@@ -1,11 +1,55 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test'
-import { mkdtempSync, rmSync } from 'fs'
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { resolveBackendContext } from '@polo-ai/shared/agent/backend'
-import { loadWorkspaceConfig } from '@polo-ai/shared/workspaces'
-import { SessionManager, createManagedSession } from './SessionManager.ts'
-import { buildRestartRequiredSignature } from './runtime-config.ts'
+
+const originalConfigDir = process.env.POLO_AI_CONFIG_DIR
+const testConfigDir = mkdtempSync(join(tmpdir(), 'sm-refresh-config-'))
+process.env.POLO_AI_CONFIG_DIR = testConfigDir
+
+const testConnections = [
+  {
+    slug: 'slug-A',
+    name: 'Custom Vision Endpoint',
+    providerType: 'pi_compat',
+    authType: 'api_key_with_endpoint',
+    createdAt: 1,
+    baseUrl: 'https://models.example.test/v1',
+    defaultModel: 'vision-model',
+    customEndpoint: { api: 'openai-completions' },
+    models: [
+      { id: 'vision-model', supportsImages: true },
+      { id: 'text-model', supportsImages: false },
+    ],
+  },
+  {
+    slug: 'slug-B',
+    name: 'Other Endpoint',
+    providerType: 'pi_compat',
+    authType: 'api_key_with_endpoint',
+    createdAt: 1,
+    baseUrl: 'https://other.example.test/v1',
+    defaultModel: 'other-model',
+    customEndpoint: { api: 'openai-completions' },
+    models: ['other-model'],
+  },
+]
+
+function writeTestConfig(): void {
+  writeFileSync(join(testConfigDir, 'config.json'), JSON.stringify({
+    workspaces: [],
+    activeWorkspaceId: null,
+    activeSessionId: null,
+    llmConnections: testConnections,
+    defaultLlmConnection: 'slug-A',
+  }, null, 2))
+}
+
+writeTestConfig()
+
+const { resolveBackendContext } = await import('@polo-ai/shared/agent/backend')
+const { buildBackendRuntimeSignature, buildRestartRequiredSignature } = await import('./runtime-config.ts')
+const { SessionManager, createManagedSession } = await import('./SessionManager.ts')
 
 // Regression coverage for the stale-Pi-subprocess bug where toggling
 // `supportsImages` on a custom-endpoint model wrote to disk but never reached
@@ -45,7 +89,7 @@ function createAgentStub(opts: {
 }
 
 function injectSession(
-  sm: SessionManager,
+  sm: InstanceType<typeof SessionManager>,
   id: string,
   workspaceRoot: string,
   llmConnection: string,
@@ -74,10 +118,8 @@ function injectSession(
   if (opts.backendRestartSignature !== undefined) {
     managed.backendRestartSignature = opts.backendRestartSignature
   } else {
-    const workspaceConfig = loadWorkspaceConfig(workspaceRoot)
     const ctx = resolveBackendContext({
       sessionConnectionSlug: llmConnection,
-      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
     })
     managed.backendRestartSignature = buildRestartRequiredSignature({
       connection: ctx.connection,
@@ -94,15 +136,25 @@ function injectSession(
 
 describe('refreshConnectionRuntime', () => {
   let tmpRoot: string
-  let sm: SessionManager
+  let sm: InstanceType<typeof SessionManager>
 
   beforeEach(() => {
+    writeTestConfig()
     tmpRoot = mkdtempSync(join(tmpdir(), 'sm-refresh-'))
     sm = new SessionManager()
   })
 
   afterEach(() => {
     rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  afterAll(() => {
+    rmSync(testConfigDir, { recursive: true, force: true })
+    if (originalConfigDir === undefined) {
+      delete process.env.POLO_AI_CONFIG_DIR
+    } else {
+      process.env.POLO_AI_CONFIG_DIR = originalConfigDir
+    }
   })
 
   it('pushes updateRuntimeConfig to sessions on the matching connection slug', async () => {
@@ -203,17 +255,47 @@ describe('refreshConnectionRuntime', () => {
     // helper must forward that field on `customModels` so the Pi subprocess
     // can re-register the model with `input: ['text', 'image']`.
     const agent = createAgentStub()
-    injectSession(sm, 'shape-check', tmpRoot, 'slug-A', agent)
+    const connection = testConnections[0]!
+    const backendContext = {
+      connection,
+      provider: 'pi',
+      authType: 'api_key_with_endpoint',
+      resolvedModel: 'vision-model',
+      capabilities: {},
+    }
+    const sigInput = {
+      connection,
+      provider: backendContext.provider,
+      authType: backendContext.authType,
+      resolvedModel: backendContext.resolvedModel,
+    }
+    const runtimeSignature = buildBackendRuntimeSignature(sigInput)
+    const restartSignature = buildRestartRequiredSignature(sigInput)
+    const managed = injectSession(sm, 'shape-check', tmpRoot, 'slug-A', agent, {
+      backendRestartSignature: restartSignature,
+    })
 
-    await sm.refreshConnectionRuntime('slug-A')
+    await (sm as unknown as {
+      runAgentRuntimeRefresh: (
+        managed: typeof managed,
+        backendContext: typeof backendContext,
+        runtimeSignature: string,
+        restartSignature: string,
+        restartRequired: boolean,
+        reason: string,
+      ) => Promise<void>
+    }).runAgentRuntimeRefresh(managed, backendContext, runtimeSignature, restartSignature, false, 'connection update')
 
     expect(agent.updateRuntimeConfig).toHaveBeenCalledTimes(1)
     const payload = agent.updateRuntimeConfig.mock.calls[0]?.[0]
+    const runtime = payload?.runtime
     expect(payload).toBeDefined()
-    expect(payload).toMatchObject({
-      model: expect.any(String),
-      runtime: expect.any(Object),
-    })
+    expect(typeof payload?.model).toBe('string')
+    expect(runtime).toBeDefined()
+    expect(runtime?.customModels).toEqual([
+      { id: 'vision-model', supportsImages: true },
+      { id: 'text-model', supportsImages: false },
+    ])
     // The runtime envelope mirrors what `pi-agent.ts:requestRuntimeConfigUpdate`
     // unpacks — `customModels` shape preserves `supportsImages` when set.
     if (payload.runtime?.customModels) {

@@ -65,6 +65,7 @@ mock.module('@polo-ai/shared/config', () => ({
       thinkingLevel: 'medium',
     },
   }),
+  loadPreferences: () => ({}),
   getLlmConnection: () => null,
   getDefaultLlmConnection: () => null,
   resolveAuthEnvVars: () => ({}),
@@ -85,6 +86,13 @@ mock.module('@polo-ai/shared/config', () => ({
   DEFAULT_THEME: { mode: 'system' },
   getDefaultModelsForConnection: () => ({ default: 'claude-sonnet-4-20250514', mini: 'claude-haiku-4-5-20251001' }),
   getDefaultModelForConnection: () => 'claude-sonnet-4-20250514',
+  defaultMidStreamBehavior: (providerType: string) => providerType === 'anthropic' ? 'queue' : 'steer',
+  resolveMidStreamBehavior: (connection: { midStreamBehavior?: string; providerType: string }) =>
+    connection.midStreamBehavior === 'queue' || connection.midStreamBehavior === 'steer'
+      ? connection.midStreamBehavior
+      : (connection.providerType === 'anthropic' ? 'queue' : 'steer'),
+  modelSupportsImages: () => true,
+  resetManagedAnthropicAuthEnvVars: () => {},
   setGitBashPath: () => {},
   clearGitBashPath: () => {},
   setActiveWorkspace: () => {},
