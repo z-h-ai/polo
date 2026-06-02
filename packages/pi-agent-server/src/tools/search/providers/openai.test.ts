@@ -46,7 +46,7 @@ describe('ResponsesApiSearchProvider', () => {
       apiBase: 'https://api.openai.com/v1',
       apiKey: 'sk-test',
     });
-    const results = await provider.search('craft agent', 5);
+    const results = await provider.search('polo ai', 5);
 
     expect(calledUrl).toBe('https://api.openai.com/v1/responses');
     expect(calledBody.model).toBe('gpt-4o-mini');
