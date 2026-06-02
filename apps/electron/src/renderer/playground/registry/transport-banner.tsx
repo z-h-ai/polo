@@ -65,7 +65,7 @@ const failedAuthState: TransportConnectionState = {
   status: 'failed',
   url: 'wss://remote.example.com',
   attempt: 5,
-  lastError: { kind: 'auth', message: 'Authentication failed. Verify CRAFT_SERVER_TOKEN.' },
+  lastError: { kind: 'auth', message: 'Authentication failed. Verify POLO_AI_SERVER_TOKEN.' },
   updatedAt: Date.now(),
 }
 

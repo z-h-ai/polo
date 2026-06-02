@@ -82,11 +82,11 @@ mock.module('../../../skills/storage.ts', () => ({
   PROJECT_AGENT_SKILLS_DIR: '.agents/skills',
 }));
 
-let mockCraftAgentsCliFlag = false;
+let mockPoloAiCliFlag = false;
 mock.module('../../../feature-flags.ts', () => ({
   FEATURE_FLAGS: {
-    get craftAgentsCli() {
-      return mockCraftAgentsCliFlag;
+    get poloAiCli() {
+      return mockPoloAiCliFlag;
     },
     get developerFeedback() {
       return false;
@@ -166,7 +166,7 @@ describe('runPreToolUseChecks', () => {
     mockValidateConfigFileContent.mockReset();
     mockValidateConfigFileContent.mockImplementation(() => null);
     mockReadOnlyBashPatterns = [];
-    mockCraftAgentsCliFlag = false;
+    mockPoloAiCliFlag = false;
   });
 
   // ============================================================
@@ -303,9 +303,9 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('call_llm_intercept');
     });
 
-    it('skips source check for built-in MCP servers (craft-agents-docs)', () => {
+    it('skips source check for built-in MCP servers (polo-ai-docs)', () => {
       const result = runPreToolUseChecks(createInput({
-        toolName: 'mcp__craft-agents-docs__search',
+        toolName: 'mcp__polo-ai-docs__search',
         input: {},
         activeSourceSlugs: [],
       }));
@@ -414,7 +414,7 @@ describe('runPreToolUseChecks', () => {
 
   describe('step 5: input transforms', () => {
     beforeEach(() => {
-      mockCraftAgentsCliFlag = true;
+      mockPoloAiCliFlag = true;
     });
 
     it('expands tilde paths and returns modify', () => {
@@ -467,8 +467,8 @@ describe('runPreToolUseChecks', () => {
       }
     });
 
-    it('blocks direct label folder reads and suggests craft-agent label help when feature is enabled', () => {
-      mockCraftAgentsCliFlag = true;
+    it('blocks direct label folder reads and suggests polo-ai label help when feature is enabled', () => {
+      mockPoloAiCliFlag = true;
 
       const result = runPreToolUseChecks(createInput({
         toolName: 'Read',
@@ -477,14 +477,14 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('craft-agent label');
-        expect(result.reason).toContain('craft-agent label --help');
+        expect(result.reason).toContain('polo-ai label');
+        expect(result.reason).toContain('polo-ai label --help');
         expect(result.reason).toContain('labels/');
       }
     });
 
-    it('blocks direct label config writes and suggests craft-agent label help when feature is enabled', () => {
-      mockCraftAgentsCliFlag = true;
+    it('blocks direct label config writes and suggests polo-ai label help when feature is enabled', () => {
+      mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({ type: 'labels', displayFile: 'labels/config.json' }));
 
       const result = runPreToolUseChecks(createInput({
@@ -494,13 +494,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('craft-agent label');
-        expect(result.reason).toContain('craft-agent label --help');
+        expect(result.reason).toContain('polo-ai label');
+        expect(result.reason).toContain('polo-ai label --help');
       }
     });
 
     it('does not apply config-file CLI redirect when feature is disabled', () => {
-      mockCraftAgentsCliFlag = false;
+      mockPoloAiCliFlag = false;
       mockDetectConfigFileType.mockImplementation(() => ({ type: 'labels', displayFile: 'labels/config.json' }));
 
       const result = runPreToolUseChecks(createInput({
@@ -512,7 +512,7 @@ describe('runPreToolUseChecks', () => {
     });
 
     it('does not block label config writes when feature is disabled', () => {
-      mockCraftAgentsCliFlag = false;
+      mockPoloAiCliFlag = false;
       mockDetectConfigFileType.mockImplementation(() => ({ type: 'labels', displayFile: 'labels/config.json' }));
 
       const result = runPreToolUseChecks(createInput({
@@ -524,7 +524,7 @@ describe('runPreToolUseChecks', () => {
     });
 
     it('does not block bash commands touching automations files when feature is disabled', () => {
-      mockCraftAgentsCliFlag = false;
+      mockPoloAiCliFlag = false;
 
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',
@@ -535,8 +535,8 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
-    it('blocks direct automations config edits and suggests craft-agent automation commands when feature is enabled', () => {
-      mockCraftAgentsCliFlag = true;
+    it('blocks direct automations config edits and suggests polo-ai automation commands when feature is enabled', () => {
+      mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({ type: 'automations', displayFile: 'automations.json' }));
 
       const result = runPreToolUseChecks(createInput({
@@ -550,13 +550,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('craft-agent automation');
+        expect(result.reason).toContain('polo-ai automation');
         expect(result.reason).toContain('automations.json');
       }
     });
 
-    it('blocks direct source config edits and suggests craft-agent source commands when feature is enabled', () => {
-      mockCraftAgentsCliFlag = true;
+    it('blocks direct source config edits and suggests polo-ai source commands when feature is enabled', () => {
+      mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({
         type: 'source',
         slug: 'linear',
@@ -574,13 +574,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('craft-agent source');
+        expect(result.reason).toContain('polo-ai source');
         expect(result.reason).toContain('sources/linear/config.json');
       }
     });
 
-    it('blocks direct skill file edits and suggests craft-agent skill commands when feature is enabled', () => {
-      mockCraftAgentsCliFlag = true;
+    it('blocks direct skill file edits and suggests polo-ai skill commands when feature is enabled', () => {
+      mockPoloAiCliFlag = true;
       mockDetectConfigFileType.mockImplementation(() => ({
         type: 'skill',
         slug: 'commit-helper',
@@ -598,13 +598,13 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('craft-agent skill');
+        expect(result.reason).toContain('polo-ai skill');
         expect(result.reason).toContain('skills/commit-helper/SKILL.md');
       }
     });
 
-    it('blocks bash commands touching labels paths and points to craft-agent label --help when feature is enabled', () => {
-      mockCraftAgentsCliFlag = true;
+    it('blocks bash commands touching labels paths and points to polo-ai label --help when feature is enabled', () => {
+      mockPoloAiCliFlag = true;
 
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',
@@ -614,23 +614,23 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('craft-agent label --help');
-        expect(result.reason).toContain('craft-agent label');
+        expect(result.reason).toContain('polo-ai label --help');
+        expect(result.reason).toContain('polo-ai label');
       }
     });
 
-    it('allows bash craft-agent label commands through labels guard', () => {
+    it('allows bash polo-ai label commands through labels guard', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',
-        input: { command: 'craft-agent label list' },
+        input: { command: 'polo-ai label list' },
         permissionMode: 'allow-all',
       }));
 
       expect(result.type).toBe('allow');
     });
 
-    it('blocks bash commands touching automations files and points to craft-agent automation --help when feature is enabled', () => {
-      mockCraftAgentsCliFlag = true;
+    it('blocks bash commands touching automations files and points to polo-ai automation --help when feature is enabled', () => {
+      mockPoloAiCliFlag = true;
 
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',
@@ -640,15 +640,15 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('block');
       if (result.type === 'block') {
-        expect(result.reason).toContain('craft-agent automation --help');
-        expect(result.reason).toContain('craft-agent automation');
+        expect(result.reason).toContain('polo-ai automation --help');
+        expect(result.reason).toContain('polo-ai automation');
       }
     });
 
-    it('allows bash craft-agent automation commands through config-domain bash guard', () => {
+    it('allows bash polo-ai automation commands through config-domain bash guard', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',
-        input: { command: 'craft-agent automation list' },
+        input: { command: 'polo-ai automation list' },
         permissionMode: 'allow-all',
       }));
 
@@ -656,7 +656,7 @@ describe('runPreToolUseChecks', () => {
     });
 
     it('does not apply config-domain bash guard when feature is disabled', () => {
-      mockCraftAgentsCliFlag = false;
+      mockPoloAiCliFlag = false;
 
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',
@@ -930,7 +930,7 @@ describe('shouldPromptInAskMode', () => {
     mockValidateConfigFileContent.mockReset();
     mockValidateConfigFileContent.mockImplementation(() => null);
     mockReadOnlyBashPatterns = [];
-    mockCraftAgentsCliFlag = false;
+    mockPoloAiCliFlag = false;
   });
 
   // --- File writes ---

@@ -1,14 +1,14 @@
 {
-  "name": "@craft-agent/electron",
+  "name": "@polo-ai/electron",
   "version": "0.10.0",
-  "description": "Electron desktop app for Craft Agents",
+  "description": "Electron desktop app for Polo AI",
   "main": "dist/main.cjs",
   "private": true,
   "author": {
-    "name": "Craft Docs Ltd.",
-    "email": "support@craft.do"
+    "name": "Polo AI",
+    "email": "support@polo.ai"
   },
-  "homepage": "https://agents.craft.do",
+  "homepage": "https://polo.ai",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -36,11 +36,11 @@
     "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
-    "@craft-agent/core": "workspace:*",
-    "@craft-agent/messaging-gateway": "workspace:*",
-    "@craft-agent/server-core": "workspace:*",
-    "@craft-agent/shared": "workspace:*",
-    "@craft-agent/ui": "workspace:*",
+    "@polo-ai/core": "workspace:*",
+    "@polo-ai/messaging-gateway": "workspace:*",
+    "@polo-ai/server-core": "workspace:*",
+    "@polo-ai/shared": "workspace:*",
+    "@polo-ai/ui": "workspace:*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",

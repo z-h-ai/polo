@@ -12,7 +12,7 @@
  *
  * Usage:
  * ```typescript
- * import { createAgent, type AgentBackend } from '@craft-agent/shared/agent/backend';
+ * import { createAgent, type AgentBackend } from '@polo-ai/shared/agent/backend';
  *
  * const agent = createAgent({
  *   provider: 'anthropic',

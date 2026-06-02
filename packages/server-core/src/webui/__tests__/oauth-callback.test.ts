@@ -35,7 +35,7 @@ describe('WebUI /api/oauth/callback', () => {
       flowId: 'flow-1',
       state: 'inner-state-123',
       codeVerifier: 'verifier',
-      redirectUri: 'https://agents.craft.do/auth/callback',
+      redirectUri: 'https://polo.ai/auth/callback',
       source: {} as any,
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',
@@ -67,7 +67,7 @@ describe('WebUI /api/oauth/callback', () => {
         },
       },
       credManager: {
-        exchangeAndStore: async () => ({ success: true, email: 'gyula@craft.do' }),
+        exchangeAndStore: async () => ({ success: true, email: 'gyula@polo.ai' }),
       },
       sessionManager: {
         completeAuthRequest: async () => {},

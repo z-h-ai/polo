@@ -102,44 +102,44 @@
       "comment": "CLI tools: bare invocation (prints help)"
     },
     {
-      "pattern": "^craft-agent\\s+label\\s+(list|get|auto-rule-list|auto-rule-validate)\\b",
-      "comment": "craft-agent label read-only operations"
+      "pattern": "^polo-ai\\s+label\\s+(list|get|auto-rule-list|auto-rule-validate)\\b",
+      "comment": "polo-ai label read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+source\\s+(list|get|validate|test|auth-help)\\b",
-      "comment": "craft-agent source read-only operations"
+      "pattern": "^polo-ai\\s+source\\s+(list|get|validate|test|auth-help)\\b",
+      "comment": "polo-ai source read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+skill\\s+(list|get|validate|where)\\b",
-      "comment": "craft-agent skill read-only operations"
+      "pattern": "^polo-ai\\s+skill\\s+(list|get|validate|where)\\b",
+      "comment": "polo-ai skill read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+automation\\s+(list|get|validate|history|last-executed|test|lint)\\b",
-      "comment": "craft-agent automation read-only operations"
+      "pattern": "^polo-ai\\s+automation\\s+(list|get|validate|history|last-executed|test|lint)\\b",
+      "comment": "polo-ai automation read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+permission\\s+(list|get|validate)\\b",
-      "comment": "craft-agent permission read-only operations"
+      "pattern": "^polo-ai\\s+permission\\s+(list|get|validate)\\b",
+      "comment": "polo-ai permission read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+theme\\s+(get|validate|list-presets|get-preset)\\b",
-      "comment": "craft-agent theme read-only operations"
+      "pattern": "^polo-ai\\s+theme\\s+(get|validate|list-presets|get-preset)\\b",
+      "comment": "polo-ai theme read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s*$",
-      "comment": "craft-agent bare invocation (prints help)"
+      "pattern": "^polo-ai\\s*$",
+      "comment": "polo-ai bare invocation (prints help)"
     },
     {
-      "pattern": "^craft-agent\\s+(label|source|skill|automation|permission|theme)\\s*$",
-      "comment": "craft-agent entity help"
+      "pattern": "^polo-ai\\s+(label|source|skill|automation|permission|theme)\\s*$",
+      "comment": "polo-ai entity help"
     },
     {
-      "pattern": "^craft-agent\\s+(label|source|skill|automation|permission|theme)\\s+--help\\b",
-      "comment": "craft-agent entity help flags"
+      "pattern": "^polo-ai\\s+(label|source|skill|automation|permission|theme)\\s+--help\\b",
+      "comment": "polo-ai entity help flags"
     },
     {
-      "pattern": "^craft-agent\\s+--(help|version|discover)\\b",
-      "comment": "craft-agent global flags"
+      "pattern": "^polo-ai\\s+--(help|version|discover)\\b",
+      "comment": "polo-ai global flags"
     },
     {
       "pattern": "^find\\b",

@@ -1,4 +1,4 @@
-import type { BrowserEmptyPromptSample } from '@craft-agent/ui'
+import type { BrowserEmptyPromptSample } from '@polo-ai/ui'
 
 export const EMPTY_STATE_PROMPT_SAMPLES: readonly BrowserEmptyPromptSample[] = [
   {

@@ -1,12 +1,12 @@
-interface CraftAgentsSymbolProps {
+interface PoloAiSymbolProps {
   className?: string
 }
 
 /**
- * Craft Agents "E" symbol - the small pixel art icon
+ * Polo AI "E" symbol - the small pixel art icon
  * Uses accent color from theme (currentColor from className)
  */
-export function CraftAgentsSymbol({ className }: CraftAgentsSymbolProps) {
+export function PoloAiSymbol({ className }: PoloAiSymbolProps) {
   return (
     <svg
       viewBox="452 368 115 129"

@@ -1,11 +1,11 @@
 {
-  "name": "@craft-agent/server",
+  "name": "@polo-ai/server",
   "version": "0.10.0",
-  "description": "Standalone headless Craft Agent server (Bun runtime)",
+  "description": "Standalone headless Polo AI server (Bun runtime)",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
-    "craft-server": "src/index.ts"
+    "polo-ai-server": "src/index.ts"
   },
   "files": [
     "src/"
@@ -14,21 +14,21 @@
     "bun": ">=1.0.0"
   },
   "author": {
-    "name": "Craft Docs Ltd.",
-    "email": "support@craft.do"
+    "name": "Polo AI",
+    "email": "support@polo.ai"
   },
   "license": "Apache-2.0",
-  "homepage": "https://agents.craft.do",
+  "homepage": "https://polo.ai",
   "scripts": {
     "start": "bun run src/index.ts",
     "generate-token": "bun run src/index.ts --generate-token",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@craft-agent/core": "workspace:*",
-    "@craft-agent/messaging-gateway": "workspace:*",
-    "@craft-agent/server-core": "workspace:*",
-    "@craft-agent/shared": "workspace:*"
+    "@polo-ai/core": "workspace:*",
+    "@polo-ai/messaging-gateway": "workspace:*",
+    "@polo-ai/server-core": "workspace:*",
+    "@polo-ai/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.2",

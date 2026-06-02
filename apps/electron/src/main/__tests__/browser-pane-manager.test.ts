@@ -289,14 +289,14 @@ describe('BrowserPaneManager', () => {
     const openHandler = instance.pageView.webContents.setWindowOpenHandler.mock.calls[0][0]
 
     const result = openHandler({
-      url: 'craftagents://settings',
+      url: 'poloai://settings',
       disposition: 'new-popup',
       frameName: '',
     })
 
     expect(result).toEqual({ action: 'deny' })
     await Bun.sleep(0)
-    expect(mockShellOpenExternal).toHaveBeenCalledWith('craftagents://settings')
+    expect(mockShellOpenExternal).toHaveBeenCalledWith('poloai://settings')
   })
 
   it('destroys child popups when parent instance is destroyed', () => {
@@ -792,8 +792,8 @@ describe('BrowserPaneManager', () => {
     manager.createInstance('toolbar-finish-load-replay')
     const instance = (manager as any).instances.get('toolbar-finish-load-replay')
 
-    instance.currentUrl = 'https://craft.do'
-    instance.title = 'Craft'
+    instance.currentUrl = 'https://polo.ai'
+    instance.title = 'Polo AI'
     instance.isLoading = true
     instance.canGoBack = true
     instance.canGoForward = true
@@ -808,8 +808,8 @@ describe('BrowserPaneManager', () => {
     expect(sendCallsAfterFinishLoad).toContainEqual([
       'browser-toolbar:state-update',
       {
-        url: 'https://craft.do',
-        title: 'Craft',
+        url: 'https://polo.ai',
+        title: 'Polo AI',
         isLoading: true,
         canGoBack: true,
         canGoForward: true,

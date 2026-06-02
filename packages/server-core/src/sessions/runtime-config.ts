@@ -1,6 +1,6 @@
-import type { AgentProvider, LlmAuthType } from '@craft-agent/shared/agent/backend'
-import { isCompatProvider, modelSupportsImages, type LlmConnection } from '@craft-agent/shared/config'
-import type { FileAttachment } from '@craft-agent/shared/protocol'
+import type { AgentProvider, LlmAuthType } from '@polo-ai/shared/agent/backend'
+import { isCompatProvider, modelSupportsImages, type LlmConnection } from '@polo-ai/shared/config'
+import type { FileAttachment } from '@polo-ai/shared/protocol'
 
 export interface BackendRuntimeSignatureInput {
   connection: LlmConnection | null

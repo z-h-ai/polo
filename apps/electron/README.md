@@ -1,6 +1,6 @@
-# Craft Agents Electron App
+# Polo AI Electron App
 
-The primary desktop interface for Craft Agents, built with Electron + React. Provides a multi-session inbox with chat interface for interacting with Claude via Craft workspaces.
+The primary desktop interface for Polo AI, built with Electron + React. Provides a multi-session inbox with chat interface for interacting with Claude via Polo AI workspaces.
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ apps/electron/
 │   │   ├── index.ts       # Window creation, app lifecycle
 │   │   ├── ipc.ts         # IPC handler registration
 │   │   ├── menu.ts        # Application menu (File, Edit, View, Help)
-│   │   ├── sessions.ts    # Session management, CraftAgent integration
+│   │   ├── sessions.ts    # Session management, PoloAi integration
 │   │   ├── deep-link.ts   # Deep link URL parsing and handling
 │   │   ├── agent-service.ts # Agent listing, caching, auth checking
 │   │   └── sources-service.ts # Source and authentication service
@@ -88,7 +88,7 @@ if (billing.type === 'oauth_token' && billing.claudeOAuthToken) {
 
 ### 3. AgentEvent Type Mismatches
 
-The `AgentEvent` types from `CraftAgent` use different property names than you might expect:
+The `AgentEvent` types from `PoloAi` use different property names than you might expect:
 
 | Event Type | Wrong | Correct |
 |------------|-------|---------|
@@ -111,16 +111,16 @@ const toolName = managed.pendingTools.get(event.toolUseId) || 'unknown'
 managed.pendingTools.delete(event.toolUseId)
 ```
 
-### 4. CraftAgent Constructor
+### 4. PoloAi Constructor
 
-`CraftAgent` expects the full `Workspace` object, not just the ID:
+`PoloAi` expects the full `Workspace` object, not just the ID:
 
 ```typescript
 // Wrong:
-new CraftAgent({ workspaceId: workspace.id, model })
+new PoloAi({ workspaceId: workspace.id, model })
 
 // Correct:
-new CraftAgent({ workspace, model })
+new PoloAi({ workspace, model })
 ```
 
 ### 5. esbuild Configuration
@@ -211,7 +211,7 @@ DevTools opens automatically (configured in `index.ts`). Remove `mainWindow.webC
 - **Session persistence** - Sessions, messages, and names are saved to disk
 - **File attachments** - Attach images, PDFs, and code files to messages
 - **AI-generated titles** - Sessions get automatic titles after first exchange
-- **Subagent support** - Load and apply agent definitions from Craft documents
+- **Subagent support** - Load and apply agent definitions from Polo AI documents
 - **Shell integration** - Open URLs in browser, open files in default apps
 - **Permission modes** - Three-level permission system (Explore, Ask to Edit, Auto)
 - **Background tasks** - Run long-running tasks in background with progress tracking
@@ -248,14 +248,14 @@ navigate(routes.sidebar.flagged())        // Show flagged
 
 ### Deep Links
 
-External apps can navigate using `craftagents://` URLs:
+External apps can navigate using `poloai://` URLs:
 
 ```
-craftagents://settings
-craftagents://allSessions/session/session123
-craftagents://sources/source/github
-craftagents://action/new-chat
-craftagents://workspace/{id}/allSessions/session/abc123
+poloai://settings
+poloai://allSessions/session/session123
+poloai://sources/source/github
+poloai://action/new-chat
+poloai://workspace/{id}/allSessions/session/abc123
 ```
 
 See `CLAUDE.md` for complete route reference.
@@ -265,7 +265,7 @@ See `CLAUDE.md` for complete route reference.
 | File | Purpose |
 |------|---------|
 | `main/index.ts` | App entry, window creation |
-| `main/sessions.ts` | CraftAgent wrapper, event processing, source integration |
+| `main/sessions.ts` | PoloAi wrapper, event processing, source integration |
 | `main/ipc.ts` | IPC channel handlers (sessions, files, shell) |
 | `main/menu.ts` | Application menu (File, Edit, View, Help) |
 | `main/deep-link.ts` | Deep link URL parsing and handling |

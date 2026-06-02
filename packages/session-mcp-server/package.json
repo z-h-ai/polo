@@ -1,5 +1,5 @@
 {
-  "name": "@craft-agent/session-mcp-server",
+  "name": "@polo-ai/session-mcp-server",
   "version": "0.10.0",
   "license": "Apache-2.0",
   "description": "MCP server that provides session-scoped tools (SubmitPlan, config_validate, etc.) to Codex via stdio transport",
@@ -13,8 +13,8 @@
     "dev": "bun run src/index.ts"
   },
   "dependencies": {
-    "@craft-agent/session-tools-core": "workspace:*",
-    "@craft-agent/shared": "workspace:*",
+    "@polo-ai/session-tools-core": "workspace:*",
+    "@polo-ai/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.11.0",
     "zod": "^3.23.0"
   },

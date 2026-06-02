@@ -11,7 +11,7 @@ import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 // Event Types
 // ============================================================================
 
-/** App events - handled by Craft */
+/** App events - handled by Polo AI */
 export type AppEvent =
   | 'LabelAdd'
   | 'LabelRemove'
@@ -54,7 +54,7 @@ export const AGENT_EVENTS: AgentEvent[] = [
 // Action Definitions
 // ============================================================================
 
-/** A prompt action - sends a prompt to Craft Agent */
+/** A prompt action - sends a prompt to Polo AI */
 export interface PromptAction {
   type: 'prompt';
   prompt: string;
@@ -264,7 +264,7 @@ export interface AutomationResult {
   event: string;
   matched: number;
   results: ActionExecutionResult[];
-  /** Prompts that should be executed by Craft Agent (with metadata) */
+  /** Prompts that should be executed by Polo AI (with metadata) */
   pendingPrompts: PendingPrompt[];
 }
 

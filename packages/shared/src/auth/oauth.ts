@@ -7,7 +7,7 @@ import { type OAuthSessionContext, buildOAuthDeeplinkUrl } from './types.ts';
 import type { PreparedOAuthFlow, OAuthExchangeParams, OAuthExchangeResult } from './oauth-flow-types.ts';
 
 export interface OAuthConfig {
-  mcpUrl: string; // Full MCP URL including path (e.g., https://mcp.craft.do/my/mcp)
+  mcpUrl: string; // Full MCP URL including path (e.g., https://mcp.polo.ai/my/mcp)
 }
 
 export interface OAuthTokens {
@@ -26,7 +26,7 @@ export interface OAuthCallbacks {
 const CALLBACK_PORT_START = 8914;
 const CALLBACK_PORT_END = 8924;
 const CALLBACK_PATH = '/oauth/callback';
-const CLIENT_NAME = 'Claude Code (Craft Agent)';
+const CLIENT_NAME = 'Claude Code (Polo AI)';
 
 // Generate PKCE code verifier and challenge
 function generatePKCE(): { verifier: string; challenge: string } {
@@ -264,7 +264,7 @@ export class CraftOAuth {
       }
     } else {
       // Use a default client ID for public clients
-      clientId = 'craft-agent';
+      clientId = 'polo-ai';
       this.callbacks.onStatus(`Using default client ID: ${clientId}`);
     }
 
@@ -574,10 +574,10 @@ export async function prepareMcpOAuth(
       // Dynamic client registration can be intentionally gated by providers
       // (for example returning 403 for unapproved clients). In that case,
       // fall back to a default client ID and proceed with the flow.
-      clientId = 'craft-agent';
+      clientId = 'polo-ai';
     }
   } else {
-    clientId = 'craft-agent';
+    clientId = 'polo-ai';
   }
 
   const authUrl = new URL(metadata.authorization_endpoint);
@@ -960,7 +960,7 @@ export async function discoverOAuthMetadata(
 
   onLog?.(`Discovering OAuth metadata for ${mcpUrl}`);
 
-  // 1. Try RFC 9728 protected resource discovery first (handles Craft MCP and other compliant servers)
+  // 1. Try RFC 9728 protected resource discovery first (handles Polo AI MCP and other compliant servers)
   const rfc9728Metadata = await discoverViaProtectedResource(mcpUrl, onLog);
   if (rfc9728Metadata) {
     return rfc9728Metadata;

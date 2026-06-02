@@ -6,11 +6,11 @@
  * satisfy it at runtime.
  */
 
-import type { Workspace, WorkspaceInfo, ActiveSessionInfo } from '@craft-agent/core/types'
-import type { StoredAttachment, AnnotationV1 } from '@craft-agent/core/types'
-import type { PermissionMode } from '@craft-agent/shared/agent/mode-types'
-import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
-import type { AuthResult } from '@craft-agent/shared/agent'
+import type { Workspace, WorkspaceInfo, ActiveSessionInfo } from '@polo-ai/core/types'
+import type { StoredAttachment, AnnotationV1 } from '@polo-ai/core/types'
+import type { PermissionMode } from '@polo-ai/shared/agent/mode-types'
+import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
+import type { AuthResult } from '@polo-ai/shared/agent'
 import type {
   Session,
   SessionStatus,
@@ -22,8 +22,8 @@ import type {
   PermissionModeState,
   UnreadSummary,
   ShareResult,
-} from '@craft-agent/shared/protocol'
-import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
+} from '@polo-ai/shared/protocol'
+import type { SessionBundle, DispatchMode } from '@polo-ai/shared/sessions'
 import type { EventSink } from '../transport'
 
 export interface ISessionManager {
@@ -162,7 +162,7 @@ export interface ISessionManager {
   exportRemoteSessionTransfer(
     sessionId: string,
     workspaceId: string,
-  ): Promise<import('@craft-agent/shared/protocol').RemoteSessionTransferPayload | null>
+  ): Promise<import('@polo-ai/shared/protocol').RemoteSessionTransferPayload | null>
 
   /**
    * Import a session bundle into a target workspace.
@@ -180,8 +180,8 @@ export interface ISessionManager {
    */
   importRemoteSessionTransfer(
     workspaceId: string,
-    payload: import('@craft-agent/shared/protocol').RemoteSessionTransferPayload,
-  ): Promise<import('@craft-agent/shared/protocol').ImportRemoteSessionTransferResult>
+    payload: import('@polo-ai/shared/protocol').RemoteSessionTransferPayload,
+  ): Promise<import('@polo-ai/shared/protocol').ImportRemoteSessionTransferResult>
 
   // ---------------------------------------------------------------------------
   // Utilities

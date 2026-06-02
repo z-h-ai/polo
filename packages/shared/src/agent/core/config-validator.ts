@@ -27,26 +27,26 @@ const CONFIG_FILE_PATTERNS: { pattern: RegExp; type: ConfigFileType }[] = [
 ];
 
 /**
- * Craft Agent specific config files that have known schemas.
+ * Polo AI specific config files that have known schemas.
  */
-const CRAFT_AGENT_CONFIG_PATTERNS = [
+const POLO_AI_AGENT_CONFIG_PATTERNS = [
   // Main config
-  /\.craft-agent\/config\.json$/,
+  /\.polo-ai\/config\.json$/,
   // Preferences
-  /\.craft-agent\/preferences\.json$/,
+  /\.polo-ai\/preferences\.json$/,
   // Source configs
-  /\.craft-agent\/workspaces\/[^/]+\/sources\/[^/]+\/config\.json$/,
+  /\.polo-ai\/workspaces\/[^/]+\/sources\/[^/]+\/config\.json$/,
   // Permissions
-  /\.craft-agent\/workspaces\/[^/]+\/permissions\.json$/,
-  /\.craft-agent\/permissions\/[^/]+\.json$/,
+  /\.polo-ai\/workspaces\/[^/]+\/permissions\.json$/,
+  /\.polo-ai\/permissions\/[^/]+\.json$/,
   // Theme
-  /\.craft-agent\/workspaces\/[^/]+\/theme\.json$/,
+  /\.polo-ai\/workspaces\/[^/]+\/theme\.json$/,
   // Statuses
-  /\.craft-agent\/workspaces\/[^/]+\/statuses\/config\.json$/,
+  /\.polo-ai\/workspaces\/[^/]+\/statuses\/config\.json$/,
   // Labels
-  /\.craft-agent\/workspaces\/[^/]+\/labels\.json$/,
+  /\.polo-ai\/workspaces\/[^/]+\/labels\.json$/,
   // Tool icons
-  /\.craft-agent\/tool-icons\/tool-icons\.json$/,
+  /\.polo-ai\/tool-icons\/tool-icons\.json$/,
 ];
 
 /**
@@ -98,16 +98,16 @@ export class ConfigValidator {
   }
 
   /**
-   * Check if a file path is a Craft Agent config file.
+   * Check if a file path is a Polo AI config file.
    *
    * @param filePath - Path to check
-   * @returns true if this is a Craft Agent config
+   * @returns true if this is a Polo AI config
    */
-  isCraftAgentConfig(filePath: string): boolean {
+  isPoloAiConfig(filePath: string): boolean {
     const normalizedPath = process.platform === 'win32'
       ? filePath.replace(/\\/g, '/').toLowerCase()
       : filePath.replace(/\\/g, '/');
-    return CRAFT_AGENT_CONFIG_PATTERNS.some((pattern) => pattern.test(normalizedPath));
+    return POLO_AI_AGENT_CONFIG_PATTERNS.some((pattern) => pattern.test(normalizedPath));
   }
 
   // ============================================================

@@ -27,7 +27,7 @@ function guidePath(slug: string): string {
 }
 
 function browserDocPath(): string {
-  return resolve(join(homedir(), '.craft-agent', 'docs', 'browser-tools.md'));
+  return resolve(join(homedir(), '.polo-ai', 'docs', 'browser-tools.md'));
 }
 
 describe('PrerequisiteManager', () => {
@@ -83,9 +83,9 @@ describe('PrerequisiteManager', () => {
       expect(result.allowed).toBe(true);
     });
 
-    it('exempts craft-agents-docs MCP tools', () => {
-      mockExistsPaths.add(guidePath('craft-agents-docs'));
-      const result = manager.checkPrerequisites('mcp__craft-agents-docs__search');
+    it('exempts polo-ai-docs MCP tools', () => {
+      mockExistsPaths.add(guidePath('polo-ai-docs'));
+      const result = manager.checkPrerequisites('mcp__polo-ai-docs__search');
       expect(result.allowed).toBe(true);
     });
 

@@ -2,7 +2,7 @@
  * Update User Preferences Handler
  *
  * Updates stored user preferences (name, timezone, location, language, notes).
- * Uses an injected updatePreferences callback to avoid depending on @craft-agent/shared.
+ * Uses an injected updatePreferences callback to avoid depending on @polo-ai/shared.
  */
 
 import type { SessionToolContext } from '../context.ts';

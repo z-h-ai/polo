@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { loadSource, loadWorkspaceSources, getSourceCredentialManager } from '@craft-agent/shared/sources'
-import { createPendingFlow } from '@craft-agent/shared/auth'
-import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { loadSource, loadWorkspaceSources, getSourceCredentialManager } from '@polo-ai/shared/sources'
+import { createPendingFlow } from '@polo-ai/shared/auth'
+import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 export const HANDLED_CHANNELS = [

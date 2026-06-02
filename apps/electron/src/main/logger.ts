@@ -6,21 +6,21 @@ import type {
   MessagingLogContext,
   MessagingLogMeta,
   MessagingLogger,
-} from '@craft-agent/messaging-gateway'
+} from '@polo-ai/messaging-gateway'
 
 /**
  * Resolve debug mode deterministically across runtimes.
  *
  * Priority:
  * 1) --debug flag always enables debug mode
- * 2) CRAFT_IS_PACKAGED env (when explicitly set)
+ * 2) POLO_AI_IS_PACKAGED env (when explicitly set)
  * 3) Electron runtime heuristic (defaultApp => dev, otherwise packaged)
  * 4) Non-Electron runtimes default to debug mode (headless Bun / node --check)
  */
 function resolveDebugMode(): boolean {
   if (process.argv.includes('--debug')) return true
 
-  const packagedEnv = process.env.CRAFT_IS_PACKAGED
+  const packagedEnv = process.env.POLO_AI_IS_PACKAGED
   if (packagedEnv === 'true') return false
   if (packagedEnv === 'false') return true
 
@@ -81,7 +81,7 @@ export const searchLog = log.scope('search')
  * Kept outside the Electron-managed logs folder so messaging issues can be
  * inspected independently at a stable path across debug and production builds.
  */
-export const messagingGatewayLogPath = join(homedir(), '.craft-agent', 'logs', 'messaging-gateway.log')
+export const messagingGatewayLogPath = join(homedir(), '.polo-ai', 'logs', 'messaging-gateway.log')
 const messagingGatewayBackupPath = `${messagingGatewayLogPath}.1`
 const MESSAGING_LOG_MAX_BYTES = 5 * 1024 * 1024 // 5MB
 

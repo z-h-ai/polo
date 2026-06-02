@@ -1,16 +1,16 @@
 import type { ComponentEntry } from './types'
-import { CraftAgentsLogo } from '@/components/icons/CraftAgentsLogo'
-import { CraftAgentsSymbol } from '@/components/icons/CraftAgentsSymbol'
+import { PoloAiLogo } from '@/components/icons/PoloAiLogo'
+import { PoloAiSymbol } from '@/components/icons/PoloAiSymbol'
 import { PanelLeftRounded } from '@/components/icons/PanelLeftRounded'
 import { SquarePenRounded } from '@/components/icons/SquarePenRounded'
 
 export const iconComponents: ComponentEntry[] = [
   {
-    id: 'craft-agents-logo',
-    name: 'CraftAgentsLogo',
+    id: 'polo-ai-logo',
+    name: 'PoloAiLogo',
     category: 'Icons',
-    description: 'Full Craft Agents branding logo with text',
-    component: CraftAgentsLogo,
+    description: 'Full Polo AI branding logo with text',
+    component: PoloAiLogo,
     props: [
       {
         name: 'className',
@@ -26,11 +26,11 @@ export const iconComponents: ComponentEntry[] = [
     ],
   },
   {
-    id: 'craft-agents-symbol',
-    name: 'CraftAgentsSymbol',
+    id: 'polo-ai-symbol',
+    name: 'PoloAiSymbol',
     category: 'Icons',
-    description: 'Craft Agents "E" pixel art symbol icon (brand color: #9570BE)',
-    component: CraftAgentsSymbol,
+    description: 'Polo AI "E" pixel art symbol icon (brand color: #9570BE)',
+    component: PoloAiSymbol,
     props: [
       {
         name: 'className',

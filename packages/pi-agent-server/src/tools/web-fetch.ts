@@ -359,7 +359,7 @@ export function createWebFetchTool(
       try {
         response = await fetch(url, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; CraftAgent/1.0)',
+            'User-Agent': 'Mozilla/5.0 (compatible; PoloAi/1.0)',
             Accept:
               'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           },
@@ -383,10 +383,11 @@ export function createWebFetchTool(
       // Use the final URL after redirects for all output messages
       const finalUrl = response.url || url;
 
-      const contentType = (response.headers.get('content-type') || '')
-        .toLowerCase()
-        .split(';')[0]
-        .trim();
+      const contentType = (
+        (response.headers.get('content-type') || '')
+          .toLowerCase()
+          .split(';')[0] ?? ''
+      ).trim();
 
       // Binary content types — stream with size limit
       if (contentType === 'application/pdf') {

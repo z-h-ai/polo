@@ -1,15 +1,15 @@
 {
-  "name": "@craft-agent/shared",
+  "name": "@polo-ai/shared",
   "version": "0.10.0",
   "license": "Apache-2.0",
-  "description": "Shared business logic for Craft Agents - agent, auth, config, credentials, MCP integration",
+  "description": "Shared business logic for Polo AI - agent, auth, config, credentials, MCP integration",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "sync:craft-agent-bash-patterns": "bun run src/config/sync-craft-agent-bash-patterns.ts"
+    "sync:polo-ai-bash-patterns": "bun run src/config/sync-polo-ai-bash-patterns.ts"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -65,8 +65,8 @@
     "./resources": "./src/resources/index.ts"
   },
   "dependencies": {
-    "@craft-agent/core": "workspace:*",
-    "@craft-agent/session-tools-core": "workspace:*",
+    "@polo-ai/core": "workspace:*",
+    "@polo-ai/session-tools-core": "workspace:*",
     "@isaacs/ttlcache": "^2.1.4",
     "@leeoniya/ufuzzy": "^1.0.19",
     "bash-parser": "^0.5.0",

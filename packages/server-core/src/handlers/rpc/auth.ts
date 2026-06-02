@@ -1,11 +1,11 @@
 import { unlink } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { getCredentialManager } from '@craft-agent/shared/credentials'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { getCredentialManager } from '@polo-ai/shared/credentials'
+import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { requestClientConfirmDialog } from '@craft-agent/server-core/transport'
+import { requestClientConfirmDialog } from '@polo-ai/server-core/transport'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.auth.LOGOUT,
@@ -59,7 +59,7 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
       }
 
       // Delete the config file
-      const configPath = join(homedir(), '.craft-agent', 'config.json')
+      const configPath = join(homedir(), '.polo-ai', 'config.json')
       await unlink(configPath).catch(() => {
         // Ignore if file doesn't exist
       })

@@ -9,8 +9,8 @@ import type { ThinkingLevel as PiThinkingLevel } from '@mariozechner/pi-agent-co
 import type { ThinkingLevel } from '../../thinking-levels.ts';
 
 /**
- * Map Craft's {@link ThinkingLevel} to Pi's `ThinkingLevel`.
- * Pi's ceiling is `xhigh`; Craft's `max` saturates there.
+ * Map Polo AI's {@link ThinkingLevel} to Pi's `ThinkingLevel`.
+ * Pi's ceiling is `xhigh`; Polo AI's `max` saturates there.
  */
 export const THINKING_TO_PI: Record<ThinkingLevel, PiThinkingLevel> = {
   off: 'off',

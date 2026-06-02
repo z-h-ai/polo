@@ -1,5 +1,5 @@
 /**
- * @craft-agent/ui - Shared React UI components for Craft Agent
+ * @polo-ai/ui - Shared React UI components for Polo AI
  *
  * This package provides platform-agnostic UI components that work in both:
  * - Electron desktop app (full interactive mode)

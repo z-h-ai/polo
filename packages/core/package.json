@@ -1,8 +1,8 @@
 {
-  "name": "@craft-agent/core",
+  "name": "@polo-ai/core",
   "version": "0.10.0",
   "license": "Apache-2.0",
-  "description": "Core types, storage, and agent logic for Craft Agents",
+  "description": "Core types, storage, and agent logic for Polo AI",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",

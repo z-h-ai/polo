@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { createEditToolDefinition } from '@mariozechner/pi-coding-agent';
-import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
+import { allowPoloAiMetadataProperties, stripPoloAiMetadata } from './polo-ai-metadata-schema.ts';
 
-describe('Craft metadata schema compatibility for Pi tools', () => {
-  it('widens a strict Edit-like schema with optional Craft metadata properties', () => {
+describe('Polo AI metadata schema compatibility for Pi tools', () => {
+  it('widens a strict Edit-like schema with optional Polo AI metadata properties', () => {
     const schema = {
       type: 'object',
       additionalProperties: false,
@@ -25,7 +25,7 @@ describe('Craft metadata schema compatibility for Pi tools', () => {
       required: ['path', 'edits'],
     };
 
-    const widened = allowCraftMetadataProperties(schema);
+    const widened = allowPoloAiMetadataProperties(schema);
 
     expect(widened).not.toBe(schema);
     expect(widened.additionalProperties).toBe(false);
@@ -40,7 +40,7 @@ describe('Craft metadata schema compatibility for Pi tools', () => {
 
   it('widens the actual Pi Edit tool schema without making metadata required', () => {
     const editTool = createEditToolDefinition('/tmp');
-    const widened = allowCraftMetadataProperties(editTool.parameters);
+    const widened = allowPoloAiMetadataProperties(editTool.parameters);
     const widenedSchema = widened as {
       additionalProperties?: unknown;
       properties: Record<string, unknown>;
@@ -68,21 +68,21 @@ describe('Craft metadata schema compatibility for Pi tools', () => {
       required: ['path'],
     };
 
-    const widened = allowCraftMetadataProperties(schema);
+    const widened = allowPoloAiMetadataProperties(schema);
 
     expect(widened.properties._displayName).toBe(upstreamDisplayName);
     expect(widened.properties._intent).toBe(upstreamIntent);
   });
 
   it('returns unknown schema shapes unchanged', () => {
-    expect(allowCraftMetadataProperties(undefined)).toBeUndefined();
-    expect(allowCraftMetadataProperties('schema')).toBe('schema');
+    expect(allowPoloAiMetadataProperties(undefined)).toBeUndefined();
+    expect(allowPoloAiMetadataProperties('schema')).toBe('schema');
 
     const noProperties = { type: 'string' };
-    expect(allowCraftMetadataProperties(noProperties)).toBe(noProperties);
+    expect(allowPoloAiMetadataProperties(noProperties)).toBe(noProperties);
   });
 
-  it('strips Craft metadata before upstream Pi tool execution', () => {
+  it('strips Polo AI metadata before upstream Pi tool execution', () => {
     const input = {
       _displayName: 'Edit Lines',
       _intent: 'Add punctuation',
@@ -90,7 +90,7 @@ describe('Craft metadata schema compatibility for Pi tools', () => {
       edits: [{ oldText: 'a', newText: 'b' }],
     };
 
-    const clean = stripCraftMetadata(input);
+    const clean = stripPoloAiMetadata(input);
 
     expect(clean).toEqual({
       path: 'random',
@@ -104,6 +104,6 @@ describe('Craft metadata schema compatibility for Pi tools', () => {
 
   it('returns the same input object when no metadata is present', () => {
     const input = { path: 'random' };
-    expect(stripCraftMetadata(input)).toBe(input);
+    expect(stripPoloAiMetadata(input)).toBe(input);
   });
 });

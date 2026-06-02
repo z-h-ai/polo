@@ -80,7 +80,7 @@ describe('startWebuiHttpServer', () => {
 
     expect(authRes.status).toBe(200)
     const setCookie = authRes.headers.get('set-cookie')
-    expect(setCookie).toContain('craft_session=')
+    expect(setCookie).toContain('polo_ai_session=')
     expect(setCookie).not.toContain('Secure')
 
     const configRes = await fetch(`${baseUrl}/api/config`, {

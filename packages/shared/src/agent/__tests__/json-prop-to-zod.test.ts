@@ -44,7 +44,7 @@ describe('jsonPropToZod', () => {
   })
 
   describe('oneOf / anyOf (union types)', () => {
-    it('converts oneOf with object variants (the Craft destination case)', () => {
+    it('converts oneOf with object variants (the Polo AI destination case)', () => {
       const schema = jsonPropToZod({
         oneOf: [
           {

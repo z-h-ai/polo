@@ -1,8 +1,8 @@
 import { normalize, isAbsolute, sep } from 'path'
 import { homedir, tmpdir } from 'os'
 import { realpath } from 'fs/promises'
-import { getWorkspaceByNameOrId, type Workspace } from '@craft-agent/shared/config'
-import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
+import { getWorkspaceByNameOrId, type Workspace } from '@polo-ai/shared/config'
+import { loadWorkspaceConfig } from '@polo-ai/shared/workspaces'
 import type { PlatformServices } from '../runtime/platform'
 
 /**

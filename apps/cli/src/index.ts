@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * craft-cli — Terminal client for Craft Agent server.
+ * polo-ai — Terminal client for Polo AI server.
  *
- * Connects over WebSocket (ws:// or wss://) to a running Craft Agent server
+ * Connects over WebSocket (ws:// or wss://) to a running Polo AI server
  * and provides commands for listing resources, managing sessions, sending
  * messages with real-time streaming, and validating server health.
  */
@@ -146,9 +146,9 @@ export function parseArgs(argv: string[]): CliArgs {
   }
 
   // Env var fallbacks
-  if (!url) url = process.env.CRAFT_SERVER_URL ?? ''
-  if (!token) token = process.env.CRAFT_SERVER_TOKEN ?? ''
-  if (!tlsCa) tlsCa = process.env.CRAFT_TLS_CA
+  if (!url) url = process.env.POLO_AI_SERVER_URL ?? ''
+  if (!token) token = process.env.POLO_AI_SERVER_TOKEN ?? ''
+  if (!tlsCa) tlsCa = process.env.POLO_AI_TLS_CA
   if (!provider) provider = process.env.LLM_PROVIDER ?? 'anthropic'
   if (!model) model = process.env.LLM_MODEL ?? ''
   if (!apiKey) apiKey = process.env.LLM_API_KEY ?? ''
@@ -1339,7 +1339,7 @@ export function getValidateSteps(): ValidateStep[] {
           sourceSlugs: enableSlugs,
         })
         return await waitForSendEvents(client, ctx.createdSessionId,
-          `[source:craft-public] List the documents under the "CraftAgents E2E Test" folder inside the "CraftAgents" folder. Just list their names.`,
+          `[source:craft-public] List the documents under the "PoloAi E2E Test" folder inside the "PoloAi" folder. Just list their names.`,
           180_000, false, undefined, ctx.onEvent)
       },
     },
@@ -1376,7 +1376,7 @@ export function getValidateSteps(): ValidateStep[] {
 mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'SKILLEOF'
 ---
 name: "CLI Validate Skill"
-description: "Validation skill created by craft-cli"
+description: "Validation skill created by polo-ai"
 requiredSources:
   - "${sourceSlug}"
 ---
@@ -1891,13 +1891,13 @@ export async function runValidation(
 // ---------------------------------------------------------------------------
 
 function printHelp(): void {
-  process.stdout.write(`craft-cli — Terminal client for Craft Agent server
+  process.stdout.write(`polo-ai — Terminal client for Polo AI server
 
-Usage: craft-cli [options] <command> [args...]
+Usage: polo-ai [options] <command> [args...]
 
 Connection:
-  --url <ws[s]://...>    Server URL (default: $CRAFT_SERVER_URL)
-  --token <secret>       Auth token (default: $CRAFT_SERVER_TOKEN)
+  --url <ws[s]://...>    Server URL (default: $POLO_AI_SERVER_URL)
+  --token <secret>       Auth token (default: $POLO_AI_SERVER_TOKEN)
   --workspace <id>       Workspace ID (auto-detected if omitted)
   --timeout <ms>         Request timeout (default: 10000)
   --tls-ca <path>        Custom CA cert for self-signed TLS
@@ -1936,21 +1936,21 @@ Commands:
                          --verbose, -v       Show server stderr output
 
 Examples:
-  craft-cli run "What files are in the current directory?"
-  craft-cli run --source craft-kb "Summarize today's daily note"
-  craft-cli run --workspace-dir .github/agents --source craft-public "Read the doc"
-  craft-cli run --provider openai --model gpt-4o "Summarize this repo"
-  OPENAI_API_KEY=sk-... craft-cli run --provider openai "Hello"
-  GOOGLE_API_KEY=... craft-cli run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... craft-cli run --provider deepseek --model deepseek-v4-flash "Hello"
-  echo "Analyze this code" | craft-cli run
-  craft-cli ping
-  craft-cli sessions
-  craft-cli send abc-123 "What files are in the current directory?"
-  echo "Summarize this" | craft-cli send abc-123
-  craft-cli --validate-server
-  craft-cli invoke system:homeDir
-  craft-cli --json workspaces | jq '.[].name'
+  polo-ai run "What files are in the current directory?"
+  polo-ai run --source craft-kb "Summarize today's daily note"
+  polo-ai run --workspace-dir .github/agents --source craft-public "Read the doc"
+  polo-ai run --provider openai --model gpt-4o "Summarize this repo"
+  OPENAI_API_KEY=sk-... polo-ai run --provider openai "Hello"
+  GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
+  DEEPSEEK_API_KEY=sk-... polo-ai run --provider deepseek --model deepseek-v4-flash "Hello"
+  echo "Analyze this code" | polo-ai run
+  polo-ai ping
+  polo-ai sessions
+  polo-ai send abc-123 "What files are in the current directory?"
+  echo "Summarize this" | polo-ai send abc-123
+  polo-ai --validate-server
+  polo-ai invoke system:homeDir
+  polo-ai --json workspaces | jq '.[].name'
 `)
 }
 
@@ -1991,7 +1991,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
   // All other commands need a server URL
   if (!args.url) {
-    err('No server URL. Use --url <ws://...> or set $CRAFT_SERVER_URL')
+    err('No server URL. Use --url <ws://...> or set $POLO_AI_SERVER_URL')
     process.exit(1)
   }
 

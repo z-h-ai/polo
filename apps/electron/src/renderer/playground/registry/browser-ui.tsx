@@ -7,7 +7,7 @@ import {
   TurnCard,
   type ActivityItem,
   type ResponseContent,
-} from '@craft-agent/ui'
+} from '@polo-ai/ui'
 import { AnimatePresence, motion } from 'motion/react'
 import { BrowserTabStrip } from '@/components/browser/BrowserTabStrip'
 import { EMPTY_STATE_PROMPT_SAMPLES } from '@/components/browser/empty-state-prompts'
@@ -106,7 +106,7 @@ const WRAPPER_COMMANDS_TURN: ActivityItem[] = [
   { id: 'wrapper-open', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'open' }, intent: 'Wrapper: open browser', timestamp: now - 4200 },
   { id: 'wrapper-navigate', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'navigate https://example.com' }, intent: 'Wrapper: navigate to URL', timestamp: now - 3900 },
   { id: 'wrapper-snapshot', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'snapshot' }, intent: 'Wrapper: list refs', timestamp: now - 3600 },
-  { id: 'wrapper-fill', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'fill @e5 hello@craft.do' }, intent: 'Wrapper: fill text field', timestamp: now - 3300 },
+  { id: 'wrapper-fill', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'fill @e5 hello@polo.ai' }, intent: 'Wrapper: fill text field', timestamp: now - 3300 },
   { id: 'wrapper-click', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'click @e8' }, intent: 'Wrapper: click target', timestamp: now - 3000 },
   { id: 'wrapper-scroll', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'scroll down 600' }, intent: 'Wrapper: scroll viewport', timestamp: now - 2700 },
   { id: 'wrapper-evaluate', type: 'tool', status: 'completed', toolName: 'browser_tool', toolInput: { command: 'evaluate document.title' }, intent: 'Wrapper: evaluate expression', timestamp: now - 2400 },
@@ -183,7 +183,7 @@ function getLiveFxPayload(scenario: Scenario, runState: RunState): { active: boo
 
     return {
       active: true,
-      label: 'Craft Agents are working…',
+      label: 'Polo AI are working…',
       cursor: cursorByScenario[scenario],
     }
   }
@@ -223,7 +223,7 @@ function BrowserAgentEmptyState({
 }) {
   const handlePromptSelect = useCallback(async (prompt: string) => {
     const deepLinkRoute = routes.action.newSession({ input: prompt, send: true })
-    const deepLinkUrl = `craftagents://${deepLinkRoute}`
+    const deepLinkUrl = `poloai://${deepLinkRoute}`
 
     try {
       if (typeof window !== 'undefined' && window.electronAPI?.openUrl) {
@@ -579,7 +579,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'mock-4',
-      url: 'https://github.com/lukilabs/craft-agents-oss',
+      url: 'https://github.com/polo-ai/polo-ai-oss',
       title: 'GitHub',
       favicon: null,
       isLoading: false,
@@ -611,8 +611,8 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
   'long-names': [
     {
       id: 'long-1',
-      url: 'https://www.notion.so/Craft-Agents-Multi-Session-Browser-Registry-Design-Review-Thread-2026-Q1',
-      title: 'Craft Agents Multi-Session Browser Registry Design Review Thread (Q1 2026)',
+      url: 'https://www.notion.so/Polo-AI-Multi-Session-Browser-Registry-Design-Review-Thread-2026-Q1',
+      title: 'Polo AI Multi-Session Browser Registry Design Review Thread (Q1 2026)',
       favicon: null,
       isLoading: false,
       canGoBack: true,
@@ -688,7 +688,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'run-3',
-      url: 'https://github.com/lukilabs/craft-agents-oss/pulls',
+      url: 'https://github.com/polo-ai/polo-ai-oss/pulls',
       title: 'GitHub PRs',
       favicon: null,
       isLoading: true,
@@ -780,8 +780,8 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'mix-4',
-      url: 'https://github.com/lukilabs/craft-agents-oss',
-      title: 'Craft Agents OSS Repo with a Surprisingly Long Branch and Compare View Name',
+      url: 'https://github.com/polo-ai/polo-ai-oss',
+      title: 'Polo AI OSS Repo with a Surprisingly Long Branch and Compare View Name',
       favicon: null,
       isLoading: false,
       canGoBack: true,

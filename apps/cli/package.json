@@ -1,12 +1,12 @@
 {
-  "name": "@craft-agent/cli",
+  "name": "@polo-ai/cli",
   "version": "0.10.0",
   "license": "Apache-2.0",
-  "description": "Terminal client for Craft Agent server",
+  "description": "Terminal client for Polo AI server",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
-    "craft-cli": "src/index.ts"
+    "polo-ai": "src/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.ts",
@@ -14,8 +14,8 @@
     "test": "bun test src/"
   },
   "dependencies": {
-    "@craft-agent/shared": "workspace:*",
-    "@craft-agent/server-core": "workspace:*"
+    "@polo-ai/shared": "workspace:*",
+    "@polo-ai/server-core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.2",
