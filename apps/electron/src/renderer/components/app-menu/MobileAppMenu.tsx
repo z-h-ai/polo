@@ -177,7 +177,7 @@ export function MobileAppMenu(props: AppMenuProps) {
     <>
       <TopBarButton
         onClick={() => state.isOpen ? close() : dispatch({ type: 'open' })}
-        aria-label={t('menu.craftMenu')}
+        aria-label={t('menu.poloAiMenu')}
         data-state={state.isOpen ? 'open' : 'closed'}
         className="rounded-[8px]"
       >

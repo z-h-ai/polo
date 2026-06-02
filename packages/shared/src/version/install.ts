@@ -1,4 +1,5 @@
 import { mkdir, chmod, symlink, unlink, lstat, access } from "fs/promises";
+import { existsSync } from "fs";
 import { PassThrough, pipeline } from "stream";
 import { promisify } from "util";
 import { getLatestVersion, getManifest } from "./manifest";
@@ -47,15 +48,17 @@ async function extractArchive(params: { archiveData: ArrayBuffer, destination: s
 
 export async function installArchive(params: { archiveData: ArrayBuffer, version: string }): Promise<void> {
   const { archiveData, version } = params;
-  const versionDirectory = join(homedir(), '.local', 'share', 'craft', 'versions', version);
-  const binaryPath = join(versionDirectory, 'craft');
+  const versionDirectory = join(homedir(), '.local', 'share', 'polo-ai', 'versions', version);
   const symlinkDirectory = join(homedir(), '.local', 'bin');
-  const symlinkPath = join(symlinkDirectory, 'craft');
+  const symlinkPath = join(symlinkDirectory, 'polo-ai');
 
   await ensureDirectory(versionDirectory);
   await ensureDirectory(symlinkDirectory);
 
   await extractArchive({ archiveData, destination: versionDirectory });
+  const binaryPath = existsSync(join(versionDirectory, 'polo-ai'))
+    ? join(versionDirectory, 'polo-ai')
+    : join(versionDirectory, 'craft');
   await chmod(binaryPath, '755');
   // Use lstat to check if symlink exists (even if broken/pointing to nothing)
   try {

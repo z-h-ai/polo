@@ -17,7 +17,7 @@ export class ApiSourcePoolClient implements PoolClient {
   private connected = false;
 
   constructor(private mcpServer: McpServer) {
-    this.client = new Client({ name: 'craft-pool-api-source', version: '1.0.0' });
+    this.client = new Client({ name: 'polo-ai-pool-api-source', version: '1.0.0' });
   }
 
   async connect(): Promise<void> {

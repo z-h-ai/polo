@@ -938,7 +938,7 @@ interface ManagedSession {
    * so the SDK's session-manager has updated its leaf — see polo-ai-oss#782).
    * Capped at PI_SDK_MESSAGE_ID_CACHE_LIMIT to bound memory in long sessions.
    */
-  piSdkMessageToCraftMessage?: Map<string, string>
+  piSdkMessageToPoloAiMessage?: Map<string, string>
   // Source-activation auto-retry (polo-ai-oss#804). When a source activates
   // mid-turn, we re-send the original message with a "[<slug> activated]" suffix
   // after a short delay. The pending slot lets `sendMessage` dedup a duplicate
@@ -6844,10 +6844,10 @@ export class SessionManager implements ISessionManager {
           // separate `pi_turn_anchor` event one microtask later — the SDK
           // updates its leaf only AFTER firing message_end (see #782).
           if (event.sdkMessageId) {
-            let cache = managed.piSdkMessageToCraftMessage
+            let cache = managed.piSdkMessageToPoloAiMessage
             if (!cache) {
               cache = new Map()
-              managed.piSdkMessageToCraftMessage = cache
+              managed.piSdkMessageToPoloAiMessage = cache
             }
             cache.set(event.sdkMessageId, assistantMessage.id)
             // Prune oldest entries when over the cap. Map preserves insertion
@@ -6872,15 +6872,15 @@ export class SessionManager implements ISessionManager {
         // (the synchronous `message_end` listener could not see it — #782).
         // Look up the Polo AI assistant message id by SDK message id and
         // persist the anchor to the sidecar.
-        const cache = managed.piSdkMessageToCraftMessage
-        const craftMessageId = cache?.get(event.sdkMessageId)
-        if (!craftMessageId) {
+        const cache = managed.piSdkMessageToPoloAiMessage
+        const poloAiMessageId = cache?.get(event.sdkMessageId)
+        if (!poloAiMessageId) {
           sessionLog.debug(`pi_turn_anchor for unknown sdkMessageId=${event.sdkMessageId}; ignoring`)
           break
         }
         const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
         try {
-          await savePiTurnAnchor(sessionPath, craftMessageId, event.sdkTurnAnchor)
+          await savePiTurnAnchor(sessionPath, poloAiMessageId, event.sdkTurnAnchor)
         } catch (error) {
           sessionLog.warn(`Failed to persist Pi turn anchor for session ${sessionId}:`, error)
         }

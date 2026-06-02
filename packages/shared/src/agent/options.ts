@@ -223,12 +223,14 @@ export function getDefaultOptions(envOverrides?: Record<string, string>): Partia
         };
     }
 
-    // Standalone CLI distribution (`scripts/install.sh`) lays the per-version
-    // SDK out at ~/.local/share/craft/versions/<version>/claude-agent-sdk/<binary>
+    // Standalone CLI distribution lays the per-version SDK out at
+    // ~/.local/share/polo-ai/versions/<version>/claude-agent-sdk/<binary>.
     if (typeof POLO_AI_AGENT_CLI_VERSION !== 'undefined' && POLO_AI_AGENT_CLI_VERSION != null) {
-        const baseDir = join(homedir(), '.local', 'share', 'craft', 'versions', POLO_AI_AGENT_CLI_VERSION);
+        const baseDir = join(homedir(), '.local', 'share', 'polo-ai', 'versions', POLO_AI_AGENT_CLI_VERSION);
+        const legacyBaseDir = join(homedir(), '.local', 'share', 'craft', 'versions', POLO_AI_AGENT_CLI_VERSION);
+        const resolvedBaseDir = existsSync(baseDir) ? baseDir : legacyBaseDir;
         return {
-            pathToClaudeCodeExecutable: join(baseDir, 'claude-agent-sdk', nativeBinaryName()),
+            pathToClaudeCodeExecutable: join(resolvedBaseDir, 'claude-agent-sdk', nativeBinaryName()),
             env,
         };
     }

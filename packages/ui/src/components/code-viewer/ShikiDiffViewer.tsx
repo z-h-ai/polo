@@ -14,7 +14,7 @@ import { FileDiff, type FileDiffMetadata, type FileDiffProps } from '@pierre/dif
 import { parseDiffFromFile, DIFFS_TAG_NAME, type FileContents } from '@pierre/diffs'
 import { cn } from '../../lib/utils'
 import { LANGUAGE_MAP } from './language-map'
-import { registerCraftShikiThemes } from './registerShikiThemes'
+import { registerPoloAiShikiThemes } from './registerShikiThemes'
 
 // Register the diffs-container custom element if not already registered
 // This is necessary because the React component renders a custom element
@@ -30,7 +30,7 @@ if (typeof HTMLElement !== 'undefined' && !customElements.get(DIFFS_TAG_NAME)) {
 }
 
 // Register custom themes once per runtime.
-registerCraftShikiThemes()
+registerPoloAiShikiThemes()
 
 export interface ShikiDiffViewerProps {
   /** Original (before) content */
@@ -46,7 +46,7 @@ export interface ShikiDiffViewerProps {
   /** Theme mode */
   theme?: 'light' | 'dark'
   /** Shiki theme name (e.g., 'dracula', 'github-dark'). When provided, uses the matching
-   *  Shiki theme natively. Falls back to craft-dark/craft-light (transparent bg) if not set. */
+   *  Shiki theme natively. Falls back to Polo AI themes (transparent bg) if not set. */
   shikiTheme?: string
   /** Disable background highlighting on changed lines */
   disableBackground?: boolean
@@ -125,8 +125,8 @@ export function ShikiDiffViewer({
   }, [oldFile, newFile])
 
   // Diff options - use the app's Shiki theme if available, otherwise fall back
-  // to craft-dark/craft-light which have transparent bg for CSS variable theming
-  const resolvedThemeName = shikiTheme || (theme === 'dark' ? 'craft-dark' : 'craft-light')
+  // to Polo AI themes which have transparent bg for CSS variable theming
+  const resolvedThemeName = shikiTheme || (theme === 'dark' ? 'polo-ai-dark' : 'polo-ai-light')
   // When onFileHeaderClick is provided, inject CSS to make the header look clickable
   const unsafeCSS = onFileHeaderClick
     ? '[data-diffs-header] { cursor: pointer; } [data-diffs-header]:hover [data-title] { text-decoration: underline; }'
@@ -181,7 +181,7 @@ export function ShikiDiffViewer({
       }
       header.addEventListener('click', handleClick)
       // Store cleanup ref so we can remove listener
-      ;(header as any).__craftClickCleanup = () => header.removeEventListener('click', handleClick)
+      ;(header as any).__poloAiClickCleanup = () => header.removeEventListener('click', handleClick)
     }, 150)
 
     return () => {
@@ -189,7 +189,7 @@ export function ShikiDiffViewer({
       const diffsContainer = containerRef.current?.querySelector(DIFFS_TAG_NAME)
       const header = diffsContainer?.shadowRoot?.querySelector('[data-diffs-header]')
       if (header) {
-        ;(header as any).__craftClickCleanup?.()
+        ;(header as any).__poloAiClickCleanup?.()
       }
     }
   }, [filePath, disableFileHeader, onFileHeaderClick])

@@ -167,7 +167,7 @@ if (isDebugMode) {
   if (!bundledUvExists) {
     mainLog.warn('Bundled uv binary missing, CLI document tools may fail unless uv is available on PATH.', {
       expectedUvPath: uvBinary,
-      usingCraftUv: process.env.POLO_AI_UV,
+      usingPoloAiUv: process.env.POLO_AI_UV,
     })
   }
 

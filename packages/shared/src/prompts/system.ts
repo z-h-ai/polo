@@ -372,7 +372,7 @@ export function getSystemPrompt(
   // Note: Date/time context is now added to user messages instead of system prompt
   // to enable prompt caching. The system prompt stays static and cacheable.
   // Safe Mode context is also in user messages for the same reason.
-  const basePrompt = getCraftAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy);
+  const basePrompt = getPoloAiAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy);
   const fullPrompt = `${basePrompt}${preferences}${debugContext}${projectContextFiles}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
@@ -450,7 +450,7 @@ function getPoloAiEnvironmentMarker(): string {
  * @param backendName - Backend name for "powered by X" text (default: 'Claude Code')
  * @param includeCoAuthoredBy - Whether to include the Co-Authored-By git trailer instruction (default: true)
  */
-function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
+function getPoloAiAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
   // Default to ${APP_ROOT}/workspaces/{id} if no path provided
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
 
@@ -587,7 +587,7 @@ Read relevant context files using the Read tool - they contain architecture info
 | Markdown Preview | \`${DOC_REFS.markdownPreview}\` | When displaying rendered .md files inline |
 | Browser Tools | \`${DOC_REFS.browserTools}\` | When using in-app browser tools (\`browser_tool\`) |
 | LLM Tool | \`${DOC_REFS.llmTool}\` | When using \`call_llm\` for subtasks |${FEATURE_FLAGS.poloAiCli ? `
-| Polo AI CLI | \`${DOC_REFS.craftCli}\` | When managing labels/sources/skills/automations via \`polo-ai\` |` : ''}
+| Polo AI CLI | \`${DOC_REFS.poloAiCli}\` | When managing labels/sources/skills/automations via \`polo-ai\` |` : ''}
 
 **IMPORTANT:** Always read the relevant doc file BEFORE making changes. Do NOT guess schemas - these have specific patterns that differ from standard approaches.${FEATURE_FLAGS.poloAiCli ? `
 
@@ -599,7 +599,7 @@ Prefer \`polo-ai\` CLI over direct file edits for labels, sources, skills, and a
 - Sources help: \`polo-ai source --help\`
 - Skills help: \`polo-ai skill --help\`
 - Automations help: \`polo-ai automation --help\`
-- Canonical reference: \`${DOC_REFS.craftCli}\`` : ''}
+- Canonical reference: \`${DOC_REFS.poloAiCli}\`` : ''}
 
 ## User preferences
 

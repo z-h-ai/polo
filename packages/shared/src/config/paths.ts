@@ -2,7 +2,7 @@
  * Centralized path configuration for Polo AI.
  *
  * Supports multi-instance development via POLO_AI_CONFIG_DIR environment variable.
- * When running from a numbered folder (e.g., craft-tui-agent-1), the detect-instance.sh
+ * When running from a numbered folder (e.g., polo-ai-1), the detect-instance.sh
  * script sets POLO_AI_CONFIG_DIR to ~/.polo-ai-1, allowing multiple instances to run
  * simultaneously with separate configurations.
  *

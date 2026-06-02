@@ -21,16 +21,16 @@ function isPoloAiPattern(entry: AllowedBashEntry): boolean {
 
 function syncPoloAiPatterns(config: PermissionsConfig): PermissionsConfig {
   const patterns = config.allowedBashPatterns ?? []
-  const firstCraftIndex = patterns.findIndex(isPoloAiPattern)
+  const firstPoloAiIndex = patterns.findIndex(isPoloAiPattern)
 
-  const withoutCraft = patterns.filter(entry => !isPoloAiPattern(entry))
+  const withoutPoloAi = patterns.filter(entry => !isPoloAiPattern(entry))
   const generated = getPoloAiReadOnlyBashPatterns()
 
-  const insertAt = firstCraftIndex >= 0 ? firstCraftIndex : withoutCraft.length
+  const insertAt = firstPoloAiIndex >= 0 ? firstPoloAiIndex : withoutPoloAi.length
   const nextAllowedBashPatterns = [
-    ...withoutCraft.slice(0, insertAt),
+    ...withoutPoloAi.slice(0, insertAt),
     ...generated,
-    ...withoutCraft.slice(insertAt),
+    ...withoutPoloAi.slice(insertAt),
   ]
 
   return {

@@ -167,7 +167,7 @@ export function DesktopAppMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <TopBarButton aria-label={t("menu.craftMenu")}>
+        <TopBarButton aria-label={t("menu.poloAiMenu")}>
           <PoloAiSymbol className="h-4 text-accent" />
         </TopBarButton>
       </DropdownMenuTrigger>

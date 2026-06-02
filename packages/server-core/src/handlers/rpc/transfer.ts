@@ -125,7 +125,7 @@ export function registerTransferHandlers(server: RpcServer): void {
     }
 
     const transferId = randomUUID()
-    const dir = join(tmpdir(), `craft-transfer-${transferId}`)
+    const dir = join(tmpdir(), `polo-ai-transfer-${transferId}`)
     await mkdir(dir, { recursive: true })
 
     const transfer: TransferState = {

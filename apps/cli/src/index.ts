@@ -1051,7 +1051,7 @@ export function getValidateSteps(): ValidateStep[] {
         // Auto-bootstrap a temp workspace for CI environments
         const { mkdtemp } = await import('fs/promises')
         const { tmpdir } = await import('os')
-        const tmpDir = await mkdtemp(`${tmpdir()}/craft-validate-`)
+        const tmpDir = await mkdtemp(`${tmpdir()}/polo-ai-validate-`)
         const ws = (await client.invoke('workspaces:create', tmpDir, 'validate-workspace')) as { id: string }
         ctx.workspaceId = ws.id
         ctx.workspaceRootPath = tmpDir

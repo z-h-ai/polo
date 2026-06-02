@@ -570,7 +570,7 @@ function createEntryScripts(config: ServerBuildConfig): void {
   mkdirSync(binDir, { recursive: true });
 
   // bin/polo-ai-server — main entry wrapper
-  const craftServer = `#!/bin/sh
+  const poloAiServer = `#!/bin/sh
 set -e
 
 # Resolve the distribution root
@@ -593,7 +593,7 @@ export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
 # Use bundled Bun runtime
 exec "$ROOT/vendor/bun/bun" run "$ROOT/packages/server/src/index.ts" "$@"
 `;
-  writeFileSync(join(binDir, 'polo-ai-server'), craftServer);
+  writeFileSync(join(binDir, 'polo-ai-server'), poloAiServer);
 
   // start.sh — convenience entry
   const startSh = `#!/bin/sh
@@ -650,7 +650,7 @@ if [ "\${1:-}" = "--systemd" ]; then
     exit 1
   fi
 
-  SERVICE_USER="\${POLO_AI_USER:-\$(logname 2>/dev/null || echo craft)}"
+  SERVICE_USER="\${POLO_AI_USER:-\$(logname 2>/dev/null || echo polo-ai)}"
   SERVICE_FILE="/etc/systemd/system/polo-ai-server.service"
 
   cat > "$SERVICE_FILE" <<UNIT
