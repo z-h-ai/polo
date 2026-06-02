@@ -40,7 +40,7 @@ function generateState(): string {
   return randomBytes(16).toString('hex');
 }
 
-export class CraftOAuth {
+export class PoloOAuth {
   private config: OAuthConfig;
   private server: Server | null = null;
   private callbacks: OAuthCallbacks;
@@ -446,7 +446,7 @@ export class CraftOAuth {
 
 /**
  * Register an MCP OAuth client dynamically.
- * Extracted from CraftOAuth.registerClient for reuse in prepareMcpOAuth.
+ * Extracted from PoloOAuth.registerClient for reuse in prepareMcpOAuth.
  */
 class McpClientRegistrationError extends Error {
   status?: number;

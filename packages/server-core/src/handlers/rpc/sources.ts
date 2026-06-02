@@ -170,15 +170,15 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         return { success: false, error: 'Source has not been tested yet' }
       }
 
-      const { CraftMcpClient } = await import('@polo-ai/shared/mcp')
-      let client: InstanceType<typeof CraftMcpClient>
+      const { PoloMcpClient } = await import('@polo-ai/shared/mcp')
+      let client: InstanceType<typeof PoloMcpClient>
 
       if (source.config.mcp.transport === 'stdio') {
         if (!source.config.mcp.command) {
           return { success: false, error: 'Stdio MCP source is missing required "command" field' }
         }
         log.info(`Fetching MCP tools via stdio: ${source.config.mcp.command}`)
-        client = new CraftMcpClient({
+        client = new PoloMcpClient({
           transport: 'stdio',
           command: source.config.mcp.command,
           args: source.config.mcp.args,
@@ -200,7 +200,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         }
 
         log.info(`Fetching MCP tools from ${source.config.mcp.url}`)
-        client = new CraftMcpClient({
+        client = new PoloMcpClient({
           transport: 'http',
           url: source.config.mcp.url,
           headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,

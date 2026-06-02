@@ -8,7 +8,7 @@
  *   import { PoloAi } from '@polo-ai/shared/agent';
  *   import { loadStoredConfig } from '@polo-ai/shared/config';
  *   import { getCredentialManager } from '@polo-ai/shared/credentials';
- *   import { CraftMcpClient } from '@polo-ai/shared/mcp';
+ *   import { PoloMcpClient } from '@polo-ai/shared/mcp';
  *   import { debug } from '@polo-ai/shared/utils';
  *   import { loadSource, createSource, getSourceCredentialManager } from '@polo-ai/shared/sources';
  *   import { createWorkspace, loadWorkspace } from '@polo-ai/shared/workspaces';
