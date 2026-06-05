@@ -89,7 +89,15 @@ function createTestHarness(sessionPaths: Map<string, string>) {
 }
 
 function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
-  return { clientId, workspaceId, webContentsId: null }
+  return {
+    clientId,
+    workspaceId,
+    webContentsId: null,
+    userId: null,
+    username: null,
+    userRole: null,
+    userJwt: null,
+  }
 }
 
 // ---------------------------------------------------------------------------

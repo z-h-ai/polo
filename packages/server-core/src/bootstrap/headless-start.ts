@@ -5,7 +5,7 @@ import { OAuthFlowStore } from '@polo-ai/shared/auth'
 import { ensureConfigDir, loadStoredConfig, saveConfig } from '@polo-ai/shared/config'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
-import { WsRpcServer, type WsAuthContext, type WsRpcTlsOptions } from '../transport/server'
+import { WsRpcServer, type WsAuthContext, type WsClientConnectedInfo, type WsRpcTlsOptions } from '../transport/server'
 import type { EventSink, RpcServer } from '../transport/types'
 import { createHeadlessPlatform } from '../runtime/platform-headless'
 import type { PlatformServices } from '../runtime/platform'
@@ -40,7 +40,7 @@ export interface ServerBootstrapOptions<TSessionManager, THandlerDeps> {
   initModelRefreshService: () => ModelRefreshServiceLike
   cleanupSessionManager?: (sessionManager: TSessionManager) => Promise<void> | void
   cleanupClientResources?: (clientId: string) => void
-  onClientConnected?: (info: { clientId: string; webContentsId: number | null; workspaceId: string | null; capabilities: string[] }) => void
+  onClientConnected?: (info: WsClientConnectedInfo) => void
   serverId?: string
   /** App version string, included in handshake_ack for client compatibility checks. */
   serverVersion?: string

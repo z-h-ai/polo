@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from 'bun
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import type { LlmConnection } from '@polo-ai/shared/config'
 
 const originalConfigDir = process.env.POLO_AI_CONFIG_DIR
 const testConfigDir = mkdtempSync(join(tmpdir(), 'sm-refresh-config-'))
@@ -33,7 +34,7 @@ const testConnections = [
     customEndpoint: { api: 'openai-completions' },
     models: ['other-model'],
   },
-]
+] as const
 
 function writeTestConfig(): void {
   writeFileSync(join(testConfigDir, 'config.json'), JSON.stringify({
@@ -256,15 +257,16 @@ describe('refreshConnectionRuntime', () => {
     // can re-register the model with `input: ['text', 'image']`.
     const agent = createAgentStub()
     const connection = testConnections[0]!
+    const typedConnection = connection as unknown as LlmConnection
     const backendContext = {
-      connection,
-      provider: 'pi',
-      authType: 'api_key_with_endpoint',
+      connection: typedConnection,
+      provider: 'pi' as const,
+      authType: 'api_key_with_endpoint' as const,
       resolvedModel: 'vision-model',
       capabilities: {},
     }
     const sigInput = {
-      connection,
+      connection: typedConnection,
       provider: backendContext.provider,
       authType: backendContext.authType,
       resolvedModel: backendContext.resolvedModel,
@@ -277,8 +279,8 @@ describe('refreshConnectionRuntime', () => {
 
     await (sm as unknown as {
       runAgentRuntimeRefresh: (
-        managed: typeof managed,
-        backendContext: typeof backendContext,
+        managed: ReturnType<typeof injectSession>,
+        runtimeContext: typeof backendContext,
         runtimeSignature: string,
         restartSignature: string,
         restartRequired: boolean,
