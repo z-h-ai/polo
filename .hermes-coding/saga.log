@@ -18,3 +18,5 @@
 [2026-06-05T19:09:54.039Z] COMPLETED: polo-quota.onboarding-skip
 [2026-06-05T19:13:03.278Z] STARTED: polo-client.admin-api
 [2026-06-05T19:19:11.897Z] COMPLETED: polo-client.admin-api
+[2026-06-05T19:22:11.818Z] STARTED: polo-client.pending-usage
+[2026-06-05T19:27:08.807Z] COMPLETED: polo-client.pending-usage
