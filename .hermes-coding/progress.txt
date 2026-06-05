@@ -13,3 +13,6 @@ Non-obvious patterns that work — only record if not self-evident.
 Unresolved issues that may affect future tasks.
 [2026-06-05T15:32:06.656Z] Baseline fix attempt 1: installed workspace dependencies so CI=true npm test can resolve packages; baseline now passes.
 [2026-06-05T15:42:51.240Z] [polo-auth.api-config] Known out-of-scope failure: CI=true bun run --cwd packages/server-core typecheck currently fails in src/sessions/refresh-connection-runtime.test.ts due LlmConnection providerType typing and self-referential test annotations; WebUI config tests are unaffected.
+[2026-06-05T16:00:18.446Z] [polo-auth.session-endpoint] Hidden constraint: WebUI Admin JWT session routes must verify process.env.JWT_SECRET, while legacy /api/auth continues to use the createWebuiHandler secret; do not conflate the two secrets.
+[2026-06-05T16:00:18.446Z] [polo-auth.session-endpoint] Verified approach: Admin JWT WebUI cookies must be accepted by the shared validateSession path, not only /api/config, because the same cookie is used for protected static routes and WebSocket upgrade validation via packages/server/src/index.ts.
+[2026-06-05T16:00:18.446Z] [polo-auth.session-endpoint] Hidden constraint: source-level WebUI auth tests must resolve repo root six levels above packages/server-core/src/webui/__tests__; five levels points at the parent polo-dir and causes ENOENT.
