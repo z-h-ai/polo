@@ -5,8 +5,10 @@ module: polo-ui
 priority: 16
 estimatedMinutes: 25
 depends: ["polo-ui.login-page", "polo-client.admin-api", "polo-auth.session-endpoint"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §8.4 (配额显示)"
+startedAt: 2026-06-05T20:27:11.032Z
+completedAt: 2026-06-05T20:44:41.089Z
 ---
 # WebUI quota display component
 
