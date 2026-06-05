@@ -8,6 +8,10 @@ export interface RequestContext {
   clientId: string
   workspaceId: string | null
   webContentsId: number | null
+  userId: string | null
+  username: string | null
+  userRole: 'admin' | 'user' | null
+  userJwt: string | null
 }
 
 export type HandlerFn = (ctx: RequestContext, ...args: any[]) => Promise<any> | any

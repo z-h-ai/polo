@@ -42,6 +42,10 @@ function ctx(clientId: string): RequestContext {
     clientId,
     workspaceId: 'ws-1',
     webContentsId: 1,
+    userId: null,
+    username: null,
+    userRole: null,
+    userJwt: null,
   }
 }
 

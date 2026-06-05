@@ -5,6 +5,7 @@ import { SignJWT } from 'jose'
 import WebSocket from 'ws'
 import { PROTOCOL_VERSION } from '@polo-ai/shared/protocol'
 import { WsRpcServer, type WsAuthContext } from '../server'
+import type { RequestContext } from '../types'
 import { extractSessionCookie, verifyAdminJwt } from '../../webui/auth'
 
 const JWT_SECRET = 'jwt-secret-for-ws-upgrade-tests'
@@ -141,6 +142,37 @@ async function connectAndHandshake(opts: {
   })
 }
 
+async function invokeRpc(ws: WebSocket, channel: string, ...args: unknown[]): Promise<Record<string, any>> {
+  const id = crypto.randomUUID()
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`RPC timeout: ${channel}`))
+    }, 3000)
+
+    const onMessage = (data: WebSocket.RawData) => {
+      const msg = JSON.parse(data.toString())
+      if (msg.id !== id) return
+
+      clearTimeout(timeout)
+      ws.off('message', onMessage)
+      if (msg.type === 'error') {
+        reject(new Error(msg.error?.message ?? 'rpc error'))
+        return
+      }
+      resolve(msg)
+    }
+
+    ws.on('message', onMessage)
+    ws.send(JSON.stringify({
+      id,
+      type: 'request',
+      channel,
+      args,
+    }))
+  })
+}
+
 async function expectUpgradeRejected(server: WsRpcServer, headers?: Record<string, string>): Promise<void> {
   const statusCode = await new Promise<number>((resolve, reject) => {
     const socket = netConnect(server.port, '127.0.0.1', () => {
@@ -186,13 +218,24 @@ describe('WsRpcServer upgrade authentication', () => {
   it('accepts a valid polo_ai_session cookie and exposes user identity on connection and ack', async () => {
     const connected: ConnectedInfo[] = []
     const server = createUpgradeAuthServer((info) => connected.push(info))
+    const handlerContexts: RequestContext[] = []
+    server.handle('test:get-context', (ctx) => {
+      handlerContexts.push(ctx)
+      return {
+        userId: ctx.userId,
+        username: ctx.username,
+        userRole: ctx.userRole,
+        userJwt: ctx.userJwt,
+      }
+    })
     await server.listen()
 
     const jwt = await signAdminJwt({ userId: 'user-1', username: 'alice', role: 'admin' })
-    const { ack } = await connectAndHandshake({
+    const { ws, ack } = await connectAndHandshake({
       server,
       headers: { Cookie: `polo_ai_session=${jwt}` },
     })
+    const response = await invokeRpc(ws, 'test:get-context')
 
     expect(ack.clientId).toBeTruthy()
     expect(ack.userId).toBe('user-1')
@@ -204,6 +247,14 @@ describe('WsRpcServer upgrade authentication', () => {
       role: 'admin',
       jwt,
     })
+    expect(response.result).toEqual({
+      userId: 'user-1',
+      username: 'alice',
+      userRole: 'admin',
+      userJwt: jwt,
+    })
+    expect(handlerContexts[0]?.userId).toBe('user-1')
+    expect(handlerContexts[0]?.userJwt).toBe(jwt)
   })
 
   it('parses polo_ai_session from a multi-cookie header and gives cookie auth priority', async () => {
@@ -226,12 +277,19 @@ describe('WsRpcServer upgrade authentication', () => {
   it('accepts x-server-token header fallback with system identity when no session cookie is present', async () => {
     const connected: ConnectedInfo[] = []
     const server = createUpgradeAuthServer((info) => connected.push(info))
+    server.handle('test:get-context', (ctx) => ({
+      userId: ctx.userId,
+      username: ctx.username,
+      userRole: ctx.userRole,
+      userJwt: ctx.userJwt,
+    }))
     await server.listen()
 
-    const { ack } = await connectAndHandshake({
+    const { ws, ack } = await connectAndHandshake({
       server,
       headers: { 'x-server-token': SERVER_TOKEN },
     })
+    const response = await invokeRpc(ws, 'test:get-context')
 
     expect(ack.clientId).toBeTruthy()
     expect(ack.userId).toBeNull()
@@ -241,6 +299,12 @@ describe('WsRpcServer upgrade authentication', () => {
       username: 'system',
       role: 'admin',
       jwt: null,
+    })
+    expect(response.result).toEqual({
+      userId: null,
+      username: 'system',
+      userRole: 'admin',
+      userJwt: null,
     })
   })
 

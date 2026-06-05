@@ -42,6 +42,10 @@ interface ClientConnection {
   id: string
   ws: WebSocket
   auth: WsAuthContext
+  userId: string | null
+  username: string | null
+  userRole: RequestContext['userRole']
+  userJwt: string | null
   workspaceId: string | null
   webContentsId: number | null
   capabilities: Set<string>
@@ -142,6 +146,19 @@ function createSystemAuthContext(): WsAuthContext {
     role: 'admin',
     jwt: null,
   }
+}
+
+function requestUserRoleFromAuth(auth: WsAuthContext): RequestContext['userRole'] {
+  if (auth.role === 'admin' || auth.role === 'user') return auth.role
+  return null
+}
+
+function applyAuthContextToClient(client: ClientConnection, auth: WsAuthContext): void {
+  client.auth = auth
+  client.userId = auth.userId
+  client.username = auth.username
+  client.userRole = requestUserRoleFromAuth(auth)
+  client.userJwt = auth.jwt
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +521,7 @@ export class WsRpcServer implements RpcServer {
               prevClient.ws = ws
               prevClient.alive = true
               prevClient.missedPongs = 0
-              prevClient.auth = currentAuth
+              applyAuthContextToClient(prevClient, currentAuth)
               handshakeCompleted = true
 
               // Determine replay vs stale using the per-client delivery sequence.
@@ -583,6 +600,10 @@ export class WsRpcServer implements RpcServer {
           id: clientId,
           ws,
           auth: authContext ?? createSystemAuthContext(),
+          userId: null,
+          username: null,
+          userRole: null,
+          userJwt: null,
           workspaceId: envelope.workspaceId ?? null,
           webContentsId: envelope.webContentsId ?? null,
           capabilities: new Set(envelope.clientCapabilities ?? []),
@@ -592,6 +613,7 @@ export class WsRpcServer implements RpcServer {
           lastAckedSeq: 0,
           lastSentSeq: 0,
         }
+        applyAuthContextToClient(client, client.auth)
         this.clients.set(clientId, client)
         handshakeCompleted = true
 
@@ -675,6 +697,10 @@ export class WsRpcServer implements RpcServer {
       clientId: client.id,
       workspaceId: client.workspaceId,
       webContentsId: client.webContentsId,
+      userId: client.userId,
+      username: client.username,
+      userRole: client.userRole,
+      userJwt: client.userJwt,
     }
 
     try {
