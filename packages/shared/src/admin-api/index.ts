@@ -17,3 +17,5 @@ export {
   AdminApiTimeoutError,
   ConfigurationError,
 } from './errors.ts';
+export { PendingUsageStore, createPendingUsageStore, pendingUsageStore } from './pending-usage.ts';
+export type { PendingUsageEntry, PendingUsageStoreOptions } from './pending-usage.ts';
