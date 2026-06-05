@@ -1,4 +1,4 @@
 {
-  "tool": "claude",
-  "toolCommand": "claude --dangerously-skip-permissions --print --verbose"
+  "tool": "codex",
+  "toolCommand": "codex --yolo exec"
 }

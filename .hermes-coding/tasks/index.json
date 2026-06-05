@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-06-05T15:21:15.297Z",
+  "updatedAt": "2026-06-05T15:40:50.769Z",
   "metadata": {
     "projectGoal": "Polo AI multi-user modification (MVP-1, WebUI only)",
     "languageConfig": {
@@ -10,7 +10,7 @@
   },
   "tasks": {
     "polo-auth.api-config": {
-      "status": "pending",
+      "status": "completed",
       "priority": 1,
       "module": "polo-auth",
       "description": "Add GET /api/public-config endpoint (pre-login config)",

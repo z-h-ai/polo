@@ -5,8 +5,10 @@ module: polo-auth
 priority: 1
 estimatedMinutes: 15
 depends: []
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §3.1 — split into public (pre-login) and authenticated (post-login) config"
+startedAt: 2026-06-05T15:32:48.207Z
+completedAt: 2026-06-05T15:40:50.767Z
 ---
 # Add GET /api/public-config endpoint (pre-login config)
 
