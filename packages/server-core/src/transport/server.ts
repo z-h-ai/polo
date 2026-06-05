@@ -134,6 +134,15 @@ export interface WsRpcServerOptions {
    * Must use Node.js HTTP callback signature (IncomingMessage, ServerResponse).
    */
   httpHandler?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void
+  /**
+   * Optional hook for auto-creating a workspace when an authenticated user
+   * connects without specifying a workspaceId. Called with the user's id and
+   * username; must return the workspace id to include in the handshake_ack.
+   *
+   * When omitted, auto-create is disabled and the handshake_ack workspaceId
+   * is sourced only from the client's handshake envelope.
+   */
+  onAutoCreateWorkspace?: (userId: string, username: string) => Promise<string>
 }
 
 const transportLog = createLogger('ws-rpc-server')
@@ -192,6 +201,7 @@ export class WsRpcServer implements RpcServer {
   private readonly onClientConnected: WsRpcServerOptions['onClientConnected']
   private readonly onClientDisconnected: WsRpcServerOptions['onClientDisconnected']
   private readonly httpHandler: WsRpcServerOptions['httpHandler']
+  private readonly onAutoCreateWorkspace: WsRpcServerOptions['onAutoCreateWorkspace']
 
   constructor(opts?: WsRpcServerOptions) {
     this.host = opts?.host ?? '127.0.0.1'
@@ -206,6 +216,7 @@ export class WsRpcServer implements RpcServer {
     this.onClientConnected = opts?.onClientConnected
     this.onClientDisconnected = opts?.onClientDisconnected
     this.httpHandler = opts?.httpHandler
+    this.onAutoCreateWorkspace = opts?.onAutoCreateWorkspace
   }
 
   /** The actual port the server is listening on (available after listen()). */
@@ -596,10 +607,11 @@ export class WsRpcServer implements RpcServer {
 
         // ── Normal fresh connect ──
         const clientId = randomUUID()
+        const freshAuth = authContext ?? createSystemAuthContext()
         const client: ClientConnection = {
           id: clientId,
           ws,
-          auth: authContext ?? createSystemAuthContext(),
+          auth: freshAuth,
           userId: null,
           username: null,
           userRole: null,
@@ -614,10 +626,23 @@ export class WsRpcServer implements RpcServer {
           lastSentSeq: 0,
         }
         applyAuthContextToClient(client, client.auth)
+
+        // Auto-create workspace for authenticated users who didn't specify one
+        if (client.userId && client.username && !client.workspaceId && this.onAutoCreateWorkspace) {
+          try {
+            client.workspaceId = await this.onAutoCreateWorkspace(client.userId, client.username)
+          } catch (err) {
+            transportLog.warn('Auto-create workspace failed', {
+              userId: client.userId,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+
         this.clients.set(clientId, client)
         handshakeCompleted = true
 
-        // Send handshake_ack
+        // Send handshake_ack (includes workspaceId from client envelope or auto-created)
         const ack = this.createHandshakeAck(envelope.id, client)
         this.safeSend(ws, serializeEnvelope(ack))
 
@@ -826,6 +851,7 @@ export class WsRpcServer implements RpcServer {
       userId: client.auth.userId,
       username: client.auth.username,
       role: client.auth.role,
+      workspaceId: client.workspaceId ?? undefined,
       ...extra,
     }
   }

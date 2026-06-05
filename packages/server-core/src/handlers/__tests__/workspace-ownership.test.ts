@@ -4,17 +4,20 @@
  * TDD tests for:
  *   AC1  - WorkspaceConfig.ownerUserId field
  *   AC2  - assertWorkspaceAccess() boundary matrix
- *   AC3  - auto-create workspace on connect
+ *   AC3  - auto-create workspace on connect (including handshake_ack workspaceId)
  *
  * Handler-integration AC4–AC7 are covered through the assertWorkspaceAccess
  * function being called (behavior is verified via unit tests of the helper
  * rather than end-to-end handler invocations, which require a full server).
  */
 
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import WebSocket from 'ws'
+import { WsRpcServer } from '@polo-ai/server-core/transport'
+import { PROTOCOL_VERSION } from '@polo-ai/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -240,5 +243,171 @@ describe('AC3: findOrCreateUserWorkspace auto-create', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AC3 — handshake_ack contains the auto-created workspace ID
+// ---------------------------------------------------------------------------
+
+describe('AC3: handshake_ack contains auto-created workspace ID', () => {
+  let server: WsRpcServer | null = null
+  const openSockets: WebSocket[] = []
+
+  afterEach(() => {
+    for (const ws of openSockets) {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close()
+      }
+    }
+    openSockets.length = 0
+    server?.close()
+    server = null
+  })
+
+  /**
+   * Full WebSocket handshake that returns the entire handshake_ack envelope
+   * so callers can inspect any field (clientId, workspaceId, etc.).
+   */
+  function handshakeFull(url: string, opts?: {
+    token?: string
+    userId?: string
+    username?: string
+  }): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url)
+      openSockets.push(ws)
+      const timeout = setTimeout(() => {
+        ws.close()
+        reject(new Error('Handshake timeout'))
+      }, 5_000)
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          type: 'handshake',
+          protocolVersion: PROTOCOL_VERSION,
+          ...(opts?.token ? { token: opts.token } : {}),
+        }))
+      })
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'handshake_ack') {
+          clearTimeout(timeout)
+          resolve(msg)
+        } else if (msg.type === 'error') {
+          clearTimeout(timeout)
+          reject(new Error(`Error: ${msg.error?.message}`))
+        }
+      })
+      ws.on('close', (code, reason) => {
+        clearTimeout(timeout)
+        reject(new Error(`WS closed: ${code} ${reason}`))
+      })
+      ws.on('error', (err) => {
+        clearTimeout(timeout)
+        reject(err)
+      })
+    })
+  }
+
+  it('handshake_ack includes workspaceId returned by onAutoCreateWorkspace', async () => {
+    const AUTO_WORKSPACE_ID = 'ws-auto-created-test-123'
+    // Simulate an authenticated user via cookie-based auth so userId is set
+    server = new WsRpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      requireAuth: true,
+      serverId: 'test-auto-ws',
+      validateSessionCookie: async (_cookie) => ({
+        userId: 'user-aut-123',
+        username: 'alice',
+        role: 'user',
+        jwt: null,
+      }),
+      onAutoCreateWorkspace: async (userId: string, _username: string) => {
+        // Only auto-create for the test user
+        if (userId === 'user-aut-123') return AUTO_WORKSPACE_ID
+        throw new Error('Unexpected userId: ' + userId)
+      },
+    })
+    await server.listen()
+    const url = `ws://127.0.0.1:${server.port}`
+
+    // Send a session cookie so the auth context has a userId
+    const ack = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const ws = new (WebSocket as any)(url, { headers: { Cookie: 'polo_ai_session=valid-session' } })
+      openSockets.push(ws)
+      const timeout = setTimeout(() => { ws.close(); reject(new Error('Handshake timeout')) }, 5_000)
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          type: 'handshake',
+          protocolVersion: PROTOCOL_VERSION,
+        }))
+      })
+      ws.on('message', (data: Buffer) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'handshake_ack') { clearTimeout(timeout); resolve(msg) }
+        else if (msg.type === 'error') { clearTimeout(timeout); reject(new Error(msg.error?.message)) }
+      })
+      ws.on('close', (code: number, reason: Buffer) => { clearTimeout(timeout); reject(new Error(`WS closed: ${code} ${reason}`)) })
+      ws.on('error', (err: Error) => { clearTimeout(timeout); reject(err) })
+    })
+
+    expect(ack.type).toBe('handshake_ack')
+    expect(ack.workspaceId).toBe(AUTO_WORKSPACE_ID)
+  })
+
+  it('handshake_ack workspaceId is undefined when onAutoCreateWorkspace is not set', async () => {
+    server = new WsRpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      requireAuth: false,
+      serverId: 'test-no-auto-ws',
+    })
+    await server.listen()
+    const url = `ws://127.0.0.1:${server.port}`
+
+    const ack = await handshakeFull(url)
+    expect(ack.type).toBe('handshake_ack')
+    // No onAutoCreateWorkspace and no workspaceId in handshake → ack has no workspaceId
+    expect(ack.workspaceId).toBeUndefined()
+  })
+
+  it('handshake_ack workspaceId echoes client-provided workspaceId when no auto-create hook', async () => {
+    const CLIENT_WS_ID = 'ws-client-provided-xyz'
+    server = new WsRpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      requireAuth: false,
+      serverId: 'test-echo-ws',
+    })
+    await server.listen()
+    const url = `ws://127.0.0.1:${server.port}`
+
+    // Send workspaceId in handshake
+    const ack = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const ws = new WebSocket(url)
+      openSockets.push(ws)
+      const timeout = setTimeout(() => { ws.close(); reject(new Error('Handshake timeout')) }, 5_000)
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          type: 'handshake',
+          protocolVersion: PROTOCOL_VERSION,
+          workspaceId: CLIENT_WS_ID,
+        }))
+      })
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'handshake_ack') { clearTimeout(timeout); resolve(msg) }
+        else if (msg.type === 'error') { clearTimeout(timeout); reject(new Error(msg.error?.message)) }
+      })
+      ws.on('close', (code, reason) => { clearTimeout(timeout); reject(new Error(`WS closed: ${code} ${reason}`)) })
+      ws.on('error', (err) => { clearTimeout(timeout); reject(err) })
+    })
+
+    expect(ack.workspaceId).toBe(CLIENT_WS_ID)
   })
 })

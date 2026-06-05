@@ -2,6 +2,7 @@ import { join } from 'path'
 import { existsSync, readdirSync, statSync } from 'fs'
 import { RPC_CHANNELS, type SkillFile } from '@polo-ai/shared/protocol'
 import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { assertWorkspaceAccessByPath } from '@polo-ai/server-core/workspace-access'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -15,13 +16,15 @@ export const HANDLED_CHANNELS = [
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
-  server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
+  server.handle(RPC_CHANNELS.skills.GET, async (ctx, workspaceId: string, workingDirectory?: string) => {
     deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       deps.platform.logger?.error(`SKILLS_GET: Workspace not found: ${workspaceId}`)
       return []
     }
+    // Ownership guard: only the workspace owner (or server-token) may read skills
+    assertWorkspaceAccessByPath(ctx, workspace.rootPath)
     // Validate workingDirectory exists on this server — a thin client may pass
     // its local path which doesn't exist on the remote server's filesystem.
     const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)

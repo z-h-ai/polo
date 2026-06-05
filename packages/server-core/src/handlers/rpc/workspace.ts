@@ -5,6 +5,7 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, updateWorkspaceRemoteServer } from '@polo-ai/shared/config'
 import { perf } from '@polo-ai/shared/utils'
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
+import { assertWorkspaceAccessByPath } from '@polo-ai/server-core/workspace-access'
 import type { HandlerDeps } from '../handler-deps'
 import { isValidWorkspaceRootPath } from '../../utils/path-validation'
 
@@ -39,8 +40,9 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   const windowManager = deps.windowManager
 
   // Get workspaces (LOCAL_ONLY — includes rootPath for local Electron renderer)
-  server.handle(RPC_CHANNELS.workspaces.GET, async () => {
-    return sessionManager.getWorkspaces()
+  // In platform mode, filters to only the workspaces owned by the requesting user.
+  server.handle(RPC_CHANNELS.workspaces.GET, async (ctx) => {
+    return sessionManager.getWorkspaces(ctx.userId)
   })
 
   // Create a new workspace at a folder path (Obsidian-style: folder IS the workspace)
@@ -67,7 +69,12 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   })
 
   // Update remote server config for an existing workspace (reconnect flow)
-  server.handle(RPC_CHANNELS.workspaces.UPDATE_REMOTE, async (_ctx, workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }) => {
+  server.handle(RPC_CHANNELS.workspaces.UPDATE_REMOTE, async (ctx, workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (workspace) {
+      // Ownership guard: only the workspace owner (or server-token) may update remote config
+      assertWorkspaceAccessByPath(ctx, workspace.rootPath)
+    }
     updateWorkspaceRemoteServer(workspaceId, remoteServer)
     deps.platform.logger.info(`Updated remote server for workspace ${workspaceId}: ${remoteServer.url}`)
     return { success: true }
@@ -80,6 +87,8 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
     if (workspaceId) {
       const workspace = getWorkspaceByNameOrId(workspaceId)
       if (workspace) {
+        // Ownership guard: only the workspace owner (or server-token) may read the workspace
+        assertWorkspaceAccessByPath(ctx, workspace.rootPath)
         sessionManager.setupConfigWatcher(workspace.rootPath, workspaceId)
       }
     }

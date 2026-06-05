@@ -8,7 +8,7 @@ import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
-import { assertCtxWorkspaceAccess } from '@polo-ai/server-core/workspace-access'
+import { assertCtxWorkspaceAccess, assertWorkspaceAccessByPath } from '@polo-ai/server-core/workspace-access'
 import type { HandlerDeps } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 
@@ -147,7 +147,28 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       ? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId)
       : undefined
     const workspaceId = ctx.workspaceId ?? windowWorkspaceId
-    const sessions = sessionManager.getSessions(workspaceId ?? undefined)
+
+    // Ownership guard: when an authenticated user is making the request
+    // (ctx.userId != null), only return sessions that belong to workspaces
+    // they own. Server-token requests (ctx.userId = null) bypass this filter
+    // so internal/admin callers can see all sessions.
+    const sessions = (() => {
+      const all = sessionManager.getSessions(workspaceId ?? undefined)
+      if (ctx.userId == null) return all
+
+      const { loadWorkspaceConfig } = require('@polo-ai/shared/workspaces/storage')
+      const { getWorkspaceByNameOrId: getWs } = require('@polo-ai/shared/config')
+      return all.filter(s => {
+        if (!s.workspaceId) return true // legacy sessions without workspaceId
+        const ws = getWs(s.workspaceId)
+        if (!ws) return true // unknown workspace — allow passthrough
+        const config = loadWorkspaceConfig(ws.rootPath)
+        if (!config) return true
+        const ownerUserId = (config as any).ownerUserId
+        if (ownerUserId == null) return true // unowned workspace — accessible
+        return ownerUserId === ctx.userId
+      })
+    })()
     end()
 
     log.info('[sessions:get] result', {
@@ -542,6 +563,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     if (!workspaceId) throw new Error('No workspace context')
 
+    // Ownership guard: only the workspace owner (or server-token) may export sessions
+    assertCtxWorkspaceAccess(ctx)
+
     const bundle = await sessionManager.exportSession(sessionId, workspaceId)
     if (!bundle) throw new Error(`Failed to export session ${sessionId}`)
     return bundle
@@ -550,10 +574,19 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Import a session bundle into a target workspace
   // targetWorkspaceId is passed explicitly (not from context) so the renderer
   // can import into any workspace the server manages, not just the active one.
-  const importHandler = async (_ctx: any, targetWorkspaceId: string, bundle: unknown, mode: string) => {
+  const importHandler = async (importCtx: any, targetWorkspaceId: string, bundle: unknown, mode: string) => {
     await sessionManager.waitForInit()
     if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
     if (mode !== 'move' && mode !== 'fork') throw new Error(`Invalid dispatch mode: ${mode}`)
+
+    // Ownership guard: only the target workspace owner (or server-token) may import sessions
+    if (importCtx?.userId != null) {
+      const { getWorkspaceByNameOrId: getWs } = await import('@polo-ai/shared/config')
+      const ws = getWs(targetWorkspaceId)
+      if (ws) {
+        assertWorkspaceAccessByPath(importCtx, ws.rootPath)
+      }
+    }
 
     return sessionManager.importSession(targetWorkspaceId, bundle as import('@polo-ai/shared/sessions').SessionBundle, mode)
   }
