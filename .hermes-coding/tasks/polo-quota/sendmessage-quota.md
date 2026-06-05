@@ -5,8 +5,10 @@ module: polo-quota
 priority: 12
 estimatedMinutes: 25
 depends: ["polo-auth.workspace-ownership", "polo-client.admin-api", "polo-client.pending-usage"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §5.1 (改造后的 sendMessage)"
+startedAt: 2026-06-05T19:30:12.697Z
+completedAt: 2026-06-05T19:39:02.698Z
 ---
 # Add quota check + ownership validation to sendMessage
 
