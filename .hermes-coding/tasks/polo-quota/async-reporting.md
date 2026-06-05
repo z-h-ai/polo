@@ -5,8 +5,10 @@ module: polo-quota
 priority: 14
 estimatedMinutes: 25
 depends: ["polo-quota.usage-capture"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §5.2, §6.2 (异步用量上报+pending 重试)"
+startedAt: 2026-06-05T19:56:40.576Z
+completedAt: 2026-06-05T20:04:25.269Z
 ---
 # Implement background usage retry timer
 
