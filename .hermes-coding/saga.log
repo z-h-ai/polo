@@ -8,3 +8,5 @@
 [2026-06-05T17:16:22.670Z] COMPLETED: polo-auth.request-context
 [2026-06-05T17:20:51.192Z] STARTED: polo-auth.file-isolation
 [2026-06-05T17:42:07.785Z] COMPLETED: polo-auth.file-isolation
+[2026-06-05T18:02:48.470Z] STARTED: polo-auth.workspace-ownership
+[2026-06-05T18:31:51.761Z] COMPLETED: polo-auth.workspace-ownership

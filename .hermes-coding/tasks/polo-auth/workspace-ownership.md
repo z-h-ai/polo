@@ -5,8 +5,10 @@ module: polo-auth
 priority: 6
 estimatedMinutes: 25
 depends: ["polo-auth.file-isolation"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §4.2, §4.3 (Workspace 归属校验+自动创建)"
+startedAt: 2026-06-05T18:02:48.467Z
+completedAt: 2026-06-05T18:31:51.758Z
 ---
 # Add workspace ownership validation + auto-create
 
