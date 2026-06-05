@@ -16,3 +16,5 @@
 [2026-06-05T19:01:55.604Z] COMPLETED: polo-quota.platform-key
 [2026-06-05T19:04:59.575Z] STARTED: polo-quota.onboarding-skip
 [2026-06-05T19:09:54.039Z] COMPLETED: polo-quota.onboarding-skip
+[2026-06-05T19:13:03.278Z] STARTED: polo-client.admin-api
+[2026-06-05T19:19:11.897Z] COMPLETED: polo-client.admin-api
