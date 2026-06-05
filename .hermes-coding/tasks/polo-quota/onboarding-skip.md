@@ -5,8 +5,10 @@ module: polo-quota
 priority: 9
 estimatedMinutes: 15
 depends: ["polo-quota.platform-key"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §8.1 (跳过 API Key 配置)"
+startedAt: 2026-06-05T19:04:59.573Z
+completedAt: 2026-06-05T19:09:54.036Z
 ---
 # Skip API Key onboarding in platform mode
 

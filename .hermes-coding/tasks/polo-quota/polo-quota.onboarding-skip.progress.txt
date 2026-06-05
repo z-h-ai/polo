@@ -1,0 +1,4 @@
+# Task Progress: polo-quota.onboarding-skip
+[2026-06-05T19:07:50.277Z] isPlatformMode() is already defined in packages/shared/src/auth/platform.ts — import it from there in state.ts rather than redefining. The import path within the same auth/ folder is './platform.ts'.
+[2026-06-05T19:07:55.266Z] getAuthState() must be tested in platform mode with the real function (not mocks) because it reads process.env.PLATFORM_ANTHROPIC_API_KEY at call time. Set/delete process.env in beforeEach/afterEach to avoid leaking env state between tests.
+[2026-06-05T19:07:59.201Z] The onboarding GET_AUTH_STATE handler calls getAuthState() + getSetupNeeds() internally — no code change was needed in onboarding.ts itself, since both functions already short-circuit for platform mode. The handler test verifies end-to-end: platform env → isFullyConfigured:true response.
