@@ -5,6 +5,7 @@ import {
   SETTINGS_ITEMS,
   type SettingsMenuItem,
 } from '../../../shared/menu-schema'
+import { filterSettingsItemsForPlatformMode } from '@/lib/platform-mode'
 
 /** Identifies one of the mobile menu pages. */
 export type MobileMenuPageId = 'root' | 'settings' | 'help' | 'debug'
@@ -40,6 +41,8 @@ export interface MobileMenuPage {
 interface BuildOptions {
   hasNewWindow: boolean
   isDebugMode: boolean
+  /** Whether app is in platform mode (hides LLM config settings) */
+  platformMode?: boolean
 }
 
 /**
@@ -54,7 +57,7 @@ interface BuildOptions {
  * Adding a new help link requires only an addition to `HELP_LINKS`. Adding a new
  * settings page requires only an addition to `SETTINGS_PAGES`. Both fan out here.
  */
-export function buildMobileMenuPages({ hasNewWindow, isDebugMode }: BuildOptions): MobileMenuPage[] {
+export function buildMobileMenuPages({ hasNewWindow, isDebugMode, platformMode = false }: BuildOptions): MobileMenuPage[] {
   const rootRows: MobileMenuRow[] = [
     {
       id: ROOT_MENU.newChat.id,
@@ -96,6 +99,7 @@ export function buildMobileMenuPages({ hasNewWindow, isDebugMode }: BuildOptions
     })
   }
 
+  const visibleSettingsItems = filterSettingsItemsForPlatformMode(SETTINGS_ITEMS, platformMode)
   const settingsRows: MobileMenuRow[] = [
     {
       id: 'settings-overview',
@@ -103,7 +107,7 @@ export function buildMobileMenuPages({ hasNewWindow, isDebugMode }: BuildOptions
       labelKey: 'menu.settings',
       action: { kind: 'callback', key: 'openSettings' },
     },
-    ...SETTINGS_ITEMS.map<MobileMenuRow>((item) => ({
+    ...visibleSettingsItems.map<MobileMenuRow>((item) => ({
       id: `settings-${item.id}`,
       iconName: item.icon,
       labelKey: item.labelKey,

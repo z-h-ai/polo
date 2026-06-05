@@ -11,6 +11,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAtomValue } from 'jotai'
+import { platformModeAtom } from '@/atoms/platform'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -601,7 +603,11 @@ function getApiKeyMethodForConnection(conn: LlmConnectionWithStatus): ApiSetupMe
 
 export default function AiSettingsPage() {
   const { t } = useTranslation()
+  const platformMode = useAtomValue(platformModeAtom)
   const { llmConnections, refreshLlmConnections, activeWorkspaceId } = useAppShellContext()
+
+  // In platform mode, the server provides the API key — hide LLM config UI
+  if (platformMode) return null
 
   // API Setup overlay state
   const [showApiSetup, setShowApiSetup] = useState(false)

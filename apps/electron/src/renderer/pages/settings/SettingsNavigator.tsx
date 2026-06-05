@@ -10,6 +10,7 @@
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MoreHorizontal, AppWindow } from 'lucide-react'
+import { useAtomValue } from 'jotai'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -23,6 +24,8 @@ import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type { SettingsSubpage } from '../../../shared/types'
 import { SETTINGS_ITEMS } from '../../../shared/menu-schema'
 import { SETTINGS_ICONS } from '@/components/icons/SettingsIcons'
+import { platformModeAtom } from '@/atoms/platform'
+import { filterSettingsItemsForPlatformMode } from '@/lib/platform-mode'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -153,16 +156,17 @@ export default function SettingsNavigator({
   onSelectSubpage,
 }: SettingsNavigatorProps) {
   const { t } = useTranslation()
+  const platformMode = useAtomValue(platformModeAtom)
 
-  const settingsItems: SettingsItem[] = useMemo(() =>
-    SETTINGS_ITEMS.map((item) => ({
+  const settingsItems: SettingsItem[] = useMemo(() => {
+    const allItems = SETTINGS_ITEMS.map((item) => ({
       id: item.id,
       label: t(item.labelKey),
       icon: SETTINGS_ICONS[item.id],
       description: t(item.descriptionKey),
-    })),
-    [t]
-  )
+    }))
+    return filterSettingsItemsForPlatformMode(allItems, platformMode)
+  }, [t, platformMode])
 
   return (
     <div className="flex flex-col h-full">

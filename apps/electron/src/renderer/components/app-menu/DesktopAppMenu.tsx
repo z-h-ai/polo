@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import * as Icons from "lucide-react"
+import { useAtomValue } from "jotai"
 import { isMac } from "@/lib/platform"
 import { useActionLabel } from "@/actions"
 import {
@@ -30,6 +31,8 @@ import {
 } from "../../../shared/menu-schema"
 import type { MenuItem, MenuSection } from "../../../shared/menu-schema"
 import type { AppMenuProps } from "./types"
+import { platformModeAtom } from "@/atoms/platform"
+import { filterSettingsItemsForPlatformMode } from "@/lib/platform-mode"
 
 type MenuActionHandlers = {
   toggleFocusMode?: () => void
@@ -148,6 +151,8 @@ export function DesktopAppMenu({
 }: AppMenuProps) {
   const { t } = useTranslation()
   const [isDebugMode, setIsDebugMode] = useState(false)
+  const platformMode = useAtomValue(platformModeAtom)
+  const visibleSettingsItems = filterSettingsItemsForPlatformMode(SETTINGS_ITEMS, platformMode)
 
   const newChatHotkey = useActionLabel('app.newChat').hotkey
   const newWindowHotkey = useActionLabel('app.newWindow').hotkey
@@ -205,7 +210,7 @@ export function DesktopAppMenu({
               {settingsHotkey && <DropdownMenuShortcut className="pl-6">{settingsHotkey}</DropdownMenuShortcut>}
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
-            {SETTINGS_ITEMS.map((item) => {
+            {visibleSettingsItems.map((item) => {
               const Icon = SETTINGS_ICONS[item.id]
               return (
                 <StyledDropdownMenuItem

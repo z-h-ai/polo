@@ -10,7 +10,9 @@
 
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSetAtom } from 'jotai'
 import { createWebApi } from './adapter/web-api'
+import { setPlatformModeAtom } from '@/atoms/platform'
 import type { WsRpcClient } from '../../electron/src/transport/client'
 
 // Lazy-load the Electron App after window.electronAPI is set up.
@@ -65,6 +67,7 @@ export default function App() {
   const [error, setError] = useState('')
   const clientRef = useRef<WsRpcClient | null>(null)
   const initRef = useRef(false)
+  const setPlatformMode = useSetAtom(setPlatformModeAtom)
 
   const initialize = async () => {
     setPhase('loading')
@@ -79,6 +82,18 @@ export default function App() {
           return
         }
         throw new Error(`Failed to check session: ${sessionRes.status}`)
+      }
+
+      // 1b. Fetch platformMode from public config (no auth required).
+      // Safe default is false (hides LLM config). If this fetch fails, we keep false.
+      try {
+        const publicConfigRes = await fetch('/api/public-config')
+        if (publicConfigRes.ok) {
+          const publicConfig = await publicConfigRes.json() as { platformMode?: boolean }
+          setPlatformMode(Boolean(publicConfig.platformMode))
+        }
+      } catch {
+        // Non-fatal: keep platformMode=false (safe default hides LLM config)
       }
 
       // 2. Fetch WS URL from the server (cookie auth)

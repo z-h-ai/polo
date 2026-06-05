@@ -4,6 +4,7 @@ import { useEffect, useMemo, useReducer, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
+import { useAtomValue } from 'jotai'
 import { useRegisterDismissibleLayer } from '@/context/DismissibleLayerContext'
 import { PoloAiSymbol } from '../icons/PoloAiSymbol'
 import { SquarePenRounded } from '../icons/SquarePenRounded'
@@ -18,6 +19,7 @@ import {
   type MobileMenuRow,
 } from './mobile-menu-pages'
 import type { AppMenuProps } from './types'
+import { platformModeAtom } from '@/atoms/platform'
 
 const SNAPPY_SPRING = { type: 'spring' as const, stiffness: 400, damping: 36, mass: 0.8 }
 const BACKDROP_FADE = { duration: 0.18 }
@@ -100,14 +102,15 @@ export function MobileAppMenu(props: AppMenuProps) {
   const { t } = useTranslation()
   const [state, dispatch] = useReducer(stackReducer, INITIAL_STATE)
   const [isDebugMode, setIsDebugMode] = useState(false)
+  const platformMode = useAtomValue(platformModeAtom)
 
   useEffect(() => {
     window.electronAPI.isDebugMode().then(setIsDebugMode)
   }, [])
 
   const pages = useMemo(
-    () => buildMobileMenuPages({ hasNewWindow: !!props.onNewWindow, isDebugMode }),
-    [props.onNewWindow, isDebugMode],
+    () => buildMobileMenuPages({ hasNewWindow: !!props.onNewWindow, isDebugMode, platformMode }),
+    [props.onNewWindow, isDebugMode, platformMode],
   )
 
   const close = React.useCallback(() => dispatch({ type: 'close' }), [])
