@@ -2,9 +2,11 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs'
 import { uptime as osUptime } from 'node:os'
 import { join } from 'node:path'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
+import { isPlatformMode } from '@polo-ai/shared/auth'
 import { ensureConfigDir, loadStoredConfig, saveConfig } from '@polo-ai/shared/config'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
+import { startRetryTimer, stopRetryTimer, pendingUsageStore } from '@polo-ai/shared/admin-api'
 import { WsRpcServer, type WsAuthContext, type WsClientConnectedInfo, type WsRpcTlsOptions } from '../transport/server'
 import type { EventSink, RpcServer } from '../transport/types'
 import { createHeadlessPlatform } from '../runtime/platform-headless'
@@ -348,6 +350,17 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
 
   modelRefreshService.startAll()
 
+  // Start background usage retry timer in platform mode (§5.2, §6.2)
+  if (isPlatformMode()) {
+    const adminApiUrl = process.env.ADMIN_API_URL ?? ''
+    startRetryTimer({
+      pendingStore: pendingUsageStore,
+      fetchFn: globalThis.fetch,
+      adminApiUrl,
+    })
+    platform.logger.info('[bootstrap] Background usage retry timer started')
+  }
+
   platform.logger.info(`Polo AI server listening on ${wsServer.protocol}://${rpcHost}:${wsServer.port}`)
 
   let stopped = false
@@ -374,6 +387,13 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
       modelRefreshService.stopAll?.()
     } catch (error) {
       platform.logger.error('[bootstrap] Failed to stop model refresh service:', error)
+    }
+
+    // Stop background usage retry timer (graceful shutdown)
+    try {
+      stopRetryTimer()
+    } catch (error) {
+      platform.logger.error('[bootstrap] Failed to stop usage retry timer:', error)
     }
 
     try {
