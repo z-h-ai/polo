@@ -5,12 +5,18 @@ import type { StoredAttachment } from '@polo-ai/core/types'
 import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import { perf } from '@polo-ai/shared/utils'
 import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/thinking-levels'
+import { isPlatformMode } from '@polo-ai/shared/auth'
+import {
+  AdminApiUnavailableError,
+  AdminApiTimeoutError,
+} from '@polo-ai/shared/admin-api'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
-import { assertCtxWorkspaceAccess, assertWorkspaceAccessByPath } from '@polo-ai/server-core/workspace-access'
+import { assertCtxWorkspaceAccess, assertWorkspaceAccessByPath, ForbiddenError } from '@polo-ai/server-core/workspace-access'
 import type { HandlerDeps } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
+import { QuotaExceededError, ServiceUnavailableError, type QuotaContext } from '../quota-errors'
 
 interface ClientSessionWatchState {
   watcher: import('fs').FSWatcher
@@ -235,8 +241,103 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   //     event stream as today.
   // attachments: FileAttachment[] for Claude (has content), storedAttachments: StoredAttachment[] for persistence (has thumbnailBase64)
   server.handle(RPC_CHANNELS.sessions.SEND_MESSAGE, async (ctx, sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions) => {
-    // Ownership guard: ctx.workspaceId must be owned by the requesting user
-    assertCtxWorkspaceAccess(ctx)
+    // ── Platform-mode quota checks ────────────────────────────────────────────
+    // All checks run only in platform mode (PLATFORM_ANTHROPIC_API_KEY is set).
+    // Server-token requests (ctx.userJwt = null) skip quota checks entirely.
+
+    let quotaContext: QuotaContext | undefined
+
+    if (isPlatformMode()) {
+      // AC1: Ownership validation
+      // (assertCtxWorkspaceAccess handles null userId as server-token bypass)
+      // We use a workspace-aware check: look up workspace config and compare ownerUserId
+      if (ctx.userId != null && ctx.workspaceId != null) {
+        // Use injectable resolver if provided (for testing), otherwise fall back to
+        // the global config registry + workspace config file.
+        let ownerUserId: string | null | undefined
+        if (deps.resolveWorkspaceOwner) {
+          ownerUserId = deps.resolveWorkspaceOwner(ctx.workspaceId)
+        } else {
+          const workspace = getWorkspaceByNameOrId(ctx.workspaceId)
+          if (workspace) {
+            const { loadWorkspaceConfig } = require('@polo-ai/shared/workspaces/storage')
+            const wsConfig = loadWorkspaceConfig(workspace.rootPath)
+            if (wsConfig) {
+              ownerUserId = (wsConfig as any).ownerUserId
+            }
+          }
+        }
+
+        if (ownerUserId != null && ctx.userId !== ownerUserId) {
+          throw new ForbiddenError(
+            `User ${ctx.userId} does not own workspace ${ctx.workspaceId} (owner: ${ownerUserId})`
+          )
+        }
+      }
+
+      // AC7 + AC2: Quota check only when userJwt is present (skip server-token path)
+      if (ctx.userJwt != null) {
+        const adminApi = deps.adminApiClient
+        const pendingUsage = deps.pendingUsageStore
+
+        if (adminApi) {
+          let quotaResult
+          try {
+            quotaResult = await adminApi.checkQuota(ctx.userJwt)
+          } catch (err) {
+            // AC6: Admin API unavailable → ServiceUnavailableError (fail-closed)
+            if (
+              err instanceof AdminApiUnavailableError ||
+              err instanceof AdminApiTimeoutError
+            ) {
+              throw new ServiceUnavailableError(
+                `Quota service is temporarily unavailable. Please try again in a moment.`
+              )
+            }
+            // Any other Admin API error also fails closed
+            throw new ServiceUnavailableError(
+              `Quota check failed: ${err instanceof Error ? err.message : String(err)}`
+            )
+          }
+
+          // AC2: Admin returned allowed=false → QuotaExceededError
+          if (!quotaResult.allowed) {
+            throw new QuotaExceededError(quotaResult)
+          }
+
+          // AC3: Effective remaining = admin.remaining - local pending tokens
+          const pendingTokens = pendingUsage && ctx.userId
+            ? pendingUsage.getPendingTokens(ctx.userId)
+            : 0
+          const effectiveRemaining = quotaResult.remaining - pendingTokens
+
+          if (effectiveRemaining <= 0) {
+            throw new QuotaExceededError({
+              remaining: effectiveRemaining,
+              limit: quotaResult.limit,
+              used: quotaResult.used + pendingTokens,
+              period: quotaResult.period,
+            })
+          }
+        }
+
+        // AC4: Generate unique requestId for this turn
+        const requestId = crypto.randomUUID()
+        quotaContext = {
+          requestId,
+          userId: ctx.userId,
+          userJwt: ctx.userJwt,
+          sessionId,
+        }
+      }
+    }
+
+    // ── Non-platform mode: fallback to basic ownership guard ─────────────────
+    if (!isPlatformMode()) {
+      // Ownership guard: ctx.workspaceId must be owned by the requesting user
+      assertCtxWorkspaceAccess(ctx)
+    }
+
     // Capture the caller's clientId for error routing
     const callerClientId = ctx.clientId
 
@@ -250,7 +351,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       }
 
       sessionManager
-        .sendMessage(sessionId, message, attachments, storedAttachments, options, undefined, undefined, onAck, { callerClientId })
+        .sendMessage(sessionId, message, attachments, storedAttachments, options, undefined, quotaContext, onAck, { callerClientId })
         .then(() => {
           // sendMessage finished without firing onAck — should not happen in
           // practice (every code path that creates a user message acks).

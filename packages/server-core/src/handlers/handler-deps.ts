@@ -4,6 +4,8 @@ import type { IOAuthFlowStore } from './oauth-flow-store-interface'
 import type { IBrowserPaneManager } from './browser-pane-manager-interface'
 import type { IWindowManager } from './window-manager-interface'
 import type { IMessagingGatewayRegistry } from './messaging-registry-interface'
+import type { AdminApiClient } from '@polo-ai/shared/admin-api'
+import type { PendingUsageStore } from '@polo-ai/shared/admin-api'
 
 /**
  * Generic handler dependency bag.
@@ -27,4 +29,20 @@ export interface HandlerDeps<
   browserPaneManager?: TBrowserPaneManager
   oauthFlowStore: TOAuthFlowStore
   messagingRegistry?: IMessagingGatewayRegistry
+  /**
+   * Admin API client for quota enforcement (platform mode only).
+   * Optional: only present when PLATFORM_ANTHROPIC_API_KEY is set.
+   */
+  adminApiClient?: AdminApiClient
+  /**
+   * Pending usage store for effective remaining calculation (platform mode only).
+   * Optional: only present when PLATFORM_ANTHROPIC_API_KEY is set.
+   */
+  pendingUsageStore?: PendingUsageStore
+  /**
+   * Resolve the ownerUserId for a given workspaceId.
+   * Optional injectable for testing; production code uses loadWorkspaceConfig.
+   * Returns null if workspace not found or no owner set (legacy workspace).
+   */
+  resolveWorkspaceOwner?: (workspaceId: string) => string | null | undefined
 }
