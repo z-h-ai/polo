@@ -1,0 +1,14 @@
+# Project Progress
+
+## Falsified Paths
+Approaches that do not work — avoid repeating these mistakes.
+
+## Hidden Constraints
+Non-obvious dependencies and constraints discovered in the codebase.
+
+## Verified Approaches
+Non-obvious patterns that work — only record if not self-evident.
+
+## Active Risks
+Unresolved issues that may affect future tasks.
+[2026-06-05T15:32:06.656Z] Baseline fix attempt 1: installed workspace dependencies so CI=true npm test can resolve packages; baseline now passes.
