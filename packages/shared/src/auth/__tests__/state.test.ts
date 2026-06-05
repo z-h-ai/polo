@@ -5,10 +5,12 @@
  * - Token refresh returns migration info through function chain (no module-level state)
  * - Setup needs derivation from auth state
  * - Migration detection for legacy CLI tokens
+ * - Platform mode bypasses API key setup
  */
-import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import {
   getSetupNeeds,
+  getAuthState,
   performTokenRefresh,
   _resetRefreshMutex,
   type AuthState,
@@ -378,5 +380,143 @@ describe('MigrationInfo', () => {
     };
 
     expect(validInfo.reason).toBe('legacy_token');
+  });
+});
+
+// ============================================
+// AC1: getSetupNeeds in platform mode
+// ============================================
+
+describe('getSetupNeeds - platform mode', () => {
+  let originalPlatformKey: string | undefined;
+
+  beforeEach(() => {
+    originalPlatformKey = process.env.PLATFORM_ANTHROPIC_API_KEY;
+  });
+
+  afterEach(() => {
+    if (originalPlatformKey === undefined) {
+      delete process.env.PLATFORM_ANTHROPIC_API_KEY;
+    } else {
+      process.env.PLATFORM_ANTHROPIC_API_KEY = originalPlatformKey;
+    }
+  });
+
+  it('AC1: returns isFullyConfigured:true when isPlatformMode() is true, regardless of state', () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key';
+
+    // State with no billing config at all
+    const state: AuthState = {
+      billing: {
+        type: null,
+        hasCredentials: false,
+        apiKey: null,
+        claudeOAuthToken: null,
+      },
+      workspace: { hasWorkspace: false, active: null },
+    };
+
+    const needs = getSetupNeeds(state);
+
+    expect(needs.isFullyConfigured).toBe(true);
+    expect(needs.needsBillingConfig).toBe(false);
+    expect(needs.needsCredentials).toBe(false);
+  });
+
+  it('AC1: returns isFullyConfigured:true in platform mode even with missing local credentials', () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key';
+
+    // State where billing type is set but no local credentials
+    const state: AuthState = {
+      billing: {
+        type: 'api_key',
+        hasCredentials: false,
+        apiKey: null,
+        claudeOAuthToken: null,
+      },
+      workspace: { hasWorkspace: false, active: null },
+    };
+
+    const needs = getSetupNeeds(state);
+
+    expect(needs.isFullyConfigured).toBe(true);
+    expect(needs.needsBillingConfig).toBe(false);
+    expect(needs.needsCredentials).toBe(false);
+  });
+
+  it('AC3: non-platform mode getSetupNeeds behaves as before when billing type is null', () => {
+    delete process.env.PLATFORM_ANTHROPIC_API_KEY;
+
+    const state: AuthState = {
+      billing: {
+        type: null,
+        hasCredentials: false,
+        apiKey: null,
+        claudeOAuthToken: null,
+      },
+      workspace: { hasWorkspace: false, active: null },
+    };
+
+    const needs = getSetupNeeds(state);
+
+    expect(needs.isFullyConfigured).toBe(false);
+    expect(needs.needsBillingConfig).toBe(true);
+    expect(needs.needsCredentials).toBe(false);
+  });
+
+  it('AC3: non-platform mode getSetupNeeds behaves as before when credentials missing', () => {
+    delete process.env.PLATFORM_ANTHROPIC_API_KEY;
+
+    const state: AuthState = {
+      billing: {
+        type: 'oauth_token',
+        hasCredentials: false,
+        apiKey: null,
+        claudeOAuthToken: null,
+      },
+      workspace: { hasWorkspace: false, active: null },
+    };
+
+    const needs = getSetupNeeds(state);
+
+    expect(needs.isFullyConfigured).toBe(false);
+    expect(needs.needsBillingConfig).toBe(false);
+    expect(needs.needsCredentials).toBe(true);
+  });
+});
+
+// ============================================
+// AC2: getAuthState in platform mode
+// ============================================
+
+describe('getAuthState - platform mode', () => {
+  let originalPlatformKey: string | undefined;
+
+  beforeEach(() => {
+    originalPlatformKey = process.env.PLATFORM_ANTHROPIC_API_KEY;
+  });
+
+  afterEach(() => {
+    if (originalPlatformKey === undefined) {
+      delete process.env.PLATFORM_ANTHROPIC_API_KEY;
+    } else {
+      process.env.PLATFORM_ANTHROPIC_API_KEY = originalPlatformKey;
+    }
+  });
+
+  it('AC2: getAuthState returns billing.type=api_key in platform mode', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key';
+
+    const authState = await getAuthState();
+
+    expect(authState.billing.type).toBe('api_key');
+  });
+
+  it('AC2: getAuthState returns billing.hasCredentials=true in platform mode', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key';
+
+    const authState = await getAuthState();
+
+    expect(authState.billing.hasCredentials).toBe(true);
   });
 });

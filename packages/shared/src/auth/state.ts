@@ -21,6 +21,7 @@ import {
   type Workspace,
 } from '../config/storage.ts';
 import { refreshClaudeToken, isTokenExpired } from './claude-token.ts';
+import { isPlatformMode } from './platform.ts';
 import { debug } from '../utils/debug.ts';
 
 function toLegacyBillingType(
@@ -261,8 +262,28 @@ export async function getValidClaudeOAuthToken(connectionSlug: string): Promise<
  *
  * Uses LLM connections as the source of truth for auth type and credentials.
  * Falls back to legacy global credentials for backwards compatibility.
+ *
+ * In platform mode (PLATFORM_ANTHROPIC_API_KEY set), returns a fully-configured
+ * state so the UI never shows "configure billing" prompts.
  */
 export async function getAuthState(): Promise<AuthState> {
+  // Platform mode: the API key is injected via env — treat as fully configured
+  if (isPlatformMode()) {
+    const activeWorkspace = getActiveWorkspace();
+    return {
+      billing: {
+        type: 'api_key',
+        hasCredentials: true,
+        apiKey: null, // raw key is never exposed to the renderer
+        claudeOAuthToken: null,
+      },
+      workspace: {
+        hasWorkspace: !!activeWorkspace,
+        active: activeWorkspace,
+      },
+    };
+  }
+
   const config = loadStoredConfig();
   const manager = getCredentialManager();
   const activeWorkspace = getActiveWorkspace();
@@ -328,8 +349,21 @@ export async function getAuthState(): Promise<AuthState> {
 
 /**
  * Derive what setup steps are needed based on current auth state
+ *
+ * In platform mode (PLATFORM_ANTHROPIC_API_KEY set), always returns fully-configured
+ * so the onboarding / billing setup steps are skipped entirely.
  */
 export function getSetupNeeds(state: AuthState, setupDeferred?: boolean): SetupNeeds {
+  // Platform mode: the API key is injected via env — skip all onboarding steps
+  if (isPlatformMode()) {
+    return {
+      isFullyConfigured: true,
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsMigration: undefined,
+    };
+  }
+
   // Need billing config if no billing type is set
   const needsBillingConfig = state.billing.type === null;
 
