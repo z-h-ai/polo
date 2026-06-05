@@ -4,3 +4,5 @@
 [2026-06-05T15:59:56.262Z] COMPLETED: polo-auth.session-endpoint
 [2026-06-05T16:07:38.224Z] STARTED: polo-auth.ws-upgrade
 [2026-06-05T16:20:20.204Z] COMPLETED: polo-auth.ws-upgrade
+[2026-06-05T16:37:17.997Z] STARTED: polo-auth.request-context
+[2026-06-05T17:16:22.670Z] COMPLETED: polo-auth.request-context

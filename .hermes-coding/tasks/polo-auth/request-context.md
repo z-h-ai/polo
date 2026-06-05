@@ -5,8 +5,10 @@ module: polo-auth
 priority: 4
 estimatedMinutes: 15
 depends: ["polo-auth.ws-upgrade"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §3.3 (RequestContext 扩展)"
+startedAt: 2026-06-05T16:37:17.995Z
+completedAt: 2026-06-05T17:16:22.667Z
 ---
 # Extend RequestContext with user identity fields
 
