@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import { RPC_CHANNELS } from '../../../shared/types'
-import type { RpcServer } from '@polo-ai/server-core/transport'
+import type { RequestContext, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
-type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | any
+type HandlerFn = (ctx: RequestContext, ...args: any[]) => Promise<any> | any
+
+function makeContext(clientId = 'client-1'): RequestContext {
+  return {
+    clientId,
+    workspaceId: null,
+    webContentsId: null,
+    userId: null,
+    username: null,
+    userRole: null,
+    userJwt: null,
+  }
+}
 
 const getDefaultThinkingLevelMock = mock(() => 'think')
 const setDefaultThinkingLevelMock = mock((_level: string) => true)
@@ -76,7 +88,7 @@ describe('settings default thinking RPC handlers', () => {
     const getHandler = handlers.get(RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL)
     expect(getHandler).toBeTruthy()
 
-    const result = await getHandler!({ clientId: 'client-1' })
+    const result = await getHandler!(makeContext())
     expect(result).toBe('think')
     expect(getDefaultThinkingLevelMock).toHaveBeenCalledTimes(1)
   })
@@ -85,7 +97,7 @@ describe('settings default thinking RPC handlers', () => {
     const setHandler = handlers.get(RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL)
     expect(setHandler).toBeTruthy()
 
-    const result = await setHandler!({ clientId: 'client-1' }, 'max')
+    const result = await setHandler!(makeContext(), 'max')
     expect(result).toEqual({ success: true })
     expect(setDefaultThinkingLevelMock).toHaveBeenCalledWith('max')
     expect(setDefaultThinkingLevelMock).toHaveBeenCalledTimes(1)
@@ -95,7 +107,7 @@ describe('settings default thinking RPC handlers', () => {
     const setHandler = handlers.get(RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL)
     expect(setHandler).toBeTruthy()
 
-    await expect(setHandler!({ clientId: 'client-1' }, 'ultra')).rejects.toThrow('Invalid thinking level')
+    await expect(setHandler!(makeContext(), 'ultra')).rejects.toThrow('Invalid thinking level')
     expect(setDefaultThinkingLevelMock).not.toHaveBeenCalled()
   })
 })

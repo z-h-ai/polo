@@ -4,10 +4,22 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { RPC_CHANNELS } from '../../../shared/types'
 import { registerSessionsHandlers, cleanupSessionFileWatchForClient } from '@polo-ai/server-core/handlers/rpc'
-import type { RpcServer } from '@polo-ai/server-core/transport'
+import type { RequestContext, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
-type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | any
+type HandlerFn = (ctx: RequestContext, ...args: any[]) => Promise<any> | any
+
+function makeContext(clientId: string): RequestContext {
+  return {
+    clientId,
+    workspaceId: null,
+    webContentsId: null,
+    userId: null,
+    username: null,
+    userRole: null,
+    userJwt: null,
+  }
+}
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -97,8 +109,8 @@ describe('sessions file watchers', () => {
     expect(watch).toBeTruthy()
     expect(unwatch).toBeTruthy()
 
-    await watch!({ clientId: 'client-a' }, 'session-a')
-    await watch!({ clientId: 'client-b' }, 'session-b')
+    await watch!(makeContext('client-a'), 'session-a')
+    await watch!(makeContext('client-b'), 'session-b')
     await wait(50)
 
     writeFileSync(join(sessionDirA, 'a.txt'), `a-${Date.now()}`)
@@ -112,7 +124,7 @@ describe('sessions file watchers', () => {
     expect(bEvents.some((evt) => evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED && evt.args[0] === 'session-b')).toBe(true)
 
     pushed.length = 0
-    await unwatch!({ clientId: 'client-a' })
+    await unwatch!(makeContext('client-a'))
 
     writeFileSync(join(sessionDirA, 'a.txt'), `a2-${Date.now()}`)
     writeFileSync(join(sessionDirB, 'b.txt'), `b2-${Date.now()}`)
@@ -129,7 +141,7 @@ describe('sessions file watchers', () => {
     const watch = handlers.get(RPC_CHANNELS.sessions.WATCH_FILES)
     expect(watch).toBeTruthy()
 
-    await watch!({ clientId: 'client-a' }, 'session-a')
+    await watch!(makeContext('client-a'), 'session-a')
     await wait(50)
 
     cleanupSessionFileWatchForClient('client-a')

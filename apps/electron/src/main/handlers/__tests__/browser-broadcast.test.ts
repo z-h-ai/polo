@@ -175,7 +175,15 @@ describe('browser handler — workspace filtering', () => {
         .find((ch) => ch.endsWith(':list') && ch.includes('browser'))
       if (!listChannel) throw new Error('LIST handler not registered')
       const handler = recorder.handlers.get(listChannel)!
-      return handler({ clientId: 'c1', workspaceId, webContentsId: null }) as BrowserInstanceInfo[]
+      return handler({
+        clientId: 'c1',
+        workspaceId,
+        webContentsId: null,
+        userId: null,
+        username: null,
+        userRole: null,
+        userJwt: null,
+      }) as BrowserInstanceInfo[]
     }
 
     it('returns ALL instances regardless of ctx.workspaceId (renderer filters)', async () => {
