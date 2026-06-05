@@ -106,6 +106,10 @@ export function resolveWebSocketUrl(
   return `${wsProtocol}://127.0.0.1:${wsPort}`
 }
 
+export function isPlatformMode(): boolean {
+  return !!process.env.PLATFORM_ANTHROPIC_API_KEY
+}
+
 // ---------------------------------------------------------------------------
 // Handler options (shared between embedded and standalone modes)
 // ---------------------------------------------------------------------------
@@ -342,6 +346,20 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
         })
+      }
+    }
+
+    // ── Public pre-login config endpoint (no auth) ──
+    if (path === '/api/public-config' && req.method === 'GET') {
+      try {
+        return Response.json({
+          adminUrl: process.env.ADMIN_API_URL || null,
+          platformMode: isPlatformMode(),
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error'
+        logger.error(`[webui] Public config failed: ${msg}`)
+        return Response.json({ error: 'internal_error' }, { status: 500 })
       }
     }
 
