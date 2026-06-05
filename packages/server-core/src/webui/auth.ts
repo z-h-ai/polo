@@ -7,7 +7,7 @@
  * - Rate limiting: per-IP brute-force protection on /api/auth
  */
 
-import { SignJWT, jwtVerify } from 'jose'
+import { SignJWT, decodeJwt, jwtVerify } from 'jose'
 
 // ---------------------------------------------------------------------------
 // JWT helpers (via jose library)
@@ -19,6 +19,17 @@ export interface JwtPayload {
   sub: string
   iat: number
   exp: number
+}
+
+export interface AdminJwtPayload extends JwtPayload {
+  username: string
+  role: string
+}
+
+export interface WebuiUser {
+  id: string
+  username: string
+  role: string
 }
 
 export async function signJwt(payload: JwtPayload, secret: string): Promise<string> {
@@ -44,9 +55,84 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtPaylo
   }
 }
 
+export async function verifyAdminJwt(token: string, secret: string): Promise<AdminJwtPayload | null> {
+  try {
+    const key = new TextEncoder().encode(secret)
+    const { payload } = await jwtVerify(token, key, { algorithms: ['HS256'] })
+
+    if (
+      typeof payload.sub !== 'string'
+      || typeof payload.username !== 'string'
+      || typeof payload.role !== 'string'
+      || typeof payload.iat !== 'number'
+      || typeof payload.exp !== 'number'
+    ) {
+      return null
+    }
+
+    return {
+      sub: payload.sub,
+      username: payload.username,
+      role: payload.role,
+      iat: payload.iat,
+      exp: payload.exp,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function userFromAdminJwt(payload: AdminJwtPayload): WebuiUser {
+  return {
+    id: payload.sub,
+    username: payload.username,
+    role: payload.role,
+  }
+}
+
 export async function createSessionToken(secret: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   return signJwt({ sub: 'webui', iat: now, exp: now + JWT_EXPIRY_SECONDS }, secret)
+}
+
+// ---------------------------------------------------------------------------
+// Admin API token store
+// ---------------------------------------------------------------------------
+
+export const adminJwtStore = new Map<string, string>()
+
+const adminJwtExpirations = new Map<string, number>()
+
+export function storeAdminJwt(userId: string, token: string, expiresAt: number): void {
+  adminJwtStore.set(userId, token)
+  adminJwtExpirations.set(userId, expiresAt)
+}
+
+export function removeAdminJwt(userId: string): void {
+  adminJwtStore.delete(userId)
+  adminJwtExpirations.delete(userId)
+}
+
+export function removeAdminJwtFromToken(token: string): void {
+  try {
+    const payload = decodeJwt(token)
+    if (typeof payload.sub === 'string') {
+      removeAdminJwt(payload.sub)
+    }
+  } catch {
+    // Invalid JWTs have no trusted user mapping to remove.
+  }
+}
+
+export function sweepExpiredAdminJwtStore(now = Math.floor(Date.now() / 1000)): void {
+  for (const [userId, expiresAt] of adminJwtExpirations) {
+    if (expiresAt <= now) removeAdminJwt(userId)
+  }
+}
+
+export function clearAdminJwtStore(): void {
+  adminJwtStore.clear()
+  adminJwtExpirations.clear()
 }
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,12 @@ import {
   validateSession,
   buildSessionCookie,
   buildLogoutCookie,
+  verifyAdminJwt,
+  userFromAdminJwt,
+  storeAdminJwt,
+  removeAdminJwtFromToken,
+  sweepExpiredAdminJwtStore,
+  extractSessionCookie,
 } from './auth'
 import { generateCallbackPage } from '@polo-ai/shared/auth'
 import type { PlatformServices } from '../runtime/platform'
@@ -70,6 +76,15 @@ function getRequestHost(req: Request): string | null {
     || req.headers.get('host')
 }
 
+function getRequestHostname(req: Request): string {
+  const host = getRequestHost(req) || new URL(req.url).host
+  try {
+    return new URL(`http://${host}`).hostname.toLowerCase()
+  } catch {
+    return host.replace(/:\d+$/, '').toLowerCase()
+  }
+}
+
 function formatHostWithPort(host: string, port: number): string {
   try {
     const parsed = new URL(`http://${host}`)
@@ -82,7 +97,10 @@ function formatHostWithPort(host: string, port: number): string {
 }
 
 export function shouldUseSecureCookies(req: Request, secureCookies?: boolean): boolean {
+  if (process.env.POLO_AI_WEBUI_SECURE_COOKIE?.toLowerCase() === 'false') return false
+  if (getRequestHostname(req) === 'localhost') return false
   if (secureCookies != null) return secureCookies
+  if (process.env.POLO_AI_WEBUI_SECURE_COOKIE?.toLowerCase() === 'true') return true
   return getRequestProto(req) === 'https'
 }
 
@@ -185,7 +203,14 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
   } = options
 
   const rateLimiter = new RateLimiter(5, 60_000)
-  const cleanupTimer = setInterval(() => rateLimiter.cleanup(), 120_000)
+  if (!process.env.JWT_SECRET) {
+    logger.error('[webui] JWT_SECRET is not configured; /auth/session is disabled')
+  }
+
+  const cleanupTimer = setInterval(() => {
+    rateLimiter.cleanup()
+    sweepExpiredAdminJwtStore()
+  }, 120_000)
 
   const loginPassword = password || secret
   const trustedProxySet = new Set(trustedProxies ?? [])
@@ -236,6 +261,82 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
         })
       }
       return new Response('Not Found', { status: 404 })
+    }
+
+    // ── Admin JWT session endpoint (no cookie auth) ──
+    if (path === '/auth/session' && req.method === 'POST') {
+      const jwtSecret = process.env.JWT_SECRET
+      if (!jwtSecret) {
+        logger.error('[webui] JWT_SECRET is required for /auth/session')
+        return Response.json({ error: 'server_configuration_error' }, { status: 500 })
+      }
+
+      let body: { token?: unknown }
+      try {
+        body = await req.json() as { token?: unknown }
+      } catch {
+        return Response.json(
+          { error: 'validation_error', message: 'token field required' },
+          { status: 400 },
+        )
+      }
+
+      if (typeof body.token !== 'string' || body.token.trim().length === 0) {
+        return Response.json(
+          { error: 'validation_error', message: 'token field required' },
+          { status: 400 },
+        )
+      }
+
+      const payload = await verifyAdminJwt(body.token, jwtSecret)
+      if (!payload) {
+        return Response.json({ error: 'invalid_token' }, { status: 401 })
+      }
+
+      const user = userFromAdminJwt(payload)
+      storeAdminJwt(user.id, body.token, payload.exp)
+
+      return Response.json({ user }, {
+        status: 200,
+        headers: {
+          'Set-Cookie': buildSessionCookie(body.token, useSecureCookies),
+        },
+      })
+    }
+
+    if (path === '/auth/me' && req.method === 'GET') {
+      const jwtSecret = process.env.JWT_SECRET
+      if (!jwtSecret) {
+        logger.error('[webui] JWT_SECRET is required for /auth/me')
+        return Response.json({ error: 'server_configuration_error' }, { status: 500 })
+      }
+
+      const token = extractSessionCookie(req.headers.get('cookie'))
+      if (!token) {
+        return Response.json({ error: 'session_expired' }, { status: 401 })
+      }
+
+      const payload = await verifyAdminJwt(token, jwtSecret)
+      if (!payload) {
+        removeAdminJwtFromToken(token)
+        return Response.json({ error: 'session_expired' }, { status: 401 })
+      }
+
+      const user = userFromAdminJwt(payload)
+      storeAdminJwt(user.id, token, payload.exp)
+      return Response.json({ user }, { status: 200 })
+    }
+
+    if (path === '/auth/logout' && req.method === 'POST') {
+      const token = extractSessionCookie(req.headers.get('cookie'))
+      if (token) removeAdminJwtFromToken(token)
+
+      return Response.json({ success: true }, {
+        status: 200,
+        headers: {
+          'Set-Cookie': buildLogoutCookie(useSecureCookies),
+        },
+      })
     }
 
     // ── Auth endpoint ──
