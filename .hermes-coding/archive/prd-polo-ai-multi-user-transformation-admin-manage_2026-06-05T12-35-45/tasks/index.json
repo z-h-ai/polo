@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-06-05T11:25:56.499Z",
+  "metadata": {
+    "projectGoal": "Polo AI Multi-User + Admin Console MVP-1",
+    "languageConfig": {
+      "language": "typescript",
+      "framework": ""
+    }
+  },
+  "tasks": {}
+}

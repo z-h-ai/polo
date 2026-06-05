@@ -1,0 +1,157 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-06-05T15:21:15.297Z",
+  "metadata": {
+    "projectGoal": "Polo AI multi-user modification (MVP-1, WebUI only)",
+    "languageConfig": {
+      "language": "typescript",
+      "framework": ""
+    }
+  },
+  "tasks": {
+    "polo-auth.api-config": {
+      "status": "pending",
+      "priority": 1,
+      "module": "polo-auth",
+      "description": "Add GET /api/public-config endpoint (pre-login config)",
+      "filePath": "polo-auth/api-config.md",
+      "dependencies": [],
+      "estimatedMinutes": 15
+    },
+    "polo-auth.session-endpoint": {
+      "status": "pending",
+      "priority": 2,
+      "module": "polo-auth",
+      "description": "Implement POST /auth/session endpoint (JWT → cookie)",
+      "filePath": "polo-auth/session-endpoint.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-auth.ws-upgrade": {
+      "status": "pending",
+      "priority": 3,
+      "module": "polo-auth",
+      "description": "Move WebSocket auth to HTTP upgrade phase (cookie-based)",
+      "filePath": "polo-auth/ws-upgrade.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-auth.request-context": {
+      "status": "pending",
+      "priority": 4,
+      "module": "polo-auth",
+      "description": "Extend RequestContext with user identity fields",
+      "filePath": "polo-auth/request-context.md",
+      "dependencies": [],
+      "estimatedMinutes": 15
+    },
+    "polo-auth.file-isolation": {
+      "status": "pending",
+      "priority": 5,
+      "module": "polo-auth",
+      "description": "Isolate file storage paths per userId in platform mode",
+      "filePath": "polo-auth/file-isolation.md",
+      "dependencies": [],
+      "estimatedMinutes": 20
+    },
+    "polo-auth.workspace-ownership": {
+      "status": "pending",
+      "priority": 6,
+      "module": "polo-auth",
+      "description": "Add workspace ownership validation + auto-create",
+      "filePath": "polo-auth/workspace-ownership.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-ui.login-page": {
+      "status": "pending",
+      "priority": 7,
+      "module": "polo-ui",
+      "description": "Create WebUI login page",
+      "filePath": "polo-ui/login-page.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-quota.platform-key": {
+      "status": "pending",
+      "priority": 8,
+      "module": "polo-quota",
+      "description": "Modify resolveAuthEnvVars() for platform API Key",
+      "filePath": "polo-quota/platform-key.md",
+      "dependencies": [],
+      "estimatedMinutes": 15
+    },
+    "polo-quota.onboarding-skip": {
+      "status": "pending",
+      "priority": 9,
+      "module": "polo-quota",
+      "description": "Skip API Key onboarding in platform mode",
+      "filePath": "polo-quota/onboarding-skip.md",
+      "dependencies": [],
+      "estimatedMinutes": 15
+    },
+    "polo-client.admin-api": {
+      "status": "pending",
+      "priority": 10,
+      "module": "polo-client",
+      "description": "Create Admin API Client module",
+      "filePath": "polo-client/admin-api.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-client.pending-usage": {
+      "status": "pending",
+      "priority": 11,
+      "module": "polo-client",
+      "description": "Create pending_usage JSONL store",
+      "filePath": "polo-client/pending-usage.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-quota.sendmessage-quota": {
+      "status": "pending",
+      "priority": 12,
+      "module": "polo-quota",
+      "description": "Add quota check + ownership validation to sendMessage",
+      "filePath": "polo-quota/sendmessage-quota.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-quota.usage-capture": {
+      "status": "pending",
+      "priority": 13,
+      "module": "polo-quota",
+      "description": "Capture usage from SessionManager complete event",
+      "filePath": "polo-quota/usage-capture.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-quota.async-reporting": {
+      "status": "pending",
+      "priority": 14,
+      "module": "polo-quota",
+      "description": "Implement background usage retry timer",
+      "filePath": "polo-quota/async-reporting.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "polo-ui.hide-llm-config": {
+      "status": "pending",
+      "priority": 15,
+      "module": "polo-ui",
+      "description": "Hide LLM connection config UI in platform mode",
+      "filePath": "polo-ui/hide-llm-config.md",
+      "dependencies": [],
+      "estimatedMinutes": 15
+    },
+    "polo-ui.quota-display": {
+      "status": "pending",
+      "priority": 16,
+      "module": "polo-ui",
+      "description": "WebUI quota display component",
+      "filePath": "polo-ui/quota-display.md",
+      "dependencies": [],
+      "estimatedMinutes": 25
+    }
+  }
+}
