@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
 import '../../../tests/setup/register-pi-model-resolver.ts'
 import {
   getDefaultModelsForConnection,
@@ -10,8 +10,11 @@ import {
   fromBedrockNativeId,
   normalizeBedrockModelId,
   deriveBedrockRegionPrefix,
+  resolveAuthEnvVars,
+  isPlatformMode,
 } from '../llm-connections'
 import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelShortName, isClaudeModel } from '../models'
+import type { LlmConnection } from '../llm-connections'
 
 // ============================================================
 // getDefaultModelsForConnection
@@ -279,5 +282,191 @@ describe('Bedrock-native model display', () => {
     expect(isClaudeModel('us.anthropic.claude-opus-4-7-v1')).toBe(true)
     expect(isClaudeModel('anthropic.claude-sonnet-4-6')).toBe(true)
     expect(isClaudeModel('eu.anthropic.claude-haiku-4-5-20251001-v1:0')).toBe(true)
+  })
+})
+
+// ============================================================
+// isPlatformMode
+// ============================================================
+
+describe('isPlatformMode', () => {
+  let originalEnv: string | undefined
+
+  beforeEach(() => {
+    originalEnv = process.env.PLATFORM_ANTHROPIC_API_KEY
+  })
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.PLATFORM_ANTHROPIC_API_KEY
+    } else {
+      process.env.PLATFORM_ANTHROPIC_API_KEY = originalEnv
+    }
+  })
+
+  it('returns true when PLATFORM_ANTHROPIC_API_KEY is set', () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-xxx'
+    expect(isPlatformMode()).toBe(true)
+  })
+
+  it('returns false when PLATFORM_ANTHROPIC_API_KEY is not set', () => {
+    delete process.env.PLATFORM_ANTHROPIC_API_KEY
+    expect(isPlatformMode()).toBe(false)
+  })
+
+  it('returns false when PLATFORM_ANTHROPIC_API_KEY is empty string', () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = ''
+    expect(isPlatformMode()).toBe(false)
+  })
+})
+
+// ============================================================
+// resolveAuthEnvVars — platform mode (AC1, AC2, AC3, AC4)
+// ============================================================
+
+function makeAnthropicConnection(overrides: Partial<LlmConnection> = {}): LlmConnection {
+  return {
+    slug: 'anthropic-api',
+    name: 'Anthropic API',
+    providerType: 'anthropic',
+    authType: 'api_key',
+    createdAt: Date.now(),
+    ...overrides,
+  }
+}
+
+function makePiConnection(overrides: Partial<LlmConnection> = {}): LlmConnection {
+  return {
+    slug: 'pi-openai',
+    name: 'OpenAI via Pi',
+    providerType: 'pi',
+    authType: 'api_key',
+    piAuthProvider: 'openai',
+    createdAt: Date.now(),
+    ...overrides,
+  }
+}
+
+describe('resolveAuthEnvVars — platform mode', () => {
+  let getLlmApiKeyCalled: boolean
+  let originalPlatformKey: string | undefined
+  let originalAnthropicKey: string | undefined
+
+  const mockCredentialManager = {
+    getLlmApiKey: async (_slug: string): Promise<string | null> => {
+      getLlmApiKeyCalled = true
+      return 'sk-local-key'
+    },
+    getLlmOAuth: async (_slug: string) => null,
+    isAuthenticated: async () => false,
+  } as any
+
+  const mockGetValidOAuthToken = async (_slug: string) => ({ accessToken: null })
+
+  beforeEach(() => {
+    getLlmApiKeyCalled = false
+    originalPlatformKey = process.env.PLATFORM_ANTHROPIC_API_KEY
+    originalAnthropicKey = process.env.ANTHROPIC_API_KEY
+  })
+
+  afterEach(() => {
+    if (originalPlatformKey === undefined) {
+      delete process.env.PLATFORM_ANTHROPIC_API_KEY
+    } else {
+      process.env.PLATFORM_ANTHROPIC_API_KEY = originalPlatformKey
+    }
+    if (originalAnthropicKey === undefined) {
+      delete process.env.ANTHROPIC_API_KEY
+    } else {
+      process.env.ANTHROPIC_API_KEY = originalAnthropicKey
+    }
+  })
+
+  // AC1: Platform mode — use platform key
+  it('AC1: sets ANTHROPIC_API_KEY from PLATFORM_ANTHROPIC_API_KEY when platform mode', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key'
+    delete process.env.ANTHROPIC_API_KEY
+
+    const conn = makeAnthropicConnection()
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+
+    expect(result.success).toBe(true)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(process.env['ANTHROPIC_API_KEY'] as any).toBe('sk-ant-platform-key')
+  })
+
+  it('AC1: does NOT call getLlmApiKey in platform mode', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key'
+
+    const conn = makeAnthropicConnection()
+    await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+
+    expect(getLlmApiKeyCalled).toBe(false)
+  })
+
+  it('AC1: platform mode works regardless of existing ANTHROPIC_API_KEY value', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key'
+    process.env.ANTHROPIC_API_KEY = 'sk-existing-key'
+
+    const conn = makeAnthropicConnection()
+    await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+
+    expect(process.env.ANTHROPIC_API_KEY).toBe('sk-ant-platform-key')
+  })
+
+  // AC2: Non-platform mode — original flow still works
+  it('AC2: without PLATFORM_ANTHROPIC_API_KEY, original credential resolution runs', async () => {
+    delete process.env.PLATFORM_ANTHROPIC_API_KEY
+
+    const conn = makeAnthropicConnection()
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+
+    expect(getLlmApiKeyCalled).toBe(true)
+    expect(result.success).toBe(true)
+    expect(result.envVars.ANTHROPIC_API_KEY).toBe('sk-local-key')
+  })
+
+  it('AC2: empty PLATFORM_ANTHROPIC_API_KEY treated as unset, original flow runs', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = ''
+
+    const conn = makeAnthropicConnection()
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+
+    expect(getLlmApiKeyCalled).toBe(true)
+    expect(result.success).toBe(true)
+  })
+
+  // AC3: Platform mode ignores non-Anthropic providers (existing early-return)
+  it('AC3: in platform mode, non-Anthropic connection returns early with success', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key'
+
+    const conn = makePiConnection()
+    const result = await resolveAuthEnvVars(conn, 'pi-openai', mockCredentialManager, mockGetValidOAuthToken)
+
+    // Non-Anthropic providers already return early — unchanged behavior
+    expect(result.success).toBe(true)
+    expect(Object.keys(result.envVars)).toHaveLength(0)
+    // getLlmApiKey should NOT be called for non-Anthropic providers
+    expect(getLlmApiKeyCalled).toBe(false)
+  })
+
+  // AC4: Platform key not exposed — not returned in envVars, not logged
+  it('AC4: PLATFORM_ANTHROPIC_API_KEY is not returned in envVars', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-secret'
+
+    const conn = makeAnthropicConnection()
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+
+    const allValues = Object.values(result.envVars)
+    expect(allValues).not.toContain('sk-ant-platform-secret')
+  })
+
+  it('AC4: resolveAuthEnvVars does not return PLATFORM_ANTHROPIC_API_KEY as a key', async () => {
+    process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-secret'
+
+    const conn = makeAnthropicConnection()
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+
+    expect('PLATFORM_ANTHROPIC_API_KEY' in result.envVars).toBe(false)
   })
 })

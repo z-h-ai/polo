@@ -16,6 +16,9 @@ import {
   ANTHROPIC_MODELS,
 } from './models';
 import type { CredentialManager } from '../credentials/manager.ts';
+import { isPlatformMode } from '../auth/platform.ts';
+
+export { isPlatformMode };
 
 // ============================================================
 // Pi Model Resolver (dependency injection to avoid Pi SDK in renderer)
@@ -979,6 +982,13 @@ export async function resolveAuthEnvVars(
   // Only Anthropic-SDK-based providers use env var auth
   // OpenAI (Codex), Copilot, and Pi handle auth internally in their postInit()
   if (!isAnthropicProvider(connection.providerType)) {
+    return { envVars, success: true };
+  }
+
+  // Platform mode: use PLATFORM_ANTHROPIC_API_KEY directly, bypassing credential store
+  const platformKey = process.env.PLATFORM_ANTHROPIC_API_KEY;
+  if (platformKey) {
+    process.env.ANTHROPIC_API_KEY = platformKey;
     return { envVars, success: true };
   }
 
