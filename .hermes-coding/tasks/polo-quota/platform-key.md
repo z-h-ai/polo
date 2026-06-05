@@ -5,8 +5,10 @@ module: polo-quota
 priority: 8
 estimatedMinutes: 15
 depends: []
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §7 (API Key 注入改造)"
+startedAt: 2026-06-05T18:55:13.190Z
+completedAt: 2026-06-05T19:01:55.602Z
 ---
 # Modify resolveAuthEnvVars() for platform API Key
 
