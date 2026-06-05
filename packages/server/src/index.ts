@@ -31,7 +31,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { version as packageVersion } from '../package.json'
 import { enableDebug } from '@polo-ai/shared/utils/debug'
 import { bootstrapServer, startHealthHttpServer, generateServerToken } from '@polo-ai/server-core/bootstrap'
-import { validateSession, createWebuiHandler, nodeHttpAdapter } from '@polo-ai/server-core/webui'
+import { validateSession, extractSessionCookie, createWebuiHandler, nodeHttpAdapter } from '@polo-ai/server-core/webui'
 import type { WebuiHandler } from '@polo-ai/server-core/webui'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { getWorkspaces } from '@polo-ai/shared/config'
@@ -172,10 +172,29 @@ const instance = await (async () => {
       // When web UI is enabled, accept JWT session cookies on WebSocket upgrade
       validateSessionCookie: webuiEnabled && serverToken
         ? async (cookieHeader) => {
+            const jwt = extractSessionCookie(cookieHeader)
+            if (!jwt) return null
+
             const session = await validateSession(cookieHeader, serverToken, {
               adminJwtSecret: process.env.JWT_SECRET,
             })
-            return session !== null
+            if (!session) return null
+
+            if ('username' in session) {
+              return {
+                userId: session.sub,
+                username: session.username,
+                role: session.role,
+                jwt,
+              }
+            }
+
+            return {
+              userId: session.sub,
+              username: 'webui',
+              role: 'admin',
+              jwt,
+            }
           }
         : undefined,
       // Embed the WebUI HTTP handler on the WS server's port

@@ -5,7 +5,7 @@ import { OAuthFlowStore } from '@polo-ai/shared/auth'
 import { ensureConfigDir, loadStoredConfig, saveConfig } from '@polo-ai/shared/config'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
-import { WsRpcServer, type WsRpcTlsOptions } from '../transport/server'
+import { WsRpcServer, type WsAuthContext, type WsRpcTlsOptions } from '../transport/server'
 import type { EventSink, RpcServer } from '../transport/types'
 import { createHeadlessPlatform } from '../runtime/platform-headless'
 import type { PlatformServices } from '../runtime/platform'
@@ -47,7 +47,7 @@ export interface ServerBootstrapOptions<TSessionManager, THandlerDeps> {
   /** TLS configuration. When provided, the server listens on wss:// instead of ws://. */
   tls?: WsRpcTlsOptions
   /** Cookie-based session validator for web UI auth on WebSocket upgrade. */
-  validateSessionCookie?: (cookieHeader: string | null) => Promise<boolean>
+  validateSessionCookie?: (cookieHeader: string | null) => Promise<WsAuthContext | null>
   /**
    * Optional HTTP request handler for non-WebSocket requests on the RPC port.
    * When provided, the WsRpcServer serves HTTP (e.g. WebUI) on the same port.

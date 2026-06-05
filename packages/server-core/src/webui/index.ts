@@ -7,4 +7,5 @@ export {
   storeAdminJwt,
   removeAdminJwt,
   clearAdminJwtStore,
+  isPlatformMode,
 } from './auth'

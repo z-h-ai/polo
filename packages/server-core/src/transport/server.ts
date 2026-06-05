@@ -7,8 +7,8 @@
  * Same class used locally (127.0.0.1, no auth) and remotely (0.0.0.0, auth).
  */
 
-import { WebSocketServer, type WebSocket } from 'ws'
-import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
+import { WebSocketServer, type VerifyClientCallbackAsync, type WebSocket } from 'ws'
+import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer } from 'node:http'
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { randomUUID } from 'node:crypto'
 import {
@@ -41,6 +41,7 @@ interface BufferedEvent {
 interface ClientConnection {
   id: string
   ws: WebSocket
+  auth: WsAuthContext
   workspaceId: string | null
   webContentsId: number | null
   capabilities: Set<string>
@@ -76,6 +77,24 @@ export interface WsRpcTlsOptions {
   passphrase?: string
 }
 
+export interface WsAuthContext {
+  userId: string | null
+  username: string
+  role: string
+  jwt: string | null
+}
+
+export interface WsClientConnectedInfo {
+  clientId: string
+  webContentsId: number | null
+  workspaceId: string | null
+  capabilities: string[]
+  userId: string | null
+  username: string
+  role: string
+  jwt: string | null
+}
+
 export interface WsRpcServerOptions {
   /** Host to bind to. Default: '127.0.0.1' */
   host?: string
@@ -90,7 +109,7 @@ export interface WsRpcServerOptions {
    * Called with the Cookie header from the HTTP upgrade request.
    * If provided, a valid session cookie is accepted as an alternative to a bearer token.
    */
-  validateSessionCookie?: (cookieHeader: string | null) => Promise<boolean>
+  validateSessionCookie?: (cookieHeader: string | null) => Promise<WsAuthContext | null>
   /** Server identity stamp on outgoing events. Default: 'local' */
   serverId?: string
   /** TLS configuration. When provided, the server listens on wss:// instead of ws://. */
@@ -100,7 +119,7 @@ export interface WsRpcServerOptions {
   /** Maximum concurrent clients. 0 = unlimited. Default: 50 */
   maxClients?: number
   /** Called when a client completes handshake. */
-  onClientConnected?: (info: { clientId: string; webContentsId: number | null; workspaceId: string | null; capabilities: string[] }) => void
+  onClientConnected?: (info: WsClientConnectedInfo) => void
   /** Called when a client disconnects. */
   onClientDisconnected?: (clientId: string) => void
   /**
@@ -114,6 +133,16 @@ export interface WsRpcServerOptions {
 }
 
 const transportLog = createLogger('ws-rpc-server')
+const SESSION_COOKIE_NAME = 'polo_ai_session'
+
+function createSystemAuthContext(): WsAuthContext {
+  return {
+    userId: null,
+    username: 'system',
+    role: 'admin',
+    jwt: null,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // WsRpcServer
@@ -126,6 +155,7 @@ export class WsRpcServer implements RpcServer {
   private clients = new Map<string, ClientConnection>()
   private handlers = new Map<string, HandlerFn>()
   private pendingInvokes = new Map<string, PendingInvoke>()
+  private upgradeAuthContexts = new WeakMap<IncomingMessage, WsAuthContext>()
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private _port = 0
   private _protocol: 'ws' | 'wss' = 'ws'
@@ -137,7 +167,7 @@ export class WsRpcServer implements RpcServer {
   private readonly requestedPort: number
   private readonly requireAuth: boolean
   private readonly validateToken: ((token: string) => Promise<boolean>) | null
-  private readonly validateSessionCookie: ((cookieHeader: string | null) => Promise<boolean>) | null
+  private readonly validateSessionCookie: ((cookieHeader: string | null) => Promise<WsAuthContext | null>) | null
   private readonly serverId: string
   private readonly tlsOptions: WsRpcTlsOptions | null
   private readonly serverVersion: string
@@ -278,7 +308,7 @@ export class WsRpcServer implements RpcServer {
           this.httpHandler,
         )
 
-        this.wss = new WebSocketServer({ server: this.httpsServer })
+        this.wss = new WebSocketServer({ server: this.httpsServer, ...this.getUpgradeAuthOptions() })
 
         this.httpsServer.on('error', (err) => reject(err))
 
@@ -294,7 +324,7 @@ export class WsRpcServer implements RpcServer {
         // Plain WS + HTTP handler: create an HTTP server for both.
         this._protocol = 'ws'
         this.httpServer = createHttpServer(this.httpHandler)
-        this.wss = new WebSocketServer({ server: this.httpServer })
+        this.wss = new WebSocketServer({ server: this.httpServer, ...this.getUpgradeAuthOptions() })
 
         this.httpServer.on('error', (err) => reject(err))
 
@@ -312,6 +342,7 @@ export class WsRpcServer implements RpcServer {
         this.wss = new WebSocketServer({
           host: this.host,
           port: this.requestedPort,
+          ...this.getUpgradeAuthOptions(),
         })
 
         this.wss.on('listening', () => {
@@ -329,7 +360,7 @@ export class WsRpcServer implements RpcServer {
       }
 
       this.wss.on('connection', (ws, req) => {
-        this.onConnection(ws, req.headers.cookie ?? null)
+        this.onConnection(ws, req)
       })
     })
   }
@@ -368,7 +399,7 @@ export class WsRpcServer implements RpcServer {
   // Connection handling
   // -------------------------------------------------------------------------
 
-  private onConnection(ws: WebSocket, upgradeRequestCookie: string | null): void {
+  private onConnection(ws: WebSocket, req: IncomingMessage): void {
     // Reject if at capacity
     if (this.maxClients > 0 && this.clients.size >= this.maxClients) {
       transportLog.warn('Connection rejected: at capacity', {
@@ -381,6 +412,8 @@ export class WsRpcServer implements RpcServer {
 
     let handshakeCompleted = false
     let handshakeTimeout: ReturnType<typeof setTimeout> | null = null
+    let authContext = this.upgradeAuthContexts.get(req) ?? null
+    this.upgradeAuthContexts.delete(req)
 
     // Give the client 5 seconds to send a handshake
     handshakeTimeout = setTimeout(() => {
@@ -426,21 +459,18 @@ export class WsRpcServer implements RpcServer {
           return
         }
 
-        // Auth check — bearer token OR session cookie (web UI)
+        // Auth check. In WebUI mode authContext is established during HTTP
+        // upgrade. Without a session-cookie validator, retain legacy
+        // handshake-token auth for older clients.
         if (this.requireAuth) {
-          let authenticated = false
-
-          // 1. Try bearer token (standard path)
-          if (envelope.token && this.validateToken) {
-            authenticated = await this.validateToken(envelope.token)
+          if (!authContext && envelope.token && this.validateToken) {
+            const authenticated = await this.validateToken(envelope.token)
+            if (authenticated) {
+              authContext = createSystemAuthContext()
+            }
           }
 
-          // 2. Fallback: try session cookie from HTTP upgrade request (web UI path)
-          if (!authenticated && this.validateSessionCookie && upgradeRequestCookie) {
-            authenticated = await this.validateSessionCookie(upgradeRequestCookie)
-          }
-
-          if (!authenticated) {
+          if (!authContext) {
             const reason = envelope.token ? 'Invalid token' : 'Token required'
             this.sendError(ws, envelope.id, 'AUTH_FAILED', reason)
             ws.close(4005, 'Auth failed')
@@ -455,9 +485,16 @@ export class WsRpcServer implements RpcServer {
             const prevClient = entry.client
 
             // Identity must match (workspace + webContentsId)
+            const currentAuth = authContext
+            if (!currentAuth) {
+              ws.close(4005, 'Auth failed')
+              return
+            }
+
             const identityMatch =
               prevClient.workspaceId === (envelope.workspaceId ?? null) &&
-              prevClient.webContentsId === (envelope.webContentsId ?? null)
+              prevClient.webContentsId === (envelope.webContentsId ?? null) &&
+              prevClient.auth.userId === currentAuth.userId
 
             if (identityMatch) {
               // Valid reconnect — prepare client state but do NOT add to
@@ -471,6 +508,7 @@ export class WsRpcServer implements RpcServer {
               prevClient.ws = ws
               prevClient.alive = true
               prevClient.missedPongs = 0
+              prevClient.auth = currentAuth
               handshakeCompleted = true
 
               // Determine replay vs stale using the per-client delivery sequence.
@@ -488,15 +526,9 @@ export class WsRpcServer implements RpcServer {
               if (canReplay) {
                 const replayEvents = prevClient.eventBuffer.filter(e => e.seq > lastSeq)
 
-                const ack: MessageEnvelope = {
-                  id: envelope.id,
-                  type: 'handshake_ack',
-                  protocolVersion: PROTOCOL_VERSION,
-                  serverVersion: this.serverVersion || undefined,
-                  clientId: prevClient.id,
-                  registeredChannels: [...this.handlers.keys()],
+                const ack = this.createHandshakeAck(envelope.id, prevClient, {
                   reconnected: true,
-                }
+                })
                 this.safeSend(ws, serializeEnvelope(ack))
 
                 // Replay missed events in order
@@ -511,16 +543,10 @@ export class WsRpcServer implements RpcServer {
                 })
               } else {
                 // Buffer evicted — client must full-refresh
-                const ack: MessageEnvelope = {
-                  id: envelope.id,
-                  type: 'handshake_ack',
-                  protocolVersion: PROTOCOL_VERSION,
-                  serverVersion: this.serverVersion || undefined,
-                  clientId: prevClient.id,
-                  registeredChannels: [...this.handlers.keys()],
+                const ack = this.createHandshakeAck(envelope.id, prevClient, {
                   reconnected: true,
                   stale: true,
-                }
+                })
                 this.safeSend(ws, serializeEnvelope(ack))
 
                 transportLog.info('Client reconnected as stale', {
@@ -542,6 +568,7 @@ export class WsRpcServer implements RpcServer {
                 webContentsId: prevClient.webContentsId,
                 workspaceId: prevClient.workspaceId,
                 capabilities: [...prevClient.capabilities],
+                ...prevClient.auth,
               })
               return
             }
@@ -559,6 +586,7 @@ export class WsRpcServer implements RpcServer {
         const client: ClientConnection = {
           id: clientId,
           ws,
+          auth: authContext ?? createSystemAuthContext(),
           workspaceId: envelope.workspaceId ?? null,
           webContentsId: envelope.webContentsId ?? null,
           capabilities: new Set(envelope.clientCapabilities ?? []),
@@ -572,14 +600,7 @@ export class WsRpcServer implements RpcServer {
         handshakeCompleted = true
 
         // Send handshake_ack
-        const ack: MessageEnvelope = {
-          id: envelope.id,
-          type: 'handshake_ack',
-          protocolVersion: PROTOCOL_VERSION,
-          serverVersion: this.serverVersion || undefined,
-          clientId,
-          registeredChannels: [...this.handlers.keys()],
-        }
+        const ack = this.createHandshakeAck(envelope.id, client)
         this.safeSend(ws, serializeEnvelope(ack))
 
         // Notify lifecycle listener
@@ -593,6 +614,7 @@ export class WsRpcServer implements RpcServer {
           webContentsId: client.webContentsId,
           workspaceId: client.workspaceId,
           capabilities: [...client.capabilities],
+          ...client.auth,
         })
 
         this.setupClientHandlers(ws, client)
@@ -710,6 +732,81 @@ export class WsRpcServer implements RpcServer {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  private getUpgradeAuthOptions(): { verifyClient?: VerifyClientCallbackAsync } {
+    if (!this.requireAuth || !this.validateSessionCookie) {
+      return {}
+    }
+
+    return {
+      verifyClient: (info, callback) => {
+        void this.authenticateUpgradeRequest(info.req)
+          .then((auth) => {
+            if (!auth) {
+              callback(false, 401, 'Unauthorized')
+              return
+            }
+
+            this.upgradeAuthContexts.set(info.req, auth)
+            callback(true)
+          })
+          .catch(() => {
+            callback(false, 401, 'Unauthorized')
+          })
+      },
+    }
+  }
+
+  private async authenticateUpgradeRequest(req: IncomingMessage): Promise<WsAuthContext | null> {
+    const cookieHeader = this.headerToString(req.headers.cookie)
+    const hasSessionCookie = this.hasSessionCookie(cookieHeader)
+
+    if (this.validateSessionCookie) {
+      const cookieAuth = await this.validateSessionCookie(cookieHeader)
+      if (cookieAuth) return cookieAuth
+      if (hasSessionCookie) return null
+    }
+
+    const serverToken = this.headerToString(req.headers['x-server-token'])
+    if (serverToken && this.validateToken && await this.validateToken(serverToken)) {
+      return createSystemAuthContext()
+    }
+
+    return null
+  }
+
+  private headerToString(value: string | string[] | undefined): string | null {
+    if (Array.isArray(value)) return value.join('; ')
+    return value ?? null
+  }
+
+  private hasSessionCookie(cookieHeader: string | null): boolean {
+    if (!cookieHeader) return false
+    for (const pair of cookieHeader.split(';')) {
+      const [name] = pair.trim().split('=')
+      if (name === SESSION_COOKIE_NAME) return true
+    }
+    return false
+  }
+
+  private createHandshakeAck(
+    id: string,
+    client: ClientConnection,
+    extra?: Pick<MessageEnvelope, 'reconnected' | 'stale'>,
+  ): MessageEnvelope {
+    return {
+      id,
+      type: 'handshake_ack',
+      protocolVersion: PROTOCOL_VERSION,
+      serverVersion: this.serverVersion || undefined,
+      clientId: client.id,
+      registeredChannels: [...this.handlers.keys()],
+      userId: client.auth.userId,
+      username: client.auth.username,
+      role: client.auth.role,
+      ...extra,
+    }
+  }
 
   /** Wire up close + pong handlers for a WebSocket ↔ ClientConnection pair. */
   private setupClientHandlers(ws: WebSocket, client: ClientConnection): void {

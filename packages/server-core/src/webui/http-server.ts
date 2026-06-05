@@ -25,6 +25,7 @@ import {
   removeAdminJwtFromToken,
   sweepExpiredAdminJwtStore,
   extractSessionCookie,
+  isPlatformMode,
 } from './auth'
 import { generateCallbackPage } from '@polo-ai/shared/auth'
 import type { PlatformServices } from '../runtime/platform'
@@ -122,10 +123,6 @@ export function resolveWebSocketUrl(
   }
 
   return `${wsProtocol}://127.0.0.1:${wsPort}`
-}
-
-export function isPlatformMode(): boolean {
-  return !!process.env.PLATFORM_ANTHROPIC_API_KEY
 }
 
 // ---------------------------------------------------------------------------

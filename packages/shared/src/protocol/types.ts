@@ -37,6 +37,12 @@ export interface MessageEnvelope {
   token?: string
   /** Assigned by server in handshake_ack. */
   clientId?: string
+  /** Authenticated user id assigned during WebSocket upgrade auth. */
+  userId?: string | null
+  /** Authenticated username assigned during WebSocket upgrade auth. */
+  username?: string
+  /** Authenticated role assigned during WebSocket upgrade auth. */
+  role?: string
   /** Server identity stamp on outgoing events. For MultiClient source disambiguation. */
   serverId?: string
   /** Electron webContents.id, sent on handshake by local clients. */

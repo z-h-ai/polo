@@ -32,6 +32,10 @@ export interface WebuiUser {
   role: string
 }
 
+export function isPlatformMode(): boolean {
+  return !!process.env.PLATFORM_ANTHROPIC_API_KEY
+}
+
 export async function signJwt(payload: JwtPayload, secret: string): Promise<string> {
   const key = new TextEncoder().encode(secret)
   return new SignJWT({ sub: payload.sub } as Record<string, unknown>)
