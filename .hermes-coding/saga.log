@@ -22,3 +22,5 @@
 [2026-06-05T19:27:08.807Z] COMPLETED: polo-client.pending-usage
 [2026-06-05T19:30:12.699Z] STARTED: polo-quota.sendmessage-quota
 [2026-06-05T19:39:02.700Z] COMPLETED: polo-quota.sendmessage-quota
+[2026-06-05T19:42:22.880Z] STARTED: polo-quota.usage-capture
+[2026-06-05T19:55:05.543Z] COMPLETED: polo-quota.usage-capture

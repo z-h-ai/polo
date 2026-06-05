@@ -5,8 +5,10 @@ module: polo-quota
 priority: 13
 estimatedMinutes: 25
 depends: ["polo-quota.sendmessage-quota"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §5.2 (Usage 捕获)"
+startedAt: 2026-06-05T19:42:22.878Z
+completedAt: 2026-06-05T19:55:05.541Z
 ---
 # Capture usage from SessionManager complete event
 
