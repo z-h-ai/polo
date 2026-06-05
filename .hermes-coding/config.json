@@ -1,0 +1,4 @@
+{
+  "tool": "claude",
+  "toolCommand": "claude --dangerously-skip-permissions --print --verbose"
+}
