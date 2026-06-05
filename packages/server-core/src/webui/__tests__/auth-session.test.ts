@@ -3,7 +3,7 @@ import { SignJWT } from 'jose'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { adminJwtStore, clearAdminJwtStore } from '../auth'
+import { adminJwtStore, clearAdminJwtStore, validateSession } from '../auth'
 import { createWebuiHandler } from '../http-server'
 
 const HANDLER_SECRET = 'legacy-webui-secret'
@@ -276,6 +276,51 @@ describe('GET /auth/me', () => {
       expect(res.status).toBe(401)
       expect(await res.json()).toEqual({ error: 'session_expired' })
     }
+  })
+})
+
+describe('Admin JWT session compatibility', () => {
+  it('allows protected config and SPA static access with an Admin JWT session cookie', async () => {
+    setEnv('JWT_SECRET', JWT_SECRET)
+    const { handler, baseUrl } = await createServer()
+    const token = await signAdminJwt({ sub: 'user-abc', username: 'alice', role: 'admin' })
+    const sessionRes = await request(handler, baseUrl, '/auth/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+    const cookie = cookiePair(sessionRes)
+
+    const configRes = await request(handler, baseUrl, '/api/config', {
+      headers: { cookie },
+    })
+    const spaRes = await request(handler, baseUrl, '/', {
+      headers: { cookie, accept: 'text/html' },
+    })
+
+    expect(configRes.status).toBe(200)
+    expect(await configRes.json()).toEqual({
+      wsUrl: 'wss://127.0.0.1:9100',
+    })
+    expect(spaRes.status).toBe(200)
+    expect(await spaRes.text()).toContain('app')
+  })
+
+  it('lets the shared session validator accept Admin JWT cookies for WebSocket upgrade auth', async () => {
+    setEnv('JWT_SECRET', JWT_SECRET)
+    const token = await signAdminJwt({ sub: 'user-abc', username: 'alice', role: 'admin' })
+
+    const session = await validateSession(`polo_ai_session=${token}`, HANDLER_SECRET, {
+      adminJwtSecret: JWT_SECRET,
+    })
+
+    expect(session).toEqual({
+      sub: 'user-abc',
+      username: 'alice',
+      role: 'admin',
+      iat: expect.any(Number),
+      exp: expect.any(Number),
+    })
   })
 })
 

@@ -226,15 +226,15 @@
 <body>
   <div class="card">
     <h1>Polo AI</h1>
-    <p class="subtitle">Enter your server token to continue</p>
+    <p class="subtitle">Enter your Admin session token to continue</p>
 
     <form id="login-form">
-      <label for="password">Server Token</label>
+      <label for="token">Admin Session Token</label>
       <input
-        id="password"
-        name="password"
+        id="token"
+        name="token"
         type="password"
-        placeholder="Enter POLO_AI_SERVER_TOKEN"
+        placeholder="Enter Admin JWT"
         autocomplete="current-password"
         autofocus
         required
@@ -257,11 +257,11 @@
       submitBtn.textContent = 'Signing in...';
 
       try {
-        const password = document.getElementById('password').value;
-        const res = await fetch('/api/auth', {
+        const token = document.getElementById('token').value;
+        const res = await fetch('/auth/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ token }),
         });
 
         if (res.ok) {

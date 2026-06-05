@@ -466,7 +466,9 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Config endpoint (requires session cookie) ──
     if (path === '/api/config' && req.method === 'GET') {
-      const configSession = await validateSession(req.headers.get('cookie'), secret)
+      const configSession = await validateSession(req.headers.get('cookie'), secret, {
+        adminJwtSecret: process.env.JWT_SECRET,
+      })
       if (!configSession) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 })
       }
@@ -477,7 +479,9 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // Return the default workspace ID so the webui can include it in the WS handshake
     if (path === '/api/config/workspaces' && req.method === 'GET') {
-      const configSession = await validateSession(req.headers.get('cookie'), secret)
+      const configSession = await validateSession(req.headers.get('cookie'), secret, {
+        adminJwtSecret: process.env.JWT_SECRET,
+      })
       if (!configSession) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 })
       }
@@ -490,7 +494,9 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Everything below requires a valid session cookie ──
     const cookieHeader = req.headers.get('cookie')
-    const session = await validateSession(cookieHeader, secret)
+    const session = await validateSession(cookieHeader, secret, {
+      adminJwtSecret: process.env.JWT_SECRET,
+    })
 
     if (!session) {
       const accept = req.headers.get('accept') ?? ''

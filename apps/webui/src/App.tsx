@@ -47,7 +47,7 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
         </button>
         <button
           onClick={() => {
-            fetch('/api/auth/logout', { method: 'POST' }).then(() => {
+            fetch('/auth/logout', { method: 'POST' }).then(() => {
               window.location.href = '/login'
             })
           }}
@@ -71,7 +71,17 @@ export default function App() {
     setError('')
 
     try {
-      // 1. Fetch WS URL from the server (cookie auth)
+      // 1. Check Admin JWT session state before loading protected config.
+      const sessionRes = await fetch('/auth/me', { credentials: 'same-origin' })
+      if (!sessionRes.ok) {
+        if (sessionRes.status === 401) {
+          window.location.href = '/login'
+          return
+        }
+        throw new Error(`Failed to check session: ${sessionRes.status}`)
+      }
+
+      // 2. Fetch WS URL from the server (cookie auth)
       const configRes = await fetch('/api/config', { credentials: 'same-origin' })
       if (!configRes.ok) {
         if (configRes.status === 401) {
@@ -85,7 +95,7 @@ export default function App() {
       const { wsUrl } = await configRes.json() as { wsUrl: string }
       if (!wsUrl) throw new Error('Server did not return a WebSocket URL')
 
-      // 2. Determine workspace — check URL params first
+      // 3. Determine workspace — check URL params first
       const params = new URLSearchParams(window.location.search)
       let workspaceId = params.get('workspace') ?? undefined
 
@@ -103,7 +113,7 @@ export default function App() {
         }
       }
 
-      // 3. Create web API adapter
+      // 4. Create web API adapter
       // Destroy previous client on retry
       if (clientRef.current) {
         clientRef.current.destroy()
@@ -112,10 +122,10 @@ export default function App() {
       const { api, client } = createWebApi({ serverUrl: wsUrl, workspaceId })
       clientRef.current = client
 
-      // 4. Set window.electronAPI — must happen before any Electron component mounts
+      // 5. Set window.electronAPI — must happen before any Electron component mounts
       ;(window as any).electronAPI = api
 
-      // 5. Connect the WebSocket client
+      // 6. Connect the WebSocket client
       client.connect()
 
       setPhase('ready')

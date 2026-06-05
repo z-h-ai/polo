@@ -172,7 +172,9 @@ const instance = await (async () => {
       // When web UI is enabled, accept JWT session cookies on WebSocket upgrade
       validateSessionCookie: webuiEnabled && serverToken
         ? async (cookieHeader) => {
-            const session = await validateSession(cookieHeader, serverToken)
+            const session = await validateSession(cookieHeader, serverToken, {
+              adminJwtSecret: process.env.JWT_SECRET,
+            })
             return session !== null
           }
         : undefined,

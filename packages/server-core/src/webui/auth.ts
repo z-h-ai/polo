@@ -266,8 +266,19 @@ export class RateLimiter {
 export async function validateSession(
   cookieHeader: string | null,
   secret: string,
-): Promise<JwtPayload | null> {
+  options?: { adminJwtSecret?: string },
+): Promise<JwtPayload | AdminJwtPayload | null> {
   const token = extractSessionCookie(cookieHeader)
   if (!token) return null
-  return verifyJwt(token, secret)
+
+  const legacySession = await verifyJwt(token, secret)
+  if (legacySession) return legacySession
+
+  if (!options?.adminJwtSecret) return null
+
+  const adminSession = await verifyAdminJwt(token, options.adminJwtSecret)
+  if (adminSession) {
+    storeAdminJwt(adminSession.sub, token, adminSession.exp)
+  }
+  return adminSession
 }
