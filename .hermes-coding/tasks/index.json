@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-06-05T15:59:56.261Z",
+  "updatedAt": "2026-06-05T16:20:20.203Z",
   "metadata": {
     "projectGoal": "Polo AI multi-user modification (MVP-1, WebUI only)",
     "languageConfig": {
@@ -28,7 +28,7 @@
       "estimatedMinutes": 25
     },
     "polo-auth.ws-upgrade": {
-      "status": "pending",
+      "status": "completed",
       "priority": 3,
       "module": "polo-auth",
       "description": "Move WebSocket auth to HTTP upgrade phase (cookie-based)",

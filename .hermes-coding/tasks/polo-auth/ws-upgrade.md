@@ -5,8 +5,10 @@ module: polo-auth
 priority: 3
 estimatedMinutes: 25
 depends: ["polo-auth.session-endpoint"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §3.2 (WebSocket 认证改造)"
+startedAt: 2026-06-05T16:07:38.222Z
+completedAt: 2026-06-05T16:20:20.202Z
 ---
 # Move WebSocket auth to HTTP upgrade phase (cookie-based)
 

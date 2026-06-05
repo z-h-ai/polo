@@ -2,3 +2,5 @@
 [2026-06-05T15:40:50.769Z] COMPLETED: polo-auth.api-config
 [2026-06-05T15:45:40.967Z] STARTED: polo-auth.session-endpoint
 [2026-06-05T15:59:56.262Z] COMPLETED: polo-auth.session-endpoint
+[2026-06-05T16:07:38.224Z] STARTED: polo-auth.ws-upgrade
+[2026-06-05T16:20:20.204Z] COMPLETED: polo-auth.ws-upgrade
