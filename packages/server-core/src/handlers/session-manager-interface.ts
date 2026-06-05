@@ -25,6 +25,7 @@ import type {
 } from '@polo-ai/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@polo-ai/shared/sessions'
 import type { EventSink } from '../transport'
+import type { QuotaContext } from './quota-errors.ts'
 
 export interface ISessionManager {
   // ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ export interface ISessionManager {
     storedAttachments?: StoredAttachment[],
     options?: SendMessageOptions,
     existingMessageId?: string,
-    _isAuthRetry?: boolean,
+    quotaContext?: QuotaContext,
     onAck?: (messageId: string) => void,
     rpcContext?: { callerClientId?: string },
   ): Promise<void>

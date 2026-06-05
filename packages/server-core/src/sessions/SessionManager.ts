@@ -74,7 +74,7 @@ import {
 } from '@polo-ai/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@polo-ai/shared/config'
-import { getValidClaudeOAuthToken } from '@polo-ai/shared/auth'
+import { getValidClaudeOAuthToken, isPlatformMode } from '@polo-ai/shared/auth'
 import { resolveAuthEnvVars } from '@polo-ai/shared/config'
 import { toolMetadataStore, getLastApiError } from '@polo-ai/shared/interceptor'
 import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
@@ -82,7 +82,7 @@ import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@polo-ai/shared/protocol'
-import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
+import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type AgentEventUsage } from '@polo-ai/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@polo-ai/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@polo-ai/shared/skills'
 import { invalidateContextFileCache } from '@polo-ai/shared/prompts/system'
@@ -102,6 +102,110 @@ import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAtta
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@polo-ai/server-core/domain'
 import { resizeImageForAPI, resizeIconBuffer } from '@polo-ai/server-core/services'
 export { sanitizeForTitle }
+import { adminApiClient, pendingUsageStore, DuplicateRequestError } from '@polo-ai/shared/admin-api'
+import type { QuotaContext } from '../handlers/quota-errors.ts'
+
+// ─── Usage capture ────────────────────────────────────────────────────────────
+
+/**
+ * Injectable dependencies for `captureAndReportUsage`.
+ * Default implementation uses the real singletons; tests pass mocks.
+ */
+export interface UsageCaptureDeps {
+  pendingStore: {
+    add(entry: import('@polo-ai/shared/admin-api').PendingUsageEntry): void
+    remove(requestId: string): void
+    markRetry(requestId: string): void
+  }
+  adminApi: {
+    reportUsage(jwt: string, usage: import('@polo-ai/shared/admin-api').UsageReportInput): Promise<import('@polo-ai/shared/admin-api').UsageReportResult>
+  }
+  /** Returns the model name for the current session. */
+  getModel(): string
+  logWarning(msg: string): void
+  logError(msg: string, err?: unknown): void
+}
+
+/**
+ * Capture token usage from a `complete` event and report it to Admin API.
+ *
+ * Called from the `event.type === 'complete'` handler inside sendMessage.
+ * Fire-and-forget: the outer sendMessage promise resolves immediately; the
+ * Admin API call runs in the background and updates the pending store on
+ * success/failure.
+ *
+ * Guard conditions (caller may also check, but this function is self-contained):
+ *  - `isPlatformMode()` must be true, otherwise no-op
+ *  - `quotaContext` must be present, otherwise no-op (non-platform or system call)
+ *  - `event.usage` must be non-null, otherwise logs warning and returns
+ *
+ * Never throws — all errors are caught and logged to avoid crashing the server.
+ */
+export async function captureAndReportUsage({
+  event,
+  quotaContext,
+  deps,
+}: {
+  event: { type: 'complete'; usage?: AgentEventUsage | null }
+  quotaContext: QuotaContext | undefined
+  deps: UsageCaptureDeps
+}): Promise<void> {
+  // AC6: Non-platform mode → no capture
+  if (!isPlatformMode()) return
+
+  // AC2: No quota context → skip (non-platform path or system call)
+  if (!quotaContext) return
+
+  try {
+    // AC1: event.usage absent → log warning and skip
+    if (!event.usage) {
+      deps.logWarning('[usage-capture] complete event has no usage data — skipping capture')
+      return
+    }
+
+    const model = deps.getModel()
+    const { requestId, userId, userJwt, sessionId } = quotaContext
+
+    // AC3: Write to pending store
+    deps.pendingStore.add({
+      requestId,
+      userId: userId ?? '',
+      userJwt: userJwt ?? '',
+      sessionId,
+      model,
+      inputTokens: event.usage.inputTokens,
+      outputTokens: event.usage.outputTokens,
+      createdAt: new Date().toISOString(),
+      retryCount: 0,
+    })
+
+    // AC4: Fire-and-forget report — run outside the send message critical path
+    void (async () => {
+      try {
+        await deps.adminApi.reportUsage(userJwt ?? '', {
+          requestId,
+          sessionId,
+          model,
+          inputTokens: event.usage!.inputTokens,
+          outputTokens: event.usage!.outputTokens,
+        })
+        // Success → remove from pending store
+        deps.pendingStore.remove(requestId)
+      } catch (reportErr) {
+        if (reportErr instanceof DuplicateRequestError) {
+          // 409 = already recorded — safe to remove
+          deps.pendingStore.remove(requestId)
+        } else {
+          // Network error / other failure → mark for retry
+          deps.pendingStore.markRetry(requestId)
+        }
+      }
+    })()
+  } catch (captureErr) {
+    // AC5: Error resilience — log but do NOT propagate
+    deps.logError('[usage-capture] Failed to capture usage', captureErr)
+  }
+}
 
 // Module-level platform ref — set once during init via setSessionPlatform()
 let _platform: PlatformServices | null = null
@@ -5419,7 +5523,13 @@ export class SessionManager implements ISessionManager {
     storedAttachments?: StoredAttachment[],
     options?: SendMessageOptions,
     existingMessageId?: string,
-    _isAuthRetry?: boolean,
+    /**
+     * Per-turn quota context created by the `sessions.sendMessage` RPC handler
+     * in platform mode. Carries requestId, userId, userJwt, and sessionId for
+     * downstream usage reporting. Pass undefined for internal calls (auth retry,
+     * system flows) where no quota check was performed.
+     */
+    quotaContext?: QuotaContext,
     /**
      * Internal hook fired after the user message has been pushed to
      * `managed.messages` and persisted to disk, but before the model-streaming
@@ -5641,9 +5751,10 @@ export class SessionManager implements ISessionManager {
 
     // Reset auth retry flag for this new message (allows one retry per message)
     // IMPORTANT: Skip reset if this is an auth retry call - the flag is already true
-    // and resetting it would allow infinite retry loops
-    // Note: authRetryInProgress is NOT reset here - it's managed by the retry logic
-    if (!_isAuthRetry) {
+    // and resetting it would allow infinite retry loops.
+    // We detect auth retries via managed.authRetryInProgress (set to true before the
+    // retry sendMessage call in attemptAuthRetry) rather than a _isAuthRetry parameter.
+    if (!managed.authRetryInProgress) {
       managed.authRetryAttempted = false
     }
 
@@ -5939,6 +6050,19 @@ export class SessionManager implements ISessionManager {
             }
           }
 
+          // Capture token usage for quota reporting (platform mode only, fire-and-forget)
+          void captureAndReportUsage({
+            event,
+            quotaContext,
+            deps: {
+              pendingStore: pendingUsageStore,
+              adminApi: adminApiClient,
+              getModel: () => agent.getModel(),
+              logWarning: (msg) => sessionLog.warn(msg),
+              logError: (msg, err) => sessionLog.error(msg, err),
+            },
+          })
+
           sendSpan.mark('chat.complete')
           sendSpan.end()
           this.onProcessingStopped(sessionId, 'complete')
@@ -6156,7 +6280,7 @@ export class SessionManager implements ISessionManager {
             retryStoredAttachments,
             retryOptions,
             undefined,  // existingMessageId
-            true        // _isAuthRetry - prevents infinite retry loop
+            undefined,  // quotaContext — auth retries do not create a new quota context
           )
           sessionLog.info(`[auth-retry] Retry completed for session ${sessionId}`)
         } else {
