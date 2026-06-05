@@ -5,8 +5,10 @@ module: polo-ui
 priority: 7
 estimatedMinutes: 25
 depends: ["polo-auth.api-config", "polo-auth.session-endpoint"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §8.2 (WebUI 登录页)"
+startedAt: 2026-06-05T18:35:04.172Z
+completedAt: 2026-06-05T18:51:42.583Z
 ---
 # Create WebUI login page
 
