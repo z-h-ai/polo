@@ -326,12 +326,14 @@ export function generateUniqueWorkspacePath(name: string, baseDir: string): stri
  * @param rootPath - Absolute path where workspace folder will be created
  * @param name - Display name for the workspace
  * @param defaults - Optional default settings for new sessions
+ * @param ownerUserId - Optional platform user ID to assign as workspace owner
  * @returns The created WorkspaceConfig
  */
 export function createWorkspaceAtPath(
   rootPath: string,
   name: string,
-  defaults?: WorkspaceConfig['defaults']
+  defaults?: WorkspaceConfig['defaults'],
+  ownerUserId?: string | null
 ): WorkspaceConfig {
   const now = Date.now();
   const slug = generateSlug(name);
@@ -359,6 +361,7 @@ export function createWorkspaceAtPath(
     slug,
     defaults: workspaceDefaults,
     localMcpServers: globalDefaults.workspaceDefaults.localMcpServers,
+    ...(ownerUserId != null ? { ownerUserId } : {}),
     createdAt: now,
     updatedAt: now,
   };

@@ -57,6 +57,13 @@ export interface WorkspaceConfig {
    */
   localMcpServers?: LocalMcpConfig;
 
+  /**
+   * Platform user ID of the workspace owner.
+   * null/undefined = legacy workspace (no owner assigned, accessible by all).
+   * When set, only the matching userId (or server-token requests with userId=null) may access.
+   */
+  ownerUserId?: string | null;
+
   createdAt: number;
   updatedAt: number;
 }

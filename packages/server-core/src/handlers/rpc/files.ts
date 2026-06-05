@@ -10,6 +10,7 @@ import { getSessionAttachmentsPath, validateSessionId } from '@polo-ai/shared/se
 import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import { resizeImageForAPI, inspectImageBuffer } from '@polo-ai/server-core/services'
 import { sanitizeFilename, validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
+import { assertCtxWorkspaceAccess } from '@polo-ai/server-core/workspace-access'
 import { MarkItDown } from 'markitdown-js'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -32,6 +33,8 @@ export const HANDLED_CHANNELS = [
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
   // Read a file (with path validation to prevent traversal attacks)
   server.handle(RPC_CHANNELS.file.READ, async (ctx, path: string) => {
+    // Ownership guard: the workspace context must belong to the requesting user
+    assertCtxWorkspaceAccess(ctx)
     try {
       const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
       const safePath = await validateFilePath(path, getWorkspaceAllowedDirs(workspaceId))

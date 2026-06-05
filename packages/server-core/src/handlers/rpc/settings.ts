@@ -6,6 +6,7 @@ import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { getWorkspaceOrThrow } from '@polo-ai/server-core/handlers'
+import { assertWorkspaceAccessByPath } from '@polo-ai/server-core/workspace-access'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@polo-ai/server-core/transport'
@@ -97,12 +98,15 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   // ============================================================
 
   // Get workspace settings (model, permission mode, working directory, credential strategy)
-  server.handle(RPC_CHANNELS.workspace.SETTINGS_GET, async (_ctx, workspaceId: string) => {
+  server.handle(RPC_CHANNELS.workspace.SETTINGS_GET, async (ctx, workspaceId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       deps.platform.logger.error(`Workspace not found: ${workspaceId}`)
       return null
     }
+
+    // Ownership guard: only the workspace owner (or server-token) may read settings
+    assertWorkspaceAccessByPath(ctx, workspace.rootPath)
 
     // Load workspace config
     const { loadWorkspaceConfig } = await import('@polo-ai/shared/workspaces')
@@ -122,8 +126,10 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Update a workspace setting
-  server.handle(RPC_CHANNELS.workspace.SETTINGS_UPDATE, async (_ctx, workspaceId: string, key: string, value: unknown) => {
+  server.handle(RPC_CHANNELS.workspace.SETTINGS_UPDATE, async (ctx, workspaceId: string, key: string, value: unknown) => {
     const workspace = getWorkspaceOrThrow(workspaceId)
+    // Ownership guard: only the workspace owner (or server-token) may update settings
+    assertWorkspaceAccessByPath(ctx, workspace.rootPath)
     const normalizedValue = key === 'workingDirectory' && typeof value === 'string'
       ? value.trim()
       : value

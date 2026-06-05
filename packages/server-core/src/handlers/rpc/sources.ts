@@ -3,6 +3,7 @@ import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import { loadWorkspaceSources } from '@polo-ai/shared/sources'
 import { safeJsonParse } from '@polo-ai/shared/utils/files'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { assertWorkspaceAccessByPath } from '@polo-ai/server-core/workspace-access'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -22,12 +23,14 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
   const log = deps.platform.logger
 
   // Get all sources for a workspace
-  server.handle(RPC_CHANNELS.sources.GET, async (_ctx, workspaceId: string) => {
+  server.handle(RPC_CHANNELS.sources.GET, async (ctx, workspaceId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       log.error(`SOURCES_GET: Workspace not found: ${workspaceId}`)
       return []
     }
+    // Ownership guard: only the workspace owner (or server-token) may read sources
+    assertWorkspaceAccessByPath(ctx, workspace.rootPath)
     return loadWorkspaceSources(workspace.rootPath)
   })
 

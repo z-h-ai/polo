@@ -8,6 +8,7 @@ import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
+import { assertCtxWorkspaceAccess } from '@polo-ai/server-core/workspace-access'
 import type { HandlerDeps } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 
@@ -177,7 +178,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Get a single session with messages (for lazy loading)
-  server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (_ctx, sessionId: string) => {
+  server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (ctx, sessionId: string) => {
+    // Ownership guard: ctx.workspaceId must be owned by the requesting user
+    assertCtxWorkspaceAccess(ctx)
     const end = perf.start('rpc.getSessionMessages')
     const session = await sessionManager.getSession(sessionId)
     end()
@@ -211,6 +214,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   //     event stream as today.
   // attachments: FileAttachment[] for Claude (has content), storedAttachments: StoredAttachment[] for persistence (has thumbnailBase64)
   server.handle(RPC_CHANNELS.sessions.SEND_MESSAGE, async (ctx, sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions) => {
+    // Ownership guard: ctx.workspaceId must be owned by the requesting user
+    assertCtxWorkspaceAccess(ctx)
     // Capture the caller's clientId for error routing
     const callerClientId = ctx.clientId
 
