@@ -5,8 +5,10 @@ module: polo-ui
 priority: 15
 estimatedMinutes: 15
 depends: ["polo-auth.api-config"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §8.3 (隐藏 LLM 连接配置 UI)"
+startedAt: 2026-06-05T20:07:36.416Z
+completedAt: 2026-06-05T20:23:35.621Z
 ---
 # Hide LLM connection config UI in platform mode
 

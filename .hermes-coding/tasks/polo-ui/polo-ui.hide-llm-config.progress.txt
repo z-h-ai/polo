@@ -1,0 +1,19 @@
+# Task Progress: polo-ui.hide-llm-config
+[2026-06-05T20:19:46.478Z] TDD implementation of platform-mode LLM config hiding:
+
+1. ATOM PLACEMENT: platformModeAtom lives in apps/electron/src/renderer/atoms/platform.ts (default false = safe default = hidden). WebUI accesses via @/atoms/platform alias since both apps share the same renderer directory.
+
+2. FILTER UTILITY DUPLICATION: Had to create the filter utility in two locations:
+   - apps/electron/src/renderer/lib/platform-mode.ts (used by renderer components via @/lib/platform-mode)
+   - apps/webui/src/platform-mode-filter.ts (for webui-specific unit tests that cannot import via @ alias)
+   Both files contain identical logic. This is intentional to keep import paths clean in each app.
+
+3. SAFE DEFAULT: platformModeAtom defaults to false which means LLM config SHOWS by default. The /api/public-config fetch sets it to true only when server confirms platform mode. On fetch failure, it stays false (non-breaking default for non-platform deployments).
+
+4. HIDDEN ITEMS: PLATFORM_HIDDEN_SETTINGS = ['ai']. The 'ai' settings item covers the AiSettingsPage (LLM connections, API keys, model provider config). FreeFormInput model picker also hides when platformMode=true.
+
+5. TOUCH POINTS: Five components needed modification: App.tsx (fetches config), AiSettingsPage.tsx (early return null), SettingsNavigator.tsx (filters nav items), DesktopAppMenu.tsx (filters dropdown items), MobileAppMenu.tsx + mobile-menu-pages.ts (filters mobile sheet items).
+
+6. MOBILE MENU PATTERN: mobile-menu-pages.ts is a pure function (no hooks), so platformMode must be passed as a parameter in BuildOptions. MobileAppMenu.tsx reads the atom with useAtomValue and passes it to buildMobileMenuPages() inside useMemo with platformMode in the dependency array.
+
+7. TEST APPROACH: Unit tests for atoms and filter utilities run in bun:test without React. No DOM/component tests needed since the filtering logic is pure and tested at the utility level. All 4821 tests pass.

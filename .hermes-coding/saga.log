@@ -26,3 +26,5 @@
 [2026-06-05T19:55:05.543Z] COMPLETED: polo-quota.usage-capture
 [2026-06-05T19:56:40.578Z] STARTED: polo-quota.async-reporting
 [2026-06-05T20:04:25.271Z] COMPLETED: polo-quota.async-reporting
+[2026-06-05T20:07:36.418Z] STARTED: polo-ui.hide-llm-config
+[2026-06-05T20:23:35.623Z] COMPLETED: polo-ui.hide-llm-config

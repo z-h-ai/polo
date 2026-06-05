@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-06-05T20:04:25.270Z",
+  "updatedAt": "2026-06-05T20:23:35.622Z",
   "metadata": {
     "projectGoal": "Polo AI multi-user modification (MVP-1, WebUI only)",
     "languageConfig": {
@@ -136,7 +136,7 @@
       "estimatedMinutes": 25
     },
     "polo-ui.hide-llm-config": {
-      "status": "pending",
+      "status": "completed",
       "priority": 15,
       "module": "polo-ui",
       "description": "Hide LLM connection config UI in platform mode",
