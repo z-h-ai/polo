@@ -12,7 +12,8 @@ import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
 import { createWebApi } from './adapter/web-api'
-import { setPlatformModeAtom } from '@/atoms/platform'
+import { setPlatformModeAtom, triggerQuotaRefreshAtom } from '@/atoms/platform'
+import { QuotaDisplay } from './QuotaDisplay'
 import type { WsRpcClient } from '../../electron/src/transport/client'
 
 // Lazy-load the Electron App after window.electronAPI is set up.
@@ -68,6 +69,7 @@ export default function App() {
   const clientRef = useRef<WsRpcClient | null>(null)
   const initRef = useRef(false)
   const setPlatformMode = useSetAtom(setPlatformModeAtom)
+  const triggerQuotaRefresh = useSetAtom(triggerQuotaRefreshAtom)
 
   const initialize = async () => {
     setPhase('loading')
@@ -143,6 +145,22 @@ export default function App() {
       // 6. Connect the WebSocket client
       client.connect()
 
+      // 7. Trigger quota refresh on WebSocket reconnect (AC7)
+      // The 'connected' status fires on initial connect and each reconnect.
+      api.onTransportConnectionStateChanged?.((state) => {
+        if (state.status === 'connected') {
+          triggerQuotaRefresh()
+        }
+      })
+
+      // 8. Trigger quota refresh after agent complete events (AC7)
+      // The 'complete' session event fires when the agent finishes a turn.
+      api.onSessionEvent?.((event) => {
+        if (event && typeof event === 'object' && 'type' in event && event.type === 'complete') {
+          triggerQuotaRefresh()
+        }
+      })
+
       setPhase('ready')
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -167,8 +185,19 @@ export default function App() {
   if (phase === 'error') return <ErrorScreen message={error} onRetry={initialize} />
 
   return (
-    <Suspense fallback={<LoadingScreen />}>
-      <ElectronApp />
-    </Suspense>
+    <>
+      <Suspense fallback={<LoadingScreen />}>
+        <ElectronApp />
+      </Suspense>
+      {/* Quota display — positioned at the top-right within the topbar area.
+          Only renders when platformMode=true (checked inside QuotaDisplay). */}
+      <div
+        className="fixed top-0 right-0 z-[var(--z-topbar,200)] flex items-center pointer-events-none"
+        style={{ height: 'var(--topbar-height, 48px)', paddingRight: 12 }}
+        aria-hidden="false"
+      >
+        <QuotaDisplay />
+      </div>
+    </>
   )
 }

@@ -32,3 +32,24 @@ export const setPlatformModeAtom = atom<null, [boolean], void>(
     set(platformModeAtom, value)
   },
 )
+
+/**
+ * Monotonically-incrementing counter used to trigger quota status refreshes.
+ * Components can write to this atom to force a quota re-fetch (e.g. after
+ * a message completes, or on WebSocket reconnect).
+ *
+ * Read by: QuotaDisplay (as a useEffect dependency)
+ * Written by: webui/src/App.tsx after each agent-complete event / WS reconnect
+ */
+export const quotaRefreshTriggerAtom = atom<number>(0)
+
+/**
+ * Write-only atom to increment the quota refresh trigger.
+ * Calling this from any component or atom effect will cause QuotaDisplay to re-fetch.
+ */
+export const triggerQuotaRefreshAtom = atom<null, [], void>(
+  null,
+  (_get, set) => {
+    set(quotaRefreshTriggerAtom, (prev) => prev + 1)
+  },
+)

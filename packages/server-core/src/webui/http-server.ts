@@ -26,6 +26,7 @@ import {
   sweepExpiredAdminJwtStore,
   extractSessionCookie,
   isPlatformMode,
+  adminJwtStore,
 } from './auth'
 import { generateCallbackPage } from '@polo-ai/shared/auth'
 import type { PlatformServices } from '../runtime/platform'
@@ -487,6 +488,57 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       return Response.json({
         defaultWorkspaceId: active?.id ?? null,
       })
+    }
+
+    // ── Quota status proxy (requires Admin JWT session) ──
+    // Proxies GET /api/quota/status to Admin API using the stored JWT from the user's session.
+    // Only Admin JWT sessions have a stored JWT (legacy /api/auth sessions do not).
+    if (path === '/api/quota/status' && req.method === 'GET') {
+      const quotaSession = await validateSession(req.headers.get('cookie'), secret, {
+        adminJwtSecret: process.env.JWT_SECRET,
+      })
+      if (!quotaSession) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+
+      // Retrieve the stored Admin JWT for this user.
+      // Legacy sessions have sub='webui' and no stored JWT.
+      const userId = quotaSession.sub
+      const storedJwt = adminJwtStore.get(userId)
+      if (!storedJwt) {
+        return Response.json({ error: 'session_expired' }, { status: 401 })
+      }
+
+      const adminApiUrl = process.env.ADMIN_API_URL
+      if (!adminApiUrl) {
+        logger.warn('[webui] ADMIN_API_URL not configured; quota proxy unavailable')
+        return Response.json({ error: 'admin_not_configured' }, { status: 503 })
+      }
+
+      try {
+        const adminRes = await globalThis.fetch(`${adminApiUrl.replace(/\/+$/, '')}/api/quota/status`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${storedJwt}`,
+            'Content-Type': 'application/json',
+          },
+        })
+
+        if (adminRes.status === 401) {
+          return Response.json({ error: 'session_expired' }, { status: 401 })
+        }
+
+        // Forward the Admin response body and status to the browser
+        const body = await adminRes.text()
+        return new Response(body, {
+          status: adminRes.status,
+          headers: { 'Content-Type': adminRes.headers.get('Content-Type') ?? 'application/json' },
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        logger.error(`[webui] Quota proxy failed: ${msg}`)
+        return Response.json({ error: 'admin_unreachable' }, { status: 502 })
+      }
     }
 
     // ── Everything below requires a valid session cookie ──
