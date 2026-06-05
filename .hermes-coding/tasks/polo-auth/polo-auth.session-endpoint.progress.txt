@@ -1,0 +1,4 @@
+# Task Progress: polo-auth.session-endpoint
+[2026-06-05T15:50:05.686Z] WebUI Admin JWT session routes must verify process.env.JWT_SECRET, while legacy /api/auth continues to use the createWebuiHandler secret; do not conflate the two secrets.
+[2026-06-05T15:55:29.892Z] Source-level WebUI auth test must resolve repo root six levels above packages/server-core/src/webui/__tests__; five levels points at the parent polo-dir and causes ENOENT.
+[2026-06-05T15:57:54.430Z] Admin JWT WebUI cookies must be accepted by the shared validateSession path, not only /api/config, because the same cookie is used for protected static routes and WebSocket upgrade validation via packages/server/src/index.ts.

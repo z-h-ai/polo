@@ -5,8 +5,10 @@ module: polo-auth
 priority: 2
 estimatedMinutes: 25
 depends: []
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §3.1 (POST /auth/session)"
+startedAt: 2026-06-05T15:45:40.964Z
+completedAt: 2026-06-05T15:59:56.259Z
 ---
 # Implement POST /auth/session endpoint (JWT → cookie)
 

@@ -12,3 +12,4 @@ Non-obvious patterns that work — only record if not self-evident.
 ## Active Risks
 Unresolved issues that may affect future tasks.
 [2026-06-05T15:32:06.656Z] Baseline fix attempt 1: installed workspace dependencies so CI=true npm test can resolve packages; baseline now passes.
+[2026-06-05T15:42:51.240Z] [polo-auth.api-config] Known out-of-scope failure: CI=true bun run --cwd packages/server-core typecheck currently fails in src/sessions/refresh-connection-runtime.test.ts due LlmConnection providerType typing and self-referential test annotations; WebUI config tests are unaffected.
