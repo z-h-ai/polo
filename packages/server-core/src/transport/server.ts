@@ -485,11 +485,7 @@ export class WsRpcServer implements RpcServer {
             const prevClient = entry.client
 
             // Identity must match (workspace + webContentsId)
-            const currentAuth = authContext
-            if (!currentAuth) {
-              ws.close(4005, 'Auth failed')
-              return
-            }
+            const currentAuth = authContext ?? createSystemAuthContext()
 
             const identityMatch =
               prevClient.workspaceId === (envelope.workspaceId ?? null) &&
