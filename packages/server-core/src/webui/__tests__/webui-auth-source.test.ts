@@ -24,7 +24,8 @@ describe('WebUI Admin session endpoints', () => {
   })
 
   it('submits the login token to /auth/session instead of the legacy endpoint', () => {
-    const source = readRepoFile('apps/webui/src/login.html')
+    // The login page is now a React app — the auth logic lives in login-logic.ts
+    const source = readRepoFile('apps/webui/src/login-logic.ts')
 
     expect(source).toContain("fetch('/auth/session'")
     expect(source).toContain('JSON.stringify({ token })')
