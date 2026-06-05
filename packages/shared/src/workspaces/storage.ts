@@ -15,11 +15,12 @@ import {
   rmSync,
   statSync,
 } from 'fs';
-import { join } from 'path';
+import { join, sep } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import { expandPath, toPortablePath } from '../utils/paths.ts';
 import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
+import { isPlatformMode } from '../auth/platform.ts';
 import { getDefaultStatusConfig, saveStatusConfig, ensureDefaultIconFiles } from '../statuses/storage.ts';
 import { getDefaultLabelConfig, saveLabelConfig } from '../labels/storage.ts';
 import { loadConfigDefaults } from '../config/storage.ts';
@@ -34,6 +35,7 @@ import type {
 
 const CONFIG_DIR = join(homedir(), '.polo-ai');
 const DEFAULT_WORKSPACES_DIR = join(CONFIG_DIR, 'workspaces');
+const USERS_DIR = join(CONFIG_DIR, 'users');
 
 // ============================================================
 // Path Utilities
@@ -42,26 +44,63 @@ const DEFAULT_WORKSPACES_DIR = join(CONFIG_DIR, 'workspaces');
 /**
  * Get the default workspaces directory (~/.polo-ai/workspaces/)
  */
-export function getDefaultWorkspacesDir(): string {
+export function getDefaultWorkspacesDir(userId: string | null = null): string {
+  if (isPlatformMode() && userId) {
+    assertSafePathComponent(userId, 'userId');
+    return join(USERS_DIR, userId, 'workspaces');
+  }
+
   return DEFAULT_WORKSPACES_DIR;
 }
 
 /**
  * Ensure default workspaces directory exists
  */
-export function ensureDefaultWorkspacesDir(): void {
-  if (!existsSync(DEFAULT_WORKSPACES_DIR)) {
-    mkdirSync(DEFAULT_WORKSPACES_DIR, { recursive: true });
+export function ensureDefaultWorkspacesDir(userId: string | null = null): void {
+  const dir = getDefaultWorkspacesDir(userId);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function assertSafePathComponent(component: string, label: 'userId' | 'workspace slug'): void {
+  if (
+    component.length === 0
+    || component.includes('..')
+    || component.includes('/')
+    || component.includes('\\')
+    || component.includes('\0')
+  ) {
+    throw new Error(`Invalid ${label}`);
   }
 }
 
 /**
- * Get workspace root path from ID
- * @param workspaceId - Workspace ID
- * @returns Absolute path to workspace root in default location
+ * Get workspace root path.
+ * @param userId - Platform user ID. Null falls back to legacy workspace storage.
+ * @param slug - Workspace folder slug.
+ * @returns Absolute path to workspace root.
  */
-export function getWorkspacePath(workspaceId: string): string {
-  return join(DEFAULT_WORKSPACES_DIR, workspaceId);
+export function getWorkspacePath(userId: string | null, slug: string): string;
+export function getWorkspacePath(slug: string): string;
+export function getWorkspacePath(userIdOrSlug: string | null, slug?: string): string {
+  const workspaceSlug = slug ?? userIdOrSlug;
+  if (typeof workspaceSlug !== 'string') {
+    throw new Error('Invalid workspace slug');
+  }
+  assertSafePathComponent(workspaceSlug, 'workspace slug');
+
+  const userId = slug === undefined ? null : userIdOrSlug;
+  if (isPlatformMode() && userId) {
+    assertSafePathComponent(userId, 'userId');
+  }
+
+  return join(getDefaultWorkspacesDir(userId), workspaceSlug);
+}
+
+export function isWorkspacePathForUser(rootPath: string, userId: string | null): boolean {
+  const baseDir = getDefaultWorkspacesDir(userId);
+  return rootPath.startsWith(`${baseDir}${sep}`);
 }
 
 /**

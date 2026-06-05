@@ -1,9 +1,8 @@
 import { existsSync } from 'node:fs'
-import { join } from 'path'
 import { homedir } from 'os'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { addWorkspace, setActiveWorkspace } from '@polo-ai/shared/config'
-import { getDefaultWorkspacesDir, ensureDefaultWorkspacesDir } from '@polo-ai/shared/workspaces'
+import { ensureDefaultWorkspacesDir, getWorkspacePath } from '@polo-ai/shared/workspaces'
 import type { ServerStatus, ServerHealth } from '@polo-ai/core/types'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -29,13 +28,13 @@ export function registerServerHandlers(
   // Workspace discovery (moved from workspace.ts — server-level, no workspace context)
   // -----------------------------------------------------------------------
 
-  server.handle(RPC_CHANNELS.server.GET_WORKSPACES, async () => {
-    const workspaces = sessionManager.getWorkspacesInfo()
+  server.handle(RPC_CHANNELS.server.GET_WORKSPACES, async (requestCtx) => {
+    const workspaces = sessionManager.getWorkspacesInfo(requestCtx.userId)
     deps.platform.logger.info(`[server:getWorkspaces] returning ${workspaces.length} workspaces: ${JSON.stringify(workspaces.map(w => ({ id: w.id, name: w.name })))}`)
     return workspaces
   })
 
-  server.handle(RPC_CHANNELS.server.CREATE_WORKSPACE, async (_ctx, name: string) => {
+  server.handle(RPC_CHANNELS.server.CREATE_WORKSPACE, async (requestCtx, name: string) => {
     if (!name?.trim()) throw new Error('Workspace name is required')
     const trimmed = name.trim()
 
@@ -45,14 +44,13 @@ export function registerServerHandlers(
       .replace(/^-|-$/g, '')
       || 'workspace'
 
-    ensureDefaultWorkspacesDir()
-    const baseDir = getDefaultWorkspacesDir()
-    let rootPath = join(baseDir, slug)
+    ensureDefaultWorkspacesDir(requestCtx.userId)
+    let rootPath = getWorkspacePath(requestCtx.userId, slug)
     let uniqueSlug = slug
     let counter = 1
     while (existsSync(rootPath)) {
       uniqueSlug = `${slug}-${counter++}`
-      rootPath = join(baseDir, uniqueSlug)
+      rootPath = getWorkspacePath(requestCtx.userId, uniqueSlug)
     }
 
     const workspace = addWorkspace({ name: trimmed, rootPath })
@@ -67,8 +65,8 @@ export function registerServerHandlers(
   // Server Status
   // -----------------------------------------------------------------------
 
-  server.handle(RPC_CHANNELS.server.GET_STATUS, async () => {
-    const workspaces = sessionManager.getWorkspacesInfo()
+  server.handle(RPC_CHANNELS.server.GET_STATUS, async (requestCtx) => {
+    const workspaces = sessionManager.getWorkspacesInfo(requestCtx.userId)
     const workspaceStatuses = workspaces.map(ws => {
       const summary = sessionManager.getWorkspaceAutomationSummary(ws.id)
       return {

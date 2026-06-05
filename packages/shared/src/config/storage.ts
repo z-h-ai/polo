@@ -4,11 +4,13 @@ import { getCredentialManager } from '../credentials/index.ts';
 import { getOrCreateLatestSession, type SessionConfig } from '../sessions/index.ts';
 import {
   discoverWorkspacesInDefaultLocation,
+  isWorkspacePathForUser,
   loadWorkspaceConfig,
   saveWorkspaceConfig,
   createWorkspaceAtPath,
   isValidWorkspace,
 } from '../workspaces/storage.ts';
+import { isPlatformMode } from '../auth/platform.ts';
 import { findIconFile } from '../utils/icon.ts';
 import { extractWorkspaceSlugFromPath } from '../utils/workspace-slug.ts';
 import { initializeDocs } from '../docs/index.ts';
@@ -640,12 +642,15 @@ export function findWorkspaceIcon(rootPath: string): string | null {
   return findIconFile(rootPath) ?? null;
 }
 
-export function getWorkspaces(): Workspace[] {
+export function getWorkspaces(userId: string | null = null): Workspace[] {
   const config = loadStoredConfig();
   const workspaces = config?.workspaces || [];
+  const visibleWorkspaces = isPlatformMode()
+    ? workspaces.filter(w => isWorkspacePathForUser(w.rootPath, userId))
+    : workspaces;
 
   // Resolve workspace names from folder config and local icons
-  return workspaces.map(w => {
+  return visibleWorkspaces.map(w => {
     // Read name from workspace folder config (single source of truth)
     const wsConfig = loadWorkspaceConfig(w.rootPath);
     const name = wsConfig?.name || basename(w.rootPath) || 'Untitled';

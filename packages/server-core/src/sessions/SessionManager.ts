@@ -2214,12 +2214,12 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  getWorkspaces(): Workspace[] {
-    return getWorkspaces()
+  getWorkspaces(userId: string | null = null): Workspace[] {
+    return getWorkspaces(userId)
   }
 
-  getWorkspacesInfo(): WorkspaceInfo[] {
-    return getWorkspaces().map(({ rootPath, createdAt, ...info }) => info)
+  getWorkspacesInfo(userId: string | null = null): WorkspaceInfo[] {
+    return getWorkspaces(userId).map(({ rootPath, createdAt, ...info }) => info)
   }
 
   getActiveSessionCount(workspaceId?: string): number {

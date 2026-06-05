@@ -8,6 +8,7 @@
  */
 
 import { SignJWT, decodeJwt, jwtVerify } from 'jose'
+export { isPlatformMode } from '@polo-ai/shared/auth'
 
 // ---------------------------------------------------------------------------
 // JWT helpers (via jose library)
@@ -30,10 +31,6 @@ export interface WebuiUser {
   id: string
   username: string
   role: string
-}
-
-export function isPlatformMode(): boolean {
-  return !!process.env.PLATFORM_ANTHROPIC_API_KEY
 }
 
 export async function signJwt(payload: JwtPayload, secret: string): Promise<string> {

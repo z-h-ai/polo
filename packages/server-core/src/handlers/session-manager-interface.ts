@@ -196,9 +196,9 @@ export interface ISessionManager {
   // Workspace
   // ---------------------------------------------------------------------------
 
-  getWorkspaces(): Workspace[]
+  getWorkspaces(userId?: string | null): Workspace[]
   /** Return client-safe workspace list (no rootPath) for remote clients. */
-  getWorkspacesInfo(): WorkspaceInfo[]
+  getWorkspacesInfo(userId?: string | null): WorkspaceInfo[]
   setupConfigWatcher(workspaceRootPath: string, workspaceId: string): void
   /**
    * Manually notify the ConfigWatcher of a file change.
