@@ -5,8 +5,10 @@ module: polo-auth
 priority: 5
 estimatedMinutes: 20
 depends: ["polo-auth.request-context"]
-status: pending
+status: completed
 spec_ref: "spec-polo-ai.md §4.1 (文件存储路径)"
+startedAt: 2026-06-05T17:20:51.190Z
+completedAt: 2026-06-05T17:42:07.783Z
 ---
 # Isolate file storage paths per userId in platform mode
 

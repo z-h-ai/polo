@@ -6,3 +6,5 @@
 [2026-06-05T16:20:20.204Z] COMPLETED: polo-auth.ws-upgrade
 [2026-06-05T16:37:17.997Z] STARTED: polo-auth.request-context
 [2026-06-05T17:16:22.670Z] COMPLETED: polo-auth.request-context
+[2026-06-05T17:20:51.192Z] STARTED: polo-auth.file-isolation
+[2026-06-05T17:42:07.785Z] COMPLETED: polo-auth.file-isolation
