@@ -243,10 +243,14 @@ describe('AdminApiClient auth validateToken', () => {
     await expect(client.validateToken()).rejects.toThrow(NetworkError);
   });
 
-  it('validateToken respects timeout and throws NetworkError', async () => {
+  it('validateToken fails when connect/header phase exceeds its configured timeout', async () => {
+    let connectStarted = false;
+    let abortReason: unknown;
     const slowFetch: FetchFn = async (_input, init) => {
+      connectStarted = true;
       return new Promise<Response>((_, reject) => {
         init?.signal?.addEventListener('abort', () => {
+          abortReason = init.signal?.reason;
           reject(init.signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
         });
       });
@@ -254,10 +258,48 @@ describe('AdminApiClient auth validateToken', () => {
     const client = createAdminApiClient({
       fetchFn: slowFetch,
       token: SAMPLE_JWT,
-      validateTimeoutMs: 25,
+      // Production defaults are 5s connect/header + 5s read; shorten the same phases for CI speed.
+      validateConnectTimeoutMs: 25,
+      validateReadTimeoutMs: 1_000,
     });
 
     await expect(client.validateToken()).rejects.toThrow(NetworkError);
+    expect(connectStarted).toBe(true);
+    expect(abortReason).toBeInstanceOf(NetworkError);
+  }, 1000);
+
+  it('validateToken fails when body/read phase exceeds its configured timeout after headers', async () => {
+    let headersReturned = false;
+    let bodyReadStarted = false;
+
+    const slowBodyFetch: FetchFn = async () => {
+      headersReturned = true;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'Content-Type': 'application/json' }),
+        json: async () => {
+          bodyReadStarted = true;
+          return new Promise(resolve => {
+            setTimeout(() => {
+              resolve({ valid: true, user: SAMPLE_USER, configVersion: 'cv_auth_001' });
+            }, 1_000);
+          });
+        },
+      } as Response;
+    };
+
+    const client = createAdminApiClient({
+      fetchFn: slowBodyFetch,
+      token: SAMPLE_JWT,
+      // Production defaults are 5s connect/header + 5s read; shorten the same phases for CI speed.
+      validateConnectTimeoutMs: 1_000,
+      validateReadTimeoutMs: 25,
+    });
+
+    await expect(client.validateToken()).rejects.toThrow(NetworkError);
+    expect(headersReturned).toBe(true);
+    expect(bodyReadStarted).toBe(true);
   }, 1000);
 
   it('validateToken when rate limited throws RateLimitedError with Retry-After seconds', async () => {

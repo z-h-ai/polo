@@ -1,4 +1,5 @@
-const DEFAULT_VALIDATE_TIMEOUT_MS = 10_000;
+const DEFAULT_VALIDATE_CONNECT_TIMEOUT_MS = 5_000;
+const DEFAULT_VALIDATE_READ_TIMEOUT_MS = 5_000;
 
 export type FetchFn = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -6,6 +7,8 @@ export interface AdminApiClientOptions {
   fetchFn?: FetchFn;
   token?: string;
   validateTimeoutMs?: number;
+  validateConnectTimeoutMs?: number;
+  validateReadTimeoutMs?: number;
 }
 
 export interface AdminUser {
@@ -116,20 +119,29 @@ export class ConfigError extends Error {
 type RequestOptions = {
   body?: unknown;
   token?: string;
-  timeoutMs?: number;
+  phaseTimeouts?: {
+    connectMs: number;
+    readMs: number;
+  };
 };
 
 export class AdminApiClient {
   private readonly baseUrl: string;
   private readonly fetchFn: FetchFn;
   private readonly token?: string;
-  private readonly validateTimeoutMs: number;
+  private readonly validateConnectTimeoutMs: number;
+  private readonly validateReadTimeoutMs: number;
 
   constructor(options: AdminApiClientOptions = {}) {
     this.baseUrl = resolveBaseUrl();
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
     this.token = options.token;
-    this.validateTimeoutMs = options.validateTimeoutMs ?? DEFAULT_VALIDATE_TIMEOUT_MS;
+    const legacyPhaseTimeoutMs =
+      options.validateTimeoutMs === undefined ? undefined : Math.ceil(options.validateTimeoutMs / 2);
+    this.validateConnectTimeoutMs =
+      options.validateConnectTimeoutMs ?? legacyPhaseTimeoutMs ?? DEFAULT_VALIDATE_CONNECT_TIMEOUT_MS;
+    this.validateReadTimeoutMs =
+      options.validateReadTimeoutMs ?? legacyPhaseTimeoutMs ?? DEFAULT_VALIDATE_READ_TIMEOUT_MS;
   }
 
   async login(username: string, password: string): Promise<LoginResult> {
@@ -147,7 +159,10 @@ export class AdminApiClient {
   async validateToken(): Promise<ValidateTokenResult> {
     return this.request<ValidateTokenResult>('POST', '/api/auth/validate', {
       token: this.requiredToken(),
-      timeoutMs: this.validateTimeoutMs,
+      phaseTimeouts: {
+        connectMs: this.validateConnectTimeoutMs,
+        readMs: this.validateReadTimeoutMs,
+      },
     });
   }
 
@@ -181,40 +196,46 @@ export class AdminApiClient {
     }
 
     const controller = new AbortController();
-    let timerId: ReturnType<typeof setTimeout> | undefined;
-    if (options.timeoutMs !== undefined) {
-      timerId = setTimeout(() => {
-        controller.abort(new NetworkError('Admin API request timed out'));
-      }, options.timeoutMs);
-    }
 
+    let response: Response;
     try {
-      let response: Response;
-      try {
-        response = await this.fetchFn(this.url(path), {
+      response = await this.runWithTimeout(
+        () => this.fetchFn(this.url(path), {
           method,
           headers,
           body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
           signal: controller.signal,
-        });
-      } catch (error) {
-        throw toNetworkError(error);
-      }
+        }),
+        controller,
+        options.phaseTimeouts?.connectMs,
+        'Admin API validate connect timed out',
+      );
+    } catch (error) {
+      throw toNetworkError(error);
+    }
 
-      if (!response.ok) {
-        throw await this.toHttpError(response);
-      }
+    if (!response.ok) {
+      throw await this.toHttpError(response, controller, options.phaseTimeouts?.readMs);
+    }
 
-      return (await response.json()) as T;
-    } finally {
-      if (timerId !== undefined) {
-        clearTimeout(timerId);
+    try {
+      return (await this.readJson(response, controller, options.phaseTimeouts?.readMs)) as T;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        throw error;
       }
+      throw error;
     }
   }
 
-  private async toHttpError(response: Response): Promise<Error> {
-    const envelope = await readErrorEnvelope(response);
+  private async toHttpError(
+    response: Response,
+    controller: AbortController,
+    readTimeoutMs?: number,
+  ): Promise<Error> {
+    const envelope = await readErrorEnvelope(response, responseToRead =>
+      this.readJson(responseToRead, controller, readTimeoutMs)
+    );
     const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get('Retry-After'));
 
     switch (envelope.error) {
@@ -240,6 +261,74 @@ export class AdminApiClient {
           `Admin API returned HTTP ${response.status}`,
         );
     }
+  }
+
+  private async readJson(
+    response: Response,
+    controller: AbortController,
+    timeoutMs?: number,
+  ): Promise<unknown> {
+    try {
+      return await this.runWithTimeout(
+        () => response.json() as Promise<unknown>,
+        controller,
+        timeoutMs,
+        'Admin API validate read timed out',
+      );
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new NetworkError('Admin API validate read timed out');
+      }
+      throw error;
+    }
+  }
+
+  private async runWithTimeout<T>(
+    operation: () => Promise<T>,
+    controller: AbortController,
+    timeoutMs: number | undefined,
+    timeoutMessage: string,
+  ): Promise<T> {
+    if (timeoutMs === undefined) {
+      return operation();
+    }
+
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+
+    return new Promise<T>((resolve, reject) => {
+      timerId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const error = new NetworkError(timeoutMessage);
+        controller.abort(error);
+        reject(error);
+      }, timeoutMs);
+
+      Promise.resolve()
+        .then(operation)
+        .then(
+          result => {
+            if (settled) return;
+            settled = true;
+            if (timerId !== undefined) {
+              clearTimeout(timerId);
+            }
+            resolve(result);
+          },
+          error => {
+            if (settled) return;
+            settled = true;
+            if (timerId !== undefined) {
+              clearTimeout(timerId);
+            }
+            reject(error);
+          },
+        );
+    });
   }
 }
 
@@ -267,9 +356,12 @@ function resolveBaseUrl(): string {
   return raw.replace(/\/+$/, '');
 }
 
-async function readErrorEnvelope(response: Response): Promise<ErrorEnvelope> {
+async function readErrorEnvelope(
+  response: Response,
+  readJson: (response: Response) => Promise<unknown> = responseToRead => responseToRead.json(),
+): Promise<ErrorEnvelope> {
   try {
-    const parsed = await response.json() as unknown;
+    const parsed = await readJson(response);
     if (isErrorEnvelope(parsed)) {
       return parsed;
     }
@@ -280,7 +372,10 @@ async function readErrorEnvelope(response: Response): Promise<ErrorEnvelope> {
       details: objectValue.details,
       requestId: typeof objectValue.requestId === 'string' ? objectValue.requestId : undefined,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof NetworkError) {
+      throw error;
+    }
     return { error: `http_${response.status}` };
   }
 }
