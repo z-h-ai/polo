@@ -3,9 +3,11 @@ id: auth.logout
 module: auth
 type: domain
 priority: 5
-status: pending
+status: completed
 estimatedMinutes: 20
 dependencies: [auth.admin-api-client, auth.login-page]
+startedAt: 2026-06-07T08:27:20.412Z
+completedAt: 2026-06-07T08:50:58.480Z
 ---
 # Logout Functionality
 
