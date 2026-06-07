@@ -490,6 +490,12 @@ function copyWorkspacePackages(config: ServerBuildConfig): void {
       cpSync(srcDir, join(dest, 'src'), { recursive: true });
     }
 
+    // Copy package-level test helpers used by tests copied under src/.
+    const testsDir = join(src, 'tests');
+    if (existsSync(testsDir)) {
+      cpSync(testsDir, join(dest, 'tests'), { recursive: true });
+    }
+
     // Copy dist/ directory if present (built artifacts like session-mcp-server)
     const distDir = join(src, 'dist');
     if (existsSync(distDir)) {
