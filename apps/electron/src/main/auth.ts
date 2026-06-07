@@ -1,5 +1,5 @@
 import { app, ipcMain, safeStorage } from 'electron'
-import { mkdir, rename, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, readFile, rename, unlink, writeFile, chmod } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   AccountDisabledError,
@@ -19,11 +19,14 @@ const SESSION_FILE_NAME = 'admin-session.json'
 type IpcMainLike = Pick<typeof ipcMain, 'handle'>
 type AppLike = Pick<typeof app, 'getPath'>
 type SafeStorageLike = Pick<typeof safeStorage, 'encryptString'> & {
+  decryptString?: typeof safeStorage.decryptString
   isEncryptionAvailable?: () => boolean
 }
 
 export interface ElectronAdminTokenStore {
   save(token: string, user: AdminUser): Promise<void>
+  loadToken?(): Promise<string | null>
+  clear?(): Promise<void>
 }
 
 export interface RegisterElectronAuthHandlersOptions {
@@ -79,6 +82,40 @@ export class SafeStorageAdminTokenStore implements ElectronAdminTokenStore {
       // chmod can be unsupported on some filesystems; encrypted safeStorage data
       // is still the security boundary.
     })
+  }
+
+  async loadToken(): Promise<string | null> {
+    if (!this.safeStorageApi.decryptString) {
+      throw createIpcLoginError({
+        code: 'storage_error',
+        message: 'Secure Admin token decryption is unavailable',
+      })
+    }
+
+    const filePath = this.sessionFilePath()
+    let raw: string
+    try {
+      raw = await readFile(filePath, 'utf8')
+    } catch {
+      return null
+    }
+
+    const parsed = JSON.parse(raw) as { encryptedToken?: unknown }
+    if (typeof parsed.encryptedToken !== 'string' || !parsed.encryptedToken) {
+      return null
+    }
+
+    return this.safeStorageApi.decryptString(Buffer.from(parsed.encryptedToken, 'base64'))
+  }
+
+  async clear(): Promise<void> {
+    await unlink(this.sessionFilePath()).catch(() => {
+      // Missing session file already means the JWT/user cache is clear.
+    })
+  }
+
+  private sessionFilePath(): string {
+    return join(this.appApi.getPath('userData'), 'auth', SESSION_FILE_NAME)
   }
 }
 

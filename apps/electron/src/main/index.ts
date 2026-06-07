@@ -106,6 +106,8 @@ import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeU
 import type { EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
 import { registerElectronAuthHandlers } from './auth'
+import { SafeStorageAdminTokenStore } from './auth'
+import { createAdminApiClient } from '@polo-ai/shared/auth'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -668,6 +670,7 @@ app.whenReady().then(async () => {
               pairingMode: 'qr',
             },
           })
+          const adminTokenStore = new SafeStorageAdminTokenStore()
           return {
             sessionManager: sm,
             platform: p,
@@ -675,6 +678,14 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
+            authLogout: {
+              logout: async (contextToken?: string | null) => {
+                const token = contextToken ?? await adminTokenStore.loadToken()
+                if (!token) return
+                await createAdminApiClient({ token }).logout()
+              },
+            },
+            clearCachedAuthData: () => adminTokenStore.clear(),
           }
         },
         // Headless: register only core handlers (no GUI handlers for browser, settings, etc.)

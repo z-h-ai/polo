@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import { readFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   AccountDisabledError,
@@ -113,5 +114,17 @@ describe('Electron auth login IPC', () => {
     expect(result).toMatchObject({ error: expected })
     expect(result).not.toHaveProperty('token')
     expect((result as { error: Record<string, unknown> }).error).not.toHaveProperty('token')
+  })
+
+  it('clears the stored Admin JWT and user metadata session file on logout', async () => {
+    const { SafeStorageAdminTokenStore } = await import('../auth')
+    const tokenStore = new SafeStorageAdminTokenStore()
+
+    await tokenStore.save('admin.jwt.secret', sampleUser)
+    expect(existsSync(TEST_SESSION_FILE)).toBe(true)
+
+    await tokenStore.clear()
+
+    expect(existsSync(TEST_SESSION_FILE)).toBe(false)
   })
 })

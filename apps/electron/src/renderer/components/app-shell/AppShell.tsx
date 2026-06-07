@@ -521,6 +521,7 @@ function AppShellContent({
     onOpenSettings,
     onOpenKeyboardShortcuts,
     onOpenStoredUserPreferences,
+    onLogout,
     onReset,
     onSendMessage,
     openNewChat,
@@ -2190,6 +2191,7 @@ function AppShellContent({
           onOpenSettingsSubpage={handleSettingsClick}
           onOpenKeyboardShortcuts={onOpenKeyboardShortcuts}
           onOpenStoredUserPreferences={onOpenStoredUserPreferences}
+          onLogout={onLogout}
           onBack={goBack}
           onForward={goForward}
           canGoBack={canGoBack}

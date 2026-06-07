@@ -49,6 +49,7 @@ interface TopBarProps {
   onOpenSettingsSubpage: (subpage: SettingsMenuItem['id']) => void
   onOpenKeyboardShortcuts: () => void
   onOpenStoredUserPreferences: () => void
+  onLogout: () => void
   onBack: () => void
   onForward: () => void
   canGoBack: boolean
@@ -75,6 +76,7 @@ export function TopBar({
   onOpenSettingsSubpage,
   onOpenKeyboardShortcuts,
   onOpenStoredUserPreferences,
+  onLogout,
   onBack,
   onForward,
   canGoBack,
@@ -163,6 +165,7 @@ export function TopBar({
           onOpenSettingsSubpage={onOpenSettingsSubpage}
           onOpenKeyboardShortcuts={onOpenKeyboardShortcuts}
           onOpenStoredUserPreferences={onOpenStoredUserPreferences}
+          onLogout={onLogout}
           onToggleSidebar={onToggleSidebar}
           onToggleFocusMode={onToggleFocusMode}
         />

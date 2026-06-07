@@ -146,6 +146,7 @@ export function DesktopAppMenu({
   onOpenSettings,
   onOpenSettingsSubpage,
   onOpenKeyboardShortcuts,
+  onLogout,
   onToggleSidebar,
   onToggleFocusMode,
 }: AppMenuProps) {
@@ -253,6 +254,13 @@ export function DesktopAppMenu({
         </DropdownMenuSub>
 
         {isDebugMode && renderDebugSubmenu(t)}
+
+        <StyledDropdownMenuSeparator />
+
+        <StyledDropdownMenuItem onClick={onLogout}>
+          <Icons.LogOut className="h-3.5 w-3.5" />
+          {t("menu.logout")}
+        </StyledDropdownMenuItem>
 
         <StyledDropdownMenuSeparator />
 

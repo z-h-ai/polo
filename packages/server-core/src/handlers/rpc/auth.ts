@@ -3,6 +3,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { createAdminApiClient, logoutAuth } from '@polo-ai/shared/auth'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientConfirmDialog } from '@polo-ai/server-core/transport'
@@ -47,24 +48,20 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
     return result.response === 1
   })
 
-  // Logout - clear all credentials and config
-  server.handle(RPC_CHANNELS.auth.LOGOUT, async () => {
+  // Logout - revoke Admin session best-effort, then clear local auth/config cache.
+  server.handle(RPC_CHANNELS.auth.LOGOUT, async (ctx) => {
     try {
-      const manager = getCredentialManager()
-
-      // List and delete all stored credentials
-      const allCredentials = await manager.list()
-      for (const credId of allCredentials) {
-        await manager.delete(credId)
-      }
-
-      // Delete the config file
-      const configPath = join(homedir(), '.polo-ai', 'config.json')
-      await unlink(configPath).catch(() => {
-        // Ignore if file doesn't exist
+      const manager = deps.credentialManager ?? getCredentialManager()
+      const result = await logoutAuth({
+        logout: () => logoutAdminSession(deps, ctx.userJwt),
+        clearCachedAuthData: () => clearCachedAuthData(deps),
+        credentialManager: manager,
       })
 
-      deps.platform.logger.info('Logout complete - cleared all credentials and config')
+      if (!result.apiLogoutSucceeded) {
+        deps.platform.logger.warn('Admin logout failed; cleared local auth cache anyway:', result.apiError)
+      }
+      deps.platform.logger.info('Logout complete - cleared local auth cache')
     } catch (error) {
       deps.platform.logger.error('Logout error:', error)
       throw error
@@ -77,4 +74,27 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
     const manager = getCredentialManager()
     return manager.checkHealth()
   })
+}
+
+async function logoutAdminSession(deps: HandlerDeps, token: string | null): Promise<void> {
+  if (deps.authLogout) {
+    await deps.authLogout.logout(token)
+    return
+  }
+
+  if (!token) {
+    return
+  }
+
+  await createAdminApiClient({ token }).logout()
+}
+
+async function clearCachedAuthData(deps: HandlerDeps): Promise<void> {
+  // Delete the config file. This clears cached LLM config and configVersion.
+  const configPath = join(homedir(), '.polo-ai', 'config.json')
+  await unlink(configPath).catch(() => {
+    // Ignore if file doesn't exist
+  })
+
+  await deps.clearCachedAuthData?.()
 }

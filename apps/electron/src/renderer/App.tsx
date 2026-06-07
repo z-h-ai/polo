@@ -1667,6 +1667,35 @@ export default function App() {
     navigate(routes.view.settings('preferences'))
   }, [])
 
+  const handleLogout = useCallback(async () => {
+    try {
+      await window.electronAPI.logout()
+      initializeSessions([])
+      setWorkspaces([])
+      setWindowWorkspaceId(null)
+      setSession({ selected: null })
+      setPendingPermissions(new Map())
+      setPendingCredentials(new Map())
+      setSessionOptions(new Map())
+      sessionDraftsRef.current.clear()
+      store.set(sourcesAtom, [])
+      store.set(skillsAtom, [])
+      store.set(sessionMetaMapAtom, new Map())
+      store.set(sessionIdsAtom, [])
+      setSetupNeeds({
+        needsBillingConfig: true,
+        needsCredentials: true,
+        isFullyConfigured: false,
+      })
+      onboarding.reset()
+      setAppState('onboarding')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('Logout failed:', error)
+      toast.error(t('toast.logoutFailed'), { description: message })
+    }
+  }, [initializeSessions, onboarding, setSession, store, t])
+
   // Show reset confirmation dialog
   const handleReset = useCallback(() => {
     setShowResetDialog(true)
@@ -1812,6 +1841,7 @@ export default function App() {
     onOpenSettings: handleOpenSettings,
     onOpenKeyboardShortcuts: handleOpenKeyboardShortcuts,
     onOpenStoredUserPreferences: handleOpenStoredUserPreferences,
+    onLogout: handleLogout,
     onReset: handleReset,
     // Session options
     onSessionOptionsChange: handleSessionOptionsChange,
@@ -1858,6 +1888,7 @@ export default function App() {
     handleSessionOptionsChange,
     handleInputChange,
     handleAttachmentsChange,
+    handleLogout,
     openNewChat,
   ])
 
