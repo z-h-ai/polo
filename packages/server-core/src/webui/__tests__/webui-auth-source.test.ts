@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
-const REPO_ROOT = join(import.meta.dir, '../../../../..')
+function findRepoRoot(startDir: string): string {
+  let currentDir = startDir
+  while (true) {
+    if (existsSync(join(currentDir, 'apps/webui/src/App.tsx'))) {
+      return currentDir
+    }
+
+    const parentDir = dirname(currentDir)
+    if (parentDir === currentDir) {
+      throw new Error('Could not locate repository root')
+    }
+    currentDir = parentDir
+  }
+}
+
+const REPO_ROOT = findRepoRoot(import.meta.dir)
 
 function readRepoFile(path: string): string {
   return readFileSync(join(REPO_ROOT, path), 'utf8')
