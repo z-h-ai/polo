@@ -22,3 +22,5 @@
 [2026-06-07T11:18:05.750Z] COMPLETED: cleanup.ai-settings
 [2026-06-07T11:22:27.853Z] STARTED: cleanup.local-models
 [2026-06-07T12:02:18.973Z] COMPLETED: cleanup.local-models
+[2026-06-07T12:06:05.261Z] STARTED: cleanup.oauth
+[2026-06-07T12:28:47.356Z] COMPLETED: cleanup.oauth

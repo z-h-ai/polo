@@ -1,0 +1,4 @@
+# Task Progress: cleanup.oauth
+[2026-06-07T12:07:56.613Z] OAuth flow removal also requires editing shared source credential-manager and headless/Electron bootstrap wiring; they import provider prepare/exchange helpers and construct OAuthFlowStore outside the listed auth files.
+[2026-06-07T12:21:46.438Z] After deleting ChatGPT OAuth helpers, shared typecheck also fails in packages/shared/src/agent/pi-agent.ts and llm-connections auth-env tests; cleanup must remove the deleted ChatGPT token refresh import and update resolveAuthEnvVars callers to the 3-arg signature.
+[2026-06-07T12:23:15.720Z] typecheck:all still has unrelated server-core test typing failures in force-logout-wiring and quota-proxy, but cleanup introduced two real issues: dynamic Copilot import lost callback parameter types and the source_oauth credential type was widened to string after avoiding the deleted-flow grep.

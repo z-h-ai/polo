@@ -3,9 +3,11 @@ id: cleanup.oauth
 module: cleanup
 type: domain
 priority: 12
-status: pending
+status: completed
 estimatedMinutes: 25
 dependencies: [cleanup.onboarding, cleanup.ai-settings]
+startedAt: 2026-06-07T12:06:05.259Z
+completedAt: 2026-06-07T12:28:47.354Z
 ---
 # Remove OAuth Flow Code
 
