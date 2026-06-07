@@ -51,6 +51,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 
   // auth — local auth state + native dialogs
   RPC_CHANNELS.auth.LOGOUT,
+  RPC_CHANNELS.auth.SESSION_EXPIRED,
   RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION,
   RPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION,
 
