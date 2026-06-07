@@ -31,10 +31,12 @@ import { readFileSync, existsSync } from 'node:fs'
 import { version as packageVersion } from '../package.json'
 import { enableDebug } from '@polo-ai/shared/utils/debug'
 import { bootstrapServer, startHealthHttpServer, generateServerToken } from '@polo-ai/server-core/bootstrap'
-import { validateSession, extractSessionCookie, createWebuiHandler, nodeHttpAdapter } from '@polo-ai/server-core/webui'
+import { configureServerForceLogout } from '@polo-ai/server-core'
+import { validateSession, extractSessionCookie, createWebuiHandler, nodeHttpAdapter, clearAdminJwtStore } from '@polo-ai/server-core/webui'
 import type { WebuiHandler } from '@polo-ai/server-core/webui'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { getWorkspaces } from '@polo-ai/shared/config'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 
 // --generate-token: print a crypto-random token and exit
@@ -162,6 +164,7 @@ const waNodeBin = process.env.POLO_AI_MESSAGING_NODE_BIN ?? 'node'
 // Built inside createHandlerDeps (needs sessionManager), populated with the WS
 // publisher after bootstrapServer resolves.
 let messagingHandle: MessagingBootstrapHandle | null = null
+let forceLogoutEventSink: import('@polo-ai/server-core/transport').EventSink | null = null
 
 const instance = await (async () => {
   try {
@@ -240,6 +243,15 @@ const instance = await (async () => {
             pairingMode: 'qr',
           },
         })
+        configureServerForceLogout({
+          clearCachedAuthData: () => clearAdminJwtStore(),
+          emitSessionExpired: (event) => {
+            forceLogoutEventSink?.(RPC_CHANNELS.auth.SESSION_EXPIRED, { to: 'all' }, event)
+          },
+          routeToLogin: () => {
+            // Browser clients route to LoginPage when auth:sessionExpired is received.
+          },
+        })
         return {
           sessionManager,
           platform,
@@ -274,6 +286,8 @@ const instance = await (async () => {
     process.exit(1)
   }
 })()
+
+forceLogoutEventSink = instance.wsServer.push.bind(instance.wsServer)
 
 // ---------------------------------------------------------------------------
 // Messaging post-bootstrap: bind the WS publisher and initialize local

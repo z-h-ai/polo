@@ -1,4 +1,5 @@
 import type { OnForceLogout, SessionExpiredEvent } from './force-logout.ts';
+import { getGlobalForceLogoutHandler } from './global-force-logout.ts';
 
 const DEFAULT_VALIDATE_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_VALIDATE_READ_TIMEOUT_MS = 5_000;
@@ -282,12 +283,13 @@ export class AdminApiClient {
   }
 
   private async notifyForceLogout(event: SessionExpiredEvent): Promise<void> {
-    if (!this.onForceLogout) {
+    const onForceLogout = this.onForceLogout ?? getGlobalForceLogoutHandler();
+    if (!onForceLogout) {
       return;
     }
 
     try {
-      await this.onForceLogout(event);
+      await onForceLogout(event);
     } catch (error) {
       console.warn(
         '[AdminApiClient] Force logout hook failed:',

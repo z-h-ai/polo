@@ -21,6 +21,7 @@ import {
 } from './errors.ts';
 import type { QuotaCheckResult, UsageReportInput, UsageReportResult, QuotaStatus } from './types.ts';
 import type { OnForceLogout, SessionExpiredEvent } from '../auth/force-logout.ts';
+import { getGlobalForceLogoutHandler } from '../auth/global-force-logout.ts';
 
 export type { OnForceLogout, SessionExpiredEvent } from '../auth/force-logout.ts';
 
@@ -218,12 +219,13 @@ export class AdminApiClient {
   }
 
   private async notifyForceLogout(event: SessionExpiredEvent): Promise<void> {
-    if (!this.onForceLogout) {
+    const onForceLogout = this.onForceLogout ?? getGlobalForceLogoutHandler();
+    if (!onForceLogout) {
       return;
     }
 
     try {
-      await this.onForceLogout(event);
+      await onForceLogout(event);
     } catch (error) {
       console.warn(
         '[AdminApiClient] Force logout hook failed:',

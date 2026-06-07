@@ -77,6 +77,7 @@ import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
+import { configureServerForceLogout } from '@polo-ai/server-core'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
@@ -195,6 +196,7 @@ let browserPaneManager: BrowserPaneManager | null = null
 let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
+let forceLogoutEventSink: EventSink | null = null
 
 // Messaging gateway: the bootstrap handle is created once sessionManager is
 // available (inside createHandlerDeps) and populated with the WS publisher
@@ -671,6 +673,15 @@ app.whenReady().then(async () => {
             },
           })
           const adminTokenStore = new SafeStorageAdminTokenStore()
+          configureServerForceLogout({
+            clearCachedAuthData: () => adminTokenStore.clear(),
+            emitSessionExpired: (event) => {
+              forceLogoutEventSink?.(RPC_CHANNELS.auth.SESSION_EXPIRED, { to: 'all' }, event)
+            },
+            routeToLogin: () => {
+              // The renderer routes to LoginPage when it receives auth:sessionExpired.
+            },
+          })
           return {
             sessionManager: sm,
             platform: p,
@@ -724,6 +735,7 @@ app.whenReady().then(async () => {
       sessionManager = instance.sessionManager
       oauthFlowStore = instance.oauthFlowStore
       moduleSink = instance.wsServer.push.bind(instance.wsServer)
+      forceLogoutEventSink = moduleSink
       moduleClientResolver = resolveClientId
 
       // -----------------------------------------------------------------------

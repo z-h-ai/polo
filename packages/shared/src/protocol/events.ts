@@ -14,6 +14,7 @@ import type {
   BrowserInstanceInfo,
   DeepLinkNavigation,
 } from './dto'
+import type { SessionExpiredEvent } from '../auth/force-logout'
 
 export interface BroadcastEventMap {
   // Session events (workspace-scoped via broadcastToWorkspace)
@@ -47,6 +48,9 @@ export interface BroadcastEventMap {
   // Window events (per-window)
   [RPC_CHANNELS.window.FOCUS_STATE]: [isFocused: boolean]
   [RPC_CHANNELS.window.CLOSE_REQUESTED]: []
+
+  // Auth events (global)
+  [RPC_CHANNELS.auth.SESSION_EXPIRED]: [event: SessionExpiredEvent]
 
   // Browser pane events (global)
   [RPC_CHANNELS.browserPane.STATE_CHANGED]: [info: BrowserInstanceInfo]

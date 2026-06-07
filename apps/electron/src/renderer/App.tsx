@@ -70,10 +70,12 @@ import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterc
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { useStaleSessionRecovery } from '@/hooks/useStaleSessionRecovery'
 import { TransportConnectionBanner, shouldShowTransportConnectionBanner } from '@/components/app-shell/TransportConnectionBanner'
+import SessionExpiredDialog from '@/components/SessionExpiredDialog'
 import { getFileManagerName } from '@/lib/platform'
 import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
+import { handleRendererSessionExpired } from './lib/session-expired-flow'
 
 type AppState = 'loading' | 'login' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
 
@@ -235,6 +237,7 @@ export default function App() {
 
   // App state: loading -> check auth -> onboarding or ready
   const [appState, setAppState] = useState<AppState>('loading')
+  const [sessionExpiredDialogVisible, setSessionExpiredDialogVisible] = useState(false)
   const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
 
   // Per-session Jotai atom setters for isolated updates
@@ -665,6 +668,7 @@ export default function App() {
   }, [syncPostLoginAppState])
 
   const handleLoginSuccess = useCallback(() => {
+    setSessionExpiredDialogVisible(false)
     void syncPostLoginAppState()
   }, [syncPostLoginAppState])
 
@@ -1491,6 +1495,23 @@ export default function App() {
     schedulePersistDraft(sessionId)
   }, [schedulePersistDraft])
 
+  useEffect(() => {
+    const cleanup = window.electronAPI.onSessionExpired((event) => {
+      void handleRendererSessionExpired({
+        event,
+        drafts: sessionDraftsRef.current,
+        pendingDraftTimers: draftSaveTimeoutRef.current,
+        setDraft: window.electronAPI.setDraft,
+        dispatchEvent: eventToDispatch => window.dispatchEvent(eventToDispatch),
+        showLoginPage: () => {
+          setSessionExpiredDialogVisible(true)
+          setAppState('login')
+        },
+      })
+    })
+    return () => { cleanup() }
+  }, [])
+
   // Open new chat - creates session and selects it
   // Used by components via AppShellContext and for programmatic navigation
   const openNewChat = useCallback(async (params: NewChatActionParams = {}) => {
@@ -1934,6 +1955,10 @@ export default function App() {
         <ModalProvider>
           <WindowCloseHandler />
           <LoggedOutLoginPage onSuccess={handleLoginSuccess} />
+          <SessionExpiredDialog
+            visible={sessionExpiredDialogVisible}
+            onLogin={() => setSessionExpiredDialogVisible(false)}
+          />
         </ModalProvider>
       </DismissibleLayerProvider>
     )

@@ -212,6 +212,7 @@ import type {
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
 } from '@polo-ai/shared/protocol'
+import type { SessionExpiredEvent } from '@polo-ai/shared/auth'
 
 export interface ElectronAPI {
   // Platform auth
@@ -384,6 +385,7 @@ export interface ElectronAPI {
   showLogoutConfirmation(): Promise<boolean>
   showDeleteSessionConfirmation(name: string): Promise<boolean>
   logout(): Promise<void>
+  onSessionExpired(callback: (event: SessionExpiredEvent) => void): () => void
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>

@@ -16,6 +16,7 @@ import { mapClaudeSdkAssistantError, type ClaudeSdkApiError } from './claude-sdk
 import { runErrorDiagnostics } from './diagnostics.ts';
 import { loadStoredConfig, loadConfigDefaults, type Workspace, type AuthType, getDefaultLlmConnection, getLlmConnection } from '../config/storage.ts';
 import { getValidClaudeOAuthToken } from '../auth/state.ts';
+import { trackInFlightLlmAbortController } from '../auth/llm-abort-registry.ts';
 import {
   clearClaudeBedrockRoutingEnvVars,
   resolveAuthEnvVars,
@@ -803,6 +804,7 @@ export class ClaudeAgent extends BaseAgent {
 
     // Clear any leftover steer from a previous turn (safety net — should already be null)
     this.pendingSteerMessage = null;
+    let untrackCurrentQueryAbortController: (() => void) | null = null;
 
     try {
       const sessionId = this.config.session?.id || `temp-${Date.now()}`;
@@ -1375,6 +1377,7 @@ export class ClaudeAgent extends BaseAgent {
 
       // Create AbortController for this query - allows force-stopping via forceAbort()
       this.currentQueryAbortController = new AbortController();
+      untrackCurrentQueryAbortController = trackInFlightLlmAbortController(this.currentQueryAbortController);
       const optionsWithAbort = {
         ...options,
         abortController: this.currentQueryAbortController,
@@ -2124,6 +2127,7 @@ This is a branched conversation. All prior messages in this conversation are par
       // emit complete even on error so application knows we're done
       yield { type: 'complete' };
     } finally {
+      untrackCurrentQueryAbortController?.();
       this.currentQuery = null;
 
       // If a steer message was never delivered (no PreToolUse fired), notify the session
