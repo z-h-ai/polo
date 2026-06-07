@@ -126,6 +126,7 @@ export async function performPlatformLogin(
     return await res.json() as PlatformLoginResult
   }
 
+  const errorCode = await readErrorCode(res)
   const retryAfterSeconds = parseRetryAfterSeconds(res.headers.get('Retry-After'))
   if (res.status === 401) {
     throw new LoginError('invalid_credentials', '用户名或密码错误')
@@ -136,6 +137,9 @@ export async function performPlatformLogin(
   if (res.status === 429) {
     const seconds = retryAfterSeconds ?? 0
     throw new LoginError('rate_limited', `请 ${seconds} 秒后再试`, seconds)
+  }
+  if (errorCode === 'network_error' || res.status === 503) {
+    throw new LoginError('network_error', '无法连接服务器，请检查网络连接')
   }
 
   throw new LoginError('unknown', `Login failed: ${res.status}`)
@@ -182,4 +186,13 @@ function parseRetryAfterSeconds(value: string | null): number | undefined {
   if (!value) return undefined
   const seconds = Number.parseInt(value, 10)
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined
+}
+
+async function readErrorCode(res: Response): Promise<string | undefined> {
+  try {
+    const body = await res.json() as { error?: unknown }
+    return typeof body.error === 'string' ? body.error : undefined
+  } catch {
+    return undefined
+  }
 }

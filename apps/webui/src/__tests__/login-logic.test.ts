@@ -158,6 +158,15 @@ describe('performPlatformLogin', () => {
     expect(err.code).toBe('network_error')
     expect(err.message).toBe('无法连接服务器，请检查网络连接')
   })
+
+  it('throws LoginError with code network_error when the WebUI auth proxy returns network_error', async () => {
+    mockFetch(async () => jsonResponse({ error: 'network_error' }, 503))
+
+    const err = await performPlatformLogin('alice', 'pw')
+      .catch(e => e) as LoginError
+    expect(err.code).toBe('network_error')
+    expect(err.message).toBe('无法连接服务器，请检查网络连接')
+  })
 })
 
 // ---------------------------------------------------------------------------
