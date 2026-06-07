@@ -1,0 +1,2 @@
+# Task Progress: polo-quota.platform-key
+[2026-06-05T18:58:50.010Z] isPlatformMode() already existed in packages/shared/src/auth/platform.ts — re-exported it from llm-connections.ts rather than redefining it. TypeScript control-flow analysis narrows process.env.ANTHROPIC_API_KEY to 'undefined' after 'delete process.env.ANTHROPIC_API_KEY' — cast with 'as any' in the expect() call to avoid TS2769 while keeping the runtime assertion meaningful.

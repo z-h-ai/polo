@@ -1,0 +1,3 @@
+# Task Progress: polo-auth.file-isolation
+[2026-06-05T17:34:20.430Z] Server RPC isolation subprocess cannot self-import a bun test file because top-level describe throws outside bun test; keep subprocess scenario code inside the eval string or a non-test helper module.
+[2026-06-05T17:39:15.832Z] Workspace path resolution is implemented in packages/shared/src/workspaces/storage.ts; server-core RPC creation only composes that shared helper, so file-isolation fixes need shared tests plus server handler coverage.

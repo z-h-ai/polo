@@ -1,0 +1,36 @@
+# Task Progress: polo-auth.workspace-ownership
+[2026-06-05T18:14:44.328Z] WorkspaceConfig.ownerUserId is an optional field (string | null | undefined) added to packages/shared/src/workspaces/types.ts. Existing configs without this field load without error — the undefined value passes the 'ownerUserId == null' check in assertWorkspaceAccess.
+[2026-06-05T18:14:54.738Z] Hidden constraint: CONFIG_DIR in @polo-ai/shared/config/paths.ts is evaluated at module load time (const CONFIG_DIR = process.env.POLO_AI_CONFIG_DIR || ...). Setting POLO_AI_CONFIG_DIR after module load has no effect. Handler integration tests must use subprocess isolation (Bun.spawnSync with env: {POLO_AI_CONFIG_DIR}) to avoid tests picking up the real ~/.polo-ai config.
+[2026-06-05T18:14:59.502Z] Verified approach: assertWorkspaceAccess(ctx, workspace) uses == null for both userId and ownerUserId checks (not === null), so undefined fields work correctly without needing ?? coercions.
+[2026-06-05T18:15:05.188Z] Verified approach: ForbiddenError.code = 'FORBIDDEN' is not in the ErrorCode union in @polo-ai/shared/protocol/types.ts. This is intentional — the transport layer maps unknown codes to HANDLER_ERROR at the wire level but the code field on the error object is still readable for client-side branching. Tests assert err.code === 'FORBIDDEN' at the handler layer before the transport serializes it.
+[2026-06-05T18:15:10.237Z] Hidden constraint: @polo-ai/shared/workspaces/storage was not exported as a subpath in shared/package.json (only @polo-ai/shared/workspaces pointing to index.ts). Added './workspaces/storage': './src/workspaces/storage.ts' to shared/package.json exports for explicit resolution from server-core and tests.
+[2026-06-06T00:00:00.000Z] Fixer pass: Implemented 5 missing criteria (AC3/AC4/AC5/AC6/AC7).
+
+AC3 (handshake_ack workspaceId):
+- Added onAutoCreateWorkspace optional callback to WsRpcServerOptions in server.ts
+- During fresh connect, if client.userId && !client.workspaceId && onAutoCreateWorkspace is set, auto-create is called and result stored in client.workspaceId
+- createHandshakeAck now includes workspaceId: client.workspaceId ?? undefined
+- Added 3 tests: auto-create returns workspaceId in ack; no hook = undefined workspaceId; client-provided workspaceId echoed back
+- Test uses validateSessionCookie to inject userId into auth context (requireAuth=true path)
+
+AC4 (sessions:listSessions ownership filter):
+- In sessions.GET handler: when ctx.userId != null, filters returned sessions to those in workspaces whose ownerUserId matches ctx.userId
+- Uses require() for @polo-ai/shared/workspaces/storage and @polo-ai/shared/config to avoid circular import issues at handler registration time
+- Legacy sessions (no workspaceId), unknown workspaces, and unowned workspaces pass through (no filter)
+- Server-token (userId=null) bypasses filter — sees all sessions
+
+AC5 (workspace handlers):
+- workspaces.GET: now passes ctx.userId to sessionManager.getWorkspaces(userId) — existing platform-mode filtering in getWorkspaces() handles the userId-based filter
+- window.GET_WORKSPACE: added assertWorkspaceAccessByPath guard before setupConfigWatcher
+- workspaces.UPDATE_REMOTE: added assertWorkspaceAccessByPath guard before updateWorkspaceRemoteServer
+- Added tests for window:getWorkspace and workspaces:updateRemote ownership
+
+AC6 (files:write):
+- Confirmed no file:write channel exists in RPC_CHANNELS.file — file mutations go through agent session tools
+- Added a test documenting this intentional absence
+
+AC7 (sessions:export/import, skills:get):
+- sessions.EXPORT: added assertCtxWorkspaceAccess(ctx) before export
+- sessions.IMPORT: added assertWorkspaceAccessByPath for the targetWorkspaceId if ctx.userId is set
+- skills.GET: added assertWorkspaceAccessByPath(ctx, workspace.rootPath) guard
+- Added ownership tests for all three handlers

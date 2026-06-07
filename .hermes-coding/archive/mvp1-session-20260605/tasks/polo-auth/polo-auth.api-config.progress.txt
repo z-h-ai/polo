@@ -1,0 +1,2 @@
+# Task Progress: polo-auth.api-config
+[2026-06-05T15:34:31.619Z] CI=true bun run --cwd packages/server-core typecheck currently fails outside this task in src/sessions/refresh-connection-runtime.test.ts due LlmConnection providerType typing and self-referential test annotations; WebUI config tests are unaffected.
