@@ -6,6 +6,8 @@
 
 export { default as ChatPage } from './ChatPage'
 export { default as SourceInfoPage } from './SourceInfoPage'
+export { default as ServerErrorPage } from './ServerErrorPage'
+export { default as ConfigErrorPage } from './ConfigErrorPage'
 // Settings pages
 export {
   SettingsNavigator,
