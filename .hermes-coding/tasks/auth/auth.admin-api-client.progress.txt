@@ -1,0 +1,4 @@
+# Task Progress: auth.admin-api-client
+[2026-06-07T07:16:23.241Z] Existing quota AdminApiClient lives in packages/shared/src/admin-api, but auth task targets a separate packages/shared/src/auth/admin-auth.ts client to avoid changing quota API exports/semantics.
+[2026-06-07T07:20:12.482Z] Shared typecheck currently also fails in packages/shared/src/admin-api/__tests__/usage-reporter.test.ts with an unrelated null inference error on Authorization header expectation; focused auth test passes before addressing auth-only TS errors.
+[2026-06-07T07:27:06.125Z] validateToken read timeout must race response.json() itself, not only abort the fetch signal, because body readers and focused mocks may not reject just because the post-headers AbortSignal is aborted.

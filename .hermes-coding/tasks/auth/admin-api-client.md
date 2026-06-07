@@ -3,9 +3,11 @@ id: auth.admin-api-client
 module: auth
 type: api
 priority: 1
-status: pending
+status: completed
 estimatedMinutes: 30
 dependencies: []
+startedAt: 2026-06-07T07:15:31.091Z
+completedAt: 2026-06-07T07:29:51.824Z
 ---
 # AdminApiClient: login, logout, validate, getLlmConnections
 
