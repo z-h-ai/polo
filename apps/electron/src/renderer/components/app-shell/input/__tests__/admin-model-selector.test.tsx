@@ -1,5 +1,7 @@
 import React from 'react'
 import { describe, expect, it, mock } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { StoredConfig } from '@polo-ai/shared/config'
 import type { LlmConnectionWithStatus } from '@config/llm-connections'
@@ -153,5 +155,27 @@ describe('NoLlmConfigBanner', () => {
 
     expect(html).toContain('role="status"')
     expect(html).toContain('暂无可用的 LLM 配置，请联系管理员')
+  })
+})
+
+describe('desktop and compact model selector integration', () => {
+  const inputDir = resolve(import.meta.dir, '..')
+
+  it('wires NoLlmConfigBanner into the desktop FreeFormInput dropdown path', () => {
+    const source = readFileSync(resolve(inputDir, 'FreeFormInput.tsx'), 'utf8')
+
+    expect(source).toContain("import { NoLlmConfigBanner } from '@/components/NoLlmConfigBanner'")
+    expect(source).toContain('llmConnections.length === 0 ?')
+    expect(source).toContain('<NoLlmConfigBanner')
+  })
+
+  it('does not wire connection-mutating vision toggles into model selectors', () => {
+    const freeFormSource = readFileSync(resolve(inputDir, 'FreeFormInput.tsx'), 'utf8')
+    const compactSource = readFileSync(resolve(inputDir, 'CompactModelSelector.tsx'), 'utf8')
+
+    expect(freeFormSource).not.toContain('useModelVisionToggle')
+    expect(compactSource).not.toContain('useModelVisionToggle')
+    expect(freeFormSource).not.toContain('handleToggleModelVision')
+    expect(compactSource).not.toContain('toggleVision')
   })
 })

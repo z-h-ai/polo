@@ -15,28 +15,15 @@ import { useTranslation } from 'react-i18next'
 
 function BannerDemo({
   modelName,
-  onClickEnable,
 }: {
   modelName: string
-  onClickEnable?: () => void
 }) {
-  const [enabled, setEnabled] = React.useState(false)
   return (
     <div className="w-full max-w-[640px] mx-auto p-6">
       <div className="rounded-2xl border border-border/50 shadow-middle bg-background/40 backdrop-blur-sm">
-        {!enabled && (
-          <ImageSupportWarningBanner
-            modelName={modelName}
-            onEnable={() => {
-              setEnabled(true)
-              onClickEnable?.()
-            }}
-          />
-        )}
+        <ImageSupportWarningBanner modelName={modelName} />
         <div className="px-4 py-6 text-foreground/40 text-sm">
-          {enabled
-            ? 'Image support enabled — banner dismissed.'
-            : 'Imagine the chat input here. Banner sits above any staged attachments.'}
+          Imagine the chat input here. Banner sits above any staged attachments.
         </div>
       </div>
     </div>
