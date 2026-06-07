@@ -11,3 +11,6 @@ Non-obvious patterns that work — only record if not self-evident.
 
 ## Active Risks
 Unresolved issues that may affect future tasks.
+[2026-06-07T07:30:34.450Z] [auth.admin-api-client] Keep auth admin API client work in packages/shared/src/auth/admin-auth.ts instead of reusing packages/shared/src/admin-api quota AdminApiClient; the quota client has separate export/semantic expectations.
+[2026-06-07T07:30:34.504Z] [auth.admin-api-client] Shared typecheck may fail outside auth in packages/shared/src/admin-api/__tests__/usage-reporter.test.ts due to an unrelated null inference issue on the Authorization header expectation.
+[2026-06-07T07:30:34.563Z] [auth.admin-api-client] validateToken read timeouts need to race response.json() itself, since post-header AbortSignal aborts may not reject body readers or focused fetch mocks.
