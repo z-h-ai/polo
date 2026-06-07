@@ -91,6 +91,7 @@ import {
 import { useWorkingDirectoryState } from './use-working-directory-state'
 import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
+import { DesktopAdminLlmModelSelectorControls } from './DesktopAdminLlmModelSelectorControls'
 import {
   formatTokenCount,
   groupConnectionsByProvider,
@@ -2063,6 +2064,18 @@ export function FreeFormInput({
                 <NoLlmConfigBanner className="m-1" />
               ) : (
                 <>
+                  {pickerMode !== 'unavailable' && (
+                    <>
+                      <DesktopAdminLlmModelSelectorControls
+                        llmConnections={llmConnections}
+                        currentConnection={effectiveConnection}
+                        currentModel={currentModel}
+                        onConnectionChange={onConnectionChange}
+                        onModelChange={onModelChange}
+                      />
+                      <StyledDropdownMenuSeparator className="my-1" />
+                    </>
+                  )}
               {/* Connection unavailable message */}
               {pickerMode === 'unavailable' ? (
                 <div className="flex flex-col items-center justify-center py-6 px-4 text-center">

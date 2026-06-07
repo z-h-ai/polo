@@ -10,6 +10,7 @@ import {
   AdminLlmModelSelectorPanel,
   resolveAdminModelSelection,
 } from '../AdminLlmModelSelectorPanel'
+import { DesktopAdminLlmModelSelectorControls } from '../DesktopAdminLlmModelSelectorControls'
 
 function connection(
   slug: string,
@@ -161,12 +162,42 @@ describe('NoLlmConfigBanner', () => {
 describe('desktop and compact model selector integration', () => {
   const inputDir = resolve(import.meta.dir, '..')
 
+  it('renders desktop FreeFormInput admin connection and model controls for multiple connections', () => {
+    const html = renderToStaticMarkup(
+      <DesktopAdminLlmModelSelectorControls
+        llmConnections={[anthropic, openai]}
+        currentConnection="anthropic-api"
+        currentModel="claude-sonnet-4-6"
+        onConnectionChange={() => {}}
+        onModelChange={() => {}}
+      />,
+    )
+
+    expect(html).toContain('aria-label="LLM 连接"')
+    expect(html).toContain('aria-label="LLM 模型"')
+    expect(html).toContain('Anthropic API')
+    expect(html).toContain('OpenAI API')
+    expect(html).toContain('claude-opus-4-6')
+    expect(html).toContain('claude-sonnet-4-6')
+    expect(html).toContain('value="anthropic-api" selected=""')
+    expect(html).toContain('value="claude-sonnet-4-6" selected=""')
+  })
+
   it('wires NoLlmConfigBanner into the desktop FreeFormInput dropdown path', () => {
     const source = readFileSync(resolve(inputDir, 'FreeFormInput.tsx'), 'utf8')
 
     expect(source).toContain("import { NoLlmConfigBanner } from '@/components/NoLlmConfigBanner'")
     expect(source).toContain('llmConnections.length === 0 ?')
     expect(source).toContain('<NoLlmConfigBanner')
+  })
+
+  it('wires admin selector controls into the desktop FreeFormInput dropdown path', () => {
+    const source = readFileSync(resolve(inputDir, 'FreeFormInput.tsx'), 'utf8')
+
+    expect(source).toContain("import { DesktopAdminLlmModelSelectorControls } from './DesktopAdminLlmModelSelectorControls'")
+    expect(source).toContain('<DesktopAdminLlmModelSelectorControls')
+    expect(source).toContain('llmConnections={llmConnections}')
+    expect(source).toContain('currentConnection={effectiveConnection}')
   })
 
   it('does not wire connection-mutating vision toggles into model selectors', () => {
