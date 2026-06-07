@@ -3,9 +3,11 @@ id: llm.credential-store
 module: llm
 type: domain
 priority: 8
-status: pending
+status: completed
 estimatedMinutes: 30
 dependencies: [llm.config-decrypt]
+startedAt: 2026-06-07T09:30:07.783Z
+completedAt: 2026-06-07T09:41:22.379Z
 ---
 # Write Decrypted Keys to CredentialManager + StoredConfig
 

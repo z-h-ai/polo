@@ -10,3 +10,5 @@
 [2026-06-07T09:05:54.292Z] COMPLETED: auth.error-pages
 [2026-06-07T09:09:55.641Z] STARTED: llm.config-decrypt
 [2026-06-07T09:22:06.520Z] COMPLETED: llm.config-decrypt
+[2026-06-07T09:30:07.786Z] STARTED: llm.credential-store
+[2026-06-07T09:41:22.381Z] COMPLETED: llm.credential-store
