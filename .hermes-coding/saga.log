@@ -24,3 +24,5 @@
 [2026-06-07T12:02:18.973Z] COMPLETED: cleanup.local-models
 [2026-06-07T12:06:05.261Z] STARTED: cleanup.oauth
 [2026-06-07T12:28:47.356Z] COMPLETED: cleanup.oauth
+[2026-06-07T12:45:12.643Z] STARTED: cleanup.old-auth
+[2026-06-07T13:14:20.707Z] COMPLETED: cleanup.old-auth

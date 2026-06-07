@@ -1,0 +1,5 @@
+# Task Progress: cleanup.old-auth
+[2026-06-07T12:52:14.084Z] Shared AdminApiClient already resolves POLO_ADMIN_API_URL, but server-core WebUI login/quota/public-config and bootstrap usage retry still read ADMIN_API_URL; cleanup.old-auth should align server startup/webui paths to POLO_ADMIN_API_URL to avoid split Admin API configuration.
+[2026-06-07T12:52:45.227Z] WsRpcClient remote auth still sends opts.token inside the JSON handshake rather than HTTP upgrade headers; cleanup.old-auth can remove WebUI/x-server-token upgrade fallback without changing all remote client compatibility paths in the same task.
+[2026-06-07T12:54:37.572Z] Focused bun test paths under packages/server-core can also execute stale dist/server copies in this workspace; cleanup.old-auth verification should remove or avoid dist/server outputs before relying on auth cleanup test results.
+[2026-06-07T13:03:13.987Z] Bun's fetch type includes a preconnect property in this repo, so assigning focused test fetch mocks directly to globalThis.fetch fails typecheck; cast fetch mocks through unknown or spyOn(globalThis,'fetch') for server-core webui tests.

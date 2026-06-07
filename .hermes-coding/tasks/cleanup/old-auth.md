@@ -3,9 +3,11 @@ id: cleanup.old-auth
 module: cleanup
 type: domain
 priority: 13
-status: pending
+status: completed
 estimatedMinutes: 35
 dependencies: [auth.startup-flow, auth.login-page, auth.admin-api-client]
+startedAt: 2026-06-07T12:45:12.640Z
+completedAt: 2026-06-07T13:14:20.704Z
 ---
 # Remove CRAFT_WEBUI_PASSWORD / CRAFT_SERVER_TOKEN Auth
 
