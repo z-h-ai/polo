@@ -164,16 +164,6 @@ export const RPC_CHANNELS = {
   credentials: {
     HEALTH_CHECK: 'credentials:healthCheck',
   },
-  onboarding: {
-    GET_AUTH_STATE: 'onboarding:getAuthState',
-    VALIDATE_MCP: 'onboarding:validateMcp',
-    START_MCP_OAUTH: 'onboarding:startMcpOAuth',
-    START_CLAUDE_OAUTH: 'onboarding:startClaudeOAuth',
-    EXCHANGE_CLAUDE_CODE: 'onboarding:exchangeClaudeCode',
-    HAS_CLAUDE_OAUTH_STATE: 'onboarding:hasClaudeOAuthState',
-    CLEAR_CLAUDE_OAUTH_STATE: 'onboarding:clearClaudeOAuthState',
-    DEFER_SETUP: 'onboarding:deferSetup',
-  },
   llmConnections: {
     LIST: 'LLM_Connection:list',
     LIST_WITH_STATUS: 'LLM_Connection:listWithStatus',

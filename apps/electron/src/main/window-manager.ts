@@ -43,7 +43,7 @@ interface ManagedWindow {
 }
 
 export interface CreateWindowOptions {
-  /** The workspace to open (empty string for onboarding) */
+  /** The workspace to open; empty string means no workspace is selected yet. */
   workspaceId: string
   /** Whether to open in focused mode (smaller window, no sidebars) */
   focused?: boolean
@@ -163,7 +163,7 @@ export class WindowManager {
    * Apply the window-title policy across all managed windows:
    *   1 window  → app name ("Polo AI") on the lone window
    *   ≥2 windows → workspace name on each window, app-name fallback when the
-   *                workspace can't be resolved (e.g. onboarding window).
+   *                workspace can't be resolved.
    *
    * Called after createWindow() registers a new window and after the closed
    * handler removes one, so titles always reflect the current window count.

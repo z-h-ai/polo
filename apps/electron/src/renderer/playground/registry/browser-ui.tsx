@@ -965,7 +965,7 @@ export const browserUiComponents: ComponentEntry[] = [
       },
       {
         name: 'surfaceMode',
-        description: 'Switch between generic mock page content and the new browser onboarding empty state.',
+        description: 'Switch between generic mock page content and the browser empty state.',
         control: {
           type: 'select',
           options: [

@@ -259,7 +259,7 @@ const mockAutomations: AutomationListItem[] = [
     summary: 'Greet on new session',
     enabled: true,
     actions: [{ type: 'prompt', prompt: 'Welcome! Check if there are any pending @linear issues assigned to me.' }],
-    labels: ['Onboarding'],
+    labels: ['Welcome'],
     lastExecutedAt: now - 7200_000, // 2 hours ago
   },
   {

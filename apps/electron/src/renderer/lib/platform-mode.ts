@@ -9,7 +9,7 @@
  * the server-side key handles all LLM connectivity. This hides:
  * - The "AI" settings page (LLM connections, model management)
  * - Connection picker / model selector
- * - Onboarding API Key / OAuth steps
+ * - Local API key / OAuth setup UI
  *
  * State matrix (from spec §8.3):
  * | platformMode     | LLM Config Nav | LLM Config Page | Model Provider Settings |

@@ -102,7 +102,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     statuses,
     coreSystem,
     coreWorkspace,
-    onboarding,
     resources,
     transfer,
   ] = await Promise.all([
@@ -119,7 +118,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     import('@polo-ai/server-core/handlers/rpc/statuses'),
     import('@polo-ai/server-core/handlers/rpc/system'),
     import('@polo-ai/server-core/handlers/rpc/workspace'),
-    import('@polo-ai/server-core/handlers/rpc/onboarding'),
     import('@polo-ai/server-core/handlers/rpc/resources'),
     import('@polo-ai/server-core/handlers/rpc/transfer'),
   ])
@@ -146,7 +144,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...statuses.HANDLED_CHANNELS,
     ...coreSystem.CORE_HANDLED_CHANNELS,
     ...coreWorkspace.CORE_HANDLED_CHANNELS,
-    ...onboarding.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
     ...browser.HANDLED_CHANNELS,
@@ -187,17 +184,5 @@ describe('RPC handler registration', () => {
       .sort()
 
     expect(duplicates).toEqual([])
-  })
-
-  it('keeps onboarding channels in registration coverage', async () => {
-    const { HANDLED_CHANNELS } = await import('@polo-ai/server-core/handlers/rpc/onboarding')
-    const { registerAllRpcHandlers } = await import('../index')
-
-    registerAllRpcHandlers(createMockServer(), createMockDeps())
-
-    const actual = new Set(registeredChannels)
-    const missingOnboarding = HANDLED_CHANNELS.filter(ch => !actual.has(ch))
-
-    expect(missingOnboarding).toEqual([])
   })
 })

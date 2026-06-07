@@ -18,6 +18,7 @@ type ApiToChannelMapKeys = Exclude<
   | 'getTransportConnectionState'
   | 'getRuntimeEnvironment'
   | 'authLogin' // direct IPC to main process — platform auth stores tokens outside renderer
+  | 'hasAdminSession' // direct IPC to main process — checks token presence without exposing it
   | 'onTransportConnectionStateChanged'
   | 'reconnectTransport'
   | 'isChannelAvailable'

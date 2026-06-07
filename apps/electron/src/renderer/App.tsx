@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -12,7 +12,6 @@ import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
 import type { AppShellContextType } from '@/context/AppShellContext'
-import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
 import { SplashScreen } from '@/components/SplashScreen'
@@ -21,7 +20,6 @@ import { FocusProvider } from '@/context/FocusContext'
 import { ModalProvider } from '@/context/ModalContext'
 import { DismissibleLayerProvider } from '@/context/DismissibleLayerContext'
 import { useWindowCloseHandler } from '@/hooks/useWindowCloseHandler'
-import { useOnboarding } from '@/hooks/useOnboarding'
 import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
@@ -77,7 +75,7 @@ import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 import { handleRendererSessionExpired } from './lib/session-expired-flow'
 
-type AppState = 'loading' | 'login' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
+type AppState = 'loading' | 'login' | 'workspace-picker' | 'ready'
 
 /** Type for the Jotai store returned by useStore() */
 type JotaiStore = ReturnType<typeof getDefaultStore>
@@ -235,10 +233,9 @@ export default function App() {
     })
   }, [])
 
-  // App state: loading -> check auth -> onboarding or ready
+  // App state: loading -> check auth -> login, workspace picker, or ready
   const [appState, setAppState] = useState<AppState>('loading')
   const [sessionExpiredDialogVisible, setSessionExpiredDialogVisible] = useState(false)
-  const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
 
   // Per-session Jotai atom setters for isolated updates
   // NOTE: No sessionsAtom - we don't store a Session[] array anywhere to prevent memory leaks
@@ -610,74 +607,33 @@ export default function App() {
     }
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
 
-  // Handle onboarding completion
-  const handleOnboardingComplete = useCallback(async () => {
-    try {
-      // Reload workspaces after onboarding
-      const ws = await window.electronAPI.getWorkspaces()
-      if (ws.length > 0) {
-        // Switch to workspace in-place (no window close/reopen)
-        await window.electronAPI.switchWorkspace(ws[0].id)
-        setWindowWorkspaceId(ws[0].id)
-        setWorkspaces(ws)
-      } else {
-        setWorkspaces(ws)
-      }
-    } catch (error) {
-      console.error('[App] Failed to load workspaces after onboarding:', error)
-      // Still transition to ready — the app can recover via reconnect
-    }
-    setAppState('ready')
-  }, [])
-
-  // Onboarding hook — onConfigSaved fires immediately when billing is saved,
-  // ensuring connection state updates before the wizard closes.
-  const onboarding = useOnboarding({
-    onComplete: handleOnboardingComplete,
-    onConfigSaved: refreshLlmConnections,
-    initialSetupNeeds: setupNeeds || undefined,
-  })
-
   const syncPostLoginAppState = useCallback(async () => {
     try {
+      const hasSession = await window.electronAPI.hasAdminSession()
+      if (!hasSession) {
+        setAppState('login')
+        return
+      }
+
       // Get this window's workspace ID (passed via URL query param from main process)
       const wsId = await window.electronAPI.getWindowWorkspace()
       setWindowWorkspaceId(wsId)
 
-      const needs = await window.electronAPI.getSetupNeeds()
-      setSetupNeeds(needs)
-
-      if (needs.isFullyConfigured) {
-        // If no workspace is selected (thin client without POLO_AI_WORKSPACE_ID),
-        // show workspace picker before entering the main app
-        setAppState(wsId ? 'ready' : 'workspace-picker')
-      } else {
-        // New user or needs setup - show onboarding
-        setAppState('onboarding')
-      }
+      // If no workspace is selected (thin client without POLO_AI_WORKSPACE_ID),
+      // show workspace picker before entering the main app.
+      setAppState(wsId ? 'ready' : 'workspace-picker')
     } catch (error) {
-      console.error('Failed to check auth state:', error)
-      // If check fails, show onboarding to be safe
-      setAppState('onboarding')
+      console.error('Failed to check app startup state:', error)
+      setAppState('login')
     }
   }, [])
-
-  // Reauth login handler - placeholder (reauth is not currently used)
-  const handleReauthLogin = useCallback(async () => {
-    await syncPostLoginAppState()
-  }, [syncPostLoginAppState])
 
   const handleLoginSuccess = useCallback(() => {
     setSessionExpiredDialogVisible(false)
     void syncPostLoginAppState()
   }, [syncPostLoginAppState])
 
-  // Reauth reset handler - open reset confirmation dialog
-  const handleReauthReset = useCallback(() => {
-    setShowResetDialog(true)
-  }, [])
-
-  // Check auth state and get window's workspace ID on mount
+  // Check cached Admin session and this window's workspace ID on mount.
   useEffect(() => {
     void syncPostLoginAppState()
   }, [syncPostLoginAppState])
@@ -1695,13 +1651,7 @@ export default function App() {
     store.set(skillsAtom, [])
     store.set(sessionMetaMapAtom, new Map())
     store.set(sessionIdsAtom, [])
-    setSetupNeeds({
-      needsBillingConfig: true,
-      needsCredentials: true,
-      isFullyConfigured: false,
-    })
-    onboarding.reset()
-  }, [initializeSessions, onboarding, setSession, store])
+  }, [initializeSessions, setSession, store])
 
   const handleLogout = useCallback(async () => {
     try {
@@ -1734,21 +1684,22 @@ export default function App() {
       initializeSessions([])
       setWorkspaces([])
       setWindowWorkspaceId(null)
-      // Reset setupNeeds to force fresh onboarding start
-      setSetupNeeds({
-        needsBillingConfig: true,
-        needsCredentials: true,
-        isFullyConfigured: false,
-      })
-      // Reset onboarding hook state
-      onboarding.reset()
-      setAppState('onboarding')
+      setSession({ selected: null })
+      setPendingPermissions(new Map())
+      setPendingCredentials(new Map())
+      setSessionOptions(new Map())
+      sessionDraftsRef.current.clear()
+      store.set(sourcesAtom, [])
+      store.set(skillsAtom, [])
+      store.set(sessionMetaMapAtom, new Map())
+      store.set(sessionIdsAtom, [])
+      setAppState('login')
     } catch (error) {
       console.error('Reset failed:', error)
     } finally {
       setShowResetDialog(false)
     }
-  }, [onboarding, initializeSessions])
+  }, [initializeSessions, setSession, store])
 
   // Handle workspace selection
   // - Default: switch workspace in same window (in-window switching)
@@ -1815,11 +1766,6 @@ export default function App() {
   const handleRefreshWorkspaces = useCallback(() => {
     window.electronAPI.getWorkspaces().then(setWorkspaces)
   }, [])
-
-  // Handle cancel during onboarding
-  const handleOnboardingCancel = useCallback(() => {
-    onboarding.handleCancel()
-  }, [onboarding])
 
   // Build context value for AppShell component
   // This is memoized to prevent unnecessary re-renders
@@ -1958,60 +1904,6 @@ export default function App() {
           <SessionExpiredDialog
             visible={sessionExpiredDialogVisible}
             onLogin={() => setSessionExpiredDialogVisible(false)}
-          />
-        </ModalProvider>
-      </DismissibleLayerProvider>
-    )
-  }
-
-  // Reauth state - session expired, need to re-login
-  // ModalProvider + WindowCloseHandler ensures X button works on Windows
-  if (appState === 'reauth') {
-    return (
-      <DismissibleLayerProvider>
-        <ModalProvider>
-          <WindowCloseHandler />
-          <ReauthScreen
-            onLogin={handleReauthLogin}
-            onReset={handleReauthReset}
-          />
-          <ResetConfirmationDialog
-            open={showResetDialog}
-            onConfirm={executeReset}
-            onCancel={() => setShowResetDialog(false)}
-          />
-        </ModalProvider>
-      </DismissibleLayerProvider>
-    )
-  }
-
-  // Onboarding state
-  // ModalProvider + WindowCloseHandler ensures X button works on Windows
-  // (without this, the close IPC message has no listener and window stays open)
-  if (appState === 'onboarding') {
-    return (
-      <DismissibleLayerProvider>
-        <ModalProvider>
-          <WindowCloseHandler />
-          <OnboardingWizard
-            state={onboarding.state}
-            onContinue={onboarding.handleContinue}
-            onBack={onboarding.handleBack}
-            onSelectProvider={onboarding.handleSelectProvider}
-            onSkipSetup={onboarding.handleSkipSetup}
-            onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
-            onSubmitCredential={onboarding.handleSubmitCredential}
-            onSubmitLocalModel={onboarding.handleSubmitLocalModel}
-            onStartOAuth={onboarding.handleStartOAuth}
-            onFinish={onboarding.handleFinish}
-            isWaitingForCode={onboarding.isWaitingForCode}
-            onSubmitAuthCode={onboarding.handleSubmitAuthCode}
-            onCancelOAuth={onboarding.handleCancelOAuth}
-            copilotDeviceCode={onboarding.copilotDeviceCode}
-            onBrowseGitBash={onboarding.handleBrowseGitBash}
-            onUseGitBashPath={onboarding.handleUseGitBashPath}
-            onRecheckGitBash={onboarding.handleRecheckGitBash}
-            onClearError={onboarding.handleClearError}
           />
         </ModalProvider>
       </DismissibleLayerProvider>

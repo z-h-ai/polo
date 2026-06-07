@@ -123,16 +123,6 @@ export const CHANNEL_MAP = {
   onSessionExpired: listener(RPC_CHANNELS.auth.SESSION_EXPIRED),
   getCredentialHealth: invoke(RPC_CHANNELS.credentials.HEALTH_CHECK),
 
-  // Onboarding
-  getAuthState: invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE),
-  getSetupNeeds: invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE, r => r.setupNeeds),
-  startWorkspaceMcpOAuth: invoke(RPC_CHANNELS.onboarding.START_MCP_OAUTH),
-  startClaudeOAuth: invoke(RPC_CHANNELS.onboarding.START_CLAUDE_OAUTH),
-  exchangeClaudeCode: invoke(RPC_CHANNELS.onboarding.EXCHANGE_CLAUDE_CODE),
-  hasClaudeOAuthState: invoke(RPC_CHANNELS.onboarding.HAS_CLAUDE_OAUTH_STATE),
-  clearClaudeOAuthState: invoke(RPC_CHANNELS.onboarding.CLEAR_CLAUDE_OAUTH_STATE),
-  deferSetup: invoke(RPC_CHANNELS.onboarding.DEFER_SETUP),
-
   // ChatGPT OAuth
   startChatGptOAuth: invoke(RPC_CHANNELS.chatgpt.START_OAUTH),
   cancelChatGptOAuth: invoke(RPC_CHANNELS.chatgpt.CANCEL_OAUTH),

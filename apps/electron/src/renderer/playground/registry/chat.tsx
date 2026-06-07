@@ -1,7 +1,6 @@
 import * as React from 'react'
 import type { ComponentEntry } from './types'
 import { AttachmentPreview } from '@/components/app-shell/AttachmentPreview'
-import { SetupAuthBanner } from '@/components/app-shell/SetupAuthBanner'
 import { TurnCard, type ActivityItem } from '@polo-ai/ui'
 import type { BackgroundTask } from '@/components/app-shell/ActiveTasksBar'
 import { ActiveOptionBadges } from '@/components/app-shell/ActiveOptionBadges'
@@ -1011,45 +1010,6 @@ export const chatComponents: ComponentEntry[] = [
     mockData: () => ({
       attachments: [sampleImageAttachment, samplePdfAttachment],
       onRemove: mockAttachmentCallbacks.onRemove,
-    }),
-  },
-  {
-    id: 'setup-auth-banner',
-    name: 'SetupAuthBanner',
-    category: 'Chat',
-    description: 'Shows when an agent needs activation or authentication',
-    component: SetupAuthBanner,
-    props: [
-      {
-        name: 'state',
-        description: 'Banner state',
-        control: {
-          type: 'select',
-          options: [
-            { label: 'Hidden', value: 'hidden' },
-            { label: 'MCP Auth', value: 'mcp_auth' },
-            { label: 'API Auth', value: 'api_auth' },
-            { label: 'Error', value: 'error' },
-          ],
-        },
-        defaultValue: 'mcp_auth',
-      },
-      {
-        name: 'reason',
-        description: 'Custom reason message',
-        control: { type: 'string', placeholder: 'Optional custom reason' },
-        defaultValue: '',
-      },
-    ],
-    variants: [
-      { name: 'MCP Auth', props: { state: 'mcp_auth' } },
-      { name: 'API Auth', props: { state: 'api_auth' } },
-      { name: 'Custom Reason', props: { state: 'api_auth', reason: 'Your OAuth token has expired. Please re-authenticate to continue.' } },
-      { name: 'Error', props: { state: 'error' } },
-      { name: 'Hidden', props: { state: 'hidden' } },
-    ],
-    mockData: () => ({
-      onAction: () => console.log('[Playground] Setup/Auth action clicked'),
     }),
   },
   {

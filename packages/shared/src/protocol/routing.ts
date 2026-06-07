@@ -197,11 +197,6 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // debug — local debug logging
   RPC_CHANNELS.debug.LOG,
 
-  // onboarding — local auth setup flow
-  RPC_CHANNELS.onboarding.GET_AUTH_STATE,
-  RPC_CHANNELS.onboarding.VALIDATE_MCP,
-  RPC_CHANNELS.onboarding.START_MCP_OAUTH,
-  RPC_CHANNELS.onboarding.DEFER_SETUP,
   RPC_CHANNELS.settings.GET_NETWORK_PROXY,
   RPC_CHANNELS.settings.SET_NETWORK_PROXY,
 
@@ -308,14 +303,6 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.copilot.GET_AUTH_STATUS,
   RPC_CHANNELS.copilot.LOGOUT,
   RPC_CHANNELS.copilot.DEVICE_CODE,
-
-  // Claude OAuth — runs on workspace server so credentials and connection config
-  // end up on the same server that will use them. Browser opening is client-side.
-  // (ChatGPT OAuth stays LOCAL_ONLY — requires localhost callback server.)
-  RPC_CHANNELS.onboarding.START_CLAUDE_OAUTH,
-  RPC_CHANNELS.onboarding.EXCHANGE_CLAUDE_CODE,
-  RPC_CHANNELS.onboarding.HAS_CLAUDE_OAUTH_STATE,
-  RPC_CHANNELS.onboarding.CLEAR_CLAUDE_OAUTH_STATE,
 
   // settings — workspace-level settings
   RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,

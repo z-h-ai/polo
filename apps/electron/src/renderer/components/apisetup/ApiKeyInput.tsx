@@ -7,7 +7,7 @@
  * Does NOT include layout wrappers or action buttons — the parent
  * controls placement via the form ID ("api-key-form") for submit binding.
  *
- * Used in: Onboarding CredentialsStep, Settings API dialog
+ * Used in: Settings API dialog
  */
 
 import { useState, useEffect, useCallback, useRef } from "react"

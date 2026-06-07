@@ -9,7 +9,7 @@
  * button placement and loading states. Error display follows the same pattern
  * as ApiKeyInput (shown below the content area).
  *
- * Used in: Onboarding CredentialsStep, Settings OAuth dialog
+ * Used in: Settings OAuth dialog
  */
 
 import { useState } from "react"

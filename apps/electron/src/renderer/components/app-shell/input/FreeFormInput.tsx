@@ -316,7 +316,7 @@ export function FreeFormInput({
   const { t } = useTranslation()
   const platformMode = useAtomValue(platformModeAtom)
 
-  // Default rotating placeholders for onboarding/empty state (i18n-aware)
+  // Default rotating placeholders for empty state (i18n-aware)
   const defaultPlaceholders = React.useMemo(() => [
     t("chatInput.placeholder.workOn"),
     t("chatInput.placeholder.shiftTab"),

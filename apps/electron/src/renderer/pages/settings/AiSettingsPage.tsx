@@ -4,7 +4,7 @@
  * Unified AI settings page that consolidates all LLM-related configuration:
  * - Default connection, model, and thinking level
  * - Per-workspace overrides
- * - Connection management (add/edit/delete)
+ * - Connection management
  *
  * Follows the Appearance settings pattern: app-level defaults + workspace overrides.
  */
@@ -18,11 +18,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { routes } from '@/lib/navigate'
-import { X, MoreHorizontal, Pencil, Trash2, Star, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, RefreshCcw, Settings2, MessageSquareMore, Zap, Clock, Check } from 'lucide-react'
+import { MoreHorizontal, Pencil, Trash2, Star, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, RefreshCcw, MessageSquareMore, Zap, Clock, Check } from 'lucide-react'
 import type { CredentialHealthStatus, CredentialHealthIssue } from '../../../shared/types'
-import { Spinner, FullscreenOverlayBase } from '@polo-ai/ui'
-import { useSetAtom } from 'jotai'
-import { fullscreenOverlayOpenAtom } from '@/atoms/overlay'
+import { Spinner } from '@polo-ai/ui'
 import { motion, AnimatePresence } from 'motion/react'
 import type { LlmConnectionWithStatus, ThinkingLevel, WorkspaceSettings, Workspace } from '../../../shared/types'
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '@polo-ai/shared/agent/thinking-levels'
@@ -49,13 +47,11 @@ import {
   SettingsMenuSelectRow,
   SettingsToggle,
 } from '@/components/settings'
-import { useOnboarding } from '@/hooks/useOnboarding'
 import { useWorkspaceIcon } from '@/hooks/useWorkspaceIcon'
-import { OnboardingWizard, type ApiSetupMethod } from '@/components/onboarding'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
-import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
+import { getModelsForProviderType, resolveMidStreamBehavior, type MidStreamBehavior } from '@config/llm-connections'
 import { toast } from 'sonner'
 
 /**
@@ -125,10 +121,9 @@ function getHealthIssueMessage(issue: CredentialHealthIssue, t: (key: string) =>
 
 interface CredentialHealthBannerProps {
   issues: CredentialHealthIssue[]
-  onReauthenticate: () => void
 }
 
-function CredentialHealthBanner({ issues, onReauthenticate }: CredentialHealthBannerProps) {
+function CredentialHealthBanner({ issues }: CredentialHealthBannerProps) {
   const { t } = useTranslation()
   if (issues.length === 0) return null
 
@@ -144,14 +139,6 @@ function CredentialHealthBanner({ issues, onReauthenticate }: CredentialHealthBa
             {getHealthIssueMessage(issues[0], t)}
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onReauthenticate}
-          className="flex-shrink-0 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
-        >
-          {t("settings.ai.reAuthenticate")}
-        </Button>
       </div>
     </div>
   )
@@ -193,14 +180,12 @@ interface ConnectionRowProps {
   onDelete: () => void
   onSetDefault: () => void
   onValidate: () => void
-  onReauthenticate: () => void
-  onEdit: () => void
   onSetMidStreamBehavior: (behavior: MidStreamBehavior) => void
   validationState: ValidationState
   validationError?: string
 }
 
-function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, onSetDefault, onValidate, onReauthenticate, onEdit, onSetMidStreamBehavior, validationState, validationError }: ConnectionRowProps) {
+function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, onSetDefault, onValidate, onSetMidStreamBehavior, validationState, validationError }: ConnectionRowProps) {
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [piBaseUrl, setPiBaseUrl] = useState<string | undefined>(undefined)
@@ -314,17 +299,6 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
             <StyledDropdownMenuItem onClick={onSetDefault}>
               <Star className="h-3.5 w-3.5" />
               <span>{t("settings.ai.setAsDefault")}</span>
-            </StyledDropdownMenuItem>
-          )}
-          {connection.authType === 'oauth' ? (
-            <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onReauthenticate)}>
-              <RefreshCcw className="h-3.5 w-3.5" />
-              <span>{t("settings.ai.reAuthenticate")}</span>
-            </StyledDropdownMenuItem>
-          ) : (
-            <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onEdit)}>
-              <Settings2 className="h-3.5 w-3.5" />
-              <span>{t("common.edit")}</span>
             </StyledDropdownMenuItem>
           )}
           <StyledDropdownMenuItem
@@ -587,17 +561,6 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
 }
 
 // ============================================
-// Helpers
-// ============================================
-
-/** Map a connection's provider type to the corresponding API key setup method. */
-function getApiKeyMethodForConnection(conn: LlmConnectionWithStatus): ApiSetupMethod {
-  const provider = conn.providerType || conn.type
-  if (provider === 'pi' || provider === 'pi_compat') return 'pi_api_key'
-  return 'anthropic_api_key'
-}
-
-// ============================================
 // Main Component
 // ============================================
 
@@ -608,20 +571,6 @@ export default function AiSettingsPage() {
 
   // In platform mode, the server provides the API key — hide LLM config UI
   if (platformMode) return null
-
-  // API Setup overlay state
-  const [showApiSetup, setShowApiSetup] = useState(false)
-  const [editingConnectionSlug, setEditingConnectionSlug] = useState<string | null>(null)
-  const [isDirectEdit, setIsDirectEdit] = useState(false)
-  const [editInitialValues, setEditInitialValues] = useState<{
-    apiKey?: string
-    baseUrl?: string
-    connectionDefaultModel?: string
-    activePreset?: string
-    models?: string[]
-    customApi?: CustomEndpointApi
-  } | undefined>(undefined)
-  const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
 
   // Workspaces for override cards
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -684,71 +633,6 @@ export default function AiSettingsPage() {
     load()
   }, [activeWorkspaceId])
 
-  // Helpers to open/close the fullscreen API setup overlay
-  const openApiSetup = useCallback((connectionSlug?: string) => {
-    setEditingConnectionSlug(connectionSlug || null)
-    setShowApiSetup(true)
-    setFullscreenOverlayOpen(true)
-  }, [setFullscreenOverlayOpen])
-
-  const closeApiSetup = useCallback(() => {
-    setShowApiSetup(false)
-    setFullscreenOverlayOpen(false)
-    setEditingConnectionSlug(null)
-  }, [setFullscreenOverlayOpen])
-
-  // Derive existing slugs for unique slug generation
-  const existingSlugs = useMemo(
-    () => new Set(llmConnections.map(c => c.slug)),
-    [llmConnections],
-  )
-
-  // OnboardingWizard hook for editing API connection
-  const apiSetupOnboarding = useOnboarding({
-    initialStep: 'provider-select',
-    onConfigSaved: refreshLlmConnections,
-    onComplete: () => {
-      closeApiSetup()
-      refreshLlmConnections?.()
-      apiSetupOnboarding.reset()
-    },
-    onDismiss: () => {
-      closeApiSetup()
-      apiSetupOnboarding.reset()
-    },
-    editingSlug: editingConnectionSlug,
-    existingSlugs,
-  })
-
-  const handleApiSetupFinish = useCallback(() => {
-    closeApiSetup()
-    refreshLlmConnections?.()
-    apiSetupOnboarding.reset()
-    // Clear any credential health issues after successful re-authentication
-    setCredentialHealthIssues([])
-    setIsDirectEdit(false)
-    setEditInitialValues(undefined)
-  }, [closeApiSetup, refreshLlmConnections, apiSetupOnboarding])
-
-  // Handler for closing the modal via X button or Escape - resets state and cancels OAuth
-  const handleCloseApiSetup = useCallback(() => {
-    closeApiSetup()
-    apiSetupOnboarding.reset()
-    setIsDirectEdit(false)
-    setEditInitialValues(undefined)
-  }, [closeApiSetup, apiSetupOnboarding])
-
-  // Handler for re-authenticate button in credential health banner
-  const handleReauthenticate = useCallback(() => {
-    // Open API setup for the default connection (or first connection if available)
-    const defaultConn = llmConnections.find(c => c.isDefault) || llmConnections[0]
-    if (defaultConn) {
-      openApiSetup(defaultConn.slug)
-    } else {
-      openApiSetup()
-    }
-  }, [llmConnections, openApiSetup])
-
   // Connection action handlers
   const handleRenameClick = useCallback((connection: LlmConnectionWithStatus) => {
     setRenamingConnection({ slug: connection.slug, name: connection.name })
@@ -784,55 +668,6 @@ export default function AiSettingsPage() {
     setRenamingConnection(null)
     setRenameValue('')
   }, [renamingConnection, renameValue, refreshLlmConnections])
-
-  const handleReauthenticateConnection = useCallback((connection: LlmConnectionWithStatus) => {
-    openApiSetup(connection.slug)
-    apiSetupOnboarding.reset()
-
-    if (connection.authType === 'oauth') {
-      const method = connection.providerType === 'pi'
-                   ? (connection.piAuthProvider === 'github-copilot' ? 'pi_copilot_oauth' : 'pi_chatgpt_oauth')
-                   : 'claude_oauth'
-      apiSetupOnboarding.handleStartOAuth(method, connection.slug)
-    }
-  }, [apiSetupOnboarding, openApiSetup])
-
-  const handleEditConnection = useCallback(async (connection: LlmConnectionWithStatus) => {
-    // Fetch stored API key (best-effort — if IPC not available yet, skip pre-fill)
-    let apiKey: string | undefined
-    try {
-      apiKey = (await window.electronAPI.getLlmConnectionApiKey(connection.slug)) ?? undefined
-    } catch {
-      // IPC method may not exist if app wasn't restarted after code change
-    }
-
-    // Build model string from connection's models array
-    const modelStr = connection.models
-      ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
-      .join(', ') || connection.defaultModel || ''
-
-    // Set initial values before opening overlay so ApiKeyInput mounts with them
-    const modelIds = connection.models
-      ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
-      .filter(Boolean)
-
-    const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()
-
-    setEditInitialValues({
-      apiKey,
-      baseUrl: connection.baseUrl,
-      connectionDefaultModel: modelStr,
-      activePreset: isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined),
-      models: modelIds,
-      customApi: connection.customEndpoint?.api,
-    })
-
-    // Open overlay and jump directly to credentials step (no reset — jumpToCredentials sets state)
-    openApiSetup(connection.slug)
-    setIsDirectEdit(true)
-    const method = getApiKeyMethodForConnection(connection)
-    apiSetupOnboarding.jumpToCredentials(method)
-  }, [apiSetupOnboarding, openApiSetup])
 
   const handleDeleteConnection = useCallback(async (slug: string) => {
     if (!window.electronAPI) return
@@ -1016,7 +851,6 @@ export default function AiSettingsPage() {
             {/* Credential Health Warning Banner */}
             <CredentialHealthBanner
               issues={credentialHealthIssues}
-              onReauthenticate={handleReauthenticate}
             />
 
             <div className="space-y-8">
@@ -1101,8 +935,6 @@ export default function AiSettingsPage() {
                         onDelete={() => handleDeleteConnection(conn.slug)}
                         onSetDefault={() => handleSetDefaultConnection(conn.slug)}
                         onValidate={() => handleValidateConnection(conn.slug)}
-                        onReauthenticate={() => handleReauthenticateConnection(conn)}
-                        onEdit={() => handleEditConnection(conn)}
                         onSetMidStreamBehavior={(behavior) => handleSetMidStreamBehavior(conn, behavior)}
                         validationState={validationStates[conn.slug]?.state || 'idle'}
                         validationError={validationStates[conn.slug]?.error}
@@ -1110,14 +942,6 @@ export default function AiSettingsPage() {
                     ))
                   )}
                 </SettingsCard>
-                <div className="pt-0">
-                  <button
-                    onClick={() => openApiSetup()}
-                    className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
-                  >
-                    {t("settings.ai.addConnection")}
-                  </button>
-                </div>
               </SettingsSection>
 
               {/* Performance */}
@@ -1195,43 +1019,6 @@ export default function AiSettingsPage() {
                   )}
                 </SettingsCard>
               </SettingsSection>
-
-              {/* API Setup Fullscreen Overlay */}
-              <FullscreenOverlayBase
-                isOpen={showApiSetup}
-                onClose={handleCloseApiSetup}
-                className="z-splash flex flex-col bg-foreground-2"
-              >
-                <OnboardingWizard
-                  state={apiSetupOnboarding.state}
-                  onContinue={apiSetupOnboarding.handleContinue}
-                  onBack={isDirectEdit ? handleCloseApiSetup : apiSetupOnboarding.handleBack}
-                  onSelectProvider={apiSetupOnboarding.handleSelectProvider}
-                  onSelectApiSetupMethod={apiSetupOnboarding.handleSelectApiSetupMethod}
-                  onSubmitCredential={apiSetupOnboarding.handleSubmitCredential}
-                  onSubmitLocalModel={apiSetupOnboarding.handleSubmitLocalModel}
-                  onStartOAuth={apiSetupOnboarding.handleStartOAuth}
-                  onFinish={handleApiSetupFinish}
-                  isWaitingForCode={apiSetupOnboarding.isWaitingForCode}
-                  onSubmitAuthCode={apiSetupOnboarding.handleSubmitAuthCode}
-                  onCancelOAuth={apiSetupOnboarding.handleCancelOAuth}
-                  copilotDeviceCode={apiSetupOnboarding.copilotDeviceCode}
-                  editInitialValues={editInitialValues}
-                  className="h-full"
-                />
-                <div
-                  className="fixed top-0 right-0 h-[50px] flex items-center pr-5 [-webkit-app-region:no-drag]"
-                  style={{ zIndex: 'var(--z-fullscreen, 350)' }}
-                >
-                  <button
-                    onClick={handleCloseApiSetup}
-                    className="p-1.5 rounded-[6px] transition-all bg-background shadow-minimal text-muted-foreground/50 hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    title={t("common.closeEsc")}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </FullscreenOverlayBase>
 
               {/* Rename Connection Dialog */}
               <RenameDialog

@@ -46,10 +46,8 @@ export type {
   AnnotationV1,
 };
 
-// Auth types for onboarding
-import type { AuthState, SetupNeeds } from '@polo-ai/shared/auth/types';
 import type { AuthType } from '@polo-ai/shared/config/types';
-export type { AuthState, SetupNeeds, AuthType };
+export type { AuthType };
 
 // Credential health types
 import type { CredentialHealthStatus, CredentialHealthIssue, CredentialHealthIssueType } from '@polo-ai/shared/credentials/types';
@@ -196,10 +194,8 @@ import type {
   TestLlmConnectionResult,
   SkillFile,
   SessionFile,
-  OAuthResult,
   McpToolsResult,
   GitBashStatus,
-  ClaudeOAuthResult,
   UpdateInfo,
   WorkspaceSettings,
   PermissionModeState,
@@ -217,6 +213,7 @@ import type { SessionExpiredEvent } from '@polo-ai/shared/auth'
 export interface ElectronAPI {
   // Platform auth
   authLogin(username: string, password: string): Promise<{ user: { id: string; username: string; role: string } }>
+  hasAdminSession(): Promise<boolean>
 
   // Session management
   getSessions(): Promise<Session[]>
@@ -389,18 +386,6 @@ export interface ElectronAPI {
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>
-
-  // Onboarding
-  getAuthState(): Promise<AuthState>
-  getSetupNeeds(): Promise<SetupNeeds>
-  startWorkspaceMcpOAuth(mcpUrl: string): Promise<OAuthResult & { clientId?: string }>
-  // Claude OAuth (two-step flow)
-  startClaudeOAuth(): Promise<{ success: boolean; authUrl?: string; error?: string }>
-  exchangeClaudeCode(code: string, connectionSlug: string): Promise<ClaudeOAuthResult>
-  hasClaudeOAuthState(): Promise<boolean>
-  clearClaudeOAuthState(): Promise<{ success: boolean }>
-  /** Defer onboarding setup — user chose "Setup later" */
-  deferSetup(): Promise<{ success: boolean }>
 
   // ChatGPT OAuth (for Codex chatgptAuthTokens mode)
   startChatGptOAuth(connectionSlug: string): Promise<{ success: boolean; error?: string }>

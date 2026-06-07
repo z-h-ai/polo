@@ -14,6 +14,7 @@ import {
 } from '@polo-ai/shared/auth'
 
 const AUTH_LOGIN_CHANNEL = 'auth:login'
+const AUTH_HAS_SESSION_CHANNEL = 'auth:hasSession'
 const SESSION_FILE_NAME = 'admin-session.json'
 
 type IpcMainLike = Pick<typeof ipcMain, 'handle'>
@@ -141,6 +142,16 @@ export function registerElectronAuthHandlers(options: RegisterElectronAuthHandle
       return { user: result.user }
     } catch (error) {
       return { error: serializeIpcLoginError(mapAdminLoginError(error)) }
+    }
+  })
+
+  ipc.handle(AUTH_HAS_SESSION_CHANNEL, async (): Promise<boolean> => {
+    if (!tokenStore.loadToken) return false
+
+    try {
+      return Boolean(await tokenStore.loadToken())
+    } catch {
+      return false
     }
   })
 }
