@@ -215,9 +215,71 @@ export interface LlmConnectionWithStatus extends LlmConnection {
   isDefault?: boolean;
 }
 
+export interface AdminLlmModel {
+  id: string;
+  name: string;
+  tier?: 'fast' | 'standard' | 'premium';
+}
+
+export interface DecryptedAdminLlmConnection {
+  slug: string;
+  name: string;
+  providerType: LlmProviderType;
+  authType: Extract<
+    LlmAuthType,
+    'api_key' | 'api_key_with_endpoint' | 'bearer_token' | 'iam_credentials' | 'service_account_file' | 'environment'
+  >;
+  models: AdminLlmModel[];
+  defaultModel: string;
+  apiKey: string;
+  baseUrl?: string;
+  piAuthProvider?: string;
+  midStreamBehavior?: MidStreamBehavior;
+}
+
+export type AdminMappedModel = ModelDefinition & {
+  tier?: AdminLlmModel['tier'];
+};
+
 // ============================================================
 // Helpers
 // ============================================================
+
+export function mapDecryptedAdminConnectionToLlmConnection(
+  connection: DecryptedAdminLlmConnection,
+  createdAt = Date.now(),
+): LlmConnection {
+  return {
+    slug: connection.slug,
+    name: connection.name,
+    providerType: connection.providerType,
+    authType: connection.authType,
+    baseUrl: connection.baseUrl,
+    models: connection.models.map(model =>
+      mapAdminModelToModelDefinition(model, connection.providerType),
+    ),
+    defaultModel: connection.defaultModel,
+    modelSelectionMode: 'userDefined3Tier',
+    piAuthProvider: connection.piAuthProvider,
+    midStreamBehavior: connection.midStreamBehavior,
+    createdAt,
+  };
+}
+
+function mapAdminModelToModelDefinition(
+  model: AdminLlmModel,
+  providerType: LlmProviderType,
+): AdminMappedModel {
+  return {
+    id: model.id,
+    name: model.name,
+    shortName: model.name,
+    description: '',
+    provider: providerType === 'anthropic' ? 'anthropic' : 'pi',
+    contextWindow: 0,
+    ...(model.tier ? { tier: model.tier } : {}),
+  };
+}
 
 /**
  * Returns true when `modelId` must NOT be used as the mini/summarization model
