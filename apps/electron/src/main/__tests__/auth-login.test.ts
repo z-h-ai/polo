@@ -18,13 +18,18 @@ mock.module('electron', () => ({
       ipcHandlers.set(channel, handler)
     },
   },
+  BrowserView: class {},
+  BrowserWindow: class {},
   app: {
     getPath: () => TEST_USER_DATA_DIR,
   },
+  nativeTheme: { shouldUseDarkColors: false },
   safeStorage: {
     isEncryptionAvailable: () => true,
     encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
   },
+  session: {},
+  shell: { openExternal: async () => {} },
 }))
 
 const sampleUser = {
