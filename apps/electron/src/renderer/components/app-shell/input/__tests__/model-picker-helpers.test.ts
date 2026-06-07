@@ -120,10 +120,10 @@ describe('groupConnectionsByProvider', () => {
     expect(result.map(([k]) => k)).toEqual(['Anthropic', 'Polo AI Backend'])
   })
 
-  test('"pi_compat" with localhost baseUrl goes to "Local"', () => {
-    const local = conn('ollama', 'pi_compat', { baseUrl: 'http://localhost:11434' })
-    const result = groupConnectionsByProvider([local])
-    expect(result).toEqual([['Local', [local]]])
+  test('"pi_compat" with loopback baseUrl goes to "Polo AI Backend"', () => {
+    const compat = conn('compat-loopback', 'pi_compat', { baseUrl: 'http://localhost:11434' })
+    const result = groupConnectionsByProvider([compat])
+    expect(result).toEqual([['Polo AI Backend', [compat]]])
   })
 
   test('"pi_compat" with remote baseUrl goes to "Polo AI Backend"', () => {
@@ -140,16 +140,15 @@ describe('groupConnectionsByProvider', () => {
     expect(result[0][0]).toBe('Anthropic')
   })
 
-  test('full mixed input — anthropic + local + remote pi_compat + pi', () => {
+  test('full mixed input — anthropic + pi_compat + pi', () => {
     const anth = conn('a', 'anthropic')
-    const local = conn('ollama', 'pi_compat', { baseUrl: 'http://127.0.0.1:1234' })
+    const compat = conn('compat', 'pi_compat', { baseUrl: 'http://127.0.0.1:1234' })
     const remote = conn('or', 'pi_compat', { baseUrl: 'https://openrouter.ai' })
     const pi = conn('p', 'pi')
-    const result = groupConnectionsByProvider([anth, local, remote, pi])
+    const result = groupConnectionsByProvider([anth, compat, remote, pi])
     expect(result.map(([k, conns]) => [k, conns.map(c => c.slug)])).toEqual([
       ['Anthropic', ['a']],
-      ['Local', ['ollama']],
-      ['Polo AI Backend', ['or', 'p']],
+      ['Polo AI Backend', ['compat', 'or', 'p']],
     ])
   })
 })

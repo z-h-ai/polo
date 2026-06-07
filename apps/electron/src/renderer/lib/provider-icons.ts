@@ -14,7 +14,6 @@ import huggingfaceIcon from '@/assets/provider-icons/huggingface.svg'
 import kimiIcon from '@/assets/provider-icons/kimi.svg'
 import minimaxIcon from '@/assets/provider-icons/minimax.svg'
 import mistralIcon from '@/assets/provider-icons/mistral.svg'
-import ollamaIcon from '@/assets/provider-icons/ollama.svg'
 import openaiIcon from '@/assets/provider-icons/openai.svg'
 import openrouterIcon from '@/assets/provider-icons/openrouter.svg'
 import piIcon from '@/assets/provider-icons/pi.svg'
@@ -35,7 +34,6 @@ export const providerIcons = {
   kimi: kimiIcon,
   minimax: minimaxIcon,
   mistral: mistralIcon,
-  ollama: ollamaIcon,
   openai: openaiIcon,
   openrouter: openrouterIcon,
   pi: piIcon,
@@ -53,7 +51,6 @@ const providerDisplayNames: Record<string, string> = {
   deepseek: 'DeepSeek',
   kimi: 'Kimi',
   minimax: 'Minimax',
-  ollama: 'Ollama',
   openrouter: 'OpenRouter',
   pi: 'Polo AI Backend',
   pi_compat: 'Polo AI Backend',
@@ -66,7 +63,6 @@ export function getProviderDisplayName(providerType: string, baseUrl?: string | 
   if (baseUrl) {
     const url = baseUrl.toLowerCase()
     if (url.includes('openrouter.ai')) return 'OpenRouter'
-    if (url.includes('ollama')) return 'Ollama'
     if (url.includes('kimi.com')) return 'Kimi'
     if (url.includes('minimax.io') || url.includes('minimaxi.com')) return 'Minimax'
     if (url.includes('v0.dev') || url.includes('vercel')) return 'Vercel'
@@ -82,7 +78,6 @@ function detectProviderFromUrl(baseUrl: string): ProviderIconKey | null {
   const url = baseUrl.toLowerCase()
 
   if (url.includes('openrouter.ai')) return 'openrouter'
-  if (url.includes('ollama')) return 'ollama'
   if (url.includes('api.anthropic.com')) return 'anthropic'
   if (url.includes('api.openai.com')) return 'openai'
   if (url.includes('v0.dev') || url.includes('vercel')) return 'vercel'

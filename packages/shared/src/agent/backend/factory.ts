@@ -462,7 +462,7 @@ export async function validateStoredBackendConnection(args: {
       connection.providerType,
     );
 
-    if (!hasCredentials && connection.authType !== 'none') {
+    if (!hasCredentials) {
       return { success: false, error: 'No credentials configured' };
     }
 

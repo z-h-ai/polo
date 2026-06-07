@@ -119,11 +119,9 @@ export const anthropicDriver: ProviderDriver = {
       if (!apiKey) {
         return { success: false, error: 'ANTHROPIC_API_KEY environment variable not set' };
       }
-    } else if (connection.authType === 'none') {
-      apiKey = 'ollama';
     }
 
-    if (!apiKey && !oauthToken && connection.authType !== 'none') {
+    if (!apiKey && !oauthToken) {
       return { success: false, error: 'Could not retrieve credentials' };
     }
 

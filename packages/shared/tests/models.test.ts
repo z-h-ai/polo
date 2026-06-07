@@ -37,8 +37,8 @@ describe('isClaudeModel', () => {
     expect(isClaudeModel('mistralai/mistral-large')).toBe(false);
   });
 
-  // Non-Claude models via Ollama (no provider prefix)
-  it('rejects non-Claude Ollama models', () => {
+  // Non-Claude unprefixed model IDs
+  it('rejects non-Claude unprefixed models', () => {
     expect(isClaudeModel('llama3.2')).toBe(false);
     expect(isClaudeModel('deepseek-r1')).toBe(false);
     expect(isClaudeModel('qwen3-coder')).toBe(false);

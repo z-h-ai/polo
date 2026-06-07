@@ -79,7 +79,7 @@ export const THINKING_TO_EFFORT: Record<ThinkingLevel, 'low' | 'medium' | 'high'
 /**
  * Token budgets per model family.
  * Used as fallback for models that don't support adaptive thinking
- * (e.g., non-Claude models via OpenRouter/Ollama).
+ * (e.g., non-Claude models via OpenRouter).
  *
  * Haiku max is 8k per Anthropic docs.
  * Sonnet/Opus can use up to 128k, but Anthropic recommends ≤32k for real-time use

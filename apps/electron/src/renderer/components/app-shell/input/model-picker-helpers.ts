@@ -1,7 +1,4 @@
-import {
-  isLocalConnection,
-  type LlmConnection,
-} from '@config/llm-connections'
+import type { LlmConnection } from '@config/llm-connections'
 
 /**
  * Format token count for display (e.g., 1500 -> "1.5k", 200000 -> "200k").
@@ -30,7 +27,7 @@ export type ConnectionGroup = [groupName: string, connections: LlmConnection[]]
 /**
  * Group connections by provider type for hierarchical picker rendering.
  * Each provider section can contain multiple connections (API Key, OAuth, …).
- * Order is significant for UI: Anthropic, Local, Polo AI Backend.
+ * Order is significant for UI: Anthropic, Polo AI Backend.
  * Empty groups are dropped.
  */
 export function groupConnectionsByProvider<T extends LlmConnection>(
@@ -38,15 +35,12 @@ export function groupConnectionsByProvider<T extends LlmConnection>(
 ): Array<[string, T[]]> {
   const groups: Record<string, T[]> = {
     'Anthropic': [],
-    'Local': [],
     'Polo AI Backend': [],
   }
   for (const conn of connections) {
     const provider = conn.providerType || 'anthropic'
     if (provider === 'anthropic') {
       groups['Anthropic'].push(conn)
-    } else if (provider === 'pi_compat' && isLocalConnection(conn)) {
-      groups['Local'].push(conn)
     } else if (provider === 'pi' || provider === 'pi_compat') {
       groups['Polo AI Backend'].push(conn)
     }

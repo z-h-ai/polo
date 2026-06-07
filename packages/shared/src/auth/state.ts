@@ -314,10 +314,6 @@ export async function getAuthState(): Promise<AuthState> {
 
     if (connection.authType === 'api_key' || connection.authType === 'api_key_with_endpoint' || connection.authType === 'bearer_token') {
       apiKey = await manager.getLlmApiKey(defaultConnectionSlug);
-      // Keyless providers (Ollama) are valid when a custom base URL is configured
-      if (!apiKey && connection.baseUrl) {
-        hasCredentials = true;
-      }
     } else if (connection.authType === 'oauth') {
       const llmOAuth = await manager.getLlmOAuth(defaultConnectionSlug);
       if (llmOAuth?.accessToken) {

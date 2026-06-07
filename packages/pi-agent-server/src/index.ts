@@ -394,36 +394,15 @@ function setInterceptorApiHints(model: { api?: string; provider?: string; baseUr
   );
 }
 
-/**
- * Resolve the API key for custom endpoint auth.
- * Returns empty string for local endpoints (Ollama etc.) that don't need auth.
- */
 function resolveCustomEndpointApiKey(): string {
   if (initConfig?.piAuth?.credential?.type === 'api_key') {
     return initConfig.piAuth.credential.key;
   }
   const key = initConfig?.apiKey || '';
   if (!key && initConfig?.baseUrl) {
-    if (isLocalhostUrl(initConfig.baseUrl)) {
-      // Local endpoints (Ollama, LM Studio) don't need auth.
-      // Pi SDK requires a truthy apiKey to register models, so use a placeholder.
-      return 'not-needed';
-    }
-    debugLog('[custom-endpoint] Warning: no API key found for non-localhost endpoint — requests will likely fail');
+    debugLog('[custom-endpoint] Warning: no API key found for custom endpoint — requests will likely fail');
   }
   return key;
-}
-
-function isLocalhostUrl(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname;
-    const normalizedHostname = hostname.startsWith('[') && hostname.endsWith(']')
-      ? hostname.slice(1, -1)
-      : hostname;
-    return normalizedHostname === 'localhost' || normalizedHostname === '127.0.0.1' || normalizedHostname === '::1';
-  } catch {
-    return false;
-  }
 }
 
 /** Model IDs currently registered under the custom-endpoint provider */

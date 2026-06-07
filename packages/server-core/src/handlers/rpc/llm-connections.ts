@@ -8,7 +8,7 @@ import {
   validateStoredBackendConnection,
 } from '@polo-ai/shared/agent/backend'
 import { getModelRefreshService } from '@polo-ai/server-core/model-fetchers'
-import { parseTestConnectionError, createBuiltInConnection, validateModelList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup } from '@polo-ai/server-core/domain'
+import { parseTestConnectionError, createBuiltInConnection, validateModelList, piAuthProviderDisplayName, validateSetupTestInput, resolveCustomEndpointSetup } from '@polo-ai/server-core/domain'
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@polo-ai/server-core/handlers'
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -109,12 +109,10 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         updates.customEndpoint = customEndpoint
         updates.providerType = 'pi_compat'
         const branch = resolveCustomEndpointSetup({
-          baseUrl: setup.baseUrl ?? undefined,
           credential: setup.credential ?? undefined,
           customEndpointApi: customEndpoint.api,
         })
         updates.authType = branch.authType
-        if (branch.name !== undefined) updates.name = branch.name
         if (branch.piAuthProvider !== undefined) updates.piAuthProvider = branch.piAuthProvider
 
         // Brand-name override on first setup only (user-renamed connections aren't clobbered on re-save).
@@ -299,9 +297,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   server.handle(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('@polo-ai/shared/protocol').TestLlmConnectionParams): Promise<import('@polo-ai/shared/protocol').TestLlmConnectionResult> => {
     const { provider, apiKey, baseUrl, model, piAuthProvider, customEndpoint } = params
     const trimmedKey = apiKey?.trim() ?? ''
-    const allowEmptyApiKey = !setupTestRequiresApiKey(baseUrl)
-
-    if (!trimmedKey && !allowEmptyApiKey) {
+    if (!trimmedKey) {
       return { success: false, error: 'API key is required' }
     }
 
@@ -320,7 +316,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       const result = await testBackendConnection({
         provider,
         apiKey: trimmedKey,
-        allowEmptyApiKey,
+        allowEmptyApiKey: false,
         model: testModel,
         baseUrl,
         timeoutMs: 45000,
@@ -399,7 +395,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       const hasCredentials = await credentialManager.hasLlmCredentials(conn.slug, conn.authType)
       return {
         ...conn,
-        isAuthenticated: conn.authType === 'none' || hasCredentials,
+        isAuthenticated: hasCredentials,
         isDefault: conn.slug === defaultSlug,
       }
     }))

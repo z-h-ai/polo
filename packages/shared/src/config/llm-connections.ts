@@ -46,7 +46,7 @@ export function registerPiModelResolver(resolver: PiModelResolver): void {
  *
  * - 'anthropic': Direct Anthropic API (api.anthropic.com) — uses Claude Agent SDK
  * - 'pi': Pi unified LLM API (20+ providers via @mariozechner/pi-ai)
- * - 'pi_compat': Pi with custom endpoint (Ollama, self-hosted models, Anthropic-compat endpoints)
+ * - 'pi_compat': Pi with Admin-managed custom endpoint metadata
  *
  * Legacy values (bedrock, vertex, anthropic_compat) are migrated on startup
  * by migrateLegacyProviderTypes() in storage.ts.
@@ -78,8 +78,8 @@ export type LlmConnectionType = 'anthropic' | 'openai' | 'openai-compat';
  * - 'service_account_file': GCP-style JSON file upload
  * - 'environment': Auto-detect from environment variables
  *
- * No auth:
- * - 'none': No authentication required (local models like Ollama)
+ * Legacy no-auth mode:
+ * - 'none': Parsed for backwards compatibility but not valid for LLM connections.
  */
 export type LlmAuthType =
   | 'api_key'
@@ -106,7 +106,7 @@ export type CustomEndpointApi = 'openai-completions' | 'anthropic-messages';
 
 /**
  * Custom endpoint protocol config.
- * Set when user configures an arbitrary API endpoint (Ollama, DashScope, vLLM, etc.).
+ * Set when Admin provides arbitrary endpoint metadata.
  */
 export interface CustomEndpointConfig {
   api: CustomEndpointApi;
@@ -135,10 +135,10 @@ export type MidStreamBehavior = 'steer' | 'queue';
  * Stored in config.llmConnections array.
  */
 export interface LlmConnection {
-  /** URL-safe identifier (e.g., 'anthropic-api', 'ollama-local') */
+  /** URL-safe identifier (e.g., 'anthropic-api') */
   slug: string;
 
-  /** Display name shown in UI (e.g., 'Anthropic (API Key)', 'Ollama') */
+  /** Display name shown in UI (e.g., 'Anthropic (API Key)') */
   name: string;
 
   /** Provider type determines backend/SDK implementation */
@@ -178,7 +178,7 @@ export interface LlmConnection {
 
   /**
    * Custom endpoint protocol config.
-   * Set when user configures an arbitrary API endpoint (Ollama, DashScope, vLLM, etc.).
+   * Set when Admin provides arbitrary endpoint metadata.
    * Determines which streaming adapter the Pi SDK uses for requests.
    */
   customEndpoint?: CustomEndpointConfig;
@@ -493,20 +493,6 @@ export function isAnthropicProvider(providerType: LlmProviderType): boolean {
 }
 
 /**
- * Check if a connection points to a local model runtime (loopback URL).
- */
-export function isLocalConnection(conn: Pick<LlmConnection, 'baseUrl'>): boolean {
-  if (!conn.baseUrl?.trim()) return false;
-  try {
-    const hostname = new URL(conn.baseUrl.trim()).hostname;
-    const h = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
-    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if a provider type uses Pi unified API.
  * @param providerType - Provider type to check
  * @returns true if this provider uses Pi
@@ -789,8 +775,8 @@ export function isValidProviderAuthCombination(
 ): boolean {
   const validCombinations: Record<LlmProviderType, LlmAuthType[]> = {
     anthropic: ['api_key', 'oauth'],
-    pi: ['api_key', 'oauth', 'iam_credentials', 'environment', 'none'],
-    pi_compat: ['api_key_with_endpoint', 'none'],
+    pi: ['api_key', 'oauth', 'iam_credentials', 'environment'],
+    pi_compat: ['api_key_with_endpoint'],
   };
 
   return validCombinations[providerType]?.includes(authType) ?? false;
@@ -1065,9 +1051,6 @@ export async function resolveAuthEnvVars(
     const apiKey = await credentialManager.getLlmApiKey(connectionSlug);
     if (apiKey) {
       envVars.ANTHROPIC_API_KEY = apiKey;
-    } else if (connection.baseUrl) {
-      // Keyless provider (e.g. Ollama)
-      envVars.ANTHROPIC_API_KEY = 'not-needed';
     } else {
       return { envVars, success: false, warning: `No API key found for: ${connectionSlug}` };
     }

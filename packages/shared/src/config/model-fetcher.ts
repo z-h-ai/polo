@@ -8,7 +8,7 @@
  * causes a type error.
  *
  * Compat providers (pi_compat) are excluded —
- * they point to arbitrary endpoints where users configure models manually.
+ * they point to Admin-managed arbitrary endpoints.
  */
 
 import type { ModelDefinition } from './models';
@@ -20,8 +20,7 @@ import type { LlmProviderType, LlmConnection } from './llm-connections';
 
 /**
  * Providers that support automatic model fetching.
- * Compat providers are excluded — they point to arbitrary endpoints
- * (Ollama, OpenRouter, etc.) where users configure models manually.
+ * Compat providers are excluded because their model metadata is managed by Admin.
  *
  * Adding a new LlmProviderType without updating this type
  * will cause a compile error in the fetcher registry.

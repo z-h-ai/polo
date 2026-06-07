@@ -69,54 +69,19 @@ export function validateSetupTestInput(params: {
 }
 
 /**
- * Returns true when a URL points to local loopback.
- * Used to permit keyless setup tests for local model runtimes (e.g. Ollama).
- */
-export function isLoopbackBaseUrl(baseUrl?: string): boolean {
-  if (!baseUrl?.trim()) return false
-  try {
-    const hostname = new URL(baseUrl.trim()).hostname
-    const normalizedHostname = hostname.startsWith('[') && hostname.endsWith(']')
-      ? hostname.slice(1, -1)
-      : hostname
-    return normalizedHostname === 'localhost' || normalizedHostname === '127.0.0.1' || normalizedHostname === '::1'
-  } catch {
-    return false
-  }
-}
-
-/**
- * Setup tests require API keys for non-local endpoints, but local loopback
- * endpoints may be keyless.
- */
-export function setupTestRequiresApiKey(baseUrl?: string): boolean {
-  return !isLoopbackBaseUrl(baseUrl)
-}
-
-/**
  * Decide how a custom OpenAI/Anthropic-compatible endpoint should be persisted.
  *
- * - Loopback URL with no credential → keyless local model (Ollama, LM Studio).
- * - Loopback URL *with* a credential → real local OpenAI-compat server (vLLM, LiteLLM, etc.);
- *   must be treated like a remote custom endpoint so `piAuthProvider` is set, otherwise
- *   `getPiAuth()` returns null at runtime and chat requests fail with 401 (#636).
- * - Remote URL → always keyed with provider hint for the correct icon.
+ * Custom endpoints are always keyed and receive a provider hint for the correct icon.
  *
  * Pure: caller spreads the result into the connection updates patch.
  */
 export function resolveCustomEndpointSetup(input: {
-  baseUrl: string | undefined
   credential: string | undefined
   customEndpointApi: CustomEndpointApi
 }): {
-  authType: Extract<LlmConnection['authType'], 'none' | 'api_key_with_endpoint'>
-  name?: 'Local Model'
+  authType: Extract<LlmConnection['authType'], 'api_key_with_endpoint'>
   piAuthProvider?: 'openai' | 'anthropic'
 } {
-  const isKeylessLoopback = isLoopbackBaseUrl(input.baseUrl) && !input.credential
-  if (isKeylessLoopback) {
-    return { authType: 'none', name: 'Local Model' }
-  }
   return {
     authType: 'api_key_with_endpoint',
     piAuthProvider: input.customEndpointApi === 'anthropic-messages' ? 'anthropic' : 'openai',

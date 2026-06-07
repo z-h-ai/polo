@@ -223,8 +223,8 @@ describe('isValidProviderAuthCombination', () => {
       expect(isValidProviderAuthCombination('pi', 'oauth')).toBe(true);
     });
 
-    it('should accept none auth', () => {
-      expect(isValidProviderAuthCombination('pi', 'none')).toBe(true);
+    it('should reject none auth', () => {
+      expect(isValidProviderAuthCombination('pi', 'none')).toBe(false);
     });
   });
 
@@ -233,8 +233,8 @@ describe('isValidProviderAuthCombination', () => {
       expect(isValidProviderAuthCombination('pi_compat', 'api_key_with_endpoint')).toBe(true);
     });
 
-    it('should accept none auth (for local models like Ollama)', () => {
-      expect(isValidProviderAuthCombination('pi_compat', 'none')).toBe(true);
+    it('should reject none auth', () => {
+      expect(isValidProviderAuthCombination('pi_compat', 'none')).toBe(false);
     });
   });
 
