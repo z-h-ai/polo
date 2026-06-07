@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import {
   AccountDisabledError,
+  AdminAuthApiError,
   AdminApiClient,
   ConfigError,
   InvalidCredentialsError,
@@ -8,6 +9,7 @@ import {
   RateLimitedError,
   TokenRevokedError,
   createAdminApiClient,
+  type SessionExpiredEvent,
 } from './admin-auth.ts';
 import type { FetchFn } from './admin-auth.ts';
 
@@ -393,6 +395,80 @@ describe('AdminApiClient auth getLlmConnections', () => {
 
     expect(caught).toBeInstanceOf(RateLimitedError);
     expect(caught?.retryAfterSeconds).toBe(12);
+  });
+});
+
+describe('AdminApiClient global 401 interception', () => {
+  it('GET /api/llm-connections returning 401 triggers force logout with request URL', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(401, { error: 'token_revoked', message: 'Token revoked' }),
+      token: SAMPLE_JWT,
+      onForceLogout,
+    });
+
+    await expect(client.getLlmConnections()).rejects.toThrow(TokenRevokedError);
+
+    expect(onForceLogout).toHaveBeenCalledTimes(1);
+    expect(onForceLogout).toHaveBeenCalledWith({
+      reason: 'token_revoked',
+      requestUrl: 'http://localhost:3001/api/llm-connections',
+    });
+  });
+
+  it('POST /api/auth/validate returning 401 triggers force logout', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(401, { error: 'token_revoked', message: 'Token revoked' }),
+      token: SAMPLE_JWT,
+      onForceLogout,
+    });
+
+    await expect(client.validateToken()).rejects.toThrow(TokenRevokedError);
+
+    expect(onForceLogout).toHaveBeenCalledTimes(1);
+    expect(onForceLogout).toHaveBeenCalledWith({
+      reason: 'token_revoked',
+      requestUrl: 'http://localhost:3001/api/auth/validate',
+    });
+  });
+
+  it('POST /api/auth/login returning 401 does not trigger force logout', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(401, { error: 'invalid_credentials', message: 'Wrong password' }),
+      onForceLogout,
+    });
+
+    await expect(client.login('zhangsan', 'wrong_password')).rejects.toThrow(InvalidCredentialsError);
+
+    expect(onForceLogout).not.toHaveBeenCalled();
+  });
+
+  it('200 responses do not trigger force logout', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(200, SAMPLE_CONNECTIONS_RESPONSE),
+      token: SAMPLE_JWT,
+      onForceLogout,
+    });
+
+    await expect(client.getLlmConnections()).resolves.toEqual(SAMPLE_CONNECTIONS_RESPONSE);
+
+    expect(onForceLogout).not.toHaveBeenCalled();
+  });
+
+  it('500 responses do not trigger force logout and preserve the HTTP error', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(500, { error: 'server_error', message: 'Admin down' }),
+      token: SAMPLE_JWT,
+      onForceLogout,
+    });
+
+    await expect(client.getLlmConnections()).rejects.toThrow(AdminAuthApiError);
+
+    expect(onForceLogout).not.toHaveBeenCalled();
   });
 });
 

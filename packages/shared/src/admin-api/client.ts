@@ -20,6 +20,9 @@ import {
   ConfigurationError,
 } from './errors.ts';
 import type { QuotaCheckResult, UsageReportInput, UsageReportResult, QuotaStatus } from './types.ts';
+import type { OnForceLogout, SessionExpiredEvent } from '../auth/force-logout.ts';
+
+export type { OnForceLogout, SessionExpiredEvent } from '../auth/force-logout.ts';
 
 // ─── default timeouts ─────────────────────────────────────────────────────────
 
@@ -40,6 +43,8 @@ export type FetchFn = (input: string | URL | Request, init?: RequestInit) => Pro
 export interface AdminApiClientOptions {
   /** Override the global `fetch` (for testing) */
   fetchFn?: FetchFn;
+  /** Called when an authenticated Admin API call returns HTTP 401. */
+  onForceLogout?: OnForceLogout;
   /** Timeout for checkQuota (ms). Defaults to 3000. */
   checkQuotaTimeoutMs?: number;
   /** Timeout for reportUsage (ms). Defaults to 5000. */
@@ -50,11 +55,13 @@ export interface AdminApiClientOptions {
 
 export class AdminApiClient {
   private readonly fetchFn: FetchFn;
+  private readonly onForceLogout?: OnForceLogout;
   private readonly checkQuotaTimeoutMs: number;
   private readonly reportUsageTimeoutMs: number;
 
   constructor(options: AdminApiClientOptions = {}) {
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
+    this.onForceLogout = options.onForceLogout;
     this.checkQuotaTimeoutMs = options.checkQuotaTimeoutMs ?? DEFAULT_CHECK_QUOTA_TIMEOUT_MS;
     this.reportUsageTimeoutMs = options.reportUsageTimeoutMs ?? DEFAULT_REPORT_USAGE_TIMEOUT_MS;
   }
@@ -127,6 +134,7 @@ export class AdminApiClient {
       if (!response.ok) {
         switch (response.status) {
           case 401:
+            await this.notifyForceLogout({ reason: 'token_revoked', requestUrl: fullUrl });
             throw new AuthenticationError();
           case 403:
             throw new AccountDisabledError();
@@ -207,6 +215,21 @@ export class AdminApiClient {
    */
   async getQuotaStatus(jwt: string): Promise<QuotaStatus> {
     return this.request<QuotaStatus>('GET', '/api/quota/status', { jwt });
+  }
+
+  private async notifyForceLogout(event: SessionExpiredEvent): Promise<void> {
+    if (!this.onForceLogout) {
+      return;
+    }
+
+    try {
+      await this.onForceLogout(event);
+    } catch (error) {
+      console.warn(
+        '[AdminApiClient] Force logout hook failed:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 }
 

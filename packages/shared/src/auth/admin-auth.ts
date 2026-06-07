@@ -1,11 +1,16 @@
+import type { OnForceLogout, SessionExpiredEvent } from './force-logout.ts';
+
 const DEFAULT_VALIDATE_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_VALIDATE_READ_TIMEOUT_MS = 5_000;
+
+export type { OnForceLogout, SessionExpiredEvent } from './force-logout.ts';
 
 export type FetchFn = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export interface AdminApiClientOptions {
   fetchFn?: FetchFn;
   token?: string;
+  onForceLogout?: OnForceLogout;
   validateTimeoutMs?: number;
   validateConnectTimeoutMs?: number;
   validateReadTimeoutMs?: number;
@@ -136,6 +141,7 @@ export class AdminApiClient {
   private readonly baseUrl: string;
   private readonly fetchFn: FetchFn;
   private readonly token?: string;
+  private readonly onForceLogout?: OnForceLogout;
   private readonly validateConnectTimeoutMs: number;
   private readonly validateReadTimeoutMs: number;
 
@@ -143,6 +149,7 @@ export class AdminApiClient {
     this.baseUrl = resolveBaseUrl();
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
     this.token = options.token;
+    this.onForceLogout = options.onForceLogout;
     const legacyPhaseTimeoutMs =
       options.validateTimeoutMs === undefined ? undefined : Math.ceil(options.validateTimeoutMs / 2);
     this.validateConnectTimeoutMs =
@@ -203,11 +210,12 @@ export class AdminApiClient {
     }
 
     const controller = new AbortController();
+    const requestUrl = this.url(path);
 
     let response: Response;
     try {
       response = await this.runWithTimeout(
-        () => this.fetchFn(this.url(path), {
+        () => this.fetchFn(requestUrl, {
           method,
           headers,
           body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -222,6 +230,9 @@ export class AdminApiClient {
     }
 
     if (!response.ok) {
+      if (response.status === 401 && path !== '/api/auth/login' && options.token) {
+        await this.notifyForceLogout({ reason: 'token_revoked', requestUrl });
+      }
       throw await this.toHttpError(response, controller, options.phaseTimeouts?.readMs);
     }
 
@@ -267,6 +278,21 @@ export class AdminApiClient {
           envelope,
           `Admin API returned HTTP ${response.status}`,
         );
+    }
+  }
+
+  private async notifyForceLogout(event: SessionExpiredEvent): Promise<void> {
+    if (!this.onForceLogout) {
+      return;
+    }
+
+    try {
+      await this.onForceLogout(event);
+    } catch (error) {
+      console.warn(
+        '[AdminApiClient] Force logout hook failed:',
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 

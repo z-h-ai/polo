@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { AdminApiClient, createAdminApiClient } from '../client.ts';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { AdminApiClient, createAdminApiClient, type SessionExpiredEvent } from '../client.ts';
 import type { FetchFn } from '../client.ts';
 import {
   AuthenticationError,
@@ -355,4 +355,52 @@ describe('AC4: Error handling', () => {
     const client = createAdminApiClient({ fetchFn: slowFetch, checkQuotaTimeoutMs: 50 });
     await expect(client.checkQuota('jwt')).rejects.toBeInstanceOf(AdminApiTimeoutError);
   }, 3000);
+});
+
+describe('global 401 interception', () => {
+  it('quota check 401 triggers force logout with request URL', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(401, { error: 'Unauthorized' }),
+      onForceLogout,
+    });
+
+    await expect(client.checkQuota('bad-jwt')).rejects.toBeInstanceOf(AuthenticationError);
+
+    expect(onForceLogout).toHaveBeenCalledTimes(1);
+    expect(onForceLogout).toHaveBeenCalledWith({
+      reason: 'token_revoked',
+      requestUrl: 'http://localhost:3001/api/quota/check',
+    });
+  });
+
+  it('200 responses do not trigger force logout', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(200, { allowed: true, remaining: 90, limit: 100, used: 10, period: 'monthly' }),
+      onForceLogout,
+    });
+
+    await expect(client.checkQuota('jwt')).resolves.toEqual({
+      allowed: true,
+      remaining: 90,
+      limit: 100,
+      used: 10,
+      period: 'monthly',
+    });
+
+    expect(onForceLogout).not.toHaveBeenCalled();
+  });
+
+  it('500 responses do not trigger force logout and preserve AdminApiError', async () => {
+    const onForceLogout = mock(async (_event: SessionExpiredEvent) => {});
+    const client = createAdminApiClient({
+      fetchFn: mockFetch(500, { error: 'Internal Server Error' }),
+      onForceLogout,
+    });
+
+    await expect(client.checkQuota('jwt')).rejects.toBeInstanceOf(AdminApiError);
+
+    expect(onForceLogout).not.toHaveBeenCalled();
+  });
 });
