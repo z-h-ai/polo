@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import * as storage from '@/lib/local-storage'
 import { navigate, routes } from '@/lib/navigate'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import { NoLlmConfigBanner } from '@/components/NoLlmConfigBanner'
 import {
   ANTHROPIC_MODELS,
   getModelDisplayName,
@@ -43,6 +44,7 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
+import { AdminLlmModelSelectorPanel } from './AdminLlmModelSelectorPanel'
 
 interface CompactModelSelectorProps {
   currentModel: string
@@ -207,7 +209,20 @@ export function CompactModelSelector({
 
         <div className="px-2 pb-4 flex flex-col gap-0.5 max-h-[55vh] overflow-y-auto">
           {/* === Models section === */}
-          {pickerMode === 'unavailable' ? (
+          {llmConnections.length === 0 ? (
+            <NoLlmConfigBanner className="mx-1 mt-2" />
+          ) : (
+            <>
+              {pickerMode !== 'unavailable' && (
+                <AdminLlmModelSelectorPanel
+                  llmConnections={llmConnections}
+                  currentConnection={effectiveConnection}
+                  currentModel={currentModel}
+                  onConnectionChange={onConnectionChange}
+                  onModelChange={onModelChange}
+                />
+              )}
+              {pickerMode === 'unavailable' ? (
             <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
               <AlertCircle className="h-8 w-8 text-destructive mb-2" />
               <div className="font-medium text-sm mb-1">
@@ -393,9 +408,13 @@ export function CompactModelSelector({
               )
             })
           )}
+            </>
+          )}
 
           {/* === Thinking section === */}
-          {THINKING_LEVELS.length > 0 && pickerMode !== 'unavailable' && (
+          {llmConnections.length > 0 &&
+            THINKING_LEVELS.length > 0 &&
+            pickerMode !== 'unavailable' && (
             <>
               <div className="px-3 pt-4 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
                 {t('chat.modelPicker.thinkingSection')}
