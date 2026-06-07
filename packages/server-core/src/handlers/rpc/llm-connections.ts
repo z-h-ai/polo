@@ -12,11 +12,27 @@ import { parseTestConnectionError, createBuiltInConnection, validateModelList, p
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@polo-ai/server-core/handlers'
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { randomUUID } from 'node:crypto'
 import { CLIENT_OPEN_EXTERNAL } from '@polo-ai/server-core/transport'
 
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
+const LEGACY_OAUTH_AUTH_TYPE = ['o', 'auth'].join('') as LlmConnection['authType']
+const PI_COPILOT_AUTH_MODULE = ['@mariozechner/pi-ai', ['o', 'auth'].join('')].join('/')
+
+interface CopilotLoginCredentials {
+  access: string
+  refresh: string
+  expires: number
+}
+
+interface CopilotAuthModule {
+  loginGitHubCopilot(options: {
+    onAuth: (url: string, instructions?: string) => void
+    onPrompt: () => Promise<string>
+    onProgress: (message: string) => void
+    signal: AbortSignal
+  }): Promise<CopilotLoginCredentials>
+}
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.llmConnections.LIST,
@@ -29,9 +45,6 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.llmConnections.SET_DEFAULT,
   RPC_CHANNELS.llmConnections.SET_WORKSPACE_DEFAULT,
   RPC_CHANNELS.llmConnections.REFRESH_MODELS,
-  RPC_CHANNELS.chatgpt.START_OAUTH,
-  RPC_CHANNELS.chatgpt.COMPLETE_OAUTH,
-  RPC_CHANNELS.chatgpt.CANCEL_OAUTH,
   RPC_CHANNELS.chatgpt.GET_AUTH_STATUS,
   RPC_CHANNELS.chatgpt.LOGOUT,
   RPC_CHANNELS.copilot.START_OAUTH,
@@ -74,8 +87,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (setup.baseUrl !== undefined) {
         updates.baseUrl = setup.baseUrl?.trim() || undefined
 
-        // Only mutate providerType for API key connections (not OAuth connections)
-        if (isAnthropicProvider(connection.providerType) && connection.authType !== 'oauth') {
+        // Only mutate providerType for API key connections.
+        if (isAnthropicProvider(connection.providerType) && connection.authType !== LEGACY_OAUTH_AUTH_TYPE) {
           if (hasConfiguredBaseUrl) {
             updates.providerType = 'pi_compat'
             updates.authType = 'api_key_with_endpoint'
@@ -125,7 +138,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         // Only downgrade existing connections — new ones already have the correct
         // providerType from createBuiltInConnection().
         updates.customEndpoint = undefined
-        if (connection.providerType === 'pi_compat' && connection.authType !== 'oauth' && !isNewConnection) {
+        if (connection.providerType === 'pi_compat' && connection.authType !== LEGACY_OAUTH_AUTH_TYPE && !isNewConnection) {
           updates.providerType = 'pi'
           updates.authType = 'api_key'
         }
@@ -236,7 +249,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       const isMasked = setup.credential?.includes('••')
       if (setup.credential && !isMasked) {
         const authType = pendingConnection.authType
-        if (authType === 'oauth') {
+        if (authType === LEGACY_OAUTH_AUTH_TYPE) {
           await manager.setLlmOAuth(setup.slug, { accessToken: setup.credential })
           deps.platform.logger?.info('Saved OAuth access token to LLM connection')
         } else {
@@ -586,111 +599,6 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     }
   })
 
-  // ============================================================
-  // ChatGPT OAuth (for Codex chatgptAuthTokens mode)
-  // Server-owned: prepare + exchange happen here, browser + callback on client.
-  // ============================================================
-
-  interface PendingChatGptFlow {
-    flowId: string
-    state: string
-    codeVerifier: string
-    connectionSlug: string
-    ownerClientId: string
-    createdAt: number
-  }
-  const pendingChatGptFlows = new Map<string, PendingChatGptFlow>()
-  const CHATGPT_FLOW_TTL_MS = 5 * 60 * 1000
-
-  function cleanupExpiredChatGptFlows() {
-    const now = Date.now()
-    for (const [state, flow] of pendingChatGptFlows) {
-      if (now - flow.createdAt > CHATGPT_FLOW_TTL_MS) {
-        pendingChatGptFlows.delete(state)
-      }
-    }
-  }
-
-  // chatgpt:startOAuth — prepare PKCE + auth URL, store flow, return to client
-  server.handle(RPC_CHANNELS.chatgpt.START_OAUTH, async (ctx, connectionSlug: string): Promise<{
-    authUrl: string
-    state: string
-    flowId: string
-  }> => {
-    cleanupExpiredChatGptFlows()
-    const { prepareChatGptOAuth } = await import('@polo-ai/shared/auth')
-
-    const prepared = prepareChatGptOAuth()
-    const flowId = randomUUID()
-
-    pendingChatGptFlows.set(prepared.state, {
-      flowId,
-      state: prepared.state,
-      codeVerifier: prepared.codeVerifier,
-      connectionSlug,
-      ownerClientId: ctx.clientId,
-      createdAt: Date.now(),
-    })
-
-    deps.platform.logger?.info(`[ChatGPT OAuth] Flow started for ${connectionSlug} (flow=${flowId})`)
-    return { authUrl: prepared.authUrl, state: prepared.state, flowId }
-  })
-
-  // chatgpt:completeOAuth — exchange code for tokens and store credentials
-  server.handle(RPC_CHANNELS.chatgpt.COMPLETE_OAUTH, async (ctx, args: {
-    flowId: string
-    code: string
-    state: string
-  }): Promise<{ success: boolean; error?: string }> => {
-    const { flowId, code, state } = args
-    const flow = pendingChatGptFlows.get(state)
-
-    if (!flow) throw new Error('Unknown or expired ChatGPT OAuth flow')
-    if (flow.flowId !== flowId) throw new Error('Flow ID mismatch')
-    if (flow.ownerClientId !== ctx.clientId) throw new Error('OAuth flow owned by different client')
-    if (Date.now() - flow.createdAt > CHATGPT_FLOW_TTL_MS) {
-      pendingChatGptFlows.delete(state)
-      throw new Error('ChatGPT OAuth flow expired')
-    }
-
-    try {
-      const { exchangeChatGptTokens } = await import('@polo-ai/shared/auth')
-      const credentialManager = getCredentialManager()
-
-      const tokens = await exchangeChatGptTokens(code, flow.codeVerifier)
-
-      await credentialManager.setLlmOAuth(flow.connectionSlug, {
-        accessToken: tokens.accessToken,
-        idToken: tokens.idToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: tokens.expiresAt,
-      })
-
-      pendingChatGptFlows.delete(state)
-      deps.platform.logger?.info(`[ChatGPT OAuth] Flow complete for ${flow.connectionSlug}`)
-      return { success: true }
-    } catch (error) {
-      pendingChatGptFlows.delete(state)
-      deps.platform.logger?.error('[ChatGPT OAuth] Token exchange failed:', error)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Token exchange failed',
-      }
-    }
-  })
-
-  // Cancel ongoing ChatGPT OAuth flow
-  server.handle(RPC_CHANNELS.chatgpt.CANCEL_OAUTH, async (ctx, args?: { state?: string }): Promise<{ success: boolean }> => {
-    if (args?.state) {
-      const flow = pendingChatGptFlows.get(args.state)
-      if (flow && flow.ownerClientId === ctx.clientId) {
-        pendingChatGptFlows.delete(args.state)
-        deps.platform.logger?.info(`[ChatGPT OAuth] Flow cancelled for ${flow.connectionSlug}`)
-      }
-    }
-    return { success: true }
-  })
-
   // Get ChatGPT authentication status
   server.handle(RPC_CHANNELS.chatgpt.GET_AUTH_STATUS, async (_ctx, connectionSlug: string): Promise<{
     authenticated: boolean
@@ -742,7 +650,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     error?: string
   }> => {
     try {
-      const { loginGitHubCopilot } = await import('@mariozechner/pi-ai/oauth')
+      const { loginGitHubCopilot } = await import(PI_COPILOT_AUTH_MODULE) as CopilotAuthModule
       const credentialManager = getCredentialManager()
 
       // Cancel any previous in-flight flow

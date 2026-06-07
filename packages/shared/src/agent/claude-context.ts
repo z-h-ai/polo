@@ -59,7 +59,6 @@ import {
   type SlackService,
   type MicrosoftService,
 } from '../sources/types.ts';
-import { isGoogleOAuthConfigured as isGoogleOAuthConfiguredImpl } from '../auth/google-oauth.ts';
 import { debug } from '../utils/debug.ts';
 import { getSessionPlansPath, getSessionPath, getSessionDataPath } from '../sessions/storage.ts';
 import { updatePreferences as updatePreferencesImpl } from '../config/preferences.ts';
@@ -256,7 +255,9 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
 
     // OAuth config check
     isGoogleOAuthConfigured: (clientId?: string, clientSecret?: string): boolean => {
-      return isGoogleOAuthConfiguredImpl(clientId, clientSecret);
+      const id = clientId || process.env.GOOGLE_OAUTH_CLIENT_ID;
+      const secret = clientSecret || process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+      return Boolean(id && secret);
     },
 
     // MCP validation

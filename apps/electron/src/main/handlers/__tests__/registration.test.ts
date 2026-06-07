@@ -75,14 +75,6 @@ function createMockDeps(): HandlerDeps {
       onRemoved: () => {},
       onInteracted: () => {},
     } as unknown as NonNullable<HandlerDeps['browserPaneManager']>,
-    oauthFlowStore: {
-      store: () => {},
-      getByState: () => null,
-      remove: () => {},
-      cleanup: () => {},
-      dispose: () => {},
-      size: 0,
-    } as unknown as HandlerDeps['oauthFlowStore'],
   }
 }
 
@@ -94,7 +86,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     files,
     labels,
     llm,
-    oauth,
     sessions,
     coreSettings,
     skills,
@@ -110,7 +101,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     import('@polo-ai/server-core/handlers/rpc/files'),
     import('@polo-ai/server-core/handlers/rpc/labels'),
     import('@polo-ai/server-core/handlers/rpc/llm-connections'),
-    import('@polo-ai/server-core/handlers/rpc/oauth'),
     import('@polo-ai/server-core/handlers/rpc/sessions'),
     import('@polo-ai/server-core/handlers/rpc/settings'),
     import('@polo-ai/server-core/handlers/rpc/skills'),
@@ -136,7 +126,6 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...files.HANDLED_CHANNELS,
     ...labels.HANDLED_CHANNELS,
     ...llm.HANDLED_CHANNELS,
-    ...oauth.HANDLED_CHANNELS,
     ...sessions.HANDLED_CHANNELS,
     ...coreSettings.HANDLED_CHANNELS,
     ...skills.HANDLED_CHANNELS,

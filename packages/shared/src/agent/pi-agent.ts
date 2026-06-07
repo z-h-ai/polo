@@ -50,9 +50,6 @@ import { getCoAuthorPreference } from '../config/preferences.ts';
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
 
-// ChatGPT OAuth token refresh (used when Pi routes ChatGPT auth)
-import { refreshChatGptTokens } from '../auth/chatgpt-oauth.ts';
-
 // Session-scoped tool callbacks (for SubmitPlan, source auth, etc.)
 import {
   registerSessionScopedToolCallbacks,
@@ -720,7 +717,7 @@ export class PiAgent extends BaseAgent {
 
   /**
    * Refresh OAuth tokens and push updated credentials to the running subprocess.
-   * Handles both Copilot (Pi SDK) and ChatGPT Plus token refresh.
+   * Handles Copilot token refresh through the Pi SDK.
    */
   private async refreshAndPushTokens(): Promise<void> {
     if (this.config.authType !== 'oauth') return;
@@ -758,7 +755,6 @@ export class PiAgent extends BaseAgent {
 
       try {
         if (piAuthProvider === 'github-copilot') {
-          // Copilot: refresh the short-lived Copilot token using the GitHub access token
           const { refreshGitHubCopilotToken } = await import('@mariozechner/pi-ai/oauth');
           const newCreds = await refreshGitHubCopilotToken(stored.refreshToken);
           await credentialManager.setLlmOAuth(slug, {
@@ -767,14 +763,8 @@ export class PiAgent extends BaseAgent {
             expiresAt: newCreds.expires,
           });
         } else {
-          // ChatGPT Plus: use existing refresh utility
-          const newTokens = await refreshChatGptTokens(stored.refreshToken);
-          await credentialManager.setLlmOAuth(slug, {
-            accessToken: newTokens.accessToken,
-            idToken: newTokens.idToken,
-            refreshToken: newTokens.refreshToken,
-            expiresAt: newTokens.expiresAt,
-          });
+          this.onBackendAuthRequired?.('Token refresh is unavailable for this provider');
+          return;
         }
         this.debug('Token refresh successful');
 

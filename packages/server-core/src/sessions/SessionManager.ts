@@ -74,7 +74,7 @@ import {
 } from '@polo-ai/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@polo-ai/shared/config'
-import { getValidClaudeOAuthToken, isPlatformMode } from '@polo-ai/shared/auth'
+import { isPlatformMode } from '@polo-ai/shared/auth'
 import { resolveAuthEnvVars } from '@polo-ai/shared/config'
 import { toolMetadataStore, getLastApiError } from '@polo-ai/shared/interceptor'
 import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
@@ -1880,7 +1880,7 @@ export class SessionManager implements ISessionManager {
       sessionLog.info(`Reinitializing auth for connection: ${slug} (${connection.authType})`)
 
       // Resolve auth env vars via shared utility (provider-agnostic)
-      const result = await resolveAuthEnvVars(connection, slug!, manager, getValidClaudeOAuthToken)
+      const result = await resolveAuthEnvVars(connection, slug!, manager)
 
       if (!result.success) {
         sessionLog.error(`Auth resolution failed for ${slug}: ${result.warning}`)
@@ -4099,8 +4099,6 @@ export class SessionManager implements ISessionManager {
         // Persist session state
         this.persistSession(managed)
 
-        // OAuth flow is client-driven via performOAuth() (preload).
-        // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
       }
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls

@@ -95,7 +95,6 @@ function makeDeps(opts: {
       onRemoved: (cb: (id: string) => void) => opts.captureRemovedCb?.(cb),
       onInteracted: (cb: (id: string) => void) => opts.captureInteractedCb?.(cb),
     } as unknown as NonNullable<HandlerDeps['browserPaneManager']>,
-    oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
   }
 }
 

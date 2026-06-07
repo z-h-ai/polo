@@ -7,7 +7,6 @@ import { inputComponents } from './input'
 import { slashCommandComponents } from './slash-command'
 import { markdownComponents } from './markdown'
 import { iconComponents } from './icons'
-import { oauthComponents } from './oauth'
 import { toastsComponents } from './toasts'
 import { sessionListComponents } from './session-list'
 import { editPopoverComponents } from './edit-popover'
@@ -36,7 +35,6 @@ export const componentRegistry: ComponentEntry[] = [
   ...slashCommandComponents,
   ...markdownComponents,
   ...iconComponents,
-  ...oauthComponents,
   ...sessionListComponents,
   ...editPopoverComponents,
   ...automationComponents,
@@ -51,7 +49,7 @@ export const componentRegistry: ComponentEntry[] = [
 ]
 
 export function getCategories(): CategoryGroup[] {
-  const categoryOrder: Category[] = ['Mobile WebUI', 'Automations', 'Agent Setup', 'Chat', 'Island', 'Browser', 'Planner', 'Custom Shadows', 'Session List', 'Entity Lists', 'Edit Popover', 'Turn Cards', 'TurnCard Modes', 'Fullscreen', 'Chat Messages', 'Chat Inputs', 'Toast Messages', 'Markdown', 'Icons', 'OAuth', 'Messaging']
+  const categoryOrder: Category[] = ['Mobile WebUI', 'Automations', 'Agent Setup', 'Chat', 'Island', 'Browser', 'Planner', 'Custom Shadows', 'Session List', 'Entity Lists', 'Edit Popover', 'Turn Cards', 'TurnCard Modes', 'Fullscreen', 'Chat Messages', 'Chat Inputs', 'Toast Messages', 'Markdown', 'Icons', 'Messaging']
   const categoryMap = new Map<Category, ComponentEntry[]>()
 
   for (const entry of componentRegistry) {

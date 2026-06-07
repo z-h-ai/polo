@@ -261,7 +261,6 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
   }, [isValid, handleSubmit, handleCancel])
 
   const handleOAuthClick = useCallback(async () => {
-    // Client-driven OAuth: callback server runs locally, server owns tokens
     if (!authRequestId || !authSourceSlug) {
       console.warn('[AuthRequestCard] handleOAuthClick bailed: missing', {
         authRequestId: authRequestId ?? 'MISSING',
@@ -270,21 +269,7 @@ export function AuthRequestCard({ message, onRespondToCredential, sessionId, isI
       })
       return
     }
-    setIsSubmitting(true)
-    try {
-      const result = await window.electronAPI.performOAuth({
-        sourceSlug: authSourceSlug,
-        sessionId,
-        authRequestId,
-      })
-      if (!result.success) {
-        console.warn('[AuthRequestCard] performOAuth returned failure:', result.error)
-      }
-    } catch (error) {
-      console.error('[AuthRequestCard] performOAuth threw:', error)
-    } finally {
-      setIsSubmitting(false)
-    }
+    console.warn('[AuthRequestCard] Browser sign-in is no longer available for source auth requests')
   }, [sessionId, authRequestId, authSourceSlug])
 
   // Get field labels

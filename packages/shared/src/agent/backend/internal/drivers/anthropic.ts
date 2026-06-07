@@ -98,13 +98,7 @@ export const anthropicDriver: ProviderDriver = {
     // After legacy migration, only direct 'anthropic' connections reach this driver.
 
     if (connection.providerType === 'anthropic' && connection.authType === 'oauth') {
-      const { getValidClaudeOAuthToken } = await import('../../../../auth/state.ts');
-      const tokenResult = await getValidClaudeOAuthToken(slug);
-      if (!tokenResult.accessToken) {
-        const errorMsg = tokenResult.migrationRequired?.message || 'OAuth token expired. Please re-authenticate.';
-        return { success: false, error: errorMsg };
-      }
-      return { success: true };
+      return { success: false, error: 'OAuth auth is no longer supported for Anthropic connections' };
     }
 
     let apiKey: string | null = null;

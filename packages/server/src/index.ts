@@ -230,7 +230,7 @@ const instance = await (async () => {
       }),
       createSessionManager: () => new SessionManager(),
       bindRpcServer: (sm, server) => sm.setRpcServer(server),
-      createHandlerDeps: ({ sessionManager, platform, oauthFlowStore }) => {
+      createHandlerDeps: ({ sessionManager, platform }) => {
         messagingHandle = createMessagingBootstrap({
           sessionManager,
           credentialManager: getCredentialManager(),
@@ -255,7 +255,6 @@ const instance = await (async () => {
         return {
           sessionManager,
           platform,
-          oauthFlowStore,
           messagingRegistry: messagingHandle.registry,
         }
       },
@@ -312,23 +311,6 @@ if (webuiHandler) {
   const { getHealthCheck } = await import('@polo-ai/server-core/handlers/rpc/server')
   const depsLike = { sessionManager: instance.sessionManager } as any
   healthCheckFn = () => getHealthCheck(depsLike)
-
-  // Wire up OAuth callback deps so /api/oauth/callback works
-  const { getSourceCredentialManager, loadWorkspaceSources } = await import('@polo-ai/shared/sources')
-  const { getWorkspaceByNameOrId } = await import('@polo-ai/shared/config')
-  const { pushTyped } = await import('@polo-ai/server-core/transport')
-  const { RPC_CHANNELS } = await import('@polo-ai/shared/protocol')
-
-  webuiHandler.setOAuthCallbackDeps({
-    flowStore: instance.oauthFlowStore,
-    credManager: getSourceCredentialManager(),
-    sessionManager: instance.sessionManager,
-    pushSourcesChanged: (workspaceId: string) => {
-      const ws = getWorkspaceByNameOrId(workspaceId)
-      const sources = ws ? loadWorkspaceSources(ws.rootPath) : []
-      pushTyped(instance.wsServer, RPC_CHANNELS.sources.CHANGED, { to: 'workspace', workspaceId }, workspaceId, sources)
-    },
-  })
 }
 
 // Start HTTP health endpoint if POLO_AI_HEALTH_PORT is set

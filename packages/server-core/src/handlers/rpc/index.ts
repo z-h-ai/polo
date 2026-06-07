@@ -6,7 +6,6 @@ import { registerAutomationsHandlers } from './automations'
 import { registerFilesHandlers } from './files'
 import { registerLabelsHandlers } from './labels'
 import { registerLlmConnectionsHandlers } from './llm-connections'
-import { registerOAuthHandlers } from './oauth'
 import { registerResourcesHandlers } from './resources'
 import { registerSessionsHandlers } from './sessions'
 export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './sessions'
@@ -33,7 +32,6 @@ export function registerCoreRpcHandlers(
   registerFilesHandlers(server, deps)
   registerLabelsHandlers(server, deps)
   registerLlmConnectionsHandlers(server, deps)
-  registerOAuthHandlers(server, deps)
   registerResourcesHandlers(server, deps)
   registerSessionsHandlers(server, deps)
   if (serverCtx) registerServerHandlers(server, deps, serverCtx)

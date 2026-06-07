@@ -793,12 +793,6 @@ export function NavigationProvider({
           }
           break
 
-        case 'oauth':
-          if (parsed.id) {
-            await window.electronAPI.performOAuth({ sourceSlug: parsed.id })
-          }
-          break
-
         case 'delete-source':
           if (parsed.id) {
             await window.electronAPI.deleteSource(workspaceId, parsed.id)

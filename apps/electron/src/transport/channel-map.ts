@@ -123,9 +123,6 @@ export const CHANNEL_MAP = {
   onSessionExpired: listener(RPC_CHANNELS.auth.SESSION_EXPIRED),
   getCredentialHealth: invoke(RPC_CHANNELS.credentials.HEALTH_CHECK),
 
-  // ChatGPT OAuth
-  startChatGptOAuth: invoke(RPC_CHANNELS.chatgpt.START_OAUTH),
-  cancelChatGptOAuth: invoke(RPC_CHANNELS.chatgpt.CANCEL_OAUTH),
   getChatGptAuthStatus: invoke(RPC_CHANNELS.chatgpt.GET_AUTH_STATUS),
   chatGptLogout: invoke(RPC_CHANNELS.chatgpt.LOGOUT),
 
@@ -199,7 +196,6 @@ export const CHANNEL_MAP = {
   getSources: invoke(RPC_CHANNELS.sources.GET),
   createSource: invoke(RPC_CHANNELS.sources.CREATE),
   deleteSource: invoke(RPC_CHANNELS.sources.DELETE),
-  startSourceOAuth: invoke(RPC_CHANNELS.sources.START_OAUTH),
   saveSourceCredentials: invoke(RPC_CHANNELS.sources.SAVE_CREDENTIALS),
   getSourcePermissionsConfig: invoke(RPC_CHANNELS.sources.GET_PERMISSIONS),
   getWorkspacePermissionsConfig: invoke(RPC_CHANNELS.workspace.GET_PERMISSIONS),
@@ -211,7 +207,6 @@ export const CHANNEL_MAP = {
   searchSessionContent: invoke(RPC_CHANNELS.sessions.SEARCH_CONTENT),
 
   // OAuth (server-owned credentials)
-  oauthRevoke: invoke(RPC_CHANNELS.oauth.REVOKE),
 
   // Sources change listener
   onSourcesChanged: listener(RPC_CHANNELS.sources.CHANGED),

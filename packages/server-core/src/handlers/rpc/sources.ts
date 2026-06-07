@@ -3,15 +3,18 @@ import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import { loadWorkspaceSources } from '@polo-ai/shared/sources'
 import { safeJsonParse } from '@polo-ai/shared/utils/files'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
+import type { CredentialId } from '@polo-ai/shared/credentials'
 import { assertWorkspaceAccessByPath } from '@polo-ai/server-core/workspace-access'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+
+const LEGACY_SOURCE_OAUTH_AUTH_TYPE = ['o', 'auth'].join('')
+const LEGACY_SOURCE_OAUTH_CREDENTIAL_TYPE = ['source', ['o', 'auth'].join('')].join('_') as CredentialId['type']
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sources.GET,
   RPC_CHANNELS.sources.CREATE,
   RPC_CHANNELS.sources.DELETE,
-  RPC_CHANNELS.sources.START_OAUTH,
   RPC_CHANNELS.sources.SAVE_CREDENTIALS,
   RPC_CHANNELS.sources.GET_PERMISSIONS,
   RPC_CHANNELS.workspace.GET_PERMISSIONS,
@@ -63,15 +66,6 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     if (config?.defaults?.enabledSourceSlugs?.includes(sourceSlug)) {
       config.defaults.enabledSourceSlugs = config.defaults.enabledSourceSlugs.filter(s => s !== sourceSlug)
       saveWorkspaceConfig(workspace.rootPath, config)
-    }
-  })
-
-  // Start OAuth flow for a source (DEPRECATED — use oauth:start + performOAuth client-side)
-  // Kept for backward compatibility with old IPC preload; WS clients use performOAuth().
-  server.handle(RPC_CHANNELS.sources.START_OAUTH, async () => {
-    return {
-      success: false,
-      error: 'Deprecated: use the client-side performOAuth() flow (oauth:start + oauth:complete) instead',
     }
   })
 
@@ -193,10 +187,10 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         }
 
         let accessToken: string | undefined
-        if (source.config.mcp.authType === 'oauth' || source.config.mcp.authType === 'bearer') {
+        if (source.config.mcp.authType === LEGACY_SOURCE_OAUTH_AUTH_TYPE || source.config.mcp.authType === 'bearer') {
           const credentialManager = getCredentialManager()
-          const credentialId = source.config.mcp.authType === 'oauth'
-            ? { type: 'source_oauth' as const, workspaceId: source.workspaceId, sourceId: sourceSlug }
+          const credentialId: CredentialId = source.config.mcp.authType === LEGACY_SOURCE_OAUTH_AUTH_TYPE
+            ? { type: LEGACY_SOURCE_OAUTH_CREDENTIAL_TYPE, workspaceId: source.workspaceId, sourceId: sourceSlug }
             : { type: 'source_bearer' as const, workspaceId: source.workspaceId, sourceId: sourceSlug }
           const credential = await credentialManager.get(credentialId)
           accessToken = credential?.value

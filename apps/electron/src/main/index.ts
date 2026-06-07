@@ -96,7 +96,6 @@ import { initializeBackendHostRuntime } from '@polo-ai/shared/agent/backend'
 import { setPowerShellValidatorRoot } from '@polo-ai/shared/agent'
 import { handleDeepLink } from './deep-link'
 import { BrowserPaneManager } from './browser-pane-manager'
-import { OAuthFlowStore } from '@polo-ai/shared/auth'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath, getMessagingGatewayLogFilePath, messagingGatewayLog } from './logger'
 import { setPerfEnabled, enableDebug } from '@polo-ai/shared/utils'
@@ -193,7 +192,6 @@ const DEEPLINK_SCHEME = process.env.POLO_AI_DEEPLINK_SCHEME || 'poloai'
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
 let browserPaneManager: BrowserPaneManager | null = null
-let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
 let forceLogoutEventSink: EventSink | null = null
@@ -644,7 +642,7 @@ app.whenReady().then(async () => {
           return sm
         },
         bindRpcServer: (sm, server) => sm.setRpcServer(server),
-        createHandlerDeps: ({ sessionManager: sm, platform: p, oauthFlowStore: ofs }) => {
+        createHandlerDeps: ({ sessionManager: sm, platform: p }) => {
           // The messaging handle is built here because it needs sessionManager.
           // The WS publisher is attached after bootstrapServer resolves (via
           // handle.setPublisher) because wsServer isn't available yet.
@@ -687,7 +685,6 @@ app.whenReady().then(async () => {
             platform: p,
             windowManager: windowManager ?? undefined,
             browserPaneManager: browserPaneManager ?? undefined,
-            oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
             authLogout: {
               logout: async (contextToken?: string | null) => {
@@ -733,7 +730,6 @@ app.whenReady().then(async () => {
 
       // Capture module-level references for before-quit cleanup and deep-link handlers
       sessionManager = instance.sessionManager
-      oauthFlowStore = instance.oauthFlowStore
       moduleSink = instance.wsServer.push.bind(instance.wsServer)
       forceLogoutEventSink = moduleSink
       moduleClientResolver = resolveClientId
@@ -1197,11 +1193,6 @@ app.on('before-quit', async (event) => {
     // Clean up browser pane instances
     if (browserPaneManager) {
       browserPaneManager.destroyAll()
-    }
-
-    // Clean up OAuth flow store (stop periodic cleanup timer)
-    if (oauthFlowStore) {
-      oauthFlowStore.dispose()
     }
 
     // Stop all model refresh timers

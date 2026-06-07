@@ -388,7 +388,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     delete process.env.ANTHROPIC_API_KEY
 
     const conn = makeAnthropicConnection()
-    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager)
 
     expect(result.success).toBe(true)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -399,7 +399,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key'
 
     const conn = makeAnthropicConnection()
-    await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+    await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager)
 
     expect(getLlmApiKeyCalled).toBe(false)
   })
@@ -409,7 +409,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     process.env.ANTHROPIC_API_KEY = 'sk-existing-key'
 
     const conn = makeAnthropicConnection()
-    await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+    await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager)
 
     expect(process.env.ANTHROPIC_API_KEY).toBe('sk-ant-platform-key')
   })
@@ -419,7 +419,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     delete process.env.PLATFORM_ANTHROPIC_API_KEY
 
     const conn = makeAnthropicConnection()
-    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager)
 
     expect(getLlmApiKeyCalled).toBe(true)
     expect(result.success).toBe(true)
@@ -430,7 +430,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     process.env.PLATFORM_ANTHROPIC_API_KEY = ''
 
     const conn = makeAnthropicConnection()
-    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager)
 
     expect(getLlmApiKeyCalled).toBe(true)
     expect(result.success).toBe(true)
@@ -441,7 +441,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-key'
 
     const conn = makePiConnection()
-    const result = await resolveAuthEnvVars(conn, 'pi-openai', mockCredentialManager, mockGetValidOAuthToken)
+    const result = await resolveAuthEnvVars(conn, 'pi-openai', mockCredentialManager)
 
     // Non-Anthropic providers already return early — unchanged behavior
     expect(result.success).toBe(true)
@@ -455,7 +455,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-secret'
 
     const conn = makeAnthropicConnection()
-    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager)
 
     const allValues = Object.values(result.envVars)
     expect(allValues).not.toContain('sk-ant-platform-secret')
@@ -465,7 +465,7 @@ describe('resolveAuthEnvVars — platform mode', () => {
     process.env.PLATFORM_ANTHROPIC_API_KEY = 'sk-ant-platform-secret'
 
     const conn = makeAnthropicConnection()
-    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager, mockGetValidOAuthToken)
+    const result = await resolveAuthEnvVars(conn, 'anthropic-api', mockCredentialManager)
 
     expect('PLATFORM_ANTHROPIC_API_KEY' in result.envVars).toBe(false)
   })

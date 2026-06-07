@@ -18,8 +18,6 @@
     "./agent/mode-types": "./src/agent/mode-types.ts",
     "./agent/thinking-levels": "./src/agent/thinking-levels.ts",
     "./auth": "./src/auth/index.ts",
-    "./auth/callback-page": "./src/auth/callback-page.ts",
-    "./auth/types": "./src/auth/types.ts",
     "./config": "./src/config/index.ts",
     "./docs": "./src/docs/index.ts",
     "./docs/doc-links": "./src/docs/doc-links.ts",

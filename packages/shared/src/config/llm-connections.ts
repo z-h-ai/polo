@@ -1016,14 +1016,12 @@ export interface ResolvedAuthEnvVars {
  * @param connection - The LLM connection config
  * @param connectionSlug - Connection slug for credential lookup
  * @param credentialManager - Credential manager instance
- * @param getValidOAuthToken - Function to get a valid (refreshed) OAuth token
  * @returns Resolved env vars and status
  */
 export async function resolveAuthEnvVars(
   connection: LlmConnection,
   connectionSlug: string,
   credentialManager: CredentialManager,
-  getValidOAuthToken: (slug: string) => Promise<{ accessToken?: string | null }>,
 ): Promise<ResolvedAuthEnvVars> {
   const envVars: Record<string, string> = {};
 
@@ -1055,23 +1053,7 @@ export async function resolveAuthEnvVars(
       return { envVars, success: false, warning: `No API key found for: ${connectionSlug}` };
     }
   } else if (authType === 'oauth') {
-    if (connection.providerType === 'anthropic') {
-      // Anthropic OAuth uses getValidClaudeOAuthToken which handles token refresh
-      const tokenResult = await getValidOAuthToken(connectionSlug);
-      if (tokenResult.accessToken) {
-        envVars.CLAUDE_CODE_OAUTH_TOKEN = tokenResult.accessToken;
-      } else {
-        return { envVars, success: false, warning: `Failed to get OAuth token for: ${connectionSlug}` };
-      }
-    } else {
-      // Fallback OAuth path (should not be reached after legacy migration)
-      const llmOAuth = await credentialManager.getLlmOAuth(connectionSlug);
-      if (llmOAuth?.accessToken) {
-        envVars.CLAUDE_CODE_OAUTH_TOKEN = llmOAuth.accessToken;
-      } else {
-        return { envVars, success: false, warning: `No OAuth token found for: ${connectionSlug}` };
-      }
-    }
+    return { envVars, success: false, warning: `OAuth auth is no longer supported for: ${connectionSlug}` };
   } else if (authType === 'environment') {
     // Environment auth — credentials come from process.env, nothing to inject
     return { envVars, success: true };

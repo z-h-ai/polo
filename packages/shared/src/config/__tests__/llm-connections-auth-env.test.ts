@@ -64,7 +64,6 @@ describe('Bedrock auth env handling', () => {
       connection,
       connection.slug,
       credentialManager as any,
-      async () => ({}),
     )
 
     expect(result.success).toBe(true)

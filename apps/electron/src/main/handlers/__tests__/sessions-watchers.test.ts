@@ -82,14 +82,6 @@ describe('sessions file watchers', () => {
           debug: () => {},
         },
       },
-      oauthFlowStore: {
-        store: () => {},
-        getByState: () => null,
-        remove: () => {},
-        cleanup: () => {},
-        dispose: () => {},
-        get size() { return 0 },
-      } as unknown as HandlerDeps['oauthFlowStore'],
     }
 
     registerSessionsHandlers(server, deps)

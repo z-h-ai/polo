@@ -1,6 +1,5 @@
 export type * from './handler-deps.ts'
 export type * from './session-manager-interface.ts'
-export type * from './oauth-flow-store-interface.ts'
 export type * from './browser-pane-manager-interface.ts'
 export type * from './window-manager-interface.ts'
 export type * from './messaging-registry-interface.ts'

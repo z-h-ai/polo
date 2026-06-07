@@ -387,9 +387,6 @@ export interface ElectronAPI {
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>
 
-  // ChatGPT OAuth (for Codex chatgptAuthTokens mode)
-  startChatGptOAuth(connectionSlug: string): Promise<{ success: boolean; error?: string }>
-  cancelChatGptOAuth(): Promise<{ success: boolean }>
   getChatGptAuthStatus(connectionSlug: string): Promise<{ authenticated: boolean; expiresAt?: number; hasRefreshToken?: boolean }>
   chatGptLogout(connectionSlug: string): Promise<{ success: boolean }>
 
@@ -442,16 +439,11 @@ export interface ElectronAPI {
   getSources(workspaceId: string): Promise<LoadedSource[]>
   createSource(workspaceId: string, config: Partial<FolderSourceConfig>): Promise<FolderSourceConfig>
   deleteSource(workspaceId: string, sourceSlug: string): Promise<void>
-  startSourceOAuth(workspaceId: string, sourceSlug: string): Promise<{ success: boolean; error?: string }>
   saveSourceCredentials(workspaceId: string, sourceSlug: string, credential: string): Promise<void>
   getSourcePermissionsConfig(workspaceId: string, sourceSlug: string): Promise<import('@polo-ai/shared/agent').PermissionsConfigFile | null>
   getWorkspacePermissionsConfig(workspaceId: string): Promise<import('@polo-ai/shared/agent').PermissionsConfigFile | null>
   getDefaultPermissionsConfig(): Promise<{ config: import('@polo-ai/shared/agent').PermissionsConfigFile | null; path: string }>
   getMcpTools(workspaceId: string, sourceSlug: string): Promise<McpToolsResult>
-
-  // OAuth (server-owned credentials, client-orchestrated flow)
-  performOAuth(args: { sourceSlug: string; sessionId?: string; authRequestId?: string }): Promise<{ success: boolean; error?: string; email?: string }>
-  oauthRevoke(sourceSlug: string): Promise<{ success: boolean }>
 
   // Session content search (full-text search via ripgrep)
   searchSessionContent(workspaceId: string, query: string, searchId?: string): Promise<SessionSearchResult[]>

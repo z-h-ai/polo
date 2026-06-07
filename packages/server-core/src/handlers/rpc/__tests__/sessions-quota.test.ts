@@ -181,11 +181,6 @@ function createHarness(options: {
       },
       appVersion: '0.0.0-test',
     } as unknown as HandlerDeps['platform'],
-    oauthFlowStore: {
-      getState: () => null,
-      setState: () => {},
-      clearState: () => {},
-    } as HandlerDeps['oauthFlowStore'],
     adminApiClient: mockAdminApi as AdminApiClient,
     pendingUsageStore: mockPendingUsage as PendingUsageStore,
     // Injectable workspace ownership resolver for tests (avoids filesystem config lookup)

@@ -15,7 +15,6 @@ import { parseError, type AgentError } from './errors.ts';
 import { mapClaudeSdkAssistantError, type ClaudeSdkApiError } from './claude-sdk-error-mapper.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
 import { loadStoredConfig, loadConfigDefaults, type Workspace, type AuthType, getDefaultLlmConnection, getLlmConnection } from '../config/storage.ts';
-import { getValidClaudeOAuthToken } from '../auth/state.ts';
 import { trackInFlightLlmAbortController } from '../auth/llm-abort-registry.ts';
 import {
   clearClaudeBedrockRoutingEnvVars,
@@ -678,7 +677,7 @@ export class ClaudeAgent extends BaseAgent {
 
     // Resolve auth env vars via shared utility
     const manager = getCredentialManager();
-    const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+    const result = await resolveAuthEnvVars(connection, slug, manager);
 
     if (!result.success) {
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };

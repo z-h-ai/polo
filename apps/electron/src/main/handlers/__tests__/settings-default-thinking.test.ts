@@ -70,14 +70,6 @@ describe('settings default thinking RPC handlers', () => {
           process: async () => Buffer.from(''),
         },
       },
-      oauthFlowStore: {
-        store: () => {},
-        getByState: () => null,
-        remove: () => {},
-        cleanup: () => {},
-        dispose: () => {},
-        get size() { return 0 },
-      } as unknown as HandlerDeps['oauthFlowStore'],
     }
 
     const { registerSettingsHandlers } = await import('@polo-ai/server-core/handlers/rpc/settings')

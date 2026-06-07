@@ -290,10 +290,6 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.llmConnections.REFRESH_MODELS,
   RPC_CHANNELS.llmConnections.CHANGED,
 
-  // chatgpt — OAuth via capability passthrough
-  RPC_CHANNELS.chatgpt.START_OAUTH,
-  RPC_CHANNELS.chatgpt.COMPLETE_OAUTH,
-  RPC_CHANNELS.chatgpt.CANCEL_OAUTH,
   RPC_CHANNELS.chatgpt.GET_AUTH_STATUS,
   RPC_CHANNELS.chatgpt.LOGOUT,
 
@@ -329,17 +325,10 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sources.GET,
   RPC_CHANNELS.sources.CREATE,
   RPC_CHANNELS.sources.DELETE,
-  RPC_CHANNELS.sources.START_OAUTH,
   RPC_CHANNELS.sources.SAVE_CREDENTIALS,
   RPC_CHANNELS.sources.CHANGED,
   RPC_CHANNELS.sources.GET_PERMISSIONS,
   RPC_CHANNELS.sources.GET_MCP_TOOLS,
-
-  // oauth — OAuth state management
-  RPC_CHANNELS.oauth.START,
-  RPC_CHANNELS.oauth.COMPLETE,
-  RPC_CHANNELS.oauth.CANCEL,
-  RPC_CHANNELS.oauth.REVOKE,
 
   // workspace — workspace config + images (sharp on headless)
   RPC_CHANNELS.workspace.GET_PERMISSIONS,

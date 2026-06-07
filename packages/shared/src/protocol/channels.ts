@@ -178,9 +178,6 @@ export const RPC_CHANNELS = {
     CHANGED: 'LLM_Connection:changed',
   },
   chatgpt: {
-    START_OAUTH: 'chatgpt:startOAuth',
-    COMPLETE_OAUTH: 'chatgpt:completeOAuth',
-    CANCEL_OAUTH: 'chatgpt:cancelOAuth',
     GET_AUTH_STATUS: 'chatgpt:getAuthStatus',
     LOGOUT: 'chatgpt:logout',
   },
@@ -224,17 +221,10 @@ export const RPC_CHANNELS = {
     GET: 'sources:get',
     CREATE: 'sources:create',
     DELETE: 'sources:delete',
-    START_OAUTH: 'sources:startOAuth',
     SAVE_CREDENTIALS: 'sources:saveCredentials',
     CHANGED: 'sources:changed',
     GET_PERMISSIONS: 'sources:getPermissions',
     GET_MCP_TOOLS: 'sources:getMcpTools',
-  },
-  oauth: {
-    START: 'oauth:start',
-    COMPLETE: 'oauth:complete',
-    CANCEL: 'oauth:cancel',
-    REVOKE: 'oauth:revoke',
   },
   workspace: {
     GET_PERMISSIONS: 'workspace:getPermissions',
