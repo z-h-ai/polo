@@ -1,0 +1,6 @@
+# Task Progress: auth.login-page
+[2026-06-07T07:35:29.768Z] Existing WebUI LoginPage/login-logic used the old Admin direct-login + /auth/session token handoff; auth.login-page must replace it with platform auth (/auth/login on WebUI, Electron IPC on Electron) so UI code never receives a JWT.
+[2026-06-07T07:40:16.890Z] In Bun server tests, spyOn(globalThis, 'fetch') did not intercept a bare fetch(...) call in packages/server-core/src/webui/http-server.ts; call globalThis.fetch(...) explicitly when tests need to mock outbound HTTP.
+[2026-06-07T07:42:28.282Z] packages/server-core tsc currently fails outside auth.login-page in src/handlers/rpc/__tests__/sessions-quota.test.ts, onboarding-platform.test.ts, and src/webui/__tests__/quota-proxy.test.ts due stale IOAuthFlowStore and Bun fetch typings; focused auth-login server tests pass.
+[2026-06-07T07:53:54.109Z] Electron ipcRenderer.invoke does not preserve custom Error fields reliably; auth:login should return a structured error envelope from main and have preload rethrow it so LoginPage receives code/retryAfterSeconds.
+[2026-06-07T07:59:21.296Z] WebUI performPlatformLogin must parse non-OK /auth/login JSON bodies: the server auth proxy reports unreachable Admin as 503 { error: 'network_error' }, which should map to the user-facing network error instead of the generic unknown 503 fallback.
