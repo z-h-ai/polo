@@ -17,6 +17,7 @@ type ApiToChannelMapKeys = Exclude<
   | 'performOAuth'
   | 'getTransportConnectionState'
   | 'getRuntimeEnvironment'
+  | 'authLogin' // direct IPC to main process — platform auth stores tokens outside renderer
   | 'onTransportConnectionStateChanged'
   | 'reconnectTransport'
   | 'isChannelAvailable'

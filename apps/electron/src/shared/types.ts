@@ -214,6 +214,9 @@ import type {
 } from '@polo-ai/shared/protocol'
 
 export interface ElectronAPI {
+  // Platform auth
+  authLogin(username: string, password: string): Promise<{ user: { id: string; username: string; role: string } }>
+
   // Session management
   getSessions(): Promise<Session[]>
   getUnreadSummary(): Promise<UnreadSummary>

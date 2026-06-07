@@ -15,15 +15,16 @@ export type LoginErrorCode =
   | 'account_disabled'
   | 'rate_limited'
   | 'network_error'
-  | 'session_failed'
   | 'platform_mode_disabled'
   | 'admin_not_configured'
+  | 'config_error'
   | 'unknown'
 
 export class LoginError extends Error {
   constructor(
     public readonly code: LoginErrorCode,
     message: string,
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message)
     this.name = 'LoginError'
@@ -41,6 +42,16 @@ export interface PublicConfig {
 
 export interface PostLoginConfig {
   wsUrl: string
+}
+
+export interface PlatformLoginUser {
+  id: string
+  username: string
+  role: string
+}
+
+export interface PlatformLoginResult {
+  user: PlatformLoginUser
 }
 
 // ---------------------------------------------------------------------------
@@ -87,78 +98,47 @@ export async function fetchPublicConfig(): Promise<PublicConfig> {
 }
 
 // ---------------------------------------------------------------------------
-// performAdminLogin
+// performPlatformLogin
 // ---------------------------------------------------------------------------
 
 /**
- * POST credentials to the Admin service's /api/auth/login endpoint.
- * Returns the JWT token on success.
- * Throws LoginError with appropriate code on failure.
+ * POST credentials to the WebUI platform auth endpoint.
+ * The server proxies Admin login and stores the JWT in an HttpOnly cookie;
+ * UI code only receives the authenticated user.
  */
-export async function performAdminLogin(
-  adminUrl: string,
+export async function performPlatformLogin(
   username: string,
   password: string,
-): Promise<string> {
+): Promise<PlatformLoginResult> {
   let res: Response
   try {
-    res = await fetch(`${adminUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    })
-  } catch {
-    throw new LoginError('network_error', 'Service temporarily unavailable')
-  }
-
-  if (res.ok) {
-    const data = await res.json() as { token: string }
-    return data.token
-  }
-
-  if (res.status === 401) {
-    throw new LoginError('invalid_credentials', 'Username or password incorrect')
-  }
-  if (res.status === 403) {
-    throw new LoginError('account_disabled', 'Account disabled, contact administrator')
-  }
-  if (res.status === 429) {
-    throw new LoginError('rate_limited', 'Too many attempts, try again later')
-  }
-
-  throw new LoginError('unknown', `Login failed: ${res.status}`)
-}
-
-// ---------------------------------------------------------------------------
-// setPoloSession
-// ---------------------------------------------------------------------------
-
-/**
- * POST the Admin JWT to /auth/session to set the Polo AI session cookie.
- * Resolves on success; throws LoginError on failure.
- */
-export async function setPoloSession(token: string): Promise<void> {
-  let res: Response
-  try {
-    res = await fetch('/auth/session', {
+    res = await fetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ username, password }),
     })
   } catch {
-    throw new LoginError('network_error', 'Service temporarily unavailable')
+    throw new LoginError('network_error', '无法连接服务器，请检查网络连接')
   }
 
   if (res.ok) {
-    return
+    return await res.json() as PlatformLoginResult
   }
 
+  const retryAfterSeconds = parseRetryAfterSeconds(res.headers.get('Retry-After'))
   if (res.status === 401) {
-    throw new LoginError('session_failed', 'Authentication failed')
+    throw new LoginError('invalid_credentials', '用户名或密码错误')
+  }
+  if (res.status === 403) {
+    throw new LoginError('account_disabled', '账号已被禁用，请联系管理员')
+  }
+  if (res.status === 429) {
+    const seconds = retryAfterSeconds ?? 0
+    throw new LoginError('rate_limited', `请 ${seconds} 秒后再试`, seconds)
   }
 
-  throw new LoginError('session_failed', `Session creation failed: ${res.status}`)
+  throw new LoginError('unknown', `Login failed: ${res.status}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +158,7 @@ export async function fetchPostLoginConfig(): Promise<PostLoginConfig> {
   }
 
   if (!res.ok) {
-    throw new LoginError('unknown', `Failed to fetch config: ${res.status}`)
+    throw new LoginError('config_error', `Failed to fetch config: ${res.status}`)
   }
 
   const data = await res.json() as PostLoginConfig
@@ -196,4 +176,10 @@ export async function fetchPostLoginConfig(): Promise<PostLoginConfig> {
 export function extractRedirectUrl(url: URL): string {
   const redirect = url.searchParams.get('redirect')
   return redirect && redirect.length > 0 ? redirect : '/'
+}
+
+function parseRetryAfterSeconds(value: string | null): number | undefined {
+  if (!value) return undefined
+  const seconds = Number.parseInt(value, 10)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined
 }

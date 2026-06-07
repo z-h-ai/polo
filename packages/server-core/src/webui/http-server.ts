@@ -58,6 +58,14 @@ function getMimeType(path: string): string {
   return MIME_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
+async function readJsonOrDefault(response: Response, fallback: unknown): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch {
+    return fallback
+  }
+}
+
 function getForwardedValue(req: Request, key: 'proto' | 'host'): string | null {
   const forwarded = req.headers.get('forwarded')
   if (!forwarded) return null
@@ -298,6 +306,81 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
         status: 200,
         headers: {
           'Set-Cookie': buildSessionCookie(body.token, useSecureCookies),
+        },
+      })
+    }
+
+    // ── Platform login endpoint (no cookie auth) ──
+    // Proxies credentials to Admin and stores the returned JWT in an HttpOnly
+    // cookie. The browser receives only user metadata.
+    if (path === '/auth/login' && req.method === 'POST') {
+      const jwtSecret = process.env.JWT_SECRET
+      const adminUrl = process.env.ADMIN_API_URL
+      if (!jwtSecret || !adminUrl) {
+        logger.error('[webui] JWT_SECRET and ADMIN_API_URL are required for /auth/login')
+        return Response.json({ error: 'server_configuration_error' }, { status: 500 })
+      }
+
+      let body: { username?: unknown; password?: unknown }
+      try {
+        body = await req.json() as { username?: unknown; password?: unknown }
+      } catch {
+        return Response.json(
+          { error: 'validation_error', message: 'username and password required' },
+          { status: 400 },
+        )
+      }
+
+      if (typeof body.username !== 'string' || typeof body.password !== 'string') {
+        return Response.json(
+          { error: 'validation_error', message: 'username and password required' },
+          { status: 400 },
+        )
+      }
+
+      let adminRes: Response
+      try {
+        adminRes = await globalThis.fetch(`${adminUrl.replace(/\/+$/, '')}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: body.username, password: body.password }),
+        })
+      } catch {
+        return Response.json(
+          { error: 'network_error', message: 'Admin service unavailable' },
+          { status: 503 },
+        )
+      }
+
+      const retryAfter = adminRes.headers.get('Retry-After')
+      if (!adminRes.ok) {
+        const errorBody = await readJsonOrDefault(adminRes, { error: 'login_failed' })
+        const headers = retryAfter ? { 'Retry-After': retryAfter } : undefined
+        return Response.json(errorBody, { status: adminRes.status, headers })
+      }
+
+      const loginBody = await readJsonOrDefault(adminRes, {}) as {
+        token?: unknown
+        user?: unknown
+      }
+      if (typeof loginBody.token !== 'string' || loginBody.token.trim().length === 0) {
+        logger.error('[webui] Admin login response did not include a token')
+        return Response.json({ error: 'admin_response_error' }, { status: 502 })
+      }
+
+      const payload = await verifyAdminJwt(loginBody.token, jwtSecret)
+      if (!payload) {
+        logger.error('[webui] Admin login returned an invalid JWT')
+        return Response.json({ error: 'invalid_token' }, { status: 502 })
+      }
+
+      const user = userFromAdminJwt(payload)
+      storeAdminJwt(user.id, loginBody.token, payload.exp)
+
+      return Response.json({ user }, {
+        status: 200,
+        headers: {
+          'Set-Cookie': buildSessionCookie(loginBody.token, useSecureCookies),
         },
       })
     }

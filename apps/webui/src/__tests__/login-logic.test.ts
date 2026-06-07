@@ -8,8 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:te
 import {
   checkExistingSession,
   fetchPublicConfig,
-  performAdminLogin,
-  setPoloSession,
+  performPlatformLogin,
   fetchPostLoginConfig,
   type LoginError,
 } from '../login-logic'
@@ -101,91 +100,63 @@ describe('fetchPublicConfig', () => {
 })
 
 // ---------------------------------------------------------------------------
-// performAdminLogin
+// performPlatformLogin
 // ---------------------------------------------------------------------------
 
-describe('performAdminLogin', () => {
-  it('returns token on successful admin login', async () => {
-    const adminUrl = 'http://admin.example.com'
+describe('performPlatformLogin', () => {
+  it('posts credentials to /auth/login and returns user without exposing a token', async () => {
     mockFetch(async (url, init) => {
-      expect(url).toBe(`${adminUrl}/api/auth/login`)
+      expect(url).toBe('/auth/login')
       expect((init as RequestInit).method).toBe('POST')
+      expect((init as RequestInit).credentials).toBe('same-origin')
       const body = JSON.parse((init as RequestInit).body as string)
       expect(body).toEqual({ username: 'alice', password: 'secret' })
-      return jsonResponse({ token: 'jwt-token-abc' })
+      return jsonResponse({ user: { id: 'u1', username: 'alice', role: 'admin' } })
     })
 
-    const result = await performAdminLogin(adminUrl, 'alice', 'secret')
-    expect(result).toBe('jwt-token-abc')
+    const result = await performPlatformLogin('alice', 'secret')
+    expect(result).toEqual({ user: { id: 'u1', username: 'alice', role: 'admin' } })
+    expect('token' in result).toBe(false)
   })
 
   it('throws LoginError with code invalid_credentials on 401', async () => {
     mockFetch(async () => jsonResponse({ error: 'invalid_credentials' }, 401))
 
-    const err = await performAdminLogin('http://admin.example.com', 'alice', 'wrong')
+    const err = await performPlatformLogin('alice', 'wrong')
       .catch(e => e) as LoginError
     expect(err.code).toBe('invalid_credentials')
-    expect(err.message).toContain('incorrect')
+    expect(err.message).toBe('用户名或密码错误')
   })
 
   it('throws LoginError with code account_disabled on 403', async () => {
     mockFetch(async () => jsonResponse({ error: 'account_disabled' }, 403))
 
-    const err = await performAdminLogin('http://admin.example.com', 'alice', 'pw')
+    const err = await performPlatformLogin('alice', 'pw')
       .catch(e => e) as LoginError
     expect(err.code).toBe('account_disabled')
-    expect(err.message).toContain('disabled')
+    expect(err.message).toBe('账号已被禁用，请联系管理员')
   })
 
-  it('throws LoginError with code rate_limited on 429', async () => {
-    mockFetch(async () => jsonResponse({ error: 'rate_limited' }, 429))
+  it('throws LoginError with code rate_limited and retryAfterSeconds on 429', async () => {
+    mockFetch(async () => new Response(JSON.stringify({ error: 'rate_limited' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': '30' },
+    }))
 
-    const err = await performAdminLogin('http://admin.example.com', 'alice', 'pw')
+    const err = await performPlatformLogin('alice', 'pw')
       .catch(e => e) as LoginError
     expect(err.code).toBe('rate_limited')
-    expect(err.message).toContain('Too many attempts')
+    expect(err.retryAfterSeconds).toBe(30)
+    expect(err.message).toBe('请 30 秒后再试')
   })
 
   it('throws LoginError with code network_error on fetch failure', async () => {
     mockFetch(async () => { throw new Error('ECONNREFUSED') })
 
-    const err = await performAdminLogin('http://admin.example.com', 'alice', 'pw')
+    const err = await performPlatformLogin('alice', 'pw')
       .catch(e => e) as LoginError
     expect(err.code).toBe('network_error')
-    expect(err.message).toContain('unavailable')
-  })
-})
-
-// ---------------------------------------------------------------------------
-// setPoloSession
-// ---------------------------------------------------------------------------
-
-describe('setPoloSession', () => {
-  it('POSTs to /auth/session with token and resolves on 200', async () => {
-    mockFetch(async (url, init) => {
-      expect(url).toBe('/auth/session')
-      expect((init as RequestInit).method).toBe('POST')
-      const body = JSON.parse((init as RequestInit).body as string)
-      expect(body).toEqual({ token: 'jwt-token-abc' })
-      return jsonResponse({ user: { id: 'u1', username: 'alice', role: 'user' } })
-    })
-
-    await expect(setPoloSession('jwt-token-abc')).resolves.toBeUndefined()
-  })
-
-  it('throws LoginError with code session_failed on 401 from /auth/session', async () => {
-    mockFetch(async () => jsonResponse({ error: 'invalid_token' }, 401))
-
-    const err = await setPoloSession('bad-token').catch(e => e) as LoginError
-    expect(err.code).toBe('session_failed')
-    expect(err.message).toContain('Authentication failed')
-  })
-
-  it('throws LoginError with code network_error on fetch failure', async () => {
-    mockFetch(async () => { throw new Error('Network down') })
-
-    const err = await setPoloSession('tok').catch(e => e) as LoginError
-    expect(err.code).toBe('network_error')
+    expect(err.message).toBe('无法连接服务器，请检查网络连接')
   })
 })
 

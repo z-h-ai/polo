@@ -264,6 +264,11 @@ client.onConnectionStateChanged((state) => {
   client.reconnectNow()
 }
 
+// Platform auth — main process owns token exchange/storage. Renderer receives
+// only success/failure metadata, never the raw Admin JWT.
+;(api as ElectronAPI).authLogin = (username: string, password: string) =>
+  ipcRenderer.invoke('auth:login', username, password)
+
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →
 // open browser → wait for callback → oauth:complete (server).
