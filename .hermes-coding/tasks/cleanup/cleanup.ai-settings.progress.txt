@@ -1,0 +1,3 @@
+# Task Progress: cleanup.ai-settings
+[2026-06-07T11:11:20.237Z] Initial red test also failed from a bad repoRoot calculation: shared/__tests__ needs five parent traversals to reach the repo root, not six.
+[2026-06-07T11:14:46.652Z] Settings menu items and settings/<subpage> route validation both derive from apps/electron/src/shared/settings-registry.ts, so removing a settings page must start by deleting its SETTINGS_PAGES entry.

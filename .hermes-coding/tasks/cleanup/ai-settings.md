@@ -3,9 +3,11 @@ id: cleanup.ai-settings
 module: cleanup
 type: domain
 priority: 11
-status: pending
+status: completed
 estimatedMinutes: 20
 dependencies: [cleanup.onboarding]
+startedAt: 2026-06-07T11:09:51.679Z
+completedAt: 2026-06-07T11:18:05.748Z
 ---
 # Remove AI Settings Page
 
