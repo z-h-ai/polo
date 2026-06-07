@@ -198,7 +198,7 @@ describe('AC8: reportPendingEntry shared function', () => {
   it('AC8.6: uses entry.userJwt for Authorization Bearer header', async () => {
     const entry = makeEntry({ requestId: 'req-jwt', userJwt: 'my-user-jwt-token' });
 
-    let capturedAuth: string | null = null;
+    let capturedAuth = '';
 
     const deps: ReportPendingEntryDeps = {
       pendingStore: {
@@ -207,7 +207,7 @@ describe('AC8: reportPendingEntry shared function', () => {
       },
       fetchFn: mock(async (_url: string | URL | Request, init?: RequestInit) => {
         const headers = init?.headers as Record<string, string>;
-        capturedAuth = headers?.['Authorization'] ?? null;
+        capturedAuth = headers?.['Authorization'] ?? '';
         return makeSuccessResponse();
       }),
       adminApiUrl: 'http://admin.test.local',
