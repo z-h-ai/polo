@@ -6,3 +6,5 @@
 [2026-06-07T08:22:31.436Z] COMPLETED: auth.startup-flow
 [2026-06-07T08:27:20.414Z] STARTED: auth.logout
 [2026-06-07T08:50:58.483Z] COMPLETED: auth.logout
+[2026-06-07T08:59:08.272Z] STARTED: auth.error-pages
+[2026-06-07T09:05:54.292Z] COMPLETED: auth.error-pages

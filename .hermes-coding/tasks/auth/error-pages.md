@@ -3,9 +3,11 @@ id: auth.error-pages
 module: auth
 type: ui
 priority: 6
-status: pending
+status: completed
 estimatedMinutes: 20
 dependencies: [auth.admin-api-client]
+startedAt: 2026-06-07T08:59:08.269Z
+completedAt: 2026-06-07T09:05:54.289Z
 ---
 # ServerErrorPage + ConfigErrorPage + SessionExpiredDialog
 

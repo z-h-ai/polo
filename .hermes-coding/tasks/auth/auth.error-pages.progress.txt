@@ -1,0 +1,2 @@
+# Task Progress: auth.error-pages
+[2026-06-07T09:02:19.577Z] Renderer focus-trap tests run without a DOM library; direct onKeyDown handler tests need HTMLElement-like focusable mocks with hasAttribute/getAttribute, not plain focus-only objects.
