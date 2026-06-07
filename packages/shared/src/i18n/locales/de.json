@@ -1363,7 +1363,7 @@
   "toast.webhookReplayCompleted": "Webhook-Wiedergabe abgeschlossen",
   "toast.workspaceReconnected": "Workspace wiederverbunden",
   "toolbar.escapeToInterrupt": "Drücken Sie <kbd>Esc</kbd> erneut, um zu unterbrechen",
-  "transport.authFailed": "Authentifizierung fehlgeschlagen. POLO_AI_SERVER_TOKEN überprüfen.",
+  "transport.authFailed": "Authentifizierung fehlgeschlagen. POLO_ADMIN_JWT überprüfen.",
   "transport.connecting": "Verbindung zum Remote-Server wird hergestellt",
   "transport.connectingDesc": "Verbindung zu {{url}} wird hergestellt...",
   "transport.defaultStatus": "Verbindungsstatus des Remote-Servers",

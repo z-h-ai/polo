@@ -3,10 +3,10 @@
  * @polo-ai/server — standalone headless Polo AI server.
  *
  * Usage:
- *   POLO_AI_SERVER_TOKEN=<secret> bun run packages/server/src/index.ts
+ *   POLO_ADMIN_API_URL=<url> bun run packages/server/src/index.ts
  *
  * Environment:
- *   POLO_AI_SERVER_TOKEN         — required bearer token for client auth
+ *   POLO_ADMIN_API_URL           — Admin API URL used for JWT validation and login proxy
  *   POLO_AI_RPC_HOST             — bind address (default: 127.0.0.1)
  *   POLO_AI_RPC_PORT             — bind port (default: 9100)
  *   POLO_AI_RPC_TLS_CERT         — path to PEM certificate file (enables TLS/wss)
@@ -18,8 +18,6 @@
  *   POLO_AI_VERSION              — app version (default: 0.0.0-dev)
  *   POLO_AI_DEBUG                — 'true' for debug logging
  *   POLO_AI_WEBUI_DIR            — path to built web UI assets (enables web UI on RPC port)
- *   POLO_AI_WEBUI_PASSWORD       — optional shorter password for web login (falls back to POLO_AI_SERVER_TOKEN)
- *   POLO_AI_WEBUI_SECURE_COOKIE  — optional true/false override for the session cookie Secure flag
  *   POLO_AI_WEBUI_WS_URL         — optional browser-facing ws:// or wss:// URL returned by /api/config
  *   POLO_AI_MESSAGING_WA_WORKER  — absolute path to worker.cjs (default: packages/messaging-whatsapp-worker/dist/worker.cjs)
  *   POLO_AI_MESSAGING_NODE_BIN   — Node binary used to spawn the WhatsApp worker (default: node)
@@ -65,17 +63,6 @@ if (process.env.POLO_AI_DEBUG === 'true' || process.env.POLO_AI_DEBUG === '1') {
   enableDebug()
 }
 
-function parseOptionalBooleanEnv(name: string, value: string | undefined): boolean | undefined {
-  if (value == null || value.trim() === '') return undefined
-
-  const normalized = value.trim().toLowerCase()
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
-
-  console.error(`Invalid ${name}: expected one of true/false/1/0/yes/no/on/off.`)
-  process.exit(1)
-}
-
 function parseOptionalWebSocketUrl(name: string, value: string | undefined): string | undefined {
   if (value == null || value.trim() === '') return undefined
 
@@ -116,9 +103,7 @@ if (tlsCertPath || tlsKeyPath) {
 // Web UI configuration
 const webuiDir = process.env.POLO_AI_WEBUI_DIR || undefined
 const webuiEnabled = webuiDir && existsSync(webuiDir)
-const webuiSecureCookies = parseOptionalBooleanEnv('POLO_AI_WEBUI_SECURE_COOKIE', process.env.POLO_AI_WEBUI_SECURE_COOKIE)
 const webuiWsUrl = parseOptionalWebSocketUrl('POLO_AI_WEBUI_WS_URL', process.env.POLO_AI_WEBUI_WS_URL)
-const serverToken = process.env.POLO_AI_SERVER_TOKEN
 
 // ---------------------------------------------------------------------------
 // Create WebUI handler early so it can be embedded in the WsRpcServer.
@@ -133,15 +118,13 @@ let webuiNodeHandler: ReturnType<typeof nodeHttpAdapter> | undefined
 // after bootstrap completes, but the handler captures the closure.
 let healthCheckFn: (() => { status: string }) | null = null
 
-if (webuiEnabled && serverToken) {
+if (webuiEnabled) {
   const rpcPort = parseInt(process.env.POLO_AI_RPC_PORT ?? '9100', 10)
   const rpcProtocol = tls ? 'wss' as const : 'ws' as const
 
   webuiHandler = createWebuiHandler({
     webuiDir: webuiDir!,
-    secret: serverToken,
-    password: process.env.POLO_AI_WEBUI_PASSWORD || undefined,
-    secureCookies: webuiSecureCookies,
+    secret: '',
     publicWsUrl: webuiWsUrl,
     wsProtocol: rpcProtocol,
     // WebUI is served on the same port as WS — wsPort matches the RPC port
@@ -173,12 +156,12 @@ const instance = await (async () => {
       serverVersion: process.env.POLO_AI_VERSION ?? packageVersion,
       tls,
       // When web UI is enabled, accept JWT session cookies on WebSocket upgrade
-      validateSessionCookie: webuiEnabled && serverToken
+      validateSessionCookie: webuiEnabled
         ? async (cookieHeader) => {
             const jwt = extractSessionCookie(cookieHeader)
             if (!jwt) return null
 
-            const session = await validateSession(cookieHeader, serverToken, {
+            const session = await validateSession(cookieHeader, '', {
               adminJwtSecret: process.env.JWT_SECRET,
             })
             if (!session) return null
@@ -324,7 +307,6 @@ const healthServer = await startHealthHttpServer({
 
 const serverProto = instance.protocol === 'wss' ? 'https' : 'http'
 console.log(`POLO_AI_SERVER_URL=${instance.protocol}://${instance.host}:${instance.port}`)
-console.log(`POLO_AI_SERVER_TOKEN=${instance.token}`)
 if (webuiHandler) {
   console.log(`POLO_AI_WEBUI_URL=${serverProto}://0.0.0.0:${instance.port}`)
 }

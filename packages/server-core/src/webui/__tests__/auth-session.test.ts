@@ -12,7 +12,6 @@ const OTHER_SECRET = 'other-jwt-secret'
 const TEMP_DIRS: string[] = []
 const HANDLERS: Array<{ dispose: () => void }> = []
 const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET
-const ORIGINAL_SECURE_COOKIE = process.env.POLO_AI_WEBUI_SECURE_COOKIE
 
 function createLogger() {
   return {
@@ -34,7 +33,7 @@ function createTestWebuiDir(): string {
   return dir
 }
 
-function setEnv(name: 'JWT_SECRET' | 'POLO_AI_WEBUI_SECURE_COOKIE', value: string | undefined) {
+function setEnv(name: 'JWT_SECRET', value: string | undefined) {
   if (value === undefined) {
     delete process.env[name]
   } else {
@@ -44,7 +43,6 @@ function setEnv(name: 'JWT_SECRET' | 'POLO_AI_WEBUI_SECURE_COOKIE', value: strin
 
 function restoreEnv() {
   setEnv('JWT_SECRET', ORIGINAL_JWT_SECRET)
-  setEnv('POLO_AI_WEBUI_SECURE_COOKIE', ORIGINAL_SECURE_COOKIE)
 }
 
 async function createServer(overrides?: {
@@ -87,19 +85,22 @@ async function signAdminJwt(overrides?: {
   username?: string
   role?: string
   exp?: number
+  withExp?: boolean
 }): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   const key = new TextEncoder().encode(overrides?.secret ?? JWT_SECRET)
 
-  return new SignJWT({
+  let jwt = new SignJWT({
     username: overrides?.username ?? 'alice',
     role: overrides?.role ?? 'user',
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(overrides?.sub ?? 'user-123')
     .setIssuedAt(now)
-    .setExpirationTime(overrides?.exp ?? now + 3600)
-    .sign(key)
+  if (overrides?.withExp !== false) {
+    jwt = jwt.setExpirationTime(overrides?.exp ?? now + 3600)
+  }
+  return jwt.sign(key)
 }
 
 function cookiePair(res: Response): string {
@@ -147,10 +148,27 @@ describe('POST /auth/session', () => {
     expect(adminJwtStore.get('user-abc')).toBe(token)
   })
 
-  it('omits the Secure cookie flag when secure cookies are disabled', async () => {
+  it('accepts an Admin JWT without an exp claim', async () => {
     setEnv('JWT_SECRET', JWT_SECRET)
-    setEnv('POLO_AI_WEBUI_SECURE_COOKIE', 'false')
-    const { handler, baseUrl } = await createServer({ secureCookies: true })
+    const { handler, baseUrl } = await createServer()
+    const token = await signAdminJwt({ sub: 'user-no-exp', username: 'alice', role: 'admin', withExp: false })
+
+    const res = await request(handler, baseUrl, '/auth/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      user: { id: 'user-no-exp', username: 'alice', role: 'admin' },
+    })
+    expect(adminJwtStore.get('user-no-exp')).toBe(token)
+  })
+
+  it('omits the Secure cookie flag when the explicit secure cookie option is disabled', async () => {
+    setEnv('JWT_SECRET', JWT_SECRET)
+    const { handler, baseUrl } = await createServer({ secureCookies: false })
     const token = await signAdminJwt()
 
     const res = await request(handler, baseUrl, '/auth/session', {

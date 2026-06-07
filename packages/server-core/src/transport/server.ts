@@ -108,6 +108,8 @@ export interface WsRpcServerOptions {
   requireAuth?: boolean
   /** Token validator. Called when requireAuth is true. */
   validateToken?: (token: string) => Promise<boolean>
+  /** Optional Bearer JWT validator for WebSocket upgrade Authorization headers. */
+  validateBearerToken?: (token: string) => Promise<WsAuthContext | null>
   /**
    * Optional cookie-based session validator (for web UI auth).
    * Called with the Cookie header from the HTTP upgrade request.
@@ -193,6 +195,7 @@ export class WsRpcServer implements RpcServer {
   private readonly requestedPort: number
   private readonly requireAuth: boolean
   private readonly validateToken: ((token: string) => Promise<boolean>) | null
+  private readonly validateBearerToken: ((token: string) => Promise<WsAuthContext | null>) | null
   private readonly validateSessionCookie: ((cookieHeader: string | null) => Promise<WsAuthContext | null>) | null
   private readonly serverId: string
   private readonly tlsOptions: WsRpcTlsOptions | null
@@ -208,6 +211,7 @@ export class WsRpcServer implements RpcServer {
     this.requestedPort = opts?.port ?? 0
     this.requireAuth = opts?.requireAuth ?? false
     this.validateToken = opts?.validateToken ?? null
+    this.validateBearerToken = opts?.validateBearerToken ?? null
     this.validateSessionCookie = opts?.validateSessionCookie ?? null
     this.serverId = opts?.serverId ?? 'local'
     this.serverVersion = opts?.serverVersion ?? ''
@@ -781,7 +785,7 @@ export class WsRpcServer implements RpcServer {
   // -------------------------------------------------------------------------
 
   private getUpgradeAuthOptions(): { verifyClient?: VerifyClientCallbackAsync } {
-    if (!this.requireAuth || !this.validateSessionCookie) {
+    if (!this.requireAuth || (!this.validateSessionCookie && !this.validateBearerToken)) {
       return {}
     }
 
@@ -814,12 +818,18 @@ export class WsRpcServer implements RpcServer {
       if (hasSessionCookie) return null
     }
 
-    const serverToken = this.headerToString(req.headers['x-server-token'])
-    if (serverToken && this.validateToken && await this.validateToken(serverToken)) {
-      return createSystemAuthContext()
+    const bearerToken = this.extractBearerToken(this.headerToString(req.headers.authorization))
+    if (bearerToken && this.validateBearerToken) {
+      return this.validateBearerToken(bearerToken)
     }
 
     return null
+  }
+
+  private extractBearerToken(authorizationHeader: string | null): string | null {
+    if (!authorizationHeader) return null
+    const match = authorizationHeader.match(/^Bearer\s+(.+)$/i)
+    return match?.[1]?.trim() || null
   }
 
   private headerToString(value: string | string[] | undefined): string | null {

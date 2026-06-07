@@ -4,7 +4,7 @@
  * Reuses the same WsRpcClient + buildClientApi() + CHANNEL_MAP from the Electron app.
  * Overrides LOCAL_ONLY methods (window management, native dialogs, etc.) with web equivalents.
  *
- * Auth: the browser's session cookie (set by /api/auth) is automatically sent
+ * Auth: the browser's Admin JWT session cookie is automatically sent
  * on the WebSocket upgrade request — no bearer token needed.
  */
 

@@ -1363,7 +1363,7 @@
   "toast.webhookReplayCompleted": "Webhookリプレイが完了しました",
   "toast.workspaceReconnected": "Workspaceが再接続されました",
   "toolbar.escapeToInterrupt": "<kbd>Esc</kbd>を再度押して中断",
-  "transport.authFailed": "認証に失敗しました。POLO_AI_SERVER_TOKENを確認してください。",
+  "transport.authFailed": "認証に失敗しました。POLO_ADMIN_JWTを確認してください。",
   "transport.connecting": "リモートサーバーに接続中",
   "transport.connectingDesc": "{{url}}に接続中...",
   "transport.defaultStatus": "リモートサーバーの接続状態",

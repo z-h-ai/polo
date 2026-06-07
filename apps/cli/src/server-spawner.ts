@@ -2,7 +2,7 @@
  * Server spawner — start a headless Polo AI server as a child process.
  *
  * Spawns `bun run <serverEntry>`, reads stdout for the `POLO_AI_SERVER_URL=`
- * and `POLO_AI_SERVER_TOKEN=` lines, and returns a handle to stop the server.
+ * line, and returns a handle to stop the server.
  */
 
 import { resolve, join } from 'node:path'
@@ -55,7 +55,7 @@ function findServerEntry(): string {
 export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedServer> {
   const serverEntry = opts?.serverEntry ?? findServerEntry()
   const startupTimeout = opts?.startupTimeout ?? 30_000
-  const token = crypto.randomUUID()
+  const token = opts?.env?.POLO_ADMIN_JWT ?? ''
 
   // Strip CLAUDECODE to avoid the Claude Agent SDK's nesting guard rejecting
   // subprocess launches when the CLI is invoked from within a Claude Code session.
@@ -64,7 +64,6 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
     env: {
       ...parentEnv,
       ...opts?.env,
-      POLO_AI_SERVER_TOKEN: token,
       POLO_AI_RPC_PORT: '0',
       POLO_AI_RPC_HOST: '127.0.0.1',
     },
@@ -105,9 +104,6 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
       for (const line of lines) {
         if (line.startsWith('POLO_AI_SERVER_URL=')) {
           url = line.slice('POLO_AI_SERVER_URL='.length).trim()
-        }
-        if (line.startsWith('POLO_AI_SERVER_TOKEN=')) {
-          // Server echoes the token — we already have it but this confirms ready
         }
         // Once we have the URL, the server is ready
         if (url) {

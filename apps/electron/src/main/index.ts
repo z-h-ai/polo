@@ -1011,7 +1011,6 @@ app.whenReady().then(async () => {
       // Headless: print connection details
       if (isHeadless) {
         console.log(`POLO_AI_SERVER_URL=${instance.protocol}://${instance.host}:${instance.port}`)
-        console.log(`POLO_AI_SERVER_TOKEN=${instance.token}`)
       }
     }
 

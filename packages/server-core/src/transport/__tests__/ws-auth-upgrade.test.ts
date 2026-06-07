@@ -60,6 +60,17 @@ function createUpgradeAuthServer(onClientConnected?: (info: ConnectedInfo) => vo
     port: 0,
     requireAuth: true,
     validateToken: async (token) => token === SERVER_TOKEN,
+    validateBearerToken: async (jwt): Promise<WsAuthContext | null> => {
+      const payload = await verifyAdminJwt(jwt, JWT_SECRET)
+      if (!payload) return null
+
+      return {
+        userId: payload.sub,
+        username: payload.username,
+        role: payload.role,
+        jwt,
+      }
+    },
     validateSessionCookie: async (cookieHeader): Promise<WsAuthContext | null> => {
       const jwt = extractSessionCookie(cookieHeader)
       if (!jwt) return null
@@ -274,7 +285,7 @@ describe('WsRpcServer upgrade authentication', () => {
     expect(ack.username).toBe('bob')
   })
 
-  it('accepts x-server-token header fallback with system identity when no session cookie is present', async () => {
+  it('accepts a valid Authorization Bearer JWT in the upgrade headers', async () => {
     const connected: ConnectedInfo[] = []
     const server = createUpgradeAuthServer((info) => connected.push(info))
     server.handle('test:get-context', (ctx) => ({
@@ -285,43 +296,35 @@ describe('WsRpcServer upgrade authentication', () => {
     }))
     await server.listen()
 
+    const jwt = await signAdminJwt({ userId: 'user-bearer', username: 'bea', role: 'admin' })
     const { ws, ack } = await connectAndHandshake({
       server,
-      headers: { 'x-server-token': SERVER_TOKEN },
+      headers: { Authorization: `Bearer ${jwt}` },
     })
     const response = await invokeRpc(ws, 'test:get-context')
 
     expect(ack.clientId).toBeTruthy()
-    expect(ack.userId).toBeNull()
-    expect(ack.username).toBe('system')
+    expect(ack.userId).toBe('user-bearer')
+    expect(ack.username).toBe('bea')
     expect(connected[0]).toMatchObject({
-      userId: null,
-      username: 'system',
+      userId: 'user-bearer',
+      username: 'bea',
       role: 'admin',
-      jwt: null,
+      jwt,
     })
     expect(response.result).toEqual({
-      userId: null,
-      username: 'system',
+      userId: 'user-bearer',
+      username: 'bea',
       userRole: 'admin',
-      userJwt: null,
+      userJwt: jwt,
     })
   })
 
-  it('falls through to x-server-token when Cookie is missing polo_ai_session', async () => {
+  it('rejects the removed x-server-token upgrade fallback', async () => {
     const server = createUpgradeAuthServer()
     await server.listen()
 
-    const { ack } = await connectAndHandshake({
-      server,
-      headers: {
-        Cookie: 'other=x; foo=bar',
-        'x-server-token': SERVER_TOKEN,
-      },
-    })
-
-    expect(ack.userId).toBeNull()
-    expect(ack.username).toBe('system')
+    await expectUpgradeRejected(server, { 'x-server-token': SERVER_TOKEN })
   })
 
   it('rejects unauthenticated or invalid upgrade requests with 401', async () => {

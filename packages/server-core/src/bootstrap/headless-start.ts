@@ -7,6 +7,7 @@ import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { startRetryTimer, stopRetryTimer, pendingUsageStore } from '@polo-ai/shared/admin-api'
 import { WsRpcServer, type WsAuthContext, type WsClientConnectedInfo, type WsRpcTlsOptions } from '../transport/server'
+import { validateAdminBearerAuth } from '../webui/auth'
 import type { EventSink, RpcServer } from '../transport/types'
 import { createHeadlessPlatform } from '../runtime/platform-headless'
 import type { PlatformServices } from '../runtime/platform'
@@ -18,6 +19,7 @@ interface ModelRefreshServiceLike {
 
 export interface ServerBootstrapOptions<TSessionManager, THandlerDeps> {
   serverToken?: string
+  validateBearerToken?: (token: string) => Promise<WsAuthContext | null>
   rpcHost?: string
   rpcPort?: number
   bundledAssetsRoot?: string
@@ -257,13 +259,9 @@ function ensureGlobalConfigExists(platform: PlatformServices): void {
 export async function bootstrapServer<TSessionManager, THandlerDeps>(
   options: ServerBootstrapOptions<TSessionManager, THandlerDeps>,
 ): Promise<ServerInstance<TSessionManager>> {
-  const serverToken = options.serverToken ?? process.env.POLO_AI_SERVER_TOKEN
-  if (!serverToken) {
-    throw new Error('Server token is required. Pass options.serverToken or set POLO_AI_SERVER_TOKEN.')
-  }
-
-  const entropy = validateTokenEntropy(serverToken)
-  if (!entropy.ok) {
+  const serverToken = options.serverToken
+  const entropy = serverToken ? validateTokenEntropy(serverToken) : null
+  if (entropy && !entropy.ok) {
     throw new Error(`Weak server token: ${entropy.error}`)
   }
 
@@ -274,7 +272,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
     ?? process.cwd()
   setBundledAssetsRoot(bundledAssetsRoot)
 
-  if (entropy.warning) {
+  if (entropy?.warning) {
     platform.logger.warn(`[bootstrap] ${entropy.warning}`)
   }
 
@@ -298,7 +296,8 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
     host: rpcHost,
     port: rpcPort,
     requireAuth: true,
-    validateToken: async (t) => t === serverToken,
+    validateToken: serverToken ? async (t) => t === serverToken : undefined,
+    validateBearerToken: options.validateBearerToken ?? validateAdminBearerToken,
     validateSessionCookie: options.validateSessionCookie,
     serverId: options.serverId ?? 'headless',
     serverVersion: options.serverVersion,
@@ -346,7 +345,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
 
   // Start background usage retry timer in platform mode (§5.2, §6.2)
   if (isPlatformMode()) {
-    const adminApiUrl = process.env.ADMIN_API_URL ?? ''
+    const adminApiUrl = process.env.POLO_ADMIN_API_URL ?? ''
     startRetryTimer({
       pendingStore: pendingUsageStore,
       fetchFn: globalThis.fetch,
@@ -412,9 +411,20 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
     host: rpcHost,
     port: wsServer.port,
     protocol: wsServer.protocol,
-    token: serverToken,
+    token: serverToken ?? '',
     serverHandlerContext,
     stop,
+  }
+}
+
+async function validateAdminBearerToken(token: string): Promise<WsAuthContext | null> {
+  const result = await validateAdminBearerAuth(`Bearer ${token}`)
+  if (!result.ok) return null
+  return {
+    userId: result.user.id,
+    username: result.user.username,
+    role: result.user.role,
+    jwt: result.token,
   }
 }
 

@@ -52,7 +52,7 @@ describe('getTransportBannerCopy', () => {
     }))
 
     expect(copy.title).toContain('Cannot connect')
-    expect(copy.description).toContain('POLO_AI_SERVER_TOKEN')
+    expect(copy.description).toContain('POLO_ADMIN_JWT')
     expect(copy.showRetry).toBe(true)
     expect(copy.tone).toBe('error')
   })

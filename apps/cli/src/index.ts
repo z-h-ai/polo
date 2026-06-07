@@ -147,7 +147,7 @@ export function parseArgs(argv: string[]): CliArgs {
 
   // Env var fallbacks
   if (!url) url = process.env.POLO_AI_SERVER_URL ?? ''
-  if (!token) token = process.env.POLO_AI_SERVER_TOKEN ?? ''
+  if (!token) token = process.env.POLO_ADMIN_JWT ?? ''
   if (!tlsCa) tlsCa = process.env.POLO_AI_TLS_CA
   if (!provider) provider = process.env.LLM_PROVIDER ?? 'anthropic'
   if (!model) model = process.env.LLM_MODEL ?? ''
@@ -1897,7 +1897,7 @@ Usage: polo-ai [options] <command> [args...]
 
 Connection:
   --url <ws[s]://...>    Server URL (default: $POLO_AI_SERVER_URL)
-  --token <secret>       Auth token (default: $POLO_AI_SERVER_TOKEN)
+  --token <jwt>          Admin JWT (default: $POLO_ADMIN_JWT)
   --workspace <id>       Workspace ID (auto-detected if omitted)
   --timeout <ms>         Request timeout (default: 10000)
   --tls-ca <path>        Custom CA cert for self-signed TLS

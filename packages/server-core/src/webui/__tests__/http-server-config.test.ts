@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { SignJWT } from 'jose'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWebuiHandler } from '../http-server'
+import { clearAdminJwtStore } from '../auth'
 
 const SECRET = 'test-server-secret'
-const PASSWORD = 'test-password'
+const JWT_SECRET = 'admin-jwt-secret'
 const TEMP_DIRS: string[] = []
 const HANDLERS: Array<{ dispose: () => void }> = []
-const ORIGINAL_ADMIN_API_URL = process.env.ADMIN_API_URL
+const ORIGINAL_POLO_ADMIN_API_URL = process.env.POLO_ADMIN_API_URL
 const ORIGINAL_PLATFORM_ANTHROPIC_API_KEY = process.env.PLATFORM_ANTHROPIC_API_KEY
 const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET
 
@@ -31,7 +33,6 @@ async function createServer() {
   const handler = createWebuiHandler({
     webuiDir: createTestWebuiDir(),
     secret: SECRET,
-    password: PASSWORD,
     wsProtocol: 'wss',
     wsPort: 9100,
     getHealthCheck: () => ({ status: 'ok' }),
@@ -55,7 +56,7 @@ function request(
   return handler.fetch(new Request(`${baseUrl}${path}`, init))
 }
 
-function setEnv(name: 'ADMIN_API_URL' | 'PLATFORM_ANTHROPIC_API_KEY' | 'JWT_SECRET', value: string | undefined) {
+function setEnv(name: 'POLO_ADMIN_API_URL' | 'PLATFORM_ANTHROPIC_API_KEY' | 'JWT_SECRET', value: string | undefined) {
   if (value === undefined) {
     delete process.env[name]
   } else {
@@ -64,12 +65,28 @@ function setEnv(name: 'ADMIN_API_URL' | 'PLATFORM_ANTHROPIC_API_KEY' | 'JWT_SECR
 }
 
 function restoreEnv() {
-  setEnv('ADMIN_API_URL', ORIGINAL_ADMIN_API_URL)
+  setEnv('POLO_ADMIN_API_URL', ORIGINAL_POLO_ADMIN_API_URL)
   setEnv('PLATFORM_ANTHROPIC_API_KEY', ORIGINAL_PLATFORM_ANTHROPIC_API_KEY)
   setEnv('JWT_SECRET', ORIGINAL_JWT_SECRET)
 }
 
-function extractSessionCookie(res: Response): string {
+async function signAdminJwt(): Promise<string> {
+  const key = new TextEncoder().encode(JWT_SECRET)
+  return new SignJWT({ username: 'alice', role: 'admin' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject('user-123')
+    .setIssuedAt(Math.floor(Date.now() / 1000))
+    .sign(key)
+}
+
+async function createSessionCookie(handler: { fetch: (req: Request) => Promise<Response> }, baseUrl: string): Promise<string> {
+  setEnv('JWT_SECRET', JWT_SECRET)
+  const token = await signAdminJwt()
+  const res = await request(handler, baseUrl, '/auth/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
   const setCookie = res.headers.get('set-cookie')
   expect(setCookie).toBeTruthy()
   return setCookie!.split(';')[0]!
@@ -77,6 +94,7 @@ function extractSessionCookie(res: Response): string {
 
 afterEach(() => {
   restoreEnv()
+  clearAdminJwtStore()
 
   while (HANDLERS.length > 0) {
     HANDLERS.pop()?.dispose()
@@ -90,7 +108,7 @@ afterEach(() => {
 
 describe('webui config endpoints', () => {
   it('returns public admin config without a session cookie', async () => {
-    setEnv('ADMIN_API_URL', 'http://localhost:3001')
+    setEnv('POLO_ADMIN_API_URL', 'http://localhost:3001')
     setEnv('PLATFORM_ANTHROPIC_API_KEY', 'test-platform-key')
     const { handler, baseUrl } = await createServer()
 
@@ -104,21 +122,7 @@ describe('webui config endpoints', () => {
   })
 
   it('returns null adminUrl and disabled platform mode when env vars are unset', async () => {
-    setEnv('ADMIN_API_URL', undefined)
-    setEnv('PLATFORM_ANTHROPIC_API_KEY', undefined)
-    const { handler, baseUrl } = await createServer()
-
-    const res = await request(handler, baseUrl, '/api/public-config')
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({
-      adminUrl: null,
-      platformMode: false,
-    })
-  })
-
-  it('does not require ADMIN_API_URL when platform mode is disabled', async () => {
-    setEnv('ADMIN_API_URL', undefined)
+    setEnv('POLO_ADMIN_API_URL', undefined)
     setEnv('PLATFORM_ANTHROPIC_API_KEY', undefined)
     const { handler, baseUrl } = await createServer()
 
@@ -132,7 +136,7 @@ describe('webui config endpoints', () => {
   })
 
   it('does not leak configured secret values in public config', async () => {
-    setEnv('ADMIN_API_URL', 'http://localhost:3001')
+    setEnv('POLO_ADMIN_API_URL', 'http://localhost:3001')
     setEnv('PLATFORM_ANTHROPIC_API_KEY', 'platform-secret-value')
     setEnv('JWT_SECRET', 'jwt-secret-value')
     const { handler, baseUrl } = await createServer()
@@ -145,7 +149,7 @@ describe('webui config endpoints', () => {
     expect(body).not.toContain('jwt-secret-value')
   })
 
-  it('keeps /api/config protected without a session cookie', async () => {
+  it('keeps /api/config protected without auth', async () => {
     const { handler, baseUrl } = await createServer()
 
     const res = await request(handler, baseUrl, '/api/config')
@@ -154,19 +158,12 @@ describe('webui config endpoints', () => {
     expect(await res.json()).toEqual({ error: 'Unauthorized' })
   })
 
-  it('keeps /api/config returning only wsUrl with a valid session cookie', async () => {
+  it('keeps /api/config returning only wsUrl with a valid Admin JWT session cookie', async () => {
     const { handler, baseUrl } = await createServer()
-
-    const authRes = await request(handler, baseUrl, '/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: PASSWORD }),
-    })
+    const cookie = await createSessionCookie(handler, baseUrl)
 
     const configRes = await request(handler, baseUrl, '/api/config', {
-      headers: {
-        cookie: extractSessionCookie(authRes),
-      },
+      headers: { cookie },
     })
 
     expect(configRes.status).toBe(200)

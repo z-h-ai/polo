@@ -9,11 +9,11 @@ import { createWebuiHandler } from '../http-server'
 const HANDLER_SECRET = 'legacy-webui-secret'
 const JWT_SECRET = 'admin-jwt-secret'
 const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET
-const ORIGINAL_ADMIN_API_URL = process.env.ADMIN_API_URL
+const ORIGINAL_POLO_ADMIN_API_URL = process.env.POLO_ADMIN_API_URL
 const TEMP_DIRS: string[] = []
 const HANDLERS: Array<{ dispose: () => void }> = []
 
-function setEnv(name: 'JWT_SECRET' | 'ADMIN_API_URL', value: string | undefined) {
+function setEnv(name: 'JWT_SECRET' | 'POLO_ADMIN_API_URL', value: string | undefined) {
   if (value === undefined) {
     delete process.env[name]
   } else {
@@ -23,7 +23,7 @@ function setEnv(name: 'JWT_SECRET' | 'ADMIN_API_URL', value: string | undefined)
 
 function restoreEnv() {
   setEnv('JWT_SECRET', ORIGINAL_JWT_SECRET)
-  setEnv('ADMIN_API_URL', ORIGINAL_ADMIN_API_URL)
+  setEnv('POLO_ADMIN_API_URL', ORIGINAL_POLO_ADMIN_API_URL)
 }
 
 function createLogger() {
@@ -92,7 +92,7 @@ afterEach(() => {
 describe('POST /auth/login', () => {
   it('proxies credentials to Admin, stores the token in an HttpOnly cookie, and returns only the user', async () => {
     setEnv('JWT_SECRET', JWT_SECRET)
-    setEnv('ADMIN_API_URL', 'https://admin.example.com')
+    setEnv('POLO_ADMIN_API_URL', 'https://admin.example.com')
     const token = await signAdminJwt()
     const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (url, init) => {
       expect(url).toBe('https://admin.example.com/api/auth/login')
@@ -120,7 +120,7 @@ describe('POST /auth/login', () => {
 
   it('forwards Admin login errors without setting a session cookie', async () => {
     setEnv('JWT_SECRET', JWT_SECRET)
-    setEnv('ADMIN_API_URL', 'https://admin.example.com')
+    setEnv('POLO_ADMIN_API_URL', 'https://admin.example.com')
     spyOn(globalThis, 'fetch').mockImplementation((async () =>
       jsonResponse({ error: 'rate_limited', message: 'Too many attempts' }, 429, { 'Retry-After': '30' })) as unknown as typeof fetch)
     const { handler, baseUrl } = createServer()

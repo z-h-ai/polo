@@ -54,11 +54,11 @@ describe('parseArgs', () => {
 
   it('falls back to env vars for url and token', () => {
     const prevUrl = process.env.POLO_AI_SERVER_URL
-    const prevToken = process.env.POLO_AI_SERVER_TOKEN
+    const prevToken = process.env.POLO_ADMIN_JWT
     const prevCa = process.env.POLO_AI_TLS_CA
 
     process.env.POLO_AI_SERVER_URL = 'ws://env-server:8080'
-    process.env.POLO_AI_SERVER_TOKEN = 'env-token'
+    process.env.POLO_ADMIN_JWT = 'env-token'
     process.env.POLO_AI_TLS_CA = '/env/ca.pem'
 
     try {
@@ -69,8 +69,8 @@ describe('parseArgs', () => {
     } finally {
       if (prevUrl === undefined) delete process.env.POLO_AI_SERVER_URL
       else process.env.POLO_AI_SERVER_URL = prevUrl
-      if (prevToken === undefined) delete process.env.POLO_AI_SERVER_TOKEN
-      else process.env.POLO_AI_SERVER_TOKEN = prevToken
+      if (prevToken === undefined) delete process.env.POLO_ADMIN_JWT
+      else process.env.POLO_ADMIN_JWT = prevToken
       if (prevCa === undefined) delete process.env.POLO_AI_TLS_CA
       else process.env.POLO_AI_TLS_CA = prevCa
     }

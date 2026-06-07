@@ -12,10 +12,6 @@
 
 import { join, extname } from 'node:path'
 import {
-  RateLimiter,
-  initPasswordHash,
-  verifyPassword,
-  createSessionToken,
   validateSession,
   buildSessionCookie,
   buildLogoutCookie,
@@ -25,6 +21,7 @@ import {
   removeAdminJwtFromToken,
   sweepExpiredAdminJwtStore,
   extractSessionCookie,
+  validateAdminBearerAuth,
   isPlatformMode,
   adminJwtStore,
 } from './auth'
@@ -106,10 +103,8 @@ function formatHostWithPort(host: string, port: number): string {
 }
 
 export function shouldUseSecureCookies(req: Request, secureCookies?: boolean): boolean {
-  if (process.env.POLO_AI_WEBUI_SECURE_COOKIE?.toLowerCase() === 'false') return false
   if (getRequestHostname(req) === 'localhost') return false
   if (secureCookies != null) return secureCookies
-  if (process.env.POLO_AI_WEBUI_SECURE_COOKIE?.toLowerCase() === 'true') return true
   return getRequestProto(req) === 'https'
 }
 
@@ -140,10 +135,8 @@ export function resolveWebSocketUrl(
 export interface WebuiHandlerOptions {
   /** Path to built web UI dist/ directory. */
   webuiDir: string
-  /** Secret used to sign JWTs — typically POLO_AI_SERVER_TOKEN. */
+  /** Legacy server secret. Retained only for compatibility with existing handler construction. */
   secret: string
-  /** Optional separate web UI password. Falls back to `secret` for verification. */
-  password?: string
   /** Explicit Secure-cookie override. When unset, infer from the request / proxy headers. */
   secureCookies?: boolean
   /** Optional browser-facing WebSocket URL override for reverse-proxy deployments. */
@@ -185,7 +178,6 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
   const {
     webuiDir,
     secret,
-    password,
     secureCookies,
     publicWsUrl,
     wsProtocol,
@@ -195,21 +187,15 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     trustedProxies,
   } = options
 
-  const rateLimiter = new RateLimiter(5, 60_000)
   if (!process.env.JWT_SECRET) {
     logger.error('[webui] JWT_SECRET is not configured; /auth/session is disabled')
   }
 
   const cleanupTimer = setInterval(() => {
-    rateLimiter.cleanup()
     sweepExpiredAdminJwtStore()
   }, 120_000)
 
-  const loginPassword = password || secret
   const trustedProxySet = new Set(trustedProxies ?? [])
-
-  // Hash the login password at startup (async, but resolves before first auth attempt in practice)
-  const passwordReady = initPasswordHash(loginPassword)
 
   /** Extract client IP — only trusts proxy headers when trustedProxies is configured. */
   function getClientIp(req: Request): string {
@@ -219,6 +205,30 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
         ?? 'direct'
     }
     return 'direct'
+  }
+
+  async function authenticateWebuiRequest(req: Request): Promise<Response | { sub: string }> {
+    const authorization = req.headers.get('authorization')
+    if (authorization) {
+      const bearer = await validateAdminBearerAuth(authorization)
+      if (bearer.ok) {
+        return { sub: bearer.user.id }
+      }
+      if (bearer.error === 'token_revoked') {
+        return Response.json({ error: 'token_revoked' }, { status: 401 })
+      }
+      if (bearer.error === 'server_configuration_error') {
+        logger.error('[webui] POLO_ADMIN_API_URL is required for Bearer auth')
+        return Response.json({ error: 'server_configuration_error' }, { status: 500 })
+      }
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const session = await validateSession(req.headers.get('cookie'), secret, {
+      adminJwtSecret: process.env.JWT_SECRET,
+    })
+    if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    return { sub: session.sub }
   }
 
   async function fetch(req: Request): Promise<Response> {
@@ -302,9 +312,9 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     // cookie. The browser receives only user metadata.
     if (path === '/auth/login' && req.method === 'POST') {
       const jwtSecret = process.env.JWT_SECRET
-      const adminUrl = process.env.ADMIN_API_URL
+      const adminUrl = process.env.POLO_ADMIN_API_URL
       if (!jwtSecret || !adminUrl) {
-        logger.error('[webui] JWT_SECRET and ADMIN_API_URL are required for /auth/login')
+        logger.error('[webui] JWT_SECRET and POLO_ADMIN_API_URL are required for /auth/login')
         return Response.json({ error: 'server_configuration_error' }, { status: 500 })
       }
 
@@ -407,61 +417,11 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       })
     }
 
-    // ── Auth endpoint ──
-    if (path === '/api/auth' && req.method === 'POST') {
-      await passwordReady
-      const ip = getClientIp(req)
-
-      if (!rateLimiter.check(ip)) {
-        logger.warn(`[webui] Rate limited auth attempt from ${ip}`)
-        return Response.json(
-          { error: 'Too many attempts. Try again later.' },
-          { status: 429 },
-        )
-      }
-
-      let body: { password?: string }
-      try {
-        body = await req.json() as { password?: string }
-      } catch {
-        return Response.json({ error: 'Invalid request body' }, { status: 400 })
-      }
-
-      if (!body.password || typeof body.password !== 'string') {
-        return Response.json({ error: 'Password is required' }, { status: 400 })
-      }
-
-      if (!await verifyPassword(body.password)) {
-        logger.warn(`[webui] Failed auth attempt from ${ip}`)
-        return Response.json({ error: 'Invalid credentials' }, { status: 401 })
-      }
-
-      const jwt = await createSessionToken(secret)
-      logger.info(`[webui] Successful auth from ${ip}`)
-
-      return Response.json({ ok: true }, {
-        status: 200,
-        headers: {
-          'Set-Cookie': buildSessionCookie(jwt, useSecureCookies),
-        },
-      })
-    }
-
-    // ── Logout endpoint ──
-    if (path === '/api/auth/logout' && req.method === 'POST') {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          'Set-Cookie': buildLogoutCookie(useSecureCookies),
-        },
-      })
-    }
-
     // ── Public pre-login config endpoint (no auth) ──
     if (path === '/api/public-config' && req.method === 'GET') {
       try {
         return Response.json({
-          adminUrl: process.env.ADMIN_API_URL || null,
+          adminUrl: process.env.POLO_ADMIN_API_URL || null,
           platformMode: isPlatformMode(),
         })
       } catch (err) {
@@ -473,12 +433,8 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Config endpoint (requires session cookie) ──
     if (path === '/api/config' && req.method === 'GET') {
-      const configSession = await validateSession(req.headers.get('cookie'), secret, {
-        adminJwtSecret: process.env.JWT_SECRET,
-      })
-      if (!configSession) {
-        return Response.json({ error: 'Unauthorized' }, { status: 401 })
-      }
+      const configSession = await authenticateWebuiRequest(req)
+      if (configSession instanceof Response) return configSession
       return Response.json({
         wsUrl: resolveWebSocketUrl(req, { publicWsUrl, wsProtocol, wsPort }),
       })
@@ -486,12 +442,8 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // Return the default workspace ID so the webui can include it in the WS handshake
     if (path === '/api/config/workspaces' && req.method === 'GET') {
-      const configSession = await validateSession(req.headers.get('cookie'), secret, {
-        adminJwtSecret: process.env.JWT_SECRET,
-      })
-      if (!configSession) {
-        return Response.json({ error: 'Unauthorized' }, { status: 401 })
-      }
+      const configSession = await authenticateWebuiRequest(req)
+      if (configSession instanceof Response) return configSession
       const { getActiveWorkspace } = await import('@polo-ai/shared/config/storage')
       const active = getActiveWorkspace()
       return Response.json({
@@ -501,26 +453,20 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Quota status proxy (requires Admin JWT session) ──
     // Proxies GET /api/quota/status to Admin API using the stored JWT from the user's session.
-    // Only Admin JWT sessions have a stored JWT (legacy /api/auth sessions do not).
     if (path === '/api/quota/status' && req.method === 'GET') {
-      const quotaSession = await validateSession(req.headers.get('cookie'), secret, {
-        adminJwtSecret: process.env.JWT_SECRET,
-      })
-      if (!quotaSession) {
-        return Response.json({ error: 'Unauthorized' }, { status: 401 })
-      }
+      const quotaSession = await authenticateWebuiRequest(req)
+      if (quotaSession instanceof Response) return quotaSession
 
       // Retrieve the stored Admin JWT for this user.
-      // Legacy sessions have sub='webui' and no stored JWT.
       const userId = quotaSession.sub
       const storedJwt = adminJwtStore.get(userId)
       if (!storedJwt) {
         return Response.json({ error: 'session_expired' }, { status: 401 })
       }
 
-      const adminApiUrl = process.env.ADMIN_API_URL
+      const adminApiUrl = process.env.POLO_ADMIN_API_URL
       if (!adminApiUrl) {
-        logger.warn('[webui] ADMIN_API_URL not configured; quota proxy unavailable')
+        logger.warn('[webui] POLO_ADMIN_API_URL not configured; quota proxy unavailable')
         return Response.json({ error: 'admin_not_configured' }, { status: 503 })
       }
 
@@ -551,17 +497,14 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     }
 
     // ── Everything below requires a valid session cookie ──
-    const cookieHeader = req.headers.get('cookie')
-    const session = await validateSession(cookieHeader, secret, {
-      adminJwtSecret: process.env.JWT_SECRET,
-    })
+    const session = await authenticateWebuiRequest(req)
 
-    if (!session) {
+    if (session instanceof Response) {
       const accept = req.headers.get('accept') ?? ''
       if (accept.includes('text/html') || path === '/' || path === '') {
         return Response.redirect('/login', 302)
       }
-      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      return session
     }
 
     // ── Serve SPA static files ──

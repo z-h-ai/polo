@@ -62,7 +62,7 @@ if (isClientOnly) {
   // No local server, no routing — all channels go to remote.
 
   const wsUrl = process.env.POLO_AI_SERVER_URL!
-  const wsToken = process.env.POLO_AI_SERVER_TOKEN ?? ''
+  const wsToken = process.env.POLO_ADMIN_JWT ?? ''
 
   // Block unencrypted ws:// to non-localhost servers — tokens would be sent in cleartext
   const parsed = new URL(wsUrl)

@@ -1,10 +1,9 @@
 /**
  * Web UI session authentication.
  *
- * Cookie-based JWT session auth for the browser-served web UI.
- * - Login: verify password → issue signed JWT → set HttpOnly cookie
- * - Validation: check cookie on every HTTP request + WebSocket upgrade
- * - Rate limiting: per-IP brute-force protection on /api/auth
+ * Admin JWT authentication for the browser-served web UI.
+ * - Login: proxy username/password to Admin → store Admin JWT in HttpOnly cookie
+ * - Validation: check Admin JWT cookies and Bearer headers on protected requests
  */
 
 import { SignJWT, decodeJwt, jwtVerify } from 'jose'
@@ -22,9 +21,12 @@ export interface JwtPayload {
   exp: number
 }
 
-export interface AdminJwtPayload extends JwtPayload {
+export interface AdminJwtPayload {
+  sub: string
   username: string
   role: string
+  iat?: number
+  exp?: number
 }
 
 export interface WebuiUser {
@@ -65,8 +67,6 @@ export async function verifyAdminJwt(token: string, secret: string): Promise<Adm
       typeof payload.sub !== 'string'
       || typeof payload.username !== 'string'
       || typeof payload.role !== 'string'
-      || typeof payload.iat !== 'number'
-      || typeof payload.exp !== 'number'
     ) {
       return null
     }
@@ -75,8 +75,8 @@ export async function verifyAdminJwt(token: string, secret: string): Promise<Adm
       sub: payload.sub,
       username: payload.username,
       role: payload.role,
-      iat: payload.iat,
-      exp: payload.exp,
+      iat: typeof payload.iat === 'number' ? payload.iat : undefined,
+      exp: typeof payload.exp === 'number' ? payload.exp : undefined,
     }
   } catch {
     return null
@@ -104,7 +104,7 @@ export const adminJwtStore = new Map<string, string>()
 
 const adminJwtExpirations = new Map<string, number>()
 
-export function storeAdminJwt(userId: string, token: string, expiresAt: number): void {
+export function storeAdminJwt(userId: string, token: string, expiresAt = Number.POSITIVE_INFINITY): void {
   adminJwtStore.set(userId, token)
   adminJwtExpirations.set(userId, expiresAt)
 }
@@ -173,6 +173,84 @@ export function extractSessionCookie(cookieHeader: string | null): string | null
     if (name === SESSION_COOKIE_NAME) return rest.join('=')
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// Admin Bearer token validation
+// ---------------------------------------------------------------------------
+
+export type AdminBearerAuthResult =
+  | { ok: true; token: string; user: WebuiUser }
+  | { ok: false; error: 'missing_token' | 'invalid_token' | 'token_revoked' | 'server_configuration_error' }
+
+export function extractBearerToken(authorizationHeader: string | null): string | null {
+  if (!authorizationHeader) return null
+  const match = authorizationHeader.match(/^Bearer\s+(.+)$/i)
+  return match?.[1]?.trim() || null
+}
+
+function isJwtLike(token: string): boolean {
+  const parts = token.split('.')
+  return parts.length === 3 && parts.every(part => part.length > 0)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+export async function validateAdminBearerAuth(authorizationHeader: string | null): Promise<AdminBearerAuthResult> {
+  const token = extractBearerToken(authorizationHeader)
+  if (!token) return { ok: false, error: 'missing_token' }
+  if (!isJwtLike(token)) return { ok: false, error: 'invalid_token' }
+
+  const adminApiUrl = process.env.POLO_ADMIN_API_URL
+  if (!adminApiUrl) return { ok: false, error: 'server_configuration_error' }
+
+  let response: Response
+  try {
+    response = await globalThis.fetch(`${adminApiUrl.replace(/\/+$/, '')}/api/auth/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    })
+  } catch {
+    return { ok: false, error: 'invalid_token' }
+  }
+
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    body = {}
+  }
+
+  if (!response.ok) {
+    const error = isRecord(body) && body.error === 'token_revoked' ? 'token_revoked' : 'invalid_token'
+    return { ok: false, error }
+  }
+
+  const user = isRecord(body) && isRecord(body.user) ? body.user : null
+  if (
+    !user
+    || typeof user.id !== 'string'
+    || typeof user.username !== 'string'
+    || typeof user.role !== 'string'
+  ) {
+    return { ok: false, error: 'invalid_token' }
+  }
+
+  storeAdminJwt(user.id, token)
+  return {
+    ok: true,
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,14 +344,11 @@ export class RateLimiter {
 
 export async function validateSession(
   cookieHeader: string | null,
-  secret: string,
+  _secret: string,
   options?: { adminJwtSecret?: string },
 ): Promise<JwtPayload | AdminJwtPayload | null> {
   const token = extractSessionCookie(cookieHeader)
   if (!token) return null
-
-  const legacySession = await verifyJwt(token, secret)
-  if (legacySession) return legacySession
 
   if (!options?.adminJwtSecret) return null
 

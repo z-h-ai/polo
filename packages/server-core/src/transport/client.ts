@@ -329,13 +329,17 @@ export class WsRpcClient implements RpcClient {
    */
   private createWebSocket(url: string): WebSocket {
     const needsTlsOptions = url.startsWith('wss://') && !this.tlsRejectUnauthorized
+    const needsNodeOptions = (needsTlsOptions || Boolean(this.token)) && typeof process !== 'undefined' && process.versions?.node
 
-    if (needsTlsOptions && typeof process !== 'undefined' && process.versions?.node) {
-      // Node.js / Electron main process — use `ws` library for TLS options
+    if (needsNodeOptions) {
+      // Node.js / Electron main process — use `ws` for TLS and Authorization headers.
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { WebSocket: WsWebSocket } = require('ws') as typeof import('ws')
-        return new WsWebSocket(url, { rejectUnauthorized: false }) as unknown as WebSocket
+        return new WsWebSocket(url, {
+          ...(needsTlsOptions ? { rejectUnauthorized: false } : {}),
+          ...(this.token ? { headers: { Authorization: `Bearer ${this.token}` } } : {}),
+        }) as unknown as WebSocket
       } catch {
         // Fallback if ws not available
         return new WebSocket(url)
