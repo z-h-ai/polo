@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SessionStatus, NewChatActionParams, ContentBadge, LlmConnection, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -290,7 +290,7 @@ export default function App() {
   }, [windowWorkspaceId, workspaces])
 
   // LLM connections with authentication status (for provider selection)
-  const [llmConnections, setLlmConnections] = useState<LlmConnectionWithStatus[]>([])
+  const [llmConnections, setLlmConnections] = useState<LlmConnection[]>([])
   // Workspace default LLM connection (for new sessions)
   const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
   // Global default LLM connection slug (from app config)
@@ -591,13 +591,13 @@ export default function App() {
 
   const DRAFT_SAVE_DEBOUNCE_MS = 500
 
-  const resolveDefaultConnectionSlug = useCallback((connections: LlmConnectionWithStatus[]) => {
-    return connections.find(c => c.isDefault)?.slug ?? connections[0]?.slug
+  const resolveDefaultConnectionSlug = useCallback((connections: LlmConnection[]) => {
+    return connections[0]?.slug
   }, [])
 
   // Refresh LLM connections from config (called on workspace change and after connection updates)
   const refreshLlmConnections = useCallback(async () => {
-    const connections = await window.electronAPI.listLlmConnectionsWithStatus()
+    const connections = await window.electronAPI.listLlmConnections()
     setLlmConnections(connections)
     setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     // Also refresh workspace default
@@ -676,8 +676,8 @@ export default function App() {
       }
     }).catch(() => { /* non-fatal startup check */ })
     void loadSessionsFromServer()
-    // Load LLM connections with authentication status
-    window.electronAPI.listLlmConnectionsWithStatus().then((connections) => {
+    // Load LLM connections from Admin-sourced config
+    window.electronAPI.listLlmConnections().then((connections) => {
       setLlmConnections(connections)
       setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     })

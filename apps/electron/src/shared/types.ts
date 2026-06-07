@@ -189,9 +189,6 @@ import type {
   RefreshTitleResult,
   FileSearchResult,
   SessionSearchResult,
-  LlmConnectionSetup,
-  TestLlmConnectionParams,
-  TestLlmConnectionResult,
   SkillFile,
   SessionFile,
   McpToolsResult,
@@ -386,25 +383,6 @@ export interface ElectronAPI {
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>
-
-  getChatGptAuthStatus(connectionSlug: string): Promise<{ authenticated: boolean; expiresAt?: number; hasRefreshToken?: boolean }>
-  chatGptLogout(connectionSlug: string): Promise<{ success: boolean }>
-
-  // GitHub Copilot OAuth
-  startCopilotOAuth(connectionSlug: string): Promise<{ success: boolean; error?: string }>
-  cancelCopilotOAuth(): Promise<{ success: boolean }>
-  getCopilotAuthStatus(connectionSlug: string): Promise<{ authenticated: boolean }>
-  copilotLogout(connectionSlug: string): Promise<{ success: boolean }>
-  onCopilotDeviceCode(callback: (data: { userCode: string; verificationUri: string }) => void): () => void
-
-  /** Unified LLM connection setup */
-  setupLlmConnection(setup: LlmConnectionSetup): Promise<{ success: boolean; error?: string }>
-  /** Unified connection test — spawns a lightweight agent subprocess to validate credentials */
-  testLlmConnectionSetup(params: TestLlmConnectionParams): Promise<TestLlmConnectionResult>
-  // Pi provider discovery (main process only — Pi SDK can't run in renderer)
-  getPiApiKeyProviders(): Promise<Array<{ key: string; label: string; placeholder: string }>>
-  getPiProviderBaseUrl(provider: string): Promise<string | undefined>
-  getPiProviderModels(provider: string): Promise<{ models: Array<{ id: string; name: string; costInput: number; costOutput: number; contextWindow: number; reasoning: boolean }>; totalCount: number }>
 
   // Session-specific model (overrides global)
   getSessionModel(sessionId: string, workspaceId: string): Promise<string | null>
@@ -605,16 +583,9 @@ export interface ElectronAPI {
 
   // LLM Connections (provider configurations)
   listLlmConnections(): Promise<LlmConnection[]>
-  listLlmConnectionsWithStatus(): Promise<LlmConnectionWithStatus[]>
   getLlmConnection(slug: string): Promise<LlmConnection | null>
-  getLlmConnectionApiKey(slug: string): Promise<string | null>
-  saveLlmConnection(connection: LlmConnection): Promise<{ success: boolean; error?: string }>
-  deleteLlmConnection(slug: string): Promise<{ success: boolean; error?: string }>
-  testLlmConnection(slug: string): Promise<{ success: boolean; error?: string }>
-  setDefaultLlmConnection(slug: string): Promise<{ success: boolean; error?: string }>
   getDefaultThinkingLevel(): Promise<ThinkingLevel>
   setDefaultThinkingLevel(level: ThinkingLevel): Promise<{ success: boolean; error?: string }>
-  setWorkspaceDefaultLlmConnection(workspaceId: string, slug: string | null): Promise<{ success: boolean; error?: string }>
 
   // Automations
   getAutomations(workspaceId: string): Promise<unknown>

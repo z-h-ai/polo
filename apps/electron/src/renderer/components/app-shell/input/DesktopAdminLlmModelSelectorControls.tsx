@@ -1,8 +1,8 @@
-import type { LlmConnectionWithStatus } from '@config/llm-connections'
+import type { LlmConnection } from '@config/llm-connections'
 import { AdminLlmModelSelectorPanel } from './AdminLlmModelSelectorPanel'
 
 interface DesktopAdminLlmModelSelectorControlsProps {
-  llmConnections: LlmConnectionWithStatus[]
+  llmConnections: LlmConnection[]
   currentConnection?: string
   currentModel: string
   onModelChange: (model: string, connection?: string) => void

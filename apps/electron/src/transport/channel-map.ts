@@ -123,16 +123,6 @@ export const CHANNEL_MAP = {
   onSessionExpired: listener(RPC_CHANNELS.auth.SESSION_EXPIRED),
   getCredentialHealth: invoke(RPC_CHANNELS.credentials.HEALTH_CHECK),
 
-  getChatGptAuthStatus: invoke(RPC_CHANNELS.chatgpt.GET_AUTH_STATUS),
-  chatGptLogout: invoke(RPC_CHANNELS.chatgpt.LOGOUT),
-
-  // GitHub Copilot OAuth
-  startCopilotOAuth: invoke(RPC_CHANNELS.copilot.START_OAUTH),
-  cancelCopilotOAuth: invoke(RPC_CHANNELS.copilot.CANCEL_OAUTH),
-  getCopilotAuthStatus: invoke(RPC_CHANNELS.copilot.GET_AUTH_STATUS),
-  copilotLogout: invoke(RPC_CHANNELS.copilot.LOGOUT),
-  onCopilotDeviceCode: listener(RPC_CHANNELS.copilot.DEVICE_CODE),
-
   // Server info (REMOTE_ELIGIBLE)
   getServerHomeDir: invoke(RPC_CHANNELS.server.HOME_DIR),
 
@@ -141,18 +131,10 @@ export const CHANNEL_MAP = {
   setServerConfig: invoke(RPC_CHANNELS.settings.SET_SERVER_CONFIG),
   getServerStatus: invoke(RPC_CHANNELS.settings.GET_SERVER_STATUS),
 
-  // Settings - API Setup
-  setupLlmConnection: invoke(RPC_CHANNELS.settings.SETUP_LLM_CONNECTION),
-  testLlmConnectionSetup: invoke(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP),
   getDefaultThinkingLevel: invoke(RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL),
   setDefaultThinkingLevel: invoke(RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL),
   getNetworkProxySettings: invoke(RPC_CHANNELS.settings.GET_NETWORK_PROXY),
   setNetworkProxySettings: invoke(RPC_CHANNELS.settings.SET_NETWORK_PROXY),
-
-  // Pi provider discovery
-  getPiApiKeyProviders: invoke(RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS),
-  getPiProviderBaseUrl: invoke(RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL),
-  getPiProviderModels: invoke(RPC_CHANNELS.pi.GET_PROVIDER_MODELS),
 
   // Session-specific model
   getSessionModel: invoke(RPC_CHANNELS.sessions.GET_MODEL),
@@ -347,14 +329,7 @@ export const CHANNEL_MAP = {
 
   // LLM Connections
   listLlmConnections: invoke(RPC_CHANNELS.llmConnections.LIST),
-  listLlmConnectionsWithStatus: invoke(RPC_CHANNELS.llmConnections.LIST_WITH_STATUS),
   getLlmConnection: invoke(RPC_CHANNELS.llmConnections.GET),
-  getLlmConnectionApiKey: invoke(RPC_CHANNELS.llmConnections.GET_API_KEY),
-  saveLlmConnection: invoke(RPC_CHANNELS.llmConnections.SAVE),
-  deleteLlmConnection: invoke(RPC_CHANNELS.llmConnections.DELETE),
-  testLlmConnection: invoke(RPC_CHANNELS.llmConnections.TEST),
-  setDefaultLlmConnection: invoke(RPC_CHANNELS.llmConnections.SET_DEFAULT),
-  setWorkspaceDefaultLlmConnection: invoke(RPC_CHANNELS.llmConnections.SET_WORKSPACE_DEFAULT),
 
   // Automations
   getAutomations: invoke(RPC_CHANNELS.automations.GET),

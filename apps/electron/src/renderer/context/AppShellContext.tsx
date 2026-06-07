@@ -22,7 +22,7 @@ import type {
   LoadedSource,
   LoadedSkill,
   NewChatActionParams,
-  LlmConnectionWithStatus,
+  LlmConnection,
   TestAutomationResult,
 } from '../../shared/types'
 import type { SessionStatus as SessionStatusConfig } from '@/config/session-status-config'
@@ -39,8 +39,8 @@ export interface AppShellContextType {
   activeWorkspaceId: string | null
   /** Workspace slug for SDK skill qualification (derived from workspace path) */
   activeWorkspaceSlug: string | null
-  /** All LLM connections with authentication status */
-  llmConnections: LlmConnectionWithStatus[]
+  /** All Admin-sourced LLM connections */
+  llmConnections: LlmConnection[]
   /** Default LLM connection slug for the current workspace */
   workspaceDefaultLlmConnection?: string
   /** Refresh LLM connections from config */

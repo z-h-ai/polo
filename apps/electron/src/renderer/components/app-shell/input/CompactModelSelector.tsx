@@ -237,45 +237,35 @@ export function CompactModelSelector({
                 </div>
                 {connections.map(conn => {
                   const isCurrentConnection = effectiveConnection === conn.slug
-                  const isAuthenticated = conn.isAuthenticated
                   const isExpanded = expandedConnection === conn.slug
                   return (
                     <React.Fragment key={conn.slug}>
                       <button
                         type="button"
-                        disabled={!isAuthenticated}
                         onClick={() =>
                           setExpandedConnection(prev => (prev === conn.slug ? null : conn.slug))
                         }
                         className={cn(
                           'flex items-center gap-2 w-full px-3 py-2 rounded-lg text-left transition-colors',
-                          !isAuthenticated && 'opacity-50 cursor-not-allowed',
-                          isAuthenticated && 'hover:bg-foreground/5',
+                          'hover:bg-foreground/5',
                           isCurrentConnection && !isExpanded && 'bg-foreground/5',
                         )}
                       >
                         <ConnectionIcon connection={conn} size={14} />
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium truncate">{conn.name}</div>
-                          {!isAuthenticated && (
-                            <div className="text-xs text-muted-foreground">
-                              {t('settings.ai.notAuthenticated')}
-                            </div>
-                          )}
                         </div>
                         {isCurrentConnection && (
                           <Check className="h-3 w-3 text-foreground/60 shrink-0" />
                         )}
-                        {isAuthenticated && (
-                          <ChevronRight
-                            className={cn(
-                              'h-3 w-3 opacity-60 shrink-0 transition-transform',
-                              isExpanded && 'rotate-90',
-                            )}
-                          />
-                        )}
+                        <ChevronRight
+                          className={cn(
+                            'h-3 w-3 opacity-60 shrink-0 transition-transform',
+                            isExpanded && 'rotate-90',
+                          )}
+                        />
                       </button>
-                      {isAuthenticated && isExpanded && (
+                      {isExpanded && (
                         <div className="pl-6 flex flex-col gap-0.5">
                           {(conn.models || ANTHROPIC_MODELS).map(model => {
                             const modelId = typeof model === 'string' ? model : model.id

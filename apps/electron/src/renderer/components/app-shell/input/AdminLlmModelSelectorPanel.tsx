@@ -3,12 +3,12 @@ import {
   ANTHROPIC_MODELS,
   getModelDisplayName,
 } from '@config/models'
-import type { LlmConnectionWithStatus } from '@config/llm-connections'
+import type { LlmConnection } from '@config/llm-connections'
 import { NoLlmConfigBanner } from '@/components/NoLlmConfigBanner'
 import { stripPiPrefixForDisplay } from './model-picker-helpers'
 
 interface AdminLlmModelSelectorPanelProps {
-  llmConnections: LlmConnectionWithStatus[]
+  llmConnections: LlmConnection[]
   currentConnection?: string
   currentModel: string
   onModelChange: (model: string, connection?: string) => void
@@ -16,7 +16,7 @@ interface AdminLlmModelSelectorPanelProps {
 }
 
 interface ResolveAdminModelSelectionInput {
-  llmConnections: LlmConnectionWithStatus[]
+  llmConnections: LlmConnection[]
   targetConnectionSlug: string
   targetModel?: string
   currentConnectionSlug?: string
@@ -35,24 +35,23 @@ function modelLabel(model: string | { id: string; name?: string }) {
     : (model.name ?? stripPiPrefixForDisplay(model.id))
 }
 
-function getConnectionModelIds(connection: LlmConnectionWithStatus | null): string[] {
+function getConnectionModelIds(connection: LlmConnection | null): string[] {
   if (!connection) return []
   return (connection.models ?? ANTHROPIC_MODELS).map(modelId)
 }
 
 function resolveSelectedConnection(
-  llmConnections: LlmConnectionWithStatus[],
+  llmConnections: LlmConnection[],
   currentConnection?: string,
-): LlmConnectionWithStatus | null {
+): LlmConnection | null {
   return (
     llmConnections.find(c => c.slug === currentConnection)
-    ?? llmConnections.find(c => c.isDefault)
     ?? llmConnections[0]
     ?? null
   )
 }
 
-function resolveSelectedModel(connection: LlmConnectionWithStatus | null, currentModel: string) {
+function resolveSelectedModel(connection: LlmConnection | null, currentModel: string) {
   const ids = getConnectionModelIds(connection)
   if (currentModel && ids.includes(currentModel)) return currentModel
   if (connection?.defaultModel && ids.includes(connection.defaultModel)) {

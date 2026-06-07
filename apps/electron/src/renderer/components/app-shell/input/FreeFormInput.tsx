@@ -2115,11 +2115,9 @@ export function FreeFormInput({
                     </div>
                     {connections.map((conn) => {
                       const isCurrentConnection = effectiveConnection === conn.slug
-                      const isAuthenticated = conn.isAuthenticated
                       return (
                         <DropdownMenuSub key={conn.slug}>
                           <StyledDropdownMenuSubTrigger
-                            disabled={!isAuthenticated}
                             className={cn(
                               "flex items-center justify-between px-2 py-2 rounded-lg",
                               isCurrentConnection && "bg-foreground/5"
@@ -2131,20 +2129,16 @@ export function FreeFormInput({
                                 {conn.name}
                                 {isCurrentConnection && <Check className="h-3 w-3 text-foreground" />}
                               </div>
-                              {!isAuthenticated && (
-                                <div className="text-xs text-muted-foreground">{t('settings.ai.notAuthenticated')}</div>
-                              )}
                             </div>
                           </StyledDropdownMenuSubTrigger>
-                          {isAuthenticated && (
-                            <StyledDropdownMenuSubContent className="min-w-[220px]">
-                              {/* Show models for this connection - use provider-specific models as fallback */}
-                              {(conn.models || ANTHROPIC_MODELS).map((model) => {
-                                const modelId = typeof model === 'string' ? model : model.id
-                                const modelName = typeof model === 'string'
-                                  ? stripPiPrefixForDisplay(getModelShortName(model))
-                                  : (model.name ?? stripPiPrefixForDisplay(model.id))
-                                const isSelectedModel = isCurrentConnection && currentModel === modelId
+                          <StyledDropdownMenuSubContent className="min-w-[220px]">
+                            {/* Show models for this connection - use provider-specific models as fallback */}
+                            {(conn.models || ANTHROPIC_MODELS).map((model) => {
+                              const modelId = typeof model === 'string' ? model : model.id
+                              const modelName = typeof model === 'string'
+                                ? stripPiPrefixForDisplay(getModelShortName(model))
+                                : (model.name ?? stripPiPrefixForDisplay(model.id))
+                              const isSelectedModel = isCurrentConnection && currentModel === modelId
                                 return (
                                   <StyledDropdownMenuItem
                                     key={modelId}
@@ -2167,8 +2161,7 @@ export function FreeFormInput({
                                   </StyledDropdownMenuItem>
                                 )
                               })}
-                            </StyledDropdownMenuSubContent>
-                          )}
+                          </StyledDropdownMenuSubContent>
                         </DropdownMenuSub>
                       )
                     })}
