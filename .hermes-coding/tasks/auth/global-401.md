@@ -3,9 +3,11 @@ id: auth.global-401
 module: auth
 type: domain
 priority: 4
-status: pending
+status: completed
 estimatedMinutes: 30
 dependencies: [auth.admin-api-client, llm.credential-store]
+startedAt: 2026-06-07T09:48:21.299Z
+completedAt: 2026-06-07T10:08:24.817Z
 ---
 # Global 401 Interceptor + Force Logout
 
