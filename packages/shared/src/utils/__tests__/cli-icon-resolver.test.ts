@@ -9,7 +9,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -20,6 +20,19 @@ import {
   loadToolIconConfig,
   type ToolIconConfig,
 } from '../cli-icon-resolver.ts';
+
+function getBundledToolIconsDir(): string {
+  const candidates = [
+    join(__dirname, '../../../../../resources/tool-icons'),
+    join(__dirname, '../../../../../apps/electron/resources/tool-icons'),
+  ];
+
+  const assetsDir = candidates.find(candidate => existsSync(join(candidate, 'tool-icons.json')));
+  if (!assetsDir) {
+    throw new Error('Could not locate bundled tool icon assets');
+  }
+  return assetsDir;
+}
 
 // ============================================
 // splitCommands
@@ -271,7 +284,7 @@ describe('extractCommandNames', () => {
 
 describe('loadToolIconConfig', () => {
   test('loads valid config from bundled assets', () => {
-    const assetsDir = join(__dirname, '../../../../../apps/electron/resources/tool-icons');
+    const assetsDir = getBundledToolIconsDir();
     const config = loadToolIconConfig(assetsDir);
     expect(config).not.toBeNull();
     expect(config!.version).toBe(1);
@@ -396,7 +409,7 @@ describe('resolveToolIcon', () => {
 
   test('resolves with real bundled assets', () => {
     // Use the actual bundled assets to verify end-to-end
-    const assetsDir = join(__dirname, '../../../../../apps/electron/resources/tool-icons');
+    const assetsDir = getBundledToolIconsDir();
     const result = resolveToolIcon('git status', assetsDir);
     expect(result).toBeDefined();
     expect(result!.displayName).toBe('Git');
