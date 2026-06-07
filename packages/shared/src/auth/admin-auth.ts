@@ -35,6 +35,13 @@ export interface AdminLlmConnection {
   name?: string;
   providerType?: string;
   authType?: string;
+  credential?: {
+    alg: string;
+    kid: string;
+    iv: string;
+    ciphertext: string;
+    tag: string;
+  };
   encryptedCredentials?: string;
   models?: unknown[];
   defaultModel?: string;
