@@ -3,9 +3,11 @@ id: cleanup.llm-write-rpcs
 module: cleanup
 type: domain
 priority: 14
-status: pending
+status: completed
 estimatedMinutes: 30
 dependencies: [llm.model-selector, cleanup.ai-settings, cleanup.oauth]
+startedAt: 2026-06-07T13:28:12.673Z
+completedAt: 2026-06-07T14:08:48.050Z
 ---
 # Remove LLM Connection Write RPCs
 

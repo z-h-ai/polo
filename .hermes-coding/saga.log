@@ -26,3 +26,5 @@
 [2026-06-07T12:28:47.356Z] COMPLETED: cleanup.oauth
 [2026-06-07T12:45:12.643Z] STARTED: cleanup.old-auth
 [2026-06-07T13:14:20.707Z] COMPLETED: cleanup.old-auth
+[2026-06-07T13:28:12.676Z] STARTED: cleanup.llm-write-rpcs
+[2026-06-07T14:08:48.053Z] COMPLETED: cleanup.llm-write-rpcs
