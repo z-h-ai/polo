@@ -1,0 +1,2 @@
+# Task Progress: llm.config-decrypt
+[2026-06-07T09:13:29.794Z] Shared typecheck uses Bun Web Crypto BufferSource overloads that reject Uint8Array<ArrayBufferLike>; pass copied ArrayBuffer values into subtle.importKey/decrypt for credential decryption.

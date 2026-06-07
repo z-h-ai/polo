@@ -3,9 +3,11 @@ id: llm.config-decrypt
 module: llm
 type: domain
 priority: 7
-status: pending
+status: completed
 estimatedMinutes: 25
 dependencies: [auth.admin-api-client]
+startedAt: 2026-06-07T09:09:55.638Z
+completedAt: 2026-06-07T09:22:06.518Z
 ---
 # LLM Config Fetch + AES-256-GCM Decryption
 
