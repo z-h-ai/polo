@@ -1,8 +1,8 @@
 {
   "version": "1.0.0",
-  "updatedAt": "2026-06-05T20:44:41.091Z",
+  "updatedAt": "2026-06-07T04:12:00.192Z",
   "metadata": {
-    "projectGoal": "Polo AI multi-user modification (MVP-1, WebUI only)",
+    "projectGoal": "User auth + Admin LLM config for Polo",
     "languageConfig": {
       "language": "typescript",
       "framework": ""
@@ -151,6 +151,240 @@
       "description": "WebUI quota display component",
       "filePath": "polo-ui/quota-display.md",
       "dependencies": [],
+      "estimatedMinutes": 25
+    },
+    "auth.admin-api-client": {
+      "status": "pending",
+      "priority": 1,
+      "module": "auth",
+      "description": "AdminApiClient: login, logout, validate, getLlmConnections",
+      "filePath": "auth/admin-api-client.md",
+      "dependencies": [],
+      "estimatedMinutes": 30
+    },
+    "auth.login-page": {
+      "status": "pending",
+      "priority": 2,
+      "module": "auth",
+      "description": "LoginPage UI Component",
+      "filePath": "auth/login-page.md",
+      "dependencies": [
+        "auth.admin-api-client"
+      ],
+      "estimatedMinutes": 30
+    },
+    "auth.startup-flow": {
+      "status": "pending",
+      "priority": 3,
+      "module": "auth",
+      "description": "App Startup Auth Check Logic",
+      "filePath": "auth/startup-flow.md",
+      "dependencies": [
+        "auth.admin-api-client"
+      ],
+      "estimatedMinutes": 30
+    },
+    "auth.global-401": {
+      "status": "pending",
+      "priority": 4,
+      "module": "auth",
+      "description": "Global 401 Interceptor + Force Logout",
+      "filePath": "auth/global-401.md",
+      "dependencies": [
+        "auth.admin-api-client",
+        "llm.credential-store"
+      ],
+      "estimatedMinutes": 30
+    },
+    "auth.logout": {
+      "status": "pending",
+      "priority": 5,
+      "module": "auth",
+      "description": "Logout Functionality",
+      "filePath": "auth/logout.md",
+      "dependencies": [
+        "auth.admin-api-client",
+        "auth.login-page"
+      ],
+      "estimatedMinutes": 20
+    },
+    "auth.error-pages": {
+      "status": "pending",
+      "priority": 6,
+      "module": "auth",
+      "description": "ServerErrorPage + ConfigErrorPage + SessionExpiredDialog",
+      "filePath": "auth/error-pages.md",
+      "dependencies": [
+        "auth.admin-api-client"
+      ],
+      "estimatedMinutes": 20
+    },
+    "llm.config-decrypt": {
+      "status": "pending",
+      "priority": 7,
+      "module": "llm",
+      "description": "LLM Config Fetch + AES-256-GCM Decryption",
+      "filePath": "llm/config-decrypt.md",
+      "dependencies": [
+        "auth.admin-api-client"
+      ],
+      "estimatedMinutes": 25
+    },
+    "llm.credential-store": {
+      "status": "pending",
+      "priority": 8,
+      "module": "llm",
+      "description": "Write Decrypted Keys to CredentialManager + StoredConfig",
+      "filePath": "llm/credential-store.md",
+      "dependencies": [
+        "llm.config-decrypt"
+      ],
+      "estimatedMinutes": 30
+    },
+    "llm.model-selector": {
+      "status": "pending",
+      "priority": 9,
+      "module": "llm",
+      "description": "Model Selector Reads from Admin Config (Read-Only)",
+      "filePath": "llm/model-selector.md",
+      "dependencies": [
+        "llm.credential-store"
+      ],
+      "estimatedMinutes": 20
+    },
+    "cleanup.onboarding": {
+      "status": "pending",
+      "priority": 10,
+      "module": "cleanup",
+      "description": "Remove Onboarding Wizard",
+      "filePath": "cleanup/onboarding.md",
+      "dependencies": [
+        "auth.login-page",
+        "auth.startup-flow",
+        "llm.model-selector"
+      ],
+      "estimatedMinutes": 25
+    },
+    "cleanup.ai-settings": {
+      "status": "pending",
+      "priority": 11,
+      "module": "cleanup",
+      "description": "Remove AI Settings Page",
+      "filePath": "cleanup/ai-settings.md",
+      "dependencies": [
+        "cleanup.onboarding"
+      ],
+      "estimatedMinutes": 20
+    },
+    "cleanup.local-models": {
+      "status": "pending",
+      "priority": 11,
+      "module": "cleanup",
+      "description": "Remove Local Model (Ollama) Support",
+      "filePath": "cleanup/local-models.md",
+      "dependencies": [
+        "cleanup.onboarding"
+      ],
+      "estimatedMinutes": 25
+    },
+    "cleanup.oauth": {
+      "status": "pending",
+      "priority": 12,
+      "module": "cleanup",
+      "description": "Remove OAuth Flow Code",
+      "filePath": "cleanup/oauth.md",
+      "dependencies": [
+        "cleanup.onboarding",
+        "cleanup.ai-settings"
+      ],
+      "estimatedMinutes": 25
+    },
+    "cleanup.old-auth": {
+      "status": "pending",
+      "priority": 13,
+      "module": "cleanup",
+      "description": "Remove CRAFT_WEBUI_PASSWORD / CRAFT_SERVER_TOKEN Auth",
+      "filePath": "cleanup/old-auth.md",
+      "dependencies": [
+        "auth.startup-flow",
+        "auth.login-page",
+        "auth.admin-api-client"
+      ],
+      "estimatedMinutes": 35
+    },
+    "cleanup.llm-write-rpcs": {
+      "status": "pending",
+      "priority": 14,
+      "module": "cleanup",
+      "description": "Remove LLM Connection Write RPCs",
+      "filePath": "cleanup/llm-write-rpcs.md",
+      "dependencies": [
+        "llm.model-selector",
+        "cleanup.ai-settings",
+        "cleanup.oauth"
+      ],
+      "estimatedMinutes": 30
+    },
+    "electron.auth": {
+      "status": "pending",
+      "priority": 15,
+      "module": "electron",
+      "description": "Electron Main Process Auth + safeStorage + IPC",
+      "filePath": "electron/auth.md",
+      "dependencies": [
+        "auth.admin-api-client",
+        "auth.startup-flow",
+        "auth.global-401",
+        "llm.config-decrypt",
+        "llm.credential-store"
+      ],
+      "estimatedMinutes": 30
+    },
+    "electron.startup": {
+      "status": "pending",
+      "priority": 16,
+      "module": "electron",
+      "description": "Electron Startup Flow Modification",
+      "filePath": "electron/startup.md",
+      "dependencies": [
+        "electron.auth",
+        "llm.credential-store",
+        "auth.error-pages",
+        "auth.login-page"
+      ],
+      "estimatedMinutes": 25
+    },
+    "e2e.auth-flow": {
+      "status": "pending",
+      "priority": 18,
+      "module": "e2e",
+      "description": "E2E Test: Login / Logout / Session-Expired Flows",
+      "filePath": "e2e/auth-flow.md",
+      "dependencies": [
+        "auth.login-page",
+        "auth.startup-flow",
+        "auth.logout",
+        "auth.global-401",
+        "auth.error-pages",
+        "cleanup.old-auth",
+        "llm.credential-store"
+      ],
+      "estimatedMinutes": 35
+    },
+    "e2e.llm-config": {
+      "status": "pending",
+      "priority": 19,
+      "module": "e2e",
+      "description": "E2E Test: LLM Config Display and Switching",
+      "filePath": "e2e/llm-config.md",
+      "dependencies": [
+        "llm.model-selector",
+        "llm.credential-store",
+        "llm.config-decrypt",
+        "auth.login-page",
+        "auth.startup-flow",
+        "cleanup.llm-write-rpcs"
+      ],
       "estimatedMinutes": 25
     }
   }
