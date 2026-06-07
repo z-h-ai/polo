@@ -1,0 +1,3 @@
+# Task Progress: auth.startup-flow
+[2026-06-07T08:18:13.738Z] Startup auth cannot depend on a shared Admin JWT cache yet: Electron stores encrypted admin-session.json while WebUI uses cookie/session state, so shared startup orchestration should stay dependency-injected for token/config cache operations.
+[2026-06-07T08:19:15.240Z] Shared typecheck still hits the known unrelated packages/shared/src/admin-api/__tests__/usage-reporter.test.ts Authorization header null-inference failure; startup-flow validation should use focused auth tests plus note this residual typecheck blocker.

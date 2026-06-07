@@ -3,9 +3,11 @@ id: auth.startup-flow
 module: auth
 type: domain
 priority: 3
-status: pending
+status: completed
 estimatedMinutes: 30
 dependencies: [auth.admin-api-client]
+startedAt: 2026-06-07T08:13:50.287Z
+completedAt: 2026-06-07T08:22:31.433Z
 ---
 # App Startup Auth Check Logic
 
