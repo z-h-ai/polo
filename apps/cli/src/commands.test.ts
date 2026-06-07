@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { parseArgs, resolveApiKey, shouldSetupLlmConnection } from './index.ts'
+import { parseArgs, resolveLlmConnectionSlug } from './index.ts'
 
 // ---------------------------------------------------------------------------
 // Arg parsing tests
@@ -233,34 +233,27 @@ describe('parseArgs', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Provider credential resolution tests
+// Admin-managed LLM connection selection tests
 // ---------------------------------------------------------------------------
 
-describe('resolveApiKey', () => {
-  it('uses DEEPSEEK_API_KEY for the deepseek provider', () => {
-    const prev = process.env.DEEPSEEK_API_KEY
-    process.env.DEEPSEEK_API_KEY = 'deepseek-test-key'
-
-    try {
-      expect(resolveApiKey('deepseek', '')).toBe('deepseek-test-key')
-    } finally {
-      if (prev === undefined) delete process.env.DEEPSEEK_API_KEY
-      else process.env.DEEPSEEK_API_KEY = prev
-    }
-  })
-})
-
-describe('shouldSetupLlmConnection', () => {
-  it('forces setup for non-default providers even when connections already exist', () => {
-    expect(shouldSetupLlmConnection(2, { provider: 'deepseek', baseUrl: '' })).toBe(true)
+describe('resolveLlmConnectionSlug', () => {
+  it('selects an existing provider connection', () => {
+    expect(resolveLlmConnectionSlug([
+      { slug: 'anthropic-admin', providerType: 'anthropic' },
+      { slug: 'deepseek-admin', providerType: 'pi', piAuthProvider: 'deepseek' },
+    ], { provider: 'deepseek', baseUrl: '' })).toBe('deepseek-admin')
   })
 
-  it('skips setup for the default anthropic provider when connections already exist', () => {
-    expect(shouldSetupLlmConnection(2, { provider: 'anthropic', baseUrl: '' })).toBe(false)
+  it('selects an existing custom endpoint by base URL', () => {
+    expect(resolveLlmConnectionSlug([
+      { slug: 'custom-admin', providerType: 'pi_compat', baseUrl: 'https://api.example.com' },
+    ], { provider: 'anthropic', baseUrl: 'https://api.example.com' })).toBe('custom-admin')
   })
 
-  it('forces setup for custom endpoints', () => {
-    expect(shouldSetupLlmConnection(2, { provider: 'anthropic', baseUrl: 'https://api.example.com' })).toBe(true)
+  it('does not synthesize a slug for missing provider connections', () => {
+    expect(resolveLlmConnectionSlug([
+      { slug: 'anthropic-admin', providerType: 'anthropic' },
+    ], { provider: 'deepseek', baseUrl: '' })).toBeUndefined()
   })
 })
 

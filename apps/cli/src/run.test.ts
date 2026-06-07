@@ -91,15 +91,6 @@ function createMockServer(opts?: MockServerOptions): MockServer {
             case 'LLM_Connection:list':
               result = connections
               break
-            case 'LLM_Connection:save':
-              result = { ok: true }
-              break
-            case 'settings:setupLlmConnection':
-              result = { ok: true }
-              break
-            case 'LLM_Connection:setDefault':
-              result = { ok: true }
-              break
             case 'sessions:create':
               createSessionArgs = envelope.args
               result = { id: 'run-session-1', name: 'run-test' }
@@ -167,7 +158,7 @@ mock.module('./server-spawner.ts', () => ({
 }))
 
 // Import main AFTER mocking
-const { parseArgs } = await import('./index.ts')
+const { parseArgs, resolveLlmConnectionSlug } = await import('./index.ts')
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -363,7 +354,7 @@ describe('run command', () => {
     client.destroy()
   })
 
-  it('LLM bootstrap calls save, setup, and setDefault when no connections exist', async () => {
+  it('LLM connection lookup remains read-only when no connections exist', async () => {
     // Server returns empty connections list
     mockWsServer?.close()
     mockWsServer = createMockServer({ connections: [] })
@@ -375,38 +366,23 @@ describe('run command', () => {
     })
     await client.connect()
 
-    // Simulate the LLM bootstrap path from cmdRun
     const connections = (await client.invoke('LLM_Connection:list')) as any[]
     expect(connections).toEqual([])
+    expect(resolveLlmConnectionSlug(connections, {
+      provider: 'anthropic',
+      baseUrl: '',
+    })).toBeUndefined()
 
-    await client.invoke('LLM_Connection:save', {
-      slug: 'anthropic-api',
-      name: 'Anthropic',
-      providerType: 'anthropic',
-      authType: 'api_key',
-      createdAt: 123,
-    })
-    await client.invoke('settings:setupLlmConnection', {
-      slug: 'anthropic-api',
-      credential: 'sk-test-key',
-    })
-    await client.invoke('LLM_Connection:setDefault', 'anthropic-api')
-
-    expect(mockWsServer!.invokedChannels).toEqual([
-      'LLM_Connection:list',
-      'LLM_Connection:save',
-      'settings:setupLlmConnection',
-      'LLM_Connection:setDefault',
-    ])
+    expect(mockWsServer!.invokedChannels).toEqual(['LLM_Connection:list'])
 
     client.destroy()
   })
 
-  it('LLM bootstrap is skipped when connections already exist', async () => {
+  it('LLM connection lookup selects an existing Admin-managed connection', async () => {
     // Server returns existing connection
     mockWsServer?.close()
     mockWsServer = createMockServer({
-      connections: [{ slug: 'existing', name: 'Existing' }],
+      connections: [{ slug: 'existing', name: 'Existing', providerType: 'anthropic' }],
     })
 
     const { CliRpcClient } = await import('./client.ts')
@@ -416,11 +392,13 @@ describe('run command', () => {
     })
     await client.connect()
 
-    // Simulate: check connections — they exist, so skip bootstrap
     const connections = (await client.invoke('LLM_Connection:list')) as any[]
     expect(connections).toHaveLength(1)
+    expect(resolveLlmConnectionSlug(connections, {
+      provider: 'anthropic',
+      baseUrl: '',
+    })).toBe('existing')
 
-    // No further LLM calls should be needed
     expect(mockWsServer!.invokedChannels).toEqual(['LLM_Connection:list'])
 
     client.destroy()
