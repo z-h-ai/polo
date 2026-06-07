@@ -3,9 +3,11 @@ id: llm.model-selector
 module: llm
 type: ui
 priority: 9
-status: pending
+status: completed
 estimatedMinutes: 20
 dependencies: [llm.credential-store]
+startedAt: 2026-06-07T10:15:05.931Z
+completedAt: 2026-06-07T10:43:05.398Z
 ---
 # Model Selector Reads from Admin Config (Read-Only)
 

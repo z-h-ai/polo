@@ -14,3 +14,5 @@
 [2026-06-07T09:41:22.381Z] COMPLETED: llm.credential-store
 [2026-06-07T09:48:21.301Z] STARTED: auth.global-401
 [2026-06-07T10:08:24.820Z] COMPLETED: auth.global-401
+[2026-06-07T10:15:05.933Z] STARTED: llm.model-selector
+[2026-06-07T10:43:05.401Z] COMPLETED: llm.model-selector

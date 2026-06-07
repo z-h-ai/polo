@@ -1,0 +1,4 @@
+# Task Progress: llm.model-selector
+[2026-06-07T10:19:35.765Z] Renderer Bun tests should avoid importing CompactModelSelector directly: its dependency graph can pull the PDF worker ?url module, which Bun cannot load in SSR tests; keep focused selector logic in a lightweight component module.
+[2026-06-07T10:31:23.458Z] Desktop FreeFormInput's Radix dropdown content is closed during static SSR tests, so focused renderer coverage for that path should assert the FreeFormInput source wiring or use a DOM/browser test; helper-panel tests alone do not cover the desktop dropdown branch.
+[2026-06-07T10:38:15.413Z] Desktop FreeFormInput selector coverage can stay SSR-testable by mounting a lightweight desktop wrapper around AdminLlmModelSelectorPanel, avoiding direct FreeFormInput imports and their heavy renderer dependency graph.
