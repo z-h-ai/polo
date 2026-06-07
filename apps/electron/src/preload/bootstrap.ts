@@ -266,8 +266,14 @@ client.onConnectionStateChanged((state) => {
 
 // Platform auth — main process owns token exchange/storage. Renderer receives
 // only success/failure metadata, never the raw Admin JWT.
-;(api as ElectronAPI).authLogin = (username: string, password: string) =>
-  ipcRenderer.invoke('auth:login', username, password)
+;(api as ElectronAPI).authLogin = async (username: string, password: string) => {
+  const result = await ipcRenderer.invoke('auth:login', username, password)
+  if (result && typeof result === 'object' && 'error' in result) {
+    const error = (result as { error: { code?: string; message?: string; retryAfterSeconds?: number; statusCode?: number } }).error
+    throw Object.assign(new Error(error.message ?? 'Login failed'), error)
+  }
+  return result
+}
 
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →

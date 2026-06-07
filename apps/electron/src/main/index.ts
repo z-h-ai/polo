@@ -105,6 +105,7 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
 import type { EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
+import { registerElectronAuthHandlers } from './auth'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -528,6 +529,8 @@ app.whenReady().then(async () => {
       const result = await dialog.showOpenDialog(win, spec)
       return { canceled: result.canceled, filePaths: result.filePaths }
     })
+
+    registerElectronAuthHandlers()
 
     if (!isClientOnly) {
       // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)

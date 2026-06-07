@@ -32,12 +32,11 @@ function ensureEvidenceDir() {
 function buildLoginHtml(opts: {
   authMeStatus: number
   publicConfig: { adminUrl: string | null; platformMode: boolean }
-  adminLoginStatus?: number
-  adminLoginBody?: object
+  loginStatus?: number
+  loginBody?: object
 }): string {
-  const adminUrl = opts.publicConfig.adminUrl ?? 'http://mock-admin.local'
-  const adminLoginStatus = opts.adminLoginStatus ?? 401
-  const adminLoginBody = opts.adminLoginBody ?? { error: 'invalid_credentials' }
+  const loginStatus = opts.loginStatus ?? 401
+  const loginBody = opts.loginBody ?? { error: 'invalid_credentials' }
 
   return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -119,17 +118,18 @@ function buildLoginHtml(opts: {
     const MOCKS = {
       '/auth/me': { status: ${opts.authMeStatus}, body: { error: 'session_expired' } },
       '/api/public-config': { status: 200, body: ${JSON.stringify(opts.publicConfig)} },
-      '${adminUrl}/api/auth/login': {
-        status: ${adminLoginStatus},
-        body: ${JSON.stringify(adminLoginBody)}
+      '/auth/login': {
+        status: ${loginStatus},
+        body: ${JSON.stringify(loginBody)}
       },
-      '/auth/session': { status: 200, body: { user: { id: 'u1' } } },
       '/api/config': { status: 200, body: { wsUrl: 'wss://polo.test/ws' } },
     };
 
     const _origFetch = window.fetch.bind(window);
+    window._loginFetches = [];
     window.fetch = async function(url, init) {
       const key = typeof url === 'string' ? url : url.toString();
+      window._loginFetches.push(key);
       if (Object.prototype.hasOwnProperty.call(MOCKS, key)) {
         const mock = MOCKS[key];
         await new Promise(r => setTimeout(r, 10));
@@ -214,11 +214,10 @@ function buildLoginHtml(opts: {
           submitBtn.innerHTML = '<svg class="animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke-linecap="round"/></svg> Signing in\\u2026';
 
           try {
-            var configRes = await window.fetch('/api/public-config');
-            var config = await configRes.json();
-            var loginRes = await window.fetch(config.adminUrl + '/api/auth/login', {
+            var loginRes = await window.fetch('/auth/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
               body: JSON.stringify({ username: usernameInput.value, password: passwordInput.value }),
             });
 
@@ -236,12 +235,7 @@ function buildLoginHtml(opts: {
               return;
             }
 
-            var loginData = await loginRes.json();
-            await window.fetch('/auth/session', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: loginData.token }),
-            });
+            await loginRes.json();
             window.location.href = '/';
           } catch(err) {
             errorEl.textContent = 'Service temporarily unavailable';
@@ -318,8 +312,8 @@ beforeAll(async () => {
           buildLoginHtml({
             authMeStatus: 401,
             publicConfig: { adminUrl: 'http://mock-admin.local', platformMode: true },
-            adminLoginStatus: 401,
-            adminLoginBody: { error: 'invalid_credentials' },
+            loginStatus: 401,
+            loginBody: { error: 'invalid_credentials' },
           }),
           { headers: { 'Content-Type': 'text/html' } },
         )
@@ -369,6 +363,21 @@ async function waitForSelectorHidden(page: Page, selector: string, timeout = 500
 // ---------------------------------------------------------------------------
 
 describe('Login page screenshots (AC5)', () => {
+  it('fixture submits through the production /auth/login platform proxy without handling Admin tokens', () => {
+    const source = buildLoginHtml({
+      authMeStatus: 401,
+      publicConfig: { adminUrl: 'http://mock-admin.local', platformMode: true },
+    })
+
+    const staleAdminLoginExpression = ['config.adminUrl', "'/api/auth/login'"].join(' + ')
+    const staleSessionPath = ['/auth', 'session'].join('/')
+
+    expect(source).toContain("window.fetch('/auth/login'")
+    expect(source).not.toContain(staleAdminLoginExpression)
+    expect(source).not.toContain(`window.fetch('${staleSessionPath}'`)
+    expect(source).not.toContain(['loginData', 'token'].join('.'))
+  })
+
   it('captures initial state with username and password fields visible', async () => {
     const page = await browser.newPage()
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -425,6 +434,12 @@ describe('Login page screenshots (AC5)', () => {
 
       const errorText = await page.$eval('[data-testid="login-error"]', el => el.textContent)
       expect(errorText).toContain('incorrect')
+      const fetches = await page.evaluate(() => (window as unknown as { _loginFetches: string[] })._loginFetches)
+      const staleAdminLoginUrl = ['http://mock-admin.local', 'api/auth/login'].join('/')
+      const staleSessionPath = ['/auth', 'session'].join('/')
+      expect(fetches).toContain('/auth/login')
+      expect(fetches).not.toContain(staleAdminLoginUrl)
+      expect(fetches).not.toContain(staleSessionPath)
 
       // Take screenshot (AC5)
       const screenshotPath = join(EVIDENCE_DIR, 'login-error-state.png')
