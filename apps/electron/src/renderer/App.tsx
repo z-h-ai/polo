@@ -27,6 +27,7 @@ import { useSession } from '@/hooks/useSession'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
+import { LoggedOutLoginPage, runRendererLogoutFlow } from './lib/logout-flow'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
@@ -74,7 +75,7 @@ import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 
-type AppState = 'loading' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
+type AppState = 'loading' | 'login' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
 
 /** Type for the Jotai store returned by useStore() */
 type JotaiStore = ReturnType<typeof getDefaultStore>
@@ -634,17 +635,38 @@ export default function App() {
     initialSetupNeeds: setupNeeds || undefined,
   })
 
-  // Reauth login handler - placeholder (reauth is not currently used)
-  const handleReauthLogin = useCallback(async () => {
-    // Re-check setup needs
-    const needs = await window.electronAPI.getSetupNeeds()
-    if (needs.isFullyConfigured) {
-      setAppState('ready')
-    } else {
+  const syncPostLoginAppState = useCallback(async () => {
+    try {
+      // Get this window's workspace ID (passed via URL query param from main process)
+      const wsId = await window.electronAPI.getWindowWorkspace()
+      setWindowWorkspaceId(wsId)
+
+      const needs = await window.electronAPI.getSetupNeeds()
       setSetupNeeds(needs)
+
+      if (needs.isFullyConfigured) {
+        // If no workspace is selected (thin client without POLO_AI_WORKSPACE_ID),
+        // show workspace picker before entering the main app
+        setAppState(wsId ? 'ready' : 'workspace-picker')
+      } else {
+        // New user or needs setup - show onboarding
+        setAppState('onboarding')
+      }
+    } catch (error) {
+      console.error('Failed to check auth state:', error)
+      // If check fails, show onboarding to be safe
       setAppState('onboarding')
     }
   }, [])
+
+  // Reauth login handler - placeholder (reauth is not currently used)
+  const handleReauthLogin = useCallback(async () => {
+    await syncPostLoginAppState()
+  }, [syncPostLoginAppState])
+
+  const handleLoginSuccess = useCallback(() => {
+    void syncPostLoginAppState()
+  }, [syncPostLoginAppState])
 
   // Reauth reset handler - open reset confirmation dialog
   const handleReauthReset = useCallback(() => {
@@ -653,36 +675,8 @@ export default function App() {
 
   // Check auth state and get window's workspace ID on mount
   useEffect(() => {
-    const initialize = async () => {
-      try {
-        // Get this window's workspace ID (passed via URL query param from main process)
-        const wsId = await window.electronAPI.getWindowWorkspace()
-        setWindowWorkspaceId(wsId)
-
-        const needs = await window.electronAPI.getSetupNeeds()
-        setSetupNeeds(needs)
-
-        if (needs.isFullyConfigured) {
-          // If no workspace is selected (thin client without POLO_AI_WORKSPACE_ID),
-          // show workspace picker before entering the main app
-          if (!wsId) {
-            setAppState('workspace-picker')
-          } else {
-            setAppState('ready')
-          }
-        } else {
-          // New user or needs setup - show onboarding
-          setAppState('onboarding')
-        }
-      } catch (error) {
-        console.error('Failed to check auth state:', error)
-        // If check fails, show onboarding to be safe
-        setAppState('onboarding')
-      }
-    }
-
-    initialize()
-  }, [])
+    void syncPostLoginAppState()
+  }, [syncPostLoginAppState])
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
@@ -1667,34 +1661,43 @@ export default function App() {
     navigate(routes.view.settings('preferences'))
   }, [])
 
+  const clearRendererStateAfterLogout = useCallback(() => {
+    initializeSessions([])
+    setWorkspaces([])
+    setWindowWorkspaceId(null)
+    setSession({ selected: null })
+    setPendingPermissions(new Map())
+    setPendingCredentials(new Map())
+    setSessionOptions(new Map())
+    sessionDraftsRef.current.clear()
+    store.set(sourcesAtom, [])
+    store.set(skillsAtom, [])
+    store.set(sessionMetaMapAtom, new Map())
+    store.set(sessionIdsAtom, [])
+    setSetupNeeds({
+      needsBillingConfig: true,
+      needsCredentials: true,
+      isFullyConfigured: false,
+    })
+    onboarding.reset()
+  }, [initializeSessions, onboarding, setSession, store])
+
   const handleLogout = useCallback(async () => {
     try {
-      await window.electronAPI.logout()
-      initializeSessions([])
-      setWorkspaces([])
-      setWindowWorkspaceId(null)
-      setSession({ selected: null })
-      setPendingPermissions(new Map())
-      setPendingCredentials(new Map())
-      setSessionOptions(new Map())
-      sessionDraftsRef.current.clear()
-      store.set(sourcesAtom, [])
-      store.set(skillsAtom, [])
-      store.set(sessionMetaMapAtom, new Map())
-      store.set(sessionIdsAtom, [])
-      setSetupNeeds({
-        needsBillingConfig: true,
-        needsCredentials: true,
-        isFullyConfigured: false,
+      const result = await runRendererLogoutFlow({
+        logout: () => window.electronAPI.logout(),
+        clearRendererState: clearRendererStateAfterLogout,
+        showLoginPage: () => setAppState('login'),
       })
-      onboarding.reset()
-      setAppState('onboarding')
+      if (!result.logoutSucceeded) {
+        console.warn('Logout API failed; local state was cleared:', result.logoutError)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('Logout failed:', error)
       toast.error(t('toast.logoutFailed'), { description: message })
     }
-  }, [initializeSessions, onboarding, setSession, store, t])
+  }, [clearRendererStateAfterLogout, t])
 
   // Show reset confirmation dialog
   const handleReset = useCallback(() => {
@@ -1922,6 +1925,18 @@ export default function App() {
   // Loading state - show splash screen
   if (appState === 'loading') {
     return <SplashScreen isExiting={false} />
+  }
+
+  // Logged out state - show the real login page after user-initiated logout.
+  if (appState === 'login') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <LoggedOutLoginPage onSuccess={handleLoginSuccess} />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
   }
 
   // Reauth state - session expired, need to re-login
