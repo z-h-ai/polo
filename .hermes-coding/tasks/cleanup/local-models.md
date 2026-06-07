@@ -3,9 +3,11 @@ id: cleanup.local-models
 module: cleanup
 type: domain
 priority: 11
-status: pending
+status: completed
 estimatedMinutes: 25
 dependencies: [cleanup.onboarding]
+startedAt: 2026-06-07T11:22:27.850Z
+completedAt: 2026-06-07T12:02:18.971Z
 ---
 # Remove Local Model (Ollama) Support
 

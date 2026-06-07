@@ -20,3 +20,5 @@
 [2026-06-07T11:05:11.190Z] COMPLETED: cleanup.onboarding
 [2026-06-07T11:09:51.682Z] STARTED: cleanup.ai-settings
 [2026-06-07T11:18:05.750Z] COMPLETED: cleanup.ai-settings
+[2026-06-07T11:22:27.853Z] STARTED: cleanup.local-models
+[2026-06-07T12:02:18.973Z] COMPLETED: cleanup.local-models

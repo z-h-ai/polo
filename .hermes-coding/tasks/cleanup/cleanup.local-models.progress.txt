@@ -1,0 +1,5 @@
+# Task Progress: cleanup.local-models
+[2026-06-07T11:49:40.853Z] The cleanup grep must distinguish LLM provider variants from unrelated provider:'local' fields; packages/server-core/src/transport/client.ts uses provider:'local' outside LLM model/provider selection.
+[2026-06-07T11:51:25.367Z] CI=true bun run typecheck still fails in packages/shared/src/admin-api/__tests__/usage-reporter.test.ts on the known Authorization header null inference issue; this is unrelated to local-model cleanup changes.
+[2026-06-07T11:53:17.137Z] Local LLM support was also implemented in packages/pi-agent-server/src/index.ts via a loopback placeholder API key, not only in Electron/UI config; removing it requires custom endpoints to pass through without synthetic credentials.
+[2026-06-07T11:57:47.550Z] Ignored dist outputs under apps/electron/dist, apps/webui/dist, and packages/pi-agent-server/dist are included by the cleanup.local-models acceptance grep; remove or rebuild them before verifying Ollama removal.
