@@ -17,7 +17,6 @@ import {
 } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
 import * as storage from '@/lib/local-storage'
-import { navigate, routes } from '@/lib/navigate'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { NoLlmConfigBanner } from '@/components/NoLlmConfigBanner'
 import {
@@ -225,16 +224,6 @@ export function CompactModelSelector({
               <div className="text-xs text-muted-foreground mb-3">
                 {t('chat.connectionUnavailableDescription')}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false)
-                  navigate(routes.view.settings('ai'))
-                }}
-                className="text-xs underline text-foreground/70 hover:text-foreground"
-              >
-                {t('chat.modelPicker.openAiSettings')}
-              </button>
             </div>
           ) : pickerMode === 'locked-single' && connectionDefaultModel ? (
             <LockedSingleRow

@@ -12,7 +12,6 @@ export { default as ConfigErrorPage } from './ConfigErrorPage'
 export {
   SettingsNavigator,
   AppSettingsPage,
-  AiSettingsPage,
   AppearanceSettingsPage,
   InputSettingsPage,
   WorkspaceSettingsPage,

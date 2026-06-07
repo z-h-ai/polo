@@ -8,7 +8,6 @@
  * - Permissions (Default mode, Mode cycling)
  * - Advanced (Working directory, Local MCP servers)
  *
- * Note: AI settings (model, thinking, connection) have been moved to AiSettingsPage.
  */
 
 import * as React from 'react'

@@ -11,7 +11,7 @@
  * | error            | hidden         | not rendered    | hidden                  |
  *
  * Set by: webui/src/App.tsx after fetching /api/public-config
- * Read by: AiSettingsPage, SettingsNavigator (to hide the AI settings entry)
+ * Read by: SettingsNavigator and quota-aware UI components
  */
 
 import { atom } from 'jotai'

@@ -158,7 +158,6 @@ export const NavigationRegistry = {
     displayName: 'Settings',
     detailsPages: {
       app: PlaceholderComponent, // AppSettingsPage
-      ai: PlaceholderComponent, // AiSettingsPage
       appearance: PlaceholderComponent, // AppearanceSettingsPage
       input: PlaceholderComponent, // InputSettingsPage
       workspace: PlaceholderComponent, // WorkspaceSettingsPage
@@ -197,4 +196,3 @@ export type NavigationState =
   | { navigator: 'sessions'; sessionFilter: SessionFilter; details: { type: 'session'; id: string } | null }
   | { navigator: 'sources'; details: { type: 'source'; id: string } | null }
   | { navigator: 'settings'; details: { type: DetailsType<'settings'>; id: string } }
-
