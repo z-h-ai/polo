@@ -16,3 +16,5 @@
 [2026-06-07T10:08:24.820Z] COMPLETED: auth.global-401
 [2026-06-07T10:15:05.933Z] STARTED: llm.model-selector
 [2026-06-07T10:43:05.401Z] COMPLETED: llm.model-selector
+[2026-06-07T10:48:00.494Z] STARTED: cleanup.onboarding
+[2026-06-07T11:05:11.190Z] COMPLETED: cleanup.onboarding

@@ -3,9 +3,11 @@ id: cleanup.onboarding
 module: cleanup
 type: domain
 priority: 10
-status: pending
+status: completed
 estimatedMinutes: 25
 dependencies: [auth.login-page, auth.startup-flow, llm.model-selector]
+startedAt: 2026-06-07T10:48:00.491Z
+completedAt: 2026-06-07T11:05:11.187Z
 ---
 # Remove Onboarding Wizard
 

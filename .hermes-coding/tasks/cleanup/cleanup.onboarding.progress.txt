@@ -1,0 +1,3 @@
+# Task Progress: cleanup.onboarding
+[2026-06-07T10:49:43.561Z] Removing the onboarding wizard also requires deleting Electron transport/API mappings and playground registry entries; otherwise no-production-onboarding-reference checks and typecheck still fail after deleting the named files.
+[2026-06-07T10:59:25.124Z] Root bun run typecheck still fails in packages/shared/src/admin-api/__tests__/usage-reporter.test.ts with the known Authorization-header null inference issue; packages/server-core tsc also has unrelated stale test typing failures in force-logout-wiring, sessions-quota, and quota-proxy.
