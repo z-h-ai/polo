@@ -1,0 +1,170 @@
+/**
+ * Polo AI — Login Page Styles (Electron renderer)
+ *
+ * Adapted from webui/src/login.css — removed body-level styles
+ * since the Electron renderer has its own global layout via index.css.
+ * The LoggedOutLoginPage wrapper handles centering.
+ */
+
+/* -----------------------------------------------------------------------
+   Card
+   ----------------------------------------------------------------------- */
+
+.login-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 28rem;
+  padding: 40px 36px 36px;
+  background: oklch(from var(--background) l c h / 0.86);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  text-align: center;
+  box-shadow: var(--shadow-modal-small);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+
+/* -----------------------------------------------------------------------
+   Logo
+   ----------------------------------------------------------------------- */
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #7b6dff 0%, #5a4be0 100%);
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(109, 93, 252, 0.35);
+}
+
+.login-logo-mark {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  user-select: none;
+}
+
+/* -----------------------------------------------------------------------
+   Heading
+   ----------------------------------------------------------------------- */
+
+.login-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
+
+.login-subtitle {
+  font-size: 13px;
+  opacity: 0.56;
+  margin-bottom: 28px;
+}
+
+/* -----------------------------------------------------------------------
+   Form fields
+   ----------------------------------------------------------------------- */
+
+.login-field {
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.login-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.login-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--background);
+  color: var(--foreground);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.login-input::placeholder {
+  opacity: 0.34;
+}
+
+.login-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(109, 93, 252, 0.12);
+}
+
+.login-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* -----------------------------------------------------------------------
+   Button
+   ----------------------------------------------------------------------- */
+
+.login-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  color: #fff;
+  background: linear-gradient(180deg, #7b6dff 0%, var(--accent) 100%);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s, filter 0.15s, background 0.15s;
+  box-shadow: 0 10px 24px rgba(109, 93, 252, 0.28);
+  user-select: none;
+}
+
+.login-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #705fff 0%, #5a4be0 100%);
+  transform: translateY(-1px);
+  filter: brightness(1.02);
+}
+
+.login-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+  box-shadow: none;
+}
+
+/* -----------------------------------------------------------------------
+   Error message
+   ----------------------------------------------------------------------- */
+
+.login-error {
+  display: none;
+  margin-top: 16px;
+  padding: 10px 12px;
+  font-size: 13px;
+  text-align: left;
+  background: var(--background);
+  border: 1px solid var(--destructive);
+  border-radius: 8px;
+  color: var(--destructive);
+  line-height: 1.5;
+}
+
+.login-error--visible {
+  display: block;
+}
