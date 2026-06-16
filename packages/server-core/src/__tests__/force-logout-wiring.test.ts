@@ -20,7 +20,7 @@ describe('configureServerForceLogout', () => {
     const routeToLogin = mock(async () => {})
     const credentialManager = {
       list: mock(async () => []),
-      delete: mock(async (_id: unknown) => {}),
+      delete: mock(async (_id: unknown) => true),
     }
 
     const handler = configureServerForceLogout({

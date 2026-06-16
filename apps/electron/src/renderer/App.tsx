@@ -74,6 +74,7 @@ import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 import { handleRendererSessionExpired } from './lib/session-expired-flow'
+import { triggerQuotaRefreshAtom } from '@/atoms/platform'
 
 type AppState = 'loading' | 'login' | 'workspace-picker' | 'ready'
 
@@ -247,6 +248,7 @@ export default function App() {
   const removeSession = useSetAtom(removeSessionAtom)
   const updateSessionDirect = useSetAtom(updateSessionAtom)
   const replaceLoadedSession = useSetAtom(replaceLoadedSessionAtom)
+  const triggerQuotaRefresh = useSetAtom(triggerQuotaRefreshAtom)
   const store = useStore()
 
   // Helper to update a session by ID with partial fields
@@ -835,6 +837,10 @@ export default function App() {
     const cleanup = window.electronAPI.onSessionEvent((event: SessionEvent) => {
       if (!('sessionId' in event)) return
 
+      if (event.type === 'complete') {
+        triggerQuotaRefresh()
+      }
+
       const sessionId = event.sessionId
       const workspaceId = windowWorkspaceId ?? ''
 
@@ -970,12 +976,15 @@ export default function App() {
     syncSessionOptionsFromSession,
     applyPermissionModeState,
     reconcilePermissionModeState,
+    triggerQuotaRefresh,
   ])
 
   // Transport reconnect recovery — refresh session metadata plus active/processing
   // session content after stale reconnects.
   useEffect(() => {
     const cleanup = window.electronAPI.onReconnected(async (isStale: boolean) => {
+      triggerQuotaRefresh()
+
       if (!isStale) {
         // Server replayed buffered events — we're caught up, nothing to do
         console.info('[App] Reconnected with event replay — no refresh needed')
@@ -1021,11 +1030,10 @@ export default function App() {
           console.info(`[App] Stale reconnect recovery complete — active session has ${session.messages?.length ?? 0} messages`)
         }
       }
-
     })
 
     return cleanup
-  }, [store, sessionSelection.selected, refreshSessionFromServer, refreshSessionListMetadataFromServer])
+  }, [store, sessionSelection.selected, refreshSessionFromServer, refreshSessionListMetadataFromServer, triggerQuotaRefresh])
 
   // Listen for menu bar events
   useEffect(() => {

@@ -331,6 +331,9 @@ export const CHANNEL_MAP = {
   listLlmConnections: invoke(RPC_CHANNELS.llmConnections.LIST),
   getLlmConnection: invoke(RPC_CHANNELS.llmConnections.GET),
 
+  // Quota
+  getQuotaStatus: invoke(RPC_CHANNELS.quota.GET_STATUS),
+
   // Automations
   getAutomations: invoke(RPC_CHANNELS.automations.GET),
   testAutomation: invoke(RPC_CHANNELS.automations.TEST),

@@ -1,7 +1,7 @@
 /**
  * Platform Mode Atom
  *
- * Tracks whether the WebUI is running in platform mode.
+ * Tracks whether the current renderer is running against a platform-mode server.
  * Platform mode is set when PLATFORM_ANTHROPIC_API_KEY is configured on the server
  * and reported via GET /api/public-config.
  *
@@ -10,7 +10,7 @@
  * | loading (before) | hidden         | not rendered    | hidden                  |
  * | error            | hidden         | not rendered    | hidden                  |
  *
- * Set by: webui/src/App.tsx after fetching /api/public-config
+ * Set by: webui/src/App.tsx after fetching /api/public-config and by Electron quota-aware UI.
  * Read by: SettingsNavigator and quota-aware UI components
  */
 

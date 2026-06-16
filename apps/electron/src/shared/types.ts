@@ -204,6 +204,7 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  QuotaStatusRpcResult,
 } from '@polo-ai/shared/protocol'
 import type { SessionExpiredEvent } from '@polo-ai/shared/auth'
 
@@ -584,6 +585,7 @@ export interface ElectronAPI {
   // LLM Connections (provider configurations)
   listLlmConnections(): Promise<LlmConnection[]>
   getLlmConnection(slug: string): Promise<LlmConnection | null>
+  getQuotaStatus(): Promise<QuotaStatusRpcResult>
   getDefaultThinkingLevel(): Promise<ThinkingLevel>
   setDefaultThinkingLevel(level: ThinkingLevel): Promise<{ success: boolean; error?: string }>
 

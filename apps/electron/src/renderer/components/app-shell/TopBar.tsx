@@ -31,6 +31,7 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
 import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
 import { getDocUrl } from "@polo-ai/shared/docs/doc-links"
 import { AppMenu } from "../AppMenu"
+import { QuotaDisplay } from "./QuotaDisplay"
 
 const RIGHT_SLOT_FULL_BADGES_THRESHOLD = 420
 const RIGHT_SLOT_TWO_BADGES_THRESHOLD = 300
@@ -227,6 +228,7 @@ export function TopBar({
       {/* === RIGHT: Browser strip + add + help === */}
       {!isCompact && (
       <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: 12 }}>
+        <QuotaDisplay />
         <div className="min-w-0">
           <BrowserTabStrip activeSessionId={activeSessionId} maxVisibleBadges={maxVisibleBrowserBadges} />
         </div>

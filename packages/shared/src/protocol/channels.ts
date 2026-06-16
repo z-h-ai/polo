@@ -166,31 +166,13 @@ export const RPC_CHANNELS = {
   },
   llmConnections: {
     LIST: 'LLM_Connection:list',
-    LIST_WITH_STATUS: 'LLM_Connection:listWithStatus',
     GET: 'LLM_Connection:get',
-    GET_API_KEY: 'LLM_Connection:getApiKey',
-    SAVE: 'LLM_Connection:save',
-    DELETE: 'LLM_Connection:delete',
-    TEST: 'LLM_Connection:test',
-    SET_DEFAULT: 'LLM_Connection:setDefault',
-    SET_WORKSPACE_DEFAULT: 'LLM_Connection:setWorkspaceDefault',
-    REFRESH_MODELS: 'LLM_Connection:refreshModels',
     CHANGED: 'LLM_Connection:changed',
   },
-  chatgpt: {
-    GET_AUTH_STATUS: 'chatgpt:getAuthStatus',
-    LOGOUT: 'chatgpt:logout',
-  },
-  copilot: {
-    START_OAUTH: 'copilot:startOAuth',
-    CANCEL_OAUTH: 'copilot:cancelOAuth',
-    GET_AUTH_STATUS: 'copilot:getAuthStatus',
-    LOGOUT: 'copilot:logout',
-    DEVICE_CODE: 'copilot:deviceCode',
+  quota: {
+    GET_STATUS: 'quota:getStatus',
   },
   settings: {
-    SETUP_LLM_CONNECTION: 'settings:setupLlmConnection',
-    TEST_LLM_CONNECTION_SETUP: 'settings:testLlmConnectionSetup',
     GET_DEFAULT_THINKING_LEVEL: 'settings:getDefaultThinkingLevel',
     SET_DEFAULT_THINKING_LEVEL: 'settings:setDefaultThinkingLevel',
     GET_NETWORK_PROXY: 'settings:getNetworkProxy',
@@ -198,11 +180,6 @@ export const RPC_CHANNELS = {
     GET_SERVER_CONFIG: 'settings:getServerConfig',
     SET_SERVER_CONFIG: 'settings:setServerConfig',
     GET_SERVER_STATUS: 'settings:getServerStatus',
-  },
-  pi: {
-    GET_API_KEY_PROVIDERS: 'pi:getApiKeyProviders',
-    GET_PROVIDER_BASE_URL: 'pi:getProviderBaseUrl',
-    GET_PROVIDER_MODELS: 'pi:getProviderModels',
   },
   dialog: {
     OPEN_FOLDER: 'dialog:openFolder',

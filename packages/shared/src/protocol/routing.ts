@@ -277,33 +277,13 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // credentials — remote server's credential state
   RPC_CHANNELS.credentials.HEALTH_CHECK,
 
-  // removed LLM connection write/setup/OAuth channels — constants remain for
-  // backward-compatible unknown-method errors, but no handler should register them.
-  RPC_CHANNELS.llmConnections.LIST_WITH_STATUS,
-  RPC_CHANNELS.llmConnections.GET_API_KEY,
-  RPC_CHANNELS.llmConnections.SAVE,
-  RPC_CHANNELS.llmConnections.DELETE,
-  RPC_CHANNELS.llmConnections.TEST,
-  RPC_CHANNELS.llmConnections.SET_DEFAULT,
-  RPC_CHANNELS.llmConnections.SET_WORKSPACE_DEFAULT,
-  RPC_CHANNELS.llmConnections.REFRESH_MODELS,
-  RPC_CHANNELS.chatgpt.GET_AUTH_STATUS,
-  RPC_CHANNELS.chatgpt.LOGOUT,
-  RPC_CHANNELS.copilot.START_OAUTH,
-  RPC_CHANNELS.copilot.CANCEL_OAUTH,
-  RPC_CHANNELS.copilot.GET_AUTH_STATUS,
-  RPC_CHANNELS.copilot.LOGOUT,
-  RPC_CHANNELS.copilot.DEVICE_CODE,
-  RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,
-  RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP,
-  RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS,
-  RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL,
-  RPC_CHANNELS.pi.GET_PROVIDER_MODELS,
-
   // llmConnections — LLM config lives on server running workspace
   RPC_CHANNELS.llmConnections.LIST,
   RPC_CHANNELS.llmConnections.GET,
   RPC_CHANNELS.llmConnections.CHANGED,
+
+  // quota — platform-mode usage indicator
+  RPC_CHANNELS.quota.GET_STATUS,
 
   // settings — workspace-level settings
   RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL,

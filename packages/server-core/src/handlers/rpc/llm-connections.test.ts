@@ -9,26 +9,6 @@ import type { HandlerDeps } from '../handler-deps'
 
 const LLM_RPC_MODULE = pathToFileURL(join(import.meta.dir, 'llm-connections.ts')).href
 
-const removedChannels = [
-  RPC_CHANNELS.llmConnections.LIST_WITH_STATUS,
-  RPC_CHANNELS.llmConnections.GET_API_KEY,
-  RPC_CHANNELS.llmConnections.SAVE,
-  RPC_CHANNELS.llmConnections.DELETE,
-  RPC_CHANNELS.llmConnections.TEST,
-  RPC_CHANNELS.llmConnections.SET_DEFAULT,
-  RPC_CHANNELS.llmConnections.SET_WORKSPACE_DEFAULT,
-  RPC_CHANNELS.llmConnections.REFRESH_MODELS,
-  RPC_CHANNELS.settings.SETUP_LLM_CONNECTION,
-  RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP,
-  RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS,
-  RPC_CHANNELS.chatgpt.GET_AUTH_STATUS,
-  RPC_CHANNELS.chatgpt.LOGOUT,
-  RPC_CHANNELS.copilot.START_OAUTH,
-  RPC_CHANNELS.copilot.CANCEL_OAUTH,
-  RPC_CHANNELS.copilot.GET_AUTH_STATUS,
-  RPC_CHANNELS.copilot.LOGOUT,
-] as const
-
 function makeConnection(slug: string) {
   return {
     slug,
@@ -184,9 +164,6 @@ describe('registerLlmConnectionsHandlers', () => {
       RPC_CHANNELS.llmConnections.GET,
       RPC_CHANNELS.llmConnections.LIST,
     ].sort())
-    for (const channel of removedChannels) {
-      expect(handlers.has(channel), channel).toBe(false)
-    }
   })
 
   it('LIST and GET read Admin-sourced connections from StoredConfig', async () => {

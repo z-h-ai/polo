@@ -7,6 +7,7 @@ import { registerFilesHandlers } from './files'
 import { registerLabelsHandlers } from './labels'
 import { registerLlmConnectionsHandlers } from './llm-connections'
 import { registerResourcesHandlers } from './resources'
+import { registerQuotaHandlers } from './quota'
 import { registerSessionsHandlers } from './sessions'
 export { registerSessionsHandlers, cleanupSessionFileWatchForClient } from './sessions'
 import { registerServerHandlers } from './server'
@@ -32,6 +33,7 @@ export function registerCoreRpcHandlers(
   registerFilesHandlers(server, deps)
   registerLabelsHandlers(server, deps)
   registerLlmConnectionsHandlers(server, deps)
+  registerQuotaHandlers(server, deps)
   registerResourcesHandlers(server, deps)
   registerSessionsHandlers(server, deps)
   if (serverCtx) registerServerHandlers(server, deps, serverCtx)

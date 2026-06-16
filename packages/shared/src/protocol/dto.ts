@@ -16,7 +16,7 @@ import type {
 } from '@polo-ai/core/types'
 import type { PermissionMode } from '../agent/mode-types'
 import type { ThinkingLevel } from '../agent/thinking-levels'
-import type { CustomEndpointConfig } from '../config/llm-connections'
+import type { QuotaStatus } from '../admin-api'
 import type {
   AuthRequest as SharedAuthRequest,
   CredentialInputMode as SharedCredentialInputMode,
@@ -342,44 +342,10 @@ export interface FileSearchResult {
 // LLM connection types
 // ---------------------------------------------------------------------------
 
-export interface LlmConnectionSetup {
-  slug: string
-  credential?: string
-  baseUrl?: string | null
-  defaultModel?: string | null
-  models?: string[] | null
-  piAuthProvider?: string
-  modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
-  /** When true, reject setup if the connection doesn't already exist (reauth guard). */
-  updateOnly?: boolean
-  /** Custom endpoint protocol for arbitrary OpenAI/Anthropic-compatible APIs */
-  customEndpoint?: CustomEndpointConfig
-  /** IAM credentials for Pi+Bedrock (piAuthProvider='amazon-bedrock') connections */
-  iamCredentials?: {
-    accessKeyId: string
-    secretAccessKey: string
-    sessionToken?: string
-  }
-  /** AWS region for Pi+Bedrock connections */
-  awsRegion?: string
-  /** Bedrock authentication method — determines auth type for Pi+Bedrock connections */
-  bedrockAuthMethod?: 'iam_credentials' | 'environment'
-}
-
-export interface TestLlmConnectionParams {
-  provider: 'anthropic' | 'pi'
-  apiKey: string
-  baseUrl?: string
-  model?: string
-  piAuthProvider?: string
-  /** Optional custom endpoint protocol hint so setup tests mirror runtime routing */
-  customEndpoint?: CustomEndpointConfig
-}
-
-export interface TestLlmConnectionResult {
-  success: boolean
-  error?: string
-}
+export type QuotaStatusRpcResult =
+  | { ok: true; status: QuotaStatus }
+  | { ok: false; error: 'session_expired' | 'unavailable' }
+  | null
 
 // ---------------------------------------------------------------------------
 // Source / skill types
