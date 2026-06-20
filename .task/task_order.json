@@ -1,0 +1,10 @@
+[
+  ["POL-25", "[shared] Admin 登录基础设施", "project/Polo-工作台/POL-25_Admin登录基础设施.md", "POL-25"],
+  ["POL-26", "[server-core] Admin RPC 通道与 Handler", "project/Polo-工作台/POL-26_Admin-RPC通道与Handler.md", "POL-26"],
+  ["POL-27", "[shared] Auth State（Admin 管理模式）", "project/Polo-工作台/POL-27_Auth-State-Admin管理模式.md", "POL-27"],
+  ["POL-29", "[server-core] LLM 连接同步", "project/Polo-工作台/POL-29_LLM连接同步.md", "POL-29"],
+  ["POL-31", "[electron] 登录页与被踢页面", "project/Polo-工作台/POL-31_登录页与被踢页面.md", "POL-31"],
+  ["POL-32", "[electron] 侧边栏用户菜单与模型选择器", "project/Polo-工作台/POL-32_侧边栏用户菜单与模型选择器锁定.md", "POL-32"],
+  ["POL-33", "[electron] 聊天区状态 Banner", "project/Polo-工作台/POL-33_聊天区状态Banner.md", "POL-33"],
+  ["POL-30", "[electron] 启动流程与登出集成", "project/Polo-工作台/POL-30_启动流程与登出集成.md", "POL-30"]
+]
