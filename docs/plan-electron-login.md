@@ -8,7 +8,7 @@ Admin 后台（`polo-admin` 独立仓库，Next.js）已实现基础能力：用
 
 ### 关键决策（已确认）
 
-1. **Admin URL 不需要用户配置**：由 Polo AI Server 端的 `ADMIN_API_URL` 环境变量决定。有 = Admin 管理模式，没有 = 独立模式。用户只需输入用户名和密码。
+1. **统一 Admin 管理模式**：由 Polo AI Server 端的 `ADMIN_API_URL` 环境变量配置 Admin 后台地址。用户只需输入用户名和密码，无独立模式。
 2. **本次迭代范围**：登录 + LLM 连接同步 + 用量/额度展示（软限制，仅前端展示预警，不做硬截断——第三方 Provider 兜底）。
 3. **Admin 模式下完全锁定**：用户不能自行添加/修改 LLM 连接，只用 Admin 下发的。
 4. **JWT 采用 refresh token 方案**：access token 7 天过期 + refresh token 30 天，客户端静默续期。不需要服务端 session 撤销系统。
@@ -126,7 +126,7 @@ POST /api/auth/logout
 
 ```
 Polo AI Server 启动
-  → 读取 ADMIN_API_URL 环境变量 → 存入 config（无则独立模式）
+  → 读取 ADMIN_API_URL 环境变量 → 存入 config
 
 Electron 启动
   → RPC 获取 server config（含 adminUrl）
@@ -138,8 +138,6 @@ Electron 启动
               → 刷新成功 → validate → syncConnections → 进入主界面
               → 刷新失败（refresh token 也过期/被撤销） → 显示登录页
       → 无 token：显示登录页
-  → 如果无 adminUrl（独立模式）：
-      → 走现有 onboarding 流程（不变）
 
 登录页（只显示用户名 + 密码）
   → renderer → RPC admin:login → server handler → Admin API
@@ -262,19 +260,19 @@ Handler 逻辑：
 **文件**: `packages/server-core/src/handlers/rpc/index.ts`
 - import 并调用 `registerAdminHandlers(server, deps)`
 
-### Phase 2: Auth State 双模式
+### Phase 2: Auth State（Admin 管理模式）
 
 **文件**: `packages/shared/src/auth/state.ts`
 
 `getAuthState()` 新增：
-- 读取 `getAdminUrl()` → 有值则 admin 模式
+- 读取 `getAdminUrl()` 获取 Admin 后台地址
 - 检查 `CredentialManager.getAdminTokens()` → 是否已登录
 - 返回 `authState.admin = { configured, loggedIn, username }`
 
 `getSetupNeeds()` 新增：
-- `adminUrl` 存在 + 无 tokens → `needsAdminLogin: true`
-- admin 已登录 + 有连接 → `isFullyConfigured: true`
-- admin 模式下抑制 `needsBillingConfig` 和 `needsCredentials`
+- 无 tokens → `needsAdminLogin: true`
+- 已登录 + 有连接 → `isFullyConfigured: true`
+- 抑制 `needsBillingConfig` 和 `needsCredentials`（LLM 连接由 Admin 统一管理）
 
 ### Phase 3: Electron Renderer UI
 
@@ -428,15 +426,14 @@ Banner 带 slideUp 进入动画。
 
 ---
 
-## 模式判断
+## 状态判断（Admin 管理模式）
 
-| 条件 | 模式 | 行为 |
+| 条件 | 状态 | 行为 |
 |------|------|------|
-| Server 无 `ADMIN_API_URL` | 独立模式 | 现有流程不变 |
-| Server 有 `ADMIN_API_URL` + 无 token | Admin 待登录 | 显示登录页 |
-| Server 有 `ADMIN_API_URL` + 有效 token | Admin 已登录 | 直接进入主界面 |
-| Server 有 `ADMIN_API_URL` + access token 过期 | 静默刷新 | 用 refresh token 自动换新 |
-| Server 有 `ADMIN_API_URL` + refresh token 也失效 | 需重登录 | 显示登录页 |
+| 无 token | 待登录 | 显示登录页 |
+| 有效 access token | 已登录 | 直接进入主界面 |
+| access token 过期 + refresh token 有效 | 静默刷新 | 用 refresh token 自动换新 |
+| refresh token 也失效 / 被 revoke | 需重登录 | 显示登录页 / 被踢页 |
 
 ---
 
@@ -477,7 +474,6 @@ Admin 侧需要新增 `refresh_tokens` DB 表（见 Part A 第 1 节）。
 2. **手动验证**：
    - 启动 Admin + Polo AI（设 ADMIN_API_URL），Electron 中登录
    - 等 access token 过期 → 验证静默刷新无感
-   - Admin 侧 revoke refresh token → 验证下次刷新时弹出登录
-   - 不设 ADMIN_API_URL → 独立模式不受影响
+   - Admin 侧 revoke refresh token → 验证下次刷新时弹出被踢页面
 3. **i18n**：新增翻译 key，运行 `bun run validate:ci`
 4. **类型检查**：`bun run typecheck:all`

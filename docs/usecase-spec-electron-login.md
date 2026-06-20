@@ -221,8 +221,7 @@
 |---------|---------|------|
 | JWT 签名算法 | HS256 | Admin 和 Polo AI 共享密钥，对称签名足够，性能好 |
 | JWT payload 标准 claims | iss=polo-admin, aud=polo-client | 行业标准，防止 token 跨系统误用 |
-| Admin URL 配置方式 | 服务端 `ADMIN_API_URL` 环境变量 | 有=Admin管理模式，无=独立模式。用户无感 |
-| 独立模式兼容 | 无 ADMIN_API_URL 时走现有 onboarding 流程 | 保持向后兼容，不影响非 Admin 部署 |
+| Admin URL 配置方式 | 服务端 `ADMIN_API_URL` 环境变量 | 统一 Admin 管理模式，用户无感 |
 | API Key 传输安全 | HTTPS 明文传输（不做应用层加密） | HTTPS 已加密传输层，应用层再加密增加复杂度但安全收益不明确 |
 | Refresh token 存储 | Admin 数据库 refresh_tokens 表 | 需要服务端校验和 revoke 能力 |
 | 配额单位 | Token 数量 | AI 服务计费的行业标准计量单位 |
