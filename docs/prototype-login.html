@@ -1992,7 +1992,6 @@ function renderInlineMarkdown(text) {
             }}>
             <span style={{ width:14, height:14, borderRadius:3, background:selected.bg, display:'inline-flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:9, fontWeight:700, flexShrink:0 }}>{selected.mark}</span>
             <span>{selected.name}</span>
-            <Ico.Lock size={10} style={{ color:'var(--fg-30)' }}/>
             <Ico.ChevDown size={12}/>
           </button>
           {menuOpen && (
@@ -2004,19 +2003,10 @@ function renderInlineMarkdown(text) {
                 boxShadow:'rgba(var(--foreground-rgb), 0.06) 0 0 0 1px, rgba(0,0,0,0.15) 0 6px 20px',
                 overflow:'hidden',
               }}>
-                <div style={{ padding:'8px 12px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <span style={{ fontSize:12, fontWeight:500, color:'var(--fg-50)' }}>AI 模型</span>
-                  <span style={{ fontSize:10, padding:'1px 6px', borderRadius:4, background:'color-mix(in srgb, var(--accent) 10%, transparent)', color:'var(--accent)', fontWeight:500, display:'flex', alignItems:'center', gap:3 }}>
-                    <Ico.Shield size={9}/> 管理员配置
-                  </span>
-                </div>
                 <div style={{ padding:4 }}>
                   {ADMIN_MODELS.map(m => (
                     <ModelMenuItem key={m.slug} model={m} isActive={m.slug===selected.slug} onSelect={()=>{setSelected(m);setMenuOpen(false);}}/>
                   ))}
-                </div>
-                <div style={{ padding:'6px 12px 8px', borderTop:'1px solid var(--border)', fontSize:11, color:'var(--fg-30)', display:'flex', alignItems:'center', gap:4 }}>
-                  <Ico.Lock size={10}/> 模型由管理员统一配置，不可添加或删除
                 </div>
               </div>
             </>
