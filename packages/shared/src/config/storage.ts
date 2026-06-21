@@ -88,6 +88,9 @@ export interface StoredConfig {
   setupDeferred?: boolean;
   // Server mode — embedded remote server settings
   serverConfig?: import('./server-config.ts').ServerConfig;
+  // Admin server settings
+  adminUrl?: string;
+  adminConfigVersion?: string;
   // One-shot migration markers. Used by migrations that should run at most
   // once per user (e.g. restoring a previously-removed model to connection
   // lists without re-adding it if the user later removes it deliberately).
@@ -591,6 +594,50 @@ export function clearGitBashPath(): void {
 
 export function getConfigPath(): string {
   return CONFIG_FILE;
+}
+
+/**
+ * Get configured admin server URL.
+ */
+export function getAdminUrl(): string | undefined {
+  const config = loadStoredConfig();
+  return config?.adminUrl;
+}
+
+/**
+ * Persist admin server URL.
+ */
+export function setAdminUrl(adminUrl: string | undefined): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  if (adminUrl) {
+    config.adminUrl = adminUrl;
+  } else {
+    delete config.adminUrl;
+  }
+  saveConfig(config);
+}
+
+/**
+ * Get latest admin config version observed by the client.
+ */
+export function getAdminConfigVersion(): string | undefined {
+  const config = loadStoredConfig();
+  return config?.adminConfigVersion;
+}
+
+/**
+ * Persist latest admin config version observed by the client.
+ */
+export function setAdminConfigVersion(adminConfigVersion: string | undefined): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  if (adminConfigVersion) {
+    config.adminConfigVersion = adminConfigVersion;
+  } else {
+    delete config.adminConfigVersion;
+  }
+  saveConfig(config);
 }
 
 /**
