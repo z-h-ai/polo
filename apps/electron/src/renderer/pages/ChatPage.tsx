@@ -44,6 +44,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     activeWorkspaceId,
     llmConnections,
     workspaceDefaultLlmConnection,
+    chatAccessStatus,
     onSendMessage,
     onOpenFile,
     onOpenUrl,
@@ -302,6 +303,30 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isSessionConnectionUnavailable(session?.llmConnection, llmConnections),
     [session?.llmConnection, llmConnections]
   )
+
+  const inputStatusBanner = React.useMemo(() => {
+    switch (chatAccessStatus?.issue) {
+      case 'no-ai-service':
+        return {
+          variant: 'info' as const,
+          message: t('chat.statusBanner.noAiService'),
+        }
+      case 'quota-exhausted':
+        return {
+          variant: 'destructive' as const,
+          message: t('chat.statusBanner.quotaExhausted'),
+        }
+      case 'account-disabled':
+        return {
+          variant: 'destructive' as const,
+          message: t('chat.statusBanner.accountDisabled'),
+        }
+      default:
+        return null
+    }
+  }, [chatAccessStatus?.issue, t])
+
+  const isChatInputDisabled = !!inputStatusBanner
 
   // Effective model for this session (session-specific or global fallback)
   const effectiveModel = React.useMemo(() => {
@@ -737,6 +762,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 isSearchModeActive={isSearchModeActive}
                 onMatchInfoChange={onChatMatchInfoChange}
                 connectionUnavailable={connectionUnavailable}
+                disabled={isChatInputDisabled}
+                inputStatusBanner={inputStatusBanner}
                 compactMode={!!isCompactMode}
                 enableCompactModelPicker={!!isCompactMode}
               />
@@ -817,6 +844,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             isSearchModeActive={isSearchModeActive}
             onMatchInfoChange={onChatMatchInfoChange}
             connectionUnavailable={connectionUnavailable}
+            disabled={isChatInputDisabled}
+            inputStatusBanner={inputStatusBanner}
             compactMode={!!isCompactMode}
             enableCompactModelPicker={!!isCompactMode}
           />
