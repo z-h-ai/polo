@@ -11,7 +11,7 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import type { AppShellContextType } from '@/context/AppShellContext'
+import type { AppShellContextType, ChatAccessIssue, ChatAccessStatus } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -107,6 +107,41 @@ function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Re
 
 function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
   return result.errorCode === 'TOKEN_REVOKED' || result.status === 401
+}
+
+function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
+  return result.errorCode === 'ACCOUNT_DISABLED'
+    || (result.status === 403 && /disabled|禁用/i.test(result.message ?? ''))
+}
+
+function readErrorField(error: unknown, field: 'errorCode' | 'code' | 'status' | 'message'): unknown {
+  if (!error || typeof error !== 'object') return undefined
+  return (error as Record<string, unknown>)[field]
+}
+
+function getErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message
+  const message = readErrorField(error, 'message')
+  if (typeof message === 'string') return message
+  if (typeof error === 'string') return error
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+function isQuotaExhaustedError(error: unknown): boolean {
+  const code = String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? '').toUpperCase()
+  const status = Number(readErrorField(error, 'status'))
+  const message = getErrorText(error)
+
+  return code === 'QUOTA_EXHAUSTED'
+    || code === 'QUOTA_LIMIT_EXCEEDED'
+    || code === 'USAGE_LIMIT_EXCEEDED'
+    || code === 'INSUFFICIENT_QUOTA'
+    || status === 429
+    || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
 }
 
 /**
@@ -294,16 +329,28 @@ export default function App() {
 
   // LLM connections with authentication status (for provider selection)
   const [llmConnections, setLlmConnections] = useState<LlmConnectionWithStatus[]>([])
+  const [llmConnectionsLoaded, setLlmConnectionsLoaded] = useState(false)
   // Workspace default LLM connection (for new sessions)
   const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
+  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
   const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'username' | 'displayName'> | null>(null)
 
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
     return llmConnections.find(c => c.slug === defaultLlmConnectionSlug) ?? null
   }, [llmConnections, defaultLlmConnectionSlug])
+
+  const chatAccessStatus = useMemo<ChatAccessStatus | null>(() => {
+    if (runtimeChatAccessIssue) {
+      return { issue: runtimeChatAccessIssue }
+    }
+    if (llmConnectionsLoaded && llmConnections.length === 0) {
+      return { issue: 'no-ai-service' }
+    }
+    return null
+  }, [llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue])
 
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Permission requests per session (queue to handle multiple concurrent requests)
@@ -603,6 +650,7 @@ export default function App() {
   const refreshLlmConnections = useCallback(async () => {
     const connections = await window.electronAPI.listLlmConnectionsWithStatus()
     setLlmConnections(connections)
+    setLlmConnectionsLoaded(true)
     setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     // Also refresh workspace default
     if (windowWorkspaceId) {
@@ -763,6 +811,7 @@ export default function App() {
     // Load LLM connections with authentication status
     window.electronAPI.listLlmConnectionsWithStatus().then((connections) => {
       setLlmConnections(connections)
+      setLlmConnectionsLoaded(true)
       setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     })
     // Load persisted input drafts into ref (no re-render needed).
@@ -1232,8 +1281,48 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
+  const checkAdminAccountDisabledBeforeSend = useCallback(async (): Promise<boolean> => {
+    if (!currentAdminUser || runtimeChatAccessIssue === 'account-disabled') {
+      return runtimeChatAccessIssue === 'account-disabled'
+    }
+
+    try {
+      const validation = await window.electronAPI.adminValidate()
+      if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
+        setRuntimeChatAccessIssue('account-disabled')
+        setCurrentAdminUser(null)
+        return true
+      }
+    } catch (error) {
+      if (isAdminAccountDisabledResult({
+        loggedIn: false,
+        errorCode: String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? ''),
+        status: Number(readErrorField(error, 'status')),
+        message: getErrorText(error),
+      })) {
+        setRuntimeChatAccessIssue('account-disabled')
+        setCurrentAdminUser(null)
+        return true
+      }
+    }
+
+    return false
+  }, [currentAdminUser, runtimeChatAccessIssue])
+
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
     try {
+      if (chatAccessStatus) {
+        return
+      }
+
+      if (llmConnectionsLoaded && llmConnections.length === 0) {
+        return
+      }
+
+      if (await checkAdminAccountDisabledBeforeSend()) {
+        return
+      }
+
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
       // returns status 'accepted', not 'queued').
@@ -1383,6 +1472,9 @@ export default function App() {
       })
     } catch (error) {
       console.error('Failed to send message:', error)
+      if (isQuotaExhaustedError(error)) {
+        setRuntimeChatAccessIssue('quota-exhausted')
+      }
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
         messages: [
@@ -1396,7 +1488,7 @@ export default function App() {
         ]
       }))
     }
-  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
+  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, sessionOptions, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
 
   /**
    * Unified handler for all session option changes.
@@ -1719,6 +1811,8 @@ export default function App() {
       initializeSessions([])
       setWorkspaces([])
       setWindowWorkspaceId(null)
+      setRuntimeChatAccessIssue(null)
+      setLlmConnectionsLoaded(false)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
         needsBillingConfig: true,
@@ -1744,8 +1838,10 @@ export default function App() {
       setWorkspaces([])
       setWindowWorkspaceId(null)
       setLlmConnections([])
+      setLlmConnectionsLoaded(false)
       setDefaultLlmConnectionSlug(undefined)
       setWorkspaceDefaultLlmConnection(undefined)
+      setRuntimeChatAccessIssue(null)
       setCurrentAdminUser(null)
       setSetupNeeds({
         needsBillingConfig: false,
@@ -1841,6 +1937,7 @@ export default function App() {
     activeWorkspaceSlug: windowWorkspaceSlug,
     llmConnections,
     workspaceDefaultLlmConnection,
+    chatAccessStatus,
     currentAdminUser,
     onAdminLogout: handleAdminLogout,
     refreshLlmConnections,
@@ -1889,6 +1986,7 @@ export default function App() {
     windowWorkspaceSlug,
     llmConnections,
     workspaceDefaultLlmConnection,
+    chatAccessStatus,
     currentAdminUser,
     handleAdminLogout,
     refreshLlmConnections,

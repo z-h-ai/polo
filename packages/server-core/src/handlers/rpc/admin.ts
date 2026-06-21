@@ -327,6 +327,7 @@ function expiresAtFromNow(expiresInSeconds: number): number {
 function isAuthFailure(error: unknown): boolean {
   return error instanceof AdminError && (
     error.errorCode === 'UNAUTHORIZED' ||
+    error.errorCode === 'ACCOUNT_DISABLED' ||
     error.errorCode === 'INVALID_TOKEN' ||
     error.errorCode === 'TOKEN_REVOKED' ||
     error.errorCode === 'TOKEN_EXPIRED'
