@@ -63,7 +63,7 @@ import {
   type AuthRequestTurn,
 } from "@polo-ai/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
-import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
+import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
@@ -238,6 +238,8 @@ interface ChatDisplayProps {
   emptyStateLabel?: string
   /** When true, the session's locked connection has been removed - disables send and shows unavailable state */
   connectionUnavailable?: boolean
+  /** Blocking account/config/quota state shown above the input */
+  inputStatusBanner?: ChatInputStatusBanner | null
 }
 
 import {
@@ -494,6 +496,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   emptyStateLabel,
   // Connection unavailable
   connectionUnavailable = false,
+  inputStatusBanner,
 }, ref) {
   const { t } = useTranslation()
 
@@ -1914,6 +1917,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             sessionStatuses={sessionStatuses}
             currentSessionStatus={session.sessionStatus || 'todo'}
             onSessionStatusChange={onSessionStatusChange}
+            statusBanner={inputStatusBanner}
             inputProps={{
               placeholder,
               disabled: isInputDisabled,
