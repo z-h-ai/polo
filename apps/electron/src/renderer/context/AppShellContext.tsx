@@ -31,6 +31,12 @@ import type { SessionOptions, SessionOptionUpdates } from '../hooks/useSessionOp
 import { defaultSessionOptions } from '../hooks/useSessionOptions'
 import { sessionAtomFamily } from '../atoms/sessions'
 
+export type ChatAccessIssue = 'no-ai-service' | 'quota-exhausted' | 'account-disabled'
+
+export interface ChatAccessStatus {
+  issue: ChatAccessIssue
+}
+
 export interface AppShellContextType {
   // Data
   // NOTE: sessions is NOT included here - use sessionMetaMapAtom for listing
@@ -44,6 +50,8 @@ export interface AppShellContextType {
   llmConnections: LlmConnectionWithStatus[]
   /** Default LLM connection slug for the current workspace */
   workspaceDefaultLlmConnection?: string
+  /** Blocking account/config/quota state for the chat input area */
+  chatAccessStatus?: ChatAccessStatus | null
   /** Signed-in Admin user, when Admin auth is configured */
   currentAdminUser?: Pick<AdminStatusResult, 'username' | 'displayName'> | null
   /** Log out the current Admin user and return to login */
