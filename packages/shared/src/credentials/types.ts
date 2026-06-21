@@ -113,6 +113,8 @@ export interface StoredCredential {
   userId?: string;
   /** Admin username associated with the token */
   username?: string;
+  /** Admin display name associated with the token */
+  displayName?: string;
 
   // --- AWS IAM credentials (for llm_iam type) ---
 
