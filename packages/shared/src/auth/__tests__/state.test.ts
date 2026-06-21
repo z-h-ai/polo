@@ -57,6 +57,7 @@ describe('getSetupNeeds', () => {
           claudeOAuthToken: null,
         },
         workspace: { hasWorkspace: false, active: null },
+        admin: { configured: false, loggedIn: false },
       };
 
       const needs = getSetupNeeds(state);
@@ -75,6 +76,7 @@ describe('getSetupNeeds', () => {
           claudeOAuthToken: null,
         },
         workspace: { hasWorkspace: false, active: null },
+        admin: { configured: false, loggedIn: false },
       };
 
       const needs = getSetupNeeds(state);
@@ -93,6 +95,7 @@ describe('getSetupNeeds', () => {
           claudeOAuthToken: null,
         },
         workspace: { hasWorkspace: false, active: null },
+        admin: { configured: false, loggedIn: false },
       };
 
       const needs = getSetupNeeds(state);
@@ -111,12 +114,75 @@ describe('getSetupNeeds', () => {
           claudeOAuthToken: 'valid-token',
         },
         workspace: { hasWorkspace: false, active: null },
+        admin: { configured: false, loggedIn: false },
       };
 
       const needs = getSetupNeeds(state);
 
       expect(needs.needsCredentials).toBe(false);
       expect(needs.isFullyConfigured).toBe(true);
+    });
+  });
+
+  describe('admin management', () => {
+    it('should need admin login when admin mode is configured without tokens', () => {
+      const state: AuthState = {
+        billing: {
+          type: null,
+          hasCredentials: false,
+          apiKey: null,
+          claudeOAuthToken: null,
+        },
+        workspace: { hasWorkspace: false, active: null },
+        admin: { configured: true, loggedIn: false },
+      };
+
+      const needs = getSetupNeeds(state);
+
+      expect(needs.needsAdminLogin).toBe(true);
+      expect(needs.needsBillingConfig).toBe(false);
+      expect(needs.needsCredentials).toBe(false);
+      expect(needs.isFullyConfigured).toBe(false);
+    });
+
+    it('should be fully configured when admin is logged in and a connection exists', () => {
+      const state: AuthState = {
+        billing: {
+          type: 'api_key',
+          hasCredentials: false,
+          apiKey: null,
+          claudeOAuthToken: null,
+        },
+        workspace: { hasWorkspace: true, active: null },
+        admin: { configured: true, loggedIn: true, username: 'admin@example.com' },
+      };
+
+      const needs = getSetupNeeds(state);
+
+      expect(needs.needsAdminLogin).toBe(false);
+      expect(needs.needsBillingConfig).toBe(false);
+      expect(needs.needsCredentials).toBe(false);
+      expect(needs.isFullyConfigured).toBe(true);
+    });
+
+    it('should require a synced admin-managed connection before fully configured', () => {
+      const state: AuthState = {
+        billing: {
+          type: null,
+          hasCredentials: false,
+          apiKey: null,
+          claudeOAuthToken: null,
+        },
+        workspace: { hasWorkspace: true, active: null },
+        admin: { configured: true, loggedIn: true, username: 'admin@example.com' },
+      };
+
+      const needs = getSetupNeeds(state);
+
+      expect(needs.needsAdminLogin).toBe(false);
+      expect(needs.needsBillingConfig).toBe(false);
+      expect(needs.needsCredentials).toBe(false);
+      expect(needs.isFullyConfigured).toBe(false);
     });
   });
 
@@ -136,6 +202,7 @@ describe('getSetupNeeds', () => {
           migrationRequired: migrationInfo,
         },
         workspace: { hasWorkspace: false, active: null },
+        admin: { configured: false, loggedIn: false },
       };
 
       const needs = getSetupNeeds(state);
@@ -153,6 +220,7 @@ describe('getSetupNeeds', () => {
           claudeOAuthToken: 'valid-token',
         },
         workspace: { hasWorkspace: false, active: null },
+        admin: { configured: false, loggedIn: false },
       };
 
       const needs = getSetupNeeds(state);
@@ -171,6 +239,7 @@ describe('getSetupNeeds', () => {
           claudeOAuthToken: null,
         },
         workspace: { hasWorkspace: true, active: null },
+        admin: { configured: false, loggedIn: false },
       };
 
       const needs = getSetupNeeds(state);
@@ -314,6 +383,7 @@ describe('migration info flow', () => {
         migrationRequired: tokenResult.migrationRequired,
       },
       workspace: { hasWorkspace: true, active: null },
+      admin: { configured: false, loggedIn: false },
     };
 
     // 3. Derive setup needs
@@ -343,6 +413,7 @@ describe('migration info flow', () => {
         migrationRequired: tokenResult.migrationRequired, // undefined
       },
       workspace: { hasWorkspace: true, active: null },
+      admin: { configured: false, loggedIn: false },
     };
 
     // 3. Derive setup needs
