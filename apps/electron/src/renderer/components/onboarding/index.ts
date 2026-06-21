@@ -18,6 +18,8 @@ export { CompletionStep } from './CompletionStep'
 export { LocalModelStep, type LocalModelSubmitData } from './LocalModelStep'
 export { ReauthScreen } from './ReauthScreen'
 export { GitBashWarning, type GitBashStatus } from './GitBashWarning'
+export { AdminLoginStep } from './AdminLoginStep'
+export { AdminKickedStep } from './AdminKickedStep'
 
 // Main wizard container
 export { OnboardingWizard, type OnboardingState, type OnboardingStep, type LoginStatus } from './OnboardingWizard'

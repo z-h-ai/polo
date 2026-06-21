@@ -24,6 +24,9 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 type StoredAdminTokens = NonNullable<Awaited<ReturnType<CredentialManager['getAdminTokens']>>>
+type TokenValidationResult =
+  | { tokens: StoredAdminTokens }
+  | { tokens: null; authError?: { errorCode: string; message: string; status?: number } }
 
 export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
@@ -65,14 +68,17 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
 
     const manager = getCredentialManager()
-    const tokens = await ensureValidTokens(adminUrl, manager)
-    if (!tokens) {
+    const tokenResult = await ensureValidTokens(adminUrl, manager)
+    if (!tokenResult.tokens) {
+      if (tokenResult.authError) {
+        return { loggedIn: false, ...tokenResult.authError }
+      }
       return { loggedIn: false }
     }
 
     try {
       const client = createAdminClient(adminUrl, manager)
-      const validation = await client.validate(tokens.accessToken)
+      const validation = await client.validate(tokenResult.tokens.accessToken)
       if (!validation.valid) {
         await manager.deleteAdminTokens()
         return { loggedIn: false }
@@ -82,7 +88,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         await syncAdminConnections({
           adminUrl,
           manager,
-          accessToken: tokens.accessToken,
+          accessToken: tokenResult.tokens.accessToken,
         })
       }
 
@@ -94,7 +100,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     } catch (error) {
       if (isAuthFailure(error)) {
         await manager.deleteAdminTokens()
-        return { loggedIn: false }
+        return { loggedIn: false, ...toAdminRpcError(error) }
       }
       throw error
     }
@@ -167,30 +173,35 @@ function createAdminClient(adminUrl: string, manager: CredentialManager): AdminC
   })
 }
 
-async function ensureValidTokens(adminUrl: string, manager: CredentialManager): Promise<StoredAdminTokens | null> {
+async function ensureValidTokens(adminUrl: string, manager: CredentialManager): Promise<TokenValidationResult> {
   const tokens = await manager.getAdminTokens()
-  if (!tokens) return null
+  if (!tokens) return { tokens: null }
 
   if (!manager.isExpired({
     value: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt: tokens.expiresAt,
   })) {
-    return tokens
+    return { tokens }
   }
 
   try {
     const refreshed = await createAdminClient(adminUrl, manager).refresh(tokens.refreshToken)
     await persistRefreshedTokens(manager, refreshed)
     return {
-      ...tokens,
-      accessToken: refreshed.accessToken,
-      refreshToken: refreshed.refreshToken,
-      expiresAt: expiresAtFromNow(refreshed.expiresIn),
+      tokens: {
+        ...tokens,
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: expiresAtFromNow(refreshed.expiresIn),
+      },
     }
-  } catch {
+  } catch (error) {
     await manager.deleteAdminTokens()
-    return null
+    return {
+      tokens: null,
+      authError: isAuthFailure(error) ? toAdminRpcError(error) : undefined,
+    }
   }
 }
 
@@ -216,7 +227,7 @@ async function syncAdminConnections(args: {
   const tokens = args.accessToken
     ? null
     : await ensureValidTokens(args.adminUrl, args.manager)
-  const accessToken = args.accessToken ?? tokens?.accessToken
+  const accessToken = args.accessToken ?? tokens?.tokens?.accessToken
   if (!accessToken) {
     throw new AdminError('Admin session is not logged in', 'UNAUTHORIZED')
   }
@@ -317,13 +328,18 @@ function isAuthFailure(error: unknown): boolean {
   return error instanceof AdminError && (
     error.errorCode === 'UNAUTHORIZED' ||
     error.errorCode === 'INVALID_TOKEN' ||
+    error.errorCode === 'TOKEN_REVOKED' ||
     error.errorCode === 'TOKEN_EXPIRED'
   )
 }
 
-function toAdminRpcError(error: unknown): { errorCode: string; message: string } {
+function toAdminRpcError(error: unknown): { errorCode: string; message: string; status?: number } {
   if (error instanceof AdminError) {
-    return { errorCode: error.errorCode, message: error.message }
+    return {
+      errorCode: error.errorCode,
+      message: error.message,
+      ...(typeof error.status === 'number' ? { status: error.status } : {}),
+    }
   }
   if (error instanceof Error) {
     return { errorCode: 'UNKNOWN_ERROR', message: error.message }
