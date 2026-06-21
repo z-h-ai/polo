@@ -1,36 +1,23 @@
-# POL-31 实现报告
+# POL-32 实现报告
 
 ## 变更摘要
-
-- 新增 Admin 登录页 `AdminLoginStep`：居中 glass card、Polo AI logo、用户名/密码表单、密码明文切换、loading 状态与错误提示动画。
-- 新增 Admin 被踢页 `AdminKickedStep`：多设备登录失效提示与“重新登录”入口。
-- 扩展 onboarding 状态机：新增 `admin-login` / `admin-kicked` step；`needsAdminLogin` 时进入登录页；登录成功进入完成步骤；TOKEN_REVOKED/401 校验失败进入被踢页。
-- 补齐 renderer/preload admin RPC API：`adminLogin`、`adminValidate`、`adminLogout`、`adminGetStatus`、`adminSyncConnections`。
-- 服务端 `admin:validate` 在 refresh token 被撤销或 401 时返回可识别错误码，保留普通无 token 返回登录页的行为。
-- 更新 RPC channel inventory/registration 测试期望，并新增 revoked refresh token 的 admin handler 单测。
+- 左侧边栏底部新增登录用户菜单：头像首字母渐变、显示名、向上弹出菜单、用户信息、月度用量进度条、个人信息、Settings、What's New、登出。
+- Settings 与 What's New 从侧边栏导航项移入用户菜单；键盘导航列表同步移除这两个 nav item。
+- 登出走 `admin:logout`，成功后清理前端会话/工作区/模型状态并回到 Admin 登录流程。
+- 模型选择器增加管理员锁定表现：触发按钮显示锁图标，多连接模型列表改为扁平管理员模型列表，行内展示 provider 图标、模型名、provider/connection 名，选中项打勾；选择模型时同步更新默认 connection 和该 connection 的 defaultModel。
 
 ## 关键文件列表
-
-- `apps/electron/src/renderer/components/onboarding/AdminLoginStep.tsx`
-- `apps/electron/src/renderer/components/onboarding/AdminKickedStep.tsx`
-- `apps/electron/src/renderer/components/onboarding/OnboardingWizard.tsx`
-- `apps/electron/src/renderer/hooks/useOnboarding.ts`
 - `apps/electron/src/renderer/App.tsx`
-- `apps/electron/src/preload/bootstrap.ts`
-- `apps/electron/src/transport/channel-map.ts`
-- `apps/electron/src/shared/types.ts`
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/shared/src/admin/client.ts`
-- `packages/shared/src/admin/types.ts`
+- `apps/electron/src/renderer/context/AppShellContext.tsx`
+- `apps/electron/src/renderer/components/app-shell/AppShell.tsx`
+- `apps/electron/src/renderer/components/app-shell/LeftSidebar.tsx`
+- `apps/electron/src/renderer/components/app-shell/input/FreeFormInput.tsx`
+- `apps/electron/src/renderer/components/app-shell/input/CompactModelSelector.tsx`
 
 ## 自测结果
-
-- `bun install --frozen-lockfile`：通过，用于补齐当前 worktree 缺失的 `node_modules`。
+- `bun install --frozen-lockfile`：通过，用于补齐本地缺失的 `tsc`/类型依赖，未修改 lockfile。
 - `bun run typecheck:all`：通过。
-- `bun test packages/server-core/src/handlers/rpc/admin.test.ts apps/electron/src/shared/__tests__/ipc-channels.test.ts apps/electron/src/renderer/hooks/__tests__/useOnboarding.test.ts`：通过，27 pass。
-- 额外尝试运行 registration 相关测试时失败，失败点为既有运行时导出缺失：`@polo-ai/shared/config` 未导出 `getWorkspaceByNameOrId` / `setSetupDeferred`。完整 typecheck 已覆盖这些测试文件的类型层面。
+- 先前在依赖缺失时执行过 `bun run typecheck:all` / `bun run typecheck:electron`，失败原因是本地没有可用 `tsc`，安装依赖后已通过完整类型检查。
 
 ## 遗留问题
-
-- 未在本环境启动 Electron 做真实 UI 点击验收；本次完成了类型检查与受影响逻辑测试。
-- registration 运行时测试存在上述既有模块导出问题，未在本任务中扩大范围修复。
+- 当前仓库未发现真实月度 quota/usage RPC 字段，用户菜单的用量组件已按 `used/total/resetDate` 数据结构实现状态色和文案，并提供默认展示数据；后续接入真实 Admin quota 数据时只需传入 `quota`。
