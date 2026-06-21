@@ -389,6 +389,31 @@ describe('registerAdminHandlers', () => {
     expect(configState.adminConfigVersion).toBe('config-v1')
   })
 
+  it('returns a revoked-token signal when refresh fails during validate', async () => {
+    managerState.tokens = {
+      accessToken: 'expired-access-token',
+      refreshToken: 'revoked-refresh-token',
+      expiresAt: Date.now() - 1000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.refresh = async () => {
+      throw new TestAdminError('Refresh token revoked', 'TOKEN_REVOKED', { status: 401 })
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toEqual({
+      loggedIn: false,
+      errorCode: 'TOKEN_REVOKED',
+      message: 'Refresh token revoked',
+      status: 401,
+    })
+    expect(managerState.tokens).toBeNull()
+  })
+
   it('syncs admin connections by upserting incoming config and removing admin-deleted connections', async () => {
     managerState.tokens = {
       accessToken: 'access-token',

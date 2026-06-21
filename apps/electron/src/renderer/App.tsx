@@ -105,6 +105,10 @@ function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Re
   return distribution
 }
 
+function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
+  return result.errorCode === 'TOKEN_REVOKED' || result.status === 401
+}
+
 /**
  * Helper to handle background task events from the agent.
  * Updates the backgroundTasksAtomFamily based on event type.
@@ -633,9 +637,17 @@ export default function App() {
     onConfigSaved: refreshLlmConnections,
     initialSetupNeeds: setupNeeds || undefined,
   })
+  const showAdminKicked = onboarding.showAdminKicked
 
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
+    const validation = await window.electronAPI.adminValidate()
+    if (!validation.loggedIn && isAdminKickedResult(validation)) {
+      showAdminKicked()
+      setAppState('onboarding')
+      return
+    }
+
     // Re-check setup needs
     const needs = await window.electronAPI.getSetupNeeds()
     if (needs.isFullyConfigured) {
@@ -644,7 +656,7 @@ export default function App() {
       setSetupNeeds(needs)
       setAppState('onboarding')
     }
-  }, [])
+  }, [showAdminKicked])
 
   // Reauth reset handler - open reset confirmation dialog
   const handleReauthReset = useCallback(() => {
@@ -658,6 +670,19 @@ export default function App() {
         // Get this window's workspace ID (passed via URL query param from main process)
         const wsId = await window.electronAPI.getWindowWorkspace()
         setWindowWorkspaceId(wsId)
+
+        const validation = await window.electronAPI.adminValidate()
+        if (!validation.loggedIn && isAdminKickedResult(validation)) {
+          setSetupNeeds({
+            needsBillingConfig: false,
+            needsCredentials: false,
+            needsAdminLogin: true,
+            isFullyConfigured: false,
+          })
+          showAdminKicked()
+          setAppState('onboarding')
+          return
+        }
 
         const needs = await window.electronAPI.getSetupNeeds()
         setSetupNeeds(needs)
@@ -682,7 +707,7 @@ export default function App() {
     }
 
     initialize()
-  }, [])
+  }, [showAdminKicked, setWindowWorkspaceId])
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
@@ -1931,6 +1956,8 @@ export default function App() {
             onSkipSetup={onboarding.handleSkipSetup}
             onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
             onSubmitCredential={onboarding.handleSubmitCredential}
+            onAdminLogin={onboarding.handleAdminLogin}
+            onAdminRelogin={onboarding.handleAdminRelogin}
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}
             onStartOAuth={onboarding.handleStartOAuth}
             onFinish={onboarding.handleFinish}
