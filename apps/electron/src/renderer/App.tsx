@@ -1685,6 +1685,7 @@ export default function App() {
       setSetupNeeds({
         needsBillingConfig: true,
         needsCredentials: true,
+        needsAdminLogin: false,
         isFullyConfigured: false,
       })
       // Reset onboarding hook state

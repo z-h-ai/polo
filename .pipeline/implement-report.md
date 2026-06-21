@@ -1,31 +1,26 @@
+# POL-27 实现报告
+
 ## 变更摘要
 
-- 新增 Admin RPC Handler，支持 `admin:login`、`admin:validate`、`admin:logout`、`admin:getStatus`、`admin:syncConnections`。
-- 注册 Admin RPC Handler 到 server-core RPC 入口。
-- AdminClient 支持 401 后通过 refresh token 自动刷新并重试一次。
-- 扩展 LLM connection/admin token 存储字段，支持 admin 管理标记、admin config version 和 displayName。
-- 新增 Admin handler 单元测试，并补充 AdminClient 自动刷新测试。
+- 扩展 `getAuthState()`：读取 `getAdminUrl()`，检查 `CredentialManager.getAdminTokens()`，返回 `authState.admin`，包含 Admin URL 配置状态、登录状态和用户名。
+- 扩展 `getSetupNeeds()`：Admin 管理模式下新增 `needsAdminLogin`，无 Admin tokens 时要求 Admin 登录；已登录且存在默认 LLM connection 时视为配置完成。
+- Admin 管理模式下抑制本地 LLM 配置入口：`needsBillingConfig` 和 `needsCredentials` 固定为 `false`。
+- 同步浏览器安全类型定义和 renderer 中手工构造的 `SetupNeeds` 对象。
+- 增加 Admin 管理模式 setup needs 单测覆盖。
 
 ## 关键文件列表
 
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/server-core/src/handlers/rpc/admin.test.ts`
-- `packages/server-core/src/handlers/rpc/index.ts`
-- `packages/shared/src/admin/client.ts`
-- `packages/shared/src/admin/__tests__/client.test.ts`
-- `packages/shared/src/config/llm-connections.ts`
-- `packages/shared/src/config/storage.ts`
-- `packages/shared/src/config/validators.ts`
-- `packages/shared/src/credentials/manager.ts`
-- `packages/shared/src/credentials/types.ts`
-- `packages/shared/src/protocol/channels.ts`
-- `packages/shared/src/protocol/routing.ts`
+- `packages/shared/src/auth/state.ts`
+- `packages/shared/src/auth/types.ts`
+- `packages/shared/src/auth/__tests__/state.test.ts`
+- `apps/electron/src/renderer/App.tsx`
 
 ## 自测结果
 
-- `bun test packages/server-core/src/handlers/rpc/admin.test.ts`：通过，4 个测试。
-- `bun test packages/shared/src/admin/__tests__/client.test.ts`：通过，5 个测试。
-- `bun run typecheck:all`：通过。
+- `cd packages/shared && bun test src/auth/__tests__/state.test.ts`
+  - 结果：通过，21 pass / 0 fail。
+- `bun run typecheck:all`
+  - 结果：通过。
 
 ## 遗留问题
 
