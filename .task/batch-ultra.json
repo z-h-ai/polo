@@ -1,8 +1,8 @@
 {
   "project": "Polo-工作台",
-  "workdir": "/Users/wow/project/z-h-ai/polo-dir/POL-22/feature/electron-login-adm",
+  "workdir": "/Users/wow/project/z-h-ai/polo-dir/main",
   "branch": "POL-22/feature/electron-login-adm",
-  "worktree_strategy": "shared",
+  "worktree_strategy": "chain",
   "cleanup_worktree": false,
   "assignee": "铭龙",
   "coder": "codex",
