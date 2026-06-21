@@ -11,6 +11,7 @@ import { createContext, useContext, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import type { ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import type {
+  AdminStatusResult,
   Session,
   Workspace,
   FileAttachment,
@@ -43,6 +44,10 @@ export interface AppShellContextType {
   llmConnections: LlmConnectionWithStatus[]
   /** Default LLM connection slug for the current workspace */
   workspaceDefaultLlmConnection?: string
+  /** Signed-in Admin user, when Admin auth is configured */
+  currentAdminUser?: Pick<AdminStatusResult, 'username' | 'displayName'> | null
+  /** Log out the current Admin user and return to login */
+  onAdminLogout?: () => Promise<void>
   /** Refresh LLM connections from config */
   refreshLlmConnections: () => Promise<void>
   pendingPermissions: Map<string, PermissionRequest[]>

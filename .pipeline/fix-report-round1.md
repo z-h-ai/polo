@@ -1,41 +1,25 @@
-# POL-31 Review Round 1 修复报告
+# POL-32 Review Round 1 修复报告
 
-## Issue 1 [major/style] AdminLoginStep.tsx
+## Issue 1 [major/bug] — 假用量数据误导用户
+- 处理结果：已修复。
+- 说明：删除 `getFallbackQuota()`，`config.quota` 为空时不渲染用量区域，避免展示硬编码 520K/1M 假数据。
 
-处理结果：已修复。
+## Issue 2 [major/bug] — 模型选择乐观更新无回滚
+- 处理结果：已修复。
+- 说明：模型选择先执行默认 connection/model 持久化，成功后才调用 `onConnectionChange()` / `onModelChange()` 更新 UI；失败时保持当前选择并展示 toast。
 
-- `AdminLoginStep` 已接入 `useTranslation()`。
-- 用户可见文本和 aria-label 均替换为 `t()` 调用。
-- 已在全部 locale 文件中新增并排序 `onboarding.adminLogin.*` key。
+## Issue 3 [minor/bug] — What's New 小圆点始终可见
+- 处理结果：已修复。
+- 说明：小圆点仅在 `hasUnseenWhatsNew` 为 true 时渲染。
 
-## Issue 2 [major/style] AdminKickedStep.tsx
+## Issue 4 [minor/architecture] — 硬编码字符串未使用 i18n
+- 处理结果：已修复。
+- 说明：用户菜单、quota 文案、管理员模型锁定 footer、默认模型更新失败 toast 均改为 i18n key；同步补齐所有 locale 文件。
 
-处理结果：已修复。
-
-- `AdminKickedStep` 已接入 `useTranslation()`。
-- 标题、说明、按钮和 aria-label 均替换为 `t()` 调用。
-- 已在全部 locale 文件中新增并排序 `onboarding.adminKicked.*` key。
-
-## Issue 3 [major/style] useOnboarding.ts
-
-处理结果：已修复。
-
-- `mapAdminLoginError` 已改为使用共享 i18n 实例。
-- `INVALID_CREDENTIALS`、`ACCOUNT_DISABLED`、网络错误和兜底错误均使用 i18n key。
-
-## Issue 4 [minor/style] useOnboarding.test.ts
-
-处理结果：已修复。
-
-- 新增 admin onboarding flow 测试，覆盖：
-  - `needsAdminLogin=true` 初始 step 为 `admin-login`
-  - admin 登录成功切到 `complete`
-  - admin 登录失败映射本地化错误文案
-  - `admin-kicked` 重新登录切回 `admin-login`
-  - `showAdminKicked` 对应状态转换到 `admin-kicked`
-- 当前测试环境没有 DOM hook runner，测试覆盖的是 hook 复用的纯状态转换函数，避免引入额外测试依赖。
+## Issue 5 [suggestion/style] — 模型持久化逻辑重复
+- 处理结果：已修复。
+- 说明：新增 `persist-model-selection.ts`，集中处理 `setDefaultLlmConnection`、`saveLlmConnection` 和 `refreshLlmConnections`。
 
 ## 自测结果
-
+- `git diff --check`：通过。
 - `bun run typecheck:all`：通过。
-- `bun test packages/shared/src/i18n/__tests__/locale-parity.test.ts apps/electron/src/renderer/hooks/__tests__/useOnboarding.test.ts packages/server-core/src/handlers/rpc/admin.test.ts apps/electron/src/shared/__tests__/ipc-channels.test.ts`：通过，64 pass。

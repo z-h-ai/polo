@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -298,6 +298,7 @@ export default function App() {
   const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
+  const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'username' | 'displayName'> | null>(null)
 
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
@@ -610,6 +611,17 @@ export default function App() {
     }
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
 
+  const refreshAdminUser = useCallback(async () => {
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      setCurrentAdminUser(status.loggedIn
+        ? { username: status.username, displayName: status.displayName }
+        : null)
+    } catch {
+      setCurrentAdminUser(null)
+    }
+  }, [])
+
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
     try {
@@ -732,6 +744,7 @@ export default function App() {
 
     window.electronAPI.getWorkspaces().then(setWorkspaces)
     window.electronAPI.getNotificationsEnabled().then(setNotificationsEnabled).catch(() => {})
+    void refreshAdminUser()
 
     // Show actionable toast for missing system dependencies (Windows only)
     window.electronAPI.getSystemWarnings().then((warnings) => {
@@ -762,7 +775,7 @@ export default function App() {
     })
     // Load app-level theme
     window.electronAPI.getAppTheme().then(setAppTheme)
-  }, [appState, loadSessionsFromServer, resolveDefaultConnectionSlug])
+  }, [appState, loadSessionsFromServer, resolveDefaultConnectionSlug, refreshAdminUser])
 
   // Subscribe to theme change events (live updates when theme.json changes)
   useEffect(() => {
@@ -1723,6 +1736,28 @@ export default function App() {
     }
   }, [onboarding, initializeSessions])
 
+  const handleAdminLogout = useCallback(async () => {
+    try {
+      await window.electronAPI.adminLogout()
+    } finally {
+      initializeSessions([])
+      setWorkspaces([])
+      setWindowWorkspaceId(null)
+      setLlmConnections([])
+      setDefaultLlmConnectionSlug(undefined)
+      setWorkspaceDefaultLlmConnection(undefined)
+      setCurrentAdminUser(null)
+      setSetupNeeds({
+        needsBillingConfig: false,
+        needsCredentials: false,
+        needsAdminLogin: true,
+        isFullyConfigured: false,
+      })
+      onboarding.reset()
+      setAppState('onboarding')
+    }
+  }, [initializeSessions, onboarding, setWindowWorkspaceId])
+
   // Handle workspace selection
   // - Default: switch workspace in same window (in-window switching)
   // - With openInNewWindow=true: open in new window (or focus existing)
@@ -1806,6 +1841,8 @@ export default function App() {
     activeWorkspaceSlug: windowWorkspaceSlug,
     llmConnections,
     workspaceDefaultLlmConnection,
+    currentAdminUser,
+    onAdminLogout: handleAdminLogout,
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
@@ -1852,6 +1889,8 @@ export default function App() {
     windowWorkspaceSlug,
     llmConnections,
     workspaceDefaultLlmConnection,
+    currentAdminUser,
+    handleAdminLogout,
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
