@@ -18,7 +18,7 @@ type TestConnection = {
   providerType: 'anthropic' | 'pi' | 'pi_compat'
   authType: 'api_key' | 'api_key_with_endpoint' | 'oauth' | 'iam_credentials' | 'bearer_token' | 'service_account_file' | 'environment' | 'none'
   createdAt: number
-  managedBy?: 'admin' | 'user'
+  managedBy?: 'admin'
   adminConfigVersion?: string
   apiKey?: string
   models?: string[]
@@ -325,6 +325,7 @@ describe('registerAdminHandlers', () => {
       managedBy: 'admin',
       adminConfigVersion: 'config-v1',
     })
+    expect(Object.prototype.hasOwnProperty.call(configState.connections[0], 'apiKey')).toBe(false)
     expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-admin')
     expect(configState.defaultConnection).toBe('admin-anthropic')
     expect(configState.adminConfigVersion).toBe('config-v1')
@@ -388,6 +389,111 @@ describe('registerAdminHandlers', () => {
     expect(configState.adminConfigVersion).toBe('config-v1')
   })
 
+  it('syncs admin connections by upserting incoming config and removing admin-deleted connections', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    configState.adminConfigVersion = 'config-v0'
+    configState.connections = [
+      {
+        slug: 'admin-anthropic',
+        name: 'Old Admin Name',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 100,
+        managedBy: 'admin',
+        adminConfigVersion: 'config-v0',
+        models: ['old-model'],
+        defaultModel: 'old-model',
+        apiKey: 'sk-stale-config',
+      },
+      {
+        slug: 'admin-removed',
+        name: 'Removed Admin',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 101,
+        managedBy: 'admin',
+        adminConfigVersion: 'config-v0',
+      },
+      {
+        slug: 'user-local',
+        name: 'User Local',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 200,
+        models: ['user-model'],
+        defaultModel: 'user-model',
+      },
+    ]
+    managerState.llmApiKeys.set('admin-removed', 'sk-removed')
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v2',
+      connections: [
+        adminConnection({
+          slug: 'admin-anthropic',
+          name: 'Admin Anthropic Updated',
+          models: ['claude-sonnet-4-5', 'claude-opus-4-5'],
+          defaultModel: 'claude-opus-4-5',
+          apiKey: 'sk-updated',
+        }),
+        adminConnection({
+          slug: 'admin-pi',
+          name: 'Admin Pi',
+          providerType: 'pi',
+          models: ['pi/anthropic/claude-sonnet-4-5'],
+          defaultModel: 'pi/anthropic/claude-sonnet-4-5',
+          apiKey: 'sk-pi',
+        }),
+      ],
+      defaultConnection: 'admin-pi',
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toEqual({
+      success: true,
+      configVersion: 'config-v2',
+      connectionCount: 2,
+      defaultConnection: 'admin-pi',
+    })
+    expect(configState.connections.map(connection => connection.slug).sort()).toEqual([
+      'admin-anthropic',
+      'admin-pi',
+      'user-local',
+    ])
+    expect(configState.connections.find(connection => connection.slug === 'admin-anthropic')).toMatchObject({
+      name: 'Admin Anthropic Updated',
+      managedBy: 'admin',
+      adminConfigVersion: 'config-v2',
+      models: ['claude-sonnet-4-5', 'claude-opus-4-5'],
+      defaultModel: 'claude-opus-4-5',
+    })
+    expect(configState.connections.find(connection => connection.slug === 'admin-pi')).toMatchObject({
+      providerType: 'pi',
+      managedBy: 'admin',
+      adminConfigVersion: 'config-v2',
+    })
+    const userLocal = configState.connections.find(connection => connection.slug === 'user-local')
+    expect(userLocal).toMatchObject({ slug: 'user-local' })
+    expect(userLocal?.managedBy).toBeUndefined()
+    for (const connection of configState.connections.filter(item => item.managedBy === 'admin')) {
+      expect(Object.prototype.hasOwnProperty.call(connection, 'apiKey')).toBe(false)
+    }
+    expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-updated')
+    expect(managerState.llmApiKeys.get('admin-pi')).toBe('sk-pi')
+    expect(managerState.llmApiKeys.has('admin-removed')).toBe(false)
+    expect(managerState.deletedCredentialSlugs).toEqual(['admin-removed'])
+    expect(configState.defaultConnection).toBe('admin-pi')
+    expect(configState.adminConfigVersion).toBe('config-v2')
+  })
+
   it('logs out remotely and removes admin-managed connections and credentials', async () => {
     managerState.tokens = {
       accessToken: 'access-token',
@@ -400,7 +506,13 @@ describe('registerAdminHandlers', () => {
     configState.adminConfigVersion = 'config-v1'
     configState.connections = [
       adminConnection({ slug: 'admin-anthropic', managedBy: 'admin', adminConfigVersion: 'config-v1' }),
-      adminConnection({ slug: 'user-local', name: 'User Local', managedBy: 'user', apiKey: undefined }),
+      {
+        slug: 'user-local',
+        name: 'User Local',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 200,
+      },
     ]
     managerState.llmApiKeys.set('admin-anthropic', 'sk-admin')
     const { logout } = createHarness()
