@@ -414,6 +414,7 @@ export interface ElectronAPI {
   adminLogout(): Promise<{ success: boolean }>
   adminGetStatus(): Promise<AdminStatusResult>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
+  onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>

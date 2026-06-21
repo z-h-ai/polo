@@ -275,6 +275,8 @@ client.onConnectionStateChanged((state) => {
   client.invoke(RPC_CHANNELS.admin.GET_STATUS)
 ;(api as ElectronAPI).adminSyncConnections = () =>
   client.invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS)
+;(api as ElectronAPI).onAdminReauthRequired = (callback) =>
+  client.on('admin:reauthRequired', callback)
 
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →

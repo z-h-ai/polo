@@ -106,7 +106,15 @@ function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Re
 }
 
 function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
-  return result.errorCode === 'TOKEN_REVOKED' || result.status === 401
+  return result.errorCode === 'TOKEN_REVOKED'
+}
+
+function isAdminAuthFailureResult(result: { errorCode?: string; status?: number }): boolean {
+  return result.errorCode === 'TOKEN_REVOKED'
+    || result.errorCode === 'UNAUTHORIZED'
+    || result.errorCode === 'INVALID_TOKEN'
+    || result.errorCode === 'TOKEN_EXPIRED'
+    || result.status === 401
 }
 
 function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
@@ -673,6 +681,7 @@ export default function App() {
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
     try {
+      await refreshAdminUser()
       // Reload workspaces after onboarding
       const ws = await window.electronAPI.getWorkspaces()
       if (ws.length > 0) {
@@ -688,7 +697,7 @@ export default function App() {
       // Still transition to ready — the app can recover via reconnect
     }
     setAppState('ready')
-  }, [])
+  }, [refreshAdminUser])
 
   // Onboarding hook — onConfigSaved fires immediately when billing is saved,
   // ensuring connection state updates before the wizard closes.
@@ -698,13 +707,39 @@ export default function App() {
     initialSetupNeeds: setupNeeds || undefined,
   })
   const showAdminKicked = onboarding.showAdminKicked
+  const handleAdminRelogin = onboarding.handleAdminRelogin
+
+  const enterAdminLogin = useCallback(() => {
+    setSetupNeeds({
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin: true,
+      isFullyConfigured: false,
+    })
+    handleAdminRelogin()
+    setAppState('onboarding')
+  }, [handleAdminRelogin])
+
+  const enterAdminKicked = useCallback(() => {
+    setSetupNeeds({
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin: true,
+      isFullyConfigured: false,
+    })
+    showAdminKicked()
+    setAppState('onboarding')
+  }, [showAdminKicked])
 
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
     const validation = await window.electronAPI.adminValidate()
     if (!validation.loggedIn && isAdminKickedResult(validation)) {
-      showAdminKicked()
-      setAppState('onboarding')
+      enterAdminKicked()
+      return
+    }
+    if (!validation.loggedIn) {
+      enterAdminLogin()
       return
     }
 
@@ -716,7 +751,7 @@ export default function App() {
       setSetupNeeds(needs)
       setAppState('onboarding')
     }
-  }, [showAdminKicked])
+  }, [enterAdminKicked, enterAdminLogin])
 
   // Reauth reset handler - open reset confirmation dialog
   const handleReauthReset = useCallback(() => {
@@ -731,20 +766,34 @@ export default function App() {
         const wsId = await window.electronAPI.getWindowWorkspace()
         setWindowWorkspaceId(wsId)
 
-        const validation = await window.electronAPI.adminValidate()
-        if (!validation.loggedIn && isAdminKickedResult(validation)) {
-          setSetupNeeds({
-            needsBillingConfig: false,
-            needsCredentials: false,
-            needsAdminLogin: true,
-            isFullyConfigured: false,
-          })
-          showAdminKicked()
-          setAppState('onboarding')
-          return
+        let needs = await window.electronAPI.getSetupNeeds()
+        const adminStatus = await window.electronAPI.adminGetStatus()
+
+        if (adminStatus.adminUrl) {
+          const validation = await window.electronAPI.adminValidate()
+          if (!validation.loggedIn) {
+            if (isAdminKickedResult(validation)) {
+              enterAdminKicked()
+            } else {
+              enterAdminLogin()
+            }
+            return
+          }
+
+          const syncResult = await window.electronAPI.adminSyncConnections()
+          if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
+            if (syncResult.errorCode === 'TOKEN_REVOKED') {
+              enterAdminKicked()
+            } else {
+              enterAdminLogin()
+            }
+            return
+          }
+
+          await refreshAdminUser()
+          needs = await window.electronAPI.getSetupNeeds()
         }
 
-        const needs = await window.electronAPI.getSetupNeeds()
         setSetupNeeds(needs)
 
         if (needs.isFullyConfigured) {
@@ -755,10 +804,11 @@ export default function App() {
           } else {
             setAppState('ready')
           }
-        } else {
-          // New user or needs setup - show onboarding
-          setAppState('onboarding')
+          return
         }
+
+        // New user or needs setup - show onboarding
+        setAppState('onboarding')
       } catch (error) {
         console.error('Failed to check auth state:', error)
         // If check fails, show onboarding to be safe
@@ -767,7 +817,19 @@ export default function App() {
     }
 
     initialize()
-  }, [showAdminKicked, setWindowWorkspaceId])
+  }, [enterAdminKicked, enterAdminLogin, refreshAdminUser, setWindowWorkspaceId])
+
+  useEffect(() => {
+    const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
+      setCurrentAdminUser(null)
+      if (!validation.loggedIn && isAdminKickedResult(validation)) {
+        enterAdminKicked()
+      } else {
+        enterAdminLogin()
+      }
+    })
+    return () => { cleanup() }
+  }, [enterAdminKicked, enterAdminLogin])
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
@@ -1849,10 +1911,10 @@ export default function App() {
         needsAdminLogin: true,
         isFullyConfigured: false,
       })
-      onboarding.reset()
+      handleAdminRelogin()
       setAppState('onboarding')
     }
-  }, [initializeSessions, onboarding, setWindowWorkspaceId])
+  }, [handleAdminRelogin, initializeSessions, setWindowWorkspaceId])
 
   // Handle workspace selection
   // - Default: switch workspace in same window (in-window switching)
