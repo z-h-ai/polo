@@ -1,4 +1,4 @@
-import { AdminClient, AdminError, type AdminRefreshResponse } from '@polo-ai/shared/admin'
+import { AdminClient, AdminError, type AdminLlmConnection, type AdminRefreshResponse } from '@polo-ai/shared/admin'
 import {
   addLlmConnection,
   deleteLlmConnection,
@@ -22,15 +22,6 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.GET_STATUS,
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
 ] as const
-
-type AdminManagedConnection = LlmConnection & {
-  apiKey?: string
-  key?: string
-  credentials?: {
-    apiKey?: string
-    key?: string
-  }
-}
 
 type StoredAdminTokens = NonNullable<Awaited<ReturnType<CredentialManager['getAdminTokens']>>>
 
@@ -240,7 +231,7 @@ async function syncAdminConnections(args: {
     }
   }
 
-  for (const connection of response.connections as AdminManagedConnection[]) {
+  for (const connection of response.connections) {
     await upsertAdminConnection(args.manager, connection, response.configVersion)
   }
 
@@ -259,7 +250,7 @@ async function syncAdminConnections(args: {
 
 async function upsertAdminConnection(
   manager: CredentialManager,
-  connection: AdminManagedConnection,
+  connection: AdminLlmConnection,
   configVersion: string,
 ): Promise<void> {
   const apiKey = readApiKey(connection)
@@ -273,6 +264,7 @@ async function upsertAdminConnection(
 
   const existing = getLlmConnections().find(item => item.slug === adminConnection.slug)
   if (existing) {
+    scrubCredentialFields(existing)
     const { slug: _slug, ...updates } = adminConnection
     updateLlmConnection(adminConnection.slug, updates)
   } else {
@@ -284,13 +276,24 @@ async function upsertAdminConnection(
   }
 }
 
-function readApiKey(connection: AdminManagedConnection): string | null {
+function readApiKey(connection: AdminLlmConnection): string | null {
   const value =
     connection.apiKey ??
     connection.key ??
     connection.credentials?.apiKey ??
     connection.credentials?.key
   return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function scrubCredentialFields(connection: LlmConnection): void {
+  const mutable = connection as LlmConnection & {
+    apiKey?: unknown
+    key?: unknown
+    credentials?: unknown
+  }
+  delete mutable.apiKey
+  delete mutable.key
+  delete mutable.credentials
 }
 
 async function deleteAdminManagedConnections(manager: CredentialManager): Promise<void> {
