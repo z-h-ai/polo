@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from 'bun
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import type { LlmConnection } from '@polo-ai/shared/config'
 
 const originalConfigDir = process.env.POLO_AI_CONFIG_DIR
 const testConfigDir = mkdtempSync(join(tmpdir(), 'sm-refresh-config-'))
@@ -50,6 +51,7 @@ writeTestConfig()
 const { resolveBackendContext } = await import('@polo-ai/shared/agent/backend')
 const { buildBackendRuntimeSignature, buildRestartRequiredSignature } = await import('./runtime-config.ts')
 const { SessionManager, createManagedSession } = await import('./SessionManager.ts')
+type BackendContext = ReturnType<typeof resolveBackendContext>
 
 // Regression coverage for the stale-Pi-subprocess bug where toggling
 // `supportsImages` on a custom-endpoint model wrote to disk but never reached
@@ -257,14 +259,14 @@ describe('refreshConnectionRuntime', () => {
     const agent = createAgentStub()
     const connection = testConnections[0]!
     const backendContext = {
-      connection,
+      connection: connection as unknown as LlmConnection,
       provider: 'pi',
       authType: 'api_key_with_endpoint',
       resolvedModel: 'vision-model',
-      capabilities: {},
-    }
+      capabilities: { needsHttpPoolServer: false },
+    } satisfies BackendContext
     const sigInput = {
-      connection,
+      connection: backendContext.connection,
       provider: backendContext.provider,
       authType: backendContext.authType,
       resolvedModel: backendContext.resolvedModel,
@@ -277,8 +279,8 @@ describe('refreshConnectionRuntime', () => {
 
     await (sm as unknown as {
       runAgentRuntimeRefresh: (
-        managed: typeof managed,
-        backendContext: typeof backendContext,
+        managed: ReturnType<typeof injectSession>,
+        backendContext: BackendContext,
         runtimeSignature: string,
         restartSignature: string,
         restartRequired: boolean,

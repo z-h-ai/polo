@@ -275,6 +275,50 @@ export class CredentialManager {
     });
   }
 
+  /** Get admin access/refresh tokens. */
+  async getAdminTokens(): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    userId: string;
+    username: string;
+  } | null> {
+    const cred = await this.get({ type: 'admin_token' });
+    if (!cred || !cred.refreshToken || !cred.expiresAt || !cred.userId || !cred.username) {
+      return null;
+    }
+
+    return {
+      accessToken: cred.value,
+      refreshToken: cred.refreshToken,
+      expiresAt: cred.expiresAt,
+      userId: cred.userId,
+      username: cred.username,
+    };
+  }
+
+  /** Set admin access/refresh tokens. */
+  async setAdminTokens(data: {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    userId: string;
+    username: string;
+  }): Promise<void> {
+    await this.set({ type: 'admin_token' }, {
+      value: data.accessToken,
+      refreshToken: data.refreshToken,
+      expiresAt: data.expiresAt,
+      userId: data.userId,
+      username: data.username,
+    });
+  }
+
+  /** Delete admin access/refresh tokens. */
+  async deleteAdminTokens(): Promise<boolean> {
+    return this.delete({ type: 'admin_token' });
+  }
+
   /** Get workspace MCP OAuth credentials */
   async getWorkspaceOAuth(workspaceId: string): Promise<{
     accessToken: string;
