@@ -45,6 +45,7 @@ export interface AdminLlmConnectionsResponse {
 export type AdminErrorCode =
   | 'INVALID_CREDENTIALS'
   | 'ACCOUNT_DISABLED'
+  | 'TOKEN_REVOKED'
   | 'TOKEN_EXPIRED'
   | 'INVALID_TOKEN'
   | 'UNAUTHORIZED'
