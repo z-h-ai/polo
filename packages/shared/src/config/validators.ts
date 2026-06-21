@@ -91,7 +91,7 @@ const LlmConnectionSchema = z.object({
   modelSelectionMode: z.enum(['automaticallySyncedFromProvider', 'userDefined3Tier']).optional(),
   customEndpoint: CustomEndpointSchema.optional(),
   createdAt: z.number(),
-  managedBy: z.enum(['admin', 'user']).optional(),
+  managedBy: z.enum(['admin']).optional(),
   adminConfigVersion: z.string().optional(),
   // Allow additional fields (codexPath, awsRegion, gcpProjectId, etc.)
 }).passthrough();

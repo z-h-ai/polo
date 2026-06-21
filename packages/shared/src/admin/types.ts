@@ -27,9 +27,18 @@ export interface AdminValidateResponse {
   configVersion: string;
 }
 
+export interface AdminLlmConnection extends LlmConnection {
+  apiKey?: string;
+  key?: string;
+  credentials?: {
+    apiKey?: string;
+    key?: string;
+  };
+}
+
 export interface AdminLlmConnectionsResponse {
   configVersion: string;
-  connections: LlmConnection[];
+  connections: AdminLlmConnection[];
   defaultConnection: string | null;
 }
 

@@ -67,6 +67,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         // Create connection with appropriate defaults based on slug
         connection = createBuiltInConnection(setup.slug, setup.baseUrl)
         isNewConnection = true
+      } else if (connection.managedBy === 'admin') {
+        return { success: false, error: 'Admin-managed connections can only be changed by syncing with Admin.' }
       }
 
       const updates: Partial<LlmConnection> = {}
@@ -429,6 +431,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // Check if this is an update or create
       const existing = getLlmConnection(connection.slug)
       if (existing) {
+        if (existing.managedBy === 'admin') {
+          return { success: false, error: 'Admin-managed connections can only be changed by syncing with Admin.' }
+        }
         // Update existing connection (can't change slug)
         const { slug: _slug, ...updates } = connection
         const success = updateLlmConnection(connection.slug, updates)
@@ -473,6 +478,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       const connection = getLlmConnection(slug)
       if (!connection) {
         return { success: false, error: 'Connection not found' }
+      }
+      if (connection.managedBy === 'admin') {
+        return { success: false, error: 'Admin-managed connections can only be deleted by syncing with Admin.' }
       }
       // deleteLlmConnection handles the "at least one must remain" check
       const success = deleteLlmConnection(slug)
