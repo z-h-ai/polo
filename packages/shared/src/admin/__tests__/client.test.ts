@@ -126,4 +126,70 @@ describe('AdminClient', () => {
       expect((error as AdminError).message).toBe('Invalid username or password');
     }
   });
+
+  it('refreshes tokens and retries once on authenticated 401 responses', async () => {
+    fetchCalls = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      fetchCalls.push({ url, init: init ?? {} });
+
+      if (url.endsWith('/api/auth/validate') && fetchCalls.length === 1) {
+        return new Response(JSON.stringify({ errorCode: 'TOKEN_EXPIRED', message: 'expired' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url.endsWith('/api/auth/refresh')) {
+        return new Response(JSON.stringify({
+          accessToken: 'fresh-access-token',
+          refreshToken: 'fresh-refresh-token',
+          expiresIn: 3600,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({
+        valid: true,
+        configVersion: 'config-v2',
+        user: {
+          id: 'user-1',
+          username: 'admin',
+          displayName: 'Admin',
+          role: 'admin',
+          groupIds: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof globalThis.fetch;
+
+    const refreshedTokens: unknown[] = [];
+    const client = new AdminClient('https://admin.example.com', {
+      tokenStore: {
+        getRefreshToken: () => 'old-refresh-token',
+        onTokensRefreshed: tokens => {
+          refreshedTokens.push(tokens);
+        },
+      },
+    });
+
+    const result = await client.validate('stale-access-token');
+
+    expect(result.valid).toBe(true);
+    expect(refreshedTokens).toEqual([{
+      accessToken: 'fresh-access-token',
+      refreshToken: 'fresh-refresh-token',
+      expiresIn: 3600,
+    }]);
+    expect(fetchCalls.map(call => call.url)).toEqual([
+      'https://admin.example.com/api/auth/validate',
+      'https://admin.example.com/api/auth/refresh',
+      'https://admin.example.com/api/auth/validate',
+    ]);
+    expect((fetchCalls[2]!.init.headers as Record<string, string>).Authorization).toBe('Bearer fresh-access-token');
+  });
 });

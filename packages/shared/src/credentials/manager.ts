@@ -282,6 +282,7 @@ export class CredentialManager {
     expiresAt: number;
     userId: string;
     username: string;
+    displayName?: string;
   } | null> {
     const cred = await this.get({ type: 'admin_token' });
     if (!cred || !cred.refreshToken || !cred.expiresAt || !cred.userId || !cred.username) {
@@ -294,6 +295,7 @@ export class CredentialManager {
       expiresAt: cred.expiresAt,
       userId: cred.userId,
       username: cred.username,
+      displayName: cred.displayName,
     };
   }
 
@@ -304,6 +306,7 @@ export class CredentialManager {
     expiresAt: number;
     userId: string;
     username: string;
+    displayName?: string;
   }): Promise<void> {
     await this.set({ type: 'admin_token' }, {
       value: data.accessToken,
@@ -311,6 +314,7 @@ export class CredentialManager {
       expiresAt: data.expiresAt,
       userId: data.userId,
       username: data.username,
+      displayName: data.displayName,
     });
   }
 

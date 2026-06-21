@@ -2682,6 +2682,9 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
     customEndpoint: updates.customEndpoint !== undefined ? updates.customEndpoint : existing.customEndpoint,
     // Mid-stream send behavior (steer vs queue) — read via resolveMidStreamBehavior()
     midStreamBehavior: updates.midStreamBehavior !== undefined ? updates.midStreamBehavior : existing.midStreamBehavior,
+    // Admin sync metadata
+    managedBy: updates.managedBy !== undefined ? updates.managedBy : existing.managedBy,
+    adminConfigVersion: updates.adminConfigVersion !== undefined ? updates.adminConfigVersion : existing.adminConfigVersion,
     // Timestamps
     lastUsedAt: updates.lastUsedAt !== undefined ? updates.lastUsedAt : existing.lastUsedAt,
   };

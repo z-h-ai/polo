@@ -21,15 +21,22 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'UNKNOWN_ERROR',
 ]);
 
+export interface AdminClientTokenStore {
+  getRefreshToken(): string | null | Promise<string | null>;
+  onTokensRefreshed?(tokens: AdminRefreshResponse): void | Promise<void>;
+}
+
 export class AdminClient {
   private readonly adminUrl: string;
+  private readonly tokenStore?: AdminClientTokenStore;
 
-  constructor(adminUrl: string) {
+  constructor(adminUrl: string, options?: { tokenStore?: AdminClientTokenStore }) {
     const normalized = adminUrl.trim().replace(/\/+$/, '');
     if (!normalized) {
       throw new AdminError('Admin URL is required', 'VALIDATION_ERROR');
     }
     this.adminUrl = normalized;
+    this.tokenStore = options?.tokenStore;
   }
 
   login(username: string, password: string): Promise<AdminLoginResponse> {
@@ -71,6 +78,7 @@ export class AdminClient {
     method: 'GET' | 'POST';
     accessToken?: string;
     body?: unknown;
+    retryingAfterRefresh?: boolean;
   }): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
@@ -94,6 +102,25 @@ export class AdminClient {
     }
 
     const data = await this.readJson(response);
+
+    if (
+      response.status === 401 &&
+      options.accessToken &&
+      !options.retryingAfterRefresh &&
+      path !== '/api/auth/refresh' &&
+      this.tokenStore
+    ) {
+      const refreshToken = await this.tokenStore.getRefreshToken();
+      if (refreshToken) {
+        const refreshed = await this.refresh(refreshToken);
+        await this.tokenStore.onTokensRefreshed?.(refreshed);
+        return this.request<T>(path, {
+          ...options,
+          accessToken: refreshed.accessToken,
+          retryingAfterRefresh: true,
+        });
+      }
+    }
 
     if (!response.ok) {
       throw this.createError(response, data);
