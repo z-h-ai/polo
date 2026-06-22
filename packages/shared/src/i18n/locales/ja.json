@@ -566,6 +566,8 @@
   "onboarding.adminLogin.subtitle": "ユーザー名とパスワードを入力してください",
   "onboarding.adminLogin.title": "Polo AI",
   "onboarding.adminLogin.username": "ユーザー名",
+  "onboarding.adminLogin.usernamePlaceholder": "ユーザー名を入力",
+  "onboarding.adminLogin.passwordPlaceholder": "パスワードを入力",
   "onboarding.apiSetup.anthropicApiKey": "Anthropic APIキー",
   "onboarding.apiSetup.anthropicApiKeyDesc": "Anthropic、OpenRouter、または互換APIによる従量課金制。",
   "onboarding.apiSetup.apiKey": "APIキー",

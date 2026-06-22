@@ -78,6 +78,7 @@ export function AdminLoginStep({
           <Input
             id="admin-username"
             autoComplete="username"
+            placeholder={t("onboarding.adminLogin.usernamePlaceholder")}
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             disabled={isLoading}
@@ -94,6 +95,7 @@ export function AdminLoginStep({
               id="admin-password"
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
+              placeholder={t("onboarding.adminLogin.passwordPlaceholder")}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               disabled={isLoading}
