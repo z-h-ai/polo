@@ -267,9 +267,10 @@ async function upsertAdminConnection(
   accessToken: string,
 ): Promise<void> {
   const apiKey = readApiKey(connection, accessToken)
-  const { apiKey: _apiKey, key: _key, credentials: _credentials, ...configConnection } = connection
+  const { apiKey: _apiKey, key: _key, credentials: _credentials, endpoint, ...configConnection } = connection
   const adminConnection: LlmConnection = {
     ...configConnection,
+    baseUrl: endpoint ?? configConnection.baseUrl,
     createdAt: configConnection.createdAt ?? Date.now(),
     managedBy: 'admin',
     adminConfigVersion: configVersion,

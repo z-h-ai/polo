@@ -28,6 +28,7 @@ export interface AdminValidateResponse {
 }
 
 export interface AdminLlmConnection extends LlmConnection {
+  endpoint?: string;
   apiKey?: string | AdminTransitEncryptedApiKey;
   key?: string;
   credentials?: {
