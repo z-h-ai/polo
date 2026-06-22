@@ -209,7 +209,7 @@ export function LeftSidebar({ links, isCollapsed, userMenu, getItemProps, focuse
         className={cn(
           "grid gap-0.5",
           isNested ? "pl-5 pr-0 relative" : "px-2",
-          !isNested && userMenu && "flex-1 overflow-y-auto min-h-0 mask-fade-bottom pb-4"
+          !isNested && userMenu && "flex-1 overflow-y-auto min-h-0 content-start mask-fade-bottom pb-4"
         )}
         role="navigation"
         aria-label={isNested ? "Sub navigation" : "Main navigation"}
