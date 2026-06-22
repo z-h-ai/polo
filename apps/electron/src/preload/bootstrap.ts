@@ -36,7 +36,7 @@ import {
 import type { ConfirmDialogSpec, FileDialogSpec, BrowserCapabilityRequest } from '@polo-ai/server-core/transport'
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { RemoteServerConfig } from '@polo-ai/core/types'
-import type { ElectronAPI } from '../shared/types'
+import { RPC_CHANNELS, type ElectronAPI } from '../shared/types'
 
 // ---------------------------------------------------------------------------
 // Client interface — common surface for both RoutedClient and WsRpcClient
@@ -263,6 +263,20 @@ client.onConnectionStateChanged((state) => {
 ;(api as any).reconnectTransport = async () => {
   client.reconnectNow()
 }
+
+// Admin auth — explicit preload surface for admin-managed deployments.
+;(api as ElectronAPI).adminLogin = (username: string, password: string) =>
+  client.invoke(RPC_CHANNELS.admin.LOGIN, username, password)
+;(api as ElectronAPI).adminValidate = () =>
+  client.invoke(RPC_CHANNELS.admin.VALIDATE)
+;(api as ElectronAPI).adminLogout = () =>
+  client.invoke(RPC_CHANNELS.admin.LOGOUT)
+;(api as ElectronAPI).adminGetStatus = () =>
+  client.invoke(RPC_CHANNELS.admin.GET_STATUS)
+;(api as ElectronAPI).adminSyncConnections = () =>
+  client.invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS)
+;(api as ElectronAPI).onAdminReauthRequired = (callback) =>
+  client.on('admin:reauthRequired', callback)
 
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →

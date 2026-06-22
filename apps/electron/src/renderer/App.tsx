@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -11,7 +11,7 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import type { AppShellContextType } from '@/context/AppShellContext'
+import type { AppShellContextType, ChatAccessIssue, ChatAccessStatus } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -103,6 +103,53 @@ function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Re
     distribution[key] = (distribution[key] ?? 0) + 1
   }
   return distribution
+}
+
+function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
+  return result.errorCode === 'TOKEN_REVOKED'
+}
+
+function isAdminAuthFailureResult(result: { errorCode?: string; status?: number }): boolean {
+  return result.errorCode === 'TOKEN_REVOKED'
+    || result.errorCode === 'UNAUTHORIZED'
+    || result.errorCode === 'INVALID_TOKEN'
+    || result.errorCode === 'TOKEN_EXPIRED'
+    || result.status === 401
+}
+
+function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
+  return result.errorCode === 'ACCOUNT_DISABLED'
+    || (result.status === 403 && /disabled|禁用/i.test(result.message ?? ''))
+}
+
+function readErrorField(error: unknown, field: 'errorCode' | 'code' | 'status' | 'message'): unknown {
+  if (!error || typeof error !== 'object') return undefined
+  return (error as Record<string, unknown>)[field]
+}
+
+function getErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message
+  const message = readErrorField(error, 'message')
+  if (typeof message === 'string') return message
+  if (typeof error === 'string') return error
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+function isQuotaExhaustedError(error: unknown): boolean {
+  const code = String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? '').toUpperCase()
+  const status = Number(readErrorField(error, 'status'))
+  const message = getErrorText(error)
+
+  return code === 'QUOTA_EXHAUSTED'
+    || code === 'QUOTA_LIMIT_EXCEEDED'
+    || code === 'USAGE_LIMIT_EXCEEDED'
+    || code === 'INSUFFICIENT_QUOTA'
+    || status === 429
+    || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
 }
 
 /**
@@ -290,15 +337,28 @@ export default function App() {
 
   // LLM connections with authentication status (for provider selection)
   const [llmConnections, setLlmConnections] = useState<LlmConnectionWithStatus[]>([])
+  const [llmConnectionsLoaded, setLlmConnectionsLoaded] = useState(false)
   // Workspace default LLM connection (for new sessions)
   const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
+  const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
+  const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'username' | 'displayName'> | null>(null)
 
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
     return llmConnections.find(c => c.slug === defaultLlmConnectionSlug) ?? null
   }, [llmConnections, defaultLlmConnectionSlug])
+
+  const chatAccessStatus = useMemo<ChatAccessStatus | null>(() => {
+    if (runtimeChatAccessIssue) {
+      return { issue: runtimeChatAccessIssue }
+    }
+    if (llmConnectionsLoaded && llmConnections.length === 0) {
+      return { issue: 'no-ai-service' }
+    }
+    return null
+  }, [llmConnections.length, llmConnectionsLoaded, runtimeChatAccessIssue])
 
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Permission requests per session (queue to handle multiple concurrent requests)
@@ -598,6 +658,7 @@ export default function App() {
   const refreshLlmConnections = useCallback(async () => {
     const connections = await window.electronAPI.listLlmConnectionsWithStatus()
     setLlmConnections(connections)
+    setLlmConnectionsLoaded(true)
     setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     // Also refresh workspace default
     if (windowWorkspaceId) {
@@ -606,9 +667,21 @@ export default function App() {
     }
   }, [resolveDefaultConnectionSlug, windowWorkspaceId])
 
+  const refreshAdminUser = useCallback(async () => {
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      setCurrentAdminUser(status.loggedIn
+        ? { username: status.username, displayName: status.displayName }
+        : null)
+    } catch {
+      setCurrentAdminUser(null)
+    }
+  }, [])
+
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
     try {
+      await refreshAdminUser()
       // Reload workspaces after onboarding
       const ws = await window.electronAPI.getWorkspaces()
       if (ws.length > 0) {
@@ -624,7 +697,7 @@ export default function App() {
       // Still transition to ready — the app can recover via reconnect
     }
     setAppState('ready')
-  }, [])
+  }, [refreshAdminUser])
 
   // Onboarding hook — onConfigSaved fires immediately when billing is saved,
   // ensuring connection state updates before the wizard closes.
@@ -633,9 +706,43 @@ export default function App() {
     onConfigSaved: refreshLlmConnections,
     initialSetupNeeds: setupNeeds || undefined,
   })
+  const showAdminKicked = onboarding.showAdminKicked
+  const handleAdminRelogin = onboarding.handleAdminRelogin
+
+  const enterAdminLogin = useCallback(() => {
+    setSetupNeeds({
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin: true,
+      isFullyConfigured: false,
+    })
+    handleAdminRelogin()
+    setAppState('onboarding')
+  }, [handleAdminRelogin])
+
+  const enterAdminKicked = useCallback(() => {
+    setSetupNeeds({
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin: true,
+      isFullyConfigured: false,
+    })
+    showAdminKicked()
+    setAppState('onboarding')
+  }, [showAdminKicked])
 
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
+    const validation = await window.electronAPI.adminValidate()
+    if (!validation.loggedIn && isAdminKickedResult(validation)) {
+      enterAdminKicked()
+      return
+    }
+    if (!validation.loggedIn) {
+      enterAdminLogin()
+      return
+    }
+
     // Re-check setup needs
     const needs = await window.electronAPI.getSetupNeeds()
     if (needs.isFullyConfigured) {
@@ -644,7 +751,7 @@ export default function App() {
       setSetupNeeds(needs)
       setAppState('onboarding')
     }
-  }, [])
+  }, [enterAdminKicked, enterAdminLogin])
 
   // Reauth reset handler - open reset confirmation dialog
   const handleReauthReset = useCallback(() => {
@@ -659,7 +766,34 @@ export default function App() {
         const wsId = await window.electronAPI.getWindowWorkspace()
         setWindowWorkspaceId(wsId)
 
-        const needs = await window.electronAPI.getSetupNeeds()
+        let needs = await window.electronAPI.getSetupNeeds()
+        const adminStatus = await window.electronAPI.adminGetStatus()
+
+        if (adminStatus.adminUrl) {
+          const validation = await window.electronAPI.adminValidate()
+          if (!validation.loggedIn) {
+            if (isAdminKickedResult(validation)) {
+              enterAdminKicked()
+            } else {
+              enterAdminLogin()
+            }
+            return
+          }
+
+          const syncResult = await window.electronAPI.adminSyncConnections()
+          if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
+            if (syncResult.errorCode === 'TOKEN_REVOKED') {
+              enterAdminKicked()
+            } else {
+              enterAdminLogin()
+            }
+            return
+          }
+
+          await refreshAdminUser()
+          needs = await window.electronAPI.getSetupNeeds()
+        }
+
         setSetupNeeds(needs)
 
         if (needs.isFullyConfigured) {
@@ -670,10 +804,11 @@ export default function App() {
           } else {
             setAppState('ready')
           }
-        } else {
-          // New user or needs setup - show onboarding
-          setAppState('onboarding')
+          return
         }
+
+        // New user or needs setup - show onboarding
+        setAppState('onboarding')
       } catch (error) {
         console.error('Failed to check auth state:', error)
         // If check fails, show onboarding to be safe
@@ -682,7 +817,19 @@ export default function App() {
     }
 
     initialize()
-  }, [])
+  }, [enterAdminKicked, enterAdminLogin, refreshAdminUser, setWindowWorkspaceId])
+
+  useEffect(() => {
+    const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
+      setCurrentAdminUser(null)
+      if (!validation.loggedIn && isAdminKickedResult(validation)) {
+        enterAdminKicked()
+      } else {
+        enterAdminLogin()
+      }
+    })
+    return () => { cleanup() }
+  }, [enterAdminKicked, enterAdminLogin])
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
@@ -707,6 +854,7 @@ export default function App() {
 
     window.electronAPI.getWorkspaces().then(setWorkspaces)
     window.electronAPI.getNotificationsEnabled().then(setNotificationsEnabled).catch(() => {})
+    void refreshAdminUser()
 
     // Show actionable toast for missing system dependencies (Windows only)
     window.electronAPI.getSystemWarnings().then((warnings) => {
@@ -725,6 +873,7 @@ export default function App() {
     // Load LLM connections with authentication status
     window.electronAPI.listLlmConnectionsWithStatus().then((connections) => {
       setLlmConnections(connections)
+      setLlmConnectionsLoaded(true)
       setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     })
     // Load persisted input drafts into ref (no re-render needed).
@@ -737,7 +886,7 @@ export default function App() {
     })
     // Load app-level theme
     window.electronAPI.getAppTheme().then(setAppTheme)
-  }, [appState, loadSessionsFromServer, resolveDefaultConnectionSlug])
+  }, [appState, loadSessionsFromServer, resolveDefaultConnectionSlug, refreshAdminUser])
 
   // Subscribe to theme change events (live updates when theme.json changes)
   useEffect(() => {
@@ -1194,8 +1343,48 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
+  const checkAdminAccountDisabledBeforeSend = useCallback(async (): Promise<boolean> => {
+    if (!currentAdminUser || runtimeChatAccessIssue === 'account-disabled') {
+      return runtimeChatAccessIssue === 'account-disabled'
+    }
+
+    try {
+      const validation = await window.electronAPI.adminValidate()
+      if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
+        setRuntimeChatAccessIssue('account-disabled')
+        setCurrentAdminUser(null)
+        return true
+      }
+    } catch (error) {
+      if (isAdminAccountDisabledResult({
+        loggedIn: false,
+        errorCode: String(readErrorField(error, 'errorCode') ?? readErrorField(error, 'code') ?? ''),
+        status: Number(readErrorField(error, 'status')),
+        message: getErrorText(error),
+      })) {
+        setRuntimeChatAccessIssue('account-disabled')
+        setCurrentAdminUser(null)
+        return true
+      }
+    }
+
+    return false
+  }, [currentAdminUser, runtimeChatAccessIssue])
+
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
     try {
+      if (chatAccessStatus) {
+        return
+      }
+
+      if (llmConnectionsLoaded && llmConnections.length === 0) {
+        return
+      }
+
+      if (await checkAdminAccountDisabledBeforeSend()) {
+        return
+      }
+
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
       // returns status 'accepted', not 'queued').
@@ -1345,6 +1534,9 @@ export default function App() {
       })
     } catch (error) {
       console.error('Failed to send message:', error)
+      if (isQuotaExhaustedError(error)) {
+        setRuntimeChatAccessIssue('quota-exhausted')
+      }
       updateSessionById(sessionId, (s) => ({
         isProcessing: false,
         messages: [
@@ -1358,7 +1550,7 @@ export default function App() {
         ]
       }))
     }
-  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
+  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
 
   /**
    * Unified handler for all session option changes.
@@ -1681,10 +1873,13 @@ export default function App() {
       initializeSessions([])
       setWorkspaces([])
       setWindowWorkspaceId(null)
+      setRuntimeChatAccessIssue(null)
+      setLlmConnectionsLoaded(false)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
         needsBillingConfig: true,
         needsCredentials: true,
+        needsAdminLogin: false,
         isFullyConfigured: false,
       })
       // Reset onboarding hook state
@@ -1696,6 +1891,30 @@ export default function App() {
       setShowResetDialog(false)
     }
   }, [onboarding, initializeSessions])
+
+  const handleAdminLogout = useCallback(async () => {
+    try {
+      await window.electronAPI.adminLogout()
+    } finally {
+      initializeSessions([])
+      setWorkspaces([])
+      setWindowWorkspaceId(null)
+      setLlmConnections([])
+      setLlmConnectionsLoaded(false)
+      setDefaultLlmConnectionSlug(undefined)
+      setWorkspaceDefaultLlmConnection(undefined)
+      setRuntimeChatAccessIssue(null)
+      setCurrentAdminUser(null)
+      setSetupNeeds({
+        needsBillingConfig: false,
+        needsCredentials: false,
+        needsAdminLogin: true,
+        isFullyConfigured: false,
+      })
+      handleAdminRelogin()
+      setAppState('onboarding')
+    }
+  }, [handleAdminRelogin, initializeSessions, setWindowWorkspaceId])
 
   // Handle workspace selection
   // - Default: switch workspace in same window (in-window switching)
@@ -1780,6 +1999,9 @@ export default function App() {
     activeWorkspaceSlug: windowWorkspaceSlug,
     llmConnections,
     workspaceDefaultLlmConnection,
+    chatAccessStatus,
+    currentAdminUser,
+    onAdminLogout: handleAdminLogout,
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
@@ -1826,6 +2048,9 @@ export default function App() {
     windowWorkspaceSlug,
     llmConnections,
     workspaceDefaultLlmConnection,
+    chatAccessStatus,
+    currentAdminUser,
+    handleAdminLogout,
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
@@ -1930,6 +2155,8 @@ export default function App() {
             onSkipSetup={onboarding.handleSkipSetup}
             onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
             onSubmitCredential={onboarding.handleSubmitCredential}
+            onAdminLogin={onboarding.handleAdminLogin}
+            onAdminRelogin={onboarding.handleAdminRelogin}
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}
             onStartOAuth={onboarding.handleStartOAuth}
             onFinish={onboarding.handleFinish}

@@ -122,6 +122,14 @@ export const CHANNEL_MAP = {
   logout: invoke(RPC_CHANNELS.auth.LOGOUT),
   getCredentialHealth: invoke(RPC_CHANNELS.credentials.HEALTH_CHECK),
 
+  // Admin auth
+  adminLogin: invoke(RPC_CHANNELS.admin.LOGIN),
+  adminValidate: invoke(RPC_CHANNELS.admin.VALIDATE),
+  adminLogout: invoke(RPC_CHANNELS.admin.LOGOUT),
+  adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
+  adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+  onAdminReauthRequired: listener('admin:reauthRequired'),
+
   // Onboarding
   getAuthState: invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE),
   getSetupNeeds: invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE, r => r.setupNeeds),

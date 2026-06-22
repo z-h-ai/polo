@@ -173,6 +173,13 @@ export const RPC_CHANNELS = {
     CLEAR_CLAUDE_OAUTH_STATE: 'onboarding:clearClaudeOAuthState',
     DEFER_SETUP: 'onboarding:deferSetup',
   },
+  admin: {
+    LOGIN: 'admin:login',
+    VALIDATE: 'admin:validate',
+    LOGOUT: 'admin:logout',
+    GET_STATUS: 'admin:getStatus',
+    SYNC_CONNECTIONS: 'admin:syncConnections',
+  },
   llmConnections: {
     LIST: 'LLM_Connection:list',
     LIST_WITH_STATUS: 'LLM_Connection:listWithStatus',

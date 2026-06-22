@@ -202,6 +202,7 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [piBaseUrl, setPiBaseUrl] = useState<string | undefined>(undefined)
+  const isAdminManaged = connection.managedBy === 'admin'
 
   // Opening dialog/overlay flows directly from a dropdown item can race with
   // menu teardown and leave a transient interaction lock behind on some systems.
@@ -304,7 +305,10 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
           </button>
         </DropdownMenuTrigger>
         <StyledDropdownMenuContent align="end">
-          <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onRenameClick)}>
+          <StyledDropdownMenuItem
+            onClick={() => runAfterMenuClose(onRenameClick)}
+            disabled={isAdminManaged}
+          >
             <Pencil className="h-3.5 w-3.5" />
             <span>{t("common.rename")}</span>
           </StyledDropdownMenuItem>
@@ -315,12 +319,18 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
             </StyledDropdownMenuItem>
           )}
           {connection.authType === 'oauth' ? (
-            <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onReauthenticate)}>
+            <StyledDropdownMenuItem
+              onClick={() => runAfterMenuClose(onReauthenticate)}
+              disabled={isAdminManaged}
+            >
               <RefreshCcw className="h-3.5 w-3.5" />
               <span>{t("settings.ai.reAuthenticate")}</span>
             </StyledDropdownMenuItem>
           ) : (
-            <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onEdit)}>
+            <StyledDropdownMenuItem
+              onClick={() => runAfterMenuClose(onEdit)}
+              disabled={isAdminManaged}
+            >
               <Settings2 className="h-3.5 w-3.5" />
               <span>{t("common.edit")}</span>
             </StyledDropdownMenuItem>
@@ -336,17 +346,23 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
             const currentBehavior = resolveMidStreamBehavior(connection)
             return (
               <DropdownMenuSub>
-                <StyledDropdownMenuSubTrigger>
+                <StyledDropdownMenuSubTrigger disabled={isAdminManaged}>
                   <MessageSquareMore className="h-3.5 w-3.5" />
                   <span>{t("settings.ai.midStream.title")}</span>
                 </StyledDropdownMenuSubTrigger>
                 <StyledDropdownMenuSubContent>
-                  <StyledDropdownMenuItem onClick={() => onSetMidStreamBehavior('steer')}>
+                  <StyledDropdownMenuItem
+                    onClick={() => onSetMidStreamBehavior('steer')}
+                    disabled={isAdminManaged}
+                  >
                     <Zap className="h-3.5 w-3.5" />
                     <span className="flex-1">{t("settings.ai.midStream.steer")}</span>
                     {currentBehavior === 'steer' && <Check className="h-3.5 w-3.5" />}
                   </StyledDropdownMenuItem>
-                  <StyledDropdownMenuItem onClick={() => onSetMidStreamBehavior('queue')}>
+                  <StyledDropdownMenuItem
+                    onClick={() => onSetMidStreamBehavior('queue')}
+                    disabled={isAdminManaged}
+                  >
                     <Clock className="h-3.5 w-3.5" />
                     <span className="flex-1">{t("settings.ai.midStream.queue")}</span>
                     {currentBehavior === 'queue' && <Check className="h-3.5 w-3.5" />}
@@ -359,7 +375,7 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
           <StyledDropdownMenuItem
             onClick={onDelete}
             variant="destructive"
-            disabled={isLastConnection}
+            disabled={isLastConnection || isAdminManaged}
           >
             <Trash2 className="h-3.5 w-3.5" />
             <span>{t("common.delete")}</span>
@@ -696,6 +712,10 @@ export default function AiSettingsPage() {
     () => new Set(llmConnections.map(c => c.slug)),
     [llmConnections],
   )
+  const isAdminMode = useMemo(
+    () => llmConnections.some(connection => connection.managedBy === 'admin'),
+    [llmConnections],
+  )
 
   // OnboardingWizard hook for editing API connection
   const apiSetupOnboarding = useOnboarding({
@@ -745,6 +765,7 @@ export default function AiSettingsPage() {
 
   // Connection action handlers
   const handleRenameClick = useCallback((connection: LlmConnectionWithStatus) => {
+    if (connection.managedBy === 'admin') return
     setRenamingConnection({ slug: connection.slug, name: connection.name })
     setRenameValue(connection.name)
     // Defer dialog open to next frame to let dropdown fully unmount first
@@ -780,6 +801,7 @@ export default function AiSettingsPage() {
   }, [renamingConnection, renameValue, refreshLlmConnections])
 
   const handleReauthenticateConnection = useCallback((connection: LlmConnectionWithStatus) => {
+    if (connection.managedBy === 'admin') return
     openApiSetup(connection.slug)
     apiSetupOnboarding.reset()
 
@@ -792,6 +814,7 @@ export default function AiSettingsPage() {
   }, [apiSetupOnboarding, openApiSetup])
 
   const handleEditConnection = useCallback(async (connection: LlmConnectionWithStatus) => {
+    if (connection.managedBy === 'admin') return
     // Fetch stored API key (best-effort — if IPC not available yet, skip pre-fill)
     let apiKey: string | undefined
     try {
@@ -830,6 +853,8 @@ export default function AiSettingsPage() {
 
   const handleDeleteConnection = useCallback(async (slug: string) => {
     if (!window.electronAPI) return
+    const connection = llmConnections.find(item => item.slug === slug)
+    if (connection?.managedBy === 'admin') return
     try {
       const result = await window.electronAPI.deleteLlmConnection(slug)
       if (result.success) {
@@ -840,7 +865,7 @@ export default function AiSettingsPage() {
     } catch (error) {
       console.error('Failed to delete connection:', error)
     }
-  }, [refreshLlmConnections])
+  }, [llmConnections, refreshLlmConnections])
 
   const handleValidateConnection = useCallback(async (slug: string) => {
     if (!window.electronAPI) return
@@ -899,6 +924,7 @@ export default function AiSettingsPage() {
     behavior: MidStreamBehavior,
   ) => {
     if (!window.electronAPI) return
+    if (connection.managedBy === 'admin') return
     if (resolveMidStreamBehavior(connection) === behavior) return
     try {
       const updated = { ...connection, midStreamBehavior: behavior }
@@ -1107,7 +1133,11 @@ export default function AiSettingsPage() {
                 <div className="pt-0">
                   <button
                     onClick={() => openApiSetup()}
-                    className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
+                    disabled={isAdminMode}
+                    className={cn(
+                      "inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors",
+                      isAdminMode && "opacity-50 cursor-not-allowed hover:bg-background",
+                    )}
                   >
                     {t("settings.ai.addConnection")}
                   </button>

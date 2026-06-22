@@ -20,6 +20,7 @@ export type CredentialType =
   // Global credentials (legacy, kept for backwards compatibility)
   | 'anthropic_api_key'  // Anthropic API key for Claude
   | 'claude_oauth'       // Claude OAuth token (Max subscription)
+  | 'admin_token'        // Admin server access/refresh tokens
   // LLM connection credentials (keyed by connection slug)
   | 'llm_api_key'        // API key for LLM connection
   | 'llm_oauth'          // OAuth token for LLM connection
@@ -36,9 +37,10 @@ export type CredentialType =
   | 'messaging_bearer';  // Platform tokens (e.g., Telegram bot token)
 
 /** Valid credential types for validation */
-const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
+export const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
   'anthropic_api_key',
   'claude_oauth',
+  'admin_token',
   'llm_api_key',
   'llm_oauth',
   'llm_iam',
@@ -104,6 +106,15 @@ export interface StoredCredential {
    * The `value` field stores access_token, this field stores id_token.
    */
   idToken?: string;
+
+  // --- Admin credentials (for admin_token type) ---
+
+  /** Admin user ID associated with the token */
+  userId?: string;
+  /** Admin username associated with the token */
+  username?: string;
+  /** Admin display name associated with the token */
+  displayName?: string;
 
   // --- AWS IAM credentials (for llm_iam type) ---
 
