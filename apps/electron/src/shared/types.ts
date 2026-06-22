@@ -212,6 +212,32 @@ import type {
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
 } from '@polo-ai/shared/protocol'
+import type { AdminUser } from '@polo-ai/shared/admin/types'
+
+export interface AdminRpcErrorPayload {
+  errorCode?: string
+  message?: string
+  status?: number
+}
+
+export type AdminLoginResult =
+  | { success: true; user: AdminUser }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type AdminValidateResult =
+  | { loggedIn: true; user: AdminUser; configVersion: string }
+  | ({ loggedIn: false } & AdminRpcErrorPayload)
+
+export interface AdminStatusResult {
+  adminUrl?: string
+  loggedIn: boolean
+  username: string | null
+  displayName: string | null
+}
+
+export type AdminSyncConnectionsResult =
+  | { success: true; configVersion: string; connectionCount: number; defaultConnection: string | null }
+  | ({ success: false } & AdminRpcErrorPayload)
 
 export interface ElectronAPI {
   // Session management
@@ -381,6 +407,14 @@ export interface ElectronAPI {
   showLogoutConfirmation(): Promise<boolean>
   showDeleteSessionConfirmation(name: string): Promise<boolean>
   logout(): Promise<void>
+
+  // Admin auth
+  adminLogin(username: string, password: string): Promise<AdminLoginResult>
+  adminValidate(): Promise<AdminValidateResult>
+  adminLogout(): Promise<{ success: boolean }>
+  adminGetStatus(): Promise<AdminStatusResult>
+  adminSyncConnections(): Promise<AdminSyncConnectionsResult>
+  onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>

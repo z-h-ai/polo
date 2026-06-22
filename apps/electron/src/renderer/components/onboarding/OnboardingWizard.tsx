@@ -6,10 +6,14 @@ import { CredentialsStep, type CredentialStatus } from "./CredentialsStep"
 import { LocalModelStep, type LocalModelSubmitData } from "./LocalModelStep"
 import { CompletionStep } from "./CompletionStep"
 import { GitBashWarning, type GitBashStatus } from "./GitBashWarning"
+import { AdminLoginStep } from "./AdminLoginStep"
+import { AdminKickedStep } from "./AdminKickedStep"
 import type { ApiKeySubmitData } from "../apisetup"
 import type { CustomEndpointApi } from '@config/llm-connections'
 
 export type OnboardingStep =
+  | 'admin-login'
+  | 'admin-kicked'
   | 'welcome'
   | 'git-bash'
   | 'provider-select'
@@ -43,6 +47,8 @@ interface OnboardingWizardProps {
   onSubmitCredential: (data: ApiKeySubmitData) => void
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onFinish: () => void
+  onAdminLogin?: (username: string, password: string) => void
+  onAdminRelogin?: () => void
 
   // Claude OAuth (two-step flow)
   isWaitingForCode?: boolean
@@ -96,6 +102,8 @@ export function OnboardingWizard({
   onSubmitCredential,
   onStartOAuth,
   onFinish,
+  onAdminLogin,
+  onAdminRelogin,
   // Two-step OAuth flow
   isWaitingForCode,
   onSubmitAuthCode,
@@ -118,6 +126,18 @@ export function OnboardingWizard({
 }: OnboardingWizardProps) {
   const renderStep = () => {
     switch (state.step) {
+      case 'admin-login':
+        return (
+          <AdminLoginStep
+            errorMessage={state.errorMessage}
+            isLoading={state.loginStatus === 'waiting'}
+            onSubmit={onAdminLogin!}
+          />
+        )
+
+      case 'admin-kicked':
+        return <AdminKickedStep onRelogin={onAdminRelogin!} />
+
       case 'welcome':
         return (
           <WelcomeStep

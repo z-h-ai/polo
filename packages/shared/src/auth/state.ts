@@ -13,8 +13,8 @@
 
 import { getCredentialManager } from '../credentials/index.ts';
 import {
-  loadStoredConfig,
   getActiveWorkspace,
+  getAdminUrl,
   getDefaultLlmConnection,
   getLlmConnection,
   type AuthType,
@@ -76,6 +76,16 @@ export interface AuthState {
     hasWorkspace: boolean;
     active: Workspace | null;
   };
+
+  /** Admin-managed configuration state */
+  admin: {
+    /** True when an Admin server URL is configured */
+    configured: boolean;
+    /** True when Admin tokens are present */
+    loggedIn: boolean;
+    /** Username associated with the Admin session */
+    username?: string;
+  };
 }
 
 export interface SetupNeeds {
@@ -85,6 +95,8 @@ export interface SetupNeeds {
   needsCredentials: boolean;
   /** Everything complete → go straight to App */
   isFullyConfigured: boolean;
+  /** Admin server is configured but no Admin session exists */
+  needsAdminLogin: boolean;
   /** User has legacy tokens that need migration */
   needsMigration?: MigrationInfo;
 }
@@ -263,9 +275,10 @@ export async function getValidClaudeOAuthToken(connectionSlug: string): Promise<
  * Falls back to legacy global credentials for backwards compatibility.
  */
 export async function getAuthState(): Promise<AuthState> {
-  const config = loadStoredConfig();
   const manager = getCredentialManager();
   const activeWorkspace = getActiveWorkspace();
+  const adminUrl = getAdminUrl();
+  const adminTokens = await manager.getAdminTokens();
 
   // Get the default LLM connection to determine auth type
   const defaultConnectionSlug = getDefaultLlmConnection();
@@ -323,6 +336,11 @@ export async function getAuthState(): Promise<AuthState> {
       hasWorkspace: !!activeWorkspace,
       active: activeWorkspace,
     },
+    admin: {
+      configured: !!adminUrl,
+      loggedIn: !!adminTokens,
+      ...(adminTokens?.username ? { username: adminTokens.username } : {}),
+    },
   };
 }
 
@@ -330,6 +348,18 @@ export async function getAuthState(): Promise<AuthState> {
  * Derive what setup steps are needed based on current auth state
  */
 export function getSetupNeeds(state: AuthState, setupDeferred?: boolean): SetupNeeds {
+  if (state.admin.configured) {
+    const needsAdminLogin = !state.admin.loggedIn;
+
+    return {
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin,
+      isFullyConfigured: !needsAdminLogin,
+      needsMigration: state.billing.migrationRequired,
+    };
+  }
+
   // Need billing config if no billing type is set
   const needsBillingConfig = state.billing.type === null;
 
@@ -339,6 +369,7 @@ export function getSetupNeeds(state: AuthState, setupDeferred?: boolean): SetupN
   return {
     needsBillingConfig,
     needsCredentials,
+    needsAdminLogin: false,
     // Fully configured if setup is complete OR user chose "Setup later"
     isFullyConfigured: (!needsBillingConfig && !needsCredentials) || !!setupDeferred,
     needsMigration: state.billing.migrationRequired,

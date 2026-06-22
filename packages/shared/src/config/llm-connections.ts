@@ -195,6 +195,12 @@ export interface LlmConnection {
 
   /** Timestamp when connection was last used */
   lastUsedAt?: number;
+
+  /** Connection ownership; admin-managed connections are synced from the admin server. */
+  managedBy?: 'admin';
+
+  /** Admin config version that last synced this connection. */
+  adminConfigVersion?: string;
 }
 
 /**

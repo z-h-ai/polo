@@ -3,7 +3,7 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
@@ -103,7 +103,7 @@ import { registerPiModelResolver } from '@polo-ai/shared/config'
 import { getPiModelsForAuthProvider, getAllPiModels } from '@polo-ai/shared/config'
 import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeCount } from './notifications'
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
-import type { EventSink } from '@polo-ai/server-core/transport'
+import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
 
 // Initialize electron-log for renderer process support
@@ -192,6 +192,9 @@ let browserPaneManager: BrowserPaneManager | null = null
 let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
+let adminResumeValidationInFlight: Promise<void> | null = null
+
+const ADMIN_REAUTH_REQUIRED_CHANNEL = 'admin:reauthRequired'
 
 // Messaging gateway: the bootstrap handle is created once sessionManager is
 // available (inside createHandlerDeps) and populated with the WS publisher
@@ -199,6 +202,49 @@ let moduleClientResolver: ((webContentsId: number) => string | undefined) | null
 // through createMessagingBootstrap — do not construct MessagingGatewayRegistry
 // directly.
 let messagingHandle: MessagingBootstrapHandle | null = null
+
+async function validateAdminSessionAfterResume(args: {
+  protocol: 'ws' | 'wss'
+  port: number
+  token: string
+  tlsRejectUnauthorized: boolean
+}): Promise<void> {
+  if (adminResumeValidationInFlight) {
+    return adminResumeValidationInFlight
+  }
+
+  adminResumeValidationInFlight = (async () => {
+    const client = new WsRpcClient(`${args.protocol}://127.0.0.1:${args.port}`, {
+      token: args.token,
+      autoReconnect: false,
+      mode: 'local',
+      tlsRejectUnauthorized: args.tlsRejectUnauthorized,
+      requestTimeout: 15_000,
+      connectTimeout: 10_000,
+    })
+
+    try {
+      const validation = await client.invoke(RPC_CHANNELS.admin.VALIDATE)
+      if (!validation?.loggedIn) {
+        const authState = await client.invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE).catch(() => null)
+        if (authState?.setupNeeds?.needsAdminLogin) {
+          moduleSink?.(ADMIN_REAUTH_REQUIRED_CHANNEL, { to: 'all' }, validation ?? { loggedIn: false })
+        }
+      }
+    } catch (error) {
+      mainLog.warn('[Admin] resume validation failed:', error instanceof Error ? error.message : String(error))
+      const authState = await client.invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE).catch(() => null)
+      if (authState?.setupNeeds?.needsAdminLogin) {
+        moduleSink?.(ADMIN_REAUTH_REQUIRED_CHANNEL, { to: 'all' }, { loggedIn: false })
+      }
+    } finally {
+      client.destroy()
+      adminResumeValidationInFlight = null
+    }
+  })()
+
+  return adminResumeValidationInFlight
+}
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -711,6 +757,15 @@ app.whenReady().then(async () => {
       oauthFlowStore = instance.oauthFlowStore
       moduleSink = instance.wsServer.push.bind(instance.wsServer)
       moduleClientResolver = resolveClientId
+
+      powerMonitor.on('resume', () => {
+        void validateAdminSessionAfterResume({
+          protocol: instance.protocol,
+          port: instance.port,
+          token: instance.token,
+          tlsRejectUnauthorized: !tls,
+        })
+      })
 
       // -----------------------------------------------------------------------
       // Messaging Gateway — attach the WS publisher, init local workspaces,
