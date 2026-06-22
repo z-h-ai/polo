@@ -6,7 +6,7 @@ import {
   Check,
   ChevronDown,
   Image as ImageIcon,
-  Lock,
+
 } from 'lucide-react'
 import { Spinner } from '@polo-ai/ui'
 import {
@@ -206,7 +206,6 @@ export function CompactModelSelector({
                 <ConnectionIcon connection={effectiveConnectionDetails} size={14} />
               )}
               <span className="truncate min-w-0">{currentModelDisplayName}</span>
-              <Lock className="h-3 w-3 opacity-45 shrink-0" />
               {pickerMode !== 'locked-single' && (
                 <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
               )}
@@ -310,10 +309,6 @@ export function CompactModelSelector({
                   )
                 })
               })}
-              <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground select-none">
-                <Lock className="h-3 w-3" />
-                <span>{t('chat.modelPicker.adminConfigured')}</span>
-              </div>
             </>
           ) : (
             // 'flat' — list models of the active connection
