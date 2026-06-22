@@ -566,6 +566,8 @@
   "onboarding.adminLogin.subtitle": "请输入你的账号和密码",
   "onboarding.adminLogin.title": "Polo AI",
   "onboarding.adminLogin.username": "用户名",
+  "onboarding.adminLogin.usernamePlaceholder": "请输入用户名",
+  "onboarding.adminLogin.passwordPlaceholder": "请输入密码",
   "onboarding.apiSetup.anthropicApiKey": "Anthropic API 密钥",
   "onboarding.apiSetup.anthropicApiKeyDesc": "通过 Anthropic、OpenRouter 或兼容 API 按量付费。",
   "onboarding.apiSetup.apiKey": "API 密钥",

@@ -566,6 +566,8 @@
   "onboarding.adminLogin.subtitle": "Introduce tu usuario y contraseña",
   "onboarding.adminLogin.title": "Polo AI",
   "onboarding.adminLogin.username": "Usuario",
+  "onboarding.adminLogin.usernamePlaceholder": "Introduce el usuario",
+  "onboarding.adminLogin.passwordPlaceholder": "Introduce la contraseña",
   "onboarding.apiSetup.anthropicApiKey": "Clave API de Anthropic",
   "onboarding.apiSetup.anthropicApiKeyDesc": "Pago por uso a través de Anthropic, OpenRouter o APIs compatibles.",
   "onboarding.apiSetup.apiKey": "Clave API",

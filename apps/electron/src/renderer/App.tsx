@@ -1550,7 +1550,7 @@ export default function App() {
         ]
       }))
     }
-  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, sessionOptions, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
+  }, [chatAccessStatus, checkAdminAccountDisabledBeforeSend, llmConnections.length, llmConnectionsLoaded, updateSessionById, skills, sources, windowWorkspaceId, windowWorkspaceSlug])
 
   /**
    * Unified handler for all session option changes.
