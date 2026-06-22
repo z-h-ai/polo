@@ -14,6 +14,7 @@ import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/cr
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
@@ -243,7 +244,7 @@ async function syncAdminConnections(args: {
   }
 
   for (const connection of response.connections) {
-    await upsertAdminConnection(args.manager, connection, response.configVersion)
+    await upsertAdminConnection(args.manager, connection, response.configVersion, accessToken)
   }
 
   if (response.defaultConnection && getLlmConnections().some(connection => connection.slug === response.defaultConnection)) {
@@ -263,8 +264,9 @@ async function upsertAdminConnection(
   manager: CredentialManager,
   connection: AdminLlmConnection,
   configVersion: string,
+  accessToken: string,
 ): Promise<void> {
-  const apiKey = readApiKey(connection)
+  const apiKey = readApiKey(connection, accessToken)
   const { apiKey: _apiKey, key: _key, credentials: _credentials, ...configConnection } = connection
   const adminConnection: LlmConnection = {
     ...configConnection,
@@ -287,13 +289,25 @@ async function upsertAdminConnection(
   }
 }
 
-function readApiKey(connection: AdminLlmConnection): string | null {
+export function readApiKey(connection: AdminLlmConnection, accessToken: string): string | null {
   const value =
     connection.apiKey ??
     connection.key ??
     connection.credentials?.apiKey ??
     connection.credentials?.key
+  if (isTransitEncryptedApiKey(value)) {
+    return decryptTransitApiKey(value, deriveTransitKey(accessToken))
+  }
   return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function isTransitEncryptedApiKey(value: unknown): value is { alg: string; iv: string; ciphertext: string; tag: string } {
+  if (!value || typeof value !== 'object') return false
+  const encrypted = value as { alg?: unknown; iv?: unknown; ciphertext?: unknown; tag?: unknown }
+  return encrypted.alg === 'A256GCM' &&
+    typeof encrypted.iv === 'string' &&
+    typeof encrypted.ciphertext === 'string' &&
+    typeof encrypted.tag === 'string'
 }
 
 function scrubCredentialFields(connection: LlmConnection): void {

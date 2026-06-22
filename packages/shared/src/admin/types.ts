@@ -28,12 +28,19 @@ export interface AdminValidateResponse {
 }
 
 export interface AdminLlmConnection extends LlmConnection {
-  apiKey?: string;
+  apiKey?: string | AdminTransitEncryptedApiKey;
   key?: string;
   credentials?: {
-    apiKey?: string;
+    apiKey?: string | AdminTransitEncryptedApiKey;
     key?: string;
   };
+}
+
+export interface AdminTransitEncryptedApiKey {
+  alg: string;
+  iv: string;
+  ciphertext: string;
+  tag: string;
 }
 
 export interface AdminLlmConnectionsResponse {
