@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
+import { createCipheriv, hkdfSync } from 'node:crypto'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -20,9 +22,20 @@ type TestConnection = {
   createdAt: number
   managedBy?: 'admin'
   adminConfigVersion?: string
-  apiKey?: string
+  apiKey?: string | TestEncryptedApiKey
+  credentials?: {
+    apiKey?: string | TestEncryptedApiKey
+    key?: string
+  }
   models?: string[]
   defaultModel?: string
+}
+
+type TestEncryptedApiKey = {
+  alg: 'A256GCM'
+  iv: string
+  ciphertext: string
+  tag: string
 }
 
 class TestAdminError extends Error {
@@ -179,7 +192,7 @@ mock.module('@polo-ai/shared/credentials', () => ({
   getCredentialManager: () => mockCredentialManager,
 }))
 
-const { registerAdminHandlers } = await import('./admin')
+const { readApiKey, registerAdminHandlers } = await import('./admin')
 
 function createHarness() {
   const handlers = new Map<string, HandlerFn>()
@@ -250,6 +263,28 @@ function adminConnection(overrides: Partial<TestConnection> = {}): TestConnectio
   }
 }
 
+function encryptedApiKey(apiKey: string, accessToken = 'access-token'): TestEncryptedApiKey {
+  const transitKey = Buffer.from(
+    hkdfSync(
+      'sha256',
+      Buffer.from(accessToken, 'utf8'),
+      Buffer.from('polo-llm-key-encryption', 'utf8'),
+      Buffer.from('aes-256-gcm', 'utf8'),
+      32,
+    ),
+  )
+  const iv = Buffer.from('00112233445566778899aabb', 'hex')
+  const cipher = createCipheriv('aes-256-gcm', transitKey, iv)
+  const ciphertext = Buffer.concat([cipher.update(apiKey, 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return {
+    alg: 'A256GCM',
+    iv: iv.toString('hex'),
+    ciphertext: ciphertext.toString('hex'),
+    tag: tag.toString('hex'),
+  }
+}
+
 beforeEach(() => {
   adminClientCalls.length = 0
   configState.adminUrl = 'https://admin.example.com'
@@ -297,6 +332,14 @@ beforeEach(() => {
 })
 
 describe('registerAdminHandlers', () => {
+  it('decrypts transit-encrypted admin api keys', () => {
+    const apiKey = readApiKey(adminConnection({
+      apiKey: encryptedApiKey('sk-transit-secret', 'access-token'),
+    }) as AdminLlmConnection, 'access-token')
+
+    expect(apiKey).toBe('sk-transit-secret')
+  })
+
   it('logs in, stores admin tokens, and syncs admin-managed connections', async () => {
     const { login } = createHarness()
 
@@ -329,6 +372,25 @@ describe('registerAdminHandlers', () => {
     expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-admin')
     expect(configState.defaultConnection).toBe('admin-anthropic')
     expect(configState.adminConfigVersion).toBe('config-v1')
+  })
+
+  it('syncs transit-encrypted admin api keys into credential storage as plaintext', async () => {
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [
+        adminConnection({
+          apiKey: encryptedApiKey('sk-encrypted-admin', 'access-token'),
+        }),
+      ],
+      defaultConnection: 'admin-anthropic',
+    })
+    const { login } = createHarness()
+
+    const result = await login({ clientId: 'client-1', workspaceId: null, webContentsId: null }, 'admin', 'secret')
+
+    expect(result).toMatchObject({ success: true })
+    expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-encrypted-admin')
+    expect(Object.prototype.hasOwnProperty.call(configState.connections[0], 'apiKey')).toBe(false)
   })
 
   it('returns an admin error payload when login fails', async () => {
