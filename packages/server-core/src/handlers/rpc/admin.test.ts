@@ -22,6 +22,8 @@ type TestConnection = {
   createdAt: number
   managedBy?: 'admin'
   adminConfigVersion?: string
+  baseUrl?: string
+  endpoint?: string
   apiKey?: string | TestEncryptedApiKey
   credentials?: {
     apiKey?: string | TestEncryptedApiKey
@@ -391,6 +393,57 @@ describe('registerAdminHandlers', () => {
     expect(result).toMatchObject({ success: true })
     expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-encrypted-admin')
     expect(Object.prototype.hasOwnProperty.call(configState.connections[0], 'apiKey')).toBe(false)
+  })
+
+  it('maps admin endpoint to llm connection baseUrl during sync', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [
+        adminConnection({
+          slug: 'custom-ollama',
+          name: 'Custom Ollama',
+          providerType: 'pi_compat',
+          authType: 'api_key_with_endpoint',
+          endpoint: 'http://localhost:11434',
+          models: ['llama3.2'],
+          defaultModel: 'llama3.2',
+        }),
+        adminConnection({
+          slug: 'admin-anthropic',
+          name: 'Admin Anthropic',
+          authType: 'api_key',
+        }),
+      ],
+      defaultConnection: 'custom-ollama',
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({
+      success: true,
+      configVersion: 'config-v1',
+      connectionCount: 2,
+    })
+    const customOllama = configState.connections.find(connection => connection.slug === 'custom-ollama')
+    expect(customOllama).toMatchObject({
+      authType: 'api_key_with_endpoint',
+      baseUrl: 'http://localhost:11434',
+      managedBy: 'admin',
+      adminConfigVersion: 'config-v1',
+    })
+    expect(Object.prototype.hasOwnProperty.call(customOllama, 'endpoint')).toBe(false)
+    const adminAnthropic = configState.connections.find(connection => connection.slug === 'admin-anthropic')
+    expect(adminAnthropic?.baseUrl).toBeUndefined()
+    expect(Object.prototype.hasOwnProperty.call(adminAnthropic, 'endpoint')).toBe(false)
   })
 
   it('returns an admin error payload when login fails', async () => {
