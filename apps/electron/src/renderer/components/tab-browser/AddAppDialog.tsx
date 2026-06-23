@@ -17,6 +17,8 @@ import {
   type AppDefinition,
 } from '../../../shared/tab-browser-types'
 
+const MAX_ICON_BYTES = 256 * 1024
+
 interface AddAppDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -120,6 +122,11 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
               onChange={(event) => {
                 const file = event.target.files?.[0]
                 if (!file) return
+                if (file.size > MAX_ICON_BYTES) {
+                  event.target.value = ''
+                  toast.error('Icon file must be under 256 KB.')
+                  return
+                }
                 void readFileAsDataUrl(file).then(setIconUrl).catch(() => {
                   toast.error('Could not read icon file.')
                 })

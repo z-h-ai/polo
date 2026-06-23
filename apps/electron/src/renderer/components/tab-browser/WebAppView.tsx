@@ -89,8 +89,7 @@ export function WebAppView({ tab }: WebAppViewProps) {
         ref={webviewRef as RefObject<any>}
         src={url}
         partition="persist:browser-pane"
-        allowpopups={false}
-        webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=yes"
+        webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
         className="h-full w-full"
       />
     </div>

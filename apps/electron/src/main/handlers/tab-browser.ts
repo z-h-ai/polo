@@ -2,6 +2,11 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { AppDefinition } from '../../shared/tab-browser-types'
 
+export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.tabBrowser.GET_APPS,
+  RPC_CHANNELS.tabBrowser.SAVE_APPS,
+] as const
+
 function normalizeApps(apps: unknown): AppDefinition[] {
   if (!Array.isArray(apps)) return []
 
