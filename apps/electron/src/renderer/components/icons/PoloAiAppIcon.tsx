@@ -6,7 +6,7 @@ interface PoloAiAppIconProps {
 }
 
 /**
- * PoloAiAppIcon - Displays the Polo AI logo (colorful "C" icon)
+ * PoloAiAppIcon - Displays the Polo AI logo
  */
 export function PoloAiAppIcon({ className, size = 64 }: PoloAiAppIconProps) {
   return (
