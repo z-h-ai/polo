@@ -48,23 +48,30 @@ export interface SessionViewerProps {
   sessionFolderPath?: string
 }
 
-/**
- * PoloAiLogo - The Polo AI "C" logo for branding
- */
 function PoloAiLogo({ className }: { className?: string }) {
   return (
     <svg
       className={className}
-      viewBox="0 0 24 24"
+      viewBox="0 0 100 100"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <g transform="translate(3.4502, 3)" fill="currentColor">
-        <path
-          d="M3.17890888,3.6 L3.17890888,0 L16,0 L16,3.6 L3.17890888,3.6 Z M9.642,7.2 L9.64218223,10.8 L0,10.8 L0,3.6 L16,3.6 L16,7.2 L9.642,7.2 Z M3.17890888,18 L3.178,14.4 L0,14.4 L0,10.8 L16,10.8 L16,18 L3.17890888,18 Z"
-          fillRule="nonzero"
-        />
-      </g>
+      <path
+        d="M 22 85 V 10 H 44 A 19 19 0 0 1 44 48 H 34"
+        stroke="currentColor"
+        strokeWidth="8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="42" cy="76" r="9" fill="currentColor" />
+      <path
+        d="M 60 65 V 85 H 68"
+        stroke="currentColor"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="84" cy="76" r="9" fill="currentColor" />
     </svg>
   )
 }
@@ -227,7 +234,7 @@ export function SessionViewer({
 
             {/* Bottom branding */}
             <div className={CHAT_CLASSES.brandingContainer}>
-              <PoloAiLogo className="w-8 h-8 text-[#9570BE]/40" />
+              <PoloAiLogo className="w-8 h-8 text-[#5e17eb]/40" />
             </div>
             </div>
           </div>

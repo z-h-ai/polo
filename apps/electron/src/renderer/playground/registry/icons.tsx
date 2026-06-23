@@ -29,7 +29,7 @@ export const iconComponents: ComponentEntry[] = [
     id: 'polo-ai-symbol',
     name: 'PoloAiSymbol',
     category: 'Icons',
-    description: 'Polo AI "E" pixel art symbol icon (brand color: #9570BE)',
+    description: 'Polo AI wordmark symbol icon',
     component: PoloAiSymbol,
     props: [
       {
