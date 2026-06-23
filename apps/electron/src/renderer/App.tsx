@@ -73,6 +73,8 @@ import { getFileManagerName } from '@/lib/platform'
 import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
+import { TabShellProvider } from '@/context/TabShellContext'
+import { TabShell } from '@/components/tab-browser/TabShell'
 
 type AppState = 'loading' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
 
@@ -2204,18 +2206,6 @@ export default function App() {
         <DismissibleLayerProvider>
         <ModalProvider>
         <TooltipProvider delayDuration={0}>
-        <NavigationProvider
-          workspaceId={windowWorkspaceId}
-          workspaceSlug={windowWorkspaceSlug}
-          onSwitchWorkspaceBySlug={handleSwitchWorkspaceBySlug}
-          onCreateSession={handleCreateSession}
-          onInputChange={handleInputChange}
-          getDraft={getDraft}
-          onAutoDeleteEmptySession={handleAutoDeleteEmptySession}
-          isReady={appState === 'ready'}
-          isSessionsReady={sessionsLoaded}
-          remoteWorkspaceId={windowRemoteWorkspaceId}
-        >
           {/* Handle window close requests (X button, Cmd+W) - close modal first if open */}
           <WindowCloseHandler />
 
@@ -2227,38 +2217,53 @@ export default function App() {
             />
           )}
 
-          {/* Main UI - always rendered, splash fades away to reveal it */}
-          <div
-            className="h-full flex flex-col text-foreground"
-            style={{ paddingTop: 'var(--topbar-height)' }}
-          >
-            {showTransportConnectionBanner && connectionState && (
-              <TransportConnectionBanner
-                state={connectionState}
-                onRetry={handleReconnectTransport}
-              />
-            )}
-            <div className="flex-1 min-h-0">
-              {sessionLoadError ? (
-                <SessionLoadErrorScreen
-                  message={sessionLoadError}
-                  onRetry={() => { void loadSessionsFromServer() }}
-                />
-              ) : (
-                <AppShell
-                  contextValue={appShellContextValue}
-                  defaultLayout={[20, 32, 48]}
-                  menuNewChatTrigger={menuNewChatTrigger}
-                  isFocusedMode={isFocusedMode}
-                />
+          <TabShellProvider workspaceId={windowWorkspaceId}>
+            <TabShell
+              renderPolo={() => (
+                <NavigationProvider
+                  workspaceId={windowWorkspaceId}
+                  workspaceSlug={windowWorkspaceSlug}
+                  onSwitchWorkspaceBySlug={handleSwitchWorkspaceBySlug}
+                  onCreateSession={handleCreateSession}
+                  onInputChange={handleInputChange}
+                  getDraft={getDraft}
+                  onAutoDeleteEmptySession={handleAutoDeleteEmptySession}
+                  isReady={appState === 'ready'}
+                  isSessionsReady={sessionsLoaded}
+                  remoteWorkspaceId={windowRemoteWorkspaceId}
+                >
+                  <div className="flex h-full min-h-0 flex-col text-foreground">
+                    {showTransportConnectionBanner && connectionState && (
+                      <TransportConnectionBanner
+                        state={connectionState}
+                        onRetry={handleReconnectTransport}
+                      />
+                    )}
+                    <div className="flex-1 min-h-0">
+                      {sessionLoadError ? (
+                        <SessionLoadErrorScreen
+                          message={sessionLoadError}
+                          onRetry={() => { void loadSessionsFromServer() }}
+                        />
+                      ) : (
+                        <AppShell
+                          contextValue={appShellContextValue}
+                          defaultLayout={[20, 32, 48]}
+                          menuNewChatTrigger={menuNewChatTrigger}
+                          isFocusedMode={isFocusedMode}
+                        />
+                      )}
+                    </div>
+                    <ResetConfirmationDialog
+                      open={showResetDialog}
+                      onConfirm={executeReset}
+                      onCancel={() => setShowResetDialog(false)}
+                    />
+                  </div>
+                </NavigationProvider>
               )}
-            </div>
-            <ResetConfirmationDialog
-              open={showResetDialog}
-              onConfirm={executeReset}
-              onCancel={() => setShowResetDialog(false)}
             />
-          </div>
+          </TabShellProvider>
 
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
@@ -2270,7 +2275,6 @@ export default function App() {
               isDark={isDark}
             />
           )}
-        </NavigationProvider>
         </TooltipProvider>
         </ModalProvider>
         </DismissibleLayerProvider>

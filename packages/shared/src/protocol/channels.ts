@@ -155,6 +155,10 @@ export const RPC_CHANNELS = {
   deeplink: {
     NAVIGATE: 'deeplink:navigate',
   },
+  tabBrowser: {
+    GET_APPS: 'tab-browser:getApps',
+    SAVE_APPS: 'tab-browser:saveApps',
+  },
   auth: {
     LOGOUT: 'auth:logout',
     SHOW_LOGOUT_CONFIRMATION: 'auth:showLogoutConfirmation',

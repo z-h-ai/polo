@@ -1455,12 +1455,20 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 }
 
 /* ==========================================================================
-   TopBar height — bumps to 56px on narrow viewports so it matches the larger
-   touch targets and feels less cramped on mobile. The TopBar uses position:
-   fixed so the App content area reads the same variable for its padding-top.
+   Tab browser and TopBar heights.
    ========================================================================== */
 :root {
+  --tabbar-height: 36px;
   --topbar-height: 48px;
+  --content-top-offset: var(--tabbar-height);
+}
+
+:root[data-active-tab="polo"] {
+  --content-top-offset: calc(var(--tabbar-height) + var(--topbar-height));
+}
+
+:root[data-active-tab="webapp"] {
+  --content-top-offset: calc(var(--tabbar-height) + 36px);
 }
 @media (max-width: 768px) {
   :root {

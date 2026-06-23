@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
+import { BrowserWindow, shell, nativeTheme, Menu, app, session } from 'electron'
 import { windowLog } from './logger'
 import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
@@ -8,6 +8,7 @@ import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
+import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -62,6 +63,7 @@ export class WindowManager {
   private keyboardCloseIntents: Set<number> = new Set()  // webContents.id flagged by Cmd/Ctrl+W before close
   private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
   private isAppQuitting = false  // Skip layered close interception during app quit
+  private webviewSecurityInitialized = false
 
   /**
    * Set the event sink and client resolver for pushing events via the RPC server
@@ -159,6 +161,74 @@ export class WindowManager {
     })
   }
 
+  private setupWebviewSecurity(): void {
+    if (this.webviewSecurityInitialized) return
+    this.webviewSecurityInitialized = true
+
+    const ses = session.fromPartition(BROWSER_PANE_SESSION_PARTITION)
+    const allow = new Set([
+      'fullscreen',
+      'pointerLock',
+      'window-management',
+      'notifications',
+      'geolocation',
+      'media',
+      'clipboard-read',
+      'clipboard-sanitized-write',
+      'idle-detection',
+    ])
+
+    if (typeof ses.setPermissionCheckHandler === 'function') {
+      ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+        const allowed = allow.has(permission)
+        if (!allowed) {
+          windowLog.warn(`[webview-security] permission check denied: ${permission} origin=${requestingOrigin}`)
+        }
+        return allowed
+      })
+    }
+
+    if (typeof ses.setPermissionRequestHandler === 'function') {
+      ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+        const allowed = allow.has(permission)
+        if (!allowed) {
+          const requestingOrigin = (details as { requestingOrigin?: string } | undefined)?.requestingOrigin ?? 'unknown'
+          windowLog.warn(`[webview-security] permission request denied: ${permission} origin=${requestingOrigin}`)
+        }
+        callback(allowed)
+      })
+    }
+
+    app.on('web-contents-created', (_event, contents) => {
+      if (contents.getType() !== 'webview') return
+
+      contents.setWindowOpenHandler((details) => {
+        const classification = classifyExternalUrl(details.url)
+        if (classification.kind === 'dangerous' || classification.kind === 'internal-deeplink') {
+          windowLog.warn(`[webview-security] blocked popup: ${formatBlockedUrlError(classification)} url=${details.url}`)
+          return { action: 'deny' }
+        }
+
+        void shell.openExternal(details.url).catch((error) => {
+          windowLog.warn(`[webview-security] failed to open popup externally: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        return { action: 'deny' }
+      })
+
+      contents.on('will-navigate', (event, url) => {
+        try {
+          const parsed = new URL(url)
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return
+        } catch {
+          // Invalid URLs fall through to blocking.
+        }
+
+        event.preventDefault()
+        windowLog.warn(`[webview-security] blocked navigation url=${url}`)
+      })
+    })
+  }
+
   /**
    * Apply the window-title policy across all managed windows:
    *   1 window  → app name ("Polo AI") on the lone window
@@ -193,6 +263,8 @@ export class WindowManager {
    * @param options - Window creation options
    */
   createWindow(options: CreateWindowOptions): BrowserWindow {
+    this.setupWebviewSecurity()
+
     const { workspaceId, focused = false, initialDeepLink, restoreUrl } = options
 
     // Load platform-specific app icon
@@ -258,7 +330,7 @@ export class WindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
-        webviewTag: false // Browser integration uses WebContentsView, not <webview>
+        webviewTag: true
       }
     })
 

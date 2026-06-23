@@ -96,6 +96,16 @@ const LlmConnectionSchema = z.object({
   // Allow additional fields (codexPath, awsRegion, gcpProjectId, etc.)
 }).passthrough();
 
+const TabBrowserAppSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  url: z.string().min(1),
+  iconUrl: z.string().optional(),
+  type: z.enum(['builtin', 'webapp']),
+  createdAt: z.number(),
+  order: z.number(),
+});
+
 export const StoredConfigSchema = z.object({
   workspaces: z.array(WorkspaceSchema).min(0),
   activeWorkspaceId: z.string().nullable(),
@@ -103,6 +113,9 @@ export const StoredConfigSchema = z.object({
   llmConnections: z.array(LlmConnectionSchema).optional(),
   defaultLlmConnection: z.string().optional(),
   defaultThinkingLevel: z.enum([...THINKING_LEVEL_IDS, 'think'] as [string, ...string[]]).transform(v => v === 'think' ? 'medium' : v).optional(),
+  tabBrowser: z.object({
+    installedApps: z.array(TabBrowserAppSchema),
+  }).optional(),
   // Note: tokenDisplay, showCost, cumulativeUsage, defaultPermissionMode removed
   // Permission mode and cyclable modes are now per-workspace in workspace config.json
 });

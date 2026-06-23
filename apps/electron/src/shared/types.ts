@@ -213,6 +213,7 @@ import type {
   ImportRemoteSessionTransferResult,
 } from '@polo-ai/shared/protocol'
 import type { AdminUser } from '@polo-ai/shared/admin/types'
+import type { AppDefinition } from './tab-browser-types'
 
 export interface AdminRpcErrorPayload {
   errorCode?: string
@@ -402,6 +403,10 @@ export interface ElectronAPI {
 
   // Deep link navigation listener (for external poloai:// URLs)
   onDeepLinkNavigate(callback: (nav: DeepLinkNavigation) => void): () => void
+
+  // Tab browser app launcher configuration
+  getTabBrowserApps(): Promise<AppDefinition[]>
+  saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
 
   // Auth
   showLogoutConfirmation(): Promise<boolean>

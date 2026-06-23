@@ -91,6 +91,18 @@ export interface StoredConfig {
   // Admin server settings
   adminUrl?: string;
   adminConfigVersion?: string;
+  // Electron tab browser app launcher definitions.
+  tabBrowser?: {
+    installedApps: Array<{
+      id: string;
+      name: string;
+      url: string;
+      iconUrl?: string;
+      type: 'builtin' | 'webapp';
+      createdAt: number;
+      order: number;
+    }>;
+  };
   // One-shot migration markers. Used by migrations that should run at most
   // once per user (e.g. restoring a previously-removed model to connection
   // lists without re-adding it if the user later removes it deliberately).
