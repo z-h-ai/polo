@@ -41,7 +41,7 @@ import { isMac } from "@/lib/platform"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { Separator } from "@/components/ui/separator"
-import { Tooltip, TooltipTrigger, TooltipContent, DocumentFormattedMarkdownOverlay } from "@polo-ai/ui"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@polo-ai/ui"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -558,20 +558,6 @@ function AppShellContent({
   const isAutoCompact = shellWidth > 0 && shellWidth < MOBILE_THRESHOLD
 
   const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || isAutoCompact
-
-  // What's New overlay
-  const [showWhatsNew, setShowWhatsNew] = React.useState(false)
-  const [releaseNotesContent, setReleaseNotesContent] = React.useState('')
-  const [hasUnseenReleaseNotes, setHasUnseenReleaseNotes] = React.useState(false)
-
-  // Check for unseen release notes on mount
-  useEffect(() => {
-    window.electronAPI.getLatestReleaseVersion().then((latestVersion) => {
-      if (!latestVersion) return
-      const lastSeen = storage.get(storage.KEYS.whatsNewLastSeenVersion, '')
-      setHasUnseenReleaseNotes(lastSeen !== latestVersion)
-    })
-  }, [])
 
   const [isResizing, setIsResizing] = React.useState<'sidebar' | 'session-list' | null>(null)
   const [sidebarHandleY, setSidebarHandleY] = React.useState<number | null>(null)
@@ -1722,19 +1708,6 @@ function AppShellContent({
     navigate(routes.view.settings(subpage))
   }, [])
 
-  // Handler for What's New overlay
-  const handleWhatsNewClick = useCallback(async () => {
-    const content = await window.electronAPI.getReleaseNotes()
-    setReleaseNotesContent(content)
-    setShowWhatsNew(true)
-    setHasUnseenReleaseNotes(false)
-    // Update last seen version
-    const latestVersion = await window.electronAPI.getLatestReleaseVersion()
-    if (latestVersion) {
-      storage.set(storage.KEYS.whatsNewLastSeenVersion, latestVersion)
-    }
-  }, [])
-
   // ============================================================================
   // EDIT POPOVER STATE
   // ============================================================================
@@ -2265,9 +2238,7 @@ function AppShellContent({
                     },
                     onProfile: () => handleSettingsClick('preferences'),
                     onSettings: () => handleSettingsClick(),
-                    onWhatsNew: handleWhatsNewClick,
                     onLogout: onAdminLogout ?? (async () => {}),
-                    hasUnseenWhatsNew: hasUnseenReleaseNotes,
                   } : null}
                   links={[
                     // --- Sessions Section ---
@@ -3502,14 +3473,6 @@ function AppShellContent({
           />
         </>
       )}
-
-      {/* What's New overlay */}
-      <DocumentFormattedMarkdownOverlay
-        isOpen={showWhatsNew}
-        onClose={() => setShowWhatsNew(false)}
-        content={releaseNotesContent}
-        onOpenUrl={(url) => window.electronAPI.openUrl(url)}
-      />
 
       {/* Delete automation confirmation dialog */}
       <Dialog open={!!automationPendingDelete} onOpenChange={(open) => { if (!open) setAutomationPendingDelete(null) }}>

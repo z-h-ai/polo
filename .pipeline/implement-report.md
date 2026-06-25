@@ -1,29 +1,29 @@
-# POL-44 Implement Report
+# POL-49 Implement Report
 
 ## 变更摘要
 
-- 在 admin connection sync 的 upsert 逻辑中解构并移除 `endpoint`，避免该字段残留到 Electron `LlmConnection` 配置对象。
-- 将 admin 返回的 `endpoint` 映射为 Electron 侧 `LlmConnection.baseUrl`，并保留无 `endpoint` 时使用原有 `baseUrl` 的兼容逻辑。
-- 补充 Electron 侧 admin response 类型 `AdminLlmConnection.endpoint?: string`，准确表达 admin API 返回字段。
-- 新增 admin sync 测试，覆盖 `api_key_with_endpoint` 连接的 `endpoint -> baseUrl` 映射，以及无 `endpoint` 连接不受影响。
+- 隐藏用户菜单中的 What's New / 最新动态 item，菜单现在仅保留 Profile、Settings、Logout 等入口。
+- 收敛 `SidebarUserMenuConfig`，删除隐藏 item 专用的 `onWhatsNew` 和 `hasUnseenWhatsNew` 配置字段。
+- 删除 `AppShell` 中仅服务 What's New 菜单入口的 release notes 未读检查、点击 handler 和 overlay 渲染，避免隐藏入口后继续执行无用户可见效果的启动检查。
 
 ## 关键文件列表
 
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/server-core/src/handlers/rpc/admin.test.ts`
-- `packages/shared/src/admin/types.ts`
+- `apps/electron/src/renderer/components/app-shell/LeftSidebar.tsx`
+- `apps/electron/src/renderer/components/app-shell/AppShell.tsx`
 
 ## 自测结果
 
-- `bun test packages/server-core/src/handlers/rpc/admin.test.ts`
-  - 结果：通过，9 pass / 0 fail
-- `bun run --cwd packages/server-core typecheck`
-  - 结果：通过
-- `bun run typecheck:shared`
-  - 结果：通过
-
-说明：当前 worktree 初始没有安装完整 `node_modules`，首次包级 typecheck 因找不到 `tsc` 失败；随后执行 `bun install --frozen-lockfile` 安装依赖后，上述 typecheck 均通过。
+- `bun install --frozen-lockfile`
+  - 结果：通过。当前 worktree 初始缺少 `node_modules`，先按 `bun.lock` 补齐依赖，未修改锁文件。
+- `git diff --check`
+  - 结果：通过。
+- `bun run typecheck:electron`
+  - 结果：通过。
+- `cd apps/electron && bunx eslint src/renderer/components/app-shell/AppShell.tsx src/renderer/components/app-shell/LeftSidebar.tsx`
+  - 结果：通过退出码 0；仍有 `AppShell.tsx` 既有 react-hooks dependency warnings，非本次新增错误。
+- `bun run lint:electron`
+  - 结果：失败。阻塞错误来自既有文件 `apps/electron/src/renderer/components/app-shell/FabNewChat.tsx` 的 `craft-styles/no-nonstandard-shadows`，与本次改动文件无关。
 
 ## 遗留问题
 
-- 未发现遗留问题。
+- 全量 Electron lint 仍被既有 `FabNewChat.tsx` shadow 规则错误阻塞；本任务未修改该文件。
