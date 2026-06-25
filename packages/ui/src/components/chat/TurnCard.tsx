@@ -2,9 +2,9 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
-import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
-import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
+import type { ToolDisplayMeta, AnnotationV1 } from '@polo-ai/core'
+import { normalizePath, pathStartsWith, stripPathPrefix } from '@polo-ai/core/utils'
+import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   ChevronRight,
@@ -2552,7 +2552,7 @@ export function ResponseCard({
 
           {/* Compact footer — Accept Plan only (mobile / auto-compact / popover).
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
-              / CompactModelSelector pattern. Guarded by isLastResponse so older
+              / compact drawer selector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
           {compactMode && isPlan && showAcceptPlan && isLastResponse && onAccept && onAcceptWithCompact && (
             <div

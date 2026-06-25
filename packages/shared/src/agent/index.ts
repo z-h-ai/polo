@@ -1,4 +1,4 @@
-// Export ClaudeAgent (renamed from CraftAgent) and backward-compatible aliases
+// Export ClaudeAgent (renamed from PoloAi) and backward-compatible aliases
 export * from './claude-agent.ts';
 export * from './conversation-summary.ts';
 
@@ -101,7 +101,7 @@ export {
   loadRawSourcePermissions,
   saveWorkspacePermissions,
   saveSourcePermissions,
-  // App-level default permissions (at ~/.craft-agent/permissions/)
+  // App-level default permissions (at ~/.polo-ai/permissions/)
   getAppPermissionsDir,
   ensureDefaultPermissions,
   loadDefaultPermissions,

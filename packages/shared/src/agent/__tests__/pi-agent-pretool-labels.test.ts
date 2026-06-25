@@ -5,15 +5,15 @@ import type { BackendConfig } from '../backend/types.ts'
 let origFlag: string | undefined
 
 beforeAll(() => {
-  origFlag = process.env.CRAFT_FEATURE_CRAFT_AGENTS_CLI
-  process.env.CRAFT_FEATURE_CRAFT_AGENTS_CLI = '1'
+  origFlag = process.env.POLO_AI_FEATURE_CLI
+  process.env.POLO_AI_FEATURE_CLI = '1'
 })
 
 afterAll(() => {
   if (origFlag === undefined) {
-    delete process.env.CRAFT_FEATURE_CRAFT_AGENTS_CLI
+    delete process.env.POLO_AI_FEATURE_CLI
   } else {
-    process.env.CRAFT_FEATURE_CRAFT_AGENTS_CLI = origFlag
+    process.env.POLO_AI_FEATURE_CLI = origFlag
   }
 })
 
@@ -65,7 +65,7 @@ describe('PiAgent pre-tool labels guard', () => {
     const response = sent.at(-1)
     expect(response?.type).toBe('pre_tool_use_response')
     expect(response?.action).toBe('block')
-    expect(String(response?.reason ?? '')).toContain('craft-agent label --help')
+    expect(String(response?.reason ?? '')).toContain('polo-ai label --help')
 
     agent.destroy()
   })

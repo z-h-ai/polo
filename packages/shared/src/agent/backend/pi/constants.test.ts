@@ -6,7 +6,7 @@ describe('THINKING_TO_PI', () => {
     expect(THINKING_TO_PI.xhigh).toBe('xhigh')
   })
 
-  it('saturates Craft max to Pi xhigh (Pi has no higher tier)', () => {
+  it('saturates Polo AI max to Pi xhigh (Pi has no higher tier)', () => {
     expect(THINKING_TO_PI.max).toBe('xhigh')
   })
 

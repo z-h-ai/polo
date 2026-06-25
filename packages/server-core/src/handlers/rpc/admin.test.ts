@@ -1,0 +1,670 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
+import { createCipheriv, hkdfSync } from 'node:crypto'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { AdminLlmConnection } from '@polo-ai/shared/admin'
+import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
+import type { HandlerDeps } from '../handler-deps'
+
+type StoredTokens = {
+  accessToken: string
+  refreshToken: string
+  expiresAt: number
+  userId: string
+  username: string
+  displayName?: string
+}
+
+type TestConnection = {
+  slug: string
+  name: string
+  providerType: 'anthropic' | 'pi' | 'pi_compat'
+  authType: 'api_key' | 'api_key_with_endpoint' | 'oauth' | 'iam_credentials' | 'bearer_token' | 'service_account_file' | 'environment' | 'none'
+  createdAt: number
+  managedBy?: 'admin'
+  adminConfigVersion?: string
+  baseUrl?: string
+  endpoint?: string
+  apiKey?: string | TestEncryptedApiKey
+  credentials?: {
+    apiKey?: string | TestEncryptedApiKey
+    key?: string
+  }
+  models?: string[]
+  defaultModel?: string
+}
+
+type TestEncryptedApiKey = {
+  alg: 'A256GCM'
+  iv: string
+  ciphertext: string
+  tag: string
+}
+
+class TestAdminError extends Error {
+  readonly errorCode: string
+  readonly status?: number
+  readonly details?: unknown
+
+  constructor(message: string, errorCode: string, options?: { status?: number; details?: unknown }) {
+    super(message)
+    this.name = 'AdminError'
+    this.errorCode = errorCode
+    this.status = options?.status
+    this.details = options?.details
+  }
+}
+
+const adminClientCalls: Array<{ method: string; args: unknown[]; accessToken?: string }> = []
+const adminClientBehavior = {
+  login: async (_username: string, _password: string): Promise<any> => {
+    throw new Error('login behavior not configured')
+  },
+  refresh: async (_refreshToken: string): Promise<any> => {
+    throw new Error('refresh behavior not configured')
+  },
+  validate: async (_accessToken: string): Promise<any> => {
+    throw new Error('validate behavior not configured')
+  },
+  logout: async (_refreshToken: string): Promise<void> => {},
+  getLlmConnections: async (_accessToken: string): Promise<any> => ({
+    configVersion: 'config-v1',
+    connections: [],
+    defaultConnection: null,
+  }),
+}
+
+class MockAdminClient {
+  readonly adminUrl: string
+
+  constructor(adminUrl: string) {
+    this.adminUrl = adminUrl
+  }
+
+  async login(username: string, password: string) {
+    adminClientCalls.push({ method: 'login', args: [username, password] })
+    return adminClientBehavior.login(username, password)
+  }
+
+  async refresh(refreshToken: string) {
+    adminClientCalls.push({ method: 'refresh', args: [refreshToken] })
+    return adminClientBehavior.refresh(refreshToken)
+  }
+
+  async validate(accessToken: string) {
+    adminClientCalls.push({ method: 'validate', args: [accessToken], accessToken })
+    return adminClientBehavior.validate(accessToken)
+  }
+
+  async logout(refreshToken: string) {
+    adminClientCalls.push({ method: 'logout', args: [refreshToken] })
+    return adminClientBehavior.logout(refreshToken)
+  }
+
+  async getLlmConnections(accessToken: string) {
+    adminClientCalls.push({ method: 'getLlmConnections', args: [accessToken], accessToken })
+    return adminClientBehavior.getLlmConnections(accessToken)
+  }
+}
+
+const configState: {
+  adminUrl?: string
+  adminConfigVersion?: string
+  connections: TestConnection[]
+  defaultConnection: string | null
+} = {
+  adminUrl: 'https://admin.example.com',
+  adminConfigVersion: undefined,
+  connections: [],
+  defaultConnection: null,
+}
+
+const managerState: {
+  tokens: StoredTokens | null
+  llmApiKeys: Map<string, string>
+  deletedCredentialSlugs: string[]
+} = {
+  tokens: null,
+  llmApiKeys: new Map(),
+  deletedCredentialSlugs: [],
+}
+
+const mockCredentialManager = {
+  async getAdminTokens(): Promise<StoredTokens | null> {
+    return managerState.tokens
+  },
+  async setAdminTokens(tokens: StoredTokens): Promise<void> {
+    managerState.tokens = { ...tokens }
+  },
+  async deleteAdminTokens(): Promise<boolean> {
+    const hadTokens = managerState.tokens !== null
+    managerState.tokens = null
+    return hadTokens
+  },
+  async setLlmApiKey(slug: string, apiKey: string): Promise<void> {
+    managerState.llmApiKeys.set(slug, apiKey)
+  },
+  async deleteLlmCredentials(slug: string): Promise<void> {
+    managerState.deletedCredentialSlugs.push(slug)
+    managerState.llmApiKeys.delete(slug)
+  },
+  isExpired(credential: { expiresAt?: number }): boolean {
+    return typeof credential.expiresAt === 'number' && Date.now() > credential.expiresAt - 5 * 60 * 1000
+  },
+}
+
+mock.module('@polo-ai/shared/admin', () => ({
+  AdminClient: MockAdminClient,
+  AdminError: TestAdminError,
+}))
+
+mock.module('@polo-ai/shared/config', () => ({
+  getAdminUrl: () => configState.adminUrl,
+  getAdminConfigVersion: () => configState.adminConfigVersion,
+  setAdminConfigVersion: (version: string | undefined) => {
+    configState.adminConfigVersion = version
+  },
+  getLlmConnections: () => configState.connections,
+  addLlmConnection: (connection: TestConnection) => {
+    if (configState.connections.some(item => item.slug === connection.slug)) return false
+    configState.connections.push({ ...connection })
+    return true
+  },
+  updateLlmConnection: (slug: string, updates: Partial<TestConnection>) => {
+    const index = configState.connections.findIndex(item => item.slug === slug)
+    if (index === -1) return false
+    configState.connections[index] = { ...configState.connections[index]!, ...updates, slug }
+    return true
+  },
+  deleteLlmConnection: (slug: string) => {
+    const before = configState.connections.length
+    configState.connections = configState.connections.filter(item => item.slug !== slug)
+    if (configState.defaultConnection === slug) {
+      configState.defaultConnection = configState.connections[0]?.slug ?? null
+    }
+    return configState.connections.length !== before
+  },
+  setDefaultLlmConnection: (slug: string) => {
+    if (!configState.connections.some(item => item.slug === slug)) return false
+    configState.defaultConnection = slug
+    return true
+  },
+}))
+
+mock.module('@polo-ai/shared/credentials', () => ({
+  getCredentialManager: () => mockCredentialManager,
+}))
+
+const { readApiKey, registerAdminHandlers } = await import('./admin')
+
+function createHarness() {
+  const handlers = new Map<string, HandlerFn>()
+  const server: RpcServer = {
+    handle(channel, handler) {
+      handlers.set(channel, handler)
+    },
+    push() {},
+    async invokeClient() {
+      return undefined
+    },
+    hasClientCapability() {
+      return false
+    },
+    findClientsWithCapability() {
+      return []
+    },
+  }
+  const deps = {
+    sessionManager: {} as HandlerDeps['sessionManager'],
+    oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
+    platform: {
+      appRootPath: '/',
+      resourcesPath: '/',
+      isPackaged: false,
+      appVersion: '0.0.0-test',
+      isDebugMode: true,
+      logger: {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn(),
+      },
+      imageProcessor: {
+        getMetadata: async () => null,
+        process: async () => Buffer.from(''),
+      },
+    },
+  } satisfies HandlerDeps
+
+  registerAdminHandlers(server, deps)
+
+  return {
+    login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
+    validate: requiredHandler(handlers, RPC_CHANNELS.admin.VALIDATE),
+    logout: requiredHandler(handlers, RPC_CHANNELS.admin.LOGOUT),
+    syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+  }
+}
+
+function requiredHandler(handlers: Map<string, HandlerFn>, channel: string): HandlerFn {
+  const handler = handlers.get(channel)
+  if (!handler) throw new Error(`handler not registered: ${channel}`)
+  return handler
+}
+
+function adminConnection(overrides: Partial<TestConnection> = {}): TestConnection {
+  return {
+    slug: 'admin-anthropic',
+    name: 'Admin Anthropic',
+    providerType: 'anthropic',
+    authType: 'api_key',
+    createdAt: 100,
+    models: ['claude-sonnet-4-5'],
+    defaultModel: 'claude-sonnet-4-5',
+    apiKey: 'sk-admin',
+    ...overrides,
+  }
+}
+
+function encryptedApiKey(apiKey: string, accessToken = 'access-token'): TestEncryptedApiKey {
+  const transitKey = Buffer.from(
+    hkdfSync(
+      'sha256',
+      Buffer.from(accessToken, 'utf8'),
+      Buffer.from('polo-llm-key-encryption', 'utf8'),
+      Buffer.from('aes-256-gcm', 'utf8'),
+      32,
+    ),
+  )
+  const iv = Buffer.from('00112233445566778899aabb', 'hex')
+  const cipher = createCipheriv('aes-256-gcm', transitKey, iv)
+  const ciphertext = Buffer.concat([cipher.update(apiKey, 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return {
+    alg: 'A256GCM',
+    iv: iv.toString('hex'),
+    ciphertext: ciphertext.toString('hex'),
+    tag: tag.toString('hex'),
+  }
+}
+
+beforeEach(() => {
+  adminClientCalls.length = 0
+  configState.adminUrl = 'https://admin.example.com'
+  configState.adminConfigVersion = undefined
+  configState.connections = []
+  configState.defaultConnection = null
+  managerState.tokens = null
+  managerState.llmApiKeys = new Map()
+  managerState.deletedCredentialSlugs = []
+
+  adminClientBehavior.login = async () => ({
+    accessToken: 'access-token',
+    refreshToken: 'refresh-token',
+    expiresIn: 3600,
+    user: {
+      id: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+      role: 'admin',
+      groupIds: ['group-1'],
+    },
+  })
+  adminClientBehavior.refresh = async () => ({
+    accessToken: 'fresh-access-token',
+    refreshToken: 'fresh-refresh-token',
+    expiresIn: 3600,
+  })
+  adminClientBehavior.validate = async () => ({
+    valid: true,
+    configVersion: 'config-v1',
+    user: {
+      id: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+      role: 'admin',
+      groupIds: [],
+    },
+  })
+  adminClientBehavior.logout = async () => {}
+  adminClientBehavior.getLlmConnections = async () => ({
+    configVersion: 'config-v1',
+    connections: [adminConnection()],
+    defaultConnection: 'admin-anthropic',
+  })
+})
+
+describe('registerAdminHandlers', () => {
+  it('decrypts transit-encrypted admin api keys', () => {
+    const apiKey = readApiKey(adminConnection({
+      apiKey: encryptedApiKey('sk-transit-secret', 'access-token'),
+    }) as AdminLlmConnection, 'access-token')
+
+    expect(apiKey).toBe('sk-transit-secret')
+  })
+
+  it('logs in, stores admin tokens, and syncs admin-managed connections', async () => {
+    const { login } = createHarness()
+
+    const result = await login({ clientId: 'client-1', workspaceId: null, webContentsId: null }, 'admin', 'secret')
+
+    expect(result).toEqual({
+      success: true,
+      user: {
+        id: 'user-1',
+        username: 'admin',
+        displayName: 'Admin User',
+        role: 'admin',
+        groupIds: ['group-1'],
+      },
+    })
+    expect(managerState.tokens).toMatchObject({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    })
+    expect(configState.connections).toHaveLength(1)
+    expect(configState.connections[0]).toMatchObject({
+      slug: 'admin-anthropic',
+      managedBy: 'admin',
+      adminConfigVersion: 'config-v1',
+    })
+    expect(Object.prototype.hasOwnProperty.call(configState.connections[0], 'apiKey')).toBe(false)
+    expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-admin')
+    expect(configState.defaultConnection).toBe('admin-anthropic')
+    expect(configState.adminConfigVersion).toBe('config-v1')
+  })
+
+  it('syncs transit-encrypted admin api keys into credential storage as plaintext', async () => {
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [
+        adminConnection({
+          apiKey: encryptedApiKey('sk-encrypted-admin', 'access-token'),
+        }),
+      ],
+      defaultConnection: 'admin-anthropic',
+    })
+    const { login } = createHarness()
+
+    const result = await login({ clientId: 'client-1', workspaceId: null, webContentsId: null }, 'admin', 'secret')
+
+    expect(result).toMatchObject({ success: true })
+    expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-encrypted-admin')
+    expect(Object.prototype.hasOwnProperty.call(configState.connections[0], 'apiKey')).toBe(false)
+  })
+
+  it('maps admin endpoint to llm connection baseUrl during sync', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [
+        adminConnection({
+          slug: 'custom-ollama',
+          name: 'Custom Ollama',
+          providerType: 'pi_compat',
+          authType: 'api_key_with_endpoint',
+          endpoint: 'http://localhost:11434',
+          models: ['llama3.2'],
+          defaultModel: 'llama3.2',
+        }),
+        adminConnection({
+          slug: 'admin-anthropic',
+          name: 'Admin Anthropic',
+          authType: 'api_key',
+        }),
+      ],
+      defaultConnection: 'custom-ollama',
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({
+      success: true,
+      configVersion: 'config-v1',
+      connectionCount: 2,
+    })
+    const customOllama = configState.connections.find(connection => connection.slug === 'custom-ollama')
+    expect(customOllama).toMatchObject({
+      authType: 'api_key_with_endpoint',
+      baseUrl: 'http://localhost:11434',
+      managedBy: 'admin',
+      adminConfigVersion: 'config-v1',
+    })
+    expect(Object.prototype.hasOwnProperty.call(customOllama, 'endpoint')).toBe(false)
+    const adminAnthropic = configState.connections.find(connection => connection.slug === 'admin-anthropic')
+    expect(adminAnthropic?.baseUrl).toBeUndefined()
+    expect(Object.prototype.hasOwnProperty.call(adminAnthropic, 'endpoint')).toBe(false)
+  })
+
+  it('returns an admin error payload when login fails', async () => {
+    adminClientBehavior.login = async () => {
+      throw new TestAdminError('Invalid username or password', 'INVALID_CREDENTIALS')
+    }
+    const { login } = createHarness()
+
+    const result = await login({ clientId: 'client-1', workspaceId: null, webContentsId: null }, 'admin', 'wrong')
+
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'INVALID_CREDENTIALS',
+      message: 'Invalid username or password',
+    })
+    expect(managerState.tokens).toBeNull()
+    expect(configState.connections).toEqual([])
+  })
+
+  it('refreshes expired admin tokens during validate and syncs when config changes', async () => {
+    managerState.tokens = {
+      accessToken: 'expired-access-token',
+      refreshToken: 'old-refresh-token',
+      expiresAt: Date.now() - 1000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    configState.adminConfigVersion = 'config-v0'
+    adminClientBehavior.validate = async (accessToken: string) => ({
+      valid: true,
+      configVersion: 'config-v1',
+      user: {
+        id: 'user-1',
+        username: 'admin',
+        displayName: 'Admin User',
+        role: 'admin',
+        groupIds: [],
+      },
+      seenAccessToken: accessToken,
+    })
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({
+      loggedIn: true,
+      configVersion: 'config-v1',
+    })
+    expect(adminClientCalls.map(call => call.method)).toEqual(['refresh', 'validate', 'getLlmConnections'])
+    expect(adminClientCalls.find(call => call.method === 'validate')?.accessToken).toBe('fresh-access-token')
+    expect(managerState.tokens).toMatchObject({
+      accessToken: 'fresh-access-token',
+      refreshToken: 'fresh-refresh-token',
+      userId: 'user-1',
+      username: 'admin',
+    })
+    expect(configState.adminConfigVersion).toBe('config-v1')
+  })
+
+  it('returns a revoked-token signal when refresh fails during validate', async () => {
+    managerState.tokens = {
+      accessToken: 'expired-access-token',
+      refreshToken: 'revoked-refresh-token',
+      expiresAt: Date.now() - 1000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.refresh = async () => {
+      throw new TestAdminError('Refresh token revoked', 'TOKEN_REVOKED', { status: 401 })
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toEqual({
+      loggedIn: false,
+      errorCode: 'TOKEN_REVOKED',
+      message: 'Refresh token revoked',
+      status: 401,
+    })
+    expect(managerState.tokens).toBeNull()
+  })
+
+  it('syncs admin connections by upserting incoming config and removing admin-deleted connections', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    configState.adminConfigVersion = 'config-v0'
+    configState.connections = [
+      {
+        slug: 'admin-anthropic',
+        name: 'Old Admin Name',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 100,
+        managedBy: 'admin',
+        adminConfigVersion: 'config-v0',
+        models: ['old-model'],
+        defaultModel: 'old-model',
+        apiKey: 'sk-stale-config',
+      },
+      {
+        slug: 'admin-removed',
+        name: 'Removed Admin',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 101,
+        managedBy: 'admin',
+        adminConfigVersion: 'config-v0',
+      },
+      {
+        slug: 'user-local',
+        name: 'User Local',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 200,
+        models: ['user-model'],
+        defaultModel: 'user-model',
+      },
+    ]
+    managerState.llmApiKeys.set('admin-removed', 'sk-removed')
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v2',
+      connections: [
+        adminConnection({
+          slug: 'admin-anthropic',
+          name: 'Admin Anthropic Updated',
+          models: ['claude-sonnet-4-5', 'claude-opus-4-5'],
+          defaultModel: 'claude-opus-4-5',
+          apiKey: 'sk-updated',
+        }),
+        adminConnection({
+          slug: 'admin-pi',
+          name: 'Admin Pi',
+          providerType: 'pi',
+          models: ['pi/anthropic/claude-sonnet-4-5'],
+          defaultModel: 'pi/anthropic/claude-sonnet-4-5',
+          apiKey: 'sk-pi',
+        }),
+      ],
+      defaultConnection: 'admin-pi',
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toEqual({
+      success: true,
+      configVersion: 'config-v2',
+      connectionCount: 2,
+      defaultConnection: 'admin-pi',
+    })
+    expect(configState.connections.map(connection => connection.slug).sort()).toEqual([
+      'admin-anthropic',
+      'admin-pi',
+      'user-local',
+    ])
+    expect(configState.connections.find(connection => connection.slug === 'admin-anthropic')).toMatchObject({
+      name: 'Admin Anthropic Updated',
+      managedBy: 'admin',
+      adminConfigVersion: 'config-v2',
+      models: ['claude-sonnet-4-5', 'claude-opus-4-5'],
+      defaultModel: 'claude-opus-4-5',
+    })
+    expect(configState.connections.find(connection => connection.slug === 'admin-pi')).toMatchObject({
+      providerType: 'pi',
+      managedBy: 'admin',
+      adminConfigVersion: 'config-v2',
+    })
+    const userLocal = configState.connections.find(connection => connection.slug === 'user-local')
+    expect(userLocal).toMatchObject({ slug: 'user-local' })
+    expect(userLocal?.managedBy).toBeUndefined()
+    for (const connection of configState.connections.filter(item => item.managedBy === 'admin')) {
+      expect(Object.prototype.hasOwnProperty.call(connection, 'apiKey')).toBe(false)
+    }
+    expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-updated')
+    expect(managerState.llmApiKeys.get('admin-pi')).toBe('sk-pi')
+    expect(managerState.llmApiKeys.has('admin-removed')).toBe(false)
+    expect(managerState.deletedCredentialSlugs).toEqual(['admin-removed'])
+    expect(configState.defaultConnection).toBe('admin-pi')
+    expect(configState.adminConfigVersion).toBe('config-v2')
+  })
+
+  it('logs out remotely and removes admin-managed connections and credentials', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    configState.adminConfigVersion = 'config-v1'
+    configState.connections = [
+      adminConnection({ slug: 'admin-anthropic', managedBy: 'admin', adminConfigVersion: 'config-v1' }),
+      {
+        slug: 'user-local',
+        name: 'User Local',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: 200,
+      },
+    ]
+    managerState.llmApiKeys.set('admin-anthropic', 'sk-admin')
+    const { logout } = createHarness()
+
+    const result = await logout({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toEqual({ success: true })
+    expect(adminClientCalls.map(call => call.method)).toEqual(['logout'])
+    expect(managerState.tokens).toBeNull()
+    expect(configState.adminConfigVersion).toBeUndefined()
+    expect(configState.connections.map(connection => connection.slug)).toEqual(['user-local'])
+    expect(managerState.deletedCredentialSlugs).toEqual(['admin-anthropic'])
+    expect(managerState.llmApiKeys.has('admin-anthropic')).toBe(false)
+  })
+})

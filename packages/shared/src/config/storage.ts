@@ -16,7 +16,7 @@ import { expandPath, toPortablePath, getBundledAssetsDir } from '../utils/paths.
 import { debug } from '../utils/debug.ts';
 import { readJsonFileSync } from '../utils/files.ts';
 import { CONFIG_DIR } from './paths.ts';
-import type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
+import type { StoredAttachment, StoredMessage } from '@polo-ai/core/types';
 import type { Plan } from '../agent/plan-types.ts';
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
@@ -35,10 +35,10 @@ export type {
   McpAuthType,
   AuthType,
   OAuthCredentials,
-} from '@craft-agent/core/types';
+} from '@polo-ai/core/types';
 
 // Import for local use
-import type { Workspace, AuthType } from '@craft-agent/core/types';
+import type { Workspace, AuthType } from '@polo-ai/core/types';
 
 // Import LLM connection types and constants
 import type { LlmConnection } from './llm-connections.ts';
@@ -88,6 +88,21 @@ export interface StoredConfig {
   setupDeferred?: boolean;
   // Server mode — embedded remote server settings
   serverConfig?: import('./server-config.ts').ServerConfig;
+  // Admin server settings
+  adminUrl?: string;
+  adminConfigVersion?: string;
+  // Electron tab browser app launcher definitions.
+  tabBrowser?: {
+    installedApps: Array<{
+      id: string;
+      name: string;
+      url: string;
+      iconUrl?: string;
+      type: 'builtin' | 'webapp';
+      createdAt: number;
+      order: number;
+    }>;
+  };
   // One-shot migration markers. Used by migrations that should run at most
   // once per user (e.g. restoring a previously-removed model to connection
   // lists without re-adding it if the user later removes it deliberately).
@@ -110,7 +125,7 @@ let configDefaultsSynced = false;
 /** Minimal config-defaults used when bundled assets aren't available (CI, standalone server). */
 const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
   version: '1.0',
-  description: 'Default configuration values for Craft Agents',
+  description: 'Default configuration values for Polo AI',
   defaults: {
     notificationsEnabled: true,
     colorTheme: 'default',
@@ -161,7 +176,7 @@ function syncConfigDefaults(): void {
 }
 
 /**
- * Load config defaults from ~/.craft-agent/config-defaults.json
+ * Load config defaults from ~/.polo-ai/config-defaults.json
  * This file is synced from bundled assets on every launch.
  */
 export function loadConfigDefaults(): ConfigDefaults {
@@ -213,7 +228,7 @@ export function ensureConfigDir(): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
-  // Initialize bundled docs (creates ~/.craft-agent/docs/ with sources.md, agents.md, permissions.md)
+  // Initialize bundled docs (creates ~/.polo-ai/docs/ with sources.md, agents.md, permissions.md)
   initializeDocs();
 
   // Initialize config defaults
@@ -594,6 +609,50 @@ export function getConfigPath(): string {
 }
 
 /**
+ * Get configured admin server URL.
+ */
+export function getAdminUrl(): string | undefined {
+  const config = loadStoredConfig();
+  return config?.adminUrl;
+}
+
+/**
+ * Persist admin server URL.
+ */
+export function setAdminUrl(adminUrl: string | undefined): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  if (adminUrl) {
+    config.adminUrl = adminUrl;
+  } else {
+    delete config.adminUrl;
+  }
+  saveConfig(config);
+}
+
+/**
+ * Get latest admin config version observed by the client.
+ */
+export function getAdminConfigVersion(): string | undefined {
+  const config = loadStoredConfig();
+  return config?.adminConfigVersion;
+}
+
+/**
+ * Persist latest admin config version observed by the client.
+ */
+export function setAdminConfigVersion(adminConfigVersion: string | undefined): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  if (adminConfigVersion) {
+    config.adminConfigVersion = adminConfigVersion;
+  } else {
+    delete config.adminConfigVersion;
+  }
+  saveConfig(config);
+}
+
+/**
  * Clear all configuration and credentials (for logout).
  * Deletes config file and credentials file.
  */
@@ -885,7 +944,7 @@ function ensureWorkspaceDir(workspaceId: string): string {
 
 
 // Re-export types from core for convenience
-export type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
+export type { StoredAttachment, StoredMessage } from '@polo-ai/core/types';
 
 export interface WorkspaceConversation {
   messages: StoredMessage[];
@@ -1206,7 +1265,7 @@ const APP_THEME_FILE = join(CONFIG_DIR, 'theme.json');
 const APP_THEMES_DIR = join(CONFIG_DIR, 'themes');
 
 /**
- * Get the path to the app-level theme override file (~/.craft-agent/theme.json).
+ * Get the path to the app-level theme override file (~/.polo-ai/theme.json).
  */
 export function getAppThemePath(): string {
   return APP_THEME_FILE;
@@ -1217,7 +1276,7 @@ let presetsInitialized = false;
 
 /**
  * Get the app-level themes directory.
- * Preset themes are stored at ~/.craft-agent/themes/
+ * Preset themes are stored at ~/.polo-ai/themes/
  */
 export function getAppThemesDir(): string {
   return APP_THEMES_DIR;
@@ -2635,6 +2694,9 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
     customEndpoint: updates.customEndpoint !== undefined ? updates.customEndpoint : existing.customEndpoint,
     // Mid-stream send behavior (steer vs queue) — read via resolveMidStreamBehavior()
     midStreamBehavior: updates.midStreamBehavior !== undefined ? updates.midStreamBehavior : existing.midStreamBehavior,
+    // Admin sync metadata
+    managedBy: updates.managedBy !== undefined ? updates.managedBy : existing.managedBy,
+    adminConfigVersion: updates.adminConfigVersion !== undefined ? updates.adminConfigVersion : existing.adminConfigVersion,
     // Timestamps
     lastUsedAt: updates.lastUsedAt !== undefined ? updates.lastUsedAt : existing.lastUsedAt,
   };
@@ -2897,7 +2959,7 @@ import { copyFileSync } from 'fs';
 const TOOL_ICONS_DIR_NAME = 'tool-icons';
 
 /**
- * Returns the path to the tool-icons directory: ~/.craft-agent/tool-icons/
+ * Returns the path to the tool-icons directory: ~/.polo-ai/tool-icons/
  */
 export function getToolIconsDir(): string {
   return join(CONFIG_DIR, TOOL_ICONS_DIR_NAME);

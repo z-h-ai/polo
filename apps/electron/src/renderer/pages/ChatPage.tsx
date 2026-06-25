@@ -44,6 +44,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     activeWorkspaceId,
     llmConnections,
     workspaceDefaultLlmConnection,
+    chatAccessStatus,
     onSendMessage,
     onOpenFile,
     onOpenUrl,
@@ -84,7 +85,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Use the unified session options hook for clean access
   const {
     options: sessionOpts,
-    setOption,
     setPermissionMode,
   } = useSessionOptionsFor(sessionId)
 
@@ -280,28 +280,35 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     onAttachmentsChange(sessionId, attachments)
   }, [sessionId, onAttachmentsChange])
 
-  // Session model change handler - persists per-session model and connection
-  const handleModelChange = React.useCallback((model: string, connection?: string) => {
-    if (activeWorkspaceId) {
-      window.electronAPI.setSessionModel(sessionId, activeWorkspaceId, model, connection)
-    }
-  }, [sessionId, activeWorkspaceId])
-
-  // Session connection change handler - can only change before first message
-  const handleConnectionChange = React.useCallback(async (connectionSlug: string) => {
-    try {
-      await window.electronAPI.sessionCommand(sessionId, { type: 'setConnection', connectionSlug })
-    } catch (error) {
-      // Connection change may fail if session already started or connection is invalid
-      console.error('Failed to change connection:', error)
-    }
-  }, [sessionId])
-
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
     isSessionConnectionUnavailable(session?.llmConnection, llmConnections),
     [session?.llmConnection, llmConnections]
   )
+
+  const inputStatusBanner = React.useMemo(() => {
+    switch (chatAccessStatus?.issue) {
+      case 'no-ai-service':
+        return {
+          variant: 'info' as const,
+          message: t('chat.statusBanner.noAiService'),
+        }
+      case 'quota-exhausted':
+        return {
+          variant: 'destructive' as const,
+          message: t('chat.statusBanner.quotaExhausted'),
+        }
+      case 'account-disabled':
+        return {
+          variant: 'destructive' as const,
+          message: t('chat.statusBanner.accountDisabled'),
+        }
+      default:
+        return null
+    }
+  }, [chatAccessStatus?.issue, t])
+
+  const isChatInputDisabled = !!inputStatusBanner
 
   // Effective model for this session (session-specific or global fallback)
   const effectiveModel = React.useMemo(() => {
@@ -469,7 +476,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const handleOpenInNewWindow = React.useCallback(async () => {
     const route = routes.view.allSessions(sessionId)
     const separator = route.includes('?') ? '&' : '?'
-    const url = `craftagents://${route}${separator}window=focused`
+    const url = `poloai://${route}${separator}window=focused`
     try {
       await window.electronAPI?.openUrl(url)
     } catch (error) {
@@ -558,7 +565,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               <span className="flex-1">{t('sessionMenu.stopSharing')}</span>
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://agents.craft.do/docs/go-further/sharing')}>
+            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://polo.ai/docs/go-further/sharing')}>
               <Info className="h-3.5 w-3.5" />
               <span className="flex-1">{t('chat.learnMore')}</span>
             </StyledDropdownMenuItem>
@@ -572,7 +579,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               <span className="flex-1">{t('chat.shareOnline')}</span>
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://agents.craft.do/docs/go-further/sharing')}>
+            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://polo.ai/docs/go-further/sharing')}>
               <Info className="h-3.5 w-3.5" />
               <span className="flex-1">{t('chat.learnMore')}</span>
             </StyledDropdownMenuItem>
@@ -706,14 +713,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onOpenFile={handleOpenFile}
                 onOpenUrl={handleOpenUrl}
                 currentModel={effectiveModel}
-                onModelChange={handleModelChange}
-                onConnectionChange={handleConnectionChange}
                 pendingPermission={undefined}
                 onRespondToPermission={onRespondToPermission}
                 pendingCredential={undefined}
                 onRespondToCredential={onRespondToCredential}
-                thinkingLevel={sessionOpts.thinkingLevel}
-                onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
                 permissionMode={sessionOpts.permissionMode}
                 onPermissionModeChange={setPermissionMode}
                 enabledModes={enabledModes}
@@ -737,8 +740,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 isSearchModeActive={isSearchModeActive}
                 onMatchInfoChange={onChatMatchInfoChange}
                 connectionUnavailable={connectionUnavailable}
+                disabled={isChatInputDisabled}
+                inputStatusBanner={inputStatusBanner}
                 compactMode={!!isCompactMode}
-                enableCompactModelPicker={!!isCompactMode}
               />
             </div>
           </div>
@@ -783,14 +787,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onOpenFile={handleOpenFile}
             onOpenUrl={handleOpenUrl}
             currentModel={effectiveModel}
-            onModelChange={handleModelChange}
-            onConnectionChange={handleConnectionChange}
             pendingPermission={pendingPermission}
             onRespondToPermission={onRespondToPermission}
             pendingCredential={pendingCredential}
             onRespondToCredential={onRespondToCredential}
-            thinkingLevel={sessionOpts.thinkingLevel}
-            onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
             permissionMode={sessionOpts.permissionMode}
             onPermissionModeChange={setPermissionMode}
             enabledModes={enabledModes}
@@ -817,8 +817,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             isSearchModeActive={isSearchModeActive}
             onMatchInfoChange={onChatMatchInfoChange}
             connectionUnavailable={connectionUnavailable}
+            disabled={isChatInputDisabled}
+            inputStatusBanner={inputStatusBanner}
             compactMode={!!isCompactMode}
-            enableCompactModelPicker={!!isCompactMode}
           />
         </div>
       </div>

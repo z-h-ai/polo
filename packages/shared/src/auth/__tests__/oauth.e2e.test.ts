@@ -4,10 +4,13 @@
  * These tests verify that OAuth metadata can be discovered from popular MCP servers.
  * They only check that metadata is discoverable - they don't perform full OAuth flows.
  *
- * Tests are skipped if servers are unreachable (network tolerance for CI).
+ * Real external server tests run only when RUN_OAUTH_E2E=1.
  */
 import { describe, it, expect } from 'bun:test';
 import { discoverOAuthMetadata, getMcpBaseUrl } from '../oauth';
+
+const runOAuthE2E = process.env.RUN_OAUTH_E2E === '1';
+const describeExternalOAuthE2E = runOAuthE2E ? describe : describe.skip;
 
 // Helper to check if a URL is reachable
 async function isReachable(url: string, timeoutMs = 5000): Promise<boolean> {
@@ -42,7 +45,7 @@ function describeIfReachable(name: string, mcpUrl: string, fn: () => void) {
 }
 
 describe('E2E: OAuth Metadata Discovery', () => {
-  describe('GitHub MCP (api.githubcopilot.com)', () => {
+  describeExternalOAuthE2E('GitHub MCP (api.githubcopilot.com)', () => {
     const MCP_URL = 'https://api.githubcopilot.com/mcp/';
 
     it('extracts correct origin', () => {
@@ -66,7 +69,7 @@ describe('E2E: OAuth Metadata Discovery', () => {
     });
   });
 
-  describe('Linear MCP (mcp.linear.app)', () => {
+  describeExternalOAuthE2E('Linear MCP (mcp.linear.app)', () => {
     const MCP_URL = 'https://mcp.linear.app/sse';
 
     it('extracts correct origin', () => {
@@ -89,7 +92,7 @@ describe('E2E: OAuth Metadata Discovery', () => {
     });
   });
 
-  describe('Ahrefs MCP (api.ahrefs.com/mcp/mcp)', () => {
+  describeExternalOAuthE2E('Ahrefs MCP (api.ahrefs.com/mcp/mcp)', () => {
     const MCP_URL = 'https://api.ahrefs.com/mcp/mcp';
 
     it('extracts correct origin (the bug we are fixing)', () => {

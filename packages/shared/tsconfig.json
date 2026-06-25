@@ -23,10 +23,10 @@
     "noPropertyAccessFromIndexSignature": false,
     "baseUrl": ".",
     "paths": {
-      "@craft-agent/core": ["../core/src/index.ts"],
-      "@craft-agent/core/*": ["../core/src/*"],
-      "@craft-agent/shared": ["./src/index.ts"],
-      "@craft-agent/shared/*": ["./src/*"]
+      "@polo-ai/core": ["../core/src/index.ts"],
+      "@polo-ai/core/*": ["../core/src/*"],
+      "@polo-ai/shared": ["./src/index.ts"],
+      "@polo-ai/shared/*": ["./src/*"]
     }
   },
   "include": ["src/**/*"],

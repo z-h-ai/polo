@@ -2,14 +2,14 @@
  * Pi SDK Event Adapter
  *
  * Maps Pi Agent Core events (AgentEvent / AgentSessionEvent) to
- * Craft Agent's AgentEvent format for UI compatibility.
+ * Polo AI's AgentEvent format for UI compatibility.
  *
  * Pi emits fine-grained lifecycle events. We translate them into
  * the same event vocabulary the renderer already understands from
  * Claude / Codex / Copilot backends.
  */
 
-import type { AgentEvent as CraftAgentEvent } from '@craft-agent/core/types';
+import type { AgentEvent as PoloAiEvent } from '@polo-ai/core/types';
 import type {
   AgentEvent as PiAgentEvent,
 } from '@mariozechner/pi-agent-core';
@@ -47,7 +47,7 @@ const OVERFLOW_FALLBACK_TIMEOUT_MS = 5_000;
 type PiEvent = PiAgentEvent | AgentSessionEvent;
 
 /**
- * Maps Pi SDK events to Craft AgentEvents for UI compatibility.
+ * Maps Pi SDK events to Polo AIEvents for UI compatibility.
  *
  * Event mapping:
  * - message_update (text_delta in assistantMessageEvent) → text_delta
@@ -109,7 +109,7 @@ export class PiEventAdapter extends BaseEventAdapter {
   /** Caller-supplied callbacks for the asynchronous fallback timer path —
    *  the timer fires outside `adaptEvent()` so we can't yield through the
    *  generator. */
-  private onFallbackEvent: ((event: CraftAgentEvent) => void) | null = null;
+  private onFallbackEvent: ((event: PoloAiEvent) => void) | null = null;
   private onFallbackComplete: (() => void) | null = null;
 
   constructor() {
@@ -130,7 +130,7 @@ export class PiEventAdapter extends BaseEventAdapter {
    * the buffered original error, then `onComplete` to terminate the iterator.
    */
   setOverflowFallbackHandlers(
-    onEvent: (event: CraftAgentEvent) => void,
+    onEvent: (event: PoloAiEvent) => void,
     onComplete: () => void,
   ): void {
     this.onFallbackEvent = onEvent;
@@ -215,14 +215,14 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   /**
-   * Adapt a Pi SDK event to zero or more Craft AgentEvents.
+   * Adapt a Pi SDK event to zero or more Polo AIEvents.
    */
-  *adaptEvent(event: PiEvent): Generator<CraftAgentEvent> {
-    // Craft-injected event from pi-agent-server (not part of the Pi SDK).
+  *adaptEvent(event: PiEvent): Generator<PoloAiEvent> {
+    // Polo AI-injected event from pi-agent-server (not part of the Pi SDK).
     // The subprocess emits this immediately after each `message_end` to deliver
     // the correct `sdkTurnAnchor` (the leaf id AFTER the SDK has appended the
     // assistant entry). We forward it through as-is — SessionManager correlates
-    // it to a Craft assistant message via `sdkMessageId`. See craft-agents-oss#782.
+    // it to a Polo AI assistant message via `sdkMessageId`. See polo-ai-oss#782.
     if ((event as { type?: string }).type === 'pi_turn_anchor') {
       const e = event as unknown as { sdkMessageId?: string; sdkTurnAnchor?: string };
       if (e.sdkMessageId && e.sdkTurnAnchor) {
@@ -331,7 +331,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }; id?: string } | undefined;
         // SDK message id, set by pi-agent-server when forwarding the event.
         // SessionManager uses this to correlate the follow-up `pi_turn_anchor`
-        // event to the Craft assistant message created here (#782).
+        // event to the Polo AI assistant message created here (#782).
         const sdkMessageId = (event as { sdkMessageId?: string }).sdkMessageId ?? msg?.id;
         if (msg?.role !== 'assistant') break;
 

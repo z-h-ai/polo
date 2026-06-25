@@ -36,6 +36,16 @@ export interface AuthState {
     hasWorkspace: boolean;
     active: Workspace | null;
   };
+
+  /** Admin-managed configuration state */
+  admin: {
+    /** True when an Admin server URL is configured */
+    configured: boolean;
+    /** True when Admin tokens are present */
+    loggedIn: boolean;
+    /** Username associated with the Admin session */
+    username?: string;
+  };
 }
 
 /**
@@ -48,6 +58,8 @@ export interface SetupNeeds {
   needsCredentials: boolean;
   /** Everything complete → go straight to App */
   isFullyConfigured: boolean;
+  /** Admin server is configured but no Admin session exists */
+  needsAdminLogin: boolean;
   /** User has legacy tokens that need migration */
   needsMigration?: MigrationInfo;
 }
@@ -60,7 +72,7 @@ export interface SetupNeeds {
 export interface OAuthSessionContext {
   /** The session ID to return to after OAuth completes */
   sessionId?: string;
-  /** The app's deeplink scheme (e.g., 'craftagents') */
+  /** The app's deeplink scheme (e.g., 'poloai') */
   deeplinkScheme?: string;
 }
 

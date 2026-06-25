@@ -5,11 +5,10 @@
  * Flow:
  * 1. Welcome
  * 2. Git Bash (Windows only, if not found)
- * 3. API Setup (API Key / Claude OAuth)
- * 4. Credentials (API Key or Claude OAuth)
- * 5. Complete
+ * 3. Complete
  */
 import { useState, useCallback, useEffect } from 'react'
+import { i18n } from '@polo-ai/shared/i18n'
 import type {
   OnboardingState,
   OnboardingStep,
@@ -57,6 +56,9 @@ interface UseOnboardingReturn {
 
   // Credentials
   handleSubmitCredential: (data: ApiKeySubmitData) => void
+  handleAdminLogin: (username: string, password: string) => void
+  handleAdminRelogin: () => void
+  showAdminKicked: () => void
 
   // Local model
   handleSubmitLocalModel: (data: LocalModelSubmitData) => void
@@ -97,6 +99,69 @@ export const BASE_SLUG_FOR_METHOD: Record<ApiSetupMethod, string> = {
   pi_chatgpt_oauth: 'chatgpt-plus',
   pi_copilot_oauth: 'github-copilot',
   pi_api_key: 'pi-api-key',
+}
+
+export function resolveInitialStep(initialSetupNeeds: SetupNeeds | undefined, fallback: OnboardingStep): OnboardingStep {
+  if (initialSetupNeeds?.needsAdminLogin) {
+    return 'admin-login'
+  }
+  return fallback
+}
+
+export function mapAdminLoginError(error: unknown): string {
+  const errorLike = error as { errorCode?: string; message?: string } | undefined
+  if (errorLike?.errorCode === 'INVALID_CREDENTIALS') {
+    return i18n.t('onboarding.adminLogin.invalidCredentials')
+  }
+  if (errorLike?.errorCode === 'ACCOUNT_DISABLED') {
+    return i18n.t('onboarding.adminLogin.accountDisabled')
+  }
+  if (errorLike?.errorCode === 'NETWORK_ERROR') {
+    return i18n.t('onboarding.adminLogin.networkError')
+  }
+
+  const message = error instanceof Error ? error.message : errorLike?.message
+  if (message && /network|fetch|failed to reach|connection/i.test(message)) {
+    return i18n.t('onboarding.adminLogin.networkError')
+  }
+
+  return message || i18n.t('onboarding.adminLogin.genericError')
+}
+
+export function resolveAdminLoginSuccessState(state: OnboardingState): OnboardingState {
+  return {
+    ...state,
+    loginStatus: 'success',
+    completionStatus: 'complete',
+    errorMessage: undefined,
+    step: 'complete',
+  }
+}
+
+export function resolveAdminLoginFailureState(state: OnboardingState, error: unknown): OnboardingState {
+  return {
+    ...state,
+    loginStatus: 'error',
+    errorMessage: mapAdminLoginError(error),
+  }
+}
+
+export function resolveAdminReloginState(state: OnboardingState): OnboardingState {
+  return {
+    ...state,
+    step: 'admin-login',
+    loginStatus: 'idle',
+    errorMessage: undefined,
+  }
+}
+
+export function resolveAdminKickedState(state: OnboardingState): OnboardingState {
+  return {
+    ...state,
+    step: 'admin-kicked',
+    loginStatus: 'idle',
+    errorMessage: undefined,
+  }
 }
 
 /**
@@ -194,16 +259,18 @@ export function apiSetupMethodToConnectionSetup(
 export function useOnboarding({
   onComplete,
   initialSetupNeeds,
-  initialStep = 'provider-select',
+  initialStep = 'welcome',
   initialApiSetupMethod,
   onDismiss,
   onConfigSaved,
   editingSlug = null,
   existingSlugs = new Set(),
 }: UseOnboardingOptions): UseOnboardingReturn {
+  const resolvedInitialStep = resolveInitialStep(initialSetupNeeds, initialStep)
+
   // Main wizard state
   const [state, setState] = useState<OnboardingState>({
-    step: initialStep,
+    step: resolvedInitialStep,
     loginStatus: 'idle',
     credentialStatus: 'idle',
     completionStatus: 'saving',
@@ -214,8 +281,20 @@ export function useOnboarding({
     isCheckingGitBash: true, // Start as true until check completes
   })
 
-  // Check Git Bash on Windows at mount. If missing, redirect to git-bash step
-  // regardless of the initial step (provider-select skips the welcome gate).
+  useEffect(() => {
+    if (!initialSetupNeeds?.needsAdminLogin) return
+    setState(s => {
+      if (s.step === 'admin-login' || s.step === 'admin-kicked') return s
+      return {
+        ...s,
+        step: 'admin-login',
+        loginStatus: 'idle',
+        errorMessage: undefined,
+      }
+    })
+  }, [initialSetupNeeds?.needsAdminLogin])
+
+  // Check Git Bash on Windows at mount. If missing, redirect to git-bash step.
   useEffect(() => {
     const checkGitBash = async () => {
       try {
@@ -225,7 +304,9 @@ export function useOnboarding({
           gitBashStatus: status,
           isCheckingGitBash: false,
           // Redirect to git-bash step when missing on Windows
-          ...(status.platform === 'win32' && !status.found ? { step: 'git-bash' as const } : {}),
+          ...(status.platform === 'win32' && !status.found && s.step !== 'admin-login' && s.step !== 'admin-kicked'
+            ? { step: 'git-bash' as const }
+            : {}),
         }))
       } catch (error) {
         console.error('[Onboarding] Failed to check Git Bash:', error)
@@ -311,7 +392,11 @@ export function useOnboarding({
   const handleContinue = useCallback(async () => {
     switch (state.step) {
       case 'provider-select':
-        // Handled by handleSelectProvider (card click navigates directly)
+        setState(s => ({ ...s, step: 'complete' }))
+        break
+
+      case 'admin-login':
+      case 'admin-kicked':
         break
 
       case 'welcome':
@@ -319,12 +404,12 @@ export function useOnboarding({
         if (state.gitBashStatus?.platform === 'win32' && !state.gitBashStatus?.found) {
           setState(s => ({ ...s, step: 'git-bash' }))
         } else {
-          setState(s => ({ ...s, step: 'provider-select' }))
+          setState(s => ({ ...s, step: 'complete', completionStatus: 'complete' }))
         }
         break
 
       case 'git-bash':
-        setState(s => ({ ...s, step: 'provider-select' }))
+        setState(s => ({ ...s, step: 'complete', completionStatus: 'complete' }))
         break
 
       case 'local-model':
@@ -367,8 +452,39 @@ export function useOnboarding({
       case 'local-model':
         setState(s => ({ ...s, step: 'provider-select', credentialStatus: 'idle', errorMessage: undefined }))
         break
+      case 'admin-login':
+      case 'admin-kicked':
+        if (onDismiss) {
+          onDismiss()
+        }
+        break
     }
   }, [state.step, state.gitBashStatus, initialStep, onDismiss])
+
+  const handleAdminLogin = useCallback(async (username: string, password: string) => {
+    setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
+
+    try {
+      const result = await window.electronAPI.adminLogin(username, password)
+      if (result.success) {
+        setState(resolveAdminLoginSuccessState)
+        onConfigSaved?.()
+        return
+      }
+
+      setState(s => resolveAdminLoginFailureState(s, result))
+    } catch (error) {
+      setState(s => resolveAdminLoginFailureState(s, error))
+    }
+  }, [onConfigSaved])
+
+  const handleAdminRelogin = useCallback(() => {
+    setState(resolveAdminReloginState)
+  }, [])
+
+  const showAdminKicked = useCallback(() => {
+    setState(resolveAdminKickedState)
+  }, [])
 
   // Select API setup method (legacy — kept for direct edit flows)
   const handleSelectApiSetupMethod = useCallback((method: ApiSetupMethod) => {
@@ -743,7 +859,8 @@ export function useOnboarding({
       setState(s => ({
         ...s,
         gitBashStatus: { ...s.gitBashStatus!, found: true, path },
-        step: 'provider-select',
+        step: 'complete',
+        completionStatus: 'complete',
       }))
     } else {
       setState(s => ({
@@ -762,7 +879,8 @@ export function useOnboarding({
         gitBashStatus: status,
         isRecheckingGitBash: false,
         // If found, automatically continue to next step
-        step: status.found ? 'provider-select' : s.step,
+        step: status.found ? 'complete' : s.step,
+        completionStatus: status.found ? 'complete' : s.completionStatus,
       }))
     } catch (error) {
       console.error('[Onboarding] Failed to recheck Git Bash:', error)
@@ -808,12 +926,12 @@ export function useOnboarding({
   // Reset onboarding to initial state (used after logout or modal close)
   const reset = useCallback(() => {
     setState({
-      step: initialStep,
+      step: resolvedInitialStep,
       loginStatus: 'idle',
       credentialStatus: 'idle',
       completionStatus: 'saving',
       apiSetupMethod: initialApiSetupMethod ?? null,
-      isExistingUser: false,
+      isExistingUser: initialSetupNeeds?.needsBillingConfig ?? false,
       errorMessage: undefined,
     })
     setIsWaitingForCode(false)
@@ -821,7 +939,7 @@ export function useOnboarding({
     window.electronAPI.clearClaudeOAuthState().catch(() => {
       // Ignore errors - state may not exist
     })
-  }, [initialStep, initialApiSetupMethod])
+  }, [resolvedInitialStep, initialApiSetupMethod, initialSetupNeeds?.needsBillingConfig])
 
   return {
     state,
@@ -830,6 +948,9 @@ export function useOnboarding({
     handleSelectProvider,
     handleSelectApiSetupMethod,
     handleSubmitCredential,
+    handleAdminLogin,
+    handleAdminRelogin,
+    showAdminKicked,
     handleSubmitLocalModel,
     handleStartOAuth,
     // Two-step OAuth flow

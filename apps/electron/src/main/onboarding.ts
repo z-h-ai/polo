@@ -3,13 +3,13 @@
  *
  * Handles workspace setup and configuration persistence.
  */
-import { getAuthState, getSetupNeeds } from '@craft-agent/shared/auth'
-import { isSetupDeferred, setSetupDeferred } from '@craft-agent/shared/config/storage'
-import { getCredentialManager } from '@craft-agent/shared/credentials'
-import { prepareClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState, prepareMcpOAuth } from '@craft-agent/shared/auth'
-import { validateMcpConnection } from '@craft-agent/shared/mcp'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import { getAuthState, getSetupNeeds } from '@polo-ai/shared/auth'
+import { isSetupDeferred, setSetupDeferred } from '@polo-ai/shared/config/storage'
+import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { prepareClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState, prepareMcpOAuth } from '@polo-ai/shared/auth'
+import { validateMcpConnection } from '@polo-ai/shared/mcp'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from './handlers/handler-deps'
 
 // ============================================

@@ -15,7 +15,7 @@
  * - Anthropic: adaptive thinking + effort levels (Opus 4.7+). On models that
  *   don't accept `xhigh`, the Anthropic SDK silently falls back to `high`.
  * - Pi/OpenAI: reasoning_effort via Pi SDK levels. Pi's ceiling is `xhigh`,
- *   so Craft's `max` saturates there.
+ *   so Polo AI's `max` saturates there.
  */
 
 /**

@@ -1,13 +1,19 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { CHAT_LAYOUT } from '@/config/layout'
-import { flattenLabels, type LabelConfig } from '@craft-agent/shared/labels'
-import type { PermissionMode } from '@craft-agent/shared/agent/modes'
+import { flattenLabels, type LabelConfig } from '@polo-ai/shared/labels'
+import type { PermissionMode } from '@polo-ai/shared/agent/modes'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { BackgroundTask } from '../ActiveTasksBar'
 import { ActiveOptionBadges } from '../ActiveOptionBadges'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
+import { AlertTriangle } from 'lucide-react'
+
+export interface ChatInputStatusBanner {
+  variant: 'info' | 'destructive'
+  message: string
+}
 
 interface ChatInputZoneProps {
   compactMode?: boolean
@@ -25,6 +31,7 @@ interface ChatInputZoneProps {
   sessionStatuses?: SessionStatus[]
   currentSessionStatus?: string
   onSessionStatusChange?: (stateId: string) => void
+  statusBanner?: ChatInputStatusBanner | null
   className?: string
   inputProps: React.ComponentProps<typeof InputContainer>
 }
@@ -45,6 +52,7 @@ export function ChatInputZone({
   sessionStatuses = [],
   currentSessionStatus = 'todo',
   onSessionStatusChange,
+  statusBanner,
   className,
   inputProps,
 }: ChatInputZoneProps) {
@@ -98,6 +106,21 @@ export function ChatInputZone({
           currentSessionStatus={currentSessionStatus}
           onSessionStatusChange={onSessionStatusChange}
         />
+      )}
+
+      {statusBanner && (
+        <div
+          className={cn(
+            'mb-1.5 flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] leading-5 animate-[chat-status-slide-up_250ms_ease-out]',
+            statusBanner.variant === 'info'
+              ? 'bg-info/10 text-info'
+              : 'bg-destructive/10 text-destructive',
+          )}
+          role="status"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>{statusBanner.message}</span>
+        </div>
       )}
 
       <InputErrorBoundary

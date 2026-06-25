@@ -1,19 +1,19 @@
-import { RPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
-import { getCredentialManager } from '@craft-agent/shared/credentials'
-import { setSetupDeferred } from '@craft-agent/shared/config/storage'
+import { RPC_CHANNELS, type LlmConnectionSetup } from '@polo-ai/shared/protocol'
+import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@polo-ai/shared/config'
+import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { setSetupDeferred } from '@polo-ai/shared/config/storage'
 import {
   resolveSetupTestConnectionHint,
   testBackendConnection,
   validateStoredBackendConnection,
-} from '@craft-agent/shared/agent/backend'
-import { getModelRefreshService } from '@craft-agent/server-core/model-fetchers'
-import { parseTestConnectionError, createBuiltInConnection, validateModelList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup } from '@craft-agent/server-core/domain'
-import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@craft-agent/server-core/handlers'
-import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
+} from '@polo-ai/shared/agent/backend'
+import { getModelRefreshService } from '@polo-ai/server-core/model-fetchers'
+import { parseTestConnectionError, createBuiltInConnection, validateModelList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup } from '@polo-ai/server-core/domain'
+import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@polo-ai/server-core/handlers'
+import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { randomUUID } from 'node:crypto'
-import { CLIENT_OPEN_EXTERNAL } from '@craft-agent/server-core/transport'
+import { CLIENT_OPEN_EXTERNAL } from '@polo-ai/server-core/transport'
 
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
@@ -67,6 +67,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         // Create connection with appropriate defaults based on slug
         connection = createBuiltInConnection(setup.slug, setup.baseUrl)
         isNewConnection = true
+      } else if (connection.managedBy === 'admin') {
+        return { success: false, error: 'Admin-managed connections can only be changed by syncing with Admin.' }
       }
 
       const updates: Partial<LlmConnection> = {}
@@ -137,10 +139,10 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // Skip when custom endpoint protocol is driving routing.
       if (setup.piAuthProvider && !isCustomEndpointCompat) {
         updates.piAuthProvider = setup.piAuthProvider
-        // Update connection name to show the actual provider (e.g. "Craft Agents Backend (Google AI Studio)")
+        // Update connection name to show the actual provider (e.g. "Polo AI Backend (Google AI Studio)")
         const providerName = piAuthProviderDisplayName(setup.piAuthProvider)
         if (providerName) {
-          updates.name = `Craft Agents Backend (${providerName})`
+          updates.name = `Polo AI Backend (${providerName})`
         }
         // Only set default models when using standard Pi provider AND user didn't pick explicit models
         if (!hasConfiguredBaseUrl && !setup.models?.length) {
@@ -296,7 +298,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   // Unified connection test — uses the agent factory to spawn a real agent subprocess
   // and validate credentials via runMiniCompletion(). Same code path as actual chat.
-  server.handle(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('@craft-agent/shared/protocol').TestLlmConnectionParams): Promise<import('@craft-agent/shared/protocol').TestLlmConnectionResult> => {
+  server.handle(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('@polo-ai/shared/protocol').TestLlmConnectionParams): Promise<import('@polo-ai/shared/protocol').TestLlmConnectionResult> => {
     const { provider, apiKey, baseUrl, model, piAuthProvider, customEndpoint } = params
     const trimmedKey = apiKey?.trim() ?? ''
     const allowEmptyApiKey = !setupTestRequiresApiKey(baseUrl)
@@ -349,12 +351,12 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   // ============================================================
 
   server.handle(RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS, async () => {
-    const { getPiApiKeyProviders } = await import('@craft-agent/shared/config')
+    const { getPiApiKeyProviders } = await import('@polo-ai/shared/config')
     return getPiApiKeyProviders()
   })
 
   server.handle(RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL, async (_ctx, provider: string) => {
-    const { getPiProviderBaseUrl } = await import('@craft-agent/shared/config')
+    const { getPiProviderBaseUrl } = await import('@polo-ai/shared/config')
     return getPiProviderBaseUrl(provider)
   })
 
@@ -429,6 +431,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // Check if this is an update or create
       const existing = getLlmConnection(connection.slug)
       if (existing) {
+        if (existing.managedBy === 'admin') {
+          return { success: false, error: 'Admin-managed connections can only be changed by syncing with Admin.' }
+        }
         // Update existing connection (can't change slug)
         const { slug: _slug, ...updates } = connection
         const success = updateLlmConnection(connection.slug, updates)
@@ -474,6 +479,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (!connection) {
         return { success: false, error: 'Connection not found' }
       }
+      if (connection.managedBy === 'admin') {
+        return { success: false, error: 'Admin-managed connections can only be deleted by syncing with Admin.' }
+      }
       // deleteLlmConnection handles the "at least one must remain" check
       const success = deleteLlmConnection(slug)
       if (success) {
@@ -516,7 +524,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       deps.platform.logger?.info(`[LLM_CONNECTION_TEST] Error for ${slug}: ${msg.slice(0, 500)}`)
-      const { parseValidationError } = await import('@craft-agent/shared/config')
+      const { parseValidationError } = await import('@polo-ai/shared/config')
       return { success: false, error: parseValidationError(msg) }
     }
   })
@@ -550,7 +558,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         }
       }
 
-      const { loadWorkspaceConfig, saveWorkspaceConfig } = await import('@craft-agent/shared/workspaces')
+      const { loadWorkspaceConfig, saveWorkspaceConfig } = await import('@polo-ai/shared/workspaces')
       const config = loadWorkspaceConfig(workspace.rootPath)
       if (!config) {
         return { success: false, error: 'Failed to load workspace config' }
@@ -622,7 +630,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     flowId: string
   }> => {
     cleanupExpiredChatGptFlows()
-    const { prepareChatGptOAuth } = await import('@craft-agent/shared/auth')
+    const { prepareChatGptOAuth } = await import('@polo-ai/shared/auth')
 
     const prepared = prepareChatGptOAuth()
     const flowId = randomUUID()
@@ -658,7 +666,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     }
 
     try {
-      const { exchangeChatGptTokens } = await import('@craft-agent/shared/auth')
+      const { exchangeChatGptTokens } = await import('@polo-ai/shared/auth')
       const credentialManager = getCredentialManager()
 
       const tokens = await exchangeChatGptTokens(code, flow.codeVerifier)

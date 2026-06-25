@@ -5,20 +5,27 @@
  * until required files (like guide.md) have been read.
  */
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
-import { existsSync } from 'node:fs';
+import type { PrerequisiteManager as PrerequisiteManagerType } from '../prerequisite-manager.ts';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
-import { PrerequisiteManager } from '../prerequisite-manager.ts';
 
 // Mock existsSync to control guide.md existence
 const originalExistsSync = existsSync;
+const originalReadFileSync = readFileSync;
 let mockExistsPaths: Set<string> = new Set();
 
 mock.module('node:fs', () => ({
   existsSync: (path: string) => mockExistsPaths.has(path),
   // Re-export anything else the module needs
-  readFileSync: originalExistsSync,
+  readFileSync: originalReadFileSync,
 }));
+
+mock.module('../../../config/storage.ts', () => ({
+  getBrowserToolEnabled: () => true,
+}));
+
+const { PrerequisiteManager } = await import('../prerequisite-manager.ts');
 
 const WORKSPACE_ROOT = '/test/workspace';
 
@@ -27,11 +34,11 @@ function guidePath(slug: string): string {
 }
 
 function browserDocPath(): string {
-  return resolve(join(homedir(), '.craft-agent', 'docs', 'browser-tools.md'));
+  return resolve(join(homedir(), '.polo-ai', 'docs', 'browser-tools.md'));
 }
 
 describe('PrerequisiteManager', () => {
-  let manager: PrerequisiteManager;
+  let manager: PrerequisiteManagerType;
   let debugMessages: string[];
 
   beforeEach(() => {
@@ -83,9 +90,9 @@ describe('PrerequisiteManager', () => {
       expect(result.allowed).toBe(true);
     });
 
-    it('exempts craft-agents-docs MCP tools', () => {
-      mockExistsPaths.add(guidePath('craft-agents-docs'));
-      const result = manager.checkPrerequisites('mcp__craft-agents-docs__search');
+    it('exempts polo-ai-docs MCP tools', () => {
+      mockExistsPaths.add(guidePath('polo-ai-docs'));
+      const result = manager.checkPrerequisites('mcp__polo-ai-docs__search');
       expect(result.allowed).toBe(true);
     });
 
@@ -94,11 +101,11 @@ describe('PrerequisiteManager', () => {
       expect(result.allowed).toBe(true);
     });
 
-    it('matches native browser tools and blocks until browser docs are read', () => {
+    it('matches built-in browser tool and blocks until browser docs are read', () => {
       const docsPath = browserDocPath();
       mockExistsPaths.add(docsPath);
 
-      const result = manager.checkPrerequisites('browser_snapshot');
+      const result = manager.checkPrerequisites('browser_tool');
       expect(result.allowed).toBe(false);
       expect(result.blockReason).toContain(docsPath);
     });
@@ -298,11 +305,11 @@ describe('PrerequisiteManager', () => {
       const docsPath = browserDocPath();
       mockExistsPaths.add(docsPath);
 
-      expect(manager.checkPrerequisites('browser_open').allowed).toBe(false);
-      expect(manager.checkPrerequisites('browser_open').allowed).toBe(false);
+      expect(manager.checkPrerequisites('browser_tool').allowed).toBe(false);
+      expect(manager.checkPrerequisites('browser_tool').allowed).toBe(false);
 
       manager.trackReadTool({ file_path: docsPath });
-      expect(manager.checkPrerequisites('browser_open').allowed).toBe(true);
+      expect(manager.checkPrerequisites('browser_tool').allowed).toBe(true);
     });
   });
 

@@ -155,6 +155,10 @@ export const RPC_CHANNELS = {
   deeplink: {
     NAVIGATE: 'deeplink:navigate',
   },
+  tabBrowser: {
+    GET_APPS: 'tab-browser:getApps',
+    SAVE_APPS: 'tab-browser:saveApps',
+  },
   auth: {
     LOGOUT: 'auth:logout',
     SHOW_LOGOUT_CONFIRMATION: 'auth:showLogoutConfirmation',
@@ -172,6 +176,13 @@ export const RPC_CHANNELS = {
     HAS_CLAUDE_OAUTH_STATE: 'onboarding:hasClaudeOAuthState',
     CLEAR_CLAUDE_OAUTH_STATE: 'onboarding:clearClaudeOAuthState',
     DEFER_SETUP: 'onboarding:deferSetup',
+  },
+  admin: {
+    LOGIN: 'admin:login',
+    VALIDATE: 'admin:validate',
+    LOGOUT: 'admin:logout',
+    GET_STATUS: 'admin:getStatus',
+    SYNC_CONNECTIONS: 'admin:syncConnections',
   },
   llmConnections: {
     LIST: 'LLM_Connection:list',

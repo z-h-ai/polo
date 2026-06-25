@@ -1,7 +1,7 @@
 /**
- * @craft-agent/messaging-gateway
+ * @polo-ai/messaging-gateway
  *
- * Messaging gateway for Craft Agent — Telegram & WhatsApp.
+ * Messaging gateway for Polo AI — Telegram & WhatsApp.
  */
 
 export { MessagingGateway, type GatewayOptions } from './gateway'

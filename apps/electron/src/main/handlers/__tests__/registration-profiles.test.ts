@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 const registeredChannels: string[] = []
@@ -93,6 +93,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     files,
     labels,
     llm,
+    admin,
     oauth,
     sessions,
     settings,
@@ -105,22 +106,23 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     resources,
     transfer,
   ] = await Promise.all([
-    import('@craft-agent/server-core/handlers/rpc/auth'),
-    import('@craft-agent/server-core/handlers/rpc/automations'),
-    import('@craft-agent/server-core/handlers/rpc/files'),
-    import('@craft-agent/server-core/handlers/rpc/labels'),
-    import('@craft-agent/server-core/handlers/rpc/llm-connections'),
-    import('@craft-agent/server-core/handlers/rpc/oauth'),
-    import('@craft-agent/server-core/handlers/rpc/sessions'),
-    import('@craft-agent/server-core/handlers/rpc/settings'),
-    import('@craft-agent/server-core/handlers/rpc/skills'),
-    import('@craft-agent/server-core/handlers/rpc/sources'),
-    import('@craft-agent/server-core/handlers/rpc/statuses'),
-    import('@craft-agent/server-core/handlers/rpc/system'),
-    import('@craft-agent/server-core/handlers/rpc/workspace'),
-    import('@craft-agent/server-core/handlers/rpc/onboarding'),
-    import('@craft-agent/server-core/handlers/rpc/resources'),
-    import('@craft-agent/server-core/handlers/rpc/transfer'),
+    import('@polo-ai/server-core/handlers/rpc/auth'),
+    import('@polo-ai/server-core/handlers/rpc/automations'),
+    import('@polo-ai/server-core/handlers/rpc/files'),
+    import('@polo-ai/server-core/handlers/rpc/labels'),
+    import('@polo-ai/server-core/handlers/rpc/llm-connections'),
+    import('@polo-ai/server-core/handlers/rpc/admin'),
+    import('@polo-ai/server-core/handlers/rpc/oauth'),
+    import('@polo-ai/server-core/handlers/rpc/sessions'),
+    import('@polo-ai/server-core/handlers/rpc/settings'),
+    import('@polo-ai/server-core/handlers/rpc/skills'),
+    import('@polo-ai/server-core/handlers/rpc/sources'),
+    import('@polo-ai/server-core/handlers/rpc/statuses'),
+    import('@polo-ai/server-core/handlers/rpc/system'),
+    import('@polo-ai/server-core/handlers/rpc/workspace'),
+    import('@polo-ai/server-core/handlers/rpc/onboarding'),
+    import('@polo-ai/server-core/handlers/rpc/resources'),
+    import('@polo-ai/server-core/handlers/rpc/transfer'),
   ])
 
   return new Set([
@@ -129,6 +131,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...files.HANDLED_CHANNELS,
     ...labels.HANDLED_CHANNELS,
     ...llm.HANDLED_CHANNELS,
+    ...admin.HANDLED_CHANNELS,
     ...oauth.HANDLED_CHANNELS,
     ...sessions.HANDLED_CHANNELS,
     ...settings.HANDLED_CHANNELS,
@@ -144,11 +147,12 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
 }
 
 async function getExpectedGuiChannels(): Promise<Set<string>> {
-  const [browser, system, workspace, settings] = await Promise.all([
+  const [browser, system, workspace, settings, tabBrowser] = await Promise.all([
     import('../browser'),
     import('../system'),
     import('../workspace'),
     import('../settings'),
+    import('../tab-browser'),
   ])
 
   return new Set([
@@ -156,6 +160,7 @@ async function getExpectedGuiChannels(): Promise<Set<string>> {
     ...system.GUI_HANDLED_CHANNELS,
     ...workspace.GUI_HANDLED_CHANNELS,
     ...settings.GUI_HANDLED_CHANNELS,
+    ...tabBrowser.HANDLED_CHANNELS,
   ])
 }
 

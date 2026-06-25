@@ -5,8 +5,8 @@
  * Light mode is default, with optional dark mode overrides.
  *
  * Storage locations:
- * - App override:   ~/.craft-agent/theme.json
- * - Preset themes:  ~/.craft-agent/themes/*.json
+ * - App override:   ~/.polo-ai/theme.json
+ * - Preset themes:  ~/.polo-ai/themes/*.json
  */
 
 /**

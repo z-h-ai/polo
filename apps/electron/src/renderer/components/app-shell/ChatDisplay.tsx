@@ -38,12 +38,12 @@ import {
   type ActivityItem,
   type FileChange,
   type DiffViewerSettings,
-} from "@craft-agent/ui"
+} from "@polo-ai/ui"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
-import type { PermissionMode } from "@craft-agent/shared/agent/modes"
-import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
+import type { PermissionMode } from "@polo-ai/shared/agent/modes"
+import type { ThinkingLevel } from "@polo-ai/shared/agent/thinking-levels"
 import {
   TurnCard,
   UserMessageBubble,
@@ -61,9 +61,9 @@ import {
   type UserTurn,
   type SystemTurn,
   type AuthRequestTurn,
-} from "@craft-agent/ui"
+} from "@polo-ai/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
-import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
+import { ChatInputZone, type ChatInputStatusBanner, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
@@ -133,11 +133,11 @@ interface ChatDisplayProps {
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
-  // Model selection
+  // Current model is read-only in the input; admin-managed settings choose it.
   currentModel: string
-  onModelChange: (model: string, connection?: string) => void
-  // Connection selection (locked after first message)
-  /** Callback when LLM connection changes (only works when session is empty) */
+  /** @deprecated Manual model switching has been removed from the UI. */
+  onModelChange?: (model: string, connection?: string) => void
+  /** @deprecated Manual connection switching has been removed from the UI. */
   onConnectionChange?: (connectionSlug: string) => void
   /** Ref for the input, used for external focus control */
   textareaRef?: React.RefObject<RichTextInputHandle>
@@ -157,10 +157,9 @@ interface ChatDisplayProps {
   pendingCredential?: CredentialRequest
   /** Callback to respond to credential request */
   onRespondToCredential?: (sessionId: string, requestId: string, response: CredentialResponse) => void
-  // Thinking level (session-level setting)
-  /** Current thinking level ('off', 'think', 'max') */
+  /** @deprecated Manual thinking-level switching has been removed from the UI. */
   thinkingLevel?: ThinkingLevel
-  /** Callback when thinking level changes */
+  /** @deprecated Manual thinking-level switching has been removed from the UI. */
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   // Advanced options
   /** Current permission mode */
@@ -187,7 +186,7 @@ interface ChatDisplayProps {
   skills?: LoadedSkill[]
   // Label selection (for #labels)
   /** Available label configs (tree) for label menu and badge display */
-  labels?: import('@craft-agent/shared/labels').LabelConfig[]
+  labels?: import('@polo-ai/shared/labels').LabelConfig[]
   /** Callback when labels change */
   onLabelsChange?: (labels: string[]) => void
   // State/status selection (for # menu and ActiveOptionBadges)
@@ -226,11 +225,7 @@ interface ChatDisplayProps {
   // Compact mode (for EditPopover embedding and auto-compact / WebUI mobile)
   /** Enable compact mode - hides non-essential UI elements for popover embedding */
   compactMode?: boolean
-  /**
-   * When compactMode is true, enable the compact (drawer-based) model selector
-   * next to the permission-mode pill. Defaults to false so EditPopover keeps
-   * its current behavior; ChatPage opts in when in auto-compact / mobile.
-   */
+  /** @deprecated Manual compact model selection has been removed from the UI. */
   enableCompactModelPicker?: boolean
   /** Custom placeholder for input (used in compact mode for edit context) */
   placeholder?: string | string[]
@@ -238,6 +233,8 @@ interface ChatDisplayProps {
   emptyStateLabel?: string
   /** When true, the session's locked connection has been removed - disables send and shows unavailable state */
   connectionUnavailable?: boolean
+  /** Blocking account/config/quota state shown above the input */
+  inputStatusBanner?: ChatInputStatusBanner | null
 }
 
 import {
@@ -440,17 +437,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onOpenFile,
   onOpenUrl,
   currentModel,
-  onModelChange,
-  onConnectionChange,
   textareaRef: externalTextareaRef,
   disabled = false,
   pendingPermission,
   onRespondToPermission,
   pendingCredential,
   onRespondToCredential,
-  // Thinking level
-  thinkingLevel = 'medium',
-  onThinkingLevelChange,
   // Advanced options
   permissionMode = 'ask',
   onPermissionModeChange,
@@ -489,11 +481,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onMatchInfoChange,
   // Compact mode (for EditPopover embedding and auto-compact / WebUI mobile)
   compactMode = false,
-  enableCompactModelPicker = false,
   placeholder,
   emptyStateLabel,
   // Connection unavailable
   connectionUnavailable = false,
+  inputStatusBanner,
 }, ref) {
   const { t } = useTranslation()
 
@@ -975,7 +967,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const [overlayState, setOverlayState] = useState<OverlayState>(null)
 
   // Diff viewer settings - loaded from user preferences on mount, persisted on change
-  // These settings are stored in ~/.craft-agent/preferences.json (not localStorage)
+  // These settings are stored in ~/.polo-ai/preferences.json (not localStorage)
   const [diffViewerSettings, setDiffViewerSettings] = useState<Partial<DiffViewerSettings>>({})
 
   // Load diff viewer settings from preferences on mount
@@ -1914,6 +1906,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             sessionStatuses={sessionStatuses}
             currentSessionStatus={session.sessionStatus || 'todo'}
             onSessionStatusChange={onSessionStatusChange}
+            statusBanner={inputStatusBanner}
             inputProps={{
               placeholder,
               disabled: isInputDisabled,
@@ -1923,11 +1916,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onStop: handleStop,
               textareaRef,
               currentModel,
-              onModelChange,
-              thinkingLevel,
-              onThinkingLevelChange,
               enabledModes,
-              enableCompactModelPicker,
               structuredInput,
               onStructuredResponse: handleStructuredResponse,
               inputValue,
@@ -1945,7 +1934,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               connectionUnavailable,
               isEmptySession: session.messages.length === 0,
               currentConnection: session.llmConnection,
-              onConnectionChange,
               contextStatus: {
                 isCompacting: session.currentStatus?.statusType === 'compacting',
                 inputTokens: session.tokenUsage?.inputTokens,

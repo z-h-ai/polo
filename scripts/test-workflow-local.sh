@@ -20,4 +20,4 @@ ANTHROPIC_API_KEY="$API_KEY" bun run apps/cli/src/index.ts run \
   --workspace-dir .github/agents \
   --source craft-public \
   --output-format stream-json \
-  "Read today's daily note from the Craft source and print its contents. Do not modify anything."
+  "Read today's daily note from the Polo AI source and print its contents. Do not modify anything."

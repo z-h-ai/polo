@@ -7,8 +7,8 @@
  * actually read.
  */
 
-import type { Message } from '@craft-agent/core/types'
-import type { LabelConfig } from '@craft-agent/shared/labels'
+import type { Message } from '@polo-ai/core/types'
+import type { LabelConfig } from '@polo-ai/shared/labels'
 import type { LlmConnectionWithStatus } from '@config/llm-connections'
 import type { LoadedSource, LoadedSkill, Session, Workspace } from '../../../../shared/types'
 import type { SessionMeta } from '@/atoms/sessions'
@@ -272,7 +272,7 @@ export const MOCK_SKILLS: LoadedSkill[] = []
  * Mock LLM connections for the mobile playground.
  *
  * One Anthropic and one pi_compat connection — enough for the
- * CompactModelSelector to render its switcher path (multi-connection),
+ * the former compact model selector to render its switcher path (multi-connection),
  * its vision-toggle path (pi_compat), and its flat-list path (single
  * connection) when downstream demos slice this list.
  */

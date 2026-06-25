@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startWebuiHttpServer } from '../http-server'
+import { createWebuiHandler } from '../http-server'
 
 const SECRET = 'test-server-secret'
 const PASSWORD = 'test-password'
 const TEMP_DIRS: string[] = []
-const SERVERS: Array<{ stop: () => void }> = []
+const HANDLERS: Array<{ dispose: () => void }> = []
 
 const logger = {
   info: () => {},
@@ -30,8 +30,7 @@ async function createServer(overrides?: {
   wsProtocol?: 'ws' | 'wss'
   wsPort?: number
 }) {
-  const server = await startWebuiHttpServer({
-    port: 0,
+  const handler = createWebuiHandler({
     webuiDir: createTestWebuiDir(),
     secret: SECRET,
     password: PASSWORD,
@@ -43,12 +42,21 @@ async function createServer(overrides?: {
     logger,
   })
 
-  SERVERS.push(server)
+  HANDLERS.push(handler)
 
   return {
-    server,
-    baseUrl: `http://127.0.0.1:${server.port}`,
+    handler,
+    baseUrl: 'http://127.0.0.1:3100',
   }
+}
+
+function request(
+  handler: { fetch: (req: Request) => Promise<Response> },
+  baseUrl: string,
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  return handler.fetch(new Request(`${baseUrl}${path}`, init))
 }
 
 function extractSessionCookie(res: Response): string {
@@ -58,8 +66,8 @@ function extractSessionCookie(res: Response): string {
 }
 
 afterEach(() => {
-  while (SERVERS.length > 0) {
-    SERVERS.pop()?.stop()
+  while (HANDLERS.length > 0) {
+    HANDLERS.pop()?.dispose()
   }
 
   while (TEMP_DIRS.length > 0) {
@@ -70,9 +78,9 @@ afterEach(() => {
 
 describe('startWebuiHttpServer', () => {
   it('allows plain-http login even when the RPC transport is wss', async () => {
-    const { baseUrl } = await createServer({ wsProtocol: 'wss', wsPort: 9100 })
+    const { handler, baseUrl } = await createServer({ wsProtocol: 'wss', wsPort: 9100 })
 
-    const authRes = await fetch(`${baseUrl}/api/auth`, {
+    const authRes = await request(handler, baseUrl, '/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: PASSWORD }),
@@ -80,10 +88,10 @@ describe('startWebuiHttpServer', () => {
 
     expect(authRes.status).toBe(200)
     const setCookie = authRes.headers.get('set-cookie')
-    expect(setCookie).toContain('craft_session=')
+    expect(setCookie).toContain('polo_ai_session=')
     expect(setCookie).not.toContain('Secure')
 
-    const configRes = await fetch(`${baseUrl}/api/config`, {
+    const configRes = await request(handler, baseUrl, '/api/config', {
       headers: {
         cookie: extractSessionCookie(authRes),
       },
@@ -96,9 +104,9 @@ describe('startWebuiHttpServer', () => {
   })
 
   it('rejects invalid credentials', async () => {
-    const { baseUrl } = await createServer()
+    const { handler, baseUrl } = await createServer()
 
-    const res = await fetch(`${baseUrl}/api/auth`, {
+    const res = await request(handler, baseUrl, '/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: 'wrong-password' }),
@@ -109,9 +117,9 @@ describe('startWebuiHttpServer', () => {
   })
 
   it('honors an explicit secure-cookie override', async () => {
-    const { baseUrl } = await createServer({ secureCookies: true, wsProtocol: 'ws', wsPort: 9100 })
+    const { handler, baseUrl } = await createServer({ secureCookies: true, wsProtocol: 'ws', wsPort: 9100 })
 
-    const res = await fetch(`${baseUrl}/api/auth`, {
+    const res = await request(handler, baseUrl, '/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: PASSWORD }),
@@ -122,9 +130,9 @@ describe('startWebuiHttpServer', () => {
   })
 
   it('infers secure cookies from proxy https headers when no override is set', async () => {
-    const { baseUrl } = await createServer({ wsProtocol: 'wss', wsPort: 9100 })
+    const { handler, baseUrl } = await createServer({ wsProtocol: 'wss', wsPort: 9100 })
 
-    const res = await fetch(`${baseUrl}/api/auth`, {
+    const res = await request(handler, baseUrl, '/api/auth', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -138,9 +146,9 @@ describe('startWebuiHttpServer', () => {
   })
 
   it('derives a browser-facing websocket URL from forwarded public host headers', async () => {
-    const { baseUrl } = await createServer({ wsProtocol: 'wss', wsPort: 9100 })
+    const { handler, baseUrl } = await createServer({ wsProtocol: 'wss', wsPort: 9100 })
 
-    const authRes = await fetch(`${baseUrl}/api/auth`, {
+    const authRes = await request(handler, baseUrl, '/api/auth', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -150,7 +158,7 @@ describe('startWebuiHttpServer', () => {
       body: JSON.stringify({ password: PASSWORD }),
     })
 
-    const configRes = await fetch(`${baseUrl}/api/config`, {
+    const configRes = await request(handler, baseUrl, '/api/config', {
       headers: {
         cookie: extractSessionCookie(authRes),
         'X-Forwarded-Proto': 'https',
@@ -165,19 +173,19 @@ describe('startWebuiHttpServer', () => {
   })
 
   it('returns an explicit public websocket URL override from /api/config', async () => {
-    const { baseUrl } = await createServer({
+    const { handler, baseUrl } = await createServer({
       publicWsUrl: 'wss://craft.example.com/ws',
       wsProtocol: 'wss',
       wsPort: 9100,
     })
 
-    const authRes = await fetch(`${baseUrl}/api/auth`, {
+    const authRes = await request(handler, baseUrl, '/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: PASSWORD }),
     })
 
-    const configRes = await fetch(`${baseUrl}/api/config`, {
+    const configRes = await request(handler, baseUrl, '/api/config', {
       headers: {
         cookie: extractSessionCookie(authRes),
       },

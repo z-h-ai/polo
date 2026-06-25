@@ -1,10 +1,19 @@
 import { describe, it, expect } from 'bun:test'
+import { setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import {
   resolveSlugForMethod,
   apiSetupMethodToConnectionSetup,
   BASE_SLUG_FOR_METHOD,
+  resolveInitialStep,
+  resolveAdminLoginSuccessState,
+  resolveAdminLoginFailureState,
+  resolveAdminReloginState,
+  resolveAdminKickedState,
 } from '../useOnboarding'
-import type { ApiSetupMethod } from '@/components/onboarding'
+import type { ApiSetupMethod, OnboardingState } from '@/components/onboarding'
+import type { SetupNeeds } from '../../../shared/types'
+
+setupI18n()
 
 // ============================================================
 // resolveSlugForMethod
@@ -167,5 +176,77 @@ describe('reauth slug resolution', () => {
     const existingSlugs = new Set(['github-copilot'])
     const slug = resolveSlugForMethod('pi_copilot_oauth', 'github-copilot', existingSlugs)
     expect(slug).toBe('github-copilot')
+  })
+})
+
+// ============================================================
+// Admin onboarding flow
+// ============================================================
+
+function adminState(overrides: Partial<OnboardingState> = {}): OnboardingState {
+  return {
+    step: 'admin-login',
+    loginStatus: 'idle',
+    credentialStatus: 'idle',
+    completionStatus: 'saving',
+    apiSetupMethod: null,
+    isExistingUser: false,
+    ...overrides,
+  }
+}
+
+describe('admin onboarding flow', () => {
+  it('starts at admin-login when admin login is required', () => {
+    const setupNeeds: SetupNeeds = {
+      needsBillingConfig: false,
+      needsCredentials: false,
+      needsAdminLogin: true,
+      isFullyConfigured: false,
+    }
+
+    expect(resolveInitialStep(setupNeeds, 'provider-select')).toBe('admin-login')
+  })
+
+  it('moves to complete after admin login succeeds', () => {
+    const next = resolveAdminLoginSuccessState(adminState({ loginStatus: 'waiting' }))
+
+    expect(next.step).toBe('complete')
+    expect(next.loginStatus).toBe('success')
+    expect(next.completionStatus).toBe('complete')
+    expect(next.errorMessage).toBeUndefined()
+  })
+
+  it('maps admin login failure to a localized error message', () => {
+    const next = resolveAdminLoginFailureState(
+      adminState({ loginStatus: 'waiting' }),
+      { success: false, errorCode: 'INVALID_CREDENTIALS' },
+    )
+
+    expect(next.step).toBe('admin-login')
+    expect(next.loginStatus).toBe('error')
+    expect(next.errorMessage).toBe('Username or password is incorrect.')
+  })
+
+  it('moves from kicked back to admin-login when relogin is requested', () => {
+    const next = resolveAdminReloginState(adminState({
+      step: 'admin-kicked',
+      errorMessage: 'stale error',
+    }))
+
+    expect(next.step).toBe('admin-login')
+    expect(next.loginStatus).toBe('idle')
+    expect(next.errorMessage).toBeUndefined()
+  })
+
+  it('moves to admin-kicked when the revoked-token signal is shown', () => {
+    const next = resolveAdminKickedState(adminState({
+      step: 'complete',
+      loginStatus: 'success',
+      errorMessage: 'stale error',
+    }))
+
+    expect(next.step).toBe('admin-kicked')
+    expect(next.loginStatus).toBe('idle')
+    expect(next.errorMessage).toBeUndefined()
   })
 })

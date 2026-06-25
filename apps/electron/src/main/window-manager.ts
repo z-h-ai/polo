@@ -1,13 +1,14 @@
-import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
+import { BrowserWindow, shell, nativeTheme, Menu, app, session } from 'electron'
 import { windowLog } from './logger'
 import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
 import { release } from 'os'
 import { fileURLToPath } from 'url'
-import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
+import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
+import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -57,18 +58,19 @@ export class WindowManager {
   private windows: Map<number, ManagedWindow> = new Map()  // webContents.id → ManagedWindow
   private focusedModeWindows: Set<number> = new Set()  // webContents.id of windows in focused mode
   private pendingCloseTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Fallback timeouts for window close
-  private eventSink: ((channel: string, target: import('@craft-agent/shared/protocol').PushTarget, ...args: any[]) => void) | null = null
+  private eventSink: ((channel: string, target: import('@polo-ai/shared/protocol').PushTarget, ...args: any[]) => void) | null = null
   private clientResolver: ((wcId: number) => string | undefined) | null = null
   private keyboardCloseIntents: Set<number> = new Set()  // webContents.id flagged by Cmd/Ctrl+W before close
   private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
   private isAppQuitting = false  // Skip layered close interception during app quit
+  private webviewSecurityInitialized = false
 
   /**
    * Set the event sink and client resolver for pushing events via the RPC server
    * instead of webContents.send. Called after server creation.
    */
   setRpcEventSink(
-    sink: (channel: string, target: import('@craft-agent/shared/protocol').PushTarget, ...args: any[]) => void,
+    sink: (channel: string, target: import('@polo-ai/shared/protocol').PushTarget, ...args: any[]) => void,
     resolver: (wcId: number) => string | undefined
   ): void {
     this.eventSink = sink
@@ -76,7 +78,7 @@ export class WindowManager {
   }
 
   /** Return current RPC event sink, if transport has been initialized. */
-  getRpcEventSink(): ((channel: string, target: import('@craft-agent/shared/protocol').PushTarget, ...args: any[]) => void) | null {
+  getRpcEventSink(): ((channel: string, target: import('@polo-ai/shared/protocol').PushTarget, ...args: any[]) => void) | null {
     return this.eventSink
   }
 
@@ -159,9 +161,77 @@ export class WindowManager {
     })
   }
 
+  private setupWebviewSecurity(): void {
+    if (this.webviewSecurityInitialized) return
+    this.webviewSecurityInitialized = true
+
+    const ses = session.fromPartition(BROWSER_PANE_SESSION_PARTITION)
+    const allow = new Set([
+      'fullscreen',
+      'pointerLock',
+      'window-management',
+      'notifications',
+      'geolocation',
+      'media',
+      'clipboard-read',
+      'clipboard-sanitized-write',
+      'idle-detection',
+    ])
+
+    if (typeof ses.setPermissionCheckHandler === 'function') {
+      ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+        const allowed = allow.has(permission)
+        if (!allowed) {
+          windowLog.warn(`[webview-security] permission check denied: ${permission} origin=${requestingOrigin}`)
+        }
+        return allowed
+      })
+    }
+
+    if (typeof ses.setPermissionRequestHandler === 'function') {
+      ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+        const allowed = allow.has(permission)
+        if (!allowed) {
+          const requestingOrigin = (details as { requestingOrigin?: string } | undefined)?.requestingOrigin ?? 'unknown'
+          windowLog.warn(`[webview-security] permission request denied: ${permission} origin=${requestingOrigin}`)
+        }
+        callback(allowed)
+      })
+    }
+
+    app.on('web-contents-created', (_event, contents) => {
+      if (contents.getType() !== 'webview') return
+
+      contents.setWindowOpenHandler((details) => {
+        const classification = classifyExternalUrl(details.url)
+        if (classification.kind === 'dangerous' || classification.kind === 'internal-deeplink') {
+          windowLog.warn(`[webview-security] blocked popup: ${formatBlockedUrlError(classification)} url=${details.url}`)
+          return { action: 'deny' }
+        }
+
+        void shell.openExternal(details.url).catch((error) => {
+          windowLog.warn(`[webview-security] failed to open popup externally: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        return { action: 'deny' }
+      })
+
+      contents.on('will-navigate', (event, url) => {
+        try {
+          const parsed = new URL(url)
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return
+        } catch {
+          // Invalid URLs fall through to blocking.
+        }
+
+        event.preventDefault()
+        windowLog.warn(`[webview-security] blocked navigation url=${url}`)
+      })
+    })
+  }
+
   /**
    * Apply the window-title policy across all managed windows:
-   *   1 window  → app name ("Craft Agents") on the lone window
+   *   1 window  → app name ("Polo AI") on the lone window
    *   ≥2 windows → workspace name on each window, app-name fallback when the
    *                workspace can't be resolved (e.g. onboarding window).
    *
@@ -193,6 +263,8 @@ export class WindowManager {
    * @param options - Window creation options
    */
   createWindow(options: CreateWindowOptions): BrowserWindow {
+    this.setupWebviewSecurity()
+
     const { workspaceId, focused = false, initialDeepLink, restoreUrl } = options
 
     // Load platform-specific app icon
@@ -258,7 +330,7 @@ export class WindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
-        webviewTag: false // Browser integration uses WebContentsView, not <webview>
+        webviewTag: true
       }
     })
 
@@ -299,7 +371,7 @@ export class WindowManager {
       })
     }
 
-    // The renderer's index.html ships with `<title>Craft Agents</title>`, so
+    // The renderer's index.html ships with `<title>Polo AI</title>`, so
     // without this Electron auto-syncs every window's title back to that on
     // load — clobbering the workspace-name policy applied below. Suppress the
     // default sync so setTitle() calls from refreshWindowTitles() stick.

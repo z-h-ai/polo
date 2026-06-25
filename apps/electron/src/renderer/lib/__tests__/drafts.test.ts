@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import type { FileAttachment } from '@craft-agent/shared/protocol'
+import type { FileAttachment } from '@polo-ai/shared/protocol'
 import {
   CONTENT_PERSIST_CAP,
   attachmentFromContentRef,

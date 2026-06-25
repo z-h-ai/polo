@@ -1,0 +1,2462 @@
+<!DOCTYPE html>
+<!--
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║   FRONTEND PROTOTYPE TEMPLATE — single-file visual replica          ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  This is the STARTING SCAFFOLD. It is valid and runnable: open it  ║
+  ║  in a browser and you see splash → login → an empty app shell.     ║
+  ║                                                                    ║
+  ║  HOW TO FILL IT IN (follow the skill's 6-phase pipeline):          ║
+  ║    Phase 2 — replace every  /* TODO: ... */  in :root / .dark      ║
+  ║              with the project's real design-token VALUES.          ║
+  ║              The --fg-N ramp / surfaces / shadows auto-adapt —     ║
+  ║              DO NOT modify those, only the core color values.      ║
+  ║    Phase 4 — for each region, a sub-agent returns a complete JSX   ║
+  ║              component; paste it into the <script> block and wire  ║
+  ║              it into AppShell, replacing the corresponding         ║
+  ║              /* TODO: Phase 4 — Region: ... */  marker.            ║
+  ║    Phase 5 — fill the mock-data arrays and wire interactions.      ║
+  ║                                                                    ║
+  ║  Everything in this file is GENERIC except the TODO markers.       ║
+  ║  Brand SVGs, colors, copy, mock data are all injected per-project. ║
+  ╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Polo AI — Login Prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <!-- Craft Agents: default sans = system-ui stack; code = JetBrains Mono. -->
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- React 18 + Babel via CDN: no build step, JSX transpiled in-browser. -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <style>
+    /* ────────────────────────────────────────────────────────────────
+       DESIGN TOKENS
+       Phase 2: replace the TODO values below with the project's REAL
+       tokens (grep the project for CSS custom properties, tailwind.config
+       theme, or theme.ts). Keep the STRUCTURE — the --fg-N ramp, derived
+       surfaces, and shadow utilities auto-adapt to --foreground/--background.
+       ──────────────────────────────────────────────────────────────── */
+    :root {
+      /* CORE COLORS — Polo AI color system (warm-contrast palette). */
+      --background:      oklch(0.98 0.008 290);
+      --foreground:      oklch(0.17 0.02 290);
+      --foreground-rgb:  26, 23, 38;
+      --accent:          oklch(0.44 0.30 285);
+      --info:            oklch(0.72 0.16 75);
+      --success:         oklch(0.58 0.14 165);
+      --destructive:     oklch(0.58 0.22 25);
+
+      /* DERIVED SURFACES — auto-computed from the core colors. Keep as-is. */
+      --user-bubble:  oklch(from var(--foreground) l c h / 0.05);
+      --bg-elevated:  color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+      --border:       oklch(from var(--foreground) l c h / 0.05);
+
+      /* FOREGROUND OPACITY RAMP — auto-computed tints. Keep as-is.
+         Use var(--fg-N) for muted text, borders, hover backgrounds. */
+      --fg-2:  color-mix(in srgb, var(--foreground) 2%,  var(--background));
+      --fg-3:  color-mix(in srgb, var(--foreground) 3%,  var(--background));
+      --fg-5:  color-mix(in srgb, var(--foreground) 5%,  var(--background));
+      --fg-7:  color-mix(in srgb, var(--foreground) 7%,  var(--background));
+      --fg-10: color-mix(in srgb, var(--foreground) 10%, var(--background));
+      --fg-20: color-mix(in srgb, var(--foreground) 20%, var(--background));
+      --fg-30: color-mix(in srgb, var(--foreground) 30%, var(--background));
+      --fg-40: color-mix(in srgb, var(--foreground) 40%, var(--background));
+      --fg-50: color-mix(in srgb, var(--foreground) 50%, var(--background));
+      --fg-60: color-mix(in srgb, var(--foreground) 60%, var(--background));
+      --fg-70: color-mix(in srgb, var(--foreground) 70%, var(--background));
+      --fg-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
+
+      /* SHADOW PARAMETERS (light = subtle) */
+      --shadow-border-opacity: 0.08;
+      --shadow-blur-opacity:   0.06;
+
+      /* LAYOUT METRICS — Craft Agents uses floating shadowed panels. */
+      --panel-gap:   6px;
+      --panel-inset: 6px;
+      --radius-edge: 14px;
+      --radius-inner: 10px;
+      --topbar-h:    48px; /* matches --topbar-height */
+
+      /* TYPOGRAPHY — Craft Agents default: system-ui sans, JetBrains Mono code. */
+      --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    /* DARK THEME — Polo AI .dark (warm-contrast palette). */
+    .dark {
+      --background:      oklch(0.14 0.025 290);
+      --foreground:      oklch(0.94 0.015 290);
+      --foreground-rgb:  238, 234, 245;
+      --accent:          oklch(0.52 0.28 285);
+      --accent-rgb:      123, 63, 245;
+      --info:            oklch(0.76 0.15 75);
+      --info-rgb:        224, 168, 48;
+      --success:         oklch(0.68 0.14 165);
+      --success-rgb:     20, 184, 128;
+      --destructive:     oklch(0.64 0.22 25);
+      --destructive-rgb: 239, 85, 85;
+      --shadow-border-opacity: 0.15;
+      --shadow-blur-opacity:   0.12;
+      /* (--user-bubble / --bg-elevated / --border / --fg-N re-derive automatically) */
+    }
+
+    /* ── GLOBAL RESET & BASE ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; border-color: var(--border); }
+    html { font-size: 15px; font-optical-sizing: auto; }
+    html, body, #root { height: 100%; overflow: hidden; }
+    body {
+      font-family: var(--font-sans);
+      background: var(--background);
+      color: var(--foreground);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.35s ease, color 0.35s ease;
+    }
+    button { font-family: inherit; }
+
+    /* Scrollbars — subtle, reveal on hover. */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+    *:hover > ::-webkit-scrollbar-thumb,
+    ::-webkit-scrollbar-thumb:hover { background: var(--fg-20); }
+
+    /* ── SHADOW UTILITIES (generic elevation system) ── */
+    .shadow-middle {
+      box-shadow:
+        rgba(0,0,0,0) 0 0 0 0, rgba(0,0,0,0) 0 0 0 0,
+        rgba(var(--foreground-rgb), 0.06) 0 0 0 1px,
+        rgba(0,0,0, var(--shadow-blur-opacity)) 0 1px 1px -0.5px,
+        rgba(0,0,0, var(--shadow-blur-opacity)) 0 3px 3px -1.5px,
+        rgba(0,0,0, var(--shadow-blur-opacity)) 0 6px 6px -3px;
+    }
+    .shadow-minimal {
+      box-shadow:
+        rgba(0,0,0,0) 0 0 0 0, rgba(0,0,0,0) 0 0 0 0,
+        rgba(var(--foreground-rgb), 0.04) 0 0 0 1px,
+        rgba(0,0,0, calc(var(--shadow-blur-opacity)*0.5)) 0 1px 1px -0.5px;
+    }
+    /* Focused-panel shadow with a gradient border-ring via a ::before mask. */
+    .shadow-panel-focused {
+      position: relative;
+      box-shadow:
+        rgba(0,0,0,0) 0 0 0 0, rgba(0,0,0,0) 0 0 0 0, rgba(0,0,0,0) 0 0 0 0,
+        rgba(0,0,0, calc(var(--shadow-blur-opacity)*0.67)) 0 1px 1px -0.5px,
+        rgba(0,0,0, calc(var(--shadow-blur-opacity)*0.67)) 0 3px 3px 1px,
+        rgba(0,0,0, calc(var(--shadow-blur-opacity)*0.5))  0 6px 6px 2px,
+        rgba(0,0,0, calc(var(--shadow-blur-opacity)*0.5))  0 12px 12px 3px,
+        rgba(0,0,0, calc(var(--shadow-blur-opacity)*0.33)) 0 24px 24px 4px;
+    }
+    .shadow-panel-focused::before {
+      content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+      background: linear-gradient(to bottom, rgba(var(--foreground-rgb),0.1), rgba(var(--foreground-rgb),0.3));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      pointer-events: none; z-index: 1;
+    }
+    .shadow-panel-focused > * { position: relative; z-index: 2; }
+
+    /* Tinted shadow — color is set via --shadow-color inline style. */
+    .shadow-tinted {
+      box-shadow:
+        0px 0px 0.5px rgba(var(--shadow-color), 0.3),
+        0px 1px 0.1px rgba(0,0,0,0.04),
+        0px 3px 0.2px rgba(0,0,0,0.03);
+    }
+
+    /* ── LOGIN CARD (structural; brand colors are TODO) ── */
+    .login-card {
+      position: relative; z-index: 1; width: 100%; max-width: 28rem;
+      padding: 40px 36px 36px;
+      background: oklch(from var(--background) l c h / 0.86);
+      border: 1px solid var(--border); border-radius: 20px; text-align: center;
+      box-shadow: rgba(0,0,0,0) 0 0 0 0, rgba(0,0,0,0) 0 0 0 0,
+        rgba(var(--foreground-rgb),0.06) 0 0 0 1px,
+        rgba(0,0,0,0.06) 0 1px 1px -0.5px, rgba(0,0,0,0.06) 0 3px 3px 0,
+        rgba(0,0,0,0.03) 0 6px 6px 0, rgba(0,0,0,0.03) 0 12px 12px 0, rgba(0,0,0,0.03) 0 24px 24px 0;
+      backdrop-filter: blur(24px) saturate(140%);
+      -webkit-backdrop-filter: blur(24px) saturate(140%);
+    }
+    .login-logo {
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 16px; width: 40px; height: 40px;
+      /* TODO: replace with project's brand gradient */
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%);
+      border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.18);
+    }
+    .login-logo-mark { font-size: 18px; font-weight: 700; color: #fff; font-family: var(--font-sans); user-select: none; }
+    .login-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; letter-spacing: -0.01em; }
+    .login-subtitle { font-size: 13px; opacity: 0.56; margin-bottom: 28px; }
+    .login-field { margin-bottom: 16px; text-align: left; }
+    .login-label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+    .login-input {
+      width: 100%; padding: 10px 12px; font-size: 14px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 8px; outline: none;
+      background: var(--background); color: var(--foreground);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .login-input::placeholder { opacity: 0.34; }
+    .login-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+    .login-input:disabled { opacity: 0.6; cursor: not-allowed; }
+    .login-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; font-weight: 500;
+      font-family: inherit; color: #fff;
+      background: var(--accent); border: none; border-radius: 8px; cursor: pointer;
+      transition: transform 0.15s, filter 0.15s, background 0.15s; user-select: none;
+      box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 28%, transparent);
+    }
+    .login-btn:hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); }
+    .login-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; filter: none; box-shadow: none; }
+
+    /* ── ANIMATIONS ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes blink { 0%,100%{ opacity:1 } 50%{ opacity:0 } }
+    @keyframes splashIn { from { transform: scale(1.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes splashOut { from { transform: scale(1); opacity: 1; } to { transform: scale(3); opacity: 0; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes shake { 0%,100%{ transform:translateX(0) } 10%,50%,90%{ transform:translateX(-4px) } 30%,70%{ transform:translateX(4px) } }
+    .typing-cursor { display: inline-block; width: 2px; height: 1em; background: var(--accent); margin-left: 2px; animation: blink 1s step-end infinite; vertical-align: text-bottom; }
+    .spinner { animation: spin 0.8s linear infinite; }
+
+    /* ── CODE BLOCK (generic) ── */
+    .code-block { background: var(--fg-3); border-radius: 8px; overflow: hidden; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; }
+    .code-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: var(--fg-5); font-size: 12px; color: var(--fg-50); }
+    .code-header button { background: none; border: none; color: var(--fg-50); cursor: pointer; font-size: 12px; font-family: inherit; padding: 2px 8px; border-radius: 4px; display: flex; align-items: center; gap: 4px; transition: background 0.15s, color 0.15s; }
+    .code-header button:hover { background: var(--fg-5); color: var(--foreground); }
+    .code-content { padding: 12px 16px; overflow-x: auto; white-space: pre; }
+    .tok-keyword { color: oklch(0.7 0.15 300); }
+    .tok-string { color: oklch(0.72 0.14 145); }
+    .tok-comment { color: var(--fg-40); font-style: italic; }
+    .tok-function { color: oklch(0.75 0.12 220); }
+    .tok-number { color: oklch(0.75 0.14 70); }
+    .tok-param { color: oklch(0.82 0.08 60); }
+    .tok-operator { color: var(--fg-60); }
+    .tok-paren { color: var(--fg-50); }
+
+    /* ── LIST-ITEM SEPARATOR VISIBILITY (hover/active hides the divider) ── */
+    .session-item:hover > .session-sep,
+    .session-item[data-active] > .session-sep { opacity: 0; }
+    .session-item:hover + .session-item > .session-sep,
+    .session-item[data-active] + .session-item > .session-sep { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    /* ═════════════════════════════════════════════════════════════════
+       BRAND ASSETS
+       Phase 4: replace these stubs with the project's real logo / symbol
+       SVGs (extract from the source's logo component or assets folder).
+       ═════════════════════════════════════════════════════════════════ */
+    function BrandLogo({ size = 32 }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="var(--accent)"/>
+          <text x="16" y="22.5" textAnchor="middle" fill="#fff" fontSize="18" fontWeight="700" fontFamily="var(--font-sans)">P</text>
+        </svg>
+      );
+    }
+    function BrandSymbol({ size = 32, style }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 32 32" fill="none" style={style} aria-hidden="true">
+          <text x="16" y="24" textAnchor="middle" fill="currentColor" fontSize="22" fontWeight="700" fontFamily="var(--font-sans)">P</text>
+        </svg>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       ICON PRIMITIVES
+       I() renders any line-art SVG from path data (stroke=currentColor).
+       Ico is a registry — extend it with project icons as needed:
+           Ico.Bell = (p) => <I size={p.size||16} d="M12 2a6 6 0 ..." />;
+       For icon LIBRARIES (lucide/heroicons), extract each <path d="…">
+       from node_modules and register it here. viewBox is always 0 0 24 24.
+       ═════════════════════════════════════════════════════════════════ */
+    const I = ({ d, size = 18, sw = 2, style }) => (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" style={style}>
+        {Array.isArray(d) ? d.map((p,i)=><path key={i} d={p}/>) : <path d={d}/>}
+      </svg>
+    );
+    const Ico = {
+      Search:    (p) => <I size={p.size||16} d={["M11 11m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0","M21 21l-4.3-4.3"]} />,
+      Plus:      (p) => <I size={p.size||16} sw={1.5} d={["M5 12h14","M12 5v14"]} />,
+      ArrowUp:   (p) => <I size={p.size||16} sw={2.5} d={["M12 19V5","M5 12l7-7 7 7"]} />,
+      Paperclip: (p) => <I size={p.size||16} d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />,
+      ChevDown:  (p) => <I size={p.size||14} d="M6 9l6 6 6-6" />,
+      ChevRight: (p) => <I size={p.size||14} d="M9 18l6-6-6-6" />,
+      ChevLeft:  (p) => <I size={p.size||18} sw={1.5} d="M15 18l-6-6 6-6" />,
+      Sun:       (p) => <I size={p.size||16} d={["M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0","M12 2v2","M12 20v2","M4.93 4.93l1.41 1.41","M17.66 17.66l1.41 1.41","M2 12h2","M20 12h2","M6.34 17.66l-1.41 1.41","M19.07 4.93l-1.41 1.41"]} />,
+      Moon:      (p) => <I size={p.size||16} d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+      Settings:  (p) => <I size={p.size||16} d={["M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z","M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0"]} />,
+      Copy:      (p) => <I size={p.size||14} d={["M8 8h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z","M4 16V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"]} />,
+      Check:     (p) => <I size={p.size||14} sw={2.5} d="M20 6L9 17l-5-5" />,
+      SquarePen: (p) => <I size={p.size||16} d={["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7","M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"]} />,
+      HelpCircle:(p) => <I size={p.size||16} sw={1.5} d={["M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0","M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3","M12 17h.01"]} />,
+      DatabaseZap: (p) => <I size={p.size||16} sw={1.5} d={["M12 2C7.58172 2 4 3.34315 4 5v14c0 1.6569 3.58172 3 8 3s8-1.3431 8-3V5c0-1.65685-3.5817-3-8-3zM4 5c0-1.65685 3.58172-3 8-3s8 1.34315 8 3-3.5817 3-8 3-8-1.34315-8-3zm0 7c0 1.6569 3.58172 3 8 3s8-1.3431 8-3M4 12V5m16 7V5","M17 12l4-2-4-2z","M19 10l2 6"] } />,
+      Home:       (p) => <I size={p.size||16} sw={1.5} d={["M3 9.5L12 3l9 6.5","M5 10v10a1 1 0 0 0 1 1h3v-7h6v7h3a1 1 0 0 0 1-1V10"] } />,
+      Square:     (p) => <I size={p.size||12} sw={2} d="M4 4h16v16H4z" />,
+      /* Login feature icons */
+      Eye:    (p) => <I size={p.size||16} sw={1.5} d={["M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z","M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"]} />,
+      EyeOff: (p) => <I size={p.size||16} sw={1.5} d={["M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94","M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19","M1 1l22 22","M14.12 14.12a3 3 0 1 1-4.24-4.24"]} />,
+      AlertTriangle: (p) => <I size={p.size||16} sw={1.5} d={["M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z","M12 9v4","M12 17h.01"]} />,
+      User:   (p) => <I size={p.size||16} sw={1.5} d={["M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2","M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"]} />,
+      LogOut: (p) => <I size={p.size||16} sw={1.5} d={["M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4","M16 17l5-5-5-5","M21 12H9"]} />,
+      BarChart: (p) => <I size={p.size||16} sw={1.5} d={["M12 20V10","M18 20V4","M6 20v-4"]} />,
+      Monitor: (p) => <I size={p.size||16} sw={1.5} d={["M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z","M8 20h8","M12 18v2"]} />,
+      Shield: (p) => <I size={p.size||16} sw={1.5} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+      Lock:   (p) => <I size={p.size||14} sw={1.5} d={["M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z","M7 11V7a5 5 0 0 1 10 0v4"]} />,
+    };
+    /* Horizontal three-dots menu icon (commonly needed). */
+    function MoreHIcon({ size = 16 }) {
+      return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>;
+    }
+    /* Sidebar-toggle icon (commonly needed). */
+    function PanelLeftIcon({ size = 18 }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 4V20"/>
+          <path d="M3.5 11.5L3.5 12.5C3.5 16.2712 3.5 18.1569 4.67157 19.3284C5.84315 20.5 7.72876 20.5 11.5 20.5L12.5 20.5C16.2712 20.5 18.1569 20.5 19.3284 19.3284C20.5 18.1569 20.5 16.2712 20.5 12.5L20.5 11.5C20.5 7.72876 20.5 5.84315 19.3284 4.67157C18.1569 3.5 16.2712 3.5 12.5 3.5L11.5 3.5C7.72876 3.5 5.84315 3.5 4.67157 4.67157C3.5 5.84315 3.5 7.72876 3.5 11.5Z"/>
+        </svg>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       GENERIC UI COMPONENTS (reusable across most apps — keep as-is)
+       ═════════════════════════════════════════════════════════════════ */
+
+    /* Ghost / icon button — 28×28, transparent, hover reveals fg-5. */
+    function GhostBtn({ children, onClick, style, title, disabled }) {
+      const [hov, setHov] = useState(false);
+      return (
+        <button onClick={onClick} title={title} disabled={disabled}
+          onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          style={{
+            width: 28, height: 28, borderRadius: 6, border: 'none',
+            background: hov && !disabled ? 'var(--fg-5)' : 'transparent',
+            color: disabled ? 'var(--fg-20)' : (hov ? 'var(--foreground)' : 'var(--fg-50)'),
+            cursor: disabled ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'background 0.12s, color 0.12s', flexShrink: 0,
+            ...style,
+          }}>
+          {children}
+        </button>
+      );
+    }
+
+    /* Toolbar pill — compact icon+label button with hover background. */
+    function Pill({ children, onClick, title }) {
+      const [h,setH]=useState(false);
+      return (
+        <button onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} onClick={onClick} title={title} style={{
+          display:'flex', alignItems:'center', gap: 5, height: 28, padding:'0 8px',
+          background: h?'var(--fg-5)':'var(--fg-3)', border:'none', borderRadius: 6,
+          fontSize: 12, color:'var(--fg-50)', cursor:'pointer', fontFamily:'inherit', transition:'background 0.12s', whiteSpace:'nowrap',
+        }}>{children}</button>
+      );
+    }
+
+    /* Expandable nav item (sidebar tree node) + nested child. */
+    function NavItem({ icon, label, active, onClick, count, expandable, expanded, onToggle, children }) {
+      const [hov, setHov] = useState(false);
+      return (
+        <div style={{ width:'100%' }}>
+          <div data-active={active?'':undefined}
+            onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+            onClick={onClick}
+            style={{
+              display:'flex', alignItems:'center', gap: 8, width:'100%',
+              padding:'5px 8px', borderRadius: 6, cursor:'pointer', fontSize: 13,
+              background: active ? 'var(--fg-7)' : 'transparent',
+              color: active ? 'var(--foreground)' : 'var(--fg-60)',
+              transition:'background 0.1s',
+            }}>
+            <span style={{ display:'flex', color: active ? 'var(--foreground)' : 'var(--fg-50)' }}>
+              {expandable && hov ? (expanded ? <Ico.ChevDown size={14}/> : <Ico.ChevRight size={14}/>) : icon}
+            </span>
+            <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{label}</span>
+            {count !== undefined && (hov || active) && <span style={{ fontSize: 11, color:'var(--fg-30)' }}>{count}</span>}
+          </div>
+          {expandable && expanded && children && (
+            <div style={{ paddingLeft: 20, position:'relative' }}>
+              <div style={{ position:'absolute', left: 20, top: 0, bottom: 0, width: 1, background:'var(--fg-7)' }}/>
+              {children}
+            </div>
+          )}
+        </div>
+      );
+    }
+    function NavChild({ icon, label, count, active, onClick }) {
+      const [hov, setHov] = useState(false);
+      return (
+        <div onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          style={{ display:'flex', alignItems:'center', gap: 8, padding:'4px 8px', borderRadius: 6, cursor:'pointer', fontSize: 13, color: active?'var(--foreground)':(hov?'var(--foreground)':'var(--fg-50)'), background: hov?'var(--fg-3)':'transparent', transition:'background 0.1s' }}>
+          {icon}
+          <span style={{ flex:1 }}>{label}</span>
+          {count !== undefined && <span style={{ fontSize: 11, color:'var(--fg-30)' }}>{count}</span>}
+        </div>
+      );
+    }
+
+    /* Code block with language label + copy button. Pass pre-highlighted HTML. */
+    function CodeBlock({ language, code }) {
+      const [copied, setCopied] = useState(false);
+      const doCopy = () => { try { navigator.clipboard.writeText(code.replace(/<[^>]*>/g,'')); } catch(e){} setCopied(true); setTimeout(()=>setCopied(false),2000); };
+      return (
+        <div className="code-block" style={{ margin: '12px 0' }}>
+          <div className="code-header">
+            <span>{language}</span>
+            <button onClick={doCopy}>
+              {copied ? <><Ico.Check size={12}/> Copied</> : <><Ico.Copy size={12}/> Copy</>}
+            </button>
+          </div>
+          <div className="code-content" dangerouslySetInnerHTML={{ __html: code }} />
+        </div>
+      );
+    }
+    /* Inline code span. */
+    function IC({ children }) {
+      return <code style={{ background:'var(--fg-5)', padding:'1px 5px', borderRadius:3, fontFamily:'var(--font-mono)', fontSize:'0.88em' }}>{children}</code>;
+    }
+
+    /* Processing / typing indicator — cycling phrase + elapsed timer. */
+    /* TODO: Phase 5 — replace PROCESSING_PHRASES with project's real phrases. */
+    const PROCESSING_PHRASES = ['Thinking…','Working…','Processing…'];
+    function ProcessingIndicator() {
+      const [phraseIdx, setPhraseIdx] = useState(0);
+      const [elapsed, setElapsed] = useState(0);
+      useEffect(() => {
+        const pi = setInterval(()=>setPhraseIdx(i=>(i+1)%PROCESSING_PHRASES.length), 3000);
+        const ei = setInterval(()=>setElapsed(e=>e+1), 1000);
+        return ()=>{ clearInterval(pi); clearInterval(ei); };
+      }, []);
+      const fmt = elapsed >= 60 ? `${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,'0')}` : `${elapsed}s`;
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap: 8, marginBottom: 20, paddingLeft: 32 }}>
+          <svg className="spinner" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--fg-40)" strokeWidth="2.5"><path d="M12 2v4" strokeLinecap="round"/></svg>
+          <span style={{ fontSize: 13, color:'var(--fg-50)' }}>{PROCESSING_PHRASES[phraseIdx]}</span>
+          <span style={{ fontSize: 12, color:'var(--fg-30)' }}>{fmt}</span>
+        </div>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       MOCK DATA  (Phase 5 — fill with realistic, anonymized data)
+       ═════════════════════════════════════════════════════════════════ */
+    // TODO: Phase 5 — define list data (sessions/items), message data,
+    // labels, statuses, canned replies. Copy REAL labels & placeholders
+    // from the project source. Examples below are shape references.
+    const SESSIONS = [];        // TODO: { id, title, preview, time, group, ... }
+    const INITIAL_MESSAGES = {}; // TODO: keyed by session id -> [{ id, role, content, tools?[] }]
+    const STATUSES = {};         // TODO: status key -> { label, color }
+    const LABELS = {};           // TODO: tag key -> label string
+
+    /* ═════════════════════════════════════════════════════════════════
+       REGION COMPONENTS  (Phase 4 — one sub-agent per region)
+       Each marker below is replaced by a complete JSX component returned
+       by a per-region sub-agent that read the real source line-by-line.
+       Delete a marker once the region is implemented and wired in AppShell.
+       ═════════════════════════════════════════════════════════════════ */
+
+    /* ═════════════════════════════════════════════════════════════════
+       REGION: TopBar  (apps/electron/.../app-shell/TopBar.tsx)
+       ═════════════════════════════════════════════════════════════════ */
+    Ico.PanelLeftRounded = (p) => <I size={p.size||18} sw={p.sw||1.5} d={["M9 4V20","M3.5 11.5L3.5 12.5C3.5 16.2712 3.5 18.1569 4.67157 19.3284C5.84315 20.5 7.72876 20.5 11.5 20.5L12.5 20.5C16.2712 20.5 18.1569 20.5 19.3284 19.3284C20.5 18.1569 20.5 16.2712 20.5 12.5L20.5 11.5C20.5 7.72876 20.5 5.84315 19.3284 4.67157C18.1569 3.5 16.2712 3.5 12.5 3.5L11.5 3.5C7.72876 3.5 5.84315 3.5 4.67157 4.67157C3.5 5.84315 3.5 7.72876 3.5 11.5Z"]}/>;
+    Ico.ChevronLeft  = (p) => <I size={p.size||18} sw={p.sw||1.5} d="M15 18l-6-6 6-6"/>;
+    Ico.ChevronRight = (p) => <I size={p.size||18} sw={p.sw||1.5} d="M9 18l6-6-6-6"/>;
+    Ico.ChevronDown  = (p) => <I size={p.size||12} sw={p.sw||2} d="M6 9l6 6 6-6"/>;
+
+    function TopBar({ onToggleTheme, isDark, onToggleSidebar, workspaceName }) {
+      const [hoverBtn, setHoverBtn] = useState(null);
+      const [wsHover, setWsHover] = useState(false);
+      const [menuOpen, setMenuOpen] = useState(false);
+      const [canGoBack, setCanGoBack] = useState(false);
+      const [canGoForward, setCanGoForward] = useState(false);
+
+      const btnBase = { height:28, width:28, display:'flex', alignItems:'center', justifyContent:'center',
+        borderRadius:6, border:'none', background:'transparent', cursor:'pointer',
+        transition:'background 100ms', color:'var(--foreground)', padding:0, flexShrink:0 };
+
+      const renderBtn = (key, opts) => {
+        const isHover = hoverBtn === key;
+        const bg = (opts.isOpen || isHover) ? { background:'var(--fg-5)' } : {};
+        const disabledStyle = opts.disabled ? { opacity:0.3, pointerEvents:'none' } : {};
+        return (
+          <button type="button" aria-label={opts.label}
+            onMouseEnter={()=>setHoverBtn(key)} onMouseLeave={()=>setHoverBtn(null)}
+            onClick={opts.onClick}
+            style={{ ...btnBase, ...bg, ...disabledStyle, ...(opts.style||{}) }}>
+            {opts.children}
+          </button>
+        );
+      };
+
+      const wsTrigger = {
+        marginLeft:4, flex:1, minWidth:0, display:'flex', alignItems:'center',
+        justifyContent:'flex-start', gap:2, height:30, paddingLeft:12, paddingRight:12,
+        borderRadius:8, border:'1px solid var(--fg-7)', fontSize:13,
+        color: (wsHover||menuOpen) ? 'var(--foreground)' : 'var(--fg-50)',
+        background: (wsHover||menuOpen) ? 'var(--fg-5)' : 'transparent',
+        transition:'background 100ms, color 100ms', cursor:'pointer', overflow:'hidden',
+      };
+
+      return (
+        <div style={{ height:'var(--topbar-h)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 12px', flexShrink:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:2, paddingLeft:72 /* macOS traffic-light room */ }}>
+            {renderBtn('sidebar', { onClick:onToggleSidebar, label:'Toggle Sidebar', children:<Ico.PanelLeftRounded size={18} sw={1.5}/> })}
+            {renderBtn('appmenu', { onClick:()=>setMenuOpen(m=>!m), isOpen:menuOpen, label:'Polo AI Menu',
+              children:<span style={{ color:'var(--accent)', display:'flex' }}><BrandLogo size={18}/></span> })}
+            <div style={{ marginLeft:4, display:'flex', minWidth:0, alignItems:'center', gap:4, width:'clamp(200px, 38vw, 560px)' }}>
+              {renderBtn('back', { onClick:()=>{}, disabled:!canGoBack, label:'Back', children:<Ico.ChevronLeft size={18} sw={1.5}/> })}
+              {renderBtn('forward', { onClick:()=>{}, disabled:!canGoForward, label:'Forward', children:<Ico.ChevronRight size={18} sw={1.5}/> })}
+              <div style={{ minWidth:0, flex:1 }}>
+                <button type="button" style={wsTrigger}
+                  onMouseEnter={()=>setWsHover(true)} onMouseLeave={()=>setWsHover(false)}
+                  onClick={()=>setMenuOpen(m=>!m)} aria-label="Select Workspace">
+                  <span style={{ height:16, width:16, marginRight:6, borderRadius:'9999px', display:'inline-flex',
+                    alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:500,
+                    background:'var(--fg-10)', color:'var(--foreground)', flexShrink:0 }}>{(workspaceName||'W').charAt(0)}</span>
+                  <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0, flex:1, textAlign:'left' }}>{workspaceName||'Workspace'}</span>
+                  <Ico.ChevronDown size={12} sw={2}/>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div style={{ display:'flex', flexShrink:0, alignItems:'center', justifyContent:'flex-end', gap:4, paddingRight:4 }}>
+            {renderBtn('add', { onClick:()=>{}, label:'Add Panel', style:{ height:26, width:26, borderRadius:8 },
+              children:<span style={{ color:'var(--fg-50)' }}><Ico.Plus size={16} sw={1.5}/></span> })}
+            {renderBtn('help', { onClick:()=>{}, label:'Help', style:{ height:26, width:26, borderRadius:8 },
+              children:<span style={{ color:'var(--fg-50)' }}><Ico.HelpCircle size={16}/></span> })}
+            <GhostBtn onClick={onToggleTheme} title={isDark?'Light mode':'Dark mode'}>{isDark ? <Ico.Sun size={16}/> : <Ico.Moon size={16}/>}</GhostBtn>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       REGION: LeftSidebar  (app-shell/LeftSidebar.tsx + App.tsx nav links)
+       ═════════════════════════════════════════════════════════════════ */
+    Ico.inbox = I({d:'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',size:14,sw:2});
+    Ico.flag = I({d:'M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22V15',size:14,sw:2});
+    Ico.archive = I({d:'M20.91 8.84 8.56 2.23a1.93 1.93 0 0 0-1.66 0L2.99 4.72a1 1 0 0 0 0 1.83l12.34 6.6a1.93 1.93 0 0 0 1.66 0l3.92-2.2a.99.99 0 0 0 0-1.73zM22 8.5 14 13M2 8.5 10 13M22 8.5v7.5a2 2 0 0 1-1.1 1.79l-9.9 5.4a2 2 0 0 1-2 0l-9.9-5.4A2 2 0 0 1 0 16V8.5',size:14,sw:2});
+    Ico.tag = I({d:'M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42zM7.5 7.5h.01',size:14,sw:2});
+    Ico.databaseZap = I({d:'M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8M3 6c0 1.66 4 3 9 3s9-1.34 9-3M3 12c0 1.66 4 3 9 3s9-1.34 9-3M17 17l5 5M21 17v5M22 17h-5',size:14,sw:2});
+    Ico.globe = I({d:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',size:14,sw:2});
+    Ico.plug = I({d:'M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5',size:14,sw:2});
+    Ico.folderOpen = I({d:'M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z',size:14,sw:2});
+    Ico.zap = I({d:'M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z',size:14,sw:2});
+    Ico.listTodo = I({d:'M3 4h13M3 12h13M3 20h13M8 4l1.5 1.5L12 3M8 12l1.5 1.5L12 11M8 20l1.5 1.5L12 19',size:14,sw:2});
+    Ico.clock = I({d:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',size:14,sw:2});
+    Ico.radio = I({d:'M4.9 19.1a10 10 0 1 1 14.2 0M7.8 16.2a6 6 0 1 1 8.4 0M12 12h.01',size:14,sw:2});
+    Ico.bot = I({d:'M12 8V4H8M2 14a10 10 0 0 1 20 0M4 18a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2M7 8h2M15 8h2M9 14h.01M15 14h.01',size:14,sw:2});
+    Ico.cake = I({d:'M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1M2 21h20M10 6.5V11M14 6.5V11',size:14,sw:2});
+
+    function LeftSidebar({ activeView, onSelectView, workspaceName, onNewSession, loggedInUser, onLogout, quota, appScenario }) {
+      const [expAll, setExpAll] = useState(true);
+      const [expLabels, setExpLabels] = useState(false);
+      const [expSources, setExpSources] = useState(false);
+      const [expAutomations, setExpAutomations] = useState(false);
+
+      const StatusIco = ({ type, color }) => {
+        if (type === 'backlog') return (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" strokeDasharray="6 5"/></svg>);
+        if (type === 'todo') return (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/></svg>);
+        if (type === 'needs-review') return (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill={color} stroke="none"/></svg>);
+        if (type === 'done') return (<svg width="14" height="14" viewBox="0 0 24 24" fill={color} stroke="none"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+        return null;
+      };
+      const WhatsNewIcon = () => (<span style={{ position:'relative', display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14 }}>{Ico.cake}<span style={{ position:'absolute', top:-2, right:-2, width:6, height:6, borderRadius:'9999px', background:'var(--accent)' }}/></span>);
+      const Sep = () => (<div style={{ paddingTop:4, paddingBottom:4, paddingLeft:8, paddingRight:8 }}><div style={{ height:1, background:'var(--fg-5)' }}/></div>);
+
+      return (
+        <div style={{ width:220, height:'100%', display:'flex', flexDirection:'column', userSelect:'none', fontFamily:'var(--font-sans)', background:'var(--background)' }}>
+          <div style={{ paddingLeft:8, paddingRight:8, paddingBottom:8, flexShrink:0 }}>
+            <button onClick={onNewSession} style={{ width:'100%', display:'flex', alignItems:'center', gap:8, paddingTop:7, paddingBottom:7, paddingLeft:8, paddingRight:8, fontSize:13, fontWeight:400, color:'var(--foreground)', borderRadius:6, background:'var(--background)', boxShadow:'rgba(var(--foreground-rgb), 0.04) 0 0 0 1px', border:'none', cursor:'pointer' }}>
+              <Ico.SquarePen size={14}/><span>New Session</span>
+            </button>
+          </div>
+          <div style={{ flex:1, overflowY:'auto', minHeight:0, paddingBottom:16 }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:2, paddingLeft:8, paddingRight:8, paddingTop:4, paddingBottom:4 }}>
+              <NavItem icon={Ico.inbox} label="All Sessions" count="24" active={activeView==='allSessions'} onClick={()=>onSelectView('allSessions')} expandable={true} expanded={expAll} onToggle={()=>setExpAll(!expAll)}>
+                <NavChild icon={<StatusIco type="backlog" color="var(--fg-50)"/>} label="Backlog" count="5" active={activeView==='backlog'} onClick={()=>onSelectView('backlog')}/>
+                <NavChild icon={<StatusIco type="todo" color="var(--fg-50)"/>} label="Todo" count="12" active={activeView==='todo'} onClick={()=>onSelectView('todo')}/>
+                <NavChild icon={<StatusIco type="needs-review" color="var(--info)"/>} label="Needs Review" count="2" active={activeView==='needs-review'} onClick={()=>onSelectView('needs-review')}/>
+                <NavChild icon={<StatusIco type="done" color="var(--accent)"/>} label="Done" count="5" active={activeView==='done'} onClick={()=>onSelectView('done')}/>
+                <div style={{ marginTop:4, marginBottom:4, marginLeft:8 }}><div style={{ height:1, background:'var(--fg-5)' }}/></div>
+                <NavChild icon={Ico.flag} label="Flagged" count="3" active={activeView==='flagged'} onClick={()=>onSelectView('flagged')}/>
+                <NavChild icon={Ico.archive} label="Archived" active={activeView==='archived'} onClick={()=>onSelectView('archived')}/>
+              </NavItem>
+              <NavItem icon={Ico.tag} label="Labels" active={activeView==='labels'} onClick={()=>onSelectView('labels')} expandable={true} expanded={expLabels} onToggle={()=>setExpLabels(!expLabels)}/>
+              <Sep/>
+              <NavItem icon={Ico.databaseZap} label="Sources" count="7" active={activeView==='sources'} onClick={()=>onSelectView('sources')} expandable={true} expanded={expSources} onToggle={()=>setExpSources(!expSources)}>
+                <NavChild icon={Ico.globe} label="APIs" count="3" active={activeView==='sources-api'} onClick={()=>onSelectView('sources-api')}/>
+                <NavChild icon={Ico.plug} label="MCPs" count="2" active={activeView==='sources-mcp'} onClick={()=>onSelectView('sources-mcp')}/>
+                <NavChild icon={Ico.folderOpen} label="Local Folders" count="2" active={activeView==='sources-local'} onClick={()=>onSelectView('sources-local')}/>
+              </NavItem>
+              <NavItem icon={Ico.zap} label="Skills" count="4" active={activeView==='skills'} onClick={()=>onSelectView('skills')}/>
+              <NavItem icon={Ico.listTodo} label="Automations" count="6" active={activeView==='automations'} onClick={()=>onSelectView('automations')} expandable={true} expanded={expAutomations} onToggle={()=>setExpAutomations(!expAutomations)}>
+                <NavChild icon={Ico.clock} label="Scheduled" count="2" active={activeView==='automations-scheduled'} onClick={()=>onSelectView('automations-scheduled')}/>
+                <NavChild icon={Ico.radio} label="Event-based" count="3" active={activeView==='automations-event'} onClick={()=>onSelectView('automations-event')}/>
+                <NavChild icon={Ico.bot} label="Agentic" count="1" active={activeView==='automations-agentic'} onClick={()=>onSelectView('automations-agentic')}/>
+              </NavItem>
+            </div>
+          </div>
+          {/* ── User menu (S-004: logout) ── */}
+          {loggedInUser && (
+            <UserMenuSection user={loggedInUser} onLogout={onLogout} quota={quota} appScenario={appScenario} />
+          )}
+        </div>
+      );
+    }
+
+    /* ═══════ QUOTA WIDGET (S-014, S-015, S-016) ═══════ */
+    function QuotaWidget({ quota, appScenario }) {
+      const isWarning = appScenario === 'quota-warning';
+      const isExhausted = appScenario === 'quota-exhausted';
+      const pct = isExhausted ? 100 : isWarning ? 82 : Math.round((quota.used / quota.total) * 100);
+      const barColor = isExhausted ? 'var(--destructive)' : isWarning ? 'var(--info)' : 'var(--accent)';
+      const fmt = (n) => n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ? (n/1000).toFixed(0)+'K' : n;
+      const usedDisplay = isExhausted ? quota.total : isWarning ? Math.round(quota.total * 0.82) : quota.used;
+      return (
+        <div style={{ padding:'10px 14px', borderTop:'1px solid var(--border)' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:5 }}>
+            <span style={{ fontSize:11, color:'var(--fg-50)', display:'flex', alignItems:'center', gap:4 }}>
+              <Ico.BarChart size={12}/> 本月用量
+            </span>
+            <span style={{ fontSize:11, fontWeight:500, color: isExhausted ? 'var(--destructive)' : isWarning ? 'var(--info)' : 'var(--fg-50)' }}>
+              {fmt(usedDisplay)} / {fmt(quota.total)}
+            </span>
+          </div>
+          <div style={{ height:3, borderRadius:2, background:'var(--fg-7)', overflow:'hidden' }}>
+            <div style={{ height:'100%', borderRadius:2, background:barColor, width:pct+'%', transition:'width 0.5s ease' }}/>
+          </div>
+          {isWarning && <div style={{ marginTop:4, fontSize:10, color:'var(--info)', display:'flex', alignItems:'center', gap:3 }}><Ico.AlertTriangle size={10}/> 额度已使用 {pct}%</div>}
+          {isExhausted && <div style={{ marginTop:4, fontSize:10, color:'var(--destructive)', display:'flex', alignItems:'center', gap:3 }}><Ico.AlertTriangle size={10}/> 本月额度已用完，{quota.resetDate} 重置</div>}
+        </div>
+      );
+    }
+
+    /* ═══════ USER MENU BUTTON (proper component with its own hooks) ═══════ */
+    function UserMenuBtn({ icon, label, onClick, danger }) {
+      const [hov, setHov] = useState(false);
+      return (
+        <button onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          style={{
+            display:'flex', alignItems:'center', gap:8, width:'100%',
+            padding:'7px 10px', borderRadius:6, border:'none',
+            background: hov ? 'var(--fg-3)' : 'transparent',
+            color: danger ? 'var(--destructive)' : 'var(--foreground)',
+            cursor:'pointer', fontSize:13, fontFamily:'inherit', transition:'background 0.1s',
+          }}>
+          {icon}<span>{label}</span>
+        </button>
+      );
+    }
+
+    /* ═══════ USER MENU SECTION (bottom of sidebar) ═══════ */
+    function UserMenuSection({ user, onLogout, quota, appScenario }) {
+      const [menuOpen, setMenuOpen] = useState(false);
+      const [hov, setHov] = useState(false);
+      const initials = (user.displayName || user.username).charAt(0).toUpperCase();
+      return (
+        <div style={{ borderTop:'1px solid var(--border)', padding:'8px 8px', flexShrink:0 }}>
+          <div style={{ position:'relative' }}>
+            <button onClick={()=>setMenuOpen(!menuOpen)}
+              onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+              style={{
+                display:'flex', alignItems:'center', gap:8, width:'100%',
+                padding:'6px 8px', borderRadius:6, border:'none',
+                background: hov || menuOpen ? 'var(--fg-5)' : 'transparent',
+                cursor:'pointer', fontFamily:'inherit', transition:'background 0.1s',
+              }}>
+              <div style={{
+                width:28, height:28, borderRadius:'50%',
+                background:'linear-gradient(135deg, var(--accent), oklch(0.50 0.18 290))',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                color:'#fff', fontSize:12, fontWeight:600, flexShrink:0,
+              }}>{initials}</div>
+              <div style={{ flex:1, minWidth:0, textAlign:'left' }}>
+                <div style={{ fontSize:13, fontWeight:500, color:'var(--foreground)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.displayName}</div>
+              </div>
+              <Ico.ChevDown size={12}/>
+            </button>
+            {menuOpen && (
+              <>
+                <div style={{ position:'fixed', inset:0, zIndex:49 }} onClick={()=>setMenuOpen(false)}/>
+                <div style={{
+                  position:'absolute', bottom:'calc(100% + 4px)', left:0, right:0, zIndex:50,
+                  borderRadius:10, background:'var(--background)',
+                  boxShadow:'rgba(var(--foreground-rgb), 0.06) 0 0 0 1px, rgba(0,0,0,0.15) 0 6px 20px',
+                  overflow:'hidden',
+                }}>
+                  <div style={{ padding:'10px 14px', borderBottom:'1px solid var(--border)' }}>
+                    <div style={{ fontSize:13, fontWeight:500 }}>{user.displayName}</div>
+                    <div style={{ fontSize:11, color:'var(--fg-40)' }}>@{user.username}</div>
+                  </div>
+                  {quota && <QuotaWidget quota={quota} appScenario={appScenario}/>}
+                  <div style={{ padding:4 }}>
+                    <UserMenuBtn icon={<Ico.User size={14}/>} label="个人信息" onClick={()=>setMenuOpen(false)}/>
+                    <UserMenuBtn icon={<Ico.Settings size={14}/>} label="Settings" onClick={()=>setMenuOpen(false)}/>
+                    <UserMenuBtn icon={<span style={{ position:'relative', display:'inline-flex' }}><I d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1M2 21h20M10 6.5V11M14 6.5V11" size={14} sw={2}/><span style={{ position:'absolute', top:-2, right:-1, width:5, height:5, borderRadius:'50%', background:'var(--accent)' }}/></span>} label="What's New" onClick={()=>setMenuOpen(false)}/>
+                    <div style={{ height:1, background:'var(--border)', margin:'4px 8px' }}/>
+                    <UserMenuBtn icon={<Ico.LogOut size={14}/>} label="登出" danger onClick={()=>{setMenuOpen(false);onLogout&&onLogout();}}/>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       REGION: NavigatorPanel  (app-shell/NavigatorPanel.tsx, SessionList,
+       SessionItem, SessionSearchHeader, SessionBadges, PanelHeader)
+       ═════════════════════════════════════════════════════════════════ */
+    Ico.Flag = (p) => <I size={p.size||14} sw={2} d={["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z","M4 22V15"]}/>;
+    Ico.CircleDot = (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={p.sw||2}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>;
+    Ico.CircleCheck = (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={p.sw||2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>;
+    Ico.X = (p) => <I size={p.size||14} d={["M18 6 6 18","M6 6l12 12"]}/>;
+
+    const MOCK_SESSIONS = [
+      { id:'s1', title:'Connect Linear as a source', preview:"I'll help you set up a Linear integration so you can pull issues and sync statuses.", time:'2m', timeGroup:'Today', status:'in-progress', isFlagged:false, hasUnread:true, isProcessing:true, labels:[] },
+      { id:'s2', title:'Refactor auth module', preview:'The current auth flow has a token refresh race condition under concurrent requests.', time:'18m', timeGroup:'Today', status:'needs-review', isFlagged:true, hasUnread:false, isProcessing:false, labels:['backend'] },
+      { id:'s3', title:'Draft launch announcement', preview:'Here are three draft options for the v2.0 launch announcement, tailored to different channels.', time:'1h', timeGroup:'Today', status:'done', isFlagged:false, hasUnread:false, isProcessing:false, labels:['marketing'] },
+      { id:'s4', title:'Investigate webhook delivery failures', preview:'After checking the logs, webhooks are failing with 503 from the downstream service.', time:'3h', timeGroup:'Today', status:'todo', isFlagged:false, hasUnread:false, isProcessing:false, labels:[] },
+      { id:'s5', title:'Migrate database to PostgreSQL 16', preview:'Started the migration plan — the pg_upgrade path looks viable with minimal downtime.', time:'5h', timeGroup:'Today', status:'backlog', isFlagged:false, hasUnread:false, isProcessing:false, labels:['infra'] },
+      { id:'s6', title:'Onboarding flow A/B test results', preview:'Variant B showed a 12% lift in completion rate with statistical significance.', time:'Yesterday', timeGroup:'Yesterday', status:'done', isFlagged:false, hasUnread:false, isProcessing:false, labels:['growth'] },
+      { id:'s7', title:'Update API rate limiting strategy', preview:'Proposed a sliding window algorithm with per-key quotas and burst allowances.', time:'Yesterday', timeGroup:'Yesterday', status:'cancelled', isFlagged:false, hasUnread:false, isProcessing:false, labels:['backend'] },
+      { id:'s8', title:'Design system audit — color tokens', preview:'Audited all 47 color token usages across the codebase. 12 are deprecated.', time:'2d', timeGroup:'Jun 14', status:'needs-review', isFlagged:true, hasUnread:false, isProcessing:false, labels:['design'] },
+      { id:'s9', title:'Fix mobile notification permissions', preview:'The permission prompt fires twice on iOS 17.4 due to a race in the lifecycle hook.', time:'3d', timeGroup:'Jun 13', status:'todo', isFlagged:false, hasUnread:false, isProcessing:false, labels:['mobile'] },
+      { id:'s10', title:'Quarterly OKR synthesis', preview:'Compiled progress across all teams. Three objectives are at risk, two are ahead of schedule.', time:'5d', timeGroup:'Jun 11', status:'done', isFlagged:false, hasUnread:false, isProcessing:false, labels:[] },
+      { id:'s11', title:'Set up Sentry error monitoring', preview:'Configured Sentry with source maps and release tracking. Initial dashboard is live.', time:'1w', timeGroup:'Jun 10', status:'done', isFlagged:false, hasUnread:false, isProcessing:false, labels:['infra'] },
+    ];
+
+    const STATUS_CONFIG = {
+      'backlog':{ color:'var(--fg-50)', icon:'circle' },
+      'todo':{ color:'var(--fg-50)', icon:'circle' },
+      'in-progress':{ color:'var(--success)', icon:'circle-dot' },
+      'needs-review':{ color:'var(--info)', icon:'circle' },
+      'done':{ color:'var(--accent)', icon:'circle-check' },
+      'cancelled':{ color:'var(--fg-50)', icon:'circle' },
+    };
+
+    function StatusIconBtn({ status, size }) {
+      const cfg = STATUS_CONFIG[status] || STATUS_CONFIG['todo'];
+      const [hov, setHov] = useState(false);
+      return (
+        <button aria-label="Change status" onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          style={{ width:20, height:20, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', background:hov?'var(--fg-5)':'transparent', border:'none', cursor:'pointer', color:cfg.color, transition:'background 0.1s', flexShrink:0, padding:0 }}>
+          {cfg.icon === 'circle-check' ? <Ico.CircleCheck size={size||14}/> : cfg.icon === 'circle-dot' ? <Ico.CircleDot size={size||14}/> : <svg width={size||14} height={size||14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/></svg>}
+        </button>
+      );
+    }
+
+    function SessionRow({ item, isActive, isFirstInGroup, onSelect }) {
+      const [hov, setHov] = useState(false);
+      return (
+        <div className="session-item" data-active={isActive?'':undefined} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{ position:'relative', userSelect:'none', paddingLeft:8, marginRight:8 }}>
+          {isActive && <div style={{ position:'absolute', left:0, top:0, bottom:0, width:2, background:'var(--accent)', zIndex:1 }}/>}
+          {!isFirstInGroup && <div className="session-sep" style={{ paddingLeft:38, paddingRight:16, transition:'opacity 0.1s' }}><div style={{ height:1, background:'var(--border)' }}/></div>}
+          <button onClick={()=>onSelect(item.id)} style={{ display:'flex', alignItems:'flex-start', gap:8, paddingLeft:8, paddingRight:16, paddingTop:12, paddingBottom:12, textAlign:'left', fontSize:14, fontFamily:'inherit', color:'inherit', borderRadius:8, border:'none', width:'100%', background:isActive?'var(--fg-3)':(hov?'var(--fg-2)':'transparent'), transition:'background 0.075s', cursor:'pointer' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, minWidth:0, flex:1 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, width:'100%', minWidth:0 }}>
+                <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:4 }}>
+                  <StatusIconBtn status={item.status} size={14}/>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', gap:4, transition:'all 0.2s ease-out', width:(item.isProcessing||item.hasUnread)?'auto':0, opacity:(item.isProcessing||item.hasUnread)?1:0, marginLeft:(item.isProcessing||item.hasUnread)?0:-10 }}>
+                    {item.isProcessing && <svg className="spinner" width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="var(--fg-50)" strokeWidth={2.5}><path d="M12 2v4" strokeLinecap="round"/></svg>}
+                    {item.hasUnread && !item.isProcessing && <svg width={14} height={14} viewBox="0 0 24 24" fill="var(--accent)"><path d="M12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5-.4.9-1 1.7-1.8 2.3-.3.2-.1.7.3.6 1.2-.1 2.3-.5 3.3-1A10 10 0 0 0 12 22c5.5 0 10-4.5 10-10S17.5 2 12 2z"/></svg>}
+                  </div>
+                </div>
+                <div style={{ fontFamily:'var(--font-sans)', fontWeight:500, fontSize:13, lineHeight:1.25, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0, flex:1, marginBottom:-2 }}>{item.title}</div>
+                <div style={{ flexShrink:0, marginLeft:'auto', marginRight:-4, position:'relative', display:'flex', alignItems:'center' }}>
+                  <span style={{ visibility:hov?'hidden':'visible', display:'inline-flex', alignItems:'center' }}>
+                    {item.isFlagged ? <span style={{ padding:4, display:'flex', color:'var(--info)' }}><Ico.Flag size={14}/></span> : <span style={{ fontSize:11, color:'var(--fg-40)', whiteSpace:'nowrap' }}>{item.time}</span>}
+                  </span>
+                  <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'flex-end', opacity:hov?1:0, transition:'opacity 0.1s', color:'var(--fg-40)' }}><span style={{ padding:4, borderRadius:6, display:'flex' }}><MoreHIcon size={14}/></span></div>
+                </div>
+              </div>
+              {item.preview && (
+                <div style={{ display:'flex', alignItems:'flex-start', gap:10, width:'100%', fontSize:12, color:'var(--fg-50)', minWidth:0, marginTop:-4 }}>
+                  <div style={{ flexShrink:0, width:20 }}/>
+                  <div style={{ minWidth:0, flex:1, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', lineHeight:1.35 }}>{item.preview}</div>
+                </div>
+              )}
+              {item.labels && item.labels.length > 0 && (
+                <div style={{ display:'flex', alignItems:'center', gap:10, fontSize:12, color:'var(--fg-70)', width:'100%', minWidth:0, marginBottom:-2 }}>
+                  <div style={{ flexShrink:0, width:20 }}/>
+                  <div style={{ flex:1, display:'flex', alignItems:'center', gap:4, minWidth:0, overflow:'hidden' }}>
+                    {item.labels.map((lbl,i)=><span key={i} style={{ flexShrink:0, height:18, padding:'0 6px', borderRadius:4, fontSize:10, fontWeight:500, display:'flex', alignItems:'center', whiteSpace:'nowrap', background:'var(--fg-5)', color:'var(--fg-60)' }}>{lbl}</span>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </button>
+        </div>
+      );
+    }
+
+    function SectionHeader({ label, isCollapsed, itemCount, onToggle }) {
+      const [hov, setHov] = useState(false);
+      return (
+        <button onClick={onToggle} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{ width:'100%', paddingTop:8, paddingBottom:8, paddingLeft:16, paddingRight:16, display:'flex', alignItems:'center', gap:6, cursor:'pointer', background:'transparent', border:'none', fontFamily:'inherit', position:'relative' }}>
+          <div style={{ position:'absolute', top:2, bottom:2, left:8, right:8, borderRadius:6, background:hov?'var(--fg-2)':'transparent', transition:'background 0.1s', pointerEvents:'none' }}/>
+          <span style={{ display:'flex', transition:'transform 0.1s', transform:isCollapsed?'none':'rotate(90deg)', color:'var(--fg-30)' }}><Ico.ChevRight size={12}/></span>
+          <span style={{ fontSize:11, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.05em', color:'var(--fg-50)', position:'relative' }}>{label}{isCollapsed && <span style={{ color:'var(--fg-30)' }}> · {itemCount}</span>}</span>
+        </button>
+      );
+    }
+
+    function SessionSearchHeader({ searchQuery, onSearchChange, onSearchClose }) {
+      const [focused, setFocused] = useState(false);
+      return (
+        <div style={{ flexShrink:0, paddingLeft:8, paddingRight:8, paddingTop:8, paddingBottom:6, borderBottom:'1px solid var(--border)' }}>
+          <div style={{ position:'relative', borderRadius:8, boxShadow:'rgba(var(--foreground-rgb), 0.04) 0 0 0 1px', background:focused?'var(--background)':'var(--fg-3)' }}>
+            <div style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', display:'flex', color:'var(--fg-50)' }}><Ico.Search size={14}/></div>
+            <input type="text" value={searchQuery} onChange={(e)=>onSearchChange(e.target.value)} onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} placeholder="Search titles and content..." style={{ width:'100%', height:32, paddingLeft:32, paddingRight:32, fontSize:14, background:'transparent', border:0, borderRadius:8, outline:'none', fontFamily:'inherit', color:'var(--foreground)' }}/>
+            <button onClick={onSearchClose} title="Close search" style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', padding:2, background:'transparent', border:'none', cursor:'pointer', borderRadius:4, display:'flex', color:'var(--fg-50)' }}><Ico.X size={14}/></button>
+          </div>
+        </div>
+      );
+    }
+
+    function PanelHeader({ title, actions }) {
+      return (
+        <div style={{ display:'flex', flexShrink:0, alignItems:'center', paddingRight:8, paddingLeft:16, minWidth:0, gap:6, position:'relative', height:42 }}>
+          <div style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', userSelect:'none' }}>
+            <h1 style={{ fontSize:14, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontFamily:'var(--font-sans)', lineHeight:1.25, margin:0 }}>{title}</h1>
+          </div>
+          {actions && <div style={{ flexShrink:0, display:'flex', alignItems:'center' }}>{actions}</div>}
+        </div>
+      );
+    }
+
+    function NavigatorPanel({ activeView, sessions, activeSessionId, onSelectSession }) {
+      const [searchActive, setSearchActive] = useState(false);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+      const data = sessions || MOCK_SESSIONS;
+      const filtered = useMemo(() => {
+        if (!searchQuery.trim()) return data;
+        const q = searchQuery.toLowerCase();
+        return data.filter(s => s.title.toLowerCase().includes(q) || (s.preview && s.preview.toLowerCase().includes(q)));
+      }, [data, searchQuery]);
+      const groups = useMemo(() => {
+        const map = new Map();
+        for (const s of filtered) { const g = s.timeGroup || 'Earlier'; if (!map.has(g)) map.set(g, []); map.get(g).push(s); }
+        return Array.from(map.entries()).map(([label, items]) => ({ label, items }));
+      }, [filtered]);
+      const toggleGroup = (label) => setCollapsedGroups(prev => { const next = new Set(prev); next.has(label) ? next.delete(label) : next.add(label); return next; });
+      const title = activeView === 'flagged' ? 'Flagged' : 'All Sessions';
+      return (
+        <div style={{ height:'100%', display:'flex', flexDirection:'column', minWidth:0, overflow:'hidden', background:'var(--background)' }}>
+          <PanelHeader title={title} actions={<>
+            <GhostBtn onClick={()=>{ setSearchActive(s=>!s); setSearchQuery(''); }} title="Search"><Ico.Search size={16}/></GhostBtn>
+            <GhostBtn title="New session"><Ico.SquarePen size={16}/></GhostBtn>
+          </>}/>
+          {searchActive && <SessionSearchHeader searchQuery={searchQuery} onSearchChange={setSearchQuery} onSearchClose={()=>{ setSearchActive(false); setSearchQuery(''); }}/>}
+          <div style={{ flex:1, overflowY:'auto', minHeight:0, userSelect:'none' }}>
+            <div style={{ display:'flex', flexDirection:'column', paddingBottom:8 }}>
+              <div style={{ paddingTop:4 }}>
+                {groups.map((group) => {
+                  const isCollapsed = collapsedGroups.has(group.label);
+                  return (
+                    <div key={group.label}>
+                      {groups.length > 1 ? <SectionHeader label={group.label} isCollapsed={isCollapsed} itemCount={group.items.length} onToggle={()=>toggleGroup(group.label)}/>
+                        : <div style={{ paddingLeft:16, paddingRight:16, paddingTop:8, paddingBottom:8 }}><span style={{ fontSize:11, fontWeight:500, color:'var(--fg-50)', textTransform:'uppercase', letterSpacing:'0.05em' }}>{group.label}</span></div>}
+                      {!isCollapsed && group.items.map((item, idx) => <SessionRow key={item.id} item={item} isActive={item.id === activeSessionId} isFirstInGroup={idx === 0} onSelect={onSelectSession}/>)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       APP SHELL  — composes the regions into the 3-panel Craft layout.
+       ═════════════════════════════════════════════════════════════════ */
+    function AppShell({ onToggleTheme, isDark, loggedInUser, onLogout, appScenario }) {
+      const [sidebarOpen, setSidebarOpen] = useState(true);
+      const [activeView, setActiveView] = useState('allSessions');
+      const [activeSessionId, setActiveSessionId] = useState('s1');
+      const panel = (extra) => ({ background:'var(--background)', borderRadius:'var(--radius-inner)', overflow:'hidden', ...extra });
+      const quota = { used: 520000, total: 1000000, resetDate: '2026-07-01' };
+      return (
+        <div style={{ height:'100%', display:'flex', flexDirection:'column', background:'var(--background)' }}>
+          <TopBar onToggleTheme={onToggleTheme} isDark={isDark} onToggleSidebar={()=>setSidebarOpen(s=>!s)} workspaceName="Polo AI"/>
+          <div style={{ flex:1, display:'flex', gap:'var(--panel-gap)', padding:'0 var(--panel-inset) var(--panel-inset)', overflow:'hidden' }}>
+            {sidebarOpen && <div className="shadow-minimal" style={panel({ width:220, flexShrink:0 })}><LeftSidebar activeView={activeView} onSelectView={setActiveView} workspaceName="Polo AI" onNewSession={()=>setActiveSessionId(null)} loggedInUser={loggedInUser} onLogout={onLogout} quota={quota} appScenario={appScenario}/></div>}
+            {sidebarOpen && <div className="shadow-minimal" style={panel({ width:300, flexShrink:0 })}><NavigatorPanel activeView={activeView} sessions={MOCK_SESSIONS} activeSessionId={activeSessionId} onSelectSession={setActiveSessionId}/></div>}
+            <div className="shadow-panel-focused" style={panel({ flex:1, display:'flex', flexDirection:'column' })}>
+              <MainContentPanel activeSessionId={activeSessionId} appScenario={appScenario}/>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* 
+       CHAT DISPLAY  - scrollable message list (user bubbles + turn cards).
+       Translated from ChatDisplay.tsx + TurnCard.tsx + UserMessageBubble.tsx.
+     */
+// ─── Icon registrations ──────────────────────────────────────────────
+Ico.FileText = (p) => I({ d: 'M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M9 16H15M9 12H10M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.FilePenLine = (p) => I({ d: 'M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M10.5 12.8799C9.70024 13.2985 9.10807 13.8275 8.64232 14.5478C8.51063 14.7515 8.44479 14.8533 8.44489 15.0011C8.44498 15.1488 8.51099 15.2506 8.643 15.4542C9.1095 16.1736 9.70167 16.7028 10.5 17.1225M13.5 12.8799C14.2998 13.2985 14.8919 13.8275 15.3577 14.5478C15.4894 14.7515 15.5552 14.8533 15.5551 15.0011C15.555 15.1488 15.489 15.2506 15.357 15.4542C14.8905 16.1736 14.2983 16.7028 13.5 17.1225M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Terminal = (p) => I({ d: 'M4 12h16M4 12l3.5-3.5M4 12l3.5 3.5M12 4h4.5C17.3284 4 18 4.67157 18 5.5V18.5C18 19.3284 17.3284 20 16.5 20H12M12 4H7.5C6.67157 4 6 4.67157 6 5.5V18.5C6 19.3284 6.67157 20 7.5 20H12M12 4v16', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Globe = (p) => I({ d: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.CheckCircle2 = (p) => I({ d: 'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Circle = (p) => I({ d: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Wrench = (p) => I({ d: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Database = (p) => I({ d: 'M12 2C7.58172 2 4 3.34315 4 5v14c0 1.6569 3.58172 3 8 3s8-1.3431 8-3V5c0-1.65685-3.5817-3-8-3zM4 5c0-1.65685 3.58172-3 8-3s8 1.34315 8 3-3.5817 3-8 3-8-1.34315-8-3zm0 7c0 1.6569 3.58172 3 8 3s8-1.3431 8-3M4 12V5m16 7V5', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Sparkles = (p) => I({ d: 'M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3zM5 3v4M19 17v4M3 5h4M17 19h4', size: (p && p.size) || 24, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Brain = (p) => I({ d: 'M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2zM14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2z', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Maximize2 = (p) => I({ d: 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7', size: (p && p.size) || 14, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Pencil = (p) => I({ d: 'M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.MessageCircleDashed = (p) => I({ d: 'M13.5 3.06c5.118.562 8.5 4.68 8.5 9.94 0 1.806-.43 3.276-1.2 4.44a.75.75 0 0 0-.092.622l.683 2.952a.6.6 0 0 1-.73.73l-2.952-.683a.75.75 0 0 0-.622.092c-1.164.77-2.634 1.2-4.44 1.2-5.26 0-9.378-3.382-9.94-8.5M7.5 3.5c-1.5 0-3 .5-3 2.5S6 9 6.5 11M8.5 3c.5 0 1 0 1.5.1', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.ArrowUpRight = (p) => I({ d: 'M7 17 17 7M7 7h10v10', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+Ico.Loader = (p) => I({ d: 'M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83', size: (p && p.size) || 12, sw: (p && p.sw) || 2, style: p && p.style });
+Ico.LoaderSpin = Ico.Loader;
+
+Ico.Clock = (p) => I({ d: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 6v6l4 2', size: (p && p.size) || 12, sw: (p && p.sw) || 1.5, style: p && p.style });
+
+
+// ─── Mock data ───────────────────────────────────────────────────────
+const MOCK_MESSAGES = [
+  {
+    id: 'u1',
+    role: 'user',
+    content: 'Can you help me connect Linear to the project and analyze the current sprint backlog?',
+  },
+  {
+    id: 'a1',
+    role: 'assistant',
+    intent: 'Connect Linear & analyze sprint backlog',
+    thinking: 'The user wants to connect Linear as a data source and then analyze the current sprint backlog. I need to first check what sources are available, then look at the project files to understand the codebase structure.',
+    content: [
+      { type: 'paragraph', text: "I'll help you connect Linear and analyze the sprint backlog. Let me start by examining the project structure and then searching for recent Linear issues." },
+      {
+        type: 'list',
+        items: [
+          'Check the existing project configuration files',
+          'Connect to the Linear API and fetch the current sprint',
+          'Analyze ticket status and identify blockers',
+        ],
+      },
+      {
+        type: 'paragraph',
+        text: "Here's how we can query the Linear API for sprint data:",
+      },
+      {
+        type: 'code',
+        language: 'typescript',
+        code: 'const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });\n\nconst team = await linear.team("craft-agents");\nconst cycles = await team.cycles();\n\nconst currentCycle = cycles.nodes.find(c => c.isActive);\nconsole.log(`Sprint: ${currentCycle.name}`);\nconsole.log(`Issues: ${currentCycle.issues.totalCount}`);',
+      },
+      {
+        type: 'paragraph',
+        text: 'Let me now look at the project files and search for more context.',
+      },
+    ],
+    tools: [
+      {
+        id: 't1',
+        toolName: 'Read',
+        status: 'completed',
+        args: 'package.json',
+        detail: 'Read project configuration to understand dependencies',
+      },
+      {
+        id: 't2',
+        toolName: 'Bash',
+        status: 'completed',
+        args: 'git log --oneline -5',
+        detail: 'Check recent git history for context',
+      },
+      {
+        id: 't3',
+        toolName: 'WebSearch',
+        status: 'completed',
+        args: 'Linear API v2 authentication best practices 2024',
+        detail: 'Research Linear API auth patterns',
+      },
+    ],
+    steps: 3,
+    stepCount: 3,
+  },
+  {
+    id: 'u2',
+    role: 'user',
+    content: 'Great, now can you set up the Linear source and pull the backlog?',
+  },
+  {
+    id: 'a2',
+    role: 'assistant',
+    intent: 'Set up Linear source connection',
+    thinking: 'Now I need to actually configure the Linear source. This involves creating an MCP connection configuration and testing it. Let me check what tools are available for source management.',
+    content: [
+      {
+        type: 'paragraph',
+        text: 'Setting up the Linear source now. I\'ll configure the MCP connection and verify access.',
+      },
+      {
+        type: 'paragraph',
+        text: 'The Linear source is now connected. You can see the full backlog using the **Gmail** and **Linear** sources together. Here is what I found:',
+      },
+    ],
+    tools: [
+      {
+        id: 't4',
+        toolName: 'mcp__linear__list_issues',
+        status: 'completed',
+        args: 'Sprint 24',
+        detail: 'List all issues in the current sprint',
+      },
+      {
+        id: 't5',
+        toolName: 'Bash',
+        status: 'running',
+        args: 'npm run build',
+        detail: 'Build the project to verify changes',
+      },
+    ],
+    steps: 2,
+    stepCount: 2,
+  },
+];
+
+
+// ─── Component ───────────────────────────────────────────────────────
+function ChatDisplay({ messages, isProcessing }) {
+  const msgs = messages || MOCK_MESSAGES;
+
+  // ── Empty state ──
+  if (!msgs || msgs.length === 0) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          minHeight: 0,
+          userSelect: 'none',
+          padding: '0 20px',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 448,
+            textAlign: 'center',
+            lineHeight: 1.625,
+            letterSpacing: '-0.01em',
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 16,
+            }}
+          >
+            {Ico.Sparkles({ size: 24, sw: 1.5, style: { color: 'var(--fg-30)' } })}
+          </div>
+          <span
+            style={{
+              fontSize: 20,
+              fontWeight: 700,
+              color: 'var(--foreground)',
+            }}
+          >
+            {'Pull issues from '}
+            <span
+              style={{
+                display: 'inline-flex',
+                paddingLeft: 8,
+                paddingRight: 10,
+                paddingTop: 2,
+                paddingBottom: 2,
+                margin: '0 2px',
+                borderRadius: 8,
+                background: 'var(--fg-5)',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                color: 'var(--fg-40)',
+                fontSize: 20,
+                fontWeight: 700,
+              }}
+            >
+              Linear
+            </span>
+            {' into a summary'}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render ──
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minHeight: 0,
+        minWidth: 0,
+      }}
+    >
+      {/* Scroll area */}
+      <div
+        style={{
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            maskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%)',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 840,
+                margin: '0 auto',
+                minWidth: 0,
+                paddingLeft: 20,
+                paddingRight: 20,
+                paddingTop: 32,
+                paddingBottom: 32,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              {msgs.map((msg) => {
+                if (msg.role === 'user') {
+                  return <UserBubble key={msg.id} msg={msg} />;
+                }
+                return <TurnCardView key={msg.id} msg={msg} />;
+              })}
+
+              {/* Processing indicator */}
+              {isProcessing && <ProcessingRow />}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── User bubble ─────────────────────────────────────────────────────
+function UserBubble({ msg }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
+        width: '100%',
+        paddingTop: 16,
+        paddingBottom: 8,
+      }}
+    >
+      <div
+        style={{
+          maxWidth: '80%',
+          background: 'var(--user-bubble)',
+          borderRadius: 16,
+          padding: '14px 20px',
+          wordBreak: 'break-word',
+          minWidth: 0,
+          userSelect: 'text',
+        }}
+      >
+        <p
+          style={{
+            margin: 0,
+            fontSize: 14,
+            lineHeight: 1.5,
+            color: 'var(--foreground)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {msg.content}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── TurnCard view ───────────────────────────────────────────────────
+function TurnCardView({ msg }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const [showThinking, setShowThinking] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = () => {
+    const textParts = (msg.content || [])
+      .filter((b) => b.type === 'paragraph' || b.type === 'code')
+      .map((b) => (b.type === 'code' ? b.code : b.text));
+    const fullText = textParts.join('\n\n');
+    try {
+      navigator.clipboard && navigator.clipboard.writeText(fullText);
+    } catch (e) {}
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const tools = msg.tools || [];
+  const hasActivities = tools.length > 0;
+
+  return (
+    <div
+      style={{
+        paddingTop: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+      }}
+    >
+      {/* ── Thinking / Reasoning section ── */}
+      {msg.thinking && (
+        <div style={{ userSelect: 'none' }}>
+          <button
+            onClick={() => setShowThinking(!showThinking)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 10px',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              fontSize: 13,
+              color: 'var(--fg-50)',
+              fontStyle: 'italic',
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 12,
+                height: 12,
+                flexShrink: 0,
+                transform: showThinking ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform 0.15s ease-out',
+              }}
+            >
+              {Ico.ChevRight({ size: 12, sw: 1.5 })}
+            </span>
+            {Ico.Brain({ size: 12, sw: 1.5, style: { opacity: 0.7 } })}
+            <span>{showThinking ? 'Hide thinking' : 'Thinking'}</span>
+          </button>
+          {showThinking && (
+            <div
+              style={{
+                marginLeft: 13,
+                paddingLeft: 16,
+                paddingRight: 8,
+                paddingTop: 4,
+                paddingBottom: 4,
+                borderLeft: '2px solid var(--fg-10)',
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: 'var(--fg-50)',
+                fontStyle: 'italic',
+              }}
+            >
+              {msg.thinking}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Activities (collapsible step list) ── */}
+      {hasActivities && (
+        <div style={{ userSelect: 'none' }}>
+          {/* Header / toggle */}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              width: '100%',
+              paddingLeft: 10,
+              paddingRight: 6,
+              paddingTop: 6,
+              paddingBottom: 6,
+              borderRadius: 8,
+              textAlign: 'left',
+              fontSize: 13,
+              color: 'var(--fg-50)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--fg-5)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            {/* Chevron */}
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 12,
+                height: 12,
+                flexShrink: 0,
+                transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform 0.15s ease-out',
+              }}
+            >
+              {Ico.ChevRight({ size: 12, sw: 1.5 })}
+            </span>
+
+            {/* Step count badge */}
+            <span
+              style={{
+                flexShrink: 0,
+                paddingLeft: 6,
+                paddingRight: 6,
+                paddingTop: 2,
+                paddingBottom: 2,
+                borderRadius: 4,
+                background: 'var(--background)',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                fontSize: 10,
+                fontWeight: 500,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {tools.length}
+            </span>
+
+            {/* Preview text */}
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {msg.intent || 'Steps completed'}
+            </span>
+          </button>
+
+          {/* Expanded activity list */}
+          {expanded && (
+            <div
+              style={{
+                paddingLeft: 16,
+                paddingRight: 8,
+                paddingTop: 2,
+                paddingBottom: 2,
+                marginLeft: 13,
+                borderLeft: '2px solid var(--fg-10)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+              }}
+            >
+              {tools.map((tool) => (
+                <ActivityRowView key={tool.id} tool={tool} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Response card ── */}
+      {msg.content && msg.content.length > 0 && (
+        <div
+          style={{
+            marginTop: hasActivities ? 8 : 0,
+            background: 'var(--background)',
+            borderRadius: 8,
+            overflow: 'hidden',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            position: 'relative',
+            userSelect: 'text',
+          }}
+        >
+          {/* Content */}
+          <div
+            style={{
+              paddingLeft: 22,
+              paddingRight: 16,
+              paddingTop: 12,
+              paddingBottom: 12,
+              fontSize: 14,
+              lineHeight: 1.6,
+              color: 'var(--foreground)',
+              overflowY: 'auto',
+              maxHeight: 540,
+            }}
+          >
+            {(msg.content || []).map((block, i) => {
+              if (block.type === 'paragraph') {
+                return (
+                  <p
+                    key={i}
+                    style={{
+                      margin: '0 0 8px 0',
+                      lineHeight: 1.625,
+                    }}
+                  >
+                    {renderInlineMarkdown(block.text)}
+                  </p>
+                );
+              }
+              if (block.type === 'list') {
+                return (
+                  <ul
+                    key={i}
+                    style={{
+                      margin: '0 0 8px 0',
+                      paddingLeft: 20,
+                      paddingRight: 8,
+                      listStyleType: 'disc',
+                      listStylePosition: 'outside',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    {block.items.map((item, j) => (
+                      <li
+                        key={j}
+                        style={{
+                          color: 'var(--foreground)',
+                          paddingLeft: 4,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <span style={{ color: 'var(--fg-50)' }}>•</span>
+                        {' '}
+                        {renderInlineMarkdown(item)}
+                      </li>
+                    ))}
+                  </ul>
+                );
+              }
+              if (block.type === 'code') {
+                return (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <CodeBlock language={block.language} code={block.code} />
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </div>
+
+          {/* Footer */}
+          <div
+            style={{
+              paddingLeft: 16,
+              paddingRight: 10,
+              paddingTop: 8,
+              paddingBottom: 8,
+              borderTop: '1px solid var(--border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'var(--fg-5)',
+              fontSize: 13,
+            }}
+          >
+            {/* Left side */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                onClick={handleCopy}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  color: copied ? 'var(--success)' : 'var(--fg-50)',
+                  padding: 0,
+                }}
+              >
+                {copied ? Ico.Check({ size: 12, sw: 1.5 }) : Ico.Copy({ size: 12, sw: 1.5 })}
+                <span>{copied ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  color: 'var(--fg-50)',
+                  padding: 0,
+                }}
+              >
+                {Ico.FileText({ size: 12, sw: 1.5 })}
+                <span>Markdown</span>
+              </button>
+            </div>
+            {/* Right side */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: 'none',
+                  background: 'var(--background)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  padding: 4,
+                  color: 'var(--fg-30)',
+                }}
+              >
+                {Ico.Maximize2({ size: 14, sw: 1.5 })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ─── Activity row ────────────────────────────────────────────────────
+function ActivityRowView({ tool }) {
+  const toolIcon = getToolIcon(tool.toolName);
+  const statusIcon = getStatusIcon(tool.status, tool.toolName);
+  const statusColor = tool.status === 'error'
+    ? 'var(--destructive)'
+    : tool.status === 'completed'
+      ? 'var(--fg-50)'
+      : 'var(--fg-50)';
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        paddingTop: 2,
+        paddingBottom: 2,
+        fontSize: 13,
+        color: statusColor,
+        cursor: 'default',
+      }}
+    >
+      {/* Status icon */}
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 12,
+          height: 12,
+          flexShrink: 0,
+        }}
+      >
+        {statusIcon}
+      </span>
+
+      {/* Tool name */}
+      <span
+        style={{
+          flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        {toolIcon}
+        <span>{tool.toolName}</span>
+      </span>
+
+      {/* Args badge */}
+      {tool.args && (
+        <span
+          style={{
+            flexShrink: 0,
+            paddingLeft: 6,
+            paddingRight: 6,
+            paddingTop: 2,
+            paddingBottom: 2,
+            borderRadius: 4,
+            background: 'var(--background)',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            fontSize: 11,
+            color: 'var(--fg-70)',
+          }}
+        >
+          {tool.args}
+        </span>
+      )}
+
+      {/* Detail text */}
+      {tool.detail && (
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            opacity: 0.6,
+          }}
+        >
+          · {tool.detail}
+        </span>
+      )}
+
+      {/* Status chip */}
+      <span
+        style={{
+          flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          paddingLeft: 6,
+          paddingRight: 6,
+          paddingTop: 1,
+          paddingBottom: 1,
+          borderRadius: 4,
+          fontSize: 10,
+          fontWeight: 500,
+          ...(tool.status === 'completed' ? {
+            background: 'color-mix(in srgb, var(--success) 8%, transparent)',
+            color: 'var(--success)',
+          } : tool.status === 'running' ? {
+            background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+            color: 'var(--accent)',
+          } : tool.status === 'error' ? {
+            background: 'color-mix(in srgb, var(--destructive) 8%, transparent)',
+            color: 'var(--destructive)',
+          } : {
+            background: 'var(--fg-10)',
+            color: 'var(--fg-50)',
+          }),
+        }}
+      >
+        {tool.status === 'running' && (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 8,
+              height: 8,
+              flexShrink: 0,
+            }}
+          >
+            {Ico.LoaderSpin({ size: 8, sw: 2, style: { animation: 'spin 0.8s linear infinite' } })}
+          </span>
+        )}
+        {tool.status === 'completed' && Ico.Check({ size: 8, sw: 2.5 })}
+        {tool.status}
+      </span>
+    </div>
+  );
+}
+
+
+// ─── Processing indicator row ────────────────────────────────────────
+function ProcessingRow() {
+  const [elapsed, setElapsed] = React.useState(0);
+
+  React.useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatElapsed = (s) => {
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m + ':' + String(r).padStart(2, '0');
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        paddingLeft: 12,
+        paddingRight: 12,
+        paddingTop: 4,
+        paddingBottom: 4,
+        fontSize: 13,
+        color: 'var(--fg-50)',
+      }}
+    >
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 12,
+          height: 12,
+          flexShrink: 0,
+        }}
+      >
+        {Ico.LoaderSpin({ size: 10, sw: 2, style: { animation: 'spin 0.8s linear infinite' } })}
+      </span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span>Thinking…</span>
+        {elapsed >= 1 && (
+          <span style={{ color: 'var(--fg-30)', fontVariantNumeric: 'tabular-nums' }}>
+            {formatElapsed(elapsed)}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+
+// ─── Helpers ─────────────────────────────────────────────────────────
+function getToolIcon(name) {
+  if (!name) return Ico.Wrench({ size: 12, sw: 1.5 });
+  const lower = name.toLowerCase();
+  if (lower === 'read') return Ico.FileText({ size: 12, sw: 1.5 });
+  if (lower === 'write' || lower === 'edit') return Ico.FilePenLine({ size: 12, sw: 1.5 });
+  if (lower === 'bash') return Ico.Terminal({ size: 12, sw: 1.5 });
+  if (lower === 'websearch') return Ico.Globe({ size: 12, sw: 1.5 });
+  if (lower.startsWith('mcp__')) {
+    if (lower.includes('linear') || lower.includes('database') || lower.includes('db')) {
+      return Ico.Database({ size: 12, sw: 1.5 });
+    }
+    return Ico.Wrench({ size: 12, sw: 1.5 });
+  }
+  return Ico.Wrench({ size: 12, sw: 1.5 });
+}
+
+function getStatusIcon(status, toolName) {
+  switch (status) {
+    case 'pending':
+      return Ico.Circle({ size: 12, sw: 1.5, style: { color: 'var(--fg-30)', opacity: 0.5 } });
+    case 'running':
+      return Ico.LoaderSpin({ size: 10, sw: 2, style: { animation: 'spin 0.8s linear infinite' } });
+    case 'completed':
+      if (toolName === 'Edit') return Ico.Pencil({ size: 12, sw: 1.5, style: { color: 'var(--accent)' } });
+      if (toolName === 'Write') return Ico.FilePenLine({ size: 12, sw: 1.5, style: { color: 'var(--accent)' } });
+      return Ico.CheckCircle2({ size: 12, sw: 1.5, style: { color: 'var(--success)' } });
+    case 'error':
+      return null;
+    default:
+      return Ico.Circle({ size: 12, sw: 1.5, style: { color: 'var(--fg-30)' } });
+  }
+}
+
+function renderInlineMarkdown(text) {
+  // Simple inline markdown: **bold**, `code`
+  if (!text) return null;
+  const parts = [];
+  const regex = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[2]) {
+      // Bold
+      parts.push(React.createElement('strong', { key: key++, style: { fontWeight: 600 } }, match[2]));
+    } else if (match[3]) {
+      // Inline code
+      parts.push(IC({ key: key++, children: match[3] }));
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
+}
+
+    /* ═════════════════════════════════════════════════════════════════
+       MAIN CONTENT PANEL  — routes to the chat view (ChatDisplay + input).
+       ═════════════════════════════════════════════════════════════════ */
+    /*
+       CHAT INPUT ZONE  - RichTextInput + bottom toolbar (attach/sources/folder/model/send).
+       Translated from ChatInputZone.tsx + InputContainer.tsx + FreeFormInput.tsx +
+       FreeFormInputContextBadge.tsx (desktop, non-compact variant).
+    */
+    const INPUT_PLACEHOLDERS = [
+      'What should we work on?',
+      'Shift + Tab to switch modes',
+      '@ to mention skills and sources',
+      '# to add labels',
+      'Shift + Enter for a new line',
+      '\u2318B to toggle the sidebar',
+      '\u2318\\ to enter Focus mode',
+    ];
+    function Badge({ icon, label, expanded, selected, chevron, onClick, title }) {
+      const [hov, setHov] = useState(false);
+      const showLabel = expanded || selected;
+      const pad = showLabel ? '0 8px' : '0 6px';
+      const bg = (!expanded && selected)
+        ? 'var(--background)'
+        : (hov ? 'var(--fg-5)' : 'transparent');
+      const border = (!expanded && selected) ? '1px solid var(--fg-5)' : '1px solid transparent';
+      return (
+        <button type="button" onClick={onClick} title={title} disabled={false}
+          onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          style={{
+            display:'inline-flex', alignItems:'center', gap:6, height:28, padding:pad,
+            borderRadius:6, fontSize:13, color:'var(--foreground)',
+            background:bg, border, margin: (!expanded && selected) ? '0 2px' : '0',
+            transition:'background 0.12s, border-color 0.12s',
+            cursor:'pointer', fontFamily:'inherit', flexShrink:1, minWidth:0, overflow:'hidden',
+          }}>
+          <span style={{ flexShrink:0, display:'flex' }}>{icon}</span>
+          {showLabel && (
+            <span style={{
+              minWidth:0, flexShrink:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+              maxWidth: expanded ? 120 : 140,
+              opacity: (expanded && !selected) ? 0.5 : 1,
+            }}>{label}</span>
+          )}
+          {expanded && chevron && <Ico.ChevDown size={12} />}
+        </button>
+      );
+    }
+
+    /* ActiveOptionBadges — permission mode badge + session state badge above the input.
+       Simplified mock of the Electron ActiveOptionBadges + PermissionModeDropdown. */
+    const PERMISSION_MODES = [
+      { id: 'safe', name: 'Explore', svgPath: 'M16.24 7.76l-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z', bg: 'var(--fg-5)', color: 'color-mix(in srgb, var(--foreground) 60%, transparent)', shadowVar: 'var(--foreground-rgb)' },
+      { id: 'ask', name: 'Ask', svgPath: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 8v4m0 4h.01', bg: 'color-mix(in srgb, var(--info) 10%, transparent)', color: 'var(--info)', shadowVar: 'var(--info-rgb)' },
+      { id: 'allow-all', name: 'Execute', svgPath: 'm17 1 4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3', bg: 'color-mix(in srgb, var(--accent) 5%, transparent)', color: 'var(--accent)', shadowVar: 'var(--accent-rgb)' },
+    ];
+    function ActiveOptionBadges({ permissionMode, onPermissionModeChange }) {
+      const mode = PERMISSION_MODES.find(m => m.id === permissionMode) || PERMISSION_MODES[1];
+      const [hov, setHov] = useState(false);
+      const [menuOpen, setMenuOpen] = useState(false);
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, padding:'1px 0' }}>
+          {/* Permission mode badge */}
+          <div style={{ position:'relative' }}>
+            <button type="button" onClick={() => setMenuOpen(v => !v)}
+              onMouseEnter={()=>setHov(true)} onMouseLeave={()=>{setHov(false); setTimeout(()=>{}, 200)}}
+              className="shadow-tinted"
+              style={{
+                height:30, paddingLeft:10, paddingRight:8, fontSize:12, fontWeight:500,
+                borderRadius:8, display:'flex', alignItems:'center', gap:6,
+                background: mode.bg, color: mode.color, border:'none', cursor:'pointer',
+                fontFamily:'inherit', '--shadow-color': mode.shadowVar, transition:'background 0.15s',
+              }}>
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d={mode.svgPath} />
+              </svg>
+              <span>{mode.name}</span>
+              <Ico.ChevDown size={14} style={{ opacity:0.6 }} />
+            </button>
+            {menuOpen && (
+              <>
+                <div style={{ position:'fixed', inset:0, zIndex:49 }} onClick={()=>setMenuOpen(false)} />
+                <div style={{
+                  position:'absolute', bottom:'calc(100% + 4px)', left:0, zIndex:50,
+                  minWidth:220, borderRadius:8, background:'var(--background)',
+                  boxShadow:'rgba(var(--foreground-rgb), 0.06) 0 0 0 1px, rgba(0,0,0,0.12) 0 4px 12px',
+                  padding:4, overflow:'hidden',
+                }}>
+                  {PERMISSION_MODES.map(m => {
+                    const active = m.id === permissionMode;
+                    return (
+                      <button key={m.id} type="button"
+                        onClick={() => { onPermissionModeChange?.(m.id); setMenuOpen(false); }}
+                        style={{
+                          display:'flex', alignItems:'center', gap:10, width:'100%',
+                          padding:'8px 10px', borderRadius:6, border:'none', cursor:'pointer',
+                          background: active ? 'var(--fg-5)' : 'transparent',
+                          color: m.color, fontSize:13, fontFamily:'inherit', textAlign:'left',
+                          transition:'background 0.1s',
+                        }}
+                        onMouseEnter={(e)=>e.currentTarget.style.background='var(--fg-3)'}
+                        onMouseLeave={(e)=>e.currentTarget.style.background=active?'var(--fg-5)':'transparent'}
+                      >
+                        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <path d={m.svgPath} />
+                        </svg>
+                        <span style={{ flex:1 }}>{m.name}</span>
+                        {active && <Ico.Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════ MODEL MENU ITEM (proper component) ═══════ */
+    function ModelMenuItem({ model, isActive, onSelect }) {
+      const [hov, setHov] = useState(false);
+      return (
+        <button type="button" onClick={onSelect}
+          onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          style={{
+            display:'flex', alignItems:'center', gap:10, width:'100%',
+            padding:'8px 10px', borderRadius:6, border:'none', cursor:'pointer',
+            background: isActive ? 'var(--fg-5)' : (hov ? 'var(--fg-3)' : 'transparent'),
+            fontFamily:'inherit', transition:'background 0.1s', textAlign:'left',
+          }}>
+          <span style={{ width:24, height:24, borderRadius:5, background:model.bg, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:10, fontWeight:700, flexShrink:0 }}>{model.mark}</span>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:13, fontWeight:500, color:'var(--foreground)' }}>{model.name}</div>
+            <div style={{ fontSize:11, color:'var(--fg-40)' }}>{model.provider}</div>
+          </div>
+          {isActive && <span style={{ color:'var(--accent)', flexShrink:0 }}><Ico.Check size={14}/></span>}
+        </button>
+      );
+    }
+
+    /* ═══════ MODEL SELECTOR (S-009: switch default among admin models) ═══════ */
+    const ADMIN_MODELS = [
+      { slug:'claude-sonnet', name:'Claude Sonnet 4', provider:'Anthropic', mark:'A', bg:'#D97757' },
+      { slug:'gpt-4o', name:'GPT-4o', provider:'OpenAI', mark:'G', bg:'#10a37f' },
+      { slug:'deepseek-v3', name:'DeepSeek V3', provider:'DeepSeek', mark:'D', bg:'#4A6CF7' },
+    ];
+    function ModelSelector() {
+      const [selected, setSelected] = useState(ADMIN_MODELS[0]);
+      const [menuOpen, setMenuOpen] = useState(false);
+      const [btnHov, setBtnHov] = useState(false);
+      return (
+        <div style={{ position:'relative' }}>
+          <button type="button" title="切换模型" onClick={()=>setMenuOpen(!menuOpen)}
+            onMouseEnter={()=>setBtnHov(true)} onMouseLeave={()=>setBtnHov(false)}
+            style={{
+              display:'inline-flex', alignItems:'center', height:28, padding:'0 6px', gap:3,
+              fontSize:13, flexShrink:0, borderRadius:6, cursor:'pointer',
+              color:'var(--foreground)', background: btnHov||menuOpen ? 'var(--fg-5)' : 'transparent',
+              border:'none', fontFamily:'inherit', transition:'background 0.12s',
+            }}>
+            <span style={{ width:14, height:14, borderRadius:3, background:selected.bg, display:'inline-flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:9, fontWeight:700, flexShrink:0 }}>{selected.mark}</span>
+            <span>{selected.name}</span>
+            <Ico.ChevDown size={12}/>
+          </button>
+          {menuOpen && (
+            <>
+              <div style={{ position:'fixed', inset:0, zIndex:49 }} onClick={()=>setMenuOpen(false)}/>
+              <div style={{
+                position:'absolute', bottom:'calc(100% + 4px)', right:0, zIndex:50,
+                minWidth:260, borderRadius:10, background:'var(--background)',
+                boxShadow:'rgba(var(--foreground-rgb), 0.06) 0 0 0 1px, rgba(0,0,0,0.15) 0 6px 20px',
+                overflow:'hidden',
+              }}>
+                <div style={{ padding:4 }}>
+                  {ADMIN_MODELS.map(m => (
+                    <ModelMenuItem key={m.slug} model={m} isActive={m.slug===selected.slug} onSelect={()=>{setSelected(m);setMenuOpen(false);}}/>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    function ChatInputZone({ onSend, disabled, isEmptySession = true, permissionMode = 'ask', onPermissionModeChange }) {
+      const [value, setValue] = useState('');
+      const [focused, setFocused] = useState(false);
+      const [phIdx] = useState(() => Math.floor(Math.random() * INPUT_PLACEHOLDERS.length));
+      const taRef = useRef(null);
+      useEffect(() => {
+        // auto-grow
+        const ta = taRef.current;
+        if (!ta) return;
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 540) + 'px';
+      }, [value]);
+      const has = value.trim().length > 0;
+      const submit = (e) => {
+        e && e.preventDefault();
+        if (!has || disabled) return;
+        onSend(value);
+        setValue('');
+      };
+      const onKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          submit();
+        }
+      };
+      return (
+        <div style={{
+          maxWidth: 840, margin:'0 auto', width:'100%',
+          marginTop: 4, padding:'0 12px 16px',
+        }}>
+          <ActiveOptionBadges permissionMode={permissionMode} onPermissionModeChange={onPermissionModeChange} />
+          <div className={focused ? 'shadow-middle' : 'shadow-minimal'} style={{
+            position:'relative', borderRadius:12, overflow:'hidden',
+            background:'var(--background)', transition:'box-shadow 0.2s',
+          }}>
+            <form onSubmit={submit}>
+              <textarea
+                ref={taRef}
+                value={value}
+                onChange={(e)=>setValue(e.target.value)}
+                onKeyDown={onKeyDown}
+                onFocus={()=>setFocused(true)}
+                onBlur={()=>setFocused(false)}
+                placeholder={INPUT_PLACEHOLDERS[phIdx]}
+                style={{
+                  display:'block', width:'100%',
+                  paddingLeft:20, paddingRight:16, paddingTop:16, paddingBottom:12,
+                  border:'none', outline:'none', resize:'none',
+                  background:'transparent', color:'var(--foreground)',
+                  fontFamily:'var(--font-sans)', fontSize:14, lineHeight:1.25,
+                  minHeight:88, maxHeight:540, overflowY:'auto',
+                }}
+              />
+              {/* Bottom toolbar */}
+              <div style={{
+                display:'flex', alignItems:'center', gap:4,
+                padding:'8px 8px',
+                borderTop:'1px solid oklch(from var(--foreground) l c h / 0.025)',
+              }}>
+                {/* Hidden file input mirror */}
+                <div style={{ display:'flex', alignItems:'center', gap:4, minWidth:128, flexShrink:1, overflow:'hidden' }}>
+                  <Badge icon={<Ico.Paperclip size={16}/>} label="Attach files" expanded={isEmptySession} selected={false} chevron={false} title="Attach files" />
+                  <Badge icon={<Ico.DatabaseZap size={16}/>} label="Choose sources" expanded={isEmptySession} selected={false} chevron={true} title="Sources" />
+                  <Badge icon={<Ico.Home size={16}/>} label="Work in Folder" expanded={isEmptySession} selected={false} chevron={true} title="Working directory" />
+                </div>
+                <div style={{ flex:1 }} />
+                <div style={{ display:'flex', alignItems:'center', flexShrink:0 }}>
+                  {/* Model selector (S-009: switch default, admin-managed) */}
+                  <ModelSelector />
+                  {/* Context usage indicator (mock — shown when usage > 50%) */}
+                  <button type="button" title="Context usage" className="shadow-tinted" style={{
+                    height:24, padding:'0 8px', fontSize:12, fontWeight:500,
+                    borderRadius:6, display:'inline-flex', alignItems:'center', flexShrink:0,
+                    background:'color-mix(in srgb, var(--info) 10%, transparent)',
+                    color:'color-mix(in oklab, var(--info) 30%, var(--foreground))',
+                    border:'none', cursor:'pointer', fontFamily:'inherit',
+                    '--shadow-color':'var(--info-rgb)', marginLeft:4,
+                  }}>
+                    68%
+                  </button>
+                  {/* Send / Stop */}
+                  {disabled ? (
+                    <button type="button" onClick={()=>{}} title="Stop" style={{
+                      height:28, width:28, borderRadius:'50%', marginLeft:8, flexShrink:0,
+                      display:'inline-flex', alignItems:'center', justifyContent:'center',
+                      background:'var(--fg-10)', border:'none', cursor:'pointer', color:'var(--foreground)',
+                      transition:'background 0.12s',
+                    }}
+                    onMouseEnter={(e)=>e.currentTarget.style.background='color-mix(in srgb, var(--foreground) 15%, transparent)'}
+                    onMouseLeave={(e)=>e.currentTarget.style.background='var(--fg-10)'}
+                    onMouseDown={(e)=>e.currentTarget.style.background='color-mix(in srgb, var(--foreground) 20%, transparent)'}
+                    onMouseUp={(e)=>e.currentTarget.style.background='color-mix(in srgb, var(--foreground) 15%, transparent)'}>
+                      <Ico.Square size={11} />
+                    </button>
+                  ) : (
+                    <button type="submit" disabled={!has} title="Send" style={{
+                      height:28, width:28, borderRadius:'50%', marginLeft:8, flexShrink:0,
+                      display:'inline-flex', alignItems:'center', justifyContent:'center',
+                      background: has ? 'var(--accent)' : 'var(--fg-10)',
+                      border:'none', cursor: has ? 'pointer' : 'default',
+                      color:'#fff', transition:'background 0.12s',
+                    }}
+                    onMouseEnter={(e)=>{ if (has) e.currentTarget.style.background='color-mix(in srgb, var(--accent) 85%, var(--foreground))' }}
+                    onMouseLeave={(e)=>{ e.currentTarget.style.background = has ? 'var(--accent)' : 'var(--fg-10)' }}
+                    onMouseDown={(e)=>{ if (has) e.currentTarget.style.background='color-mix(in srgb, var(--accent) 70%, var(--foreground))' }}
+                    onMouseUp={(e)=>{ if (has) e.currentTarget.style.background='color-mix(in srgb, var(--accent) 85%, var(--foreground))' }}>
+                      <Ico.ArrowUp size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+
+    function MainContentPanel({ activeSessionId, appScenario }) {
+      return (
+        <div style={{ height:'100%', display:'flex', flexDirection:'column', minWidth:0 }}>
+          <ChatPage activeSessionId={activeSessionId} appScenario={appScenario}/>
+        </div>
+      );
+    }
+
+    /* ChatPage  — header + scrollable ChatDisplay + ChatInputZone. */
+    function ChatPage({ activeSessionId, appScenario }) {
+      const s = (MOCK_SESSIONS.find(x => x.id === activeSessionId) || MOCK_SESSIONS[0]);
+      const [permissionMode, setPermissionMode] = useState('ask');
+      const [messages, setMessages] = useState(MOCK_MESSAGES);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const noConfig = appScenario === 'no-config';
+      const exhausted = appScenario === 'quota-exhausted';
+      const onlineDisabled = appScenario === 'online-disabled';
+      const [disabledTriggered, setDisabledTriggered] = useState(false);
+      const inputDisabled = isProcessing || noConfig || exhausted || disabledTriggered;
+
+      // Reset disabledTriggered when scenario changes away
+      useEffect(() => { if (!onlineDisabled) setDisabledTriggered(false); }, [appScenario]);
+
+      const onSend = (text) => {
+        if (!text || !text.trim() || noConfig || exhausted || disabledTriggered) return;
+        // S-007: next message triggers disabled notice
+        if (onlineDisabled && !disabledTriggered) {
+          setDisabledTriggered(true);
+          return;
+        }
+        const userMsg = { id: 'u' + Date.now(), role: 'user', content: text };
+        setMessages(prev => [...prev, userMsg]);
+        setIsProcessing(true);
+        setTimeout(() => {
+          const reply = {
+            id: 'a' + Date.now(), role: 'assistant',
+            intent: 'Response',
+            thinking: 'Considering the request and the available context.',
+            content: [{ type: 'paragraph', text: "Got it. Here's a quick draft based on the current project state." }],
+            tools: [],
+          };
+          setMessages(prev => [...prev, reply]);
+          setIsProcessing(false);
+        }, 1400);
+      };
+      return (
+        <div style={{ height:'100%', display:'flex', flexDirection:'column', minWidth:0 }}>
+          <PanelHeader title={s ? s.title : 'New Session'} actions={<>
+            <GhostBtn title="Share"><Ico.ArrowUpRight size={14}/></GhostBtn>
+            <GhostBtn title="Session menu"><MoreHIcon size={16}/></GhostBtn>
+          </>}/>
+          <ChatDisplay messages={messages} isProcessing={isProcessing}/>
+          {/* Scenario banners (S-013, S-016) */}
+          {noConfig && (
+            <div style={{ maxWidth:840, margin:'0 auto', width:'100%', padding:'0 20px' }}>
+              <div style={{ marginBottom:6, padding:'8px 12px', borderRadius:8, background:'color-mix(in srgb, var(--info) 10%, transparent)', display:'flex', alignItems:'center', gap:8, fontSize:13, color:'var(--info)', animation:'slideUp 0.25s ease-out' }}>
+                <Ico.AlertTriangle size={14}/> 管理员尚未为你配置 AI 服务，暂时无法发送消息
+              </div>
+            </div>
+          )}
+          {exhausted && (
+            <div style={{ maxWidth:840, margin:'0 auto', width:'100%', padding:'0 20px' }}>
+              <div style={{ marginBottom:6, padding:'8px 12px', borderRadius:8, background:'color-mix(in srgb, var(--destructive) 10%, transparent)', display:'flex', alignItems:'center', gap:8, fontSize:13, color:'var(--destructive)', animation:'slideUp 0.25s ease-out' }}>
+                <Ico.AlertTriangle size={14}/> 本月额度已用完，下个周期将自动重置
+              </div>
+            </div>
+          )}
+          {disabledTriggered && (
+            <div style={{ maxWidth:840, margin:'0 auto', width:'100%', padding:'0 20px' }}>
+              <div style={{ marginBottom:6, padding:'8px 12px', borderRadius:8, background:'color-mix(in srgb, var(--destructive) 10%, transparent)', display:'flex', alignItems:'center', gap:8, fontSize:13, color:'var(--destructive)', animation:'slideUp 0.25s ease-out' }}>
+                <Ico.AlertTriangle size={14}/> 账号已被禁用，请联系管理员。当前会话内容不受影响。
+              </div>
+            </div>
+          )}
+          <ChatInputZone onSend={onSend} disabled={inputDisabled} isEmptySession={messages.length === 0} permissionMode={permissionMode} onPermissionModeChange={setPermissionMode}/>
+        </div>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       SPLASH SCREEN  — animated brand mark in/out.
+       ═════════════════════════════════════════════════════════════════ */
+    function SplashScreen() {
+      const [exiting, setExiting] = useState(false);
+      useEffect(() => {
+        const t1 = setTimeout(()=>setExiting(true), 1000);
+        return ()=>clearTimeout(t1);
+      }, []);
+      return (
+        <div style={{
+          position:'fixed', inset:0, display:'flex', alignItems:'center', justifyContent:'center',
+          background:'var(--background)', zIndex: 9999,
+          animation: exiting ? 'fadeOut 0.4s ease-out forwards' : 'none',
+        }}>
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, color:'var(--accent)', animation: exiting ? 'splashOut 0.4s cubic-bezier(0.16,1,0.3,1) forwards' : 'splashIn 0.3s cubic-bezier(0.16,1,0.3,1)' }}>
+            <BrandLogo size={48}/>
+            <span style={{ fontSize:15, fontWeight:500, color:'var(--fg-50)' }}>Polo AI</span>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       LOGIN PAGE  — glass card form. Structural; brand colors from tokens.
+       ═════════════════════════════════════════════════════════════════ */
+    function LoginPage({ onLogin, loginError, onClearError }) {
+      const [username, setUsername] = useState('');
+      const [password, setPassword] = useState('');
+      const [showPwd, setShowPwd] = useState(false);
+      const [busy, setBusy] = useState(false);
+
+      const go = (e) => {
+        e.preventDefault();
+        if (!username.trim() || !password.trim()) return;
+        setBusy(true);
+        onClearError && onClearError();
+        setTimeout(() => {
+          setBusy(false);
+          onLogin(username.trim(), password.trim());
+        }, 700);
+      };
+
+      return (
+        <div style={{ height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--background)', padding:24 }}>
+          <div className="login-card">
+            <div className="login-logo">
+              <span style={{ fontSize:22, fontWeight:700, color:'#fff', fontFamily:'var(--font-sans)' }}>P</span>
+            </div>
+            <h1 className="login-title">Polo AI</h1>
+            <p className="login-subtitle">请输入你的账号和密码</p>
+
+            {loginError && (
+              <div style={{
+                marginBottom:16, padding:'10px 14px', borderRadius:8,
+                background:'color-mix(in srgb, var(--destructive) 8%, transparent)',
+                display:'flex', alignItems:'center', gap:8,
+                fontSize:13, color:'var(--destructive)', textAlign:'left',
+                animation:'slideUp 0.25s ease-out',
+              }}>
+                <Ico.AlertTriangle size={16} />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <form onSubmit={go}>
+              <div className="login-field">
+                <label className="login-label">用户名</label>
+                <input className="login-input" type="text" placeholder="请输入用户名"
+                  value={username} onChange={e=>setUsername(e.target.value)} disabled={busy} autoFocus />
+              </div>
+              <div className="login-field">
+                <label className="login-label">密码</label>
+                <div style={{ position:'relative' }}>
+                  <input className="login-input" type={showPwd ? 'text' : 'password'} placeholder="请输入密码"
+                    value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}
+                    style={{ paddingRight:36 }} />
+                  <button type="button" onClick={()=>setShowPwd(!showPwd)} tabIndex={-1}
+                    style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)',
+                      background:'none', border:'none', cursor:'pointer', color:'var(--fg-40)', display:'flex', padding:4 }}>
+                    {showPwd ? <Ico.EyeOff size={16}/> : <Ico.Eye size={16}/>}
+                  </button>
+                </div>
+              </div>
+              <button type="submit" className="login-btn" disabled={busy || !username.trim() || !password.trim()}>
+                {busy ? (<><svg className="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round"/></svg> 登录中…</>) : '登 录'}
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════ KICKED PAGE (S-012: multi-device kick) ═══════ */
+    function KickedPage({ onBackToLogin }) {
+      return (
+        <div style={{ height:'100%', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--background)', padding:24 }}>
+          <div className="login-card" style={{ maxWidth:'22rem' }}>
+            <div style={{ marginBottom:16, color:'var(--info)' }}><Ico.Monitor size={40} /></div>
+            <h1 className="login-title" style={{ fontSize:18 }}>已在其他设备登录</h1>
+            <p className="login-subtitle" style={{ marginBottom:20, lineHeight:1.5 }}>
+              你的账号已在另一台设备上登录。<br/>同一账号只能在一台设备上使用。
+            </p>
+            <button className="login-btn" onClick={onBackToLogin}>重新登录</button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═════════════════════════════════════════════════════════════════
+       ROOT  — phase state machine + theme state.
+       Phases map to the project's app states (found in Phase 1 recon).
+       Default: splash → login → ready. Add/remove phases to match reality.
+       ═════════════════════════════════════════════════════════════════ */
+    /* ═══════ SCENARIO DEMO PANEL (floating control) ═══════ */
+    function ScenarioDemoPanel({ current, onChange }) {
+      const [open, setOpen] = useState(true);
+      const scenarios = [
+        { id:'normal', label:'S-001 正常登录', desc:'用户名密码 → 成功进入' },
+        { id:'wrong-password', label:'S-001 密码错误', desc:'提示"用户名或密码错误"' },
+        { id:'network-error', label:'S-001 网络错误', desc:'无法连接到服务器' },
+        { id:'auto-login', label:'S-002 免登录打开', desc:'一周内用过,直接进入' },
+        { id:'disabled', label:'S-006 账号禁用', desc:'提示"账号已被禁用"' },
+        { id:'online-disabled', label:'S-007 在线被禁用', desc:'当前会话继续,下次操作生效' },
+        { id:'kicked', label:'S-012 多设备踢出', desc:'另一设备登录,被踢下线' },
+        { id:'no-config', label:'S-013 未配置AI', desc:'进入但无法发消息' },
+        { id:'quota-warning', label:'S-015 额度预警', desc:'用量接近80%阈值' },
+        { id:'quota-exhausted', label:'S-016 额度用完', desc:'本月额度已耗尽' },
+      ];
+      return (
+        <div style={{
+          position:'fixed', top:12, right:12, zIndex:10000,
+          background:'oklch(from var(--background) l c h / 0.92)',
+          backdropFilter:'blur(12px)', borderRadius:12,
+          border:'1px solid var(--border)', width: open ? 210 : 'auto',
+          boxShadow:'rgba(0,0,0,0.12) 0 4px 16px', overflow:'hidden',
+        }}>
+          <button onClick={()=>setOpen(!open)} style={{
+            display:'flex', alignItems:'center', gap:6, width:'100%', padding:'8px 12px',
+            background:'transparent', border:'none', cursor:'pointer', fontFamily:'inherit',
+            fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em', color:'var(--fg-40)',
+          }}>
+            场景演示 {open ? '▾' : '▸'}
+          </button>
+          {open && (
+            <div style={{ padding:'0 6px 6px', display:'flex', flexDirection:'column', gap:1 }}>
+              {scenarios.map(s => (
+                <button key={s.id} onClick={()=>onChange(s.id)}
+                  style={{
+                    display:'flex', flexDirection:'column', gap:1,
+                    padding:'5px 8px', borderRadius:6, border:'none',
+                    background: current === s.id ? 'var(--fg-7)' : 'transparent',
+                    cursor:'pointer', textAlign:'left', fontFamily:'inherit', transition:'background 0.1s',
+                  }}
+                  onMouseEnter={e=>{ if(current!==s.id) e.currentTarget.style.background='var(--fg-3)'; }}
+                  onMouseLeave={e=>{ if(current!==s.id) e.currentTarget.style.background='transparent'; }}>
+                  <span style={{ fontSize:11, fontWeight:500, color: current===s.id ? 'var(--foreground)' : 'var(--fg-60)' }}>{s.label}</span>
+                  <span style={{ fontSize:10, color:'var(--fg-40)' }}>{s.desc}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function App() {
+      const [phase, setPhase] = useState('splash');
+      const [isDark, setIsDark] = useState(false);
+      const [scenario, setScenario] = useState('normal');
+      const [loginError, setLoginError] = useState(null);
+      const [loggedInUser, setLoggedInUser] = useState(null);
+
+      const toggleTheme = () => {
+        setIsDark(prev => { const n=!prev; document.documentElement.classList.toggle('dark',n); return n; });
+      };
+
+      useEffect(() => {
+        document.documentElement.classList.toggle('dark', isDark);
+        if (phase === 'splash') {
+          const t = setTimeout(()=>setPhase('login'), 1400);
+          return ()=>clearTimeout(t);
+        }
+      }, [phase]);
+
+      // When scenario changes, adjust phase
+      useEffect(() => {
+        setLoginError(null);
+        if (scenario === 'auto-login') {
+          setLoggedInUser({ username:'xiaoming', displayName:'小明' });
+          setPhase('ready');
+          return;
+        }
+        if (scenario === 'kicked' && phase === 'ready') setPhase('kicked');
+        if (scenario !== 'kicked' && phase === 'kicked') setPhase('login');
+        if (scenario === 'online-disabled' && phase !== 'ready') {
+          setLoggedInUser({ username:'xiaoming', displayName:'小明' });
+          setPhase('ready');
+        }
+        if (['wrong-password', 'disabled', 'network-error'].includes(scenario) && phase === 'ready') {
+          setPhase('login');
+          setLoggedInUser(null);
+        }
+      }, [scenario]);
+
+      const handleLogin = (username, password) => {
+        if (scenario === 'wrong-password') {
+          setLoginError('用户名或密码错误');
+          return;
+        }
+        if (scenario === 'disabled') {
+          setLoginError('账号已被禁用，请联系管理员');
+          return;
+        }
+        if (scenario === 'network-error') {
+          setLoginError('网络连接失败，请检查网络后重试');
+          return;
+        }
+        if (scenario === 'kicked') {
+          setPhase('kicked');
+          return;
+        }
+        setLoginError(null);
+        setLoggedInUser({ username, displayName: username === 'xiaoming' ? '小明' : username });
+        setPhase('ready');
+      };
+
+      const handleLogout = () => {
+        setLoggedInUser(null);
+        setLoginError(null);
+        setPhase('login');
+      };
+
+      return (
+        <>
+          <ScenarioDemoPanel current={scenario} onChange={setScenario}/>
+          {phase === 'splash' && <SplashScreen/>}
+          {phase === 'login' && <LoginPage onLogin={handleLogin} loginError={loginError} onClearError={()=>setLoginError(null)}/>}
+          {phase === 'kicked' && <KickedPage onBackToLogin={()=>{setScenario('normal');setPhase('login');}}/>}
+          {phase === 'ready' && <AppShell onToggleTheme={toggleTheme} isDark={isDark} loggedInUser={loggedInUser} onLogout={handleLogout} appScenario={scenario}/>}
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

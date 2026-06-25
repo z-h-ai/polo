@@ -1,70 +1,46 @@
 # Trademark Policy
 
-This trademark policy governs the use of the "Craft" and "Craft Agents" names, logos, and branding in connection with the Craft Agents open source project.
+This trademark policy governs use of the "Polo AI" name, logo, icon, and branding in connection with the Polo AI open source project.
 
 ## Trademarks
 
-The following are trademarks of Craft Docs Ltd.:
+The following are trademarks of Polo AI:
 
-- **Craft** (word mark)
-- **Craft Agents** (word mark)
-- The Craft logo and icon
-- The Craft Agents logo and icon
+- **Polo AI** word mark
+- The Polo AI logo and icon
+- Polo AI product and service branding
 
 ## What You Can Do
 
-### Use the Code Freely
+The Polo AI source code is licensed under the Apache License 2.0. You may use, modify, and distribute the code, create derivative works, and use the software for commercial or non-commercial purposes.
 
-The Craft Agents source code is licensed under the Apache License 2.0. You are free to:
+You may make accurate factual statements such as:
 
-- Use, modify, and distribute the code
-- Create derivative works
-- Use the software for any purpose, including commercial use
+- "Based on Polo AI"
+- "Built with Polo AI technology"
+- "Compatible with Polo AI"
+- "Fork of Polo AI"
 
-### Make Factual Statements
-
-You may make accurate, factual statements about your relationship to the project:
-
-- "Based on Craft Agents"
-- "Built with Craft Agents technology"
-- "Compatible with Craft Agents"
-- "Fork of Craft Agents"
-
-### Contribute to the Project
-
-Contributors to the official Craft Agents repository may use the trademarks when discussing their contributions.
+Contributors to the official Polo AI repository may use the trademarks when discussing their contributions.
 
 ## What You Cannot Do
 
-### Use Craft Branding for Forks
+If you create a fork or derivative work, you must:
 
-If you create a fork or derivative work, you **must**:
+- Choose a name that does not imply official Polo AI endorsement
+- Replace Polo AI logos and icons
+- Update the bundle identifier, package names, and service URLs to your own
+- Avoid suggesting that your fork is the official Polo AI product
 
-- Choose a different name that does not include "Craft"
-- Remove or replace all Craft logos and icons
-- Update the bundle identifier (e.g., `com.lukilabs.craft-agent`) to your own
-- Remove references to `craft.do` domains unless connecting to official Craft services
+You may not use the trademarks in a way that:
 
-### Imply Official Endorsement
-
-You may not:
-
-- Use "Craft" or "Craft Agents" as your product name
-- Use the Craft logo as your application icon
-- Suggest that your fork is the official version
-- Imply that Craft Docs Ltd. or Craft endorses your product
-
-### Create Confusion
-
-You may not use the trademarks in any way that:
-
-- Suggests your product is created by or affiliated with Craft Docs Ltd.
-- Could cause confusion between your product and the official Craft Agents
-- Disparages Craft Docs Ltd. or the Craft Agents project
+- Suggests your product is created by or affiliated with Polo AI
+- Could cause confusion between your product and the official Polo AI project
+- Disparages Polo AI or the Polo AI project
 
 ## Branding Locations
 
-For those creating forks, the following files contain branding that should be updated:
+For forks, the following files commonly contain branding that should be updated:
 
 | File | Contains |
 |------|----------|
@@ -72,29 +48,6 @@ For those creating forks, the following files contain branding that should be up
 | `apps/electron/resources/` | Application icons |
 | `packages/shared/src/branding.ts` | Service URLs |
 
-## Examples
-
-### Acceptable
-
-- "MyAgent - based on Craft Agents"
-- "This project is a fork of Craft Agents"
-- "Compatible with the Craft Agents ecosystem"
-
-### Not Acceptable
-
-- "Craft Agents Pro"
-- "Craft Agent for Linux"
-- "Better Craft Agents"
-- Using the Craft logo for your fork
-
 ## Questions
 
-If you have questions about this trademark policy or would like to request permission for a specific use, please open an issue in the repository or contact us at legal@craft.do.
-
-## Changes
-
-This policy may be updated from time to time. The current version will always be available in this repository.
-
----
-
-*This trademark policy is inspired by similar policies from Mozilla, WordPress, and the Apache Software Foundation.*
+For questions about this policy, open an issue in the repository or contact legal@polo.ai.

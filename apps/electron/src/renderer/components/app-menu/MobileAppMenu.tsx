@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { useRegisterDismissibleLayer } from '@/context/DismissibleLayerContext'
-import { CraftAgentsSymbol } from '../icons/CraftAgentsSymbol'
+import { PoloAiSymbol } from '../icons/PoloAiSymbol'
 import { SquarePenRounded } from '../icons/SquarePenRounded'
 import { SETTINGS_ICONS } from '../icons/SettingsIcons'
 import { TopBarButton } from '../ui/TopBarButton'
@@ -88,7 +88,7 @@ function affordanceFor(action: MobileMenuRow['action']): MobileMenuItemAffordanc
 }
 
 /**
- * Mobile AppMenu — Craft logo trigger that opens a full-screen, navigation-stack sheet.
+ * Mobile AppMenu — Polo AI logo trigger that opens a full-screen, navigation-stack sheet.
  *
  * Mounted only when `AppShellContext.isCompactMode === true` via the `AppMenu` router.
  *
@@ -177,11 +177,11 @@ export function MobileAppMenu(props: AppMenuProps) {
     <>
       <TopBarButton
         onClick={() => state.isOpen ? close() : dispatch({ type: 'open' })}
-        aria-label={t('menu.craftMenu')}
+        aria-label={t('menu.poloAiMenu')}
         data-state={state.isOpen ? 'open' : 'closed'}
         className="rounded-[8px]"
       >
-        <CraftAgentsSymbol className="!h-5 !w-auto text-accent" />
+        <PoloAiSymbol className="!h-5 !w-auto text-accent" />
       </TopBarButton>
       <MobileMenuSheet
         state={state}

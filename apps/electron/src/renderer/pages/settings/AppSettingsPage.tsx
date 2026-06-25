@@ -8,7 +8,7 @@
  * - Network (proxy)
  * - About (version, updates)
  *
- * Note: AI settings (connections, model, thinking) have been moved to AiSettingsPage.
+ * Note: AI settings (connections, model, thinking) are admin-managed and not editable here.
  * Note: Appearance settings (theme, font) have been moved to AppearanceSettingsPage.
  */
 
@@ -19,7 +19,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { routes } from '@/lib/navigate'
-import { Spinner } from '@craft-agent/ui'
+import { Spinner } from '@polo-ai/ui'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type { NetworkProxySettings } from '../../../shared/types'
 

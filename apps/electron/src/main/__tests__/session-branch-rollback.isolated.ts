@@ -56,7 +56,7 @@ mock.module('../logger', () => {
   }
 })
 
-mock.module('@craft-agent/shared/config', () => ({
+mock.module('@polo-ai/shared/config', () => ({
   getWorkspaceByNameOrId: (id: string) => (id === workspace.id ? workspace : null),
   getWorkspaces: () => [workspace],
   loadConfigDefaults: () => ({
@@ -65,6 +65,7 @@ mock.module('@craft-agent/shared/config', () => ({
       thinkingLevel: 'medium',
     },
   }),
+  loadPreferences: () => ({}),
   getLlmConnection: () => null,
   getDefaultLlmConnection: () => null,
   resolveAuthEnvVars: () => ({}),
@@ -85,6 +86,13 @@ mock.module('@craft-agent/shared/config', () => ({
   DEFAULT_THEME: { mode: 'system' },
   getDefaultModelsForConnection: () => ({ default: 'claude-sonnet-4-20250514', mini: 'claude-haiku-4-5-20251001' }),
   getDefaultModelForConnection: () => 'claude-sonnet-4-20250514',
+  defaultMidStreamBehavior: (providerType: string) => providerType === 'anthropic' ? 'queue' : 'steer',
+  resolveMidStreamBehavior: (connection: { midStreamBehavior?: string; providerType: string }) =>
+    connection.midStreamBehavior === 'queue' || connection.midStreamBehavior === 'steer'
+      ? connection.midStreamBehavior
+      : (connection.providerType === 'anthropic' ? 'queue' : 'steer'),
+  modelSupportsImages: () => true,
+  resetManagedAnthropicAuthEnvVars: () => {},
   setGitBashPath: () => {},
   clearGitBashPath: () => {},
   setActiveWorkspace: () => {},
@@ -109,7 +117,7 @@ mock.module('@craft-agent/shared/config', () => ({
   isAnthropicProvider: () => true,
 }))
 
-mock.module('@craft-agent/shared/workspaces', () => ({
+mock.module('@polo-ai/shared/workspaces', () => ({
   loadWorkspaceConfig: () => ({
     defaults: {
       permissionMode: 'ask',
@@ -119,7 +127,7 @@ mock.module('@craft-agent/shared/workspaces', () => ({
   }),
 }))
 
-mock.module('@craft-agent/shared/agent', () => ({
+mock.module('@polo-ai/shared/agent', () => ({
   ...actualSharedAgentModule,
   setPermissionMode: () => {},
   getPermissionModeDiagnostics: () => ({ mode: 'ask', source: 'test' }),
@@ -135,7 +143,7 @@ mock.module('@craft-agent/shared/agent', () => ({
   normalizeCanonicalBrowserToolName: (name: string) => name,
 }))
 
-mock.module('@craft-agent/shared/agent/backend', () => ({
+mock.module('@polo-ai/shared/agent/backend', () => ({
   ...actualSharedAgentBackendModule,
   resolveSessionConnection: () => null,
   createBackendFromConnection: () => {
@@ -163,7 +171,7 @@ mock.module('@craft-agent/shared/agent/backend', () => ({
   validateStoredBackendConnection: async () => ({ success: false, error: 'stub' }),
 }))
 
-mock.module('@craft-agent/shared/sources', () => ({
+mock.module('@polo-ai/shared/sources', () => ({
   loadWorkspaceSources: () => [],
   loadAllSources: () => [],
   getSourcesBySlugs: () => [],
@@ -184,7 +192,7 @@ mock.module('@craft-agent/shared/sources', () => ({
   API_OAUTH_PROVIDERS: [],
 }))
 
-mock.module('@craft-agent/shared/automations', () => ({
+mock.module('@polo-ai/shared/automations', () => ({
   AutomationSystem: class AutomationSystem {
     constructor(..._args: unknown[]) {}
     setInitialSessionMetadata() {}
@@ -198,7 +206,7 @@ mock.module('@craft-agent/shared/automations', () => ({
   AUTOMATIONS_HISTORY_FILE: 'automations.history.jsonl',
 }))
 
-mock.module('@craft-agent/shared/sessions', () => ({
+mock.module('@polo-ai/shared/sessions', () => ({
   listSessions: () => [],
   loadSession: (_root: string, id: string) => storedById.get(id) ?? null,
   saveSession: async (session: any) => {
@@ -258,7 +266,7 @@ mock.module('@craft-agent/shared/sessions', () => ({
   validateSessionId: () => true,
 }))
 
-const { SessionManager } = await import('@craft-agent/server-core/sessions')
+const { SessionManager } = await import('@polo-ai/server-core/sessions')
 
 describe('session branch rollback on preflight failure', () => {
   beforeEach(() => {

@@ -41,7 +41,7 @@ export type McpClientConfig = HttpMcpClientConfig | StdioMcpClientConfig;
  * If you add a new entry here, update it there too.
  */
 const BLOCKED_ENV_VARS = [
-  // Craft Agent auth (set by the app itself)
+  // Polo AI auth (set by the app itself)
   'ANTHROPIC_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
 
@@ -61,7 +61,7 @@ const BLOCKED_ENV_VARS = [
 
 /**
  * Interface for clients managed by McpClientPool.
- * Both CraftMcpClient (remote MCP sources) and ApiSourcePoolClient (API sources) implement this.
+ * Both PoloMcpClient (remote MCP sources) and ApiSourcePoolClient (API sources) implement this.
  */
 export interface PoolClient {
   listTools(): Promise<Tool[]>;
@@ -69,14 +69,14 @@ export interface PoolClient {
   close(): Promise<void>;
 }
 
-export class CraftMcpClient {
+export class PoloMcpClient {
   private client: Client;
   private transport: Transport;
   private connected = false;
 
   constructor(config: McpClientConfig) {
     this.client = new Client({
-      name: 'craft-agent',
+      name: 'polo-ai',
       version: '1.0.0',
     });
 

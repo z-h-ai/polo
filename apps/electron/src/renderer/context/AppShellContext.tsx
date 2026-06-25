@@ -11,6 +11,7 @@ import { createContext, useContext, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import type { ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import type {
+  AdminStatusResult,
   Session,
   Workspace,
   FileAttachment,
@@ -30,6 +31,12 @@ import type { SessionOptions, SessionOptionUpdates } from '../hooks/useSessionOp
 import { defaultSessionOptions } from '../hooks/useSessionOptions'
 import { sessionAtomFamily } from '../atoms/sessions'
 
+export type ChatAccessIssue = 'no-ai-service' | 'quota-exhausted' | 'account-disabled'
+
+export interface ChatAccessStatus {
+  issue: ChatAccessIssue
+}
+
 export interface AppShellContextType {
   // Data
   // NOTE: sessions is NOT included here - use sessionMetaMapAtom for listing
@@ -43,6 +50,12 @@ export interface AppShellContextType {
   llmConnections: LlmConnectionWithStatus[]
   /** Default LLM connection slug for the current workspace */
   workspaceDefaultLlmConnection?: string
+  /** Blocking account/config/quota state for the chat input area */
+  chatAccessStatus?: ChatAccessStatus | null
+  /** Signed-in Admin user, when Admin auth is configured */
+  currentAdminUser?: Pick<AdminStatusResult, 'username' | 'displayName'> | null
+  /** Log out the current Admin user and return to login */
+  onAdminLogout?: () => Promise<void>
   /** Refresh LLM connections from config */
   refreshLlmConnections: () => Promise<void>
   pendingPermissions: Map<string, PermissionRequest[]>
@@ -50,7 +63,7 @@ export interface AppShellContextType {
   /** Get draft input text for a session - reads from ref without triggering re-renders */
   getDraft: (sessionId: string) => string
   /** Get persisted attachment refs (path + name) for a session's draft - no file IO */
-  getDraftAttachmentRefs: (sessionId: string) => import('@craft-agent/shared/config').DraftAttachmentRef[]
+  getDraftAttachmentRefs: (sessionId: string) => import('@polo-ai/shared/config').DraftAttachmentRef[]
   /** Hydrate persisted attachment refs into full FileAttachment objects (async, reads files) */
   hydrateDraftAttachments: (sessionId: string) => Promise<FileAttachment[]>
   /** All enabled sources for this workspace - provided by AppShell component */
@@ -60,7 +73,7 @@ export interface AppShellContextType {
   /** Working directory of the active session — needed for project-level skill resolution */
   activeSessionWorkingDirectory?: string
   /** All label configs (tree) for label menu and badge display */
-  labels?: import('@craft-agent/shared/labels').LabelConfig[]
+  labels?: import('@polo-ai/shared/labels').LabelConfig[]
   /** Callback when session labels change */
   onSessionLabelsChange?: (sessionId: string, labels: string[]) => void
   /** Enabled permission modes for Shift+Tab cycling */
@@ -74,7 +87,7 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
-  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@craft-agent/core').ContentBadge[]) => void
+  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@polo-ai/core').ContentBadge[]) => void
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void

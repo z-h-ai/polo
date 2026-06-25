@@ -1,7 +1,8 @@
 import type { LucideIcon } from "lucide-react"
 import * as React from "react"
+import { useTranslation } from "react-i18next"
 import { AnimatePresence, motion, type Variants } from "motion/react"
-import { ChevronRight } from "lucide-react"
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, LogOut, Settings2, User } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import {
@@ -10,6 +11,13 @@ import {
   StyledContextMenuContent,
 } from '@/components/ui/styled-context-menu'
 import { ContextMenuProvider } from '@/components/ui/menu-context'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  StyledDropdownMenuContent,
+  StyledDropdownMenuItem,
+  StyledDropdownMenuSeparator,
+} from '@/components/ui/styled-dropdown'
 import { SidebarMenu, type SidebarMenuType } from './SidebarMenu'
 import { SortableList, type SortableItemData } from '@/components/ui/sortable-list'
 
@@ -93,9 +101,27 @@ export type SidebarItem = LinkItem | SeparatorItem
 export const isSeparatorItem = (item: SidebarItem): item is SeparatorItem =>
   'type' in item && item.type === 'separator'
 
+export interface SidebarUserQuota {
+  used: number
+  total: number
+  resetDate: string
+}
+
+export interface SidebarUserMenuConfig {
+  user: {
+    displayName: string
+    username: string
+  }
+  quota?: SidebarUserQuota
+  onProfile?: () => void
+  onSettings: () => void
+  onLogout: () => void | Promise<void>
+}
+
 interface LeftSidebarProps {
   isCollapsed: boolean
   links: SidebarItem[]
+  userMenu?: SidebarUserMenuConfig | null
   /** Get props for each item (from unified sidebar navigation) */
   getItemProps?: (id: string) => {
     tabIndex: number
@@ -165,7 +191,7 @@ const itemVariants: Variants = {
  * - Uses @dnd-kit with DragOverlay portaled to document.body (no clipping)
  * - Two-phase drop animation: overlay fades out, ghost fades in
  */
-export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, isNested }: LeftSidebarProps) {
+export function LeftSidebar({ links, isCollapsed, userMenu, getItemProps, focusedItemId, isNested }: LeftSidebarProps) {
   // For nested sidebars, wrap in motion container for stagger effect
   const NavWrapper = isNested ? motion.nav : 'nav'
   const navProps = isNested ? {
@@ -176,11 +202,12 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, i
   } : {}
 
   return (
-    <div className={cn("flex flex-col select-none", !isNested && "py-1")}>
+    <div className={cn("flex flex-col select-none", !isNested && "py-1", !isNested && userMenu && "h-full")}>
       <NavWrapper
         className={cn(
           "grid gap-0.5",
-          isNested ? "pl-5 pr-0 relative" : "px-2"
+          isNested ? "pl-5 pr-0 relative" : "px-2",
+          !isNested && userMenu && "flex-1 overflow-y-auto min-h-0 content-start mask-fade-bottom pb-4"
         )}
         role="navigation"
         aria-label={isNested ? "Sub navigation" : "Main navigation"}
@@ -287,8 +314,135 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, i
           )
         })}
       </NavWrapper>
+      {!isNested && userMenu && (
+        <SidebarUserMenu config={userMenu} />
+      )}
     </div>
   )
+}
+
+function SidebarUserMenu({ config }: { config: SidebarUserMenuConfig }) {
+  const { t } = useTranslation()
+  const initials = (config.user.displayName || config.user.username || '?').trim().charAt(0).toUpperCase()
+  const displayName = config.user.displayName || config.user.username
+
+  return (
+    <div className="mt-auto border-t border-border px-2 py-2 shrink-0">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="group flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left outline-none hover:bg-sidebar-hover data-[state=open]:bg-sidebar-hover focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--accent),oklch(0.50_0.18_290))] text-xs font-semibold text-white">
+              {initials}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium text-foreground">
+                {displayName}
+              </span>
+            </span>
+            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+          </button>
+        </DropdownMenuTrigger>
+        <StyledDropdownMenuContent
+          side="top"
+          align="start"
+          sideOffset={6}
+          className="w-[204px] p-0 overflow-hidden"
+        >
+          <div className="border-b border-border px-3.5 py-2.5">
+            <div className="truncate text-[13px] font-medium text-foreground">{displayName}</div>
+            <div className="truncate text-[11px] text-muted-foreground">@{config.user.username}</div>
+          </div>
+
+          {config.quota && <SidebarQuotaSection quota={config.quota} />}
+
+          <div className="p-1">
+            <StyledDropdownMenuItem onSelect={config.onProfile} className="gap-2 px-2 py-1.5 text-[13px]">
+              <User className="h-3.5 w-3.5" />
+              <span>{t('sidebar.userMenu.profile')}</span>
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuItem onSelect={config.onSettings} className="gap-2 px-2 py-1.5 text-[13px]">
+              <Settings2 className="h-3.5 w-3.5" />
+              <span>{t('sidebar.settings')}</span>
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuSeparator className="my-1" />
+            <StyledDropdownMenuItem
+              onSelect={() => {
+                void config.onLogout()
+              }}
+              variant="destructive"
+              className="gap-2 px-2 py-1.5 text-[13px]"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>{t('sidebar.userMenu.logout')}</span>
+            </StyledDropdownMenuItem>
+          </div>
+        </StyledDropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+function SidebarQuotaSection({ quota }: { quota: SidebarUserQuota }) {
+  const { t } = useTranslation()
+  const usagePct = quota.total > 0 ? Math.min(100, Math.round((quota.used / quota.total) * 100)) : 0
+  const isExhausted = quota.total > 0 && quota.used >= quota.total
+  const isWarning = !isExhausted && usagePct >= 80
+  const barClassName = isExhausted
+    ? 'bg-destructive'
+    : isWarning
+      ? 'bg-info'
+      : 'bg-accent'
+  const statusClassName = isExhausted
+    ? 'text-destructive'
+    : isWarning
+      ? 'text-info'
+      : 'text-muted-foreground'
+
+  return (
+    <div className="border-b border-border px-3.5 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <BarChart3 className="h-3 w-3" />
+          {t('sidebar.userMenu.monthlyUsage')}
+        </span>
+        <span className={cn('text-[11px] font-medium', statusClassName)}>
+          {formatQuotaNumber(quota.used)} / {formatQuotaNumber(quota.total)}
+        </span>
+      </div>
+      <div className="h-1 overflow-hidden rounded-full bg-foreground/[0.07]">
+        <div
+          className={cn('h-full rounded-full transition-all duration-300', barClassName)}
+          style={{ width: `${usagePct}%` }}
+        />
+      </div>
+      {isWarning && (
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-info">
+          <AlertTriangle className="h-2.5 w-2.5" />
+          {t('sidebar.userMenu.quotaWarning', { percent: usagePct })}
+        </div>
+      )}
+      {isExhausted && (
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-destructive">
+          <AlertTriangle className="h-2.5 w-2.5" />
+          {t('sidebar.userMenu.quotaExhausted', { resetDate: quota.resetDate })}
+        </div>
+      )}
+      {!isExhausted && (
+        <div className="mt-1.5 text-[10px] text-muted-foreground">
+          {t('sidebar.userMenu.resetDate', { resetDate: quota.resetDate })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatQuotaNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K`
+  return String(value)
 }
 
 // ============================================================

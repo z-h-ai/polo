@@ -116,11 +116,23 @@ export const CHANNEL_MAP = {
   // Deep link
   onDeepLinkNavigate: listener(RPC_CHANNELS.deeplink.NAVIGATE),
 
+  // Tab browser
+  getTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.GET_APPS),
+  saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
+
   // Auth
   showLogoutConfirmation: invoke(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION),
   showDeleteSessionConfirmation: invoke(RPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION),
   logout: invoke(RPC_CHANNELS.auth.LOGOUT),
   getCredentialHealth: invoke(RPC_CHANNELS.credentials.HEALTH_CHECK),
+
+  // Admin auth
+  adminLogin: invoke(RPC_CHANNELS.admin.LOGIN),
+  adminValidate: invoke(RPC_CHANNELS.admin.VALIDATE),
+  adminLogout: invoke(RPC_CHANNELS.admin.LOGOUT),
+  adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
+  adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+  onAdminReauthRequired: listener('admin:reauthRequired'),
 
   // Onboarding
   getAuthState: invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE),

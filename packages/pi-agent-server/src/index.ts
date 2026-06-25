@@ -76,7 +76,7 @@ import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts'
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
-import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
+import { allowPoloAiMetadataProperties, stripPoloAiMetadata } from './polo-ai-metadata-schema.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 
 // ============================================================
@@ -379,18 +379,18 @@ function shouldPreferCustomEndpoint(): boolean {
  */
 function setInterceptorApiHints(model: { api?: string; provider?: string; baseUrl?: string } | undefined): void {
   if (!model) {
-    delete process.env.CRAFT_PI_MODEL_API;
-    delete process.env.CRAFT_PI_MODEL_PROVIDER;
-    delete process.env.CRAFT_PI_MODEL_BASE_URL;
+    delete process.env.POLO_AI_PI_MODEL_API;
+    delete process.env.POLO_AI_PI_MODEL_PROVIDER;
+    delete process.env.POLO_AI_PI_MODEL_BASE_URL;
     return;
   }
 
-  process.env.CRAFT_PI_MODEL_API = model.api || '';
-  process.env.CRAFT_PI_MODEL_PROVIDER = model.provider || '';
-  process.env.CRAFT_PI_MODEL_BASE_URL = model.baseUrl || '';
+  process.env.POLO_AI_PI_MODEL_API = model.api || '';
+  process.env.POLO_AI_PI_MODEL_PROVIDER = model.provider || '';
+  process.env.POLO_AI_PI_MODEL_BASE_URL = model.baseUrl || '';
 
   debugLog(
-    `[interceptor-hint] api=${process.env.CRAFT_PI_MODEL_API || '-'} provider=${process.env.CRAFT_PI_MODEL_PROVIDER || '-'} baseUrl=${process.env.CRAFT_PI_MODEL_BASE_URL || '-'}`,
+    `[interceptor-hint] api=${process.env.POLO_AI_PI_MODEL_API || '-'} provider=${process.env.POLO_AI_PI_MODEL_PROVIDER || '-'} baseUrl=${process.env.POLO_AI_PI_MODEL_BASE_URL || '-'}`,
   );
 }
 
@@ -587,7 +587,7 @@ async function ensureSession(): Promise<AgentSession> {
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
 
-    // Session resume: use a per-Craft-session directory so the Pi SDK can
+    // Session resume: use a per-Polo AI-session directory so the Pi SDK can
     // persist and resume its own session across subprocess restarts.
     // continueRecent() loads the existing session if one exists, otherwise
     // creates a new one — so this handles both first-run and resume.
@@ -728,7 +728,7 @@ function makeErrorResult(message: string): AgentToolResult<any> {
 
 function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any> {
   const originalExecute = tool.execute;
-  const parameters = allowCraftMetadataProperties(tool.parameters);
+  const parameters = allowPoloAiMetadataProperties(tool.parameters);
 
   const wrappedExecute: ToolDefinition<any, any>['execute'] = async (
     toolCallId,
@@ -752,10 +752,10 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
     // Send to main process for permission checking + transforms
     inputObj = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
 
-    // Metadata is for Craft UI only. Keep a final defensive strip here so the
+    // Metadata is for Polo AI UI only. Keep a final defensive strip here so the
     // upstream Pi tool implementation always receives clean executable args,
     // even if a future pre-tool-use path returns `allow` without modification.
-    inputObj = stripCraftMetadata(inputObj);
+    inputObj = stripPoloAiMetadata(inputObj);
 
     // Execute original tool with (potentially modified) input
     const result = await originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
@@ -1135,7 +1135,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
       // a plain text turn is the user message that triggered the response.
       // Recording that wrong anchor and using it for `branch()` makes the next
       // turn a sibling of the assistant message, dropping the assistant reply
-      // from the LLM's view of history (craft-agents-oss#782).
+      // from the LLM's view of history (polo-ai-oss#782).
       //
       // Instead, attach the SDK's message id to the forwarded event so the main
       // process can correlate this turn, then queue a microtask to read the
@@ -1176,10 +1176,12 @@ function handleSessionEvent(event: AgentSessionEvent): void {
       const content = (msg as { content?: Array<{ type: string; id?: string; name?: string; arguments?: unknown }> }).content;
       if (Array.isArray(content)) {
         const prefetchableToolCalls = content.filter(
-          (c) => c.type === 'toolCall' && c.name && isPrefetchableTool(c.name),
+          (c): c is { type: string; id?: string; name: string; arguments?: unknown } =>
+            c.type === 'toolCall' && !!c.name && isPrefetchableTool(c.name),
         );
         if (prefetchableToolCalls.length >= 2) {
-          debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${prefetchableToolCalls[0].name} calls`);
+          const firstToolName = prefetchableToolCalls[0]?.name ?? 'tool';
+          debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${firstToolName} calls`);
           for (const tc of prefetchableToolCalls) {
             const requestId = `prefetch-${tc.id}`;
             const promise = new Promise<{ content: string; isError: boolean }>((resolve) => {
@@ -1275,7 +1277,7 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
  * Wait for any in-flight compaction to finish before sending a prompt or
  * starting another compaction. Prevents a race in the Pi SDK where concurrent
  * _runAutoCompaction calls crash on a shared AbortController
- * (see craft-agents-oss#464). Default timeout matches the RPC compact timeout
+ * (see polo-ai-oss#464). Default timeout matches the RPC compact timeout
  * in PiAgent.requestCompact (300 s), since GPT compactions can legitimately
  * take 60–120 s.
  */
@@ -1314,7 +1316,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
 
     const session = await ensureSession();
 
-    // Force the Craft-built system prompt onto the Pi session. Direct assignment
+    // Force the Polo AI-built system prompt onto the Pi session. Direct assignment
     // to `state.systemPrompt` is wiped on every `session.prompt()` call by the Pi
     // SDK (see system-prompt-override.ts).
     if (msg.systemPrompt) {
@@ -1327,7 +1329,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }
     unsubscribeEvents = session.subscribe(handleSessionEvent);
 
-    // Wait for any in-flight auto-compaction to avoid race (craft-agents-oss#464)
+    // Wait for any in-flight auto-compaction to avoid race (polo-ai-oss#464)
     await waitForCompaction(session);
 
     // Fire prompt — use followUp when session is already streaming so the
@@ -1344,7 +1346,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // calls agent.continue() to retry once. Running our own session.compact()
     // in parallel raced against the SDK and is the documented cause of the
     // AbortController crash in `_runAutoCompaction` (see
-    // plans/fix-pi-gpt-compaction.md). PiEventAdapter holds the Craft event
+    // plans/fix-pi-gpt-compaction.md). PiEventAdapter holds the Polo AI event
     // queue open across the SDK's recovery flow so the recovered turn
     // reaches the UI.
 

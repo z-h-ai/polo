@@ -18,6 +18,17 @@
 /* CSS Custom Highlight API styles are injected at runtime via ChatDisplay.tsx
    to avoid LightningCSS warnings (::highlight is not yet recognized by the optimizer) */
 
+@keyframes chat-status-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* =============================================================================
    ANIMATABLE CSS CUSTOM PROPERTIES
 
@@ -63,7 +74,7 @@
 }
 
 /* =============================================================================
-   CRAFT AGENT THEME - 6 Color System
+   POLO AI THEME - 6 Color System
 
    Base colors:
    - background: Light/dark surface
@@ -1444,13 +1455,18 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 }
 
 /* ==========================================================================
-   TopBar height — bumps to 56px on narrow viewports so it matches the larger
-   touch targets and feels less cramped on mobile. The TopBar uses position:
-   fixed so the App content area reads the same variable for its padding-top.
+   Tab browser and TopBar heights.
    ========================================================================== */
 :root {
+  --tabbar-height: 36px;
   --topbar-height: 48px;
+  --content-top-offset: var(--tabbar-height);
 }
+
+:root[data-active-tab="polo"] {
+  --content-top-offset: calc(var(--tabbar-height) + var(--topbar-height));
+}
+
 @media (max-width: 768px) {
   :root {
     --topbar-height: 56px;
