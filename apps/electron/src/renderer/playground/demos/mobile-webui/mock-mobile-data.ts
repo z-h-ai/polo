@@ -272,7 +272,7 @@ export const MOCK_SKILLS: LoadedSkill[] = []
  * Mock LLM connections for the mobile playground.
  *
  * One Anthropic and one pi_compat connection — enough for the
- * CompactModelSelector to render its switcher path (multi-connection),
+ * the former compact model selector to render its switcher path (multi-connection),
  * its vision-toggle path (pi_compat), and its flat-list path (single
  * connection) when downstream demos slice this list.
  */

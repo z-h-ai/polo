@@ -807,8 +807,19 @@ export default function App() {
           return
         }
 
-        // New user or needs setup - show onboarding
-        setAppState('onboarding')
+        if (needs.needsAdminLogin) {
+          setAppState('onboarding')
+          return
+        }
+
+        // LLM connection setup is admin-managed. If local setup is incomplete only
+        // because no user-managed LLM connection exists, enter the app and let the
+        // existing runtime unavailable-connection handling surface send-time errors.
+        if (!wsId) {
+          setAppState('workspace-picker')
+        } else {
+          setAppState('ready')
+        }
       } catch (error) {
         console.error('Failed to check auth state:', error)
         // If check fails, show onboarding to be safe

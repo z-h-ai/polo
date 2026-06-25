@@ -85,7 +85,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Use the unified session options hook for clean access
   const {
     options: sessionOpts,
-    setOption,
     setPermissionMode,
   } = useSessionOptionsFor(sessionId)
 
@@ -280,23 +279,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setAttachmentsValue(attachments)
     onAttachmentsChange(sessionId, attachments)
   }, [sessionId, onAttachmentsChange])
-
-  // Session model change handler - persists per-session model and connection
-  const handleModelChange = React.useCallback((model: string, connection?: string) => {
-    if (activeWorkspaceId) {
-      window.electronAPI.setSessionModel(sessionId, activeWorkspaceId, model, connection)
-    }
-  }, [sessionId, activeWorkspaceId])
-
-  // Session connection change handler - can only change before first message
-  const handleConnectionChange = React.useCallback(async (connectionSlug: string) => {
-    try {
-      await window.electronAPI.sessionCommand(sessionId, { type: 'setConnection', connectionSlug })
-    } catch (error) {
-      // Connection change may fail if session already started or connection is invalid
-      console.error('Failed to change connection:', error)
-    }
-  }, [sessionId])
 
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
@@ -731,14 +713,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onOpenFile={handleOpenFile}
                 onOpenUrl={handleOpenUrl}
                 currentModel={effectiveModel}
-                onModelChange={handleModelChange}
-                onConnectionChange={handleConnectionChange}
                 pendingPermission={undefined}
                 onRespondToPermission={onRespondToPermission}
                 pendingCredential={undefined}
                 onRespondToCredential={onRespondToCredential}
-                thinkingLevel={sessionOpts.thinkingLevel}
-                onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
                 permissionMode={sessionOpts.permissionMode}
                 onPermissionModeChange={setPermissionMode}
                 enabledModes={enabledModes}
@@ -765,7 +743,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 disabled={isChatInputDisabled}
                 inputStatusBanner={inputStatusBanner}
                 compactMode={!!isCompactMode}
-                enableCompactModelPicker={!!isCompactMode}
               />
             </div>
           </div>
@@ -810,14 +787,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onOpenFile={handleOpenFile}
             onOpenUrl={handleOpenUrl}
             currentModel={effectiveModel}
-            onModelChange={handleModelChange}
-            onConnectionChange={handleConnectionChange}
             pendingPermission={pendingPermission}
             onRespondToPermission={onRespondToPermission}
             pendingCredential={pendingCredential}
             onRespondToCredential={onRespondToCredential}
-            thinkingLevel={sessionOpts.thinkingLevel}
-            onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
             permissionMode={sessionOpts.permissionMode}
             onPermissionModeChange={setPermissionMode}
             enabledModes={enabledModes}
@@ -847,7 +820,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             disabled={isChatInputDisabled}
             inputStatusBanner={inputStatusBanner}
             compactMode={!!isCompactMode}
-            enableCompactModelPicker={!!isCompactMode}
           />
         </div>
       </div>

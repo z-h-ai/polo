@@ -995,6 +995,7 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
     if (isValidSettingsSubpage(subpage)) {
       return { navigator: 'settings', subpage }
     }
+    return { navigator: 'settings', subpage: 'app' }
   }
 
   // Handle sessions

@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils"
 import { WelcomeStep } from "./WelcomeStep"
 import type { ApiSetupMethod } from "./APISetupStep"
-import { ProviderSelectStep, type ProviderChoice } from "./ProviderSelectStep"
-import { CredentialsStep, type CredentialStatus } from "./CredentialsStep"
-import { LocalModelStep, type LocalModelSubmitData } from "./LocalModelStep"
+import type { ProviderChoice } from "./ProviderSelectStep"
+import type { CredentialStatus } from "./CredentialsStep"
+import type { LocalModelSubmitData } from "./LocalModelStep"
 import { CompletionStep } from "./CompletionStep"
 import { GitBashWarning, type GitBashStatus } from "./GitBashWarning"
 import { AdminLoginStep } from "./AdminLoginStep"
@@ -98,30 +98,14 @@ export function OnboardingWizard({
   state,
   onContinue,
   onBack,
-  onSelectApiSetupMethod,
-  onSubmitCredential,
-  onStartOAuth,
   onFinish,
   onAdminLogin,
   onAdminRelogin,
-  // Two-step OAuth flow
-  isWaitingForCode,
-  onSubmitAuthCode,
-  onCancelOAuth,
-  // Copilot device flow
-  copilotDeviceCode,
   // Git Bash (Windows)
   onBrowseGitBash,
   onUseGitBashPath,
   onRecheckGitBash,
   onClearError,
-  // Provider select (new flow)
-  onSelectProvider,
-  onSkipSetup,
-  // Local model
-  onSubmitLocalModel,
-  // Edit mode
-  editInitialValues,
   className
 }: OnboardingWizardProps) {
   const renderStep = () => {
@@ -158,41 +142,6 @@ export function OnboardingWizard({
             isRechecking={state.isRecheckingGitBash}
             errorMessage={state.errorMessage}
             onClearError={onClearError}
-          />
-        )
-
-      case 'provider-select':
-        return (
-          <ProviderSelectStep
-            onSelect={onSelectProvider!}
-            onSkip={onSkipSetup}
-          />
-        )
-
-      case 'local-model':
-        return (
-          <LocalModelStep
-            onSubmit={onSubmitLocalModel!}
-            onBack={onBack}
-            status={state.credentialStatus === 'validating' ? 'validating' : state.credentialStatus === 'error' ? 'error' : 'idle'}
-            errorMessage={state.errorMessage}
-          />
-        )
-
-      case 'credentials':
-        return (
-          <CredentialsStep
-            apiSetupMethod={state.apiSetupMethod!}
-            status={state.credentialStatus}
-            errorMessage={state.errorMessage}
-            onSubmit={onSubmitCredential}
-            onStartOAuth={onStartOAuth}
-            onBack={onBack}
-            isWaitingForCode={isWaitingForCode}
-            onSubmitAuthCode={onSubmitAuthCode}
-            editInitialValues={editInitialValues}
-            onCancelOAuth={onCancelOAuth}
-            copilotDeviceCode={copilotDeviceCode}
           />
         )
 
