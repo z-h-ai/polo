@@ -24,6 +24,10 @@ type TestConnection = {
   adminConfigVersion?: string
   baseUrl?: string
   endpoint?: string
+  piAuthProvider?: string
+  customEndpoint?: {
+    api: 'openai-completions' | 'anthropic-messages'
+  }
   apiKey?: string | TestEncryptedApiKey
   credentials?: {
     apiKey?: string | TestEncryptedApiKey
@@ -444,6 +448,49 @@ describe('registerAdminHandlers', () => {
     const adminAnthropic = configState.connections.find(connection => connection.slug === 'admin-anthropic')
     expect(adminAnthropic?.baseUrl).toBeUndefined()
     expect(Object.prototype.hasOwnProperty.call(adminAnthropic, 'endpoint')).toBe(false)
+  })
+
+  it('derives pi auth provider for admin custom endpoint connections', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-v1',
+      connections: [
+        adminConnection({
+          slug: 'mimo-token-plan',
+          name: 'MiMo Token Plan',
+          providerType: 'pi_compat',
+          authType: 'api_key_with_endpoint',
+          endpoint: 'https://token-plan-cn.xiaomimimo.com/v1',
+          customEndpoint: { api: 'openai-completions' },
+          apiKey: encryptedApiKey('sk-mimo-secret', 'access-token'),
+          models: ['mimo-v2.5-pro'],
+          defaultModel: 'mimo-v2.5-pro',
+        }),
+      ],
+      defaultConnection: 'mimo-token-plan',
+    })
+    const { syncConnections } = createHarness()
+
+    const result = await syncConnections({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toMatchObject({ success: true, connectionCount: 1 })
+    expect(configState.connections[0]).toMatchObject({
+      slug: 'mimo-token-plan',
+      providerType: 'pi_compat',
+      authType: 'api_key_with_endpoint',
+      baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+      customEndpoint: { api: 'openai-completions' },
+      piAuthProvider: 'openai',
+      managedBy: 'admin',
+    })
+    expect(managerState.llmApiKeys.get('mimo-token-plan')).toBe('sk-mimo-secret')
   })
 
   it('returns an admin error payload when login fails', async () => {

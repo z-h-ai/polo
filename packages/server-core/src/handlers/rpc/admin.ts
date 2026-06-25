@@ -275,6 +275,10 @@ async function upsertAdminConnection(
     managedBy: 'admin',
     adminConfigVersion: configVersion,
   }
+  const piAuthProvider = deriveAdminPiAuthProvider(adminConnection)
+  if (piAuthProvider && !adminConnection.piAuthProvider) {
+    adminConnection.piAuthProvider = piAuthProvider
+  }
 
   const existing = getLlmConnections().find(item => item.slug === adminConnection.slug)
   if (existing) {
@@ -288,6 +292,18 @@ async function upsertAdminConnection(
   if (apiKey) {
     await manager.setLlmApiKey(adminConnection.slug, apiKey)
   }
+}
+
+function deriveAdminPiAuthProvider(connection: LlmConnection): string | undefined {
+  if (
+    connection.providerType !== 'pi_compat' ||
+    !connection.baseUrl?.trim() ||
+    !connection.customEndpoint?.api
+  ) {
+    return undefined
+  }
+
+  return connection.customEndpoint.api === 'anthropic-messages' ? 'anthropic' : 'openai'
 }
 
 export function readApiKey(connection: AdminLlmConnection, accessToken: string): string | null {
