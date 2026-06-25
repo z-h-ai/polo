@@ -2552,7 +2552,7 @@ export function ResponseCard({
 
           {/* Compact footer — Accept Plan only (mobile / auto-compact / popover).
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
-              / CompactModelSelector pattern. Guarded by isLastResponse so older
+              / compact drawer selector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
           {compactMode && isPlan && showAcceptPlan && isLastResponse && onAccept && onAcceptWithCompact && (
             <div

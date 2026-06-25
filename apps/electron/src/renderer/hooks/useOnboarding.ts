@@ -5,9 +5,7 @@
  * Flow:
  * 1. Welcome
  * 2. Git Bash (Windows only, if not found)
- * 3. API Setup (API Key / Claude OAuth)
- * 4. Credentials (API Key or Claude OAuth)
- * 5. Complete
+ * 3. Complete
  */
 import { useState, useCallback, useEffect } from 'react'
 import { i18n } from '@polo-ai/shared/i18n'
@@ -261,7 +259,7 @@ export function apiSetupMethodToConnectionSetup(
 export function useOnboarding({
   onComplete,
   initialSetupNeeds,
-  initialStep = 'provider-select',
+  initialStep = 'welcome',
   initialApiSetupMethod,
   onDismiss,
   onConfigSaved,
@@ -296,8 +294,7 @@ export function useOnboarding({
     })
   }, [initialSetupNeeds?.needsAdminLogin])
 
-  // Check Git Bash on Windows at mount. If missing, redirect to git-bash step
-  // regardless of the initial step (provider-select skips the welcome gate).
+  // Check Git Bash on Windows at mount. If missing, redirect to git-bash step.
   useEffect(() => {
     const checkGitBash = async () => {
       try {
@@ -395,7 +392,7 @@ export function useOnboarding({
   const handleContinue = useCallback(async () => {
     switch (state.step) {
       case 'provider-select':
-        // Handled by handleSelectProvider (card click navigates directly)
+        setState(s => ({ ...s, step: 'complete' }))
         break
 
       case 'admin-login':
@@ -407,12 +404,12 @@ export function useOnboarding({
         if (state.gitBashStatus?.platform === 'win32' && !state.gitBashStatus?.found) {
           setState(s => ({ ...s, step: 'git-bash' }))
         } else {
-          setState(s => ({ ...s, step: 'provider-select' }))
+          setState(s => ({ ...s, step: 'complete', completionStatus: 'complete' }))
         }
         break
 
       case 'git-bash':
-        setState(s => ({ ...s, step: 'provider-select' }))
+        setState(s => ({ ...s, step: 'complete', completionStatus: 'complete' }))
         break
 
       case 'local-model':
@@ -862,7 +859,8 @@ export function useOnboarding({
       setState(s => ({
         ...s,
         gitBashStatus: { ...s.gitBashStatus!, found: true, path },
-        step: 'provider-select',
+        step: 'complete',
+        completionStatus: 'complete',
       }))
     } else {
       setState(s => ({
@@ -881,7 +879,8 @@ export function useOnboarding({
         gitBashStatus: status,
         isRecheckingGitBash: false,
         // If found, automatically continue to next step
-        step: status.found ? 'provider-select' : s.step,
+        step: status.found ? 'complete' : s.step,
+        completionStatus: status.found ? 'complete' : s.completionStatus,
       }))
     } catch (error) {
       console.error('[Onboarding] Failed to recheck Git Bash:', error)

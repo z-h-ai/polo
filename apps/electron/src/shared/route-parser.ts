@@ -101,7 +101,12 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
       // Bare `settings` route — navigator-only view (compact) / App fallback (desktop).
       return { navigator: 'settings', details: null }
     }
-    if (!isValidSettingsSubpage(subpage)) return null
+    if (!isValidSettingsSubpage(subpage)) {
+      return {
+        navigator: 'settings',
+        details: { type: 'app', id: 'app' },
+      }
+    }
     return {
       navigator: 'settings',
       details: { type: subpage, id: subpage },

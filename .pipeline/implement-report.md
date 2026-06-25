@@ -1,41 +1,39 @@
-# POL-47 实现报告
+# POL-48 实现报告
 
 ## 变更摘要
 
-- 将 Electron ready-state 改为标签页浏览器外壳：顶部固定 TabBar、Home 九宫格入口、Polo AI 常驻挂载、webapp 通过 `<webview>` 打开。
-- 新增标签页状态模型和 Provider：内置 Polo 单例、webapp 多标签、关闭/激活/拖拽重排、快捷键切换、workspace 维度 localStorage 恢复。
-- 新增 Add App 流程：名称/URL/图标输入，HTTPS 与内网 HTTP 校验，应用定义保存到 `~/.polo-ai/config.json`。
-- 接入本地 RPC 通道 `tab-browser:getApps` / `tab-browser:saveApps`，扩展共享 config schema 与 routing。
-- 启用 Electron `webviewTag`，为 `persist:browser-pane` 分区补权限、弹窗和非 HTTP(S) 导航拦截。
-- 调整布局 CSS：新增 `--tabbar-height` / `--content-top-offset`，TopBar 下移到 TabBar 下方，macOS 交通灯留白转移到 TabBar。
-- 补齐 `apps/electron/scripts/validate-assets.ts`，让 `apps/electron` 的完整 build 脚本可完成。
+- 移除 Settings 中的 AI 页面注册、导航入口、图标映射和路由详情占位，`settings/ai` 现在 fallback 到 App settings。
+- 删除用户手动配置 AI 的页面与聊天输入入口，包括 `AiSettingsPage.tsx` 和 `CompactModelSelector.tsx`。
+- 移除聊天输入区域的模型/连接切换 UI 与 Thinking Level 选择 UI，ChatPage 不再向输入组件传递模型、连接、Thinking 切换回调。
+- 调整 onboarding：首次启动不再因本地 LLM 未配置进入 LLM 配置向导；OnboardingWizard 不再渲染 Provider/Credentials/Local Model 步骤，保留 admin 登录与 Git Bash/完成流程。
+- 保留后端 IPC、storage、admin 同步链路和 LLM 运行时读取逻辑未改动。
 
 ## 关键文件列表
 
-- `apps/electron/src/shared/tab-browser-types.ts`
-- `apps/electron/src/renderer/atoms/tab-browser.ts`
-- `apps/electron/src/renderer/context/TabShellContext.tsx`
-- `apps/electron/src/renderer/components/tab-browser/*`
+- `apps/electron/src/shared/settings-registry.ts`
+- `apps/electron/src/shared/menu-schema.ts`
+- `apps/electron/src/shared/route-parser.ts`
+- `apps/electron/src/renderer/pages/settings/settings-pages.ts`
+- `apps/electron/src/renderer/pages/settings/AiSettingsPage.tsx`
+- `apps/electron/src/renderer/components/app-shell/input/CompactModelSelector.tsx`
+- `apps/electron/src/renderer/components/app-shell/input/FreeFormInput.tsx`
+- `apps/electron/src/renderer/components/app-shell/ChatDisplay.tsx`
+- `apps/electron/src/renderer/pages/ChatPage.tsx`
+- `apps/electron/src/renderer/components/onboarding/OnboardingWizard.tsx`
+- `apps/electron/src/renderer/hooks/useOnboarding.ts`
 - `apps/electron/src/renderer/App.tsx`
-- `apps/electron/src/renderer/index.css`
-- `apps/electron/src/renderer/components/app-shell/TopBar.tsx`
-- `apps/electron/src/main/window-manager.ts`
-- `apps/electron/src/main/handlers/tab-browser.ts`
-- `packages/shared/src/protocol/channels.ts`
-- `packages/shared/src/protocol/routing.ts`
-- `packages/shared/src/config/storage.ts`
-- `packages/shared/src/config/validators.ts`
+- `apps/electron/src/shared/__tests__/route-parser-settings.test.ts`
 
 ## 自测结果
 
-- `cd apps/electron && bun run build`：通过。lint 仍有既有 warning，但无 error；main/preload/renderer/copy/validate 全部完成。
-- `cd apps/electron && bun run typecheck`：通过。
-- `cd packages/shared && bun run tsc --noEmit`：通过。
-- `cd apps/electron && bunx eslint <本次 Electron 变更文件>`：通过。
-- `cd apps/electron && perl -e 'alarm shift; exec @ARGV' 8 bun run dev`：Vite dev server 启动成功，输出 `http://localhost:5173/`，随后按测试超时终止。
+- `bun install --frozen-lockfile`：通过，用于补齐当前 worktree 缺失的 `node_modules`。
+- `bun run typecheck:electron`：通过。
+- `bun test apps/electron/src/shared/__tests__/route-parser-settings.test.ts apps/electron/src/shared/__tests__/route-parser-automations.test.ts apps/electron/src/shared/__tests__/ipc-channels.test.ts apps/electron/src/renderer/hooks/__tests__/useOnboarding.test.ts`：通过，37 pass。
+- `bun test apps/electron/src/main/handlers/__tests__/registration.test.ts apps/electron/src/main/handlers/__tests__/registration-profiles.test.ts`：通过，4 pass。
+- `bun run electron:build:renderer`：通过，Vite production renderer build 成功。
+- `rg "settings\\('ai'\\)|settings\\(\\\"ai\\\"\\)|poloai://settings/ai|settings:ai|AiSettingsPage|CompactModelSelector" apps/electron/src packages -S`：无残留匹配。
 
 ## 遗留问题
 
-- 未进行人工 Electron 窗口点击验收；当前只完成构建、类型、lint 和 dev server 启动验证。
-- `apps/electron` 的 `bun run dev` 脚本当前是 Vite dev server，不是完整 Electron 启动脚本；完整 Electron dev 启动应使用仓库根脚本。
-- 工作区进入本任务前已有 `.pipeline/fix-report-round1.md` 删除状态，未恢复也未纳入本次实现。
+- `ProviderSelectStep.tsx`、`CredentialsStep.tsx`、`APISetupStep.tsx`、`ApiKeyInput.tsx` 等底层组件/类型仍保留，用于避免扩大到后端/凭据 helper 清理；当前主 onboarding 与 settings/chat UI 已不再调用它们。
+- `config.json` 中既有用户自建连接、workspace 旧覆盖字段、IPC handler 和 storage 字段均按需求保留，未做迁移或清理。
