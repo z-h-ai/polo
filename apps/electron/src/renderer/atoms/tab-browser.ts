@@ -36,7 +36,7 @@ export const setInstalledAppsAtom = atom(null, (_get, set, apps: AppDefinition[]
 export const openAppTabAtom = atom(
   null,
   (get, set, app: AppDefinition) => {
-    if (app.id === POLO_APP_ID || app.type === 'builtin') {
+    if (app.id === POLO_APP_ID) {
       const tabs = get(openTabsAtom)
       if (!tabs.some((tab) => tab.id === POLO_TAB_ID)) {
         set(openTabsAtom, [POLO_TAB, ...tabs])
