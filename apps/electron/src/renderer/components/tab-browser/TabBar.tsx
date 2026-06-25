@@ -5,10 +5,6 @@ import { isMac, isWebUI } from '@/lib/platform'
 import { useTabShell } from '@/context/TabShellContext'
 import { HOME_TAB_ID, POLO_TAB_ID, type TabInstance } from '../../../shared/tab-browser-types'
 
-interface TabBarProps {
-  onAddApp: () => void
-}
-
 function TabIcon({ tab }: { tab: TabInstance }) {
   if (tab.isLoading) {
     return <Icons.Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/65" strokeWidth={1.5} />
@@ -22,9 +18,10 @@ function TabIcon({ tab }: { tab: TabInstance }) {
   return <Icons.Globe2 className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
 }
 
-export function TabBar({ onAddApp }: TabBarProps) {
-  const { openTabs, activeTabId, activateHome, activateTab, closeTab, reorderTabs } = useTabShell()
+export function TabBar() {
+  const { activeTab, activeTabId, activeWebAppNavigation, openTabs, activateHome, activateTab, closeTab, reorderTabs } = useTabShell()
   const trafficLightPadding = isMac && !isWebUI ? 86 : 8
+  const showNavigation = activeTab.type === 'webapp'
 
   return (
     <div
@@ -82,15 +79,42 @@ export function TabBar({ onAddApp }: TabBarProps) {
         })}
       </div>
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="titlebar-no-drag ml-1 h-7 w-7 rounded-md"
-        onClick={onAddApp}
-        aria-label="Add app"
-      >
-        <Icons.Plus className="h-4 w-4" strokeWidth={1.5} />
-      </Button>
+      {showNavigation && (
+        <div className="titlebar-no-drag ml-2 flex shrink-0 items-center gap-0.5 rounded-md border border-foreground/8 bg-foreground/3 p-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-md"
+            disabled={!activeWebAppNavigation?.canGoBack}
+            onClick={() => activeWebAppNavigation?.goBack()}
+            aria-label="Back"
+          >
+            <Icons.ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-md"
+            disabled={!activeWebAppNavigation?.canGoForward}
+            onClick={() => activeWebAppNavigation?.goForward()}
+            aria-label="Forward"
+          >
+            <Icons.ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-md"
+            disabled={!activeWebAppNavigation}
+            onClick={() => activeWebAppNavigation?.reloadOrStop()}
+            aria-label={activeWebAppNavigation?.isLoading ? 'Stop loading' : 'Reload'}
+          >
+            {activeWebAppNavigation?.isLoading
+              ? <Icons.X className="h-4 w-4" strokeWidth={1.5} />
+              : <Icons.RefreshCw className="h-4 w-4" strokeWidth={1.5} />}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

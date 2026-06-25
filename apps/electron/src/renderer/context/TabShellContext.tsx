@@ -23,12 +23,22 @@ import {
   type TabInstance,
 } from '../../shared/tab-browser-types'
 
+export interface WebAppNavigationControls {
+  canGoBack: boolean
+  canGoForward: boolean
+  isLoading: boolean
+  goBack: () => void
+  goForward: () => void
+  reloadOrStop: () => void
+}
+
 interface TabShellContextValue {
   installedApps: AppDefinition[]
   openTabs: TabInstance[]
   activeTab: TabInstance
   activeTabId: string
   isReady: boolean
+  activeWebAppNavigation: WebAppNavigationControls | null
   activateHome: () => void
   activateTab: (tabId: string) => void
   openApp: (app: AppDefinition) => void
@@ -37,6 +47,7 @@ interface TabShellContextValue {
   addApp: (app: AppDefinition) => Promise<void>
   removeApp: (appId: string) => Promise<void>
   updateTabInfo: (update: { id: string } & Partial<Omit<TabInstance, 'id'>>) => void
+  registerWebAppNavigation: (tabId: string, controls: WebAppNavigationControls | null) => void
 }
 
 const TabShellContext = createContext<TabShellContextValue | null>(null)
@@ -70,6 +81,7 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
   const reorderTabsWrite = useSetAtom(reorderTabsAtom)
   const updateTabInfo = useSetAtom(updateTabInfoAtom)
   const [isReady, setIsReady] = useState(false)
+  const [webAppNavigation, setWebAppNavigation] = useState<Record<string, WebAppNavigationControls>>({})
   const hydratedRef = useRef(false)
   const workspaceSuffix = workspaceId || 'default'
 
@@ -123,12 +135,31 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
     }
   }, [activeTabId, installedApps, openTabs, persistApps, setActiveTabId, setOpenTabs])
 
+  const registerWebAppNavigation = useCallback((tabId: string, controls: WebAppNavigationControls | null) => {
+    setWebAppNavigation((current) => {
+      if (!controls) {
+        if (!current[tabId]) return current
+        const next = { ...current }
+        delete next[tabId]
+        return next
+      }
+      if (current[tabId] === controls) return current
+      return { ...current, [tabId]: controls }
+    })
+  }, [])
+
+  const activeWebAppNavigation =
+    activeTab?.type === 'webapp'
+      ? webAppNavigation[activeTab.id] ?? null
+      : null
+
   const value = useMemo<TabShellContextValue>(() => ({
     installedApps,
     openTabs,
     activeTab: activeTab ?? { id: HOME_TAB_ID, appId: HOME_TAB_ID, type: 'home', title: 'Home' },
     activeTabId,
     isReady,
+    activeWebAppNavigation,
     activateHome: () => activateTabWrite(HOME_TAB_ID),
     activateTab: activateTabWrite,
     openApp: openAppTab,
@@ -146,9 +177,11 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
     addApp,
     removeApp,
     updateTabInfo,
+    registerWebAppNavigation,
   }), [
     activeTab,
     activeTabId,
+    activeWebAppNavigation,
     activateTabWrite,
     addApp,
     closeTabWrite,
@@ -158,6 +191,7 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
     openTabs,
     reorderTabsWrite,
     removeApp,
+    registerWebAppNavigation,
     updateTabInfo,
   ])
 

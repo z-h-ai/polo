@@ -1467,9 +1467,6 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   --content-top-offset: calc(var(--tabbar-height) + var(--topbar-height));
 }
 
-:root[data-active-tab="webapp"] {
-  --content-top-offset: calc(var(--tabbar-height) + 36px);
-}
 @media (max-width: 768px) {
   :root {
     --topbar-height: 56px;

@@ -85,7 +85,7 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
   return (
     <div className="h-full min-h-0 bg-background">
-      <TabBar onAddApp={() => setAddAppOpen(true)} />
+      <TabBar />
       <TabContent onAddApp={() => setAddAppOpen(true)} renderPolo={renderPolo} />
       <AddAppDialog open={addAppOpen} onOpenChange={setAddAppOpen} />
     </div>
