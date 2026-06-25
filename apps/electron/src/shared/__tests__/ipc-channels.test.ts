@@ -275,6 +275,8 @@ const EXPECTED_CHANNELS: string[] = [
   'system:homeDir',
   'system:isDebugMode',
   'system:versions',
+  'tab-browser:getApps',
+  'tab-browser:saveApps',
   'tasks:getOutput',
   'theme:appChanged',
   'theme:broadcastPreferences',

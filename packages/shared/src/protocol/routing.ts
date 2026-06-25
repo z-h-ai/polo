@@ -128,6 +128,10 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // deeplink — local deep link handling
   RPC_CHANNELS.deeplink.NAVIGATE,
 
+  // tab browser — local app hub configuration
+  RPC_CHANNELS.tabBrowser.GET_APPS,
+  RPC_CHANNELS.tabBrowser.SAVE_APPS,
+
   // notification — local OS notifications
   RPC_CHANNELS.notification.SHOW,
   RPC_CHANNELS.notification.NAVIGATE,

@@ -3,8 +3,7 @@
  *
  * Layout: [Sidebar] [Menu] [Back] [Forward] [Workspace selector] ... [Browser strip] [+] [Help]
  *
- * Fixed at top of window, 48px tall.
- * macOS: offset left to avoid stoplight controls.
+ * Fixed below the tab browser bar, 48px tall.
  */
 
 import { useTranslation } from "react-i18next"
@@ -13,7 +12,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@polo-ai/ui"
 import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { TopBarButton } from "../ui/TopBarButton"
 import { cn } from "@/lib/utils"
-import { isMac, isWebUI } from "@/lib/platform"
 import { useActionLabel } from "@/actions"
 import {
   DropdownMenu,
@@ -124,16 +122,10 @@ export function TopBar({
     }
   }, [workspaces.length, activeWorkspaceId])
 
-  // Stoplight padding clears macOS traffic-light controls, which only exist
-  // in the Electron desktop window. The webui runs in a regular browser tab
-  // and has no traffic lights regardless of host OS — collapse to a normal
-  // 12px inset so the logo sits at the edge.
-  const menuLeftPadding = isMac && !isWebUI ? 86 : 12
-
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-panel titlebar-drag-region"
-      style={{ height: 'var(--topbar-height)' }}
+      className="fixed left-0 right-0 z-panel titlebar-drag-region"
+      style={{ top: 'var(--tabbar-height)', height: 'var(--topbar-height)' }}
     >
       <div className="flex h-full w-full items-center justify-between gap-2">
       {/* === LEFT: Sidebar + Menu + Navigation + Workspace === */}
@@ -142,7 +134,7 @@ export function TopBar({
           so the workspace pill doesn't run flush against the viewport edge. */}
       <div
         className="pointer-events-auto flex min-w-0 flex-1 items-center gap-0.5"
-        style={{ paddingLeft: menuLeftPadding, paddingRight: isCompact ? 12 : 0 }}
+        style={{ paddingLeft: 12, paddingRight: isCompact ? 12 : 0 }}
       >
         <div className="flex items-center gap-0.5">
         {!isCompact && (

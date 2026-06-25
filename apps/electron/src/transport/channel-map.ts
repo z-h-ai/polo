@@ -116,6 +116,10 @@ export const CHANNEL_MAP = {
   // Deep link
   onDeepLinkNavigate: listener(RPC_CHANNELS.deeplink.NAVIGATE),
 
+  // Tab browser
+  getTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.GET_APPS),
+  saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
+
   // Auth
   showLogoutConfirmation: invoke(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION),
   showDeleteSessionConfirmation: invoke(RPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION),
