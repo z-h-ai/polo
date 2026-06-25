@@ -355,7 +355,7 @@ export function getSetupNeeds(state: AuthState, setupDeferred?: boolean): SetupN
       needsBillingConfig: false,
       needsCredentials: false,
       needsAdminLogin,
-      isFullyConfigured: !needsAdminLogin,
+      isFullyConfigured: !needsAdminLogin && state.billing.type !== null,
       needsMigration: state.billing.migrationRequired,
     };
   }
