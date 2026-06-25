@@ -136,6 +136,7 @@ const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
     richToolDescriptions: true,
     extendedPromptCache: false,
     browserToolEnabled: true,
+    adminUrl: 'https://polo-admin.z-h-ai.com/',
     allowRemoteEvaluate: true,
   },
   workspaceDefaults: {
@@ -289,10 +290,16 @@ export function loadStoredConfig(): StoredConfig | null {
 
 export function saveConfig(config: StoredConfig): void {
   ensureConfigDir();
+  const defaults = loadConfigDefaults();
 
   // Convert paths to portable form (~ prefix) for cross-machine compatibility
   const storageConfig: StoredConfig = {
     ...config,
+    ...(config.adminUrl !== undefined
+      ? { adminUrl: config.adminUrl }
+      : defaults.defaults.adminUrl
+        ? { adminUrl: defaults.defaults.adminUrl }
+        : {}),
     workspaces: config.workspaces.map(ws => ({
       ...ws,
       rootPath: toPortablePath(ws.rootPath),
@@ -613,7 +620,11 @@ export function getConfigPath(): string {
  */
 export function getAdminUrl(): string | undefined {
   const config = loadStoredConfig();
-  return config?.adminUrl;
+  if (config?.adminUrl !== undefined) {
+    return config.adminUrl;
+  }
+  const defaults = loadConfigDefaults();
+  return defaults.defaults.adminUrl;
 }
 
 /**
