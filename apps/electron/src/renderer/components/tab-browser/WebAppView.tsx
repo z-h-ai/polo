@@ -15,6 +15,22 @@ type WebviewElement = HTMLElement & {
   stop?: () => void
 }
 
+function readWebviewBoolean(webview: WebviewElement, method: 'canGoBack' | 'canGoForward'): boolean {
+  try {
+    return Boolean(webview[method]?.())
+  } catch {
+    return false
+  }
+}
+
+function callWebviewMethod(webview: WebviewElement | null, method: 'goBack' | 'goForward' | 'reload' | 'stop') {
+  try {
+    webview?.[method]?.()
+  } catch {
+    // Electron webview methods can throw when the guest is not ready or was destroyed.
+  }
+}
+
 export function WebAppView({ tab }: WebAppViewProps) {
   const webviewRef = useRef<WebviewElement | null>(null)
   const { registerWebAppNavigation, updateTabInfo } = useTabShell()
@@ -25,9 +41,19 @@ export function WebAppView({ tab }: WebAppViewProps) {
     const webview = webviewRef.current
     if (!webview) return
 
+    let isDomReady = false
     const updateNavigationState = () => {
-      setCanGoBack(Boolean(webview.canGoBack?.()))
-      setCanGoForward(Boolean(webview.canGoForward?.()))
+      if (!isDomReady) {
+        setCanGoBack(false)
+        setCanGoForward(false)
+        return
+      }
+      setCanGoBack(readWebviewBoolean(webview, 'canGoBack'))
+      setCanGoForward(readWebviewBoolean(webview, 'canGoForward'))
+    }
+    const domReady = () => {
+      isDomReady = true
+      updateNavigationState()
     }
     const startLoading = () => updateTabInfo({ id: tab.id, isLoading: true })
     const stopLoading = () => {
@@ -48,6 +74,7 @@ export function WebAppView({ tab }: WebAppViewProps) {
       if (url) void window.electronAPI.openUrl(url)
     }
 
+    webview.addEventListener('dom-ready', domReady)
     webview.addEventListener('did-start-loading', startLoading)
     webview.addEventListener('did-stop-loading', stopLoading)
     webview.addEventListener('did-navigate', updateNavigationState)
@@ -55,9 +82,11 @@ export function WebAppView({ tab }: WebAppViewProps) {
     webview.addEventListener('page-title-updated', titleUpdated)
     webview.addEventListener('page-favicon-updated', faviconUpdated)
     webview.addEventListener('new-window', newWindow)
-    updateNavigationState()
+    setCanGoBack(false)
+    setCanGoForward(false)
 
     return () => {
+      webview.removeEventListener('dom-ready', domReady)
       webview.removeEventListener('did-start-loading', startLoading)
       webview.removeEventListener('did-stop-loading', stopLoading)
       webview.removeEventListener('did-navigate', updateNavigationState)
@@ -69,16 +98,15 @@ export function WebAppView({ tab }: WebAppViewProps) {
   }, [tab.id, updateTabInfo])
 
   const goBack = useCallback(() => {
-    webviewRef.current?.goBack?.()
+    callWebviewMethod(webviewRef.current, 'goBack')
   }, [])
 
   const goForward = useCallback(() => {
-    webviewRef.current?.goForward?.()
+    callWebviewMethod(webviewRef.current, 'goForward')
   }, [])
 
   const reloadOrStop = useCallback(() => {
-    if (tab.isLoading) webviewRef.current?.stop?.()
-    else webviewRef.current?.reload?.()
+    callWebviewMethod(webviewRef.current, tab.isLoading ? 'stop' : 'reload')
   }, [tab.isLoading])
 
   const navigationControls = useMemo(() => ({
