@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useTabShell } from '@/context/TabShellContext'
 import type { TabInstance } from '../../../shared/tab-browser-types'
-import { WebAppToolbar } from './WebAppToolbar'
 
 interface WebAppViewProps {
   tab: TabInstance
@@ -18,7 +17,7 @@ type WebviewElement = HTMLElement & {
 
 export function WebAppView({ tab }: WebAppViewProps) {
   const webviewRef = useRef<WebviewElement | null>(null)
-  const { updateTabInfo } = useTabShell()
+  const { registerWebAppNavigation, updateTabInfo } = useTabShell()
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
 
@@ -56,6 +55,7 @@ export function WebAppView({ tab }: WebAppViewProps) {
     webview.addEventListener('page-title-updated', titleUpdated)
     webview.addEventListener('page-favicon-updated', faviconUpdated)
     webview.addEventListener('new-window', newWindow)
+    updateNavigationState()
 
     return () => {
       webview.removeEventListener('did-start-loading', startLoading)
@@ -68,23 +68,37 @@ export function WebAppView({ tab }: WebAppViewProps) {
     }
   }, [tab.id, updateTabInfo])
 
+  const goBack = useCallback(() => {
+    webviewRef.current?.goBack?.()
+  }, [])
+
+  const goForward = useCallback(() => {
+    webviewRef.current?.goForward?.()
+  }, [])
+
+  const reloadOrStop = useCallback(() => {
+    if (tab.isLoading) webviewRef.current?.stop?.()
+    else webviewRef.current?.reload?.()
+  }, [tab.isLoading])
+
+  const navigationControls = useMemo(() => ({
+    canGoBack,
+    canGoForward,
+    isLoading: Boolean(tab.isLoading),
+    goBack,
+    goForward,
+    reloadOrStop,
+  }), [canGoBack, canGoForward, goBack, goForward, reloadOrStop, tab.isLoading])
+
+  useEffect(() => {
+    registerWebAppNavigation(tab.id, navigationControls)
+    return () => registerWebAppNavigation(tab.id, null)
+  }, [navigationControls, registerWebAppNavigation, tab.id])
+
   const url = tab.url || ''
 
   return (
     <div className="h-full min-h-0 bg-background">
-      <WebAppToolbar
-        url={url}
-        favicon={tab.favicon}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        isLoading={Boolean(tab.isLoading)}
-        onBack={() => webviewRef.current?.goBack?.()}
-        onForward={() => webviewRef.current?.goForward?.()}
-        onReload={() => {
-          if (tab.isLoading) webviewRef.current?.stop?.()
-          else webviewRef.current?.reload?.()
-        }}
-      />
       <webview
         ref={webviewRef as RefObject<any>}
         src={url}

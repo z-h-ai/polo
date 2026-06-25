@@ -35,7 +35,7 @@ export function AppIcon({ app, onOpen, onRemove, className }: AppIconProps) {
     <button
       type="button"
       className={cn(
-        'group titlebar-no-drag flex min-w-0 flex-col items-center gap-2 rounded-lg p-2 text-center outline-none transition-colors hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring',
+        'group titlebar-no-drag flex min-w-0 flex-col items-center gap-3 rounded-lg border border-transparent p-3 text-center outline-none transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-foreground/10 hover:bg-foreground/4 hover:shadow-minimal focus-visible:ring-2 focus-visible:ring-ring',
         className,
       )}
       onClick={() => onOpen(app)}
@@ -47,7 +47,7 @@ export function AppIcon({ app, onOpen, onRemove, className }: AppIconProps) {
         }
       }}
     >
-      <span className="flex h-[72px] w-[72px] items-center justify-center overflow-hidden rounded-lg border border-foreground/10 bg-foreground/5 shadow-xs">
+      <span className="flex h-[76px] w-[76px] items-center justify-center overflow-hidden rounded-lg border border-foreground/10 bg-[var(--background-elevated)] shadow-xs transition-all duration-200 ease-out group-hover:scale-[1.04] group-hover:border-foreground/16 group-hover:shadow-minimal">
         {app.iconUrl ? (
           <img src={app.iconUrl} alt="" className="h-full w-full object-cover" />
         ) : isBuiltin ? (
@@ -58,7 +58,7 @@ export function AppIcon({ app, onOpen, onRemove, className }: AppIconProps) {
           </span>
         )}
       </span>
-      <span className="line-clamp-2 min-h-9 max-w-[96px] text-sm leading-[18px] text-foreground/85">
+      <span className="line-clamp-2 min-h-9 max-w-[104px] text-sm font-medium leading-[18px] text-foreground/85 transition-colors group-hover:text-foreground">
         {app.name}
       </span>
     </button>
