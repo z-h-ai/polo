@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { AnimatePresence, motion, type Variants } from "motion/react"
-import { AlertTriangle, BarChart3, Cake, ChevronDown, ChevronRight, LogOut, Settings2, User } from "lucide-react"
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, LogOut, Settings2, User } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import {
@@ -115,9 +115,7 @@ export interface SidebarUserMenuConfig {
   quota?: SidebarUserQuota
   onProfile?: () => void
   onSettings: () => void
-  onWhatsNew: () => void
   onLogout: () => void | Promise<void>
-  hasUnseenWhatsNew?: boolean
 }
 
 interface LeftSidebarProps {
@@ -368,15 +366,6 @@ function SidebarUserMenu({ config }: { config: SidebarUserMenuConfig }) {
             <StyledDropdownMenuItem onSelect={config.onSettings} className="gap-2 px-2 py-1.5 text-[13px]">
               <Settings2 className="h-3.5 w-3.5" />
               <span>{t('sidebar.settings')}</span>
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onSelect={config.onWhatsNew} className="gap-2 px-2 py-1.5 text-[13px]">
-              <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
-                <Cake className="h-3.5 w-3.5" />
-                {config.hasUnseenWhatsNew && (
-                  <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-accent" />
-                )}
-              </span>
-              <span>{t('sidebar.whatsNew')}</span>
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator className="my-1" />
             <StyledDropdownMenuItem
