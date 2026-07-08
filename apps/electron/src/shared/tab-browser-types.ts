@@ -27,12 +27,41 @@ export const POLO_TAB_ID = 'polo-ai-tab'
 
 export const POLO_APP_DEFINITION: AppDefinition = {
   id: POLO_APP_ID,
-  name: 'Polo AI',
+  name: 'Pro Buddy',
   url: 'poloai://app',
   type: 'builtin',
   createdAt: 0,
   order: 0,
 }
+
+export const KANBAN_APP_ID = 'kanban'
+export const AIRDROP_APP_ID = 'airdrop'
+
+export const KANBAN_APP_DEFINITION: AppDefinition = {
+  id: KANBAN_APP_ID,
+  name: 'Kanban',
+  url: 'https://kb.z-h-ai.com/',
+  type: 'builtin',
+  createdAt: 0,
+  order: 1,
+}
+
+export const AIRDROP_APP_DEFINITION: AppDefinition = {
+  id: AIRDROP_APP_ID,
+  name: 'AirDrop',
+  url: 'https://airdrop.z-h-ai.com/',
+  type: 'builtin',
+  createdAt: 0,
+  order: 2,
+}
+
+export const BUILTIN_APP_DEFINITIONS: AppDefinition[] = [
+  POLO_APP_DEFINITION,
+  KANBAN_APP_DEFINITION,
+  AIRDROP_APP_DEFINITION,
+]
+
+export const BUILTIN_APP_IDS = new Set(BUILTIN_APP_DEFINITIONS.map((a) => a.id))
 
 export const HOME_TAB: TabInstance = {
   id: HOME_TAB_ID,
@@ -45,7 +74,7 @@ export const POLO_TAB: TabInstance = {
   id: POLO_TAB_ID,
   appId: POLO_APP_ID,
   type: 'polo',
-  title: 'Polo AI',
+  title: 'Pro Buddy',
 }
 
 export function createTabId(prefix = 'tab'): string {
@@ -57,14 +86,14 @@ export function createTabId(prefix = 'tab'): string {
 
 export function normalizeInstalledApps(apps: AppDefinition[] | undefined | null): AppDefinition[] {
   const webApps = (Array.isArray(apps) ? apps : [])
-    .filter((app) => app && app.id !== POLO_APP_ID && app.type === 'webapp')
+    .filter((app) => app && !BUILTIN_APP_IDS.has(app.id) && app.type === 'webapp')
     .map((app, index) => ({
       ...app,
-      order: Number.isFinite(app.order) ? app.order : index + 1,
+      order: Number.isFinite(app.order) ? app.order : index + BUILTIN_APP_DEFINITIONS.length,
     }))
     .sort((a, b) => a.order - b.order)
 
-  return [POLO_APP_DEFINITION, ...webApps]
+  return [...BUILTIN_APP_DEFINITIONS, ...webApps]
 }
 
 export function isValidWebAppUrl(url: string): boolean {

@@ -14,8 +14,8 @@ import {
 } from '@/atoms/tab-browser'
 import { KEYS, get as getLocalStorage, set as setLocalStorage } from '@/lib/local-storage'
 import {
+  BUILTIN_APP_IDS,
   HOME_TAB_ID,
-  POLO_APP_ID,
   POLO_TAB,
   POLO_TAB_ID,
   normalizeInstalledApps,
@@ -119,7 +119,7 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
   const persistApps = useCallback(async (apps: AppDefinition[]) => {
     const normalized = normalizeInstalledApps(apps)
     setInstalledAppsState(normalized)
-    await window.electronAPI.saveTabBrowserApps(normalized.filter((app) => app.id !== POLO_APP_ID))
+    await window.electronAPI.saveTabBrowserApps(normalized.filter((app) => !BUILTIN_APP_IDS.has(app.id)))
   }, [setInstalledAppsState])
 
   const addApp = useCallback(async (app: AppDefinition) => {
@@ -127,7 +127,7 @@ export function TabShellProvider({ workspaceId, children }: TabShellProviderProp
   }, [installedApps, persistApps])
 
   const removeApp = useCallback(async (appId: string) => {
-    if (appId === POLO_APP_ID) return
+    if (BUILTIN_APP_IDS.has(appId)) return
     await persistApps(installedApps.filter((app) => app.id !== appId))
     setOpenTabs((tabs) => tabs.filter((tab) => tab.appId !== appId))
     if (openTabs.some((tab) => tab.appId === appId && tab.id === activeTabId)) {

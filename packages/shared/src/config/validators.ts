@@ -113,6 +113,8 @@ export const StoredConfigSchema = z.object({
   llmConnections: z.array(LlmConnectionSchema).optional(),
   defaultLlmConnection: z.string().optional(),
   defaultThinkingLevel: z.enum([...THINKING_LEVEL_IDS, 'think'] as [string, ...string[]]).transform(v => v === 'think' ? 'medium' : v).optional(),
+  adminUrl: z.string().url().optional(),
+  adminConfigVersion: z.string().optional(),
   tabBrowser: z.object({
     installedApps: z.array(TabBrowserAppSchema),
   }).optional(),
