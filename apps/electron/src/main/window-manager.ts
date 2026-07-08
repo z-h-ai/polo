@@ -472,6 +472,7 @@ export class WindowManager {
                 view: target.view,
                 action: target.action,
                 actionParams: target.actionParams,
+                callbackId: target.callbackId,
               })
             }, 100)
           }

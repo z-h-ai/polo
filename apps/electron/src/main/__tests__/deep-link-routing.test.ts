@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handleDeepLink } from '../deep-link'
+import { handleDeepLink, parseDeepLink } from '../deep-link'
 import { RPC_CHANNELS } from '../../shared/types'
 import type { EventSink } from '@polo-ai/server-core/transport'
 import type { WindowManager } from '../window-manager'
@@ -20,6 +20,30 @@ function createMockWindow(webContentsId: number) {
 }
 
 describe('handleDeepLink routing', () => {
+  it('parses valid callbackId and strips it from action params', () => {
+    const target = parseDeepLink('poloai://action/new-session?input=hello&callbackId=abc12345')
+
+    expect(target?.action).toBe('new-session')
+    expect(target?.callbackId).toBe('abc12345')
+    expect(target?.actionParams).toEqual({ input: 'hello' })
+  })
+
+  it('ignores invalid callbackId values', () => {
+    const target = parseDeepLink('poloai://action/new-session?input=hello&callbackId=bad!')
+
+    expect(target?.action).toBe('new-session')
+    expect(target?.callbackId).toBeUndefined()
+    expect(target?.actionParams).toEqual({ input: 'hello' })
+  })
+
+  it('parses send-message action session id', () => {
+    const target = parseDeepLink('poloai://action/send-message/session-123?input=next&callbackId=cb-123456')
+
+    expect(target?.action).toBe('send-message')
+    expect(target?.callbackId).toBe('cb-123456')
+    expect(target?.actionParams).toEqual({ id: 'session-123', input: 'next' })
+  })
+
   it('prefers resolved target client over preferred caller client', async () => {
     const targetWindow = createMockWindow(22)
 

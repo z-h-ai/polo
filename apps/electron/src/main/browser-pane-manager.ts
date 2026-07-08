@@ -21,6 +21,7 @@ import {
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@polo-ai/shared/config'
 import { CodedError } from '@polo-ai/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
+import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import type {
   IBrowserPaneManager,
   BrowserInstanceSnapshot,
@@ -2171,7 +2172,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     await instance.pageView.webContents.loadFile(join(__dirname, `renderer/${BROWSER_EMPTY_STATE_PAGE}`))
   }
 
-  private async handleDeepLinkUrl(url: string): Promise<void> {
+  private async handleDeepLinkUrl(url: string, sourceWebContentsId?: number): Promise<void> {
     if (!url.startsWith(POLO_AI_DEEPLINK_SCHEME_PREFIX)) return
 
     try {
@@ -2184,7 +2185,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       const { handleDeepLink } = await import('./deep-link')
       const sink = this.windowManager.getRpcEventSink() ?? undefined
       const resolver = (wcId: number) => this.windowManager?.getClientIdForWindow(wcId)
-      const result = await handleDeepLink(url, this.windowManager, sink, resolver)
+      const result = await handleDeepLink(url, this.windowManager, sink, resolver, undefined, sourceWebContentsId)
       if (!result.success) {
         mainLog.warn(`[browser-pane] deep-link handling failed: ${result.error ?? 'unknown error'} url=${url}`)
       }
@@ -3509,8 +3510,17 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     pageWc.on('will-navigate', (event, url) => {
       if (url.startsWith(POLO_AI_DEEPLINK_SCHEME_PREFIX)) {
         event.preventDefault()
-        void this.handleDeepLinkUrl(url)
+        void this.handleDeepLinkUrl(url, pageWc.id)
       }
+    })
+
+    pageWc.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+      if (!isMainFrame || isInPlace || url.startsWith(POLO_AI_DEEPLINK_SCHEME_PREFIX)) return
+      getDeepLinkCallbackBridge().cleanupWebContents(pageWc.id)
+    })
+
+    pageWc.on('destroyed', () => {
+      getDeepLinkCallbackBridge().cleanupWebContents(pageWc.id)
     })
 
     pageWc.on('did-create-window', (popupWindow, details) => {
@@ -3524,7 +3534,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       )
 
       if (details.url.startsWith(POLO_AI_DEEPLINK_SCHEME_PREFIX)) {
-        void this.handleDeepLinkUrl(details.url)
+        void this.handleDeepLinkUrl(details.url, pageWc.id)
         return { action: 'deny' }
       }
 

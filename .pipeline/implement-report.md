@@ -1,35 +1,37 @@
-# POL-50 实现报告
+# POO-1 实现报告
 
 ## 变更摘要
 
-- 删除独立的 `WebAppToolbar` 组件及其渲染路径，移除 hostname/favicon 地址栏展示和独占 toolbar 行。
-- 在 `TabShellContext` 增加 webapp 导航控制注册机制，由 `WebAppView` 注册当前 webview 的后退、前进、刷新/停止能力。
-- `TabBar` 右侧仅在活动 tab 为 webapp 时显示后退、前进、刷新/停止按钮；Polo/Home tab 下不渲染导航按钮。
-- 移除 `TabBar` 右侧「+」按钮，保留 HomePage 的添加入口和 Cmd+T 切 Home 行为。
-- 移除 webapp 内容区额外 36px 顶部偏移，内容统一从 TabBar 底边开始。
-- 优化 HomePage/AppIcon 视觉样式：调整间距、卡片边框、阴影、hover 位移/缩放反馈，并将「Add app」入口改为协调的实线卡片样式。
+- 完成 `poloai://` 双向协议主链路：解析合法 `callbackId`、登记来源 `webContents.id`、通过 `window.postMessage` 回传 `poloai:ack` / `poloai:error` / `poloai:event`。
+- 新增 `send-message/{sessionId}` 多轮 action，并在主进程按同一 webContents 创建的协议会话做归属校验。
+- 主进程桥接 session 事件并只转发白名单事件；`tool_start` / `tool_result` 只保留 `toolName`，不转发工具输入或结果详情。
+- `new-session` 带 `callbackId` 时默认 `permissionMode: safe`，`allow-all` / `execute` 静默降级为 `ask`；无 `callbackId` 的旧 URL 路径保持原行为。
+- 纳入并扩写了现场已有未跟踪文档 `docs/spec-poloai-protocol-bidirectional.md`，补充 Web App 接入指南；新增内置测试页 `poloai-protocol-test.html` 并加入 renderer 构建入口。
 
 ## 关键文件列表
 
-- `apps/electron/src/renderer/components/tab-browser/TabBar.tsx`
-- `apps/electron/src/renderer/components/tab-browser/TabShell.tsx`
-- `apps/electron/src/renderer/components/tab-browser/TabContent.tsx`
-- `apps/electron/src/renderer/components/tab-browser/WebAppView.tsx`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `apps/electron/src/renderer/components/tab-browser/AppIcon.tsx`
-- `apps/electron/src/renderer/context/TabShellContext.tsx`
-- `apps/electron/src/renderer/index.css`
-- `apps/electron/src/renderer/components/tab-browser/WebAppToolbar.tsx`（已删除）
+- `apps/electron/src/main/deep-link.ts`
+- `apps/electron/src/main/deep-link-callback-bridge.ts`
+- `apps/electron/src/main/browser-pane-manager.ts`
+- `apps/electron/src/main/index.ts`
+- `apps/electron/src/renderer/contexts/NavigationContext.tsx`
+- `apps/electron/src/preload/bootstrap.ts`
+- `packages/shared/src/protocol/channels.ts`
+- `packages/shared/src/protocol/dto.ts`
+- `packages/shared/src/protocol/routing.ts`
+- `apps/electron/src/renderer/poloai-protocol-test.html`
+- `docs/spec-poloai-protocol-bidirectional.md`
 
 ## 自测结果
 
-- `bun install --frozen-lockfile`：通过。用于补齐本地缺失的 `node_modules`，未修改 lockfile。
-- `cd apps/electron && bunx eslint src/renderer/components/tab-browser/AppIcon.tsx src/renderer/components/tab-browser/HomePage.tsx src/renderer/components/tab-browser/TabBar.tsx src/renderer/components/tab-browser/TabShell.tsx src/renderer/components/tab-browser/WebAppView.tsx src/renderer/context/TabShellContext.tsx`：通过。
+- `bun test apps/electron/src/main/__tests__/deep-link-routing.test.ts apps/electron/src/main/__tests__/deep-link-callback-bridge.test.ts apps/electron/src/main/__tests__/browser-pane-manager.test.ts apps/electron/src/shared/__tests__/ipc-channels.test.ts apps/electron/src/transport/__tests__/channel-map-parity.test.ts packages/shared/src/protocol/__tests__/routing.test.ts`：通过，103 tests。
+- `cd packages/shared && bun run tsc --noEmit`：通过。
 - `bun run typecheck:electron`：通过。
-- `bun run electron:build:renderer`：通过。构建输出存在既有的 outDir/chunk-size warning，无新增失败。
-- `rg` 检查 `WebAppToolbar`、webapp 36px 偏移、`TabBar` 添加按钮路径：未发现残留 toolbar 引用或 webapp 专属偏移。
+- `bun run electron:build:main`：通过。
+- `bun run electron:build:preload`：通过。
+- `bun run electron:build:renderer`：通过，确认输出包含 `poloai-protocol-test.html`。
+- `cd apps/electron && npx eslint ...` 针对本次改动文件检查：0 errors；保留 4 个既有 warning（`browser-pane-manager.ts` 两个 unused eslint-disable、`NavigationContext.tsx` 两个 hook dependency warning）。
 
 ## 遗留问题
 
-- 未做 Electron 真实窗口手动交互验证；当前验证覆盖 TypeScript、Vite/Tailwind 构建与静态引用检查。
-- `.pipeline/fix-report-round1.md` 在本次开始前已处于删除状态，本实现未恢复该文件。
+- 未做真实 Electron 手动流式验收；已提供内置测试页，可在开发态用标签页浏览器打开 `http://localhost:5173/poloai-protocol-test.html` 验证 ack、流式事件和多轮追问。

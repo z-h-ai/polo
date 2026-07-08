@@ -278,6 +278,9 @@ export const mockElectronAPI = {
     void _callback
     return () => {}
   },
+  sendDeepLinkActionResult: (result: unknown) => {
+    console.log('[Playground] sendDeepLinkActionResult called:', result)
+  },
 
   // Debug menu actions invoked by the mobile menu's Debug sub-page in dev mode.
   // The real implementations call into the auto-updater; the playground just logs.

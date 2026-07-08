@@ -263,6 +263,9 @@ client.onConnectionStateChanged((state) => {
 ;(api as any).reconnectTransport = async () => {
   client.reconnectNow()
 }
+;(api as ElectronAPI).sendDeepLinkActionResult = (result) => {
+  ipcRenderer.send(RPC_CHANNELS.deeplink.ACTION_RESULT, result)
+}
 
 // Admin auth — explicit preload surface for admin-managed deployments.
 ;(api as ElectronAPI).adminLogin = (username: string, password: string) =>

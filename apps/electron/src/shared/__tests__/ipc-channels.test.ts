@@ -81,6 +81,7 @@ const EXPECTED_CHANNELS: string[] = [
   'copilot:startOAuth',
   'credentials:healthCheck',
   'debug:log',
+  'deeplink:action-result',
   'deeplink:navigate',
   'dialog:openFolder',
   'drafts:delete',
