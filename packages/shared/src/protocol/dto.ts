@@ -591,4 +591,56 @@ export interface DeepLinkNavigation {
   tabParams?: Record<string, string>
   action?: string
   actionParams?: Record<string, string>
+  callbackId?: string
+}
+
+// ---------------------------------------------------------------------------
+// poloai:// bidirectional Web App protocol
+// ---------------------------------------------------------------------------
+
+export const POLOAI_CALLBACK_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/
+
+export function isValidPoloaiCallbackId(value: unknown): value is string {
+  return typeof value === 'string' && POLOAI_CALLBACK_ID_PATTERN.test(value)
+}
+
+export type PoloaiProtocolErrorCode =
+  | 'invalid_action'
+  | 'session_not_found'
+  | 'not_authorized'
+  | 'internal_error'
+
+export interface PoloaiProtocolError {
+  code: PoloaiProtocolErrorCode
+  message: string
+}
+
+export interface DeepLinkActionResult {
+  callbackId: string
+  sessionId?: string
+  error?: PoloaiProtocolError
+}
+
+export interface PoloaiProtocolEvent {
+  type:
+    | 'text_delta'
+    | 'text_complete'
+    | 'tool_start'
+    | 'tool_result'
+    | 'complete'
+    | 'error'
+    | 'interrupted'
+  sessionId: string
+  delta?: string
+  text?: string
+  toolName?: string
+  error?: string
+}
+
+export interface PoloaiProtocolMessage {
+  type: 'poloai:ack' | 'poloai:event' | 'poloai:error'
+  callbackId: string
+  result?: { sessionId?: string }
+  event?: PoloaiProtocolEvent
+  error?: PoloaiProtocolError
 }

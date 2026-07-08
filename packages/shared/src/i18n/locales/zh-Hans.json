@@ -1349,6 +1349,7 @@
   "toast.failedToCheckUpdates": "无法检查更新",
   "toast.failedToCopyPattern": "无法复制模式",
   "toast.failedToCreateBrowser": "无法创建浏览器窗口",
+  "toast.failedToCreateSession": "无法创建会话",
   "toast.failedToCreateWorkspace": "无法创建 Workspace",
   "toast.failedToDeleteAutomation": "无法删除自动化",
   "toast.failedToDeleteSkill": "无法删除技能",

@@ -1349,6 +1349,7 @@
   "toast.failedToCheckUpdates": "Nem sikerült ellenőrizni a frissítéseket",
   "toast.failedToCopyPattern": "Nem sikerült másolni a mintát",
   "toast.failedToCreateBrowser": "Nem sikerült létrehozni a böngészőablakot",
+  "toast.failedToCreateSession": "Nem sikerült létrehozni a munkamenetet",
   "toast.failedToCreateWorkspace": "Nem sikerült létrehozni a munkaterületet",
   "toast.failedToDeleteAutomation": "Nem sikerült törölni az automatizációt",
   "toast.failedToDeleteSkill": "Nem sikerült törölni a készséget",

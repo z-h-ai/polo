@@ -205,6 +205,7 @@ import type {
   PermissionModeState,
   BrowserInstanceInfo,
   DeepLinkNavigation,
+  DeepLinkActionResult,
   TestAutomationPayload,
   TestAutomationResult,
   WindowCloseRequest,
@@ -403,6 +404,7 @@ export interface ElectronAPI {
 
   // Deep link navigation listener (for external poloai:// URLs)
   onDeepLinkNavigate(callback: (nav: DeepLinkNavigation) => void): () => void
+  sendDeepLinkActionResult(result: DeepLinkActionResult): void
 
   // Tab browser app launcher configuration
   getTabBrowserApps(): Promise<AppDefinition[]>

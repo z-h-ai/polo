@@ -186,6 +186,9 @@ mock.module('electron', () => ({
   shell: {
     openExternal: mockShellOpenExternal,
   },
+  webContents: {
+    fromId: mock(() => undefined),
+  },
   session: {
     fromPartition: mock(() => ({
       setPermissionCheckHandler: mock(() => {}),

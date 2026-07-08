@@ -94,6 +94,7 @@ import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { initializeBackendHostRuntime } from '@polo-ai/shared/agent/backend'
 import { setPowerShellValidatorRoot } from '@polo-ai/shared/agent'
 import { handleDeepLink } from './deep-link'
+import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import { BrowserPaneManager } from './browser-pane-manager'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
@@ -481,6 +482,13 @@ app.whenReady().then(async () => {
     // Initialize window manager
     windowManager = new WindowManager()
 
+    // Deep-link action results may only come from the app's own renderer
+    // windows — embedded browser-pane pages must not be able to forge acks.
+    const wm = windowManager
+    getDeepLinkCallbackBridge().setTrustedSenderCheck(
+      (wcId) => wm.getWindowByWebContentsId(wcId) != null
+    )
+
     // Create the application menu (needs windowManager for New Window action)
     createApplicationMenu(windowManager)
 
@@ -725,7 +733,7 @@ app.whenReady().then(async () => {
         registerAllRpcHandlers: isHeadless
           ? (server, deps, serverCtx) => registerCoreRpcHandlers(server, deps, serverCtx)
           : registerAllRpcHandlers,
-        setSessionEventSink: (sm, sink) => sm.setEventSink(sink),
+        setSessionEventSink: (sm, sink) => sm.setEventSink(getDeepLinkCallbackBridge().wrapEventSink(sink)),
         initializeSessionManager: (sm) => sm.initialize(),
         initModelRefreshService: () => initModelRefreshService(async (slug: string) => {
           const { getCredentialManager } = await import('@polo-ai/shared/credentials')
@@ -789,7 +797,7 @@ app.whenReady().then(async () => {
         // Always install — this lets workspaces enable messaging at runtime
         // without a process restart.
         const baseSink = instance.wsServer.push.bind(instance.wsServer)
-        instance.sessionManager.setEventSink(messagingHandle.wrapSink(baseSink))
+        instance.sessionManager.setEventSink(getDeepLinkCallbackBridge().wrapEventSink(messagingHandle.wrapSink(baseSink)))
         if (messagingHandle.registry.size > 0) {
           mainLog.info(`[messaging] Fan-out sink active for ${messagingHandle.registry.size} workspace(s)`)
         }

@@ -1349,6 +1349,7 @@
   "toast.failedToCheckUpdates": "アップデートの確認に失敗しました",
   "toast.failedToCopyPattern": "パターンのコピーに失敗しました",
   "toast.failedToCreateBrowser": "ブラウザウィンドウの作成に失敗しました",
+  "toast.failedToCreateSession": "セッションの作成に失敗しました",
   "toast.failedToCreateWorkspace": "Workspaceの作成に失敗しました",
   "toast.failedToDeleteAutomation": "オートメーションの削除に失敗しました",
   "toast.failedToDeleteSkill": "スキルの削除に失敗しました",

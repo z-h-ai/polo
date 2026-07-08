@@ -1349,6 +1349,7 @@
   "toast.failedToCheckUpdates": "Suche nach Updates fehlgeschlagen",
   "toast.failedToCopyPattern": "Muster konnte nicht kopiert werden",
   "toast.failedToCreateBrowser": "Browserfenster konnte nicht erstellt werden",
+  "toast.failedToCreateSession": "Sitzung konnte nicht erstellt werden",
   "toast.failedToCreateWorkspace": "Workspace konnte nicht erstellt werden",
   "toast.failedToDeleteAutomation": "Automatisierung konnte nicht gelöscht werden",
   "toast.failedToDeleteSkill": "Skill konnte nicht gelöscht werden",

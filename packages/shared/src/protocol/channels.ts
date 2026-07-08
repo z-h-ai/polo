@@ -154,6 +154,7 @@ export const RPC_CHANNELS = {
   },
   deeplink: {
     NAVIGATE: 'deeplink:navigate',
+    ACTION_RESULT: 'deeplink:action-result',
   },
   tabBrowser: {
     GET_APPS: 'tab-browser:getApps',

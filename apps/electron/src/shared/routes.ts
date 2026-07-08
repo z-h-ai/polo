@@ -48,6 +48,10 @@ export const routes = {
     newSession: (params?: { input?: string; name?: string; send?: boolean; status?: string; label?: string }) =>
       `action/new-session${toQueryString(params ? { ...params, send: params.send ? 'true' : undefined } : undefined)}` as const,
 
+    /** Send a message to a protocol-owned session. */
+    sendMessage: (sessionId: string, params: { input: string; callbackId: string }) =>
+      `action/send-message/${sessionId}${toQueryString(params)}` as const,
+
     /** Rename a session */
     renameSession: (sessionId: string, name: string) =>
       `action/rename-session/${sessionId}?name=${encodeURIComponent(name)}` as const,

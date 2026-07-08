@@ -39,6 +39,7 @@ import { mainLog } from './logger'
 import type { WindowManager } from './window-manager'
 import { RPC_CHANNELS } from '../shared/types'
 import type { EventSink } from '@polo-ai/server-core/transport'
+import { isValidPoloaiCallbackId } from '../shared/types'
 
 export interface DeepLinkTarget {
   /** Workspace ID - undefined means use active window */
@@ -48,6 +49,7 @@ export interface DeepLinkTarget {
   /** Action route (e.g., 'new-chat', 'delete-session') */
   action?: string
   actionParams?: Record<string, string>
+  callbackId?: string
   /** Window mode - if set, opens in a new window instead of navigating in existing */
   windowMode?: 'focused' | 'full'
   /** Right sidebar param (e.g., 'files/path/to/file', 'history') */
@@ -69,6 +71,7 @@ export interface DeepLinkNavigation {
   /** Action route (e.g., 'new-chat', 'delete-session') */
   action?: string
   actionParams?: Record<string, string>
+  callbackId?: string
 }
 
 /**
@@ -89,6 +92,17 @@ function parseRightSidebar(parsed: URL): string | undefined {
   return parsed.searchParams.get('sidebar') || undefined
 }
 
+function parseCallbackId(parsed: URL): string | undefined {
+  const callbackId = parsed.searchParams.get('callbackId')
+  return isValidPoloaiCallbackId(callbackId) ? callbackId : undefined
+}
+
+function isSupportedDeepLinkProtocol(protocol: string): boolean {
+  const configuredScheme = process.env.POLO_AI_DEEPLINK_SCHEME || 'poloai'
+  const schemes = new Set(['poloai', configuredScheme].map(scheme => scheme.toLowerCase()))
+  return schemes.has(protocol.replace(/:$/, '').toLowerCase())
+}
+
 /**
  * Parse a deep link URL into structured target
  */
@@ -96,7 +110,7 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
   try {
     const parsed = new URL(url)
 
-    if (parsed.protocol !== 'poloai:') {
+    if (!isSupportedDeepLinkProtocol(parsed.protocol)) {
       return null
     }
 
@@ -107,6 +121,7 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
     const pathParts = parsed.pathname.split('/').filter(Boolean)
     const windowMode = parseWindowMode(parsed)
     const rightSidebar = parseRightSidebar(parsed)
+    const callbackId = parseCallbackId(parsed)
 
     // poloai://auth-callback?... (OAuth callbacks - return null to let existing handler process)
     if (host === 'auth-callback') {
@@ -152,13 +167,14 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
       if (routeType === 'action') {
         result.action = pathParts[2]
         result.actionParams = {}
+        result.callbackId = callbackId
         // Handle path-based ID (e.g., /action/delete-session/{sessionId})
         if (pathParts[3]) {
           result.actionParams.id = pathParts[3]
         }
         parsed.searchParams.forEach((value, key) => {
           // Skip the window and sidebar params - they're handled separately
-          if (key !== 'window' && key !== 'sidebar') {
+          if (key !== 'window' && key !== 'sidebar' && key !== 'callbackId') {
             result.actionParams![key] = value
           }
         })
@@ -174,6 +190,7 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
         workspaceId: undefined,
         action: pathParts[0],
         actionParams: {},
+        callbackId,
         windowMode,
         rightSidebar,
       }
@@ -184,7 +201,7 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
 
       parsed.searchParams.forEach((value, key) => {
         // Skip the window and sidebar params - they're handled separately
-        if (key !== 'window' && key !== 'sidebar') {
+        if (key !== 'window' && key !== 'sidebar' && key !== 'callbackId') {
           result.actionParams![key] = value
         }
       })
@@ -238,6 +255,7 @@ export async function handleDeepLink(
   sink?: EventSink,
   resolveClientId?: (webContentsId: number) => string | undefined,
   preferredClientId?: string,
+  sourceWebContentsId?: number,
 ): Promise<DeepLinkResult> {
   const target = parseDeepLink(url)
 
@@ -250,6 +268,28 @@ export async function handleDeepLink(
   }
 
   mainLog.info('[DeepLink] Handling:', target)
+
+  if (target.action === 'send-message') {
+    if (!target.callbackId || sourceWebContentsId == null) {
+      return { success: false, error: 'send-message requires a valid callbackId and source webContents' }
+    }
+
+    const { getDeepLinkCallbackBridge } = await import('./deep-link-callback-bridge')
+    const bridge = getDeepLinkCallbackBridge()
+    const prepared = bridge.prepareSendMessage(target.callbackId, sourceWebContentsId, target.actionParams?.id)
+    if (!prepared.ok) {
+      bridge.sendError(target.callbackId, sourceWebContentsId, prepared.error)
+      return { success: true }
+    }
+  } else if (target.callbackId && sourceWebContentsId != null) {
+    const { getDeepLinkCallbackBridge } = await import('./deep-link-callback-bridge')
+    const bridge = getDeepLinkCallbackBridge()
+    const registered = bridge.registerCallback(target.callbackId, sourceWebContentsId)
+    if (!registered.ok) {
+      bridge.sendError(target.callbackId, sourceWebContentsId, registered.error)
+      return { success: true }
+    }
+  }
 
   // If windowMode is set, create a new window instead of navigating in existing
   if (target.windowMode) {
@@ -323,6 +363,7 @@ export async function handleDeepLink(
       view: target.view,
       action: target.action,
       actionParams: target.actionParams,
+      callbackId: target.callbackId,
     }
     const wsId = target.workspaceId ?? windowManager.getWorkspaceForWindow(window.webContents.id)
     const resolvedClientId = resolveClientId?.(window.webContents.id)

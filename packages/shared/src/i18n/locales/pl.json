@@ -1349,6 +1349,7 @@
   "toast.failedToCheckUpdates": "Nie udało się sprawdzić aktualizacji",
   "toast.failedToCopyPattern": "Nie udało się skopiować wzorca",
   "toast.failedToCreateBrowser": "Nie udało się utworzyć okna przeglądarki",
+  "toast.failedToCreateSession": "Nie udało się utworzyć sesji",
   "toast.failedToCreateWorkspace": "Nie udało się utworzyć Workspace",
   "toast.failedToDeleteAutomation": "Nie udało się usunąć automatyzacji",
   "toast.failedToDeleteSkill": "Nie udało się usunąć umiejętności",
