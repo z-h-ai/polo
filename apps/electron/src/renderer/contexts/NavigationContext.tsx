@@ -776,13 +776,19 @@ export function NavigationProvider({
               const shouldSend = parsed.params.send === 'true'
               if (shouldSend) {
                 setTimeout(() => {
-                  window.electronAPI.sendMessage(
+                  void window.electronAPI.sendMessage(
                     session.id,
                     parsed.params.input!,
                     undefined,
                     undefined,
                     badges ? { badges } : undefined
-                  )
+                  ).catch(error => {
+                    if (callbackId) {
+                      reportActionError('internal_error', error)
+                    } else {
+                      console.warn('[Navigation] Failed to send initial deep-link message:', error)
+                    }
+                  })
                 }, 100)
               } else if (onInputChange) {
                 setTimeout(() => {
@@ -791,8 +797,14 @@ export function NavigationProvider({
               }
             }
           } catch (error) {
-            if (!callbackId) throw error
-            reportActionError('internal_error', error)
+            // Callers invoke this via floating promises (deep link listener,
+            // pending navigation) — never rethrow, or the rejection goes unhandled.
+            if (callbackId) {
+              reportActionError('internal_error', error)
+            } else {
+              console.error('[Navigation] new-session action failed:', error)
+              toast.error(t('toast.failedToCreateSession'))
+            }
           }
           break
         }
@@ -812,7 +824,11 @@ export function NavigationProvider({
             await window.electronAPI.sendMessage(parsed.id, parsed.params.input)
             reportActionResult({ sessionId: parsed.id })
           } catch (error) {
-            reportActionError('session_not_found', error)
+            // SessionManager rejects with `Session ${id} not found` for missing
+            // sessions; anything else (transport, persistence, …) is internal.
+            const message = error instanceof Error ? error.message : String(error)
+            const isSessionNotFound = /session\b[^]*\bnot found/i.test(message)
+            reportActionError(isSessionNotFound ? 'session_not_found' : 'internal_error', error)
           }
           break
         }
@@ -883,7 +899,7 @@ export function NavigationProvider({
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta]
+    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta, t]
   )
 
   // =========================================================================

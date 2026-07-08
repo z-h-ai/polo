@@ -91,6 +91,20 @@ describe('DeepLinkCallbackBridge', () => {
     ])
   })
 
+  it('drops action results from untrusted senders once a check is installed', () => {
+    const wc = createWebContents()
+    webContentsById.set(42, wc)
+
+    bridge.registerCallback('callback-1', 42)
+    bridge.setTrustedSenderCheck(wcId => wcId === 42)
+
+    bridge.handleActionResultFromSender(99, { callbackId: 'callback-1', sessionId: 'session-1' })
+    expect(wc.messages).toHaveLength(0)
+
+    bridge.handleActionResultFromSender(42, { callbackId: 'callback-1', sessionId: 'session-1' })
+    expect(wc.messages).toHaveLength(1)
+  })
+
   it('forwards only whitelisted event fields', () => {
     const wc = createWebContents()
     webContentsById.set(42, wc)

@@ -482,6 +482,13 @@ app.whenReady().then(async () => {
     // Initialize window manager
     windowManager = new WindowManager()
 
+    // Deep-link action results may only come from the app's own renderer
+    // windows — embedded browser-pane pages must not be able to forge acks.
+    const wm = windowManager
+    getDeepLinkCallbackBridge().setTrustedSenderCheck(
+      (wcId) => wm.getWindowByWebContentsId(wcId) != null
+    )
+
     // Create the application menu (needs windowManager for New Window action)
     createApplicationMenu(windowManager)
 

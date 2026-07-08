@@ -97,6 +97,12 @@ function parseCallbackId(parsed: URL): string | undefined {
   return isValidPoloaiCallbackId(callbackId) ? callbackId : undefined
 }
 
+function isSupportedDeepLinkProtocol(protocol: string): boolean {
+  const configuredScheme = process.env.POLO_AI_DEEPLINK_SCHEME || 'poloai'
+  const schemes = new Set(['poloai', configuredScheme].map(scheme => scheme.toLowerCase()))
+  return schemes.has(protocol.replace(/:$/, '').toLowerCase())
+}
+
 /**
  * Parse a deep link URL into structured target
  */
@@ -104,7 +110,7 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
   try {
     const parsed = new URL(url)
 
-    if (parsed.protocol !== 'poloai:') {
+    if (!isSupportedDeepLinkProtocol(parsed.protocol)) {
       return null
     }
 

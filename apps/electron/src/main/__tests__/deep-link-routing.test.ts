@@ -28,6 +28,25 @@ describe('handleDeepLink routing', () => {
     expect(target?.actionParams).toEqual({ input: 'hello' })
   })
 
+  it('accepts the configured custom deep-link scheme', () => {
+    const previousScheme = process.env.POLO_AI_DEEPLINK_SCHEME
+    process.env.POLO_AI_DEEPLINK_SCHEME = 'poloai-test'
+
+    try {
+      const target = parseDeepLink('poloai-test://action/new-session?input=hello&callbackId=abc12345')
+
+      expect(target?.action).toBe('new-session')
+      expect(target?.callbackId).toBe('abc12345')
+      expect(target?.actionParams).toEqual({ input: 'hello' })
+    } finally {
+      if (previousScheme == null) {
+        delete process.env.POLO_AI_DEEPLINK_SCHEME
+      } else {
+        process.env.POLO_AI_DEEPLINK_SCHEME = previousScheme
+      }
+    }
+  })
+
   it('ignores invalid callbackId values', () => {
     const target = parseDeepLink('poloai://action/new-session?input=hello&callbackId=bad!')
 

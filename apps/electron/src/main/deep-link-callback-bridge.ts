@@ -88,7 +88,8 @@ export class DeepLinkCallbackBridge {
   private readonly maxCallbacksPerWebContents: number
   private readonly getWebContentsById: (webContentsId: number) => WebContentsTarget | undefined
   private readonly cleanupTimer: ReturnType<typeof setInterval> | null
-  private readonly actionResultHandler: (_event: Electron.IpcMainEvent, result: DeepLinkActionResult) => void
+  private readonly actionResultHandler: (event: Electron.IpcMainEvent, result: DeepLinkActionResult) => void
+  private trustedSenderCheck: ((webContentsId: number) => boolean) | null = null
 
   constructor(options: BridgeOptions = {}) {
     this.now = options.now ?? Date.now
@@ -96,8 +97,8 @@ export class DeepLinkCallbackBridge {
     this.maxCallbacksPerWebContents = options.maxCallbacksPerWebContents ?? DEFAULT_MAX_CALLBACKS_PER_WEB_CONTENTS
     this.getWebContentsById = options.getWebContentsById ?? ((webContentsId) => webContents.fromId(webContentsId) ?? undefined)
 
-    this.actionResultHandler = (_event, result) => {
-      this.handleActionResult(result)
+    this.actionResultHandler = (event, result) => {
+      this.handleActionResultFromSender(event.sender.id, result)
     }
 
     if (options.registerIpc !== false) {
@@ -116,6 +117,24 @@ export class DeepLinkCallbackBridge {
   destroy(): void {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer)
     ipcMain.off?.(RPC_CHANNELS.deeplink.ACTION_RESULT, this.actionResultHandler)
+  }
+
+  /**
+   * Restrict which webContents may report action results over IPC. Action
+   * results must come from the app's own renderer windows — never from
+   * embedded browser-pane pages. Until a check is installed the channel is
+   * open (matches pre-hardening behavior for early startup).
+   */
+  setTrustedSenderCheck(check: (webContentsId: number) => boolean): void {
+    this.trustedSenderCheck = check
+  }
+
+  handleActionResultFromSender(senderWebContentsId: number, result: DeepLinkActionResult): void {
+    if (this.trustedSenderCheck && !this.trustedSenderCheck(senderWebContentsId)) {
+      mainLog.warn(`[DeepLinkCallbackBridge] dropped action result from untrusted sender wcId=${senderWebContentsId}`)
+      return
+    }
+    this.handleActionResult(result)
   }
 
   registerCallback(callbackId: string, webContentsId: number): BridgeResult {
@@ -302,6 +321,13 @@ export class DeepLinkCallbackBridge {
       return
     }
 
+    // executeJavaScript is the only delivery channel here: the browser-pane
+    // <webview> has no preload by design (spec §1.3), so webContents.postMessage
+    // (which requires an ipcRenderer listener) cannot reach the page. Splicing
+    // JSON.stringify output into the script is safe in this V8-eval context —
+    // it always yields a valid JS expression (U+2028/U+2029 are legal in string
+    // literals since ES2019), and HTML sequences like `</script>` are inert
+    // because nothing here is parsed as HTML.
     const targetOrigin = currentOrigin === '*' ? '*' : currentOrigin
     const script = `window.postMessage(${JSON.stringify(payload)}, ${JSON.stringify(targetOrigin)})`
     void wc.executeJavaScript(script).catch(error => {
