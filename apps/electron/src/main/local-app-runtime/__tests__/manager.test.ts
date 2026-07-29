@@ -411,6 +411,155 @@ describe('LocalAppRuntimeManager', () => {
     ))).sort()).toEqual(['1.0.0', '2.0.0'])
   })
 
+  it('publishes and persists update_available from catalog release metadata', async () => {
+    const bundleDir = await writeBundle(
+      'demo.available-update',
+      '1.0.0',
+      {},
+      { 'dist/index.html': 'v1' },
+    )
+    const archive = await archiveBundle(bundleDir, 'available-update')
+    const url = await serveArchive(archive)
+    const runtime = makeManager()
+    await runtime.install(requestFor('demo.available-update', '1.0.0', url, archive))
+
+    const update = {
+      version: '2.0.0',
+      downloadUrl: 'https://downloads.example.test/demo.available-update-2.0.0.tar.gz',
+      checksum: 'A'.repeat(64),
+      sizeBytes: 42,
+      platform,
+      arch: architecture,
+    } as const
+    const published = await runtime.setAvailableRelease('demo.available-update', update)
+    expect(published.status).toBe('update_available')
+    expect(published.availableRelease?.checksum).toBe('a'.repeat(64))
+    expect((await runtime.getInstalledApps())[0]).toMatchObject({
+      status: 'update_available',
+      availableRelease: {
+        version: '2.0.0',
+      },
+    })
+
+    const reloaded = new LocalAppRuntimeManager({
+      rootDir: join(testRoot, 'runtime'),
+      platform,
+      arch: architecture,
+      fetch: stableFetch,
+    })
+    expect((await reloaded.getRuntimeStatus('demo.available-update')).status)
+      .toBe('update_available')
+    await reloaded.shutdown()
+
+    expect((await runtime.setAvailableRelease(
+      'demo.available-update',
+      { version: '1.0.0' },
+    )).status).toBe('installed')
+    expect((await runtime.setAvailableRelease('demo.available-update', null)).status)
+      .toBe('installed')
+  })
+
+  it('does not reuse an active install for a conflicting release identity', async () => {
+    const bundleDir = await writeBundle(
+      'demo.active-identity',
+      '1.0.0',
+      {},
+      { 'dist/index.html': 'x'.repeat(32_000) },
+    )
+    const archive = await archiveBundle(bundleDir, 'active-identity')
+    const url = await serveArchive(archive, { chunkDelayMs: 25 })
+    const runtime = makeManager()
+    const request = requestFor('demo.active-identity', '1.0.0', url, archive)
+    const first = runtime.install(request)
+
+    expect(runtime.install({ ...request })).toBe(first)
+    await expect(runtime.install({
+      ...request,
+      checksum: 'f'.repeat(64),
+    })).rejects.toMatchObject({
+      code: 'CHECKSUM_MISMATCH',
+    })
+
+    expect(runtime.cancelInstall('demo.active-identity')).toBe(true)
+    await expect(first).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
+  })
+
+  it('waits for crash cleanup and starts a fresh process on immediate retry', async () => {
+    const bundleDir = await writeBundle(
+      'demo.crash-retry',
+      '1.0.0',
+      {
+        runtime: 'js',
+        entry: ['server.js'],
+        startTimeoutMs: 3_000,
+      },
+      {
+        'server.js': `
+          const { existsSync, writeFileSync } = require('fs')
+          const { join } = require('path')
+          const { spawn } = require('child_process')
+          const http = require('http')
+          const marker = join(process.env.POLO_APP_DATA_DIR, 'crashed-once')
+          const first = !existsSync(marker)
+          if (first) {
+            writeFileSync(marker, 'yes')
+            spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], {
+              stdio: 'ignore',
+            })
+          }
+          http.createServer((_request, response) => response.end(first ? 'first' : 'retry'))
+            .listen(Number(process.env.PORT), '127.0.0.1')
+          if (first) setTimeout(() => process.exit(23), 500)
+        `,
+      },
+    )
+    const archive = await archiveBundle(bundleDir, 'crash-retry')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.crash-retry', '1.0.0', url, archive))
+
+    const first = await runtime.start('demo.crash-retry')
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await runtime.getRuntimeStatus('demo.crash-retry')).status === 'broken') break
+      await Bun.sleep(10)
+    }
+    expect((await runtime.getRuntimeStatus('demo.crash-retry')).status).toBe('broken')
+
+    const retried = await runtime.start('demo.crash-retry')
+    expect(retried.port).not.toBe(first.port)
+    expect(await (await stableFetch(retried.url)).text()).toBe('retry')
+    expect((await runtime.getRuntimeStatus('demo.crash-retry')).status).toBe('running')
+  }, 15_000)
+
+  it('does not publish running when the process exits immediately after health', async () => {
+    const bundleDir = await writeBundle(
+      'demo.health-exit',
+      '1.0.0',
+      {
+        runtime: 'js',
+        entry: ['server.js'],
+        startTimeoutMs: 2_000,
+      },
+      {
+        'server.js': `
+          const http = require('http')
+          http.createServer((_request, response) => {
+            response.end('ok', () => process.exit(0))
+          }).listen(Number(process.env.PORT), '127.0.0.1')
+        `,
+      },
+    )
+    const archive = await archiveBundle(bundleDir, 'health-exit')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.health-exit', '1.0.0', url, archive))
+
+    await expect(runtime.start('demo.health-exit')).rejects.toMatchObject({
+      code: 'PROCESS_CRASHED',
+    })
+    expect((await runtime.getRuntimeStatus('demo.health-exit')).status).toBe('broken')
+  })
+
   it('runs JS and Python bundles with isolated runtime and data directories', async () => {
     const bunPath = process.execPath
     const uvPath = Bun.which('uv')

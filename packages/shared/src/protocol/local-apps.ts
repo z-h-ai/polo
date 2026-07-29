@@ -55,6 +55,19 @@ export interface LocalAppInstallRequest {
   arch: LocalAppArchitecture
 }
 
+/**
+ * Catalog-provided latest release metadata. Only `version` is required so the
+ * client can publish update state before it has fetched full download details.
+ */
+export interface LocalAppAvailableRelease {
+  version: string
+  downloadUrl?: string
+  checksum?: string
+  sizeBytes?: number
+  platform?: LocalAppPlatform
+  arch?: LocalAppArchitecture
+}
+
 export interface LocalAppInstallProgress {
   phase: 'downloading' | 'verifying' | 'extracting' | 'preparing'
   bytesDownloaded: number
@@ -74,6 +87,7 @@ export interface LocalAppRuntimeStatus {
   /** Present when an update is downloading/installing while another version is running. */
   installationStatus?: 'downloading' | 'installing'
   progress?: LocalAppInstallProgress
+  availableRelease?: LocalAppAvailableRelease
   error?: LocalAppErrorPayload
 }
 
@@ -86,6 +100,7 @@ export interface LocalAppInstalledApp {
   runtime: LocalAppRuntimeKind
   status: LocalAppLifecycleStatus
   installedAt: number
+  availableRelease?: LocalAppAvailableRelease
 }
 
 export interface LocalAppStartResult {

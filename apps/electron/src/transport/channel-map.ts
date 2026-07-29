@@ -127,6 +127,7 @@ export const CHANNEL_MAP = {
   'localApps.stop': invoke(RPC_CHANNELS.localApps.STOP),
   'localApps.restart': invoke(RPC_CHANNELS.localApps.RESTART),
   'localApps.uninstall': invoke(RPC_CHANNELS.localApps.UNINSTALL),
+  'localApps.setAvailableRelease': invoke(RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE),
   'localApps.getInstalledApps': invoke(RPC_CHANNELS.localApps.GET_INSTALLED_APPS),
   'localApps.getRuntimeStatus': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS),
   'localApps.getLogs': invoke(RPC_CHANNELS.localApps.GET_LOGS),

@@ -1,5 +1,6 @@
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type {
+  LocalAppAvailableRelease,
   LocalAppInstallRequest,
   LocalAppLogsOptions,
   LocalAppUninstallOptions,
@@ -14,6 +15,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.STOP,
   RPC_CHANNELS.localApps.RESTART,
   RPC_CHANNELS.localApps.UNINSTALL,
+  RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
   RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
   RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
   RPC_CHANNELS.localApps.GET_LOGS,
@@ -34,6 +36,11 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     RPC_CHANNELS.localApps.UNINSTALL,
     (_ctx, appId: string, options?: LocalAppUninstallOptions) =>
       getLocalAppRuntimeManager().uninstall(appId, options),
+  )
+  server.handle(
+    RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+    (_ctx, appId: string, release: LocalAppAvailableRelease | null) =>
+      getLocalAppRuntimeManager().setAvailableRelease(appId, release),
   )
   server.handle(RPC_CHANNELS.localApps.GET_INSTALLED_APPS, () =>
     getLocalAppRuntimeManager().getInstalledApps())

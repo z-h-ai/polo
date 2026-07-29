@@ -66,6 +66,27 @@ describe('CHANNEL_MAP runtime contract', () => {
     expect(values.some((entry) => entry.type === 'invoke')).toBe(true)
   })
 
+  it('routes catalog update metadata through the local-app RPC surface', async () => {
+    expect(CHANNEL_MAP['localApps.setAvailableRelease']).toEqual({
+      type: 'invoke',
+      channel: RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+    })
+    const invoke = mock(async () => ({ status: 'update_available' }))
+    const client = {
+      invoke,
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    await api.localApps.setAvailableRelease('demo.app', { version: '2.0.0' })
+
+    expect(invoke).toHaveBeenCalledWith(
+      RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+      'demo.app',
+      { version: '2.0.0' },
+    )
+  })
+
   it('forwards phone auth and password calls through the typed local RPC surface', async () => {
     const calls: unknown[][] = []
     const invoke = mock(async (...args: unknown[]) => {

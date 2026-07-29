@@ -124,6 +124,7 @@ const EXPECTED_CHANNELS: string[] = [
   'local-apps:getRuntimeStatus',
   'local-apps:install',
   'local-apps:restart',
+  'local-apps:setAvailableRelease',
   'local-apps:start',
   'local-apps:stop',
   'local-apps:uninstall',

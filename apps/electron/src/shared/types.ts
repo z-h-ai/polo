@@ -212,6 +212,7 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  LocalAppAvailableRelease,
   LocalAppInstallRequest,
   LocalAppInstalledApp,
   LocalAppRuntimeStatus,
@@ -458,6 +459,10 @@ export interface ElectronAPI {
     stop(appId: string): Promise<LocalAppRuntimeStatus>
     restart(appId: string): Promise<LocalAppStartResult>
     uninstall(appId: string, options?: LocalAppUninstallOptions): Promise<void>
+    setAvailableRelease(
+      appId: string,
+      release: LocalAppAvailableRelease | null,
+    ): Promise<LocalAppRuntimeStatus>
     getInstalledApps(): Promise<LocalAppInstalledApp[]>
     getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus>
     getLogs(appId: string, options?: LocalAppLogsOptions): Promise<string>

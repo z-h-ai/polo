@@ -167,6 +167,7 @@ export const RPC_CHANNELS = {
     STOP: 'local-apps:stop',
     RESTART: 'local-apps:restart',
     UNINSTALL: 'local-apps:uninstall',
+    SET_AVAILABLE_RELEASE: 'local-apps:setAvailableRelease',
     GET_INSTALLED_APPS: 'local-apps:getInstalledApps',
     GET_RUNTIME_STATUS: 'local-apps:getRuntimeStatus',
     GET_LOGS: 'local-apps:getLogs',

@@ -4,6 +4,10 @@ const WINDOWS_PROCESS_QUERY_LIMIT_BYTES = 4 * 1024 * 1024
 const WINDOWS_COMMAND_TIMEOUT_MS = 5_000
 const DEFAULT_SAMPLE_INTERVAL_MS = 1_000
 const TERMINATION_PASSES = 4
+const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+const PROCESS_TERMINATE = 0x0001
+const PROCESS_SET_QUOTA = 0x0100
 
 export interface WindowsProcessRecord {
   pid: number
@@ -19,6 +23,60 @@ export interface WindowsProcessTreeOwnerOptions {
   rootPid: number
   adapter: WindowsProcessTreeAdapter
   sampleIntervalMs?: number
+}
+
+export interface WindowsJobObjectAdapter {
+  createKillOnCloseJob(): unknown
+  assignProcess(job: unknown, pid: number): void
+  terminateAndClose(job: unknown): void
+}
+
+export interface WindowsJobObjectOwnerOptions {
+  adapter: WindowsJobObjectAdapter
+  fallback?: WindowsProcessTreeOwner
+}
+
+/**
+ * Owns a Windows Job Object configured with KILL_ON_JOB_CLOSE. Unlike process
+ * snapshots, job membership is inherited by descendants while they are
+ * created, so ownership survives the root and any short-lived intermediary.
+ */
+export class WindowsJobObjectOwner {
+  private readonly adapter: WindowsJobObjectAdapter
+  private readonly job: unknown
+  private fallback?: WindowsProcessTreeOwner
+  private terminationPromise?: Promise<void>
+
+  constructor(options: WindowsJobObjectOwnerOptions) {
+    this.adapter = options.adapter
+    this.job = this.adapter.createKillOnCloseJob()
+    this.fallback = options.fallback
+  }
+
+  assignProcess(pid: number): void {
+    this.adapter.assignProcess(this.job, pid)
+  }
+
+  setSnapshotFallback(fallback: WindowsProcessTreeOwner): void {
+    this.fallback?.dispose()
+    this.fallback = fallback
+  }
+
+  terminate(): Promise<void> {
+    if (this.terminationPromise) return this.terminationPromise
+    this.terminationPromise = this.performTermination()
+    return this.terminationPromise
+  }
+
+  private async performTermination(): Promise<void> {
+    try {
+      this.adapter.terminateAndClose(this.job)
+      this.fallback?.dispose()
+    } catch (jobError) {
+      if (!this.fallback) throw jobError
+      await this.fallback.terminate()
+    }
+  }
 }
 
 /**
@@ -52,6 +110,10 @@ export class WindowsProcessTreeOwner {
     if (this.terminationPromise) return this.terminationPromise
     this.terminationPromise = this.performTermination()
     return this.terminationPromise
+  }
+
+  dispose(): void {
+    this.stopSampling()
   }
 
   private async performTermination(): Promise<void> {
@@ -129,6 +191,105 @@ export function createWindowsProcessTreeOwner(rootPid: number): WindowsProcessTr
     adapter: {
       snapshot: queryWindowsProcesses,
       killTree: killWindowsProcessTree,
+    },
+  })
+}
+
+export async function createWindowsJobObjectOwner(): Promise<WindowsJobObjectOwner> {
+  if (process.platform !== 'win32') {
+    throw new Error('Windows Job Objects are only available on win32')
+  }
+  const koffi = await import('koffi')
+  const kernel32 = koffi.load('kernel32.dll')
+  const createJobObject = kernel32.func(
+    '__stdcall',
+    'CreateJobObjectW',
+    'void *',
+    ['void *', 'str16'],
+  )
+  const setInformationJobObject = kernel32.func(
+    '__stdcall',
+    'SetInformationJobObject',
+    'bool',
+    ['void *', 'int', 'void *', 'uint32'],
+  )
+  const openProcess = kernel32.func(
+    '__stdcall',
+    'OpenProcess',
+    'void *',
+    ['uint32', 'bool', 'uint32'],
+  )
+  const assignProcessToJobObject = kernel32.func(
+    '__stdcall',
+    'AssignProcessToJobObject',
+    'bool',
+    ['void *', 'void *'],
+  )
+  const terminateJobObject = kernel32.func(
+    '__stdcall',
+    'TerminateJobObject',
+    'bool',
+    ['void *', 'uint32'],
+  )
+  const closeHandle = kernel32.func(
+    '__stdcall',
+    'CloseHandle',
+    'bool',
+    ['void *'],
+  )
+  const getLastError = kernel32.func(
+    '__stdcall',
+    'GetLastError',
+    'uint32',
+    [],
+  )
+  const pointerSize = koffi.sizeof('void *')
+  const informationSize = pointerSize === 8 ? 144 : 112
+
+  const windowsError = (operation: string): Error =>
+    new Error(`${operation} failed with Windows error ${getLastError()}`)
+
+  return new WindowsJobObjectOwner({
+    adapter: {
+      createKillOnCloseJob() {
+        const job = createJobObject(null, null)
+        if (!job) throw windowsError('CreateJobObjectW')
+        const information = Buffer.alloc(informationSize)
+        // LimitFlags has a stable offset after the two LARGE_INTEGER fields.
+        information.writeUInt32LE(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, 16)
+        if (!setInformationJobObject(
+          job,
+          JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+          information,
+          information.length,
+        )) {
+          const error = windowsError('SetInformationJobObject')
+          closeHandle(job)
+          throw error
+        }
+        return job
+      },
+      assignProcess(job, pid) {
+        const processHandle = openProcess(
+          PROCESS_TERMINATE | PROCESS_SET_QUOTA,
+          false,
+          pid,
+        )
+        if (!processHandle) throw windowsError(`OpenProcess(${pid})`)
+        try {
+          if (!assignProcessToJobObject(job, processHandle)) {
+            throw windowsError(`AssignProcessToJobObject(${pid})`)
+          }
+        } finally {
+          closeHandle(processHandle)
+        }
+      },
+      terminateAndClose(job) {
+        // TerminateJobObject makes normal stop deterministic. Closing the last
+        // handle is the authoritative KILL_ON_JOB_CLOSE guarantee.
+        terminateJobObject(job, 1)
+        if (!closeHandle(job)) throw windowsError('CloseHandle(job)')
+      },
     },
   })
 }

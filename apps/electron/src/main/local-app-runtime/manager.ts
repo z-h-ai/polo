@@ -26,6 +26,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@polo-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
+  LocalAppAvailableRelease,
   LocalAppErrorPayload,
   LocalAppInstallProgress,
   LocalAppInstallRequest,
@@ -42,7 +43,9 @@ import { extractBundleArchive } from './archive'
 import { BoundedLogWriter } from './bounded-log'
 import { assertSafeRelativePath, validatePoloAppManifest } from './manifest'
 import {
+  createWindowsJobObjectOwner,
   createWindowsProcessTreeOwner,
+  type WindowsJobObjectOwner,
   type WindowsProcessTreeOwner,
 } from './process-tree'
 import { asLocalAppRuntimeError, LocalAppRuntimeError } from './runtime-error'
@@ -55,6 +58,7 @@ const STOP_GRACE_MS = 3_000
 const MAX_LOG_TAIL = 10_000
 const MAX_STATIC_CONCURRENT_STREAMS = 32
 const MAX_STATIC_ASSET_BYTES = 256 * 1024 * 1024
+const POST_HEALTH_STABILITY_MS = 50
 const RUNTIME_ENV_ALLOWLIST = [
   'PATH',
   'TMPDIR',
@@ -86,6 +90,7 @@ interface AppMetadata {
   lastKnownGoodVersion?: string
   versions: Record<string, InstalledVersionRecord>
   brokenVersions?: Record<string, LocalAppErrorPayload>
+  availableRelease?: LocalAppAvailableRelease
 }
 
 interface ManagedRuntime {
@@ -100,16 +105,59 @@ interface ManagedRuntime {
   stopRequested: boolean
   stopPromise?: Promise<void>
   cleanupPromise?: Promise<void>
-  processTreeOwner?: WindowsProcessTreeOwner
+  processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner
   exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
   spawnError?: Error
 }
 
+type ActiveReleaseIdentity = Pick<
+  LocalAppInstallRequest,
+  'appId' | 'version' | 'checksum' | 'sizeBytes' | 'platform' | 'arch'
+>
+
 interface ActiveInstall {
-  version: string
+  identity: ActiveReleaseIdentity
   controller: AbortController
   promise: Promise<LocalAppInstalledApp>
 }
+
+const WINDOWS_JOB_GATE_SOURCE = String.raw`
+const { spawn } = require('child_process')
+let input = ''
+let launched = false
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', chunk => {
+  input += chunk
+  const newline = input.indexOf('\n')
+  if (newline < 0 || launched) return
+  launched = true
+  const payload = JSON.parse(Buffer.from(input.slice(0, newline), 'base64').toString('utf8'))
+  const env = { ...process.env }
+  delete env.ELECTRON_RUN_AS_NODE
+  const child = spawn(payload.command, payload.args, {
+    cwd: payload.cwd,
+    env,
+    shell: false,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child.stdout.pipe(process.stdout)
+  child.stderr.pipe(process.stderr)
+  let settled = false
+  child.once('error', error => {
+    if (settled) return
+    settled = true
+    console.error(error && error.stack ? error.stack : String(error))
+    process.exit(127)
+  })
+  child.once('exit', (code) => {
+    if (settled) return
+    settled = true
+    process.exit(code == null ? 1 : code)
+  })
+})
+process.stdin.resume()
+`
 
 export interface LocalAppRuntimeLogger {
   info(message: string, details?: unknown): void
@@ -278,11 +326,27 @@ export class LocalAppRuntimeManager {
 
     const existing = this.activeInstalls.get(validated.appId)
     if (existing) {
-      if (existing.version === validated.version) return existing.promise
+      if (this.installRequestsMatch(existing.identity, validated)) return existing.promise
+      if (
+        existing.identity.version === validated.version
+        && existing.identity.checksum !== validated.checksum
+      ) {
+        return Promise.reject(new LocalAppRuntimeError(
+          'CHECKSUM_MISMATCH',
+          `An active install for ${validated.appId}@${validated.version} has a different checksum`,
+          {
+            activeChecksum: existing.identity.checksum,
+            requestedChecksum: validated.checksum,
+          },
+        ))
+      }
       return Promise.reject(new LocalAppRuntimeError(
         'INVALID_REQUEST',
-        `Another version of ${validated.appId} is already being installed`,
-        { activeVersion: existing.version, requestedVersion: validated.version },
+        `A different release of ${validated.appId} is already being installed`,
+        {
+          activeRelease: existing.identity,
+          requestedRelease: validated,
+        },
       ))
     }
 
@@ -313,7 +377,7 @@ export class LocalAppRuntimeManager {
         }
       })
     this.activeInstalls.set(validated.appId, {
-      version: validated.version,
+      identity: this.getReleaseIdentity(validated),
       controller,
       promise,
     })
@@ -406,6 +470,29 @@ export class LocalAppRuntimeManager {
     }
   }
 
+  setAvailableRelease(
+    appId: string,
+    release: LocalAppAvailableRelease | null,
+  ): Promise<LocalAppRuntimeStatus> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    const validatedRelease = release
+      ? this.validateAvailableRelease(release)
+      : null
+    return this.enqueueLifecycle(safeAppId, async () => {
+      const metadata = await this.readMetadata(safeAppId)
+      if (!metadata) {
+        throw new LocalAppRuntimeError('NOT_INSTALLED', `${safeAppId} is not installed`)
+      }
+      if (validatedRelease && validatedRelease.version !== metadata.currentVersion) {
+        metadata.availableRelease = validatedRelease
+      } else {
+        delete metadata.availableRelease
+      }
+      await this.writeMetadata(metadata)
+      return this.getRuntimeStatus(safeAppId)
+    })
+  }
+
   async getInstalledApps(): Promise<LocalAppInstalledApp[]> {
     await mkdir(this.appsDir, { recursive: true })
     const entries = await readdir(this.appsDir, { withFileTypes: true })
@@ -426,6 +513,9 @@ export class LocalAppRuntimeManager {
         runtime: current.manifest.runtime,
         status: runtimeStatus.status,
         installedAt: current.installedAt,
+        ...(runtimeStatus.availableRelease
+          ? { availableRelease: runtimeStatus.availableRelease }
+          : {}),
       })
     }
     return apps.sort((left, right) => left.appId.localeCompare(right.appId))
@@ -436,40 +526,58 @@ export class LocalAppRuntimeManager {
     const handle = this.runtimes.get(safeAppId)
     const installation = this.installationStatuses.get(safeAppId)
     const transient = this.statuses.get(safeAppId)
+    const metadata = await this.readMetadata(safeAppId)
+    const availableRelease = this.getAvailableUpdate(metadata)
     if (handle) {
       if (
         transient?.status === 'broken'
-        && (handle.child?.exitCode != null || handle.child?.signalCode != null)
+        && !this.isRuntimeHandleLive(handle)
       ) {
-        return { ...transient }
+        return {
+          ...transient,
+          ...(availableRelease ? { availableRelease } : {}),
+        }
       }
       return {
         appId: safeAppId,
         status: handle.healthy ? 'running' : 'starting',
-        currentVersion: (await this.readMetadata(safeAppId))?.currentVersion,
+        currentVersion: metadata?.currentVersion,
         runningVersion: handle.version,
         url: handle.url,
         port: handle.port,
         ...(handle.child?.pid ? { pid: handle.child.pid } : {}),
+        ...(availableRelease ? { availableRelease } : {}),
         ...(installation ? { installationStatus: installation.status } : {}),
         ...(installation ? { progress: installation.progress } : {}),
       }
     }
     if (installation) {
-      const metadata = await this.readMetadata(safeAppId)
       return {
         appId: safeAppId,
         status: installation.status,
         currentVersion: metadata?.currentVersion,
         previousVersion: metadata?.previousVersion,
         progress: installation.progress,
+        ...(availableRelease ? { availableRelease } : {}),
       }
     }
-    if (transient && ['downloading', 'installing', 'broken', 'stopped'].includes(transient.status)) {
-      return { ...transient }
+    if (transient?.status === 'broken') {
+      return {
+        ...transient,
+        ...(availableRelease ? { availableRelease } : {}),
+      }
     }
-    const metadata = await this.readMetadata(safeAppId)
     if (!metadata) return { appId: safeAppId, status: 'not_installed' }
+    if (availableRelease) {
+      return {
+        appId: safeAppId,
+        status: 'update_available',
+        currentVersion: metadata.currentVersion,
+        previousVersion: metadata.previousVersion,
+        availableRelease,
+      }
+    }
+    if (transient?.status === 'stopped') return { ...transient }
     return {
       appId: safeAppId,
       status: 'installed',
@@ -609,6 +717,94 @@ export class LocalAppRuntimeManager {
     }
   }
 
+  private installRequestsMatch(
+    left: ActiveReleaseIdentity,
+    right: LocalAppInstallRequest,
+  ): boolean {
+    return left.appId === right.appId
+      && left.version === right.version
+      && left.checksum === right.checksum
+      && left.sizeBytes === right.sizeBytes
+      && left.platform === right.platform
+      && left.arch === right.arch
+  }
+
+  private getReleaseIdentity(request: LocalAppInstallRequest): ActiveReleaseIdentity {
+    return {
+      appId: request.appId,
+      version: request.version,
+      checksum: request.checksum,
+      sizeBytes: request.sizeBytes,
+      platform: request.platform,
+      arch: request.arch,
+    }
+  }
+
+  private validateAvailableRelease(release: LocalAppAvailableRelease): LocalAppAvailableRelease {
+    if (!release || typeof release !== 'object') {
+      throw new LocalAppRuntimeError('INVALID_REQUEST', 'available release must be an object')
+    }
+    const version = validateRequestIdentifier(release.version, 'version')
+    let downloadUrl: string | undefined
+    if (release.downloadUrl !== undefined) {
+      let parsedUrl: URL
+      try {
+        parsedUrl = new URL(release.downloadUrl)
+      } catch {
+        throw new LocalAppRuntimeError('INVALID_REQUEST', 'downloadUrl is not a valid URL')
+      }
+      if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+        throw new LocalAppRuntimeError('INVALID_REQUEST', 'downloadUrl must use HTTPS or HTTP')
+      }
+      downloadUrl = parsedUrl.toString()
+    }
+    const platform = release.platform === undefined
+      ? undefined
+      : normalizePlatform(release.platform)
+    const arch = release.arch === undefined
+      ? undefined
+      : normalizeArchitecture(release.arch)
+    if (release.platform !== undefined && !platform) {
+      throw new LocalAppRuntimeError('INVALID_REQUEST', `Unsupported platform "${release.platform}"`)
+    }
+    if (release.arch !== undefined && !arch) {
+      throw new LocalAppRuntimeError('INVALID_REQUEST', `Unsupported architecture "${release.arch}"`)
+    }
+    if (
+      release.sizeBytes !== undefined
+      && (
+        !Number.isSafeInteger(release.sizeBytes)
+        || release.sizeBytes <= 0
+        || release.sizeBytes > MAX_DOWNLOAD_BYTES
+      )
+    ) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        `sizeBytes must be between 1 and ${MAX_DOWNLOAD_BYTES}`,
+      )
+    }
+    return {
+      version,
+      ...(downloadUrl ? { downloadUrl } : {}),
+      ...(release.checksum !== undefined
+        ? { checksum: normalizeChecksum(release.checksum) }
+        : {}),
+      ...(release.sizeBytes !== undefined ? { sizeBytes: release.sizeBytes } : {}),
+      ...(platform ? { platform } : {}),
+      ...(arch ? { arch } : {}),
+    }
+  }
+
+  private getAvailableUpdate(metadata: AppMetadata | null): LocalAppAvailableRelease | undefined {
+    if (
+      !metadata?.availableRelease
+      || metadata.availableRelease.version === metadata.currentVersion
+    ) {
+      return undefined
+    }
+    return metadata.availableRelease
+  }
+
   private async performInstall(
     request: LocalAppInstallRequest,
     signal: AbortSignal,
@@ -699,6 +895,10 @@ export class LocalAppRuntimeManager {
             : {}),
           versions,
           ...(metadata?.brokenVersions ? { brokenVersions: metadata.brokenVersions } : {}),
+          ...(metadata?.availableRelease
+            && metadata.availableRelease.version !== request.version
+            ? { availableRelease: metadata.availableRelease }
+            : {}),
         }
         await this.writeMetadata(committedMetadata)
         return committedMetadata
@@ -956,14 +1156,12 @@ export class LocalAppRuntimeManager {
     signal: AbortSignal,
   ): Promise<void> {
     this.appendLog(appId, 'system', `Preparing dependencies with ${basename(command)}`)
-    const child = spawn(command, args, {
+    const { child, processTreeOwner } = await this.spawnManagedCommand(
+      command,
+      args,
       cwd,
       env,
-      detached: process.platform !== 'win32',
-      shell: false,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    )
     this.captureChildOutput(appId, child)
 
     type InstallProcessOutcome =
@@ -992,7 +1190,7 @@ export class LocalAppRuntimeManager {
     if (abortListener) signal.removeEventListener('abort', abortListener)
 
     if (outcome.kind === 'abort' || outcome.kind === 'timeout') {
-      await this.killProcessTree(child)
+      await this.killProcessTree(child, processTreeOwner)
       if (outcome.kind === 'abort') {
         throw this.getAbortError(
           signal,
@@ -1005,30 +1203,48 @@ export class LocalAppRuntimeManager {
       )
     }
     if (outcome.kind === 'error') {
+      await this.killProcessTree(child, processTreeOwner).catch(() => {})
       throw new LocalAppRuntimeError(
         'RUNTIME_UNAVAILABLE',
         `Could not launch ${basename(command)}: ${outcome.error.message}`,
       )
     }
     if (outcome.code !== 0) {
+      await processTreeOwner?.terminate().catch(() => {})
       throw new LocalAppRuntimeError(
         'DEPENDENCY_INSTALL_FAILED',
         `Dependency preparation exited with code ${outcome.code ?? 'null'}`,
         { signal: outcome.signal },
       )
     }
+    await processTreeOwner?.terminate()
   }
 
   private async performStart(appId: string, signal: AbortSignal): Promise<LocalAppStartResult> {
     this.throwIfStartCancelled(signal, appId)
     const running = this.runtimes.get(appId)
     if (running) {
-      return {
-        appId,
-        version: running.version,
-        url: running.url,
-        port: running.port,
+      const healthUrl = `http://127.0.0.1:${running.port}${running.manifest.healthcheck}`
+      if (
+        running.healthy
+        && this.isRuntimeHandleLive(running)
+        && !running.cleanupPromise
+        && await this.isHealthy(healthUrl)
+        && this.runtimes.get(appId) === running
+        && this.isRuntimeHandleLive(running)
+      ) {
+        this.throwIfStartCancelled(signal, appId)
+        return {
+          appId,
+          version: running.version,
+          url: running.url,
+          port: running.port,
+        }
       }
+      await running.cleanupPromise?.catch(() => {})
+      await this.stopRuntime(running)
+      if (this.runtimes.get(appId) === running) this.runtimes.delete(appId)
+      this.throwIfStartCancelled(signal, appId)
     }
     const metadata = await this.readMetadata(appId)
     if (!metadata || !metadata.versions[metadata.currentVersion]) {
@@ -1132,17 +1348,28 @@ export class LocalAppRuntimeManager {
         manifest.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS,
         signal,
       )
-      handle.healthy = true
+      // Let a root that exits immediately after answering health surface its
+      // exit event before we publish a usable URL.
+      if (handle.child) {
+        await Promise.race([
+          handle.exitPromise.then(() => {}),
+          delay(POST_HEALTH_STABILITY_MS),
+        ])
+      }
+      this.assertRuntimeHandleCurrentAndLive(handle)
       metadata.lastKnownGoodVersion = version
       if (metadata.brokenVersions?.[version]) {
         delete metadata.brokenVersions[version]
         if (Object.keys(metadata.brokenVersions).length === 0) delete metadata.brokenVersions
       }
       await this.writeMetadata(metadata)
+      this.assertRuntimeHandleCurrentAndLive(handle)
+      handle.healthy = true
     } catch (error) {
       await this.stopRuntime(handle)
       throw error
     }
+    this.assertRuntimeHandleCurrentAndLive(handle)
     this.statuses.set(metadata.appId, {
       appId: metadata.appId,
       status: 'running',
@@ -1158,6 +1385,30 @@ export class LocalAppRuntimeManager {
       version,
       url: handle.url,
       port: handle.port,
+    }
+  }
+
+  private isRuntimeHandleLive(handle: ManagedRuntime): boolean {
+    if (handle.stopRequested || handle.cleanupPromise || handle.spawnError) return false
+    if (handle.server) return handle.server.listening
+    return Boolean(
+      handle.child
+      && handle.child.exitCode == null
+      && handle.child.signalCode == null
+      && !handle.child.killed,
+    )
+  }
+
+  private assertRuntimeHandleCurrentAndLive(handle: ManagedRuntime): void {
+    if (
+      this.runtimes.get(handle.appId) !== handle
+      || !this.isRuntimeHandleLive(handle)
+    ) {
+      throw new LocalAppRuntimeError(
+        'PROCESS_CRASHED',
+        `${handle.appId} exited while its healthy start was being committed`,
+        { version: handle.version },
+      )
     }
   }
 
@@ -1185,23 +1436,18 @@ export class LocalAppRuntimeManager {
           ...manifest.entry.slice(1),
         ]
       : [entryPath, ...manifest.entry.slice(1)]
-    const child = spawn(executable, args, {
-      cwd: versionDir,
-      env: this.buildRuntimeEnvironment(appId, version, versionDir, port),
-      detached: process.platform !== 'win32',
-      shell: false,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    const { child, processTreeOwner } = await this.spawnManagedCommand(
+      executable,
+      args,
+      versionDir,
+      this.buildRuntimeEnvironment(appId, version, versionDir, port),
+    )
     this.captureChildOutput(appId, child)
 
     let resolveExit!: (outcome: { code: number | null; signal: NodeJS.Signals | null }) => void
     const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise) => {
       resolveExit = resolvePromise
     })
-    const processTreeOwner = process.platform === 'win32' && child.pid
-      ? createWindowsProcessTreeOwner(child.pid)
-      : undefined
     const handle: ManagedRuntime = {
       appId,
       version,
@@ -1241,6 +1487,85 @@ export class LocalAppRuntimeManager {
     })
     this.appendLog(appId, 'system', `Starting ${version} on port ${port}`)
     return handle
+  }
+
+  private async spawnManagedCommand(
+    command: string,
+    args: string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ): Promise<{
+    child: ChildProcess
+    processTreeOwner?: WindowsJobObjectOwner
+  }> {
+    if (process.platform !== 'win32') {
+      return {
+        child: spawn(command, args, {
+          cwd,
+          env,
+          detached: true,
+          shell: false,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      }
+    }
+
+    let owner: WindowsJobObjectOwner
+    try {
+      owner = await createWindowsJobObjectOwner()
+    } catch (error) {
+      throw new LocalAppRuntimeError(
+        'RUNTIME_UNAVAILABLE',
+        'Windows Job Object support could not be initialized',
+        { cause: error instanceof Error ? error.message : String(error) },
+      )
+    }
+    const child = spawn(process.execPath, ['-e', WINDOWS_JOB_GATE_SOURCE], {
+      cwd,
+      env: {
+        ...env,
+        ELECTRON_RUN_AS_NODE: '1',
+      },
+      detached: false,
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    if (!child.pid || !child.stdin) {
+      await owner.terminate().catch(() => {})
+      child.kill()
+      throw new LocalAppRuntimeError(
+        'RUNTIME_UNAVAILABLE',
+        'Windows managed process gate could not be launched',
+      )
+    }
+    try {
+      // The gate cannot create the target until this assignment succeeds.
+      // Every later descendant therefore inherits this Job Object.
+      owner.assignProcess(child.pid)
+      owner.setSnapshotFallback(createWindowsProcessTreeOwner(child.pid))
+      const payload = Buffer.from(JSON.stringify({ command, args, cwd }), 'utf8')
+        .toString('base64')
+      await new Promise<void>((resolveWrite, rejectWrite) => {
+        const stdin = child.stdin!
+        const onError = (error: Error) => rejectWrite(error)
+        stdin.once('error', onError)
+        stdin.end(`${payload}\n`, () => {
+          stdin.removeListener('error', onError)
+          resolveWrite()
+        })
+      })
+    } catch (error) {
+      await owner.terminate().catch(() => {})
+      child.kill()
+      throw new LocalAppRuntimeError(
+        'RUNTIME_UNAVAILABLE',
+        'Windows managed process could not enter its Job Object',
+        { cause: error instanceof Error ? error.message : String(error) },
+      )
+    }
+    return { child, processTreeOwner: owner }
   }
 
   private async startStaticRuntime(
@@ -1564,7 +1889,7 @@ export class LocalAppRuntimeManager {
 
   private async killProcessTree(
     child: ChildProcess,
-    processTreeOwner?: WindowsProcessTreeOwner,
+    processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner,
   ): Promise<void> {
     const pid = child.pid
     if (!pid) return
@@ -1576,6 +1901,12 @@ export class LocalAppRuntimeManager {
           'STOP_FAILED',
           `Windows process tree ${pid} could not be fully terminated`,
           { cause: error instanceof Error ? error.message : String(error) },
+        )
+      }
+      if (!await this.waitForChildExit(child, 1_000)) {
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          `Windows managed process ${pid} did not exit after its Job Object closed`,
         )
       }
       return
