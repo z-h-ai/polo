@@ -5,6 +5,7 @@ import { Spinner } from "@polo-ai/ui"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { AdminLoginMethodTabs } from "./AdminLoginMethodTabs"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
 import {
   canSendPhoneAuthCode,
@@ -91,26 +92,11 @@ export function PhoneAuthStep({
 
   return (
     <>
-      <div className="mt-5 grid grid-cols-2 rounded-[10px] bg-foreground/5 p-1" role="tablist" aria-label={t("onboarding.adminLogin.methodAriaLabel")}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          className="rounded-[8px] bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs"
-        >
-          {t("onboarding.adminLogin.phoneAuth")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected="false"
-          onClick={onUsePassword}
-          disabled={isBusy}
-          className="rounded-[8px] px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-        >
-          {t("onboarding.adminLogin.passwordLogin")}
-        </button>
-      </div>
+      <AdminLoginMethodTabs
+        value="phone"
+        disabled={isBusy}
+        onChange={onUsePassword}
+      />
 
       {form.mode === "entry" ? (
         <form onSubmit={handleSend} className="mt-5 space-y-4">

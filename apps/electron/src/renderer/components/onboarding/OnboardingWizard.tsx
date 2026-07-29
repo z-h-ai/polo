@@ -49,7 +49,7 @@ interface OnboardingWizardProps {
   onSubmitCredential: (data: ApiKeySubmitData) => void
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onFinish: () => void
-  onAdminLogin?: (username: string, password: string) => void
+  onAdminLogin?: (identifier: string, password: string) => void
   onAdminSendPhoneCode?: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
   onAdminVerifyPhoneCode?: (phone: string, code: string) => Promise<boolean>
   onAdminRelogin?: () => void

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { PoloAiSymbol } from "@/components/icons/PoloAiSymbol"
 import { PhoneAuthStep } from "./PhoneAuthStep"
+import { AdminLoginMethodTabs } from "./AdminLoginMethodTabs"
 import { resolvePreferredAdminLoginMode } from "./phone-auth-utils"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
 
@@ -112,33 +113,14 @@ export function AdminLoginStep({
       ) : (
         <>
           {phoneAuthEnabled ? (
-            <div
-              className="mt-5 grid grid-cols-2 rounded-[10px] bg-foreground/5 p-1"
-              role="tablist"
-              aria-label={t("onboarding.adminLogin.methodAriaLabel")}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected="false"
-                onClick={() => {
-                  setLoginMode("phone")
-                  onClearError()
-                }}
-                disabled={isLoading}
-                className="rounded-[8px] px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-              >
-                {t("onboarding.adminLogin.phoneAuth")}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected="true"
-                className="rounded-[8px] bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs"
-              >
-                {t("onboarding.adminLogin.passwordLogin")}
-              </button>
-            </div>
+            <AdminLoginMethodTabs
+              value="password"
+              disabled={isLoading}
+              onChange={() => {
+                setLoginMode("phone")
+                onClearError()
+              }}
+            />
           ) : null}
           <form onSubmit={handleSubmit} className={phoneAuthEnabled ? "mt-5 space-y-4" : "mt-6 space-y-4"}>
             <div className="space-y-2">

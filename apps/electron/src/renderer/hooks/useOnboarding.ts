@@ -66,7 +66,7 @@ interface UseOnboardingReturn {
 
   // Credentials
   handleSubmitCredential: (data: ApiKeySubmitData) => void
-  handleAdminLogin: (username: string, password: string) => void
+  handleAdminLogin: (identifier: string, password: string) => void
   handleAdminSendPhoneCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
   handleAdminVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   handleAdminRelogin: () => void
@@ -579,11 +579,11 @@ export function useOnboarding({
     }
   }, [state.step, state.gitBashStatus, initialStep, onDismiss])
 
-  const handleAdminLogin = useCallback(async (username: string, password: string) => {
+  const handleAdminLogin = useCallback(async (identifier: string, password: string) => {
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
 
     try {
-      const result = await window.electronAPI.adminLogin(username, password)
+      const result = await window.electronAPI.adminLogin(identifier, password)
       if (result.success) {
         setState(resolveAdminLoginSuccessState)
         onConfigSaved?.()

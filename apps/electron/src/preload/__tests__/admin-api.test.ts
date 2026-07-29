@@ -46,4 +46,47 @@ describe('admin preload RPC chain', () => {
     )
     expect(on).toHaveBeenCalledWith('admin:reauthRequired', listener)
   })
+
+  it('gets an issuer-signed challenge through the production preload provider', async () => {
+    let resolveCallback!: (payload: { query: Record<string, string> }) => void
+    const callbackPromise = new Promise<{ query: Record<string, string> }>(resolve => {
+      resolveCallback = resolve
+    })
+    const invoke = mock(async (channel: string) => {
+      expect(channel).toBe(RPC_CHANNELS.admin.GET_STATUS)
+      return { adminUrl: 'https://admin.example.com/' }
+    })
+    const openExternal = mock(async (value: string) => {
+      const url = new URL(value)
+      expect(url.origin + url.pathname).toBe('https://challenge.example.com/issue')
+      expect(url.searchParams.get('redirect_uri')).toStartWith(
+        'http://localhost:',
+      )
+      expect(url.searchParams.get('client_id')).toBe('polo-electron')
+      resolveCallback({
+        query: {
+          code: 'issuer-signed-opaque-token',
+          state: url.searchParams.get('state')!,
+        },
+      })
+    })
+    const api = buildAdminPreloadApi(
+      { invoke, on: mock(() => () => {}) },
+      {
+        configuredIssuerUrl: 'https://challenge.example.com/issue',
+        createCallback: async () => ({
+          promise: callbackPromise,
+          url: 'http://localhost:6477',
+          close: mock(() => {}),
+        }),
+        openExternal,
+      },
+    )
+
+    await expect(api.adminAcquirePhoneAuthChallenge()).resolves.toEqual({
+      success: true,
+      challengeToken: 'issuer-signed-opaque-token',
+    })
+    expect(openExternal).toHaveBeenCalledTimes(1)
+  })
 })

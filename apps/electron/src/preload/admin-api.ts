@@ -1,10 +1,15 @@
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import { RPC_CHANNELS, type ElectronAPI } from '../shared/types'
+import {
+  acquirePhoneAuthChallenge,
+  type PhoneAuthChallengeDependencies,
+} from './phone-auth-challenge'
 
 type AdminPreloadApi = Pick<
   ElectronAPI,
   | 'adminLogin'
   | 'adminGetAuthConfig'
+  | 'adminAcquirePhoneAuthChallenge'
   | 'adminSendPhoneAuthCode'
   | 'adminVerifyPhoneAuthCode'
   | 'adminSetPassword'
@@ -17,12 +22,19 @@ type AdminPreloadApi = Pick<
 
 export function buildAdminPreloadApi(
   client: Pick<RpcClient, 'invoke' | 'on'>,
+  challengeDependencies?: PhoneAuthChallengeDependencies,
 ): AdminPreloadApi {
   return {
     adminLogin: (identifier, password) =>
       client.invoke(RPC_CHANNELS.admin.LOGIN, identifier, password),
     adminGetAuthConfig: () =>
       client.invoke(RPC_CHANNELS.admin.GET_AUTH_CONFIG),
+    adminAcquirePhoneAuthChallenge: () => challengeDependencies
+      ? acquirePhoneAuthChallenge(client, challengeDependencies)
+      : Promise.resolve({
+          success: false as const,
+          errorCode: 'phone_auth_configuration_error' as const,
+        }),
     adminSendPhoneAuthCode: (phone, challengeToken) =>
       client.invoke(RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE, phone, challengeToken),
     adminVerifyPhoneAuthCode: (phone, code) =>

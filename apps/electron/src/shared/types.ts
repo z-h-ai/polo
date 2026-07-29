@@ -240,6 +240,10 @@ export type AdminSendPhoneAuthCodeResult =
     }
   | ({ success: false } & AdminRpcErrorPayload)
 
+export type AdminPhoneAuthChallengeResult =
+  | { success: true; challengeToken: string }
+  | { success: false; errorCode: 'phone_auth_configuration_error' }
+
 export type AdminVerifyPhoneAuthCodeResult =
   | { success: true; user: AdminUser; isNewUser: boolean }
   | ({ success: false } & AdminRpcErrorPayload)
@@ -440,6 +444,7 @@ export interface ElectronAPI {
   // Admin auth
   adminLogin(identifier: string, password: string): Promise<AdminLoginResult>
   adminGetAuthConfig(): Promise<AdminAuthConfigResult>
+  adminAcquirePhoneAuthChallenge(): Promise<AdminPhoneAuthChallengeResult>
   adminSendPhoneAuthCode(phone: string, challengeToken: string): Promise<AdminSendPhoneAuthCodeResult>
   adminVerifyPhoneAuthCode(phone: string, code: string): Promise<AdminVerifyPhoneAuthCodeResult>
   adminSetPassword(password: string): Promise<AdminSetPasswordResult>

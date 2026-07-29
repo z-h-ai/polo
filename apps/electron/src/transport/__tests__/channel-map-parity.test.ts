@@ -18,6 +18,7 @@ type BrowserPaneKeys = `browserPane.${FunctionKeys<ElectronAPI['browserPane']>}`
 type ApiToChannelMapKeys = Exclude<
   FunctionKeys<ElectronAPI>,
   | 'performOAuth'
+  | 'adminAcquirePhoneAuthChallenge' // preload opens the system challenge page and receives its loopback callback
   | 'getTransportConnectionState'
   | 'getRuntimeEnvironment'
   | 'onTransportConnectionStateChanged'

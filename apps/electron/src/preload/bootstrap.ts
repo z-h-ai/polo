@@ -269,7 +269,10 @@ client.onConnectionStateChanged((state) => {
 }
 
 // Admin auth — explicit, testable preload surface for admin-managed deployments.
-Object.assign(api, buildAdminPreloadApi(client))
+Object.assign(api, buildAdminPreloadApi(client, {
+  configuredIssuerUrl: process.env.POLO_AI_PHONE_AUTH_CHALLENGE_URL,
+  openExternal: url => shell.openExternal(url),
+}))
 
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →
