@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useReducer, useRef, useState } from "react"
 import type { FormEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Spinner } from "@polo-ai/ui"
@@ -7,17 +7,19 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
 import {
-  createPhoneAuthChallengeToken,
+  canSendPhoneAuthCode,
+  canVerifyPhoneAuthCode,
+  createExclusiveRunner,
+  INITIAL_PHONE_AUTH_FORM_STATE,
   maskMainlandPhone,
-  normalizeMainlandPhoneInput,
-  normalizeVerificationCode,
+  reducePhoneAuthForm,
 } from "./phone-auth-utils"
 
 interface PhoneAuthStepProps {
   isLoading: boolean
   onClearError: () => void
-  onSendCode: (phone: string, challengeToken: string) => Promise<AdminSendPhoneAuthCodeResult>
-  onVerify: (phone: string, code: string) => void
+  onSendCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
+  onVerify: (phone: string, code: string) => Promise<boolean>
   onUsePassword: () => void
 }
 
@@ -29,48 +31,61 @@ export function PhoneAuthStep({
   onUsePassword,
 }: PhoneAuthStepProps) {
   const { t } = useTranslation()
-  const [mode, setMode] = useState<"entry" | "verify">("entry")
-  const [phone, setPhone] = useState("")
-  const [code, setCode] = useState("")
-  const [consented, setConsented] = useState(false)
-  const [resendSeconds, setResendSeconds] = useState(0)
+  const [form, dispatch] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
+  const [isSending, setIsSending] = useState(false)
+  const [isVerifying, setIsVerifying] = useState(false)
+  const sendRunner = useRef(createExclusiveRunner())
+  const verifyRunner = useRef(createExclusiveRunner())
 
   useEffect(() => {
-    if (resendSeconds <= 0) return
+    if (form.resendSeconds <= 0) return
     const timer = window.setInterval(() => {
-      setResendSeconds(value => Math.max(0, value - 1))
+      dispatch({ type: 'countdownTicked' })
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [resendSeconds])
+  }, [form.resendSeconds])
 
-  const phoneIsValid = /^1\d{10}$/.test(phone)
-  const maskedPhone = useMemo(() => maskMainlandPhone(phone), [phone])
+  const canSend = canSendPhoneAuthCode(form)
+  const canVerify = canVerifyPhoneAuthCode(form)
+  const isBusy = isLoading || isSending || isVerifying
+  const maskedPhone = useMemo(() => maskMainlandPhone(form.phone), [form.phone])
 
   const sendCode = async () => {
-    if (isLoading || !phoneIsValid) return
-    const result = await onSendCode(phone, createPhoneAuthChallengeToken())
-    if (!result.success) return
-    setCode("")
-    setResendSeconds(Math.max(0, Math.ceil(result.resendAfter)))
-    setMode("verify")
+    if (isBusy || !canSend) return
+    const result = await sendRunner.current.run(async () => {
+      setIsSending(true)
+      try {
+        return await onSendCode(form.phone)
+      } finally {
+        setIsSending(false)
+      }
+    })
+    if (result?.success) {
+      dispatch({ type: 'codeSent', resendAfter: result.resendAfter })
+    }
   }
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!consented) return
+    if (!canSend) return
     await sendCode()
   }
 
   const handleVerify = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (isLoading || code.length !== 6) return
-    onVerify(phone, code)
+    if (isBusy || !canVerify) return
+    void verifyRunner.current.run(async () => {
+      setIsVerifying(true)
+      try {
+        return await onVerify(form.phone, form.code)
+      } finally {
+        setIsVerifying(false)
+      }
+    })
   }
 
   const handleEditPhone = () => {
-    setMode("entry")
-    setCode("")
-    setResendSeconds(0)
+    dispatch({ type: 'phoneEditRequested' })
     onClearError()
   }
 
@@ -90,14 +105,14 @@ export function PhoneAuthStep({
           role="tab"
           aria-selected="false"
           onClick={onUsePassword}
-          disabled={isLoading}
+          disabled={isBusy}
           className="rounded-[8px] px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
         >
           {t("onboarding.adminLogin.passwordLogin")}
         </button>
       </div>
 
-      {mode === "entry" ? (
+      {form.mode === "entry" ? (
         <form onSubmit={handleSend} className="mt-5 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="phone-auth-phone" className="text-xs text-foreground/70">
@@ -110,12 +125,12 @@ export function PhoneAuthStep({
                 inputMode="numeric"
                 autoComplete="tel-national"
                 placeholder={t("onboarding.adminLogin.phonePlaceholder")}
-                value={phone}
+                value={form.phone}
                 onChange={(event) => {
-                  setPhone(normalizeMainlandPhoneInput(event.target.value))
+                  dispatch({ type: 'phoneChanged', value: event.target.value })
                   onClearError()
                 }}
-                disabled={isLoading}
+                disabled={isBusy}
                 className="h-11 flex-1 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             </div>
@@ -124,9 +139,9 @@ export function PhoneAuthStep({
           <label className="flex cursor-pointer items-start gap-2 text-xs leading-5 text-muted-foreground">
             <input
               type="checkbox"
-              checked={consented}
-              onChange={(event) => setConsented(event.target.checked)}
-              disabled={isLoading}
+              checked={form.consented}
+              onChange={(event) => dispatch({ type: 'consentChanged', value: event.target.checked })}
+              disabled={isBusy}
               className="mt-1 size-3.5 accent-[var(--accent)]"
             />
             <span>
@@ -139,10 +154,10 @@ export function PhoneAuthStep({
 
           <Button
             type="submit"
-            disabled={isLoading || !phoneIsValid || !consented}
+            disabled={isBusy || !canSend}
             className="h-11 w-full rounded-[10px] bg-accent text-background hover:bg-accent/90"
           >
-            {isLoading ? (
+            {isSending ? (
               <>
                 <Spinner className="mr-1.5" />
                 {t("onboarding.adminLogin.sendingCode")}
@@ -159,7 +174,7 @@ export function PhoneAuthStep({
             <button
               type="button"
               onClick={handleEditPhone}
-              disabled={isLoading}
+              disabled={isBusy}
               className="text-accent hover:underline disabled:opacity-50"
             >
               {t("onboarding.adminLogin.editPhone")}
@@ -176,24 +191,24 @@ export function PhoneAuthStep({
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 placeholder={t("onboarding.adminLogin.codePlaceholder")}
-                value={code}
+                value={form.code}
                 onChange={(event) => {
-                  setCode(normalizeVerificationCode(event.target.value))
+                  dispatch({ type: 'codeChanged', value: event.target.value })
                   onClearError()
                 }}
-                disabled={isLoading}
+                disabled={isBusy}
                 autoFocus
                 className="h-11 min-w-0 flex-1 rounded-[10px] bg-foreground-2 tracking-[0.25em]"
               />
               <Button
                 type="button"
                 variant="outline"
-                disabled={isLoading || resendSeconds > 0}
+                disabled={isBusy || form.resendSeconds > 0}
                 onClick={sendCode}
                 className="h-11 shrink-0 rounded-[10px]"
               >
-                {resendSeconds > 0
-                  ? t("onboarding.adminLogin.resendIn", { seconds: resendSeconds })
+                {form.resendSeconds > 0
+                  ? t("onboarding.adminLogin.resendIn", { count: form.resendSeconds })
                   : t("onboarding.adminLogin.resend")}
               </Button>
             </div>
@@ -202,10 +217,10 @@ export function PhoneAuthStep({
 
           <Button
             type="submit"
-            disabled={isLoading || code.length !== 6}
+            disabled={isBusy || !canVerify}
             className="h-11 w-full rounded-[10px] bg-accent text-background hover:bg-accent/90"
           >
-            {isLoading ? (
+            {isVerifying ? (
               <>
                 <Spinner className="mr-1.5" />
                 {t("onboarding.adminLogin.verifying")}

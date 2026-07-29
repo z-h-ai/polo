@@ -50,8 +50,8 @@ interface OnboardingWizardProps {
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onFinish: () => void
   onAdminLogin?: (username: string, password: string) => void
-  onAdminSendPhoneCode?: (phone: string, challengeToken: string) => Promise<AdminSendPhoneAuthCodeResult>
-  onAdminVerifyPhoneCode?: (phone: string, code: string) => void
+  onAdminSendPhoneCode?: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
+  onAdminVerifyPhoneCode?: (phone: string, code: string) => Promise<boolean>
   onAdminRelogin?: () => void
 
   // Claude OAuth (two-step flow)

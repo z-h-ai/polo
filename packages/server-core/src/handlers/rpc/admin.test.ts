@@ -164,6 +164,8 @@ const managerState: {
   deletedCredentialSlugs: [],
 }
 
+const loggerWarn = jest.fn()
+
 const mockCredentialManager = {
   async getAdminTokens(): Promise<StoredTokens | null> {
     return managerState.tokens
@@ -260,7 +262,7 @@ function createHarness() {
       isDebugMode: true,
       logger: {
         info: jest.fn(),
-        warn: jest.fn(),
+        warn: loggerWarn,
         error: jest.fn(),
         debug: jest.fn(),
       },
@@ -328,6 +330,7 @@ function encryptedApiKey(apiKey: string, accessToken = 'access-token'): TestEncr
 }
 
 beforeEach(() => {
+  loggerWarn.mockClear()
   adminClientCalls.length = 0
   configState.adminUrl = 'https://admin.example.com'
   configState.adminConfigVersion = undefined
@@ -491,6 +494,82 @@ describe('registerAdminHandlers', () => {
     ])
   })
 
+  it('keeps phone authentication successful when post-login connection sync fails', async () => {
+    adminClientBehavior.getLlmConnections = async () => {
+      throw new Error('temporary connection sync outage')
+    }
+    const { verifyPhoneAuthCode, syncConnections } = createHarness()
+
+    const result = await verifyPhoneAuthCode(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      '13800138000',
+      '123456',
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      isNewUser: true,
+    })
+    expect(managerState.tokens).toMatchObject({
+      accessToken: 'phone-access-token',
+      refreshToken: 'phone-refresh-token',
+      userId: 'phone-user-1',
+    })
+    expect(loggerWarn).toHaveBeenCalledWith(
+      '[Admin] post-login connection sync failed; session remains authenticated:',
+      'temporary connection sync outage',
+    )
+
+    adminClientBehavior.getLlmConnections = async () => ({
+      configVersion: 'config-after-retry',
+      connections: [adminConnection()],
+      defaultConnection: 'admin-anthropic',
+    })
+    const retry = await syncConnections({
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    })
+    expect(retry).toMatchObject({
+      success: true,
+      configVersion: 'config-after-retry',
+      connectionCount: 1,
+    })
+  })
+
+  it('uses the same successful login path for an existing phone user', async () => {
+    adminClientBehavior.verifyPhoneAuthCode = async () => ({
+      accessToken: 'returning-access-token',
+      refreshToken: 'returning-refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'returning-user-1',
+        username: 'phone_13800138000',
+        displayName: 'Returning User',
+        role: 'user',
+        groupIds: [],
+      },
+      isNewUser: false,
+    })
+    const { verifyPhoneAuthCode } = createHarness()
+
+    const result = await verifyPhoneAuthCode(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      '13800138000',
+      '654321',
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      isNewUser: false,
+      user: { id: 'returning-user-1' },
+    })
+    expect(managerState.tokens).toMatchObject({
+      accessToken: 'returning-access-token',
+      userId: 'returning-user-1',
+    })
+  })
+
   it('sets a password with the current encrypted admin session token only', async () => {
     managerState.tokens = {
       accessToken: 'access-token',
@@ -554,6 +633,10 @@ describe('registerAdminHandlers', () => {
     expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-admin')
     expect(configState.defaultConnection).toBe('admin-anthropic')
     expect(configState.adminConfigVersion).toBe('config-v1')
+    expect(adminClientCalls[0]).toMatchObject({
+      method: 'login',
+      args: ['admin', 'secret'],
+    })
   })
 
   it('syncs transit-encrypted admin api keys into credential storage as plaintext', async () => {

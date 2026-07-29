@@ -42,6 +42,12 @@ interface UseOnboardingOptions {
   editingSlug?: string | null
   /** Set of slugs already in use (for generating unique slugs when creating new) */
   existingSlugs?: Set<string>
+  /**
+   * Returns an opaque token issued by the configured human/device challenge.
+   * Electron intentionally has no fallback token: without a real issuer, phone
+   * authentication is reported as unavailable and password login remains usable.
+   */
+  phoneAuthChallengeProvider?: () => Promise<string | null>
 }
 
 interface UseOnboardingReturn {
@@ -61,8 +67,8 @@ interface UseOnboardingReturn {
   // Credentials
   handleSubmitCredential: (data: ApiKeySubmitData) => void
   handleAdminLogin: (username: string, password: string) => void
-  handleAdminSendPhoneCode: (phone: string, challengeToken: string) => Promise<AdminSendPhoneAuthCodeResult>
-  handleAdminVerifyPhoneCode: (phone: string, code: string) => void
+  handleAdminSendPhoneCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
+  handleAdminVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   handleAdminRelogin: () => void
   showAdminKicked: () => void
 
@@ -156,8 +162,10 @@ export function mapAdminPhoneAuthError(error: unknown): string {
       return i18n.t('onboarding.adminLogin.verificationAttemptsExceeded')
     case 'sms_rate_limited':
       return i18n.t('onboarding.adminLogin.smsRateLimited', {
-        seconds: Math.max(1, Math.ceil(errorLike.retryAfter ?? 60)),
+        count: Math.max(1, Math.ceil(errorLike.retryAfter ?? 60)),
       })
+    case 'invalid_credentials':
+      return i18n.t('onboarding.adminLogin.challengeFailed')
     case 'phone_auth_disabled':
       return i18n.t('onboarding.adminLogin.phoneAuthDisabled')
     case 'phone_not_registered':
@@ -179,6 +187,33 @@ export function mapAdminPhoneAuthError(error: unknown): string {
   }
 
   return i18n.t('onboarding.adminLogin.genericError')
+}
+
+export function resolvePhoneAuthAvailability(
+  serverEnabled: boolean,
+  challengeProvider: UseOnboardingOptions['phoneAuthChallengeProvider'],
+): boolean {
+  return serverEnabled && typeof challengeProvider === 'function'
+}
+
+export async function sendPhoneAuthCodeWithChallenge(
+  phone: string,
+  challengeProvider: UseOnboardingOptions['phoneAuthChallengeProvider'],
+  send: (phone: string, challengeToken: string) => Promise<AdminSendPhoneAuthCodeResult>,
+): Promise<AdminSendPhoneAuthCodeResult> {
+  if (!challengeProvider) {
+    return { success: false, errorCode: 'phone_auth_configuration_error' }
+  }
+
+  try {
+    const challengeToken = await challengeProvider()
+    if (!challengeToken?.trim()) {
+      return { success: false, errorCode: 'phone_auth_configuration_error' }
+    }
+    return await send(phone, challengeToken)
+  } catch {
+    return { success: false, errorCode: 'phone_auth_configuration_error' }
+  }
 }
 
 export function resolveAdminLoginSuccessState(state: OnboardingState): OnboardingState {
@@ -318,6 +353,7 @@ export function useOnboarding({
   onConfigSaved,
   editingSlug = null,
   existingSlugs = new Set(),
+  phoneAuthChallengeProvider,
 }: UseOnboardingOptions): UseOnboardingReturn {
   const resolvedInitialStep = resolveInitialStep(initialSetupNeeds, initialStep)
 
@@ -353,7 +389,17 @@ export function useOnboarding({
     window.electronAPI.adminGetAuthConfig()
       .then(result => {
         if (!cancelled) {
-          setState(s => ({ ...s, phoneAuthEnabled: result.phoneAuthEnabled }))
+          const phoneAuthEnabled = resolvePhoneAuthAvailability(
+            result.phoneAuthEnabled,
+            phoneAuthChallengeProvider,
+          )
+          setState(s => ({
+            ...s,
+            phoneAuthEnabled,
+            ...(result.phoneAuthEnabled && !phoneAuthEnabled
+              ? { errorMessage: mapAdminPhoneAuthError({ errorCode: 'phone_auth_configuration_error' }) }
+              : {}),
+          }))
         }
       })
       .catch(() => {
@@ -364,7 +410,7 @@ export function useOnboarding({
     return () => {
       cancelled = true
     }
-  }, [state.step, state.phoneAuthEnabled])
+  }, [phoneAuthChallengeProvider, state.step, state.phoneAuthEnabled])
 
   // Check Git Bash on Windows at mount. If missing, redirect to git-bash step.
   useEffect(() => {
@@ -552,12 +598,16 @@ export function useOnboarding({
 
   const handleAdminSendPhoneCode = useCallback(async (
     phone: string,
-    challengeToken: string,
   ): Promise<AdminSendPhoneAuthCodeResult> => {
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
 
     try {
-      const result = await window.electronAPI.adminSendPhoneAuthCode(phone, challengeToken)
+      const result = await sendPhoneAuthCodeWithChallenge(
+        phone,
+        phoneAuthChallengeProvider,
+        (normalizedPhone, challengeToken) =>
+          window.electronAPI.adminSendPhoneAuthCode(normalizedPhone, challengeToken),
+      )
       if (result.success) {
         setState(s => ({ ...s, loginStatus: 'idle', errorMessage: undefined }))
         return result
@@ -576,9 +626,9 @@ export function useOnboarding({
       }))
       return { success: false, errorCode: 'NETWORK_ERROR' }
     }
-  }, [])
+  }, [phoneAuthChallengeProvider])
 
-  const handleAdminVerifyPhoneCode = useCallback(async (phone: string, code: string) => {
+  const handleAdminVerifyPhoneCode = useCallback(async (phone: string, code: string): Promise<boolean> => {
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
 
     try {
@@ -586,19 +636,21 @@ export function useOnboarding({
       if (result.success) {
         setState(resolveAdminLoginSuccessState)
         onConfigSaved?.()
-        return
+        return true
       }
       setState(s => ({
         ...s,
         loginStatus: 'error',
         errorMessage: mapAdminPhoneAuthError(result),
       }))
+      return false
     } catch (error) {
       setState(s => ({
         ...s,
         loginStatus: 'error',
         errorMessage: mapAdminPhoneAuthError(error),
       }))
+      return false
     }
   }, [onConfigSaved])
 

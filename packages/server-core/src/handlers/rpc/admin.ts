@@ -48,7 +48,12 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       const manager = getCredentialManager()
       const client = createAdminClient(adminUrl, manager)
       const login = await client.login(identifier, password)
-      await completeAdminLogin({ adminUrl, manager, login })
+      await completeAdminLogin({
+        adminUrl,
+        manager,
+        login,
+        onSyncFailure: error => logPostLoginSyncFailure(log, error),
+      })
 
       return { success: true, user: login.user }
     } catch (error) {
@@ -91,7 +96,12 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         const manager = getCredentialManager()
         const login = await createAdminClient(adminUrl, manager)
           .verifyPhoneAuthCode({ phone, code })
-        await completeAdminLogin({ adminUrl, manager, login })
+        await completeAdminLogin({
+          adminUrl,
+          manager,
+          login,
+          onSyncFailure: error => logPostLoginSyncFailure(log, error),
+        })
         return {
           success: true,
           user: login.user,
@@ -246,6 +256,7 @@ async function completeAdminLogin(args: {
   adminUrl: string
   manager: CredentialManager
   login: AdminLoginResponse
+  onSyncFailure: (error: unknown) => void
 }): Promise<void> {
   await args.manager.setAdminTokens({
     accessToken: args.login.accessToken,
@@ -256,11 +267,28 @@ async function completeAdminLogin(args: {
     displayName: args.login.user.displayName ?? undefined,
   })
 
-  await syncAdminConnections({
-    adminUrl: args.adminUrl,
-    manager: args.manager,
-    accessToken: args.login.accessToken,
-  })
+  try {
+    await syncAdminConnections({
+      adminUrl: args.adminUrl,
+      manager: args.manager,
+      accessToken: args.login.accessToken,
+    })
+  } catch (error) {
+    // Authentication has already succeeded and the one-time code may already
+    // be consumed. Keep the persisted session and let the dedicated
+    // admin:syncConnections path retry this post-login operation.
+    args.onSyncFailure(error)
+  }
+}
+
+function logPostLoginSyncFailure(
+  log: HandlerDeps['platform']['logger'],
+  error: unknown,
+): void {
+  log?.warn(
+    '[Admin] post-login connection sync failed; session remains authenticated:',
+    error instanceof Error ? error.message : String(error),
+  )
 }
 
 async function ensureValidTokens(adminUrl: string, manager: CredentialManager): Promise<TokenValidationResult> {

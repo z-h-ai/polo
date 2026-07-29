@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { PoloAiSymbol } from "@/components/icons/PoloAiSymbol"
 import { PhoneAuthStep } from "./PhoneAuthStep"
+import { resolvePreferredAdminLoginMode } from "./phone-auth-utils"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
 
 interface AdminLoginStepProps {
@@ -17,8 +18,8 @@ interface AdminLoginStepProps {
   isLoading?: boolean
   phoneAuthEnabled?: boolean
   onClearError: () => void
-  onSendPhoneCode: (phone: string, challengeToken: string) => Promise<AdminSendPhoneAuthCodeResult>
-  onVerifyPhoneCode: (phone: string, code: string) => void
+  onSendPhoneCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
+  onVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   onSubmit: (identifier: string, password: string) => void
 }
 
@@ -35,11 +36,13 @@ export function AdminLoginStep({
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
-  const [loginMode, setLoginMode] = useState<"phone" | "password">("password")
+  const [loginMode, setLoginMode] = useState<"phone" | "password">(
+    resolvePreferredAdminLoginMode(phoneAuthEnabled),
+  )
 
   useEffect(() => {
-    if (phoneAuthEnabled === true) {
-      setLoginMode("phone")
+    if (phoneAuthEnabled !== undefined) {
+      setLoginMode(resolvePreferredAdminLoginMode(phoneAuthEnabled))
     }
   }, [phoneAuthEnabled])
 

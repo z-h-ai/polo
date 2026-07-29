@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, mock } from 'bun:test'
 import { setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import {
   resolveSlugForMethod,
@@ -8,6 +8,8 @@ import {
   resolveAdminLoginSuccessState,
   resolveAdminLoginFailureState,
   mapAdminPhoneAuthError,
+  resolvePhoneAuthAvailability,
+  sendPhoneAuthCodeWithChallenge,
   resolveAdminReloginState,
   resolveAdminKickedState,
 } from '../useOnboarding'
@@ -247,6 +249,50 @@ describe('admin onboarding flow', () => {
       message: 'secret stack',
       status: 503,
     })).toBe('Phone verification is temporarily unavailable. Please try again later.')
+
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'invalid_credentials',
+      message: 'challenge verifier secret detail',
+    })).toBe('Verification challenge failed. Please try again.')
+  })
+
+  it('falls back to password login when no real challenge issuer is configured', () => {
+    expect(resolvePhoneAuthAvailability(true, undefined)).toBe(false)
+    expect(resolvePhoneAuthAvailability(false, async () => 'signed-token')).toBe(false)
+  })
+
+  it('does not send a code without an issuer-signed challenge token', async () => {
+    const send = mock(async () => ({
+      success: true as const,
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 60,
+    }))
+
+    expect(await sendPhoneAuthCodeWithChallenge('13800138000', undefined, send)).toEqual({
+      success: false,
+      errorCode: 'phone_auth_configuration_error',
+    })
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('passes the opaque challenge token through without transforming it', async () => {
+    const send = mock(async () => ({
+      success: true as const,
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 47,
+    }))
+
+    const result = await sendPhoneAuthCodeWithChallenge(
+      '13800138000',
+      async () => 'issuer-signed-opaque-token',
+      send,
+    )
+
+    expect(result).toMatchObject({ success: true, resendAfter: 47 })
+    expect(send).toHaveBeenCalledWith('13800138000', 'issuer-signed-opaque-token')
   })
 
   it('moves from kicked back to admin-login when relogin is requested', () => {

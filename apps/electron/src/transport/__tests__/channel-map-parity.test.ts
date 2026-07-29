@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, mock } from 'bun:test'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { ElectronAPI } from '../../shared/types'
+import { buildClientApi } from '../build-api'
 import { CHANNEL_MAP } from '../channel-map'
 
 type AnyFn = (...args: any[]) => any
@@ -59,5 +62,30 @@ describe('CHANNEL_MAP runtime contract', () => {
     const values = Object.values(CHANNEL_MAP)
     expect(values.some((entry) => entry.type === 'listener')).toBe(true)
     expect(values.some((entry) => entry.type === 'invoke')).toBe(true)
+  })
+
+  it('forwards phone auth and password calls through the typed local RPC surface', async () => {
+    const calls: unknown[][] = []
+    const invoke = mock(async (...args: unknown[]) => {
+      calls.push(args)
+      return { success: true }
+    })
+    const client = {
+      invoke,
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    await api.adminGetAuthConfig()
+    await api.adminSendPhoneAuthCode('13800138000', 'issuer-signed-token')
+    await api.adminVerifyPhoneAuthCode('13800138000', '123456')
+    await api.adminSetPassword('password-123')
+
+    expect(calls).toEqual([
+      [RPC_CHANNELS.admin.GET_AUTH_CONFIG],
+      [RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE, '13800138000', 'issuer-signed-token'],
+      [RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE, '13800138000', '123456'],
+      [RPC_CHANNELS.admin.SET_PASSWORD, 'password-123'],
+    ])
   })
 })
