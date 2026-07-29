@@ -74,12 +74,11 @@ export function OrganizationManagementDialog({
   const canManage = isOwner || organization.organizationMembershipRole === 'manager'
   const organizationErrorMessage = useCallback((result: {
     errorCode?: string
-    message?: string
   }) => {
     const translated = result.errorCode
       ? t(`organization.errors.${result.errorCode}`, { defaultValue: '' })
       : ''
-    return translated || result.message || t('organization.manage.actionFailed')
+    return translated || t('organization.manage.actionFailed')
   }, [t])
 
   const loadData = useCallback(async () => {

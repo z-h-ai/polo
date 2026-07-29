@@ -24,25 +24,27 @@ export type OrganizationFlowState =
   | 'ready'
 
 export interface OrganizationFlowError {
-  code?: string
-  message: string
+  code: string
 }
 
 function resultError(result: {
   errorCode?: string
-  message?: string
 }): OrganizationFlowError {
   return {
-    code: result.errorCode,
-    message: result.message || 'Organization request failed',
+    code: result.errorCode || 'request_failed',
   }
 }
 
 function caughtError(caught: unknown): OrganizationFlowError {
-  if (caught && typeof caught === 'object' && 'message' in caught) {
-    return caught as OrganizationFlowError
+  if (caught && typeof caught === 'object') {
+    const code = 'code' in caught && typeof caught.code === 'string'
+      ? caught.code
+      : 'errorCode' in caught && typeof caught.errorCode === 'string'
+        ? caught.errorCode
+        : 'request_failed'
+    return { code }
   }
-  return { message: String(caught) }
+  return { code: 'request_failed' }
 }
 
 export function useOrganizationContextState() {
@@ -66,7 +68,7 @@ export function useOrganizationContextState() {
   ) => {
     const organization = summaries.find(item => item.id === organizationId)
     if (!organization || organization.membership.status !== 'active') {
-      throw new Error('Organization membership is not active')
+      throw { code: 'membership_not_active' } satisfies OrganizationFlowError
     }
 
     setStoredActiveOrganizationId(accountId, organizationId)
@@ -204,8 +206,7 @@ export function useOrganizationContextState() {
         || result.membership.status !== 'active'
       ) {
         throw {
-          code: 'SERVER_ERROR',
-          message: 'The organization owner membership could not be confirmed',
+          code: 'owner_membership_unconfirmed',
         } satisfies OrganizationFlowError
       }
 
@@ -213,12 +214,13 @@ export function useOrganizationContextState() {
       const created = summaries.find(item => item.id === result.organization.id)
       if (created?.membership.role !== 'owner') {
         throw {
-          code: 'SERVER_ERROR',
-          message: 'The organization owner membership could not be confirmed',
+          code: 'owner_membership_unconfirmed',
         } satisfies OrganizationFlowError
       }
       const accountId = accountIdRef.current
-      if (!accountId) throw new Error('Account context is unavailable')
+      if (!accountId) {
+        throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
+      }
       activateOrganization(accountId, summaries, result.organization.id)
       return result
     } catch (caught) {
@@ -230,7 +232,9 @@ export function useOrganizationContextState() {
 
   const acceptJoin = useCallback(async () => {
     const token = pendingJoinTokenRef.current
-    if (!token) throw new Error('Join token is unavailable')
+    if (!token) {
+      throw { code: 'join_token_unavailable' } satisfies OrganizationFlowError
+    }
     setError(null)
     try {
       const result = await window.electronAPI.organizationAcceptJoin(token)
@@ -238,7 +242,9 @@ export function useOrganizationContextState() {
 
       const summaries = await loadOrganizations()
       const accountId = accountIdRef.current
-      if (!accountId) throw new Error('Account context is unavailable')
+      if (!accountId) {
+        throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
+      }
       clearPendingOrganizationJoinToken()
       pendingJoinTokenRef.current = null
       setPendingJoinToken(null)
@@ -254,7 +260,9 @@ export function useOrganizationContextState() {
 
   const selectOrganization = useCallback((organizationId: string) => {
     const accountId = accountIdRef.current
-    if (!accountId) throw new Error('Account context is unavailable')
+    if (!accountId) {
+      throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
+    }
     activateOrganization(accountId, organizationSummaries, organizationId)
   }, [activateOrganization, organizationSummaries])
 
