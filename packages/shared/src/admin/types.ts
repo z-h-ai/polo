@@ -58,11 +58,15 @@ export interface AdminRefreshResponse {
   expiresIn: number;
 }
 
-export interface AdminValidateResponse {
-  valid: boolean;
-  user: AdminUser;
-  configVersion: string;
-}
+export type AdminValidateResponse =
+  | {
+      valid: true;
+      user: AdminUser;
+      configVersion: string;
+    }
+  | {
+      valid: false;
+    };
 
 export interface AdminLlmConnection extends LlmConnection {
   endpoint?: string;

@@ -314,7 +314,11 @@ async function completeAdminLogin(args: {
     displayName: args.login.user.displayName ?? undefined,
   })
 
+  const previousAdminConnectionSlugs = getAdminManagedConnectionSlugs()
+  setAdminConfigVersion(undefined)
+
   try {
+    await deleteAdminManagedConnections(args.manager, previousAdminConnectionSlugs)
     await syncAdminConnections({
       adminUrl: args.adminUrl,
       manager: args.manager,
@@ -322,8 +326,17 @@ async function completeAdminLogin(args: {
     })
   } catch (error) {
     // Authentication has already succeeded and the one-time code may already
-    // be consumed. Keep the persisted session and let the dedicated
-    // admin:syncConnections path retry this post-login operation.
+    // be consumed. Keep the persisted session, but fail closed for model
+    // authorization so a previous account's managed connections cannot be used.
+    setAdminConfigVersion(undefined)
+    try {
+      await deleteAdminManagedConnections(
+        args.manager,
+        previousAdminConnectionSlugs,
+      )
+    } catch (cleanupError) {
+      args.onSyncFailure(cleanupError)
+    }
     args.onSyncFailure(error)
   }
 }
@@ -397,30 +410,40 @@ async function syncAdminConnections(args: {
     throw new AdminError('Admin session is not logged in', 'UNAUTHORIZED')
   }
 
-  const client = createAdminClient(args.adminUrl, args.manager)
-  const response = await client.getLlmConnections(accessToken)
-  const incomingSlugs = new Set(response.connections.map(connection => connection.slug))
-
-  for (const existing of getLlmConnections()) {
-    if (existing.managedBy === 'admin' && !incomingSlugs.has(existing.slug)) {
-      await deleteConnectionAndCredentials(args.manager, existing.slug)
+  const connectionSlugsToRevoke = new Set(getAdminManagedConnectionSlugs())
+  try {
+    const client = createAdminClient(args.adminUrl, args.manager)
+    const response = await client.getLlmConnections(accessToken)
+    const incomingSlugs = new Set(response.connections.map(connection => connection.slug))
+    for (const slug of incomingSlugs) {
+      connectionSlugsToRevoke.add(slug)
     }
-  }
 
-  for (const connection of response.connections) {
-    await upsertAdminConnection(args.manager, connection, response.configVersion, accessToken)
-  }
+    for (const existing of getLlmConnections()) {
+      if (existing.managedBy === 'admin' && !incomingSlugs.has(existing.slug)) {
+        await deleteConnectionAndCredentials(args.manager, existing.slug)
+      }
+    }
 
-  if (response.defaultConnection && getLlmConnections().some(connection => connection.slug === response.defaultConnection)) {
-    setDefaultLlmConnection(response.defaultConnection)
-  }
+    for (const connection of response.connections) {
+      await upsertAdminConnection(args.manager, connection, response.configVersion, accessToken)
+    }
 
-  setAdminConfigVersion(response.configVersion)
+    if (response.defaultConnection && getLlmConnections().some(connection => connection.slug === response.defaultConnection)) {
+      setDefaultLlmConnection(response.defaultConnection)
+    }
 
-  return {
-    configVersion: response.configVersion,
-    connectionCount: response.connections.length,
-    defaultConnection: response.defaultConnection,
+    setAdminConfigVersion(response.configVersion)
+
+    return {
+      configVersion: response.configVersion,
+      connectionCount: response.connections.length,
+      defaultConnection: response.defaultConnection,
+    }
+  } catch (error) {
+    setAdminConfigVersion(undefined)
+    await deleteAdminManagedConnections(args.manager, connectionSlugsToRevoke)
+    throw error
   }
 }
 
@@ -502,12 +525,31 @@ function scrubCredentialFields(connection: LlmConnection): void {
   delete mutable.credentials
 }
 
-async function deleteAdminManagedConnections(manager: CredentialManager): Promise<void> {
-  for (const connection of getLlmConnections()) {
-    if (connection.managedBy === 'admin') {
-      await deleteConnectionAndCredentials(manager, connection.slug)
-    }
+function getAdminManagedConnectionSlugs(): string[] {
+  return getLlmConnections()
+    .filter(connection => connection.managedBy === 'admin')
+    .map(connection => connection.slug)
+}
+
+async function deleteAdminManagedConnections(
+  manager: CredentialManager,
+  additionalSlugs: Iterable<string> = [],
+): Promise<void> {
+  const slugs = new Set([
+    ...additionalSlugs,
+    ...getAdminManagedConnectionSlugs(),
+  ])
+
+  // Remove every connection from active configuration before awaiting keychain
+  // cleanup. Even if credential deletion fails, model dispatch can no longer
+  // resolve a previous account's Admin-managed connection.
+  for (const slug of slugs) {
+    deleteLlmConnection(slug)
   }
+
+  await Promise.all(
+    [...slugs].map(slug => manager.deleteLlmCredentials(slug)),
+  )
 }
 
 async function deleteConnectionAndCredentials(manager: CredentialManager, slug: string): Promise<void> {

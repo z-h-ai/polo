@@ -801,6 +801,7 @@
   "settings.accountSecurity.password.title": "Jelszó beállítása",
   "settings.accountSecurity.password.too_short": "A jelszónak legalább 8 karakter hosszúnak kell lennie.",
   "settings.accountSecurity.title": "Fiókbiztonság",
+  "settings.accountSecurity.unavailable": "Jelentkezz be egy rendszergazdai fiókkal a jelszavad kezeléséhez.",
   "settings.ai.addConnection": "+ Kapcsolat hozzáadása",
   "settings.ai.connection": "Kapcsolat",
   "settings.ai.connectionDesc": "API kapcsolat az új csevegésekhez",

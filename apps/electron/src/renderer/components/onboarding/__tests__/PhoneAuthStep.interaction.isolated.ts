@@ -21,6 +21,23 @@ mock.module('@/components/ui/scroll-area', () => ({
   ScrollArea: ({ children }: { children?: ReactNode }) =>
     createElement('div', null, children),
 }))
+mock.module('@/components/ui/styled-dropdown', () => ({
+  DropdownMenu: ({ children }: { children?: ReactNode }) =>
+    createElement('div', null, children),
+  DropdownMenuTrigger: ({ children }: { children?: ReactNode }) =>
+    createElement('div', null, children),
+  StyledDropdownMenuContent: ({ children }: { children?: ReactNode }) =>
+    createElement('div', null, children),
+  StyledDropdownMenuItem: ({ children }: { children?: ReactNode }) =>
+    createElement('div', null, children),
+}))
+mock.module('@/components/ui/menu-context', () => ({
+  DropdownMenuProvider: ({ children }: { children?: ReactNode }) =>
+    createElement('div', null, children),
+}))
+mock.module('@/components/ui/separator', () => ({
+  Separator: () => createElement('hr'),
+}))
 mock.module('@/components/settings', () => ({
   SettingsCard: ({ children }: { children?: ReactNode }) =>
     createElement('div', null, children),
@@ -38,6 +55,24 @@ mock.module('@/components/settings', () => ({
   ),
 }))
 
+type TestAppShellContext = {
+  currentAdminUser?: {
+    username: string
+    displayName: string | null
+  } | null
+}
+
+let appShellContext: TestAppShellContext | null = {
+  currentAdminUser: {
+    username: 'phone_user',
+    displayName: null,
+  },
+}
+
+mock.module('@/context/AppShellContext', () => ({
+  useOptionalAppShellContext: () => appShellContext,
+}))
+
 const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
 const userEvent = (await import('@testing-library/user-event')).default
 const { AdminLoginStep } = await import('../AdminLoginStep')
@@ -45,9 +80,19 @@ const { PhoneAuthStep } = await import('../PhoneAuthStep')
 const { default: AccountSecuritySettingsPage } = await import(
   '../../../pages/settings/AccountSecuritySettingsPage'
 )
+const { default: SettingsNavigator } = await import(
+  '../../../pages/settings/SettingsNavigator'
+)
+const { getVisibleSettingsItems } = await import('../../../../shared/menu-schema')
 
 afterEach(() => {
   cleanup()
+  appShellContext = {
+    currentAdminUser: {
+      username: 'phone_user',
+      displayName: null,
+    },
+  }
 })
 
 function renderWithI18n(element: ReactElement) {
@@ -184,6 +229,44 @@ describe('AdminLoginStep rendered modes', () => {
 })
 
 describe('AccountSecuritySettingsPage rendered interactions', () => {
+  it('hides the entry and form when Admin is unconfigured or logged out', () => {
+    for (const unavailableContext of [null, { currentAdminUser: null }]) {
+      appShellContext = unavailableContext
+      expect(
+        getVisibleSettingsItems(Boolean(appShellContext?.currentAdminUser?.username))
+          .some(item => item.id === 'account-security'),
+      ).toBe(false)
+
+      const navigator = renderWithI18n(createElement(SettingsNavigator, {
+        selectedSubpage: null,
+        onSelectSubpage: mock(() => {}),
+      }))
+      expect(screen.queryByTestId('settings-item-account-security')).toBeNull()
+      navigator.unmount()
+
+      const page = renderWithI18n(createElement(AccountSecuritySettingsPage))
+      expect(screen.getByTestId('account-security-unavailable')).toBeTruthy()
+      expect(screen.queryByLabelText('New password')).toBeNull()
+      page.unmount()
+    }
+
+    appShellContext = {
+      currentAdminUser: {
+        username: 'phone_user',
+        displayName: null,
+      },
+    }
+    expect(
+      getVisibleSettingsItems(true)
+        .some(item => item.id === 'account-security'),
+    ).toBe(true)
+    renderWithI18n(createElement(SettingsNavigator, {
+      selectedSubpage: null,
+      onSelectSubpage: mock(() => {}),
+    }))
+    expect(screen.getByTestId('settings-item-account-security')).toBeTruthy()
+  })
+
   it('validates locally, blocks duplicate requests, and clears secrets after success', async () => {
     let resolveRequest!: (result: { success: true }) => void
     const adminSetPassword = mock(() => new Promise<{ success: true }>(resolve => {

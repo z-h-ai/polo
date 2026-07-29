@@ -801,6 +801,7 @@
   "settings.accountSecurity.password.title": "设置密码",
   "settings.accountSecurity.password.too_short": "密码至少需要 8 位。",
   "settings.accountSecurity.title": "账号安全",
+  "settings.accountSecurity.unavailable": "请先登录管理员账号，再管理密码。",
   "settings.ai.addConnection": "+ 添加连接",
   "settings.ai.connection": "连接",
   "settings.ai.connectionDesc": "新聊天的 API 连接",

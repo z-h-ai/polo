@@ -801,6 +801,7 @@
   "settings.accountSecurity.password.title": "Set password",
   "settings.accountSecurity.password.too_short": "Password must be at least 8 characters.",
   "settings.accountSecurity.title": "Account Security",
+  "settings.accountSecurity.unavailable": "Sign in with an Admin account to manage your password.",
   "settings.ai.addConnection": "+ Add Connection",
   "settings.ai.connection": "Connection",
   "settings.ai.connectionDesc": "API connection for new chats",

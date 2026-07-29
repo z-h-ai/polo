@@ -138,6 +138,17 @@ function runCaptured(
   return result.stdout.toString().trim()
 }
 
+function hasPol53RuntimeDependencies(directory: string): boolean {
+  return [
+    'node_modules/.bin/prisma',
+    'node_modules/.bin/tsx',
+    'node_modules/@prisma/client/package.json',
+    'node_modules/@alicloud/dysmsapi20170525/package.json',
+    'node_modules/@alicloud/openapi-core/package.json',
+    'node_modules/argon2/package.json',
+  ].every(path => existsSync(join(directory, path)))
+}
+
 function createLegacyUser(): void {
   runChecked([
     'node',
@@ -498,12 +509,24 @@ async function main(): Promise<void> {
     pol53Directory,
   ], temporaryDirectory)
   runChecked(['git', 'checkout', '--detach', pol53Head], pol53Directory)
-  runChecked([
-    'cp',
-    '-cR',
-    join(pol53SourceDirectory, 'node_modules'),
-    join(pol53Directory, 'node_modules'),
-  ], temporaryDirectory)
+  if (hasPol53RuntimeDependencies(pol53SourceDirectory)) {
+    runChecked([
+      'cp',
+      '-cR',
+      join(pol53SourceDirectory, 'node_modules'),
+      join(pol53Directory, 'node_modules'),
+    ], temporaryDirectory)
+  } else {
+    // External task worktrees are disposable. When the remaining contract
+    // worktree has incomplete dependencies, install only inside the temporary
+    // detached clone so the source worktree stays read-only.
+    runChecked([
+      'npm',
+      'ci',
+      '--no-audit',
+      '--no-fund',
+    ], pol53Directory)
+  }
   pol53CloneReady = true
 
   runChecked([

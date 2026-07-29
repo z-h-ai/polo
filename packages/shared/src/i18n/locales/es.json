@@ -801,6 +801,7 @@
   "settings.accountSecurity.password.title": "Establecer contraseña",
   "settings.accountSecurity.password.too_short": "La contraseña debe tener al menos 8 caracteres.",
   "settings.accountSecurity.title": "Seguridad de la cuenta",
+  "settings.accountSecurity.unavailable": "Inicia sesión con una cuenta de administrador para gestionar tu contraseña.",
   "settings.ai.addConnection": "+ Añadir conexión",
   "settings.ai.connection": "Conexión",
   "settings.ai.connectionDesc": "Conexión API para nuevos chats",

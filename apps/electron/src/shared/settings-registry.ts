@@ -23,6 +23,8 @@ export interface SettingsPageDefinition {
   labelKey: string
   /** i18n key for short description shown in settings navigator */
   descriptionKey: string
+  /** Hide this page unless an Admin account is currently authenticated */
+  requiresAdminLogin?: boolean
 }
 
 /**
@@ -36,7 +38,7 @@ export interface SettingsPageDefinition {
  */
 export const SETTINGS_PAGES = [
   { id: 'app' as const, labelKey: 'settings.app.title', descriptionKey: 'settings.app.description' },
-  { id: 'account-security' as const, labelKey: 'settings.accountSecurity.title', descriptionKey: 'settings.accountSecurity.description' },
+  { id: 'account-security' as const, labelKey: 'settings.accountSecurity.title', descriptionKey: 'settings.accountSecurity.description', requiresAdminLogin: true },
   { id: 'appearance' as const, labelKey: 'settings.appearance.title', descriptionKey: 'settings.appearance.description' },
   { id: 'input' as const, labelKey: 'settings.input.title', descriptionKey: 'settings.input.description' },
   { id: 'workspace' as const, labelKey: 'settings.workspace.title', descriptionKey: 'settings.workspace.description' },

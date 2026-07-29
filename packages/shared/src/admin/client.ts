@@ -1,6 +1,5 @@
 import {
   AdminError,
-  type AdminUser,
   type AdminAuthConfig,
   type AdminErrorCode,
   type AdminLlmConnectionsResponse,
@@ -15,7 +14,15 @@ import {
   type AdminValidateResponse,
   type VerifyPhoneAuthCodeInput,
 } from './types.ts';
-import { AdminUserSchema } from './schemas.ts';
+import type { ZodType } from 'zod';
+import {
+  AdminLoginResponseSchema,
+  AdminPhoneAuthResponseSchema,
+  AdminRefreshResponseSchema,
+  AdminValidateResponseSchema,
+  SendPhoneAuthCodeResponseSchema,
+  SetAdminPasswordResponseSchema,
+} from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -109,16 +116,11 @@ export class AdminClient {
   }
 
   async login(identifier: string, password: string): Promise<AdminLoginResponse> {
-    const response = await this.request<AdminLoginResponse>('/api/auth/login', {
+    const response = await this.request<unknown>('/api/auth/login', {
       method: 'POST',
       body: { identifier, password },
     });
-    return {
-      accessToken: response.accessToken,
-      refreshToken: response.refreshToken,
-      expiresIn: response.expiresIn,
-      user: this.readAdminUser(response.user),
-    };
+    return this.readSuccessResponse(response, AdminLoginResponseSchema);
   }
 
   async getAuthConfig(): Promise<AdminAuthConfig> {
@@ -154,63 +156,50 @@ export class AdminClient {
   }
 
   async sendPhoneAuthCode(input: SendPhoneAuthCodeInput): Promise<SendPhoneAuthCodeResponse> {
-    const response = await this.request<SendPhoneAuthCodeResponse>('/api/auth/phone/send-code', {
+    const response = await this.request<unknown>('/api/auth/phone/send-code', {
       method: 'POST',
       body: {
         phone: input.phone,
         challengeToken: input.challengeToken,
       },
     });
-    return {
-      accepted: response.accepted === true,
-      expiresIn: response.expiresIn,
-      resendAfter: response.resendAfter,
-    };
+    return this.readSuccessResponse(response, SendPhoneAuthCodeResponseSchema);
   }
 
   async verifyPhoneAuthCode(input: VerifyPhoneAuthCodeInput): Promise<AdminPhoneAuthResponse> {
-    const response = await this.request<AdminPhoneAuthResponse>('/api/auth/phone/verify', {
+    const response = await this.request<unknown>('/api/auth/phone/verify', {
       method: 'POST',
       body: {
         phone: input.phone,
         code: input.code,
       },
     });
-    return {
-      accessToken: response.accessToken,
-      refreshToken: response.refreshToken,
-      expiresIn: response.expiresIn,
-      user: this.readAdminUser(response.user),
-      isNewUser: response.isNewUser === true,
-    };
+    return this.readSuccessResponse(response, AdminPhoneAuthResponseSchema);
   }
 
   async setPassword(accessToken: string, input: SetAdminPasswordInput): Promise<SetAdminPasswordResponse> {
-    const response = await this.request<SetAdminPasswordResponse>('/api/auth/password', {
+    const response = await this.request<unknown>('/api/auth/password', {
       method: 'POST',
       accessToken,
       body: { password: input.password },
     });
-    return { success: response.success === true };
+    return this.readSuccessResponse(response, SetAdminPasswordResponseSchema);
   }
 
-  refresh(refreshToken: string): Promise<AdminRefreshResponse> {
-    return this.request('/api/auth/refresh', {
+  async refresh(refreshToken: string): Promise<AdminRefreshResponse> {
+    const response = await this.request<unknown>('/api/auth/refresh', {
       method: 'POST',
       body: { refreshToken },
     });
+    return this.readSuccessResponse(response, AdminRefreshResponseSchema);
   }
 
   async validate(accessToken: string): Promise<AdminValidateResponse> {
-    const response = await this.request<AdminValidateResponse>('/api/auth/validate', {
+    const response = await this.request<unknown>('/api/auth/validate', {
       method: 'POST',
       accessToken,
     });
-    return {
-      valid: response.valid === true,
-      user: this.readAdminUser(response.user),
-      configVersion: response.configVersion,
-    };
+    return this.readSuccessResponse(response, AdminValidateResponseSchema);
   }
 
   async logout(accessToken: string): Promise<void> {
@@ -342,13 +331,10 @@ export class AdminClient {
     return null;
   }
 
-  private readAdminUser(data: unknown): AdminUser {
-    const result = AdminUserSchema.safeParse(data);
+  private readSuccessResponse<T>(data: unknown, schema: ZodType<T>): T {
+    const result = schema.safeParse(data);
     if (!result.success) {
-      throw new AdminError(
-        'Admin response user is invalid',
-        'SERVER_ERROR',
-      );
+      throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
     }
     return result.data;
   }

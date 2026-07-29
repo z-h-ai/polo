@@ -801,6 +801,7 @@
   "settings.accountSecurity.password.title": "Ustaw hasło",
   "settings.accountSecurity.password.too_short": "Hasło musi mieć co najmniej 8 znaków.",
   "settings.accountSecurity.title": "Bezpieczeństwo konta",
+  "settings.accountSecurity.unavailable": "Zaloguj się na konto administratora, aby zarządzać hasłem.",
   "settings.ai.addConnection": "+ Dodaj połączenie",
   "settings.ai.connection": "Połączenie",
   "settings.ai.connectionDesc": "Połączenie API dla nowych czatów",

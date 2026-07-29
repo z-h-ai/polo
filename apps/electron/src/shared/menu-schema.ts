@@ -372,6 +372,7 @@ export interface SettingsMenuItem {
   labelKey: string    // i18n key - resolve with t() at render time
   icon: string        // Lucide icon name for AppMenu
   descriptionKey: string // i18n key - resolve with t() at render time
+  requiresAdminLogin: boolean
 }
 
 /**
@@ -403,7 +404,13 @@ export const SETTINGS_ITEMS: SettingsMenuItem[] = SETTINGS_PAGES
     labelKey: page.labelKey,
     icon: SETTINGS_ICONS[page.id],
     descriptionKey: page.descriptionKey,
+    requiresAdminLogin: 'requiresAdminLogin' in page && page.requiresAdminLogin === true,
   }))
+
+export function getVisibleSettingsItems(isAdminLoggedIn: boolean): SettingsMenuItem[] {
+  return SETTINGS_ITEMS.filter(item =>
+    !item.requiresAdminLogin || isAdminLoggedIn)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

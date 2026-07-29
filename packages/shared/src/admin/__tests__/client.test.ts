@@ -194,8 +194,87 @@ describe('AdminClient', () => {
       code: '123456',
     })).rejects.toMatchObject({
       errorCode: 'SERVER_ERROR',
-      message: 'Admin response user is invalid',
+      message: 'Admin response is invalid',
     });
+  });
+
+  it('rejects malformed phone auth success fields before returning credentials', async () => {
+    const user = {
+      id: 'user-1',
+      username: 'phone_user',
+      displayName: null,
+      role: 'user',
+      groupIds: [],
+    };
+    const invalidResponses = [
+      {
+        accessToken: { token: 'object-token' },
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'access-token',
+        refreshToken: null,
+        expiresIn: 3600,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresIn: -1,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'x'.repeat(16_385),
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+        user,
+        isNewUser: 'true',
+      },
+    ];
+
+    for (const response of invalidResponses) {
+      mockJsonFetch(response);
+      const client = new AdminClient('https://admin.example.com');
+
+      await expect(client.verifyPhoneAuthCode({
+        phone: '13800138000',
+        code: '123456',
+      })).rejects.toMatchObject({
+        errorCode: 'SERVER_ERROR',
+        message: 'Admin response is invalid',
+      });
+    }
+  });
+
+  it('rejects malformed send-code timing fields', async () => {
+    for (const response of [
+      { accepted: true, expiresIn: '300', resendAfter: 60 },
+      { accepted: true, expiresIn: 300, resendAfter: -1 },
+      { accepted: 'true', expiresIn: 300, resendAfter: 60 },
+    ]) {
+      mockJsonFetch(response);
+      const client = new AdminClient('https://admin.example.com');
+
+      await expect(client.sendPhoneAuthCode({
+        phone: '13800138000',
+        challengeToken: 'verified-challenge',
+      })).rejects.toMatchObject({
+        errorCode: 'SERVER_ERROR',
+        message: 'Admin response is invalid',
+      });
+    }
   });
 
   it('sets a password with bearer auth', async () => {
@@ -274,6 +353,35 @@ describe('AdminClient', () => {
     }));
   });
 
+  it('applies strict session response validation to login and refresh', async () => {
+    mockJsonFetch({
+      accessToken: ' ',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'user-1',
+        username: 'admin',
+        displayName: 'Admin',
+        role: 'admin',
+        groupIds: [],
+      },
+    });
+    const loginClient = new AdminClient('https://admin.example.com');
+    await expect(loginClient.login('admin', 'secret')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+    });
+
+    mockJsonFetch({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 31_536_001,
+    });
+    const refreshClient = new AdminClient('https://admin.example.com');
+    await expect(refreshClient.refresh('old-refresh-token')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+    });
+  });
+
   it('sends validate request with bearer access token', async () => {
     const response = {
       valid: true,
@@ -299,6 +407,30 @@ describe('AdminClient', () => {
       Authorization: 'Bearer access-token',
     });
     expect(fetchCalls[0]!.init.body).toBeUndefined();
+  });
+
+  it('strictly validates both validate response variants', async () => {
+    mockJsonFetch({ valid: false, internalReason: 'must-not-leak' });
+    const invalidSessionClient = new AdminClient('https://admin.example.com');
+    expect(await invalidSessionClient.validate('access-token')).toEqual({
+      valid: false,
+    });
+
+    mockJsonFetch({
+      valid: true,
+      configVersion: null,
+      user: {
+        id: 'user-1',
+        username: 'admin',
+        displayName: 'Admin',
+        role: 'admin',
+        groupIds: [],
+      },
+    });
+    const malformedClient = new AdminClient('https://admin.example.com');
+    await expect(malformedClient.validate('access-token')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+    });
   });
 
   it('logs out with the current access token and no refresh-token body', async () => {

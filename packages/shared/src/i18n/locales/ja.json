@@ -801,6 +801,7 @@
   "settings.accountSecurity.password.title": "パスワードを設定",
   "settings.accountSecurity.password.too_short": "パスワードは8文字以上にしてください。",
   "settings.accountSecurity.title": "アカウントセキュリティ",
+  "settings.accountSecurity.unavailable": "パスワードを管理するには管理者アカウントでサインインしてください。",
   "settings.ai.addConnection": "+ 接続を追加",
   "settings.ai.connection": "接続",
   "settings.ai.connectionDesc": "新規チャットのAPI接続",

@@ -2,7 +2,7 @@ import {
   ROOT_MENU,
   HELP_LINKS,
   DEBUG_MENU,
-  SETTINGS_ITEMS,
+  getVisibleSettingsItems,
   type SettingsMenuItem,
 } from '../../../shared/menu-schema'
 
@@ -40,6 +40,7 @@ export interface MobileMenuPage {
 interface BuildOptions {
   hasNewWindow: boolean
   isDebugMode: boolean
+  isAdminLoggedIn: boolean
 }
 
 /**
@@ -54,7 +55,11 @@ interface BuildOptions {
  * Adding a new help link requires only an addition to `HELP_LINKS`. Adding a new
  * settings page requires only an addition to `SETTINGS_PAGES`. Both fan out here.
  */
-export function buildMobileMenuPages({ hasNewWindow, isDebugMode }: BuildOptions): MobileMenuPage[] {
+export function buildMobileMenuPages({
+  hasNewWindow,
+  isDebugMode,
+  isAdminLoggedIn,
+}: BuildOptions): MobileMenuPage[] {
   const rootRows: MobileMenuRow[] = [
     {
       id: ROOT_MENU.newChat.id,
@@ -103,7 +108,7 @@ export function buildMobileMenuPages({ hasNewWindow, isDebugMode }: BuildOptions
       labelKey: 'menu.settings',
       action: { kind: 'callback', key: 'openSettings' },
     },
-    ...SETTINGS_ITEMS.map<MobileMenuRow>((item) => ({
+    ...getVisibleSettingsItems(isAdminLoggedIn).map<MobileMenuRow>((item) => ({
       id: `settings-${item.id}`,
       iconName: item.icon,
       labelKey: item.labelKey,

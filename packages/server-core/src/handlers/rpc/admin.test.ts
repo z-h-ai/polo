@@ -646,7 +646,24 @@ describe('registerAdminHandlers', () => {
     ])
   })
 
-  it('keeps phone authentication successful when post-login connection sync fails', async () => {
+  it('keeps authentication but fails closed when a new account connection sync fails', async () => {
+    configState.adminConfigVersion = 'account-a-config'
+    configState.connections = [
+      adminConnection({
+        slug: 'account-a-admin',
+        managedBy: 'admin',
+        adminConfigVersion: 'account-a-config',
+      }),
+      adminConnection({
+        slug: 'user-local',
+        name: 'User Local',
+        managedBy: undefined,
+        apiKey: undefined,
+      }),
+    ]
+    configState.defaultConnection = 'account-a-admin'
+    managerState.llmApiKeys.set('account-a-admin', 'sk-account-a')
+    managerState.llmApiKeys.set('user-local', 'sk-user-local')
     adminClientBehavior.getLlmConnections = async () => {
       throw new Error('temporary connection sync outage')
     }
@@ -667,6 +684,14 @@ describe('registerAdminHandlers', () => {
       refreshToken: 'phone-refresh-token',
       userId: 'phone-user-1',
     })
+    expect(configState.adminConfigVersion).toBeUndefined()
+    expect(configState.connections.map(connection => connection.slug)).toEqual([
+      'user-local',
+    ])
+    expect(configState.defaultConnection).toBe('user-local')
+    expect(managerState.llmApiKeys.has('account-a-admin')).toBe(false)
+    expect(managerState.llmApiKeys.get('user-local')).toBe('sk-user-local')
+    expect(managerState.deletedCredentialSlugs).toContain('account-a-admin')
     expect(loggerWarn).toHaveBeenCalledWith(
       '[Admin] post-login connection sync failed; session remains authenticated:',
       'temporary connection sync outage',
@@ -687,6 +712,11 @@ describe('registerAdminHandlers', () => {
       configVersion: 'config-after-retry',
       connectionCount: 1,
     })
+    expect(configState.connections.map(connection => connection.slug).sort()).toEqual([
+      'admin-anthropic',
+      'user-local',
+    ])
+    expect(managerState.llmApiKeys.get('admin-anthropic')).toBe('sk-admin')
   })
 
   it('uses the same successful login path for an existing phone user', async () => {
