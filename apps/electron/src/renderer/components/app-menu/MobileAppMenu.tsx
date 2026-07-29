@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { useRegisterDismissibleLayer } from '@/context/DismissibleLayerContext'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { PoloAiSymbol } from '../icons/PoloAiSymbol'
 import { SquarePenRounded } from '../icons/SquarePenRounded'
 import { SETTINGS_ICONS } from '../icons/SettingsIcons'
@@ -98,6 +99,8 @@ function affordanceFor(action: MobileMenuRow['action']): MobileMenuItemAffordanc
  */
 export function MobileAppMenu(props: AppMenuProps) {
   const { t } = useTranslation()
+  const appShell = useOptionalAppShellContext()
+  const isAdminLoggedIn = Boolean(appShell?.currentAdminUser?.username)
   const [state, dispatch] = useReducer(stackReducer, INITIAL_STATE)
   const [isDebugMode, setIsDebugMode] = useState(false)
 
@@ -106,8 +109,12 @@ export function MobileAppMenu(props: AppMenuProps) {
   }, [])
 
   const pages = useMemo(
-    () => buildMobileMenuPages({ hasNewWindow: !!props.onNewWindow, isDebugMode }),
-    [props.onNewWindow, isDebugMode],
+    () => buildMobileMenuPages({
+      hasNewWindow: !!props.onNewWindow,
+      isDebugMode,
+      isAdminLoggedIn,
+    }),
+    [props.onNewWindow, isAdminLoggedIn, isDebugMode],
   )
 
   const close = React.useCallback(() => dispatch({ type: 'close' }), [])

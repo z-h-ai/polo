@@ -1,2 +1,3 @@
 export * from './types.ts';
-export { AdminClient } from './client.ts';
+export * from './schemas.ts';
+export { AdminClient, getSafeAdminErrorMessage } from './client.ts';

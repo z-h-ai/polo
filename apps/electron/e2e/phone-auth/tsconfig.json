@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "node",
+      "bun",
+      "vite/client"
+    ]
+  },
+  "include": [
+    "main.ts",
+    "../../src/**/*.d.ts",
+    "../../../../packages/ui/src/**/*.d.ts"
+  ]
+}

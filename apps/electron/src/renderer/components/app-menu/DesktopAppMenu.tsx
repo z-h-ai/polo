@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import * as Icons from "lucide-react"
 import { isMac } from "@/lib/platform"
 import { useActionLabel } from "@/actions"
+import { useOptionalAppShellContext } from "@/context/AppShellContext"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -22,7 +23,7 @@ import {
   EDIT_MENU,
   VIEW_MENU,
   WINDOW_MENU,
-  SETTINGS_ITEMS,
+  getVisibleSettingsItems,
   ROOT_MENU,
   HELP_LINKS,
   DEBUG_MENU,
@@ -147,6 +148,8 @@ export function DesktopAppMenu({
   onToggleFocusMode,
 }: AppMenuProps) {
   const { t } = useTranslation()
+  const appShell = useOptionalAppShellContext()
+  const isAdminLoggedIn = Boolean(appShell?.currentAdminUser?.username)
   const [isDebugMode, setIsDebugMode] = useState(false)
 
   const newChatHotkey = useActionLabel('app.newChat').hotkey
@@ -205,7 +208,7 @@ export function DesktopAppMenu({
               {settingsHotkey && <DropdownMenuShortcut className="pl-6">{settingsHotkey}</DropdownMenuShortcut>}
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
-            {SETTINGS_ITEMS.map((item) => {
+            {getVisibleSettingsItems(isAdminLoggedIn).map((item) => {
               const Icon = SETTINGS_ICONS[item.id]
               return (
                 <StyledDropdownMenuItem

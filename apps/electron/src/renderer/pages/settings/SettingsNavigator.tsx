@@ -21,8 +21,9 @@ import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import type { SettingsSubpage } from '../../../shared/types'
-import { SETTINGS_ITEMS } from '../../../shared/menu-schema'
+import { getVisibleSettingsItems } from '../../../shared/menu-schema'
 import { SETTINGS_ICONS } from '@/components/icons/SettingsIcons'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -89,6 +90,7 @@ function SettingsItemRow({ item, isSelected, isFirst, onSelect }: SettingsItemRo
         </div>
         {/* Main content button */}
         <button
+          data-testid={`settings-item-${item.id}`}
           type="button"
           onClick={onSelect}
           className={cn(
@@ -153,15 +155,17 @@ export default function SettingsNavigator({
   onSelectSubpage,
 }: SettingsNavigatorProps) {
   const { t } = useTranslation()
+  const appShell = useOptionalAppShellContext()
+  const isAdminLoggedIn = Boolean(appShell?.currentAdminUser?.username)
 
   const settingsItems: SettingsItem[] = useMemo(() =>
-    SETTINGS_ITEMS.map((item) => ({
+    getVisibleSettingsItems(isAdminLoggedIn).map((item) => ({
       id: item.id,
       label: t(item.labelKey),
       icon: SETTINGS_ICONS[item.id],
       description: t(item.descriptionKey),
     })),
-    [t]
+    [isAdminLoggedIn, t]
   )
 
   return (

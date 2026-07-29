@@ -76,7 +76,10 @@ export async function createCallbackServer(options?: CreateCallbackServerOptions
       const url = new URL(req.url || '/', `http://localhost:${boundPort}`);
 
       if (!allowedPaths.has(url.pathname)) {
-        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.writeHead(404, {
+          'Content-Type': 'text/html; charset=utf-8',
+          Connection: 'close',
+        });
         res.end('Not found');
         return;
       }
@@ -103,7 +106,13 @@ export async function createCallbackServer(options?: CreateCallbackServerOptions
         deeplinkUrl: (hasCode && !hasError) ? deeplinkUrl : undefined,
       });
 
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        // A later auth flow may reuse the same loopback port. Do not leave a
+        // keep-alive socket able to route that callback into this completed
+        // server instance.
+        Connection: 'close',
+      });
       res.end(html);
 
       if (server) {
@@ -122,7 +131,10 @@ export async function createCallbackServer(options?: CreateCallbackServerOptions
         appType,
       });
 
-      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(500, {
+        'Content-Type': 'text/html; charset=utf-8',
+        Connection: 'close',
+      });
       res.end(html);
 
       if (rejectCallback) {

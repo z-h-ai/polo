@@ -22,6 +22,7 @@ import { WsRpcClient, type TransportConnectionState } from '../transport/client'
 import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
+import { buildAdminPreloadApi } from './admin-api'
 import { createCallbackServer } from '@polo-ai/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@polo-ai/shared/auth/chatgpt-oauth-config'
 import {
@@ -267,19 +268,22 @@ client.onConnectionStateChanged((state) => {
   ipcRenderer.send(RPC_CHANNELS.deeplink.ACTION_RESULT, result)
 }
 
-// Admin auth — explicit preload surface for admin-managed deployments.
-;(api as ElectronAPI).adminLogin = (username: string, password: string) =>
-  client.invoke(RPC_CHANNELS.admin.LOGIN, username, password)
-;(api as ElectronAPI).adminValidate = () =>
-  client.invoke(RPC_CHANNELS.admin.VALIDATE)
-;(api as ElectronAPI).adminLogout = () =>
-  client.invoke(RPC_CHANNELS.admin.LOGOUT)
-;(api as ElectronAPI).adminGetStatus = () =>
-  client.invoke(RPC_CHANNELS.admin.GET_STATUS)
-;(api as ElectronAPI).adminSyncConnections = () =>
-  client.invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS)
-;(api as ElectronAPI).onAdminReauthRequired = (callback) =>
-  client.on('admin:reauthRequired', callback)
+// Admin auth — explicit, testable preload surface for admin-managed deployments.
+// Plaintext loopback issuers are a build-time capability. The production
+// preload build pins this constant to false; only the local native E2E bundle
+// pins it to true. Renderer input, discovery data, and runtime environment
+// variables therefore cannot weaken the production HTTPS requirement.
+declare const __POLO_AI_TRUSTED_PHONE_AUTH_E2E__: boolean
+const trustedPhoneAuthE2eMode = (
+  typeof __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === 'boolean'
+  && __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === true
+)
+Object.assign(api, buildAdminPreloadApi(client, {
+  allowInsecureLoopbackIssuer: trustedPhoneAuthE2eMode,
+  openExternal: trustedPhoneAuthE2eMode
+    ? url => ipcRenderer.invoke('__phone-auth-e2e:open-external', url)
+    : url => shell.openExternal(url),
+}))
 
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →

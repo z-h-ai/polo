@@ -701,12 +701,18 @@ export default function App() {
     setAppState('ready')
   }, [refreshAdminUser])
 
+  const acquirePhoneAuthChallenge = useCallback(async () => {
+    const result = await window.electronAPI.adminAcquirePhoneAuthChallenge()
+    return result.success ? result.challengeToken : null
+  }, [])
+
   // Onboarding hook — onConfigSaved fires immediately when billing is saved,
   // ensuring connection state updates before the wizard closes.
   const onboarding = useOnboarding({
     onComplete: handleOnboardingComplete,
     onConfigSaved: refreshLlmConnections,
     initialSetupNeeds: setupNeeds || undefined,
+    phoneAuthChallengeProvider: acquirePhoneAuthChallenge,
   })
   const showAdminKicked = onboarding.showAdminKicked
   const handleAdminRelogin = onboarding.handleAdminRelogin
@@ -2169,6 +2175,8 @@ export default function App() {
             onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
             onSubmitCredential={onboarding.handleSubmitCredential}
             onAdminLogin={onboarding.handleAdminLogin}
+            onAdminSendPhoneCode={onboarding.handleAdminSendPhoneCode}
+            onAdminVerifyPhoneCode={onboarding.handleAdminVerifyPhoneCode}
             onAdminRelogin={onboarding.handleAdminRelogin}
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}
             onStartOAuth={onboarding.handleStartOAuth}

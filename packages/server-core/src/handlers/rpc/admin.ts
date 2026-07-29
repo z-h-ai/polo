@@ -1,4 +1,18 @@
-import { AdminClient, AdminError, type AdminLlmConnection, type AdminRefreshResponse } from '@polo-ai/shared/admin'
+import {
+  AdminClient,
+  AdminError,
+  getSafeAdminErrorMessage,
+  type AdminErrorCode,
+  type AdminLlmConnection,
+  type AdminLoginResponse,
+  type AdminRefreshResponse,
+} from '@polo-ai/shared/admin'
+import {
+  AdminLoginRpcInputSchema,
+  SendPhoneAuthCodeRpcInputSchema,
+  SetAdminPasswordRpcInputSchema,
+  VerifyPhoneAuthCodeRpcInputSchema,
+} from '@polo-ai/shared/admin/schemas'
 import {
   addLlmConnection,
   deleteLlmConnection,
@@ -18,6 +32,11 @@ import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
+  RPC_CHANNELS.admin.GET_AUTH_CONFIG,
+  RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG,
+  RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
+  RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE,
+  RPC_CHANNELS.admin.SET_PASSWORD,
   RPC_CHANNELS.admin.VALIDATE,
   RPC_CHANNELS.admin.LOGOUT,
   RPC_CHANNELS.admin.GET_STATUS,
@@ -32,32 +51,138 @@ type TokenValidationResult =
 export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
 
-  server.handle(RPC_CHANNELS.admin.LOGIN, async (_ctx, username: string, password: string) => {
+  server.handle(RPC_CHANNELS.admin.LOGIN, async (_ctx, identifier: unknown, password: unknown) => {
+    const input = AdminLoginRpcInputSchema.safeParse({ identifier, password })
+    if (!input.success) {
+      return adminInputError('INVALID_CREDENTIALS')
+    }
+
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
       const client = createAdminClient(adminUrl, manager)
-      const login = await client.login(username, password)
-
-      await manager.setAdminTokens({
-        accessToken: login.accessToken,
-        refreshToken: login.refreshToken,
-        expiresAt: expiresAtFromNow(login.expiresIn),
-        userId: login.user.id,
-        username: login.user.username,
-        displayName: login.user.displayName,
-      })
-
-      await syncAdminConnections({
+      const login = await client.login(input.data.identifier, input.data.password)
+      await completeAdminLogin({
         adminUrl,
         manager,
-        accessToken: login.accessToken,
+        login,
+        onSyncFailure: error => logPostLoginSyncFailure(log, error),
       })
 
       return { success: true, user: login.user }
     } catch (error) {
       const adminError = toAdminRpcError(error)
       log?.warn('[Admin] login failed:', adminError.message)
+      return { success: false, ...adminError }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.admin.GET_AUTH_CONFIG, async () => {
+    try {
+      return await createAdminClient(requireAdminUrl(), getCredentialManager()).getAuthConfig()
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn('[Admin] getAuthConfig failed:', adminError.message)
+      return { phoneAuthEnabled: false, ...adminError }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG, async () => {
+    try {
+      const result = await createAdminClient(
+        requireAdminUrl(),
+        getCredentialManager(),
+      ).getPhoneAuthChallengeConfig()
+      return { success: true, ...result }
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn('[Admin] getPhoneAuthChallengeConfig failed:', adminError.message)
+      return { success: false, ...adminError }
+    }
+  })
+
+  server.handle(
+    RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
+    async (_ctx, phone: unknown, challengeToken: unknown) => {
+      const input = SendPhoneAuthCodeRpcInputSchema.safeParse({ phone, challengeToken })
+      if (!input.success) {
+        return adminInputError(hasValidationIssue(input.error.issues, 'phone')
+          ? 'invalid_phone'
+          : 'phone_auth_configuration_error')
+      }
+
+      try {
+        const result = await createAdminClient(requireAdminUrl(), getCredentialManager())
+          .sendPhoneAuthCode(input.data)
+        return { success: true, ...result }
+      } catch (error) {
+        const adminError = toAdminRpcError(error)
+        log?.warn('[Admin] sendPhoneAuthCode failed:', adminError.message)
+        return { success: false, ...adminError }
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE,
+    async (_ctx, phone: unknown, code: unknown) => {
+      const input = VerifyPhoneAuthCodeRpcInputSchema.safeParse({ phone, code })
+      if (!input.success) {
+        return adminInputError(hasValidationIssue(input.error.issues, 'phone')
+          ? 'invalid_phone'
+          : 'verification_code_invalid')
+      }
+
+      try {
+        const adminUrl = requireAdminUrl()
+        const manager = getCredentialManager()
+        const login = await createAdminClient(adminUrl, manager)
+          .verifyPhoneAuthCode(input.data)
+        await completeAdminLogin({
+          adminUrl,
+          manager,
+          login,
+          onSyncFailure: error => logPostLoginSyncFailure(log, error),
+        })
+        return {
+          success: true,
+          user: login.user,
+          isNewUser: login.isNewUser,
+        }
+      } catch (error) {
+        const adminError = toAdminRpcError(error)
+        log?.warn('[Admin] verifyPhoneAuthCode failed:', adminError.message)
+        return { success: false, ...adminError }
+      }
+    },
+  )
+
+  server.handle(RPC_CHANNELS.admin.SET_PASSWORD, async (_ctx, password: unknown) => {
+    const input = SetAdminPasswordRpcInputSchema.safeParse({ password })
+    if (!input.success) {
+      return adminInputError('VALIDATION_ERROR')
+    }
+
+    try {
+      const adminUrl = requireAdminUrl()
+      const manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(adminUrl, manager)
+      if (!tokenResult.tokens) {
+        return {
+          success: false,
+          ...(tokenResult.authError ?? {
+            errorCode: 'UNAUTHORIZED',
+            message: 'Admin session is not logged in',
+          }),
+        }
+      }
+
+      const result = await createAdminClient(adminUrl, manager)
+        .setPassword(tokenResult.tokens.accessToken, input.data)
+      return { success: result.success }
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn('[Admin] setPassword failed:', adminError.message)
       return { success: false, ...adminError }
     }
   })
@@ -112,9 +237,9 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     const manager = getCredentialManager()
     const tokens = await manager.getAdminTokens()
 
-    if (adminUrl && tokens?.refreshToken) {
+    if (adminUrl && tokens?.accessToken) {
       try {
-        await createAdminClient(adminUrl, manager).logout(tokens.refreshToken)
+        await createAdminClient(adminUrl, manager).logout(tokens.accessToken)
       } catch (error) {
         log?.warn('[Admin] remote logout failed; clearing local state:', error instanceof Error ? error.message : String(error))
       }
@@ -172,6 +297,58 @@ function createAdminClient(adminUrl: string, manager: CredentialManager): AdminC
       },
     },
   })
+}
+
+async function completeAdminLogin(args: {
+  adminUrl: string
+  manager: CredentialManager
+  login: AdminLoginResponse
+  onSyncFailure: (error: unknown) => void
+}): Promise<void> {
+  await args.manager.setAdminTokens({
+    accessToken: args.login.accessToken,
+    refreshToken: args.login.refreshToken,
+    expiresAt: expiresAtFromNow(args.login.expiresIn),
+    userId: args.login.user.id,
+    username: args.login.user.username,
+    displayName: args.login.user.displayName ?? undefined,
+  })
+
+  const previousAdminConnectionSlugs = getAdminManagedConnectionSlugs()
+  setAdminConfigVersion(undefined)
+
+  try {
+    await deleteAdminManagedConnections(args.manager, previousAdminConnectionSlugs)
+    await syncAdminConnections({
+      adminUrl: args.adminUrl,
+      manager: args.manager,
+      accessToken: args.login.accessToken,
+    })
+  } catch (error) {
+    // Authentication has already succeeded and the one-time code may already
+    // be consumed. Keep the persisted session, but fail closed for model
+    // authorization so a previous account's managed connections cannot be used.
+    setAdminConfigVersion(undefined)
+    try {
+      await deleteAdminManagedConnections(
+        args.manager,
+        previousAdminConnectionSlugs,
+      )
+    } catch (cleanupError) {
+      args.onSyncFailure(cleanupError)
+    }
+    args.onSyncFailure(error)
+  }
+}
+
+function logPostLoginSyncFailure(
+  log: HandlerDeps['platform']['logger'],
+  error: unknown,
+): void {
+  log?.warn(
+    '[Admin] post-login connection sync failed; session remains authenticated:',
+    error instanceof Error ? error.message : String(error),
+  )
 }
 
 async function ensureValidTokens(adminUrl: string, manager: CredentialManager): Promise<TokenValidationResult> {
@@ -233,30 +410,40 @@ async function syncAdminConnections(args: {
     throw new AdminError('Admin session is not logged in', 'UNAUTHORIZED')
   }
 
-  const client = createAdminClient(args.adminUrl, args.manager)
-  const response = await client.getLlmConnections(accessToken)
-  const incomingSlugs = new Set(response.connections.map(connection => connection.slug))
-
-  for (const existing of getLlmConnections()) {
-    if (existing.managedBy === 'admin' && !incomingSlugs.has(existing.slug)) {
-      await deleteConnectionAndCredentials(args.manager, existing.slug)
+  const connectionSlugsToRevoke = new Set(getAdminManagedConnectionSlugs())
+  try {
+    const client = createAdminClient(args.adminUrl, args.manager)
+    const response = await client.getLlmConnections(accessToken)
+    const incomingSlugs = new Set(response.connections.map(connection => connection.slug))
+    for (const slug of incomingSlugs) {
+      connectionSlugsToRevoke.add(slug)
     }
-  }
 
-  for (const connection of response.connections) {
-    await upsertAdminConnection(args.manager, connection, response.configVersion, accessToken)
-  }
+    for (const existing of getLlmConnections()) {
+      if (existing.managedBy === 'admin' && !incomingSlugs.has(existing.slug)) {
+        await deleteConnectionAndCredentials(args.manager, existing.slug)
+      }
+    }
 
-  if (response.defaultConnection && getLlmConnections().some(connection => connection.slug === response.defaultConnection)) {
-    setDefaultLlmConnection(response.defaultConnection)
-  }
+    for (const connection of response.connections) {
+      await upsertAdminConnection(args.manager, connection, response.configVersion, accessToken)
+    }
 
-  setAdminConfigVersion(response.configVersion)
+    if (response.defaultConnection && getLlmConnections().some(connection => connection.slug === response.defaultConnection)) {
+      setDefaultLlmConnection(response.defaultConnection)
+    }
 
-  return {
-    configVersion: response.configVersion,
-    connectionCount: response.connections.length,
-    defaultConnection: response.defaultConnection,
+    setAdminConfigVersion(response.configVersion)
+
+    return {
+      configVersion: response.configVersion,
+      connectionCount: response.connections.length,
+      defaultConnection: response.defaultConnection,
+    }
+  } catch (error) {
+    setAdminConfigVersion(undefined)
+    await deleteAdminManagedConnections(args.manager, connectionSlugsToRevoke)
+    throw error
   }
 }
 
@@ -338,12 +525,31 @@ function scrubCredentialFields(connection: LlmConnection): void {
   delete mutable.credentials
 }
 
-async function deleteAdminManagedConnections(manager: CredentialManager): Promise<void> {
-  for (const connection of getLlmConnections()) {
-    if (connection.managedBy === 'admin') {
-      await deleteConnectionAndCredentials(manager, connection.slug)
-    }
+function getAdminManagedConnectionSlugs(): string[] {
+  return getLlmConnections()
+    .filter(connection => connection.managedBy === 'admin')
+    .map(connection => connection.slug)
+}
+
+async function deleteAdminManagedConnections(
+  manager: CredentialManager,
+  additionalSlugs: Iterable<string> = [],
+): Promise<void> {
+  const slugs = new Set([
+    ...additionalSlugs,
+    ...getAdminManagedConnectionSlugs(),
+  ])
+
+  // Remove every connection from active configuration before awaiting keychain
+  // cleanup. Even if credential deletion fails, model dispatch can no longer
+  // resolve a previous account's Admin-managed connection.
+  for (const slug of slugs) {
+    deleteLlmConnection(slug)
   }
+
+  await Promise.all(
+    [...slugs].map(slug => manager.deleteLlmCredentials(slug)),
+  )
 }
 
 async function deleteConnectionAndCredentials(manager: CredentialManager, slug: string): Promise<void> {
@@ -365,16 +571,46 @@ function isAuthFailure(error: unknown): boolean {
   )
 }
 
-function toAdminRpcError(error: unknown): { errorCode: string; message: string; status?: number } {
+function toAdminRpcError(error: unknown): {
+  errorCode: string
+  message: string
+  status?: number
+  retryAfter?: number
+} {
   if (error instanceof AdminError) {
     return {
       errorCode: error.errorCode,
-      message: error.message,
+      message: getSafeAdminErrorMessage(error.errorCode, error.status),
       ...(typeof error.status === 'number' ? { status: error.status } : {}),
+      ...(typeof error.details?.retryAfter === 'number'
+        && Number.isFinite(error.details.retryAfter)
+        && error.details.retryAfter > 0
+        && error.details.retryAfter <= 86_400
+        ? { retryAfter: error.details.retryAfter }
+        : {}),
     }
   }
   if (error instanceof Error) {
-    return { errorCode: 'UNKNOWN_ERROR', message: error.message }
+    return { errorCode: 'UNKNOWN_ERROR', message: 'Admin request failed' }
   }
-  return { errorCode: 'UNKNOWN_ERROR', message: String(error) }
+  return { errorCode: 'UNKNOWN_ERROR', message: 'Admin request failed' }
+}
+
+function adminInputError(errorCode: AdminErrorCode): {
+  success: false
+  errorCode: AdminErrorCode
+  message: string
+} {
+  return {
+    success: false,
+    errorCode,
+    message: getSafeAdminErrorMessage(errorCode),
+  }
+}
+
+function hasValidationIssue(
+  issues: ReadonlyArray<{ path: PropertyKey[] }>,
+  field: string,
+): boolean {
+  return issues.some(issue => issue.path[0] === field)
 }

@@ -220,10 +220,44 @@ export interface AdminRpcErrorPayload {
   errorCode?: string
   message?: string
   status?: number
+  retryAfter?: number
 }
 
 export type AdminLoginResult =
   | { success: true; user: AdminUser }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export interface AdminAuthConfigResult extends AdminRpcErrorPayload {
+  phoneAuthEnabled: boolean
+}
+
+export type AdminPhoneAuthChallengeConfigResult =
+  | {
+      success: true
+      type: 'browser_redirect'
+      issuerUrl: string
+    }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type AdminSendPhoneAuthCodeResult =
+  | {
+      success: true
+      accepted: boolean
+      expiresIn: number
+      resendAfter: number
+    }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type AdminPhoneAuthChallengeResult =
+  | { success: true; challengeToken: string }
+  | { success: false; errorCode: 'phone_auth_configuration_error' }
+
+export type AdminVerifyPhoneAuthCodeResult =
+  | { success: true; user: AdminUser; isNewUser: boolean }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type AdminSetPasswordResult =
+  | { success: true }
   | ({ success: false } & AdminRpcErrorPayload)
 
 export type AdminValidateResult =
@@ -416,7 +450,13 @@ export interface ElectronAPI {
   logout(): Promise<void>
 
   // Admin auth
-  adminLogin(username: string, password: string): Promise<AdminLoginResult>
+  adminLogin(identifier: string, password: string): Promise<AdminLoginResult>
+  adminGetAuthConfig(): Promise<AdminAuthConfigResult>
+  adminGetPhoneAuthChallengeConfig(): Promise<AdminPhoneAuthChallengeConfigResult>
+  adminAcquirePhoneAuthChallenge(): Promise<AdminPhoneAuthChallengeResult>
+  adminSendPhoneAuthCode(phone: string, challengeToken: string): Promise<AdminSendPhoneAuthCodeResult>
+  adminVerifyPhoneAuthCode(phone: string, code: string): Promise<AdminVerifyPhoneAuthCodeResult>
+  adminSetPassword(password: string): Promise<AdminSetPasswordResult>
   adminValidate(): Promise<AdminValidateResult>
   adminLogout(): Promise<{ success: boolean }>
   adminGetStatus(): Promise<AdminStatusResult>

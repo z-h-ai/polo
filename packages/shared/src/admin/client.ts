@@ -1,11 +1,28 @@
 import {
   AdminError,
+  type AdminAuthConfig,
   type AdminErrorCode,
   type AdminLlmConnectionsResponse,
   type AdminLoginResponse,
+  type AdminPhoneAuthResponse,
+  type AdminPhoneAuthChallengeConfig,
   type AdminRefreshResponse,
+  type SendPhoneAuthCodeInput,
+  type SendPhoneAuthCodeResponse,
+  type SetAdminPasswordInput,
+  type SetAdminPasswordResponse,
   type AdminValidateResponse,
+  type VerifyPhoneAuthCodeInput,
 } from './types.ts';
+import type { ZodType } from 'zod';
+import {
+  AdminLoginResponseSchema,
+  AdminPhoneAuthResponseSchema,
+  AdminRefreshResponseSchema,
+  AdminValidateResponseSchema,
+  SendPhoneAuthCodeResponseSchema,
+  SetAdminPasswordResponseSchema,
+} from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -20,7 +37,65 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'SERVER_ERROR',
   'NETWORK_ERROR',
   'UNKNOWN_ERROR',
+  'phone_auth_disabled',
+  'invalid_phone',
+  'verification_code_invalid',
+  'verification_code_expired',
+  'verification_attempts_exceeded',
+  'phone_not_registered',
+  'sms_rate_limited',
+  'sms_send_failed',
+  'phone_auth_configuration_error',
+  'invalid_credentials',
 ]);
+
+const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
+  account_disabled: 'ACCOUNT_DISABLED',
+  forbidden: 'FORBIDDEN',
+  invalid_token: 'INVALID_TOKEN',
+  not_found: 'NOT_FOUND',
+  token_expired: 'TOKEN_EXPIRED',
+  token_revoked: 'TOKEN_REVOKED',
+  unauthorized: 'UNAUTHORIZED',
+  validation_error: 'VALIDATION_ERROR',
+};
+
+const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+  INVALID_CREDENTIALS: 'Invalid username or password',
+  ACCOUNT_DISABLED: 'Admin account is disabled',
+  TOKEN_REVOKED: 'Admin session is no longer valid',
+  TOKEN_EXPIRED: 'Admin session is no longer valid',
+  INVALID_TOKEN: 'Admin session is no longer valid',
+  UNAUTHORIZED: 'Admin session is no longer valid',
+  FORBIDDEN: 'Admin request is not permitted',
+  NOT_FOUND: 'Admin resource was not found',
+  VALIDATION_ERROR: 'Admin request was rejected',
+  SERVER_ERROR: 'Admin service is temporarily unavailable',
+  NETWORK_ERROR: 'Failed to reach admin server',
+  UNKNOWN_ERROR: 'Admin request failed',
+  phone_auth_disabled: 'Phone authentication is unavailable',
+  invalid_phone: 'Phone number is invalid',
+  verification_code_invalid: 'Verification code is invalid',
+  verification_code_expired: 'Verification code has expired',
+  verification_attempts_exceeded: 'Verification attempts exceeded',
+  phone_not_registered: 'Phone number is not registered',
+  sms_rate_limited: 'Phone authentication request was rate limited',
+  sms_send_failed: 'Admin service is temporarily unavailable',
+  phone_auth_configuration_error: 'Admin service is temporarily unavailable',
+  invalid_credentials: 'Invalid username or password',
+};
+
+const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+export function getSafeAdminErrorMessage(
+  errorCode: AdminErrorCode,
+  status?: number,
+): string {
+  if (typeof status === 'number' && status >= 500) {
+    return 'Admin service is temporarily unavailable';
+  }
+  return SAFE_ADMIN_ERROR_MESSAGES[errorCode] ?? 'Admin request failed';
+}
 
 export interface AdminClientTokenStore {
   getRefreshToken(): string | null | Promise<string | null>;
@@ -40,31 +115,97 @@ export class AdminClient {
     this.tokenStore = options?.tokenStore;
   }
 
-  login(username: string, password: string): Promise<AdminLoginResponse> {
-    return this.request('/api/auth/login', {
+  async login(identifier: string, password: string): Promise<AdminLoginResponse> {
+    const response = await this.request<unknown>('/api/auth/login', {
       method: 'POST',
-      body: { username, password },
+      body: { identifier, password },
     });
+    return this.readSuccessResponse(response, AdminLoginResponseSchema);
   }
 
-  refresh(refreshToken: string): Promise<AdminRefreshResponse> {
-    return this.request('/api/auth/refresh', {
+  async getAuthConfig(): Promise<AdminAuthConfig> {
+    const response = await this.request<AdminAuthConfig>('/api/auth/config', {
+      method: 'GET',
+    });
+    return { phoneAuthEnabled: response.phoneAuthEnabled === true };
+  }
+
+  async getPhoneAuthChallengeConfig(): Promise<AdminPhoneAuthChallengeConfig> {
+    const response = await this.request<unknown>('/api/auth/phone/challenge/config', {
+      method: 'GET',
+    });
+    const issuerUrl = response && typeof response === 'object'
+      ? (response as Record<string, unknown>).issuerUrl
+      : undefined;
+    if (
+      !response
+      || typeof response !== 'object'
+      || (response as Record<string, unknown>).type !== 'browser_redirect'
+      || typeof issuerUrl !== 'string'
+      || !issuerUrl
+    ) {
+      throw new AdminError(
+        'Phone auth challenge configuration is invalid',
+        'phone_auth_configuration_error',
+      );
+    }
+    return {
+      type: 'browser_redirect',
+      issuerUrl,
+    };
+  }
+
+  async sendPhoneAuthCode(input: SendPhoneAuthCodeInput): Promise<SendPhoneAuthCodeResponse> {
+    const response = await this.request<unknown>('/api/auth/phone/send-code', {
+      method: 'POST',
+      body: {
+        phone: input.phone,
+        challengeToken: input.challengeToken,
+      },
+    });
+    return this.readSuccessResponse(response, SendPhoneAuthCodeResponseSchema);
+  }
+
+  async verifyPhoneAuthCode(input: VerifyPhoneAuthCodeInput): Promise<AdminPhoneAuthResponse> {
+    const response = await this.request<unknown>('/api/auth/phone/verify', {
+      method: 'POST',
+      body: {
+        phone: input.phone,
+        code: input.code,
+      },
+    });
+    return this.readSuccessResponse(response, AdminPhoneAuthResponseSchema);
+  }
+
+  async setPassword(accessToken: string, input: SetAdminPasswordInput): Promise<SetAdminPasswordResponse> {
+    const response = await this.request<unknown>('/api/auth/password', {
+      method: 'POST',
+      accessToken,
+      body: { password: input.password },
+    });
+    return this.readSuccessResponse(response, SetAdminPasswordResponseSchema);
+  }
+
+  async refresh(refreshToken: string): Promise<AdminRefreshResponse> {
+    const response = await this.request<unknown>('/api/auth/refresh', {
       method: 'POST',
       body: { refreshToken },
     });
+    return this.readSuccessResponse(response, AdminRefreshResponseSchema);
   }
 
-  validate(accessToken: string): Promise<AdminValidateResponse> {
-    return this.request('/api/auth/validate', {
+  async validate(accessToken: string): Promise<AdminValidateResponse> {
+    const response = await this.request<unknown>('/api/auth/validate', {
       method: 'POST',
       accessToken,
     });
+    return this.readSuccessResponse(response, AdminValidateResponseSchema);
   }
 
-  async logout(refreshToken: string): Promise<void> {
+  async logout(accessToken: string): Promise<void> {
     await this.request('/api/auth/logout', {
       method: 'POST',
-      body: { refreshToken },
+      accessToken,
     });
   }
 
@@ -144,16 +285,36 @@ export class AdminClient {
   private createError(response: Response, data: unknown): AdminError {
     const statusCode = this.errorCodeForStatus(response.status);
     const errorCode = this.readAdminErrorCode(data) ?? statusCode;
-    const bodyMessage =
-      this.readString(data, 'message') ??
-      this.readString(data, 'error_description') ??
-      this.readString(data, 'error');
-    const message = (bodyMessage ?? response.statusText) || 'Admin request failed';
+    const message = this.safeErrorMessage(response.status, errorCode);
 
     return new AdminError(message, errorCode, {
       status: response.status,
-      details: data,
+      details: this.readSafeErrorDetails(data),
     });
+  }
+
+  private safeErrorMessage(
+    status: number,
+    errorCode: AdminErrorCode,
+  ): string {
+    return getSafeAdminErrorMessage(errorCode, status);
+  }
+
+  private readSafeErrorDetails(data: unknown): { retryAfter?: number } | undefined {
+    if (!data || typeof data !== 'object') return undefined;
+    const record = data as Record<string, unknown>;
+    const nested = record.details && typeof record.details === 'object'
+      ? (record.details as Record<string, unknown>).retryAfter
+      : undefined;
+    const value = record.retryAfter ?? nested;
+    return (
+      typeof value === 'number'
+      && Number.isFinite(value)
+      && value > 0
+      && value <= MAX_RETRY_AFTER_SECONDS
+    )
+      ? { retryAfter: Math.ceil(value) }
+      : undefined;
   }
 
   private readAdminErrorCode(data: unknown): AdminErrorCode | null {
@@ -161,10 +322,21 @@ export class AdminClient {
       this.readString(data, 'errorCode') ??
       this.readString(data, 'code') ??
       this.readString(data, 'error');
+    if (value && ADMIN_ERROR_CODE_ALIASES[value]) {
+      return ADMIN_ERROR_CODE_ALIASES[value];
+    }
     if (value && ADMIN_ERROR_CODES.has(value as AdminErrorCode)) {
       return value as AdminErrorCode;
     }
     return null;
+  }
+
+  private readSuccessResponse<T>(data: unknown, schema: ZodType<T>): T {
+    const result = schema.safeParse(data);
+    if (!result.success) {
+      throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    }
+    return result.data;
   }
 
   private readString(data: unknown, key: string): string | null {

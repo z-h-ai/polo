@@ -3,7 +3,7 @@ import type { LlmConnection } from '../config/llm-connections.ts';
 export interface AdminUser {
   id: string;
   username: string;
-  displayName: string;
+  displayName: string | null;
   role: string;
   groupIds: string[];
 }
@@ -15,17 +15,58 @@ export interface AdminLoginResponse {
   user: AdminUser;
 }
 
+export interface AdminAuthConfig {
+  phoneAuthEnabled: boolean;
+}
+
+export interface AdminPhoneAuthChallengeConfig {
+  type: 'browser_redirect';
+  issuerUrl: string;
+}
+
+export interface SendPhoneAuthCodeInput {
+  phone: string;
+  challengeToken: string;
+}
+
+export interface SendPhoneAuthCodeResponse {
+  accepted: boolean;
+  expiresIn: number;
+  resendAfter: number;
+}
+
+export interface VerifyPhoneAuthCodeInput {
+  phone: string;
+  code: string;
+}
+
+export interface AdminPhoneAuthResponse extends AdminLoginResponse {
+  isNewUser: boolean;
+}
+
+export interface SetAdminPasswordInput {
+  password: string;
+}
+
+export interface SetAdminPasswordResponse {
+  success: boolean;
+}
+
 export interface AdminRefreshResponse {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
 }
 
-export interface AdminValidateResponse {
-  valid: boolean;
-  user: AdminUser;
-  configVersion: string;
-}
+export type AdminValidateResponse =
+  | {
+      valid: true;
+      user: AdminUser;
+      configVersion: string;
+    }
+  | {
+      valid: false;
+    };
 
 export interface AdminLlmConnection extends LlmConnection {
   endpoint?: string;
@@ -50,6 +91,18 @@ export interface AdminLlmConnectionsResponse {
   defaultConnection: string | null;
 }
 
+export type PhoneAuthErrorCode =
+  | 'phone_auth_disabled'
+  | 'invalid_phone'
+  | 'verification_code_invalid'
+  | 'verification_code_expired'
+  | 'verification_attempts_exceeded'
+  | 'phone_not_registered'
+  | 'sms_rate_limited'
+  | 'sms_send_failed'
+  | 'phone_auth_configuration_error'
+  | 'invalid_credentials';
+
 export type AdminErrorCode =
   | 'INVALID_CREDENTIALS'
   | 'ACCOUNT_DISABLED'
@@ -62,16 +115,21 @@ export type AdminErrorCode =
   | 'VALIDATION_ERROR'
   | 'SERVER_ERROR'
   | 'NETWORK_ERROR'
-  | 'UNKNOWN_ERROR';
+  | 'UNKNOWN_ERROR'
+  | PhoneAuthErrorCode;
+
+export interface AdminErrorDetails {
+  retryAfter?: number;
+}
 
 export class AdminError extends Error {
   readonly errorCode: AdminErrorCode;
   readonly status?: number;
-  readonly details?: unknown;
+  readonly details?: AdminErrorDetails;
 
   constructor(message: string, errorCode: AdminErrorCode, options?: {
     status?: number;
-    details?: unknown;
+    details?: AdminErrorDetails;
     cause?: unknown;
   }) {
     super(message, { cause: options?.cause });

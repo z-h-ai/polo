@@ -128,6 +128,11 @@ export const CHANNEL_MAP = {
 
   // Admin auth
   adminLogin: invoke(RPC_CHANNELS.admin.LOGIN),
+  adminGetAuthConfig: invoke(RPC_CHANNELS.admin.GET_AUTH_CONFIG),
+  adminGetPhoneAuthChallengeConfig: invoke(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG),
+  adminSendPhoneAuthCode: invoke(RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE),
+  adminVerifyPhoneAuthCode: invoke(RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE),
+  adminSetPassword: invoke(RPC_CHANNELS.admin.SET_PASSWORD),
   adminValidate: invoke(RPC_CHANNELS.admin.VALIDATE),
   adminLogout: invoke(RPC_CHANNELS.admin.LOGOUT),
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
