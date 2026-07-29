@@ -720,12 +720,14 @@ export default function App() {
 
     try {
       const next = await bootstrapOrganization(accountId)
+      if (currentAdminUserIdRef.current !== accountId || next === null) return
       if (next === 'ready') {
         continueAfterOrganization(workspaceId)
       } else {
         setAppState('organization')
       }
     } catch (error) {
+      if (currentAdminUserIdRef.current !== accountId) return
       if (isAdminAuthFailureResult(error as AdminErrorLike)) {
         currentAdminUserIdRef.current = null
         setCurrentAdminUser(null)
@@ -2239,7 +2241,8 @@ export default function App() {
     openNewChat,
   ])
 
-  const handleOrganizationFlowComplete = useCallback(() => {
+  const handleOrganizationFlowComplete = useCallback((accountId: string | null) => {
+    if (!accountId || currentAdminUserIdRef.current !== accountId) return
     continueAfterOrganization(windowWorkspaceId)
   }, [continueAfterOrganization, windowWorkspaceId])
 
@@ -2386,27 +2389,32 @@ export default function App() {
             joinPreview={organization.joinPreview}
             error={organization.error}
             onCreate={async input => {
-              await organization.createOrganization(input)
-              handleOrganizationFlowComplete()
+              const requestAccountId = currentAdminUserIdRef.current
+              const created = await organization.createOrganization(input)
+              if (created) handleOrganizationFlowComplete(requestAccountId)
             }}
             onAcceptJoin={async () => {
+              const requestAccountId = currentAdminUserIdRef.current
               const outcome = await organization.acceptJoin()
-              if (outcome.completed) handleOrganizationFlowComplete()
+              if (outcome.completed) handleOrganizationFlowComplete(requestAccountId)
             }}
             onDismissJoin={() => {
+              const requestAccountId = currentAdminUserIdRef.current
               const next = organization.dismissJoin()
-              if (next === 'ready') handleOrganizationFlowComplete()
+              if (next === 'ready') handleOrganizationFlowComplete(requestAccountId)
             }}
             onSelect={organizationId => {
+              const requestAccountId = currentAdminUserIdRef.current
               selectOrganization(organizationId)
-              handleOrganizationFlowComplete()
+              handleOrganizationFlowComplete(requestAccountId)
             }}
             onShowCreate={showOrganizationCreate}
             onShowSelect={organization.showSelect}
             onRetry={() => {
               if (!currentAdminUser?.userId) return
-              void bootstrapOrganization(currentAdminUser.userId).then(next => {
-                if (next === 'ready') handleOrganizationFlowComplete()
+              const requestAccountId = currentAdminUser.userId
+              void bootstrapOrganization(requestAccountId).then(next => {
+                if (next === 'ready') handleOrganizationFlowComplete(requestAccountId)
               }).catch(() => {})
             }}
           />

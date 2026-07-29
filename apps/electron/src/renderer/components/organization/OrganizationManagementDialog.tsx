@@ -84,6 +84,9 @@ export function OrganizationManagementDialog({
   const [maxUses, setMaxUses] = useState('1')
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [generatedLink, setGeneratedLink] = useState<GeneratedLink | null>(null)
+  // Dialog concurrency invariant: closing the dialog or changing organization/role
+  // bumps both generations. requestScopeRef always describes the latest render, so
+  // a load or write may commit only when its generation and captured scope still match.
   const loadGenerationRef = useRef(0)
   const actionGenerationRef = useRef(0)
 
@@ -190,6 +193,8 @@ export function OrganizationManagementDialog({
     organization.organizationMembershipRole,
   ])
 
+  // Each write captures organization + role before the IPC call. Result state and
+  // follow-up loads are allowed only while that exact open/manageable scope remains current.
   const runAction = async <Result extends OrganizationActionResult,>(
     action: string,
     callback: (organizationId: string) => Promise<Result>,

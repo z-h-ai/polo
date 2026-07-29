@@ -156,7 +156,7 @@ describe('useOrganizationContextState', () => {
     setPendingOrganizationJoinToken('join-token-12345678901234567890')
     const { result } = renderHook(() => useOrganizationContextState())
 
-    let next: string | undefined
+    let next: string | null | undefined
     await act(async () => {
       next = await result.current.bootstrap('account-1')
     })
@@ -219,6 +219,58 @@ describe('useOrganizationContextState', () => {
     expect(result.current.flowState).toBe('ready')
     expect(result.current.activeOrganizationId).toBe(organizations[0].id)
     expect(getStoredActiveOrganizationId('returning-account')).toBe(organizations[0].id)
+  })
+
+  it('discards account A bootstrap after clearing A and bootstrapping account B', async () => {
+    let resolveAccountA!: (value: OrganizationListResult) => void
+    let resolveAccountB!: (value: OrganizationListResult) => void
+    let requestCount = 0
+    organizationList = mock(() => new Promise<OrganizationListResult>(resolve => {
+      requestCount += 1
+      if (requestCount === 1) resolveAccountA = resolve
+      if (requestCount === 2) resolveAccountB = resolve
+    }))
+
+    const { result } = renderHook(() => useOrganizationContextState())
+    let bootstrapAccountA!: ReturnType<typeof result.current.bootstrap>
+    act(() => {
+      bootstrapAccountA = result.current.bootstrap('account-a')
+    })
+    act(() => {
+      result.current.clearAccount('account-a')
+    })
+    let bootstrapAccountB!: ReturnType<typeof result.current.bootstrap>
+    act(() => {
+      bootstrapAccountB = result.current.bootstrap('account-b')
+    })
+
+    await act(async () => {
+      resolveAccountB({
+        success: true,
+        organizations: [organizations[1]],
+      })
+      expect(await bootstrapAccountB).toBe('ready')
+    })
+    expect(result.current.accountId).toBe('account-b')
+    expect(result.current.organizationSummaries).toEqual([organizations[1]])
+    expect(result.current.activeOrganizationId).toBe(organizations[1].id)
+    expect(result.current.organizationMembershipRole).toBe('member')
+
+    await act(async () => {
+      resolveAccountA({
+        success: true,
+        organizations: [organizations[0]],
+      })
+      expect(await bootstrapAccountA).toBeNull()
+    })
+
+    expect(result.current.accountId).toBe('account-b')
+    expect(result.current.organizationSummaries).toEqual([organizations[1]])
+    expect(result.current.activeOrganizationId).toBe(organizations[1].id)
+    expect(result.current.organizationMembershipRole).toBe('member')
+    expect(result.current.flowState).toBe('ready')
+    expect(getStoredActiveOrganizationId('account-a')).toBeNull()
+    expect(getStoredActiveOrganizationId('account-b')).toBe(organizations[1].id)
   })
 
   it('confirms the owner membership before activating a newly created organization', async () => {

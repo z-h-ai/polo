@@ -306,6 +306,51 @@ describe('organization onboarding rendered interactions', () => {
     expect(onCreate.mock.calls[1][0].idempotencyKey).toBe(firstIdempotencyKey)
   })
 
+  it('keeps the creation idempotency key when the selected type is clicked during a lost response', async () => {
+    let rejectLostResponse!: (reason: Error) => void
+    const onCreate = mock((input: Parameters<OnboardingProps['onCreate']>[0]) => {
+      if (onCreate.mock.calls.length === 1) {
+        return new Promise((_, reject) => {
+          rejectLostResponse = reject
+        })
+      }
+      return Promise.resolve(input)
+    })
+    const user = userEvent.setup({ document: window.document })
+
+    renderWithI18n(createElement(OrganizationOnboarding, {
+      ...baseOnboardingProps,
+      onCreate,
+    }))
+
+    fireEvent.change(screen.getByTestId('organization-name-input'), {
+      target: { value: 'Creator Studio' },
+    })
+    fireEvent.change(screen.getByTestId('organization-purpose-input'), {
+      target: { value: 'Publish creator apps' },
+    })
+    const selectedType = screen.getByRole('button', {
+      name: /Creator space/,
+    }) as HTMLButtonElement
+    const submit = screen.getByTestId('organization-create-submit') as HTMLButtonElement
+
+    await user.click(submit)
+    expect(onCreate).toHaveBeenCalledTimes(1)
+    const firstIdempotencyKey = onCreate.mock.calls[0][0].idempotencyKey
+    expect(selectedType.disabled).toBe(true)
+
+    fireEvent.click(selectedType)
+    expect(onCreate).toHaveBeenCalledTimes(1)
+
+    rejectLostResponse(new Error('response lost after server commit'))
+    await waitFor(() => expect(submit.disabled).toBe(false))
+    await user.click(submit)
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(2))
+
+    expect(onCreate.mock.calls[1][0]).toEqual(onCreate.mock.calls[0][0])
+    expect(onCreate.mock.calls[1][0].idempotencyKey).toBe(firstIdempotencyKey)
+  })
+
   it('shows invitation context, blocks duplicate acceptance, and disables invalid invitations', async () => {
     let resolveAccept!: () => void
     const onAcceptJoin = mock(() => new Promise<void>(resolve => {

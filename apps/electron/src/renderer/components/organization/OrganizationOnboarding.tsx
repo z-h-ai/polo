@@ -87,6 +87,12 @@ function CreateOrganizationCard(props: OrganizationOnboardingProps) {
     idempotencyKeyRef.current = null
   }
 
+  const selectType = (nextType: OrganizationType) => {
+    if (submitting || nextType === type) return
+    setType(nextType)
+    markInputChanged()
+  }
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     if (submitting || !name.trim() || !purpose.trim()) return
@@ -127,27 +133,26 @@ function CreateOrganizationCard(props: OrganizationOnboardingProps) {
       </div>
 
       <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
-        <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <fieldset
+          disabled={submitting}
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+        >
           <legend className="sr-only">{t('organization.create.typeLabel')}</legend>
           <TypeCard
             selected={type === 'creator_space'}
+            disabled={submitting}
             icon={Sparkles}
             title={t('organization.type.creator')}
             description={t('organization.type.creatorDescription')}
-            onClick={() => {
-              setType('creator_space')
-              markInputChanged()
-            }}
+            onClick={() => selectType('creator_space')}
           />
           <TypeCard
             selected={type === 'enterprise_workspace'}
+            disabled={submitting}
             icon={Building2}
             title={t('organization.type.enterprise')}
             description={t('organization.type.enterpriseDescription')}
-            onClick={() => {
-              setType('enterprise_workspace')
-              markInputChanged()
-            }}
+            onClick={() => selectType('enterprise_workspace')}
           />
         </fieldset>
 
@@ -202,12 +207,14 @@ function CreateOrganizationCard(props: OrganizationOnboardingProps) {
 
 function TypeCard({
   selected,
+  disabled,
   icon: Icon,
   title,
   description,
   onClick,
 }: {
   selected: boolean
+  disabled: boolean
   icon: typeof Building2
   title: string
   description: string
@@ -217,9 +224,10 @@ function TypeCard({
     <button
       type="button"
       aria-pressed={selected}
+      disabled={disabled}
       onClick={onClick}
       className={cn(
-        'relative rounded-xl border p-4 text-left transition-colors',
+        'relative rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50',
         selected
           ? 'border-accent bg-accent/5'
           : 'border-border/70 hover:border-foreground/30',
