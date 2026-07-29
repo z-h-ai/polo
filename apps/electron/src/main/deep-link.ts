@@ -43,6 +43,7 @@ import type { WindowManager } from './window-manager'
 import { RPC_CHANNELS } from '../shared/types'
 import type { EventSink } from '@polo-ai/server-core/transport'
 import { isValidPoloaiCallbackId } from '../shared/types'
+import { describeDeepLinkForLog } from './deep-link-log'
 
 export interface DeepLinkTarget {
   /** Workspace ID - undefined means use active window */
@@ -227,8 +228,8 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
     }
 
     return null
-  } catch (error) {
-    mainLog.error('[DeepLink] Failed to parse URL:', url, error)
+  } catch {
+    mainLog.error('[DeepLink] Failed to parse URL', describeDeepLinkForLog(url))
     return null
   }
 }
@@ -275,6 +276,7 @@ export async function handleDeepLink(
   sourceWebContentsId?: number,
 ): Promise<DeepLinkResult> {
   const target = parseDeepLink(url)
+  const logContext = describeDeepLinkForLog(url)
 
   if (!target) {
     // Return success for null targets (like auth-callback) - they're handled elsewhere
@@ -284,7 +286,7 @@ export async function handleDeepLink(
     return { success: false, error: 'Invalid deep link URL' }
   }
 
-  mainLog.info('[DeepLink] Handling:', target)
+  mainLog.info('[DeepLink] Handling', logContext)
 
   if (target.action === 'send-message') {
     if (!target.callbackId || sourceWebContentsId == null) {
@@ -310,41 +312,36 @@ export async function handleDeepLink(
 
   // If windowMode is set, create a new window instead of navigating in existing
   if (target.windowMode) {
-    mainLog.info('[DeepLink] windowMode detected:', target.windowMode)
     // Get workspaceId from target or from current window
     let wsId = target.workspaceId
     if (!wsId) {
       const focusedWindow = windowManager.getFocusedWindow()
-      mainLog.info('[DeepLink] focusedWindow:', focusedWindow?.id)
       if (focusedWindow) {
         wsId = windowManager.getWorkspaceForWindow(focusedWindow.webContents.id) ?? undefined
-        mainLog.info('[DeepLink] wsId from focused window:', wsId)
       }
       if (!wsId) {
         const allWindows = windowManager.getAllWindows()
-        mainLog.info('[DeepLink] allWindows count:', allWindows.length)
         if (allWindows.length > 0) {
           wsId = allWindows[0].workspaceId
-          mainLog.info('[DeepLink] wsId from first window:', wsId)
         }
       }
     }
 
     if (!wsId) {
-      mainLog.error('[DeepLink] No workspace available for new window')
+      mainLog.error('[DeepLink] No workspace available for new window', logContext)
       return { success: false, error: 'No workspace available for new window' }
     }
 
     // Build URL without window param for navigation inside the new window
     const navUrl = buildDeepLinkWithoutWindowParam(url)
-    mainLog.info('[DeepLink] Creating new window with navUrl:', navUrl)
+    mainLog.info('[DeepLink] Creating new window', logContext)
 
     const window = windowManager.createWindow({
       workspaceId: wsId,
       focused: target.windowMode === 'focused',
       initialDeepLink: navUrl,
     })
-    mainLog.info('[DeepLink] Window created:', window.webContents.id)
+    mainLog.info('[DeepLink] Window created', logContext)
 
     return { success: true, windowId: window.webContents.id }
   }

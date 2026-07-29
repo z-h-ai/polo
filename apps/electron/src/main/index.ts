@@ -94,6 +94,7 @@ import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { initializeBackendHostRuntime } from '@polo-ai/shared/agent/backend'
 import { setPowerShellValidatorRoot } from '@polo-ai/shared/agent'
 import { handleDeepLink } from './deep-link'
+import { describeDeepLinkForLog } from './deep-link-log'
 import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import { BrowserPaneManager } from './browser-pane-manager'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
@@ -314,11 +315,11 @@ registerThumbnailScheme()
 // Handle deeplink on macOS (when app is already running)
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  mainLog.info('Received deeplink:', url)
+  mainLog.info('Received deeplink', describeDeepLinkForLog(url))
 
   if (windowManager) {
-    handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
-      mainLog.error('Failed to handle deep link:', err)
+    handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(() => {
+      mainLog.error('Failed to handle deep link', describeDeepLinkForLog(url))
     })
   } else {
     // App not ready - store for later
@@ -336,9 +337,9 @@ if (!gotTheLock) {
     // On Windows/Linux, the deeplink is in commandLine
     const url = commandLine.find(arg => arg.startsWith(`${DEEPLINK_SCHEME}://`))
     if (url && windowManager) {
-      mainLog.info('Received deeplink from second instance:', url)
-      handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
-        mainLog.error('Failed to handle deep link:', err)
+      mainLog.info('Received deeplink from second instance', describeDeepLinkForLog(url))
+      handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(() => {
+        mainLog.error('Failed to handle deep link', describeDeepLinkForLog(url))
       })
     } else if (windowManager) {
       // No deep link - just focus the first window
@@ -1123,7 +1124,7 @@ app.whenReady().then(async () => {
 
     // Process pending deep link from cold start
     if (pendingDeepLink) {
-      mainLog.info('Processing pending deep link:', pendingDeepLink)
+      mainLog.info('Processing pending deep link', describeDeepLinkForLog(pendingDeepLink))
       await handleDeepLink(pendingDeepLink, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined)
       pendingDeepLink = null
     }

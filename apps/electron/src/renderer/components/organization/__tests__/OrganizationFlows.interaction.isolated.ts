@@ -56,6 +56,7 @@ const ownerMembershipId = '21111111-1111-4111-8111-111111111111'
 const memberMembershipId = '22222222-2222-4222-8222-222222222222'
 
 let organizationRole: 'owner' | 'manager' = 'manager'
+let managedMemberStatus: 'active' | 'suspended' = 'active'
 
 mock.module('@/context/OrganizationContext', () => ({
   useOrganizationContext: () => ({
@@ -123,20 +124,18 @@ let listMembers = mock(async (_organizationId: string) => ({
         id: 'user-owner',
         username: 'owner',
         displayName: 'Owner User',
-        phone: '13800138000',
       },
     },
     {
       id: memberMembershipId,
       role: 'member' as const,
-      status: 'active' as const,
+      status: managedMemberStatus,
       joinedAt: '2026-07-29T00:00:00.000Z',
       updatedAt: '2026-07-29T00:00:00.000Z',
       user: {
         id: 'user-member',
         username: 'member',
         displayName: 'Member User',
-        phone: '13900139000',
       },
     },
   ],
@@ -186,6 +185,20 @@ let cancelInvitation = mock(async (_organizationId: string, _invitationId: strin
 let removeMember = mock(async (_organizationId: string, _memberId: string) => ({
   success: true as const,
 }))
+type UpdateMemberResult =
+  | { success: true }
+  | { success: false; errorCode: string }
+let updateMember = mock(async (
+  _organizationId: string,
+  _memberId: string,
+  input: {
+    role?: 'manager' | 'member'
+    status?: 'active' | 'suspended'
+  },
+): Promise<UpdateMemberResult> => {
+  if (input.status) managedMemberStatus = input.status
+  return { success: true as const }
+})
 
 function renderWithI18n(element: ReactElement) {
   return render(createElement(I18nextProvider, { i18n }, element))
@@ -194,6 +207,18 @@ function renderWithI18n(element: ReactElement) {
 beforeEach(async () => {
   await i18n.changeLanguage('en')
   organizationRole = 'manager'
+  managedMemberStatus = 'active'
+  updateMember = mock(async (
+    _organizationId: string,
+    _memberId: string,
+    input: {
+      role?: 'manager' | 'member'
+      status?: 'active' | 'suspended'
+    },
+  ): Promise<UpdateMemberResult> => {
+    if (input.status) managedMemberStatus = input.status
+    return { success: true as const }
+  })
   listMembers.mockClear()
   listInvitations.mockClear()
   createInvitation.mockClear()
@@ -214,7 +239,12 @@ beforeEach(async () => {
       organizationCancelInvitation: (...args: [string, string]) =>
         cancelInvitation(...args),
       organizationRevokeJoinLink: mock(async () => ({ success: true as const })),
-      organizationUpdateMember: mock(async () => ({ success: true as const })),
+      organizationUpdateMember: (
+        ...args: [string, string, {
+          role?: 'manager' | 'member'
+          status?: 'active' | 'suspended'
+        }]
+      ) => updateMember(...args),
       organizationRemoveMember: (...args: [string, string]) => removeMember(...args),
     },
   })
@@ -360,8 +390,11 @@ describe('organization management rendered interactions', () => {
       expect(listInvitations).toHaveBeenCalledWith(organizationId)
     })
     expect(await screen.findByText('Member User')).toBeTruthy()
+    expect(screen.getByText(/member · Active/)).toBeTruthy()
     expect(screen.getByText('13700137000')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Remove member' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Suspend member' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Restore member' })).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Target phone (optional)'), {
       target: { value: '13600136000' },
@@ -401,7 +434,7 @@ describe('organization management rendered interactions', () => {
     })
   })
 
-  it('shows member removal only to an Owner and refreshes organization context after removal', async () => {
+  it('lets only an Owner suspend, restore, and remove another member', async () => {
     organizationRole = 'owner'
     const onOrganizationsChanged = mock(async () => {})
     const user = userEvent.setup({ document: window.document })
@@ -411,11 +444,52 @@ describe('organization management rendered interactions', () => {
       onOrganizationsChanged,
     }))
 
-    const remove = await screen.findByRole('button', { name: 'Remove member' })
+    const suspend = await screen.findByRole('button', { name: 'Suspend member' })
+    await user.click(suspend)
+    await waitFor(() => {
+      expect(updateMember).toHaveBeenCalledWith(
+        organizationId,
+        memberMembershipId,
+        { status: 'suspended' },
+      )
+      expect(screen.getByRole('button', { name: 'Restore member' })).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Restore member' }))
+    await waitFor(() => {
+      expect(updateMember).toHaveBeenCalledWith(
+        organizationId,
+        memberMembershipId,
+        { status: 'active' },
+      )
+      expect(screen.getByRole('button', { name: 'Suspend member' })).toBeTruthy()
+    })
+
+    const remove = screen.getByRole('button', { name: 'Remove member' })
     await user.click(remove)
     await waitFor(() => {
       expect(removeMember).toHaveBeenCalledWith(organizationId, memberMembershipId)
       expect(onOrganizationsChanged).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('shows the server reason when suspending a member fails', async () => {
+    organizationRole = 'owner'
+    updateMember = mock(async (): Promise<UpdateMemberResult> => ({
+      success: false as const,
+      errorCode: 'FORBIDDEN',
+    }))
+    const user = userEvent.setup({ document: window.document })
+    renderWithI18n(createElement(OrganizationManagementDialog, {
+      open: true,
+      onOpenChange: mock(() => {}),
+      onOrganizationsChanged: mock(async () => {}),
+    }))
+
+    await user.click(await screen.findByRole('button', { name: 'Suspend member' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'You do not have permission to perform this action.',
+    )
+    expect(screen.getByRole('button', { name: 'Suspend member' })).toBeTruthy()
   })
 })

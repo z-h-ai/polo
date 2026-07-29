@@ -146,7 +146,7 @@ export const ListOrganizationMembersResponseSchema = z.object({
       id: organizationId,
       username: nonBlankString(512),
       displayName: z.string().max(2_048).nullable(),
-      phone: z.string().max(32).nullable(),
+      phone: z.string().max(32).nullable().optional(),
     }),
   })),
 })

@@ -65,6 +65,15 @@ let organizationCreate = mock(async (_input: {
   membership: organizations[0].membership,
   replayed: false,
 }))
+let organizationAcceptJoin = mock(async (_token: string) => ({
+  success: true as const,
+  membership: {
+    ...organizations[1].membership,
+    organizationId: organizations[1].id,
+    userId: 'user-race',
+  },
+  replayed: false,
+}))
 
 beforeEach(() => {
   localStorage.clear()
@@ -95,6 +104,15 @@ beforeEach(() => {
     membership: organizations[0].membership,
     replayed: false,
   }))
+  organizationAcceptJoin = mock(async (_token: string) => ({
+    success: true as const,
+    membership: {
+      ...organizations[1].membership,
+      organizationId: organizations[1].id,
+      userId: 'user-race',
+    },
+    replayed: false,
+  }))
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
@@ -102,6 +120,7 @@ beforeEach(() => {
       organizationPreviewJoin: (...args: [string]) => organizationPreviewJoin(...args),
       organizationCreate: (...args: [Parameters<typeof organizationCreate>[0]]) =>
         organizationCreate(...args),
+      organizationAcceptJoin: (...args: [string]) => organizationAcceptJoin(...args),
     },
   })
 })
@@ -209,5 +228,68 @@ describe('useOrganizationContextState', () => {
     expect(result.current.flowState).toBe('ready')
     expect(result.current.activeOrganizationId).toBe(organizations[0].id)
     expect(result.current.organizationMembershipRole).toBe('owner')
+  })
+
+  it('discards out-of-order join previews and accepts only the token bound to the visible preview', async () => {
+    const tokenA = 'join-token-aaaaaaaaaaaaaaaaaaaa'
+    const tokenB = 'join-token-bbbbbbbbbbbbbbbbbbbb'
+    type PreviewResult = Awaited<ReturnType<typeof organizationPreviewJoin>>
+    let resolvePreviewA!: (value: PreviewResult) => void
+    let resolvePreviewB!: (value: PreviewResult) => void
+    organizationPreviewJoin = mock((token: string) => new Promise<PreviewResult>(resolve => {
+      if (token === tokenA) resolvePreviewA = resolve
+      if (token === tokenB) resolvePreviewB = resolve
+    }))
+
+    const { result } = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await result.current.bootstrap('account-race')
+    })
+
+    let previewA!: Promise<void>
+    let previewB!: Promise<void>
+    act(() => {
+      previewA = result.current.receiveJoinToken(tokenA)
+      previewB = result.current.receiveJoinToken(tokenB)
+    })
+
+    await act(async () => {
+      resolvePreviewB({
+        success: true,
+        organization: organizations[1],
+        join: {
+          kind: 'join_link',
+          effectiveStatus: 'active',
+          expiresAt: null,
+          usesRemaining: null,
+          requiresPhoneMatch: false,
+        },
+      })
+      await previewB
+    })
+    expect(result.current.joinPreview?.organization.name).toBe('Acme')
+
+    await act(async () => {
+      resolvePreviewA({
+        success: true,
+        organization: organizations[0],
+        join: {
+          kind: 'join_link',
+          effectiveStatus: 'active',
+          expiresAt: null,
+          usesRemaining: null,
+          requiresPhoneMatch: false,
+        },
+      })
+      await previewA
+    })
+    expect(result.current.joinPreview?.organization.name).toBe('Acme')
+
+    await act(async () => {
+      await result.current.acceptJoin()
+    })
+    expect(organizationAcceptJoin).toHaveBeenCalledTimes(1)
+    expect(organizationAcceptJoin).toHaveBeenCalledWith(tokenB)
+    expect(result.current.activeOrganizationId).toBe(organizations[1].id)
   })
 })

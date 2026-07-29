@@ -4,6 +4,8 @@ import {
   Check,
   Clipboard,
   Link2,
+  Pause,
+  Play,
   RotateCw,
   Trash2,
   UserMinus,
@@ -257,7 +259,7 @@ export function OrganizationManagementDialog({
                         {member.user.displayName || member.user.username}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {member.user.phone || member.user.username}
+                        {member.user.phone?.trim() || member.user.username}
                         {' · '}
                         {t(`organization.membershipStatus.${member.status}`)}
                       </p>
@@ -284,6 +286,28 @@ export function OrganizationManagementDialog({
                             <SelectItem value="member">{t('organization.role.member')}</SelectItem>
                           </SelectContent>
                         </Select>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={member.status === 'active'
+                            ? t('organization.manage.suspendMember')
+                            : t('organization.manage.restoreMember')}
+                          disabled={busyAction !== null}
+                          onClick={() => {
+                            const status = member.status === 'active' ? 'suspended' : 'active'
+                            void runAction(`status-${member.id}`, () =>
+                              window.electronAPI.organizationUpdateMember(
+                                organization.activeOrganizationId,
+                                member.id,
+                                { status },
+                              ), loadData)
+                          }}
+                        >
+                          {member.status === 'active'
+                            ? <Pause className="size-4 text-amber-600" />
+                            : <Play className="size-4 text-emerald-600" />}
+                        </Button>
                         <Button
                           type="button"
                           size="icon"

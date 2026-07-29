@@ -175,7 +175,7 @@ export interface OrganizationMember {
     id: string;
     username: string;
     displayName: string | null;
-    phone: string | null;
+    phone?: string | null;
   };
 }
 

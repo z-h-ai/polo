@@ -9,6 +9,7 @@ import { isUsableGitBashPath, validateGitBashPath } from '@polo-ai/server-core/s
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
+import { describeDeepLinkForLog } from '../deep-link-log'
 import {
   requestClientOpenExternal,
   requestClientOpenPath,
@@ -204,30 +205,39 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
 
   // Shell operations - open URL in external browser (or handle poloai:// internally)
   server.handle(RPC_CHANNELS.shell.OPEN_URL, async (ctx, url: string) => {
-    deps.platform.logger.info('[OPEN_URL] Received request:', url)
     try {
       const classification = classifyExternalUrl(url)
       if (classification.kind === 'dangerous') {
+        deps.platform.logger.info('[OPEN_URL] Received request', { classification: classification.kind })
         throw new Error(formatBlockedUrlError(classification))
       }
 
       // Handle poloai:// URLs internally via deep link handler (GUI only)
       if (classification.kind === 'internal-deeplink') {
+        const logContext = describeDeepLinkForLog(url)
+        deps.platform.logger.info('[OPEN_URL] Received internal deep link', logContext)
         if (!windowManager) return
-        deps.platform.logger.info('[OPEN_URL] Handling as deep link')
         const { handleDeepLink } = await import('../deep-link')
         const resolver = (wcId: number) => windowManager.getClientIdForWindow(wcId)
         const result = await handleDeepLink(url, windowManager, server.push.bind(server), resolver, ctx.clientId)
-        deps.platform.logger.info('[OPEN_URL] Deep link result:', result)
+        deps.platform.logger.info('[OPEN_URL] Deep link result', logContext, { success: result.success })
         return
       }
 
+      deps.platform.logger.info('[OPEN_URL] Received request', { classification: classification.kind })
       const result = await requestClientOpenExternal(server, ctx.clientId, url)
       if (!result.opened) {
         deps.platform.logger.error(`[OPEN_URL] Client capability failed: ${result.error}`)
         throw new Error(`Cannot open URL on client: ${result.error}`)
       }
     } catch (error) {
+      if (classifyExternalUrl(url).kind === 'internal-deeplink') {
+        deps.platform.logger.error(
+          '[OPEN_URL] Internal deep link failed',
+          describeDeepLinkForLog(url),
+        )
+        throw new Error('Failed to open URL: Failed to handle deep link')
+      }
       const message = error instanceof Error ? error.message : 'Unknown error'
       deps.platform.logger.error('openUrl error:', message)
       throw new Error(`Failed to open URL: ${message}`)

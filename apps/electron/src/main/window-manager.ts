@@ -9,6 +9,7 @@ import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/util
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
 import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
+import { describeDeepLinkForLog } from './deep-link-log'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -135,7 +136,10 @@ export class WindowManager {
 
     if (classification.kind === 'internal-deeplink') {
       if (!sourceWindow) {
-        windowLog.warn(`[url-safety] Blocked ${context}: internal deep link has no target window url=${url}`)
+        windowLog.warn(
+          `[url-safety] Blocked ${context}: internal deep link has no target window`,
+          describeDeepLinkForLog(url),
+        )
         return
       }
 
@@ -148,10 +152,16 @@ export class WindowManager {
           this.clientResolver?.(sourceWindow.webContents.id),
         )
         if (!result.success) {
-          windowLog.warn(`[url-safety] Blocked ${context}: unsupported internal deep link url=${url} error=${result.error ?? 'unknown'}`)
+          windowLog.warn(
+            `[url-safety] Blocked ${context}: unsupported internal deep link`,
+            describeDeepLinkForLog(url),
+          )
         }
-      }).catch((error) => {
-        windowLog.warn(`[url-safety] Failed to route internal deep link from ${context}: ${error instanceof Error ? error.message : String(error)}`)
+      }).catch(() => {
+        windowLog.warn(
+          `[url-safety] Failed to route internal deep link from ${context}`,
+          describeDeepLinkForLog(url),
+        )
       })
       return
     }

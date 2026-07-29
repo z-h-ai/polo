@@ -678,6 +678,49 @@ describe('AdminClient', () => {
       .toBe('Bearer organization-access-token');
   });
 
+  it('accepts the POL-56 member response shape when user.phone is omitted', async () => {
+    mockJsonFetch({
+      members: [{
+        id: 'membership-1',
+        role: 'manager',
+        status: 'active',
+        joinedAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        user: {
+          id: 'user-1',
+          username: 'manager-user',
+          displayName: 'Manager User',
+          internalProfile: 'must-not-leak',
+        },
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.listOrganizationMembers(
+      'organization-access-token',
+      'organization-1',
+    );
+
+    expect(result).toEqual({
+      members: [{
+        id: 'membership-1',
+        role: 'manager',
+        status: 'active',
+        joinedAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        user: {
+          id: 'user-1',
+          username: 'manager-user',
+          displayName: 'Manager User',
+        },
+      }],
+    });
+    expect(fetchCalls[0]!.url)
+      .toBe('https://admin.example.com/api/organizations/organization-1/members');
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
   it('creates organizations with an idempotency key in both trusted boundaries', async () => {
     mockJsonFetch({
       organization: {

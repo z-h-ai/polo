@@ -11,6 +11,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { BrowserView, BrowserWindow, app, ipcMain, nativeTheme, session, shell, type Session as ElectronSession } from 'electron'
 import { mainLog } from './logger'
+import { describeDeepLinkForLog } from './deep-link-log'
 import type { WindowManager } from './window-manager'
 import { BrowserCDP, type AccessibilitySnapshot, type ElementGeometry } from './browser-cdp'
 import {
@@ -666,14 +667,20 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     source: 'hash' | 'ipc',
   ): Promise<boolean> {
     const dedupeToken = token ?? route
+    const deepLink = this.buildDeepLinkFromRoute(route)
     if (dedupeToken && instance.lastLaunchToken === dedupeToken) {
-      mainLog.info(`[browser-pane] ignoring duplicate empty-state launch id=${instance.id} source=${source} token=${dedupeToken}`)
+      mainLog.info(
+        `[browser-pane] ignoring duplicate empty-state launch id=${instance.id} source=${source}`,
+        describeDeepLinkForLog(deepLink),
+      )
       return false
     }
 
     instance.lastLaunchToken = dedupeToken
-    const deepLink = this.buildDeepLinkFromRoute(route)
-    mainLog.info(`[browser-pane] handling empty-state launch id=${instance.id} source=${source} route=${route} deepLink=${deepLink}`)
+    mainLog.info(
+      `[browser-pane] handling empty-state launch id=${instance.id} source=${source}`,
+      describeDeepLinkForLog(deepLink),
+    )
 
     await this.handleDeepLinkUrl(deepLink)
     return true
@@ -2187,10 +2194,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       const resolver = (wcId: number) => this.windowManager?.getClientIdForWindow(wcId)
       const result = await handleDeepLink(url, this.windowManager, sink, resolver, undefined, sourceWebContentsId)
       if (!result.success) {
-        mainLog.warn(`[browser-pane] deep-link handling failed: ${result.error ?? 'unknown error'} url=${url}`)
+        mainLog.warn(
+          '[browser-pane] deep-link handling failed',
+          describeDeepLinkForLog(url),
+        )
       }
-    } catch (error) {
-      mainLog.warn(`[browser-pane] deep-link handling threw, falling back to shell.openExternal: ${error instanceof Error ? error.message : String(error)}`)
+    } catch {
+      mainLog.warn(
+        '[browser-pane] deep-link handling threw, falling back to shell.openExternal',
+        describeDeepLinkForLog(url),
+      )
       await shell.openExternal(url)
     }
   }

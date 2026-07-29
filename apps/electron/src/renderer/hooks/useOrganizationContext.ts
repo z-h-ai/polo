@@ -56,6 +56,8 @@ export function useOrganizationContextState() {
     () => getPendingOrganizationJoinToken(),
   )
   const pendingJoinTokenRef = useRef(pendingJoinToken)
+  const joinPreviewTokenRef = useRef<string | null>(null)
+  const joinPreviewGenerationRef = useRef(0)
   const [joinPreview, setJoinPreview] = useState<OrganizationJoinPreview | null>(null)
   const [error, setError] = useState<OrganizationFlowError | null>(null)
   const [contextVersion, setContextVersion] = useState(0)
@@ -96,21 +98,35 @@ export function useOrganizationContextState() {
   }, [])
 
   const previewJoin = useCallback(async (token: string) => {
+    const generation = ++joinPreviewGenerationRef.current
+    joinPreviewTokenRef.current = null
     setJoinPreview(null)
     setError(null)
     try {
       const result = await window.electronAPI.organizationPreviewJoin(token)
+      if (
+        generation !== joinPreviewGenerationRef.current
+        || pendingJoinTokenRef.current !== token
+      ) {
+        return null
+      }
       if (!result.success) {
         setError(resultError(result))
         return null
       }
+      joinPreviewTokenRef.current = token
       setJoinPreview({
         organization: result.organization,
         join: result.join,
       })
       return result
     } catch (caught) {
-      setError(caughtError(caught))
+      if (
+        generation === joinPreviewGenerationRef.current
+        && pendingJoinTokenRef.current === token
+      ) {
+        setError(caughtError(caught))
+      }
       return null
     }
   }, [])
@@ -169,6 +185,8 @@ export function useOrganizationContextState() {
 
   const dismissJoin = useCallback((): OrganizationFlowState => {
     clearPendingOrganizationJoinToken()
+    joinPreviewGenerationRef.current += 1
+    joinPreviewTokenRef.current = null
     pendingJoinTokenRef.current = null
     setPendingJoinToken(null)
     setJoinPreview(null)
@@ -231,21 +249,31 @@ export function useOrganizationContextState() {
   }, [activateOrganization, loadOrganizations])
 
   const acceptJoin = useCallback(async () => {
-    const token = pendingJoinTokenRef.current
-    if (!token) {
+    const token = joinPreviewTokenRef.current
+    if (!token || pendingJoinTokenRef.current !== token) {
       throw { code: 'join_token_unavailable' } satisfies OrganizationFlowError
     }
+    const generation = joinPreviewGenerationRef.current
     setError(null)
     try {
       const result = await window.electronAPI.organizationAcceptJoin(token)
       if (!result.success) throw resultError(result)
 
       const summaries = await loadOrganizations()
+      if (
+        generation !== joinPreviewGenerationRef.current
+        || joinPreviewTokenRef.current !== token
+        || pendingJoinTokenRef.current !== token
+      ) {
+        return result
+      }
       const accountId = accountIdRef.current
       if (!accountId) {
         throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
       }
       clearPendingOrganizationJoinToken()
+      joinPreviewGenerationRef.current += 1
+      joinPreviewTokenRef.current = null
       pendingJoinTokenRef.current = null
       setPendingJoinToken(null)
       setJoinPreview(null)
@@ -253,7 +281,13 @@ export function useOrganizationContextState() {
       return result
     } catch (caught) {
       const nextError = caughtError(caught)
-      setError(nextError)
+      if (
+        generation === joinPreviewGenerationRef.current
+        && joinPreviewTokenRef.current === token
+        && pendingJoinTokenRef.current === token
+      ) {
+        setError(nextError)
+      }
       throw nextError
     }
   }, [activateOrganization, loadOrganizations])
@@ -286,6 +320,8 @@ export function useOrganizationContextState() {
     const targetAccountId = accountId ?? accountIdRef.current
     if (targetAccountId) clearStoredActiveOrganizationId(targetAccountId)
     clearPendingOrganizationJoinToken()
+    joinPreviewGenerationRef.current += 1
+    joinPreviewTokenRef.current = null
     pendingJoinTokenRef.current = null
     accountIdRef.current = null
     setOrganizationSummaries([])
