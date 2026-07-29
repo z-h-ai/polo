@@ -143,6 +143,16 @@ let listInvitations = mock(async (_organizationId: string) => ({
   success: true as const,
   invitations: [invitation('invite-default', '13800138000')],
 }))
+type CreateInvitationResult = Awaited<
+  ReturnType<Window['electronAPI']['organizationCreateInvitation']>
+>
+let createInvitation = mock(async (
+  _organizationId: string,
+  _input: { targetPhone?: string; maxUses?: number },
+): Promise<CreateInvitationResult> => ({
+  success: false,
+  errorCode: 'NOT_IMPLEMENTED',
+}))
 type UpdateMemberResult =
   | { success: true }
   | { success: false; errorCode: string }
@@ -205,16 +215,19 @@ beforeEach(async () => {
     success: true as const,
     invitations: [invitation('invite-default', '13800138000')],
   }))
+  createInvitation = mock(async (): Promise<CreateInvitationResult> => ({
+    success: false,
+    errorCode: 'NOT_IMPLEMENTED',
+  }))
   updateMember = mock(async (): Promise<UpdateMemberResult> => ({ success: true as const }))
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
       organizationListMembers: (...args: [string]) => listMembers(...args),
       organizationListInvitations: (...args: [string]) => listInvitations(...args),
-      organizationCreateInvitation: mock(async () => ({
-        success: false as const,
-        errorCode: 'NOT_IMPLEMENTED',
-      })),
+      organizationCreateInvitation: (
+        ...args: [string, { targetPhone?: string; maxUses?: number }]
+      ) => createInvitation(...args),
       organizationCreateJoinLink: mock(async () => ({
         success: false as const,
         errorCode: 'NOT_IMPLEMENTED',
@@ -326,6 +339,76 @@ describe('organization management request isolation', () => {
     expect(screen.queryByText('Member A')).toBeNull()
     expect(screen.queryByText('13700137000')).toBeNull()
     expect(screen.getByText('Member B')).toBeTruthy()
+  })
+
+  it('discards a generated invitation token when its organization scope changes', async () => {
+    let resolveCreateInvitation!: (value: CreateInvitationResult) => void
+    createInvitation = mock((
+      _organizationId: string,
+      _input: { targetPhone?: string; maxUses?: number },
+    ) => new Promise<CreateInvitationResult>(resolve => {
+      resolveCreateInvitation = resolve
+    }))
+
+    function SwitchingActionHarness() {
+      const [activeOrganizationId, setActiveOrganizationId] = useState(organizationAId)
+      return createElement(
+        OrganizationProvider,
+        {
+          value: contextValue('owner', activeOrganizationId),
+          children: null,
+        },
+        createElement('button', {
+          type: 'button',
+          onClick: () => setActiveOrganizationId(organizationBId),
+        }, 'Switch action to B'),
+        createElement(OrganizationManagementDialog, {
+          open: true,
+          onOpenChange: () => {},
+          onOrganizationsChanged: async () => {},
+        }),
+      )
+    }
+
+    const user = userEvent.setup({ document: window.document })
+    renderWithI18n(createElement(SwitchingActionHarness))
+    const maxUsesInput = screen.getByLabelText('Max uses') as HTMLInputElement
+    await user.clear(maxUsesInput)
+    await user.type(maxUsesInput, '7')
+    await user.type(
+      screen.getByLabelText('Target phone (optional)'),
+      '13600136000',
+    )
+    await user.click(screen.getByRole('button', { name: 'Generate link' }))
+    expect(createInvitation).toHaveBeenCalledWith(organizationAId, {
+      targetPhone: '13600136000',
+      maxUses: 1,
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Switch action to B' }))
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText('Target phone (optional)') as HTMLInputElement).value,
+      ).toBe('')
+      expect((screen.getByLabelText('Max uses') as HTMLInputElement).value).toBe('1')
+      expect(
+        (screen.getByRole('button', { name: 'Generate link' }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false)
+    })
+
+    const staleToken = 'organization-a-secret-token-abcdefghijklmnopqrstuvwxyz'
+    await act(async () => {
+      resolveCreateInvitation({
+        success: true,
+        token: staleToken,
+        invitation: invitation('stale-invitation-a', '13600136000'),
+      })
+    })
+
+    expect(screen.queryByDisplayValue(`poloai://join/${staleToken}`)).toBeNull()
+    expect(screen.queryByTestId('organization-invite-detail')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('routes member-management auth failures through the shared login handler', async () => {

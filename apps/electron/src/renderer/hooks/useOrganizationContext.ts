@@ -75,6 +75,9 @@ export function useOrganizationContextState() {
   const [pendingJoinToken, setPendingJoinToken] = useState<string | null>(
     () => getPendingOrganizationJoinToken(),
   )
+  // Join concurrency invariant: pendingJoinTokenRef is the newest deep-link intent,
+  // joinPreviewTokenRef identifies the token actually shown, and the generation
+  // invalidates every earlier preview/accept chain when a token is replaced or cleared.
   const pendingJoinTokenRef = useRef(pendingJoinToken)
   const joinPreviewTokenRef = useRef<string | null>(null)
   const joinPreviewGenerationRef = useRef(0)
@@ -82,6 +85,9 @@ export function useOrganizationContextState() {
   const [error, setError] = useState<OrganizationFlowError | null>(null)
   const [contextVersion, setContextVersion] = useState(0)
   const accountIdRef = useRef<string | null>(null)
+  const activeOrganizationIdRef = useRef<string | null>(null)
+  const organizationScopeGenerationRef = useRef(0)
+  const refreshGenerationRef = useRef(0)
 
   const activateOrganization = useCallback((
     accountId: string,
@@ -94,6 +100,9 @@ export function useOrganizationContextState() {
     }
 
     setStoredActiveOrganizationId(accountId, organizationId)
+    accountIdRef.current = accountId
+    activeOrganizationIdRef.current = organizationId
+    organizationScopeGenerationRef.current += 1
     setActiveOrganizationId(organizationId)
     setOrganizationMembershipRole(organization.membership.role)
     setContextVersion(version => version + 1)
@@ -118,6 +127,9 @@ export function useOrganizationContextState() {
   }, [])
 
   const previewJoin = useCallback(async (token: string) => {
+    // Starting a preview increments the generation and removes the previously
+    // displayed-token binding. Its response may commit only while token + generation
+    // still describe the latest pending deep link.
     const generation = ++joinPreviewGenerationRef.current
     joinPreviewTokenRef.current = null
     setJoinPreview(null)
@@ -153,6 +165,10 @@ export function useOrganizationContextState() {
 
   const bootstrap = useCallback(async (accountId: string): Promise<OrganizationFlowState> => {
     accountIdRef.current = accountId
+    activeOrganizationIdRef.current = null
+    organizationScopeGenerationRef.current += 1
+    setActiveOrganizationId(null)
+    setOrganizationMembershipRole(null)
     setFlowState('loading')
     setError(null)
 
@@ -168,6 +184,7 @@ export function useOrganizationContextState() {
       }
 
       if (summaries.length === 0) {
+        activeOrganizationIdRef.current = null
         setActiveOrganizationId(null)
         setOrganizationMembershipRole(null)
         setFlowState('create')
@@ -184,6 +201,7 @@ export function useOrganizationContextState() {
         return 'ready'
       }
 
+      activeOrganizationIdRef.current = null
       setActiveOrganizationId(null)
       setOrganizationMembershipRole(null)
       setFlowState('select')
@@ -269,6 +287,9 @@ export function useOrganizationContextState() {
   }, [activateOrganization, loadOrganizations])
 
   const acceptJoin = useCallback(async () => {
+    // Acceptance snapshots the visible preview token and generation. Every async
+    // boundary must preserve the pending token, displayed token, and generation
+    // before the result may activate an organization or clear the join context.
     const token = joinPreviewTokenRef.current
     if (!token || pendingJoinTokenRef.current !== token) {
       throw { code: 'join_token_unavailable' } satisfies OrganizationFlowError
@@ -327,12 +348,30 @@ export function useOrganizationContextState() {
   }, [activateOrganization, organizationSummaries])
 
   const refreshOrganizations = useCallback(async () => {
-    const summaries = await loadOrganizations()
-    const accountId = accountIdRef.current
-    if (!accountId || !activeOrganizationId) return summaries
-    const active = summaries.find(item => item.id === activeOrganizationId)
+    const requestAccountId = accountIdRef.current
+    if (!requestAccountId) return []
+    const requestOrganizationId = activeOrganizationIdRef.current
+    const scopeGeneration = organizationScopeGenerationRef.current
+    const refreshGeneration = ++refreshGenerationRef.current
+    const isCurrentScope = () => (
+      refreshGeneration === refreshGenerationRef.current
+      && scopeGeneration === organizationScopeGenerationRef.current
+      && accountIdRef.current === requestAccountId
+      && activeOrganizationIdRef.current === requestOrganizationId
+    )
+
+    const result = await window.electronAPI.organizationList()
+    if (!isCurrentScope()) return result.success ? result.organizations : []
+    if (!result.success) throw resultError(result)
+    const summaries = result.organizations
+
+    setOrganizationSummaries(summaries)
+    if (!requestOrganizationId) return summaries
+    const active = summaries.find(item => item.id === requestOrganizationId)
     if (!active) {
-      clearStoredActiveOrganizationId(accountId)
+      clearStoredActiveOrganizationId(requestAccountId)
+      activeOrganizationIdRef.current = null
+      organizationScopeGenerationRef.current += 1
       setActiveOrganizationId(null)
       setOrganizationMembershipRole(null)
       setFlowState(summaries.length === 0 ? 'create' : 'select')
@@ -340,7 +379,7 @@ export function useOrganizationContextState() {
     }
     setOrganizationMembershipRole(active.membership.role)
     return summaries
-  }, [activeOrganizationId, loadOrganizations])
+  }, [])
 
   const clearAccount = useCallback((
     accountId?: string | null,
@@ -356,6 +395,9 @@ export function useOrganizationContextState() {
     joinPreviewTokenRef.current = null
     pendingJoinTokenRef.current = preservedJoinToken
     accountIdRef.current = null
+    activeOrganizationIdRef.current = null
+    organizationScopeGenerationRef.current += 1
+    refreshGenerationRef.current += 1
     setOrganizationSummaries([])
     setActiveOrganizationId(null)
     setOrganizationMembershipRole(null)

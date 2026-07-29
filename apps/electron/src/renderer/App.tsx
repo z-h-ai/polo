@@ -351,6 +351,8 @@ export default function App() {
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
   const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
   const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null>(null)
+  const currentAdminUserIdRef = useRef<string | null>(null)
+  currentAdminUserIdRef.current = currentAdminUser?.userId ?? null
   const organization = useOrganizationContextState()
   const {
     bootstrap: bootstrapOrganization,
@@ -693,9 +695,11 @@ export default function App() {
             displayName: status.displayName,
           }
         : null
+      currentAdminUserIdRef.current = user?.userId ?? null
       setCurrentAdminUser(user)
       return user
     } catch {
+      currentAdminUserIdRef.current = null
       setCurrentAdminUser(null)
       return null
     }
@@ -723,6 +727,7 @@ export default function App() {
       }
     } catch (error) {
       if (isAdminAuthFailureResult(error as AdminErrorLike)) {
+        currentAdminUserIdRef.current = null
         setCurrentAdminUser(null)
         setAppState('onboarding')
       } else {
@@ -795,9 +800,10 @@ export default function App() {
   }, [showAdminKicked])
 
   const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
-    clearOrganizationAccount(currentAdminUser?.userId, {
+    clearOrganizationAccount(currentAdminUserIdRef.current, {
       preservePendingJoinToken: true,
     })
+    currentAdminUserIdRef.current = null
     setCurrentAdminUser(null)
     if (getAdminErrorCode(failure) === 'TOKEN_REVOKED') {
       enterAdminKicked()
@@ -806,7 +812,6 @@ export default function App() {
     }
   }, [
     clearOrganizationAccount,
-    currentAdminUser?.userId,
     enterAdminKicked,
     enterAdminLogin,
   ])
@@ -838,41 +843,66 @@ export default function App() {
     setShowResetDialog(true)
   }, [])
 
-  // Check auth state and get window's workspace ID on mount
+  const startupInitializationGenerationRef = useRef(0)
+  const startupInitializationHandlersRef = useRef({
+    handleAdminAuthFailure,
+    routeThroughOrganization,
+    setWindowWorkspaceId,
+  })
+  startupInitializationHandlersRef.current = {
+    handleAdminAuthFailure,
+    routeThroughOrganization,
+    setWindowWorkspaceId,
+  }
+
+  // Check auth state and get window's workspace ID exactly once on mount. The
+  // generation prevents a StrictMode/unmount cleanup from committing stale async work.
   useEffect(() => {
+    const generation = ++startupInitializationGenerationRef.current
+    let cancelled = false
+    const isCurrentInitialization = () => (
+      !cancelled
+      && generation === startupInitializationGenerationRef.current
+    )
+
     const initialize = async () => {
       try {
         // Get this window's workspace ID (passed via URL query param from main process)
         const wsId = await window.electronAPI.getWindowWorkspace()
-        setWindowWorkspaceId(wsId)
+        if (!isCurrentInitialization()) return
+        startupInitializationHandlersRef.current.setWindowWorkspaceId(wsId)
 
         let needs = await window.electronAPI.getSetupNeeds()
+        if (!isCurrentInitialization()) return
         const adminStatus = await window.electronAPI.adminGetStatus()
+        if (!isCurrentInitialization()) return
         let signedInAccountId: string | null = null
 
         if (adminStatus.adminUrl) {
           const validation = await window.electronAPI.adminValidate()
+          if (!isCurrentInitialization()) return
           if (!validation.loggedIn) {
-            handleAdminAuthFailure(validation)
+            startupInitializationHandlersRef.current.handleAdminAuthFailure(validation)
             return
           }
 
           const syncResult = await window.electronAPI.adminSyncConnections()
+          if (!isCurrentInitialization()) return
           if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
-            handleAdminAuthFailure(syncResult)
+            startupInitializationHandlersRef.current.handleAdminAuthFailure(syncResult)
             return
           }
 
-          const signedInUser = await refreshAdminUser()
-          signedInAccountId = signedInUser?.userId ?? validation.user.id
-          if (!signedInUser) {
-            setCurrentAdminUser({
-              userId: validation.user.id,
-              username: validation.user.username,
-              displayName: validation.user.displayName,
-            })
+          const signedInUser = {
+            userId: validation.user.id,
+            username: validation.user.username,
+            displayName: validation.user.displayName,
           }
+          currentAdminUserIdRef.current = signedInUser.userId
+          setCurrentAdminUser(signedInUser)
+          signedInAccountId = signedInUser.userId
           needs = await window.electronAPI.getSetupNeeds()
+          if (!isCurrentInitialization()) return
         }
 
         setSetupNeeds(needs)
@@ -885,23 +915,26 @@ export default function App() {
         // LLM connection setup is admin-managed. If local setup is incomplete only
         // because no user-managed LLM connection exists, enter the app and let the
         // existing runtime unavailable-connection handling surface send-time errors.
-        await routeThroughOrganization(signedInAccountId, wsId)
+        await startupInitializationHandlersRef.current.routeThroughOrganization(
+          signedInAccountId,
+          wsId,
+        )
       } catch (error) {
+        if (!isCurrentInitialization()) return
         console.error('Failed to check auth state:', error)
         // If check fails, show onboarding to be safe
         setAppState('onboarding')
       }
     }
 
-    initialize()
-  }, [
-    enterAdminKicked,
-    enterAdminLogin,
-    handleAdminAuthFailure,
-    refreshAdminUser,
-    routeThroughOrganization,
-    setWindowWorkspaceId,
-  ])
+    void initialize()
+    return () => {
+      cancelled = true
+      if (startupInitializationGenerationRef.current === generation) {
+        startupInitializationGenerationRef.current += 1
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
@@ -1455,6 +1488,7 @@ export default function App() {
       const validation = await window.electronAPI.adminValidate()
       if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
         setRuntimeChatAccessIssue('account-disabled')
+        currentAdminUserIdRef.current = null
         setCurrentAdminUser(null)
         return true
       }
@@ -1466,6 +1500,7 @@ export default function App() {
         message: getErrorText(error),
       })) {
         setRuntimeChatAccessIssue('account-disabled')
+        currentAdminUserIdRef.current = null
         setCurrentAdminUser(null)
         return true
       }
@@ -2015,6 +2050,7 @@ export default function App() {
       setDefaultLlmConnectionSlug(undefined)
       setWorkspaceDefaultLlmConnection(undefined)
       setRuntimeChatAccessIssue(null)
+      currentAdminUserIdRef.current = null
       setCurrentAdminUser(null)
       setSetupNeeds({
         needsBillingConfig: false,

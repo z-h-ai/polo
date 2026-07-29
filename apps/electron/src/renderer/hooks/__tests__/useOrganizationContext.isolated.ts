@@ -443,4 +443,50 @@ describe('useOrganizationContextState', () => {
     expect(result.current.joinPreview?.organization.name).toBe('Acme')
     expect(result.current.activeOrganizationId).toBeNull()
   })
+
+  it('ignores a late organization A refresh after switching to organization B', async () => {
+    const { result } = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await result.current.bootstrap('account-refresh-race')
+    })
+    act(() => {
+      result.current.selectOrganization(organizations[0].id)
+    })
+
+    let resolveRefresh!: (value: OrganizationListResult) => void
+    organizationList = mock(() => new Promise<OrganizationListResult>(resolve => {
+      resolveRefresh = resolve
+    }))
+    let refreshPromise!: ReturnType<typeof result.current.refreshOrganizations>
+    act(() => {
+      refreshPromise = result.current.refreshOrganizations()
+    })
+    act(() => {
+      result.current.selectOrganization(organizations[1].id)
+    })
+
+    await act(async () => {
+      resolveRefresh({
+        success: true,
+        organizations: organizations.map((item, index) => ({
+          ...item,
+          name: `Stale ${item.name}`,
+          membership: {
+            ...item.membership,
+            role: index === 0 ? 'manager' : 'owner',
+          },
+        })),
+      })
+      await refreshPromise
+    })
+
+    expect(result.current.activeOrganizationId).toBe(organizations[1].id)
+    expect(result.current.organizationMembershipRole).toBe(
+      organizations[1].membership.role,
+    )
+    expect(result.current.organizationSummaries.map(item => item.name)).toEqual(
+      organizations.map(item => item.name),
+    )
+    expect(result.current.flowState).toBe('ready')
+  })
 })

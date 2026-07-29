@@ -51,8 +51,17 @@ interface OrganizationManagementDialogProps {
 
 interface GeneratedLink {
   kind: 'invitation' | 'join_link'
+  organizationId: string
   url: string
   joinLink?: OrganizationJoinLink
+}
+
+interface OrganizationActionResult {
+  success: boolean
+  message?: string
+  code?: string
+  errorCode?: string
+  status?: number
 }
 
 export function OrganizationManagementDialog({
@@ -76,18 +85,21 @@ export function OrganizationManagementDialog({
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [generatedLink, setGeneratedLink] = useState<GeneratedLink | null>(null)
   const loadGenerationRef = useRef(0)
+  const actionGenerationRef = useRef(0)
 
   const isOwner = organization.organizationMembershipRole === 'owner'
   const canManage = isOwner || organization.organizationMembershipRole === 'manager'
-  const loadScopeRef = useRef({
+  const requestScopeRef = useRef({
     open,
     canManage,
     organizationId: organization.activeOrganizationId,
+    role: organization.organizationMembershipRole,
   })
-  loadScopeRef.current = {
+  requestScopeRef.current = {
     open,
     canManage,
     organizationId: organization.activeOrganizationId,
+    role: organization.organizationMembershipRole,
   }
   const organizationErrorMessage = useCallback((result: {
     code?: string
@@ -107,7 +119,7 @@ export function OrganizationManagementDialog({
     const requestOrganizationId = organization.activeOrganizationId
     const generation = ++loadGenerationRef.current
     const isCurrentRequest = () => {
-      const scope = loadScopeRef.current
+      const scope = requestScopeRef.current
       return generation === loadGenerationRef.current
         && scope.open
         && scope.canManage
@@ -154,6 +166,7 @@ export function OrganizationManagementDialog({
 
   useEffect(() => {
     loadGenerationRef.current += 1
+    actionGenerationRef.current += 1
     setMembers([])
     setInvitations([])
     setMembersError(null)
@@ -161,93 +174,154 @@ export function OrganizationManagementDialog({
     setLoading(false)
     setGeneratedLink(null)
     setActionError(null)
+    setTargetPhone('')
+    setMaxUses('1')
+    setBusyAction(null)
     if (open && canManage) void loadData()
     return () => {
       loadGenerationRef.current += 1
+      actionGenerationRef.current += 1
     }
   }, [
     canManage,
     loadData,
     open,
     organization.activeOrganizationId,
+    organization.organizationMembershipRole,
   ])
 
-  const runAction = async (
+  const runAction = async <Result extends OrganizationActionResult,>(
     action: string,
-    callback: () => Promise<{ success: boolean; message?: string; errorCode?: string }>,
-    after?: () => Promise<unknown> | unknown,
+    callback: (organizationId: string) => Promise<Result>,
+    after?: (
+      result: Result,
+      organizationId: string,
+    ) => Promise<unknown> | unknown,
   ) => {
-    if (busyAction) return
+    const requestScope = requestScopeRef.current
+    if (
+      busyAction
+      || !requestScope.open
+      || !requestScope.canManage
+      || !requestScope.organizationId
+    ) {
+      return
+    }
+    const requestOrganizationId = requestScope.organizationId
+    const requestRole = requestScope.role
+    const generation = ++actionGenerationRef.current
+    const isCurrentAction = () => {
+      const scope = requestScopeRef.current
+      return generation === actionGenerationRef.current
+        && scope.open
+        && scope.canManage
+        && scope.organizationId === requestOrganizationId
+        && scope.role === requestRole
+    }
+
     setBusyAction(action)
     setActionError(null)
     try {
-      const result = await callback()
+      const result = await callback(requestOrganizationId)
+      if (!isCurrentAction()) return
       if (!result.success) {
         setActionError(organizationErrorMessage(result))
         return
       }
-      await after?.()
+      if (after && isCurrentAction()) {
+        await after(result, requestOrganizationId)
+      }
     } catch (caught) {
+      if (!isCurrentAction()) return
       emitAdminAuthFailure(caught as AdminErrorLike)
       setActionError(t('organization.manage.actionFailed'))
     } finally {
-      setBusyAction(null)
+      if (isCurrentAction()) setBusyAction(null)
     }
   }
 
   const createInvitation = async () => {
+    const phone = targetPhone.trim()
     const uses = active?.type === 'enterprise_workspace'
       ? 1
       : Math.max(1, Math.min(1_000, Number.parseInt(maxUses, 10) || 1))
-    await runAction('create-invitation', async () => {
-      const result = await window.electronAPI.organizationCreateInvitation(
-        organization.activeOrganizationId,
+    await runAction(
+      'create-invitation',
+      organizationId => window.electronAPI.organizationCreateInvitation(
+        organizationId,
         {
-          ...(targetPhone.trim() ? { targetPhone: targetPhone.trim() } : {}),
-          maxUses: targetPhone.trim() ? 1 : uses,
+          ...(phone ? { targetPhone: phone } : {}),
+          maxUses: phone ? 1 : uses,
         },
-      )
-      if (result.success) {
-        setGeneratedLink({
-          kind: 'invitation',
-          url: createOrganizationJoinDeepLink(result.token),
-        })
-        setTargetPhone('')
-      }
-      return result
-    }, loadData)
+      ),
+      async (result, organizationId) => {
+        if (result.success) {
+          setGeneratedLink({
+            kind: 'invitation',
+            organizationId,
+            url: createOrganizationJoinDeepLink(result.token),
+          })
+          setTargetPhone('')
+        }
+        await loadData()
+      },
+    )
   }
 
   const createPublicLink = async () => {
-    await runAction('create-public-link', async () => {
-      const result = await window.electronAPI.organizationCreateJoinLink(
-        organization.activeOrganizationId,
+    await runAction(
+      'create-public-link',
+      organizationId => window.electronAPI.organizationCreateJoinLink(
+        organizationId,
         { expiresAt: null, maxUses: null },
-      )
-      if (result.success) {
-        setGeneratedLink({
-          kind: 'join_link',
-          url: createOrganizationJoinDeepLink(result.token),
-          joinLink: result.joinLink,
-        })
-      }
-      return result
-    })
+      ),
+      (result, organizationId) => {
+        if (result.success) {
+          setGeneratedLink({
+            kind: 'join_link',
+            organizationId,
+            url: createOrganizationJoinDeepLink(result.token),
+            joinLink: result.joinLink,
+          })
+        }
+      },
+    )
   }
 
   const copyGeneratedLink = async () => {
-    if (!generatedLink) return
+    if (
+      busyAction
+      || !generatedLink
+      || generatedLink.organizationId !== organization.activeOrganizationId
+    ) {
+      return
+    }
+    const requestOrganizationId = generatedLink.organizationId
+    const requestRole = requestScopeRef.current.role
+    const generation = ++actionGenerationRef.current
+    const isCurrentCopy = () => {
+      const scope = requestScopeRef.current
+      return generation === actionGenerationRef.current
+        && scope.open
+        && scope.canManage
+        && scope.organizationId === requestOrganizationId
+        && scope.role === requestRole
+    }
     try {
       await navigator.clipboard.writeText(generatedLink.url)
+      if (!isCurrentCopy()) return
       toast.success(t('organization.manage.linkCopied'))
     } catch {
-      setActionError(t('organization.manage.actionFailed'))
+      if (isCurrentCopy()) setActionError(t('organization.manage.actionFailed'))
     }
   }
 
   const activeInvitationCount = useMemo(
     () => invitations.filter(item => item.effectiveStatus === 'active').length,
     [invitations],
+  )
+  const visibleGeneratedLink = (
+    generatedLink?.organizationId === active?.id ? generatedLink : null
   )
 
   if (!active) return null
@@ -313,9 +387,9 @@ export function OrganizationManagementDialog({
                           value={member.role}
                           disabled={busyAction !== null}
                           onValueChange={value => {
-                            void runAction(`role-${member.id}`, () =>
+                            void runAction(`role-${member.id}`, organizationId =>
                               window.electronAPI.organizationUpdateMember(
-                                organization.activeOrganizationId,
+                                organizationId,
                                 member.id,
                                 { role: value as 'manager' | 'member' },
                               ), loadData)
@@ -339,9 +413,9 @@ export function OrganizationManagementDialog({
                           disabled={busyAction !== null}
                           onClick={() => {
                             const status = member.status === 'active' ? 'suspended' : 'active'
-                            void runAction(`status-${member.id}`, () =>
+                            void runAction(`status-${member.id}`, organizationId =>
                               window.electronAPI.organizationUpdateMember(
-                                organization.activeOrganizationId,
+                                organizationId,
                                 member.id,
                                 { status },
                               ), loadData)
@@ -358,9 +432,9 @@ export function OrganizationManagementDialog({
                           aria-label={t('organization.manage.removeMember')}
                           disabled={busyAction !== null}
                           onClick={() => {
-                            void runAction(`remove-${member.id}`, () =>
+                            void runAction(`remove-${member.id}`, organizationId =>
                               window.electronAPI.organizationRemoveMember(
-                                organization.activeOrganizationId,
+                                organizationId,
                                 member.id,
                               ), async () => {
                                 await loadData()
@@ -435,17 +509,23 @@ export function OrganizationManagementDialog({
                   </Button>
                 ) : null}
 
-                {generatedLink ? (
+                {visibleGeneratedLink ? (
                   <div
                     data-testid="organization-invite-detail"
                     className="mt-4 rounded-lg bg-foreground/[0.04] p-3"
                   >
                     <div className="flex items-center gap-2">
-                      <Input readOnly value={generatedLink.url} className="font-mono text-xs" />
-                      <Button type="button" size="icon" variant="outline" onClick={() => { void copyGeneratedLink() }}>
+                      <Input readOnly value={visibleGeneratedLink.url} className="font-mono text-xs" />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        disabled={busyAction !== null}
+                        onClick={() => { void copyGeneratedLink() }}
+                      >
                         <Clipboard className="size-4" />
                       </Button>
-                      {generatedLink.joinLink ? (
+                      {visibleGeneratedLink.joinLink ? (
                         <Button
                           type="button"
                           size="icon"
@@ -453,10 +533,10 @@ export function OrganizationManagementDialog({
                           aria-label={t('organization.manage.revoke')}
                           disabled={busyAction !== null}
                           onClick={() => {
-                            void runAction('revoke-public-link', () =>
+                            void runAction('revoke-public-link', organizationId =>
                               window.electronAPI.organizationRevokeJoinLink(
-                                organization.activeOrganizationId,
-                                generatedLink.joinLink!.id,
+                                organizationId,
+                                visibleGeneratedLink.joinLink!.id,
                               ), () => setGeneratedLink(null))
                           }}
                         >
@@ -512,9 +592,9 @@ export function OrganizationManagementDialog({
                           variant="outline"
                           disabled={busyAction !== null}
                           onClick={() => {
-                            void runAction(`cancel-${invitation.id}`, () =>
+                            void runAction(`cancel-${invitation.id}`, organizationId =>
                               window.electronAPI.organizationCancelInvitation(
-                                organization.activeOrganizationId,
+                                organizationId,
                                 invitation.id,
                               ), loadData)
                           }}
