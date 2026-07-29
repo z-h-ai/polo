@@ -13,6 +13,20 @@ import {
   type SetAdminPasswordResponse,
   type AdminValidateResponse,
   type VerifyPhoneAuthCodeInput,
+  type AcceptOrganizationJoinResponse,
+  type CreateOrganizationInput,
+  type CreateOrganizationInvitationInput,
+  type CreateOrganizationInvitationResponse,
+  type CreateOrganizationJoinLinkInput,
+  type CreateOrganizationJoinLinkResponse,
+  type CreateOrganizationResponse,
+  type ListOrganizationsResponse,
+  type OrganizationInvitation,
+  type OrganizationJoinLink,
+  type OrganizationJoinPreview,
+  type OrganizationMember,
+  type OrganizationMembership,
+  type UpdateOrganizationMemberInput,
 } from './types.ts';
 import type { ZodType } from 'zod';
 import {
@@ -22,6 +36,17 @@ import {
   AdminValidateResponseSchema,
   SendPhoneAuthCodeResponseSchema,
   SetAdminPasswordResponseSchema,
+  AcceptOrganizationJoinResponseSchema,
+  CreateOrganizationInvitationResponseSchema,
+  CreateOrganizationJoinLinkResponseSchema,
+  CreateOrganizationResponseSchema,
+  ListOrganizationInvitationsResponseSchema,
+  ListOrganizationMembersResponseSchema,
+  ListOrganizationsResponseSchema,
+  OrganizationInvitationMutationResponseSchema,
+  OrganizationJoinLinkMutationResponseSchema,
+  OrganizationJoinPreviewSchema,
+  OrganizationMemberMutationResponseSchema,
 } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -47,6 +72,15 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'sms_send_failed',
   'phone_auth_configuration_error',
   'invalid_credentials',
+  'idempotency_conflict',
+  'join_link_not_allowed',
+  'join_token_invalid',
+  'join_token_cancelled',
+  'join_token_expired',
+  'join_token_exhausted',
+  'phone_mismatch',
+  'last_owner_required',
+  'duplicate_request',
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -83,6 +117,15 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   sms_send_failed: 'Admin service is temporarily unavailable',
   phone_auth_configuration_error: 'Admin service is temporarily unavailable',
   invalid_credentials: 'Invalid username or password',
+  idempotency_conflict: 'This organization request conflicts with an earlier submission',
+  join_link_not_allowed: 'Public join links are only available for creator spaces',
+  join_token_invalid: 'This invitation link is invalid',
+  join_token_cancelled: 'This invitation link has been cancelled',
+  join_token_expired: 'This invitation link has expired',
+  join_token_exhausted: 'This invitation link has no uses remaining',
+  phone_mismatch: 'This invitation is assigned to a different phone number',
+  last_owner_required: 'The only active owner cannot be changed or removed',
+  duplicate_request: 'This request is already being processed',
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
@@ -216,14 +259,156 @@ export class AdminClient {
     });
   }
 
+  async listOrganizations(accessToken: string): Promise<ListOrganizationsResponse> {
+    const response = await this.request<unknown>('/api/me/organizations', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
+  }
+
+  async createOrganization(
+    accessToken: string,
+    input: CreateOrganizationInput,
+  ): Promise<CreateOrganizationResponse> {
+    const response = await this.request<unknown>('/api/organizations', {
+      method: 'POST',
+      accessToken,
+      headers: { 'Idempotency-Key': input.idempotencyKey },
+      body: input,
+    });
+    return this.readSuccessResponse(response, CreateOrganizationResponseSchema);
+  }
+
+  async previewOrganizationJoin(token: string): Promise<OrganizationJoinPreview> {
+    const response = await this.request<unknown>(
+      `/api/join/${encodeURIComponent(token)}/preview`,
+      { method: 'GET' },
+    );
+    return this.readSuccessResponse(response, OrganizationJoinPreviewSchema);
+  }
+
+  async acceptOrganizationJoin(
+    accessToken: string,
+    token: string,
+  ): Promise<AcceptOrganizationJoinResponse> {
+    const response = await this.request<unknown>(
+      `/api/join/${encodeURIComponent(token)}/accept`,
+      { method: 'POST', accessToken },
+    );
+    return this.readSuccessResponse(response, AcceptOrganizationJoinResponseSchema);
+  }
+
+  async listOrganizationMembers(
+    accessToken: string,
+    organizationId: string,
+  ): Promise<{ members: OrganizationMember[] }> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/members`,
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, ListOrganizationMembersResponseSchema);
+  }
+
+  async listOrganizationInvitations(
+    accessToken: string,
+    organizationId: string,
+  ): Promise<{ invitations: OrganizationInvitation[] }> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/invitations`,
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, ListOrganizationInvitationsResponseSchema);
+  }
+
+  async createOrganizationInvitation(
+    accessToken: string,
+    organizationId: string,
+    input: CreateOrganizationInvitationInput,
+  ): Promise<CreateOrganizationInvitationResponse> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/invitations`,
+      { method: 'POST', accessToken, body: input },
+    );
+    return this.readSuccessResponse(response, CreateOrganizationInvitationResponseSchema);
+  }
+
+  async cancelOrganizationInvitation(
+    accessToken: string,
+    organizationId: string,
+    invitationId: string,
+  ): Promise<{ invitation: Pick<OrganizationInvitation, 'id' | 'status' | 'cancelledAt'> }> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/invitations/${encodeURIComponent(invitationId)}`,
+      { method: 'DELETE', accessToken },
+    );
+    return this.readSuccessResponse(response, OrganizationInvitationMutationResponseSchema);
+  }
+
+  async createOrganizationJoinLink(
+    accessToken: string,
+    organizationId: string,
+    input: CreateOrganizationJoinLinkInput,
+  ): Promise<CreateOrganizationJoinLinkResponse> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/join-links`,
+      { method: 'POST', accessToken, body: input },
+    );
+    return this.readSuccessResponse(response, CreateOrganizationJoinLinkResponseSchema);
+  }
+
+  async revokeOrganizationJoinLink(
+    accessToken: string,
+    organizationId: string,
+    joinLinkId: string,
+  ): Promise<{ joinLink: Pick<OrganizationJoinLink, 'id' | 'status' | 'revokedAt'> }> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/join-links/${encodeURIComponent(joinLinkId)}`,
+      { method: 'DELETE', accessToken },
+    );
+    return this.readSuccessResponse(response, OrganizationJoinLinkMutationResponseSchema);
+  }
+
+  async updateOrganizationMember(
+    accessToken: string,
+    organizationId: string,
+    memberId: string,
+    input: UpdateOrganizationMemberInput,
+  ): Promise<{ membership: OrganizationMembership }> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(memberId)}`,
+      { method: 'PATCH', accessToken, body: input },
+    );
+    return this.readSuccessResponse(response, OrganizationMemberMutationResponseSchema);
+  }
+
+  async removeOrganizationMember(
+    accessToken: string,
+    organizationId: string,
+    memberId: string,
+    reason?: string,
+  ): Promise<{ membership: OrganizationMembership }> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(memberId)}`,
+      {
+        method: 'DELETE',
+        accessToken,
+        body: reason ? { reason } : {},
+      },
+    );
+    return this.readSuccessResponse(response, OrganizationMemberMutationResponseSchema);
+  }
+
   private async request<T>(path: string, options: {
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     accessToken?: string;
     body?: unknown;
+    headers?: Record<string, string>;
     retryingAfterRefresh?: boolean;
   }): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
+      ...options.headers,
     };
     if (options.accessToken) {
       headers.Authorization = `Bearer ${options.accessToken}`;

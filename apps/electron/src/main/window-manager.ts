@@ -465,7 +465,7 @@ export class WindowManager {
         // Import parseDeepLink dynamically to avoid circular dependency
         import('./deep-link').then(({ parseDeepLink }) => {
           const target = parseDeepLink(initialDeepLink)
-          if (target && (target.view || target.action)) {
+          if (target && (target.view || target.action || target.joinToken)) {
             // Wait a bit for React to mount and register IPC listeners
             setTimeout(() => {
               this.pushToWindow(window, RPC_CHANNELS.deeplink.NAVIGATE, {
@@ -473,6 +473,7 @@ export class WindowManager {
                 action: target.action,
                 actionParams: target.actionParams,
                 callbackId: target.callbackId,
+                joinToken: target.joinToken,
               })
             }, 100)
           }

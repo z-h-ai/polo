@@ -1162,6 +1162,7 @@ export function NavigationProvider({
     if (!workspaceId) return
 
     const cleanup = window.electronAPI.onDeepLinkNavigate((nav: DeepLinkNavigation) => {
+      if (nav.joinToken) return
       let route: string | null = null
 
       if (nav.view) {

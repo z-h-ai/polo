@@ -19,6 +19,18 @@ type AdminPreloadApi = Pick<
   | 'adminGetStatus'
   | 'adminSyncConnections'
   | 'onAdminReauthRequired'
+  | 'organizationList'
+  | 'organizationCreate'
+  | 'organizationPreviewJoin'
+  | 'organizationAcceptJoin'
+  | 'organizationListMembers'
+  | 'organizationListInvitations'
+  | 'organizationCreateInvitation'
+  | 'organizationCancelInvitation'
+  | 'organizationCreateJoinLink'
+  | 'organizationRevokeJoinLink'
+  | 'organizationUpdateMember'
+  | 'organizationRemoveMember'
 >
 
 export function buildAdminPreloadApi(
@@ -54,5 +66,29 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     onAdminReauthRequired: callback =>
       client.on('admin:reauthRequired', callback),
+    organizationList: () =>
+      client.invoke(RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
+    organizationCreate: input =>
+      client.invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION, input),
+    organizationPreviewJoin: token =>
+      client.invoke(RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN, token),
+    organizationAcceptJoin: token =>
+      client.invoke(RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN, token),
+    organizationListMembers: organizationId =>
+      client.invoke(RPC_CHANNELS.admin.LIST_ORGANIZATION_MEMBERS, organizationId),
+    organizationListInvitations: organizationId =>
+      client.invoke(RPC_CHANNELS.admin.LIST_ORGANIZATION_INVITATIONS, organizationId),
+    organizationCreateInvitation: (organizationId, input) =>
+      client.invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION_INVITATION, organizationId, input),
+    organizationCancelInvitation: (organizationId, invitationId) =>
+      client.invoke(RPC_CHANNELS.admin.CANCEL_ORGANIZATION_INVITATION, organizationId, invitationId),
+    organizationCreateJoinLink: (organizationId, input) =>
+      client.invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION_JOIN_LINK, organizationId, input),
+    organizationRevokeJoinLink: (organizationId, joinLinkId) =>
+      client.invoke(RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK, organizationId, joinLinkId),
+    organizationUpdateMember: (organizationId, memberId, input) =>
+      client.invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER, organizationId, memberId, input),
+    organizationRemoveMember: (organizationId, memberId, reason) =>
+      client.invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER, organizationId, memberId, reason),
   }
 }

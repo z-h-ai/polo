@@ -75,8 +75,15 @@ import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 import { TabShellProvider } from '@/context/TabShellContext'
 import { TabShell } from '@/components/tab-browser/TabShell'
+import { OrganizationOnboarding } from '@/components/organization/OrganizationOnboarding'
+import { OrganizationManagementDialog } from '@/components/organization/OrganizationManagementDialog'
+import {
+  OrganizationProvider,
+  type OrganizationContextValue,
+} from '@/context/OrganizationContext'
+import { useOrganizationContextState } from '@/hooks/useOrganizationContext'
 
-type AppState = 'loading' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
+type AppState = 'loading' | 'onboarding' | 'reauth' | 'organization' | 'workspace-picker' | 'ready'
 
 /** Type for the Jotai store returned by useStore() */
 type JotaiStore = ReturnType<typeof getDefaultStore>
@@ -345,7 +352,16 @@ export default function App() {
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
   const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
-  const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'username' | 'displayName'> | null>(null)
+  const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null>(null)
+  const organization = useOrganizationContextState()
+  const {
+    bootstrap: bootstrapOrganization,
+    clearAccount: clearOrganizationAccount,
+    receiveJoinToken: receiveOrganizationJoinToken,
+    selectOrganization,
+    showCreate: showOrganizationCreate,
+  } = organization
+  const [organizationManagementOpen, setOrganizationManagementOpen] = useState(false)
 
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
@@ -672,18 +688,57 @@ export default function App() {
   const refreshAdminUser = useCallback(async () => {
     try {
       const status = await window.electronAPI.adminGetStatus()
-      setCurrentAdminUser(status.loggedIn
-        ? { username: status.username, displayName: status.displayName }
-        : null)
+      const user = status.loggedIn && status.userId
+        ? {
+            userId: status.userId,
+            username: status.username,
+            displayName: status.displayName,
+          }
+        : null
+      setCurrentAdminUser(user)
+      return user
     } catch {
       setCurrentAdminUser(null)
+      return null
     }
   }, [])
 
+  const continueAfterOrganization = useCallback((workspaceId: string | null) => {
+    setAppState(workspaceId ? 'ready' : 'workspace-picker')
+  }, [])
+
+  const routeThroughOrganization = useCallback(async (
+    accountId: string | null,
+    workspaceId: string | null,
+  ) => {
+    if (!accountId) {
+      continueAfterOrganization(workspaceId)
+      return
+    }
+
+    try {
+      const next = await bootstrapOrganization(accountId)
+      if (next === 'ready') {
+        continueAfterOrganization(workspaceId)
+      } else {
+        setAppState('organization')
+      }
+    } catch (error) {
+      if (isAdminAuthFailureResult(error as { errorCode?: string; status?: number })) {
+        setCurrentAdminUser(null)
+        setAppState('onboarding')
+      } else {
+        setAppState('organization')
+      }
+    }
+  }, [bootstrapOrganization, continueAfterOrganization])
+
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
+    let targetWorkspaceId: string | null = windowWorkspaceId
+    let signedInUser: Awaited<ReturnType<typeof refreshAdminUser>> = null
     try {
-      await refreshAdminUser()
+      signedInUser = await refreshAdminUser()
       // Reload workspaces after onboarding
       const ws = await window.electronAPI.getWorkspaces()
       if (ws.length > 0) {
@@ -691,15 +746,17 @@ export default function App() {
         await window.electronAPI.switchWorkspace(ws[0].id)
         setWindowWorkspaceId(ws[0].id)
         setWorkspaces(ws)
+        targetWorkspaceId = ws[0].id
       } else {
         setWorkspaces(ws)
+        targetWorkspaceId = null
       }
     } catch (error) {
       console.error('[App] Failed to load workspaces after onboarding:', error)
-      // Still transition to ready — the app can recover via reconnect
+      // The organization route still runs; workspace state can recover later.
     }
-    setAppState('ready')
-  }, [refreshAdminUser])
+    await routeThroughOrganization(signedInUser?.userId ?? null, targetWorkspaceId)
+  }, [refreshAdminUser, routeThroughOrganization, setWindowWorkspaceId, windowWorkspaceId])
 
   const acquirePhoneAuthChallenge = useCallback(async () => {
     const result = await window.electronAPI.adminAcquirePhoneAuthChallenge()
@@ -776,6 +833,7 @@ export default function App() {
 
         let needs = await window.electronAPI.getSetupNeeds()
         const adminStatus = await window.electronAPI.adminGetStatus()
+        let signedInAccountId: string | null = null
 
         if (adminStatus.adminUrl) {
           const validation = await window.electronAPI.adminValidate()
@@ -798,22 +856,19 @@ export default function App() {
             return
           }
 
-          await refreshAdminUser()
+          const signedInUser = await refreshAdminUser()
+          signedInAccountId = signedInUser?.userId ?? validation.user.id
+          if (!signedInUser) {
+            setCurrentAdminUser({
+              userId: validation.user.id,
+              username: validation.user.username,
+              displayName: validation.user.displayName,
+            })
+          }
           needs = await window.electronAPI.getSetupNeeds()
         }
 
         setSetupNeeds(needs)
-
-        if (needs.isFullyConfigured) {
-          // If no workspace is selected (thin client without POLO_AI_WORKSPACE_ID),
-          // show workspace picker before entering the main app
-          if (!wsId) {
-            setAppState('workspace-picker')
-          } else {
-            setAppState('ready')
-          }
-          return
-        }
 
         if (needs.needsAdminLogin) {
           setAppState('onboarding')
@@ -823,11 +878,7 @@ export default function App() {
         // LLM connection setup is admin-managed. If local setup is incomplete only
         // because no user-managed LLM connection exists, enter the app and let the
         // existing runtime unavailable-connection handling surface send-time errors.
-        if (!wsId) {
-          setAppState('workspace-picker')
-        } else {
-          setAppState('ready')
-        }
+        await routeThroughOrganization(signedInAccountId, wsId)
       } catch (error) {
         console.error('Failed to check auth state:', error)
         // If check fails, show onboarding to be safe
@@ -836,10 +887,17 @@ export default function App() {
     }
 
     initialize()
-  }, [enterAdminKicked, enterAdminLogin, refreshAdminUser, setWindowWorkspaceId])
+  }, [
+    enterAdminKicked,
+    enterAdminLogin,
+    refreshAdminUser,
+    routeThroughOrganization,
+    setWindowWorkspaceId,
+  ])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
+      clearOrganizationAccount(currentAdminUser?.userId)
       setCurrentAdminUser(null)
       if (!validation.loggedIn && isAdminKickedResult(validation)) {
         enterAdminKicked()
@@ -848,7 +906,31 @@ export default function App() {
       }
     })
     return () => { cleanup() }
-  }, [enterAdminKicked, enterAdminLogin])
+  }, [
+    currentAdminUser?.userId,
+    enterAdminKicked,
+    enterAdminLogin,
+    clearOrganizationAccount,
+  ])
+
+  useEffect(() => {
+    return window.electronAPI.onDeepLinkNavigate((navigation) => {
+      if (!navigation.joinToken) return
+
+      void receiveOrganizationJoinToken(navigation.joinToken).finally(() => {
+        if (currentAdminUser?.userId) {
+          setAppState('organization')
+        } else if (appState !== 'loading') {
+          enterAdminLogin()
+        }
+      })
+    })
+  }, [
+    appState,
+    currentAdminUser?.userId,
+    enterAdminLogin,
+    receiveOrganizationJoinToken,
+  ])
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
@@ -1894,6 +1976,7 @@ export default function App() {
       setWindowWorkspaceId(null)
       setRuntimeChatAccessIssue(null)
       setLlmConnectionsLoaded(false)
+      clearOrganizationAccount(currentAdminUser?.userId)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
         needsBillingConfig: true,
@@ -1909,12 +1992,19 @@ export default function App() {
     } finally {
       setShowResetDialog(false)
     }
-  }, [onboarding, initializeSessions])
+  }, [
+    currentAdminUser?.userId,
+    onboarding,
+    initializeSessions,
+    clearOrganizationAccount,
+    setWindowWorkspaceId,
+  ])
 
   const handleAdminLogout = useCallback(async () => {
     try {
       await window.electronAPI.adminLogout()
     } finally {
+      clearOrganizationAccount(currentAdminUser?.userId)
       initializeSessions([])
       setWorkspaces([])
       setWindowWorkspaceId(null)
@@ -1933,7 +2023,13 @@ export default function App() {
       handleAdminRelogin()
       setAppState('onboarding')
     }
-  }, [handleAdminRelogin, initializeSessions, setWindowWorkspaceId])
+  }, [
+    currentAdminUser?.userId,
+    handleAdminRelogin,
+    initializeSessions,
+    clearOrganizationAccount,
+    setWindowWorkspaceId,
+  ])
 
   // Handle workspace selection
   // - Default: switch workspace in same window (in-window switching)
@@ -2105,6 +2201,52 @@ export default function App() {
     openNewChat,
   ])
 
+  const handleOrganizationFlowComplete = useCallback(() => {
+    continueAfterOrganization(windowWorkspaceId)
+  }, [continueAfterOrganization, windowWorkspaceId])
+
+  const handleSelectOrganization = useCallback((organizationId: string) => {
+    selectOrganization(organizationId)
+    setOrganizationManagementOpen(false)
+  }, [selectOrganization])
+
+  const handleShowOrganizationCreate = useCallback(() => {
+    showOrganizationCreate()
+    setOrganizationManagementOpen(false)
+    setAppState('organization')
+  }, [showOrganizationCreate])
+
+  const organizationContextValue = useMemo<OrganizationContextValue | null>(() => {
+    if (
+      !currentAdminUser?.userId
+      || !organization.activeOrganizationId
+      || !organization.organizationMembershipRole
+      || !organization.organizationContextKey
+    ) {
+      return null
+    }
+    return {
+      accountId: currentAdminUser.userId,
+      activeOrganizationId: organization.activeOrganizationId,
+      organizationSummaries: organization.organizationSummaries,
+      organizationMembershipRole: organization.organizationMembershipRole,
+      organizationContextKey: organization.organizationContextKey,
+      contextVersion: organization.contextVersion,
+      onSelectOrganization: handleSelectOrganization,
+      onManageOrganization: () => setOrganizationManagementOpen(true),
+      onCreateOrganization: handleShowOrganizationCreate,
+    }
+  }, [
+    currentAdminUser?.userId,
+    handleSelectOrganization,
+    handleShowOrganizationCreate,
+    organization.activeOrganizationId,
+    organization.contextVersion,
+    organization.organizationContextKey,
+    organization.organizationMembershipRole,
+    organization.organizationSummaries,
+  ])
+
   // Platform actions for @polo-ai/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
@@ -2195,6 +2337,46 @@ export default function App() {
     )
   }
 
+  if (appState === 'organization') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <OrganizationOnboarding
+            flowState={organization.flowState}
+            organizations={organization.organizationSummaries}
+            joinPreview={organization.joinPreview}
+            error={organization.error}
+            onCreate={async input => {
+              await organization.createOrganization(input)
+              handleOrganizationFlowComplete()
+            }}
+            onAcceptJoin={async () => {
+              await organization.acceptJoin()
+              handleOrganizationFlowComplete()
+            }}
+            onDismissJoin={() => {
+              const next = organization.dismissJoin()
+              if (next === 'ready') handleOrganizationFlowComplete()
+            }}
+            onSelect={organizationId => {
+              selectOrganization(organizationId)
+              handleOrganizationFlowComplete()
+            }}
+            onShowCreate={showOrganizationCreate}
+            onShowSelect={organization.showSelect}
+            onRetry={() => {
+              if (!currentAdminUser?.userId) return
+              void bootstrapOrganization(currentAdminUser.userId).then(next => {
+                if (next === 'ready') handleOrganizationFlowComplete()
+              }).catch(() => {})
+            }}
+          />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
   // Workspace picker — thin client with no workspace selected
   if (appState === 'workspace-picker') {
     return (
@@ -2236,8 +2418,12 @@ export default function App() {
             />
           )}
 
-          <TabShellProvider workspaceId={windowWorkspaceId}>
-            <TabShell
+          <MaybeOrganizationProvider value={organizationContextValue}>
+            <TabShellProvider
+              key={organizationContextValue?.organizationContextKey ?? 'local-account'}
+              workspaceId={windowWorkspaceId}
+            >
+              <TabShell
               renderPolo={() => (
                 <NavigationProvider
                   workspaceId={windowWorkspaceId}
@@ -2281,8 +2467,16 @@ export default function App() {
                   </div>
                 </NavigationProvider>
               )}
-            />
-          </TabShellProvider>
+              />
+            </TabShellProvider>
+            {organizationContextValue ? (
+              <OrganizationManagementDialog
+                open={organizationManagementOpen}
+                onOpenChange={setOrganizationManagementOpen}
+                onOrganizationsChanged={organization.refreshOrganizations}
+              />
+            ) : null}
+          </MaybeOrganizationProvider>
 
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
@@ -2302,6 +2496,18 @@ export default function App() {
     </ShikiThemeProvider>
     </PlatformProvider>
   )
+}
+
+function MaybeOrganizationProvider({
+  value,
+  children,
+}: {
+  value: OrganizationContextValue | null
+  children: React.ReactNode
+}) {
+  return value
+    ? <OrganizationProvider value={value}>{children}</OrganizationProvider>
+    : <>{children}</>
 }
 
 /**

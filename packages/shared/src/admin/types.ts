@@ -91,6 +91,145 @@ export interface AdminLlmConnectionsResponse {
   defaultConnection: string | null;
 }
 
+export type OrganizationType = 'enterprise_workspace' | 'creator_space';
+export type OrganizationRole = 'owner' | 'manager' | 'member';
+export type OrganizationStatus = 'active' | 'suspended';
+export type OrganizationMembershipStatus = 'active' | 'suspended' | 'removed';
+export type OrganizationJoinStatus =
+  | 'active'
+  | 'cancelled'
+  | 'revoked'
+  | 'expired'
+  | 'exhausted'
+  | 'unavailable';
+
+export interface Organization {
+  id: string;
+  type: OrganizationType;
+  name: string;
+  purpose: string;
+  visibility?: 'private';
+  status?: OrganizationStatus;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface OrganizationMembership {
+  id: string;
+  organizationId?: string;
+  userId?: string;
+  role: OrganizationRole;
+  status: OrganizationMembershipStatus;
+  joinedAt?: string;
+  updatedAt?: string;
+}
+
+export interface OrganizationSummary extends Organization {
+  membership: OrganizationMembership;
+  memberCount: number;
+}
+
+export interface CreateOrganizationInput {
+  type: OrganizationType;
+  name: string;
+  purpose: string;
+  idempotencyKey: string;
+}
+
+export interface CreateOrganizationResponse {
+  organization: Organization;
+  membership: OrganizationMembership;
+  replayed: boolean;
+}
+
+export interface ListOrganizationsResponse {
+  organizations: OrganizationSummary[];
+}
+
+export interface OrganizationJoinPreview {
+  organization: Organization;
+  join: {
+    kind: 'invitation' | 'join_link';
+    effectiveStatus: OrganizationJoinStatus;
+    expiresAt: string | null;
+    usesRemaining: number | null;
+    requiresPhoneMatch: boolean;
+  };
+}
+
+export interface AcceptOrganizationJoinResponse {
+  membership: OrganizationMembership & {
+    organizationId: string;
+    userId: string;
+  };
+  replayed: boolean;
+}
+
+export interface OrganizationMember {
+  id: string;
+  role: OrganizationRole;
+  status: Exclude<OrganizationMembershipStatus, 'removed'>;
+  joinedAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    username: string;
+    displayName: string | null;
+    phone: string | null;
+  };
+}
+
+export interface OrganizationInvitation {
+  id: string;
+  targetPhone: string | null;
+  status: string;
+  effectiveStatus: Exclude<OrganizationJoinStatus, 'revoked' | 'unavailable'>;
+  maxUses: number;
+  useCount: number;
+  expiresAt: string;
+  cancelledAt?: string | null;
+  createdAt: string;
+  createdByUserId?: string;
+}
+
+export interface CreateOrganizationInvitationInput {
+  targetPhone?: string;
+  expiresAt?: string;
+  maxUses?: number;
+}
+
+export interface CreateOrganizationInvitationResponse {
+  invitation: OrganizationInvitation;
+  token: string;
+}
+
+export interface OrganizationJoinLink {
+  id: string;
+  status: string;
+  effectiveStatus?: OrganizationJoinStatus;
+  maxUses: number | null;
+  useCount: number;
+  expiresAt: string | null;
+  createdAt?: string;
+  revokedAt?: string | null;
+}
+
+export interface CreateOrganizationJoinLinkInput {
+  expiresAt?: string | null;
+  maxUses?: number | null;
+}
+
+export interface CreateOrganizationJoinLinkResponse {
+  joinLink: OrganizationJoinLink;
+  token: string;
+}
+
+export interface UpdateOrganizationMemberInput {
+  role?: 'manager' | 'member';
+  status?: 'active' | 'suspended';
+  reason?: string;
+}
+
 export type PhoneAuthErrorCode =
   | 'phone_auth_disabled'
   | 'invalid_phone'
@@ -116,6 +255,15 @@ export type AdminErrorCode =
   | 'SERVER_ERROR'
   | 'NETWORK_ERROR'
   | 'UNKNOWN_ERROR'
+  | 'idempotency_conflict'
+  | 'join_link_not_allowed'
+  | 'join_token_invalid'
+  | 'join_token_cancelled'
+  | 'join_token_expired'
+  | 'join_token_exhausted'
+  | 'phone_mismatch'
+  | 'last_owner_required'
+  | 'duplicate_request'
   | PhoneAuthErrorCode;
 
 export interface AdminErrorDetails {

@@ -16,6 +16,9 @@
  *   poloai://action/{actionName}[/{id}][?params]
  *   poloai://workspace/{workspaceId}/action/{actionName}[?params]
  *
+ * Organization join:
+ *   poloai://join/{token}
+ *
  * Actions:
  *   new-chat                  - Create new chat, optional ?input=text&name=name&send=true
  *                               If send=true is provided with input, immediately sends the message
@@ -54,6 +57,8 @@ export interface DeepLinkTarget {
   windowMode?: 'focused' | 'full'
   /** Right sidebar param (e.g., 'files/path/to/file', 'history') */
   rightSidebar?: string
+  /** Opaque organization invitation/public-join token. */
+  joinToken?: string
 }
 
 export interface DeepLinkResult {
@@ -72,6 +77,7 @@ export interface DeepLinkNavigation {
   action?: string
   actionParams?: Record<string, string>
   callbackId?: string
+  joinToken?: string
 }
 
 /**
@@ -126,6 +132,17 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
     // poloai://auth-callback?... (OAuth callbacks - return null to let existing handler process)
     if (host === 'auth-callback') {
       return null
+    }
+
+    if (host === 'join') {
+      if (pathParts.length !== 1) return null
+      const joinToken = decodeURIComponent(pathParts[0] ?? '')
+      if (!joinToken) return null
+      return {
+        workspaceId: undefined,
+        joinToken,
+        windowMode,
+      }
     }
 
     // Compound route prefixes
@@ -358,12 +375,13 @@ export async function handleDeepLink(
   await waitForWindowReady(window)
 
   // 3. Send navigation command to renderer
-  if (target.view || target.action) {
+  if (target.view || target.action || target.joinToken) {
     const navigation: DeepLinkNavigation = {
       view: target.view,
       action: target.action,
       actionParams: target.actionParams,
       callbackId: target.callbackId,
+      joinToken: target.joinToken,
     }
     const wsId = target.workspaceId ?? windowManager.getWorkspaceForWindow(window.webContents.id)
     const resolvedClientId = resolveClientId?.(window.webContents.id)

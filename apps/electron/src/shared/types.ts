@@ -213,7 +213,36 @@ import type {
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
 } from '@polo-ai/shared/protocol'
-import type { AdminUser } from '@polo-ai/shared/admin/types'
+import type {
+  AcceptOrganizationJoinResponse,
+  AdminUser,
+  CreateOrganizationInput,
+  CreateOrganizationInvitationInput,
+  CreateOrganizationInvitationResponse,
+  CreateOrganizationJoinLinkInput,
+  CreateOrganizationJoinLinkResponse,
+  CreateOrganizationResponse,
+  OrganizationInvitation,
+  OrganizationJoinLink,
+  OrganizationJoinPreview,
+  OrganizationMember,
+  OrganizationMembership,
+  OrganizationSummary,
+  UpdateOrganizationMemberInput,
+} from '@polo-ai/shared/admin/types'
+export type {
+  CreateOrganizationInput,
+  CreateOrganizationInvitationInput,
+  CreateOrganizationJoinLinkInput,
+  OrganizationInvitation,
+  OrganizationJoinLink,
+  OrganizationJoinPreview,
+  OrganizationMember,
+  OrganizationMembership,
+  OrganizationRole,
+  OrganizationSummary,
+  OrganizationType,
+} from '@polo-ai/shared/admin/types'
 import type { AppDefinition } from './tab-browser-types'
 
 export interface AdminRpcErrorPayload {
@@ -267,12 +296,17 @@ export type AdminValidateResult =
 export interface AdminStatusResult {
   adminUrl?: string
   loggedIn: boolean
+  userId: string | null
   username: string | null
   displayName: string | null
 }
 
 export type AdminSyncConnectionsResult =
   | { success: true; configVersion: string; connectionCount: number; defaultConnection: string | null }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type OrganizationRpcResult<T extends object> =
+  | ({ success: true } & T)
   | ({ success: false } & AdminRpcErrorPayload)
 
 export interface ElectronAPI {
@@ -462,6 +496,38 @@ export interface ElectronAPI {
   adminGetStatus(): Promise<AdminStatusResult>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
   onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
+  organizationList(): Promise<OrganizationRpcResult<{ organizations: OrganizationSummary[] }>>
+  organizationCreate(input: CreateOrganizationInput): Promise<OrganizationRpcResult<CreateOrganizationResponse>>
+  organizationPreviewJoin(token: string): Promise<OrganizationRpcResult<OrganizationJoinPreview>>
+  organizationAcceptJoin(token: string): Promise<OrganizationRpcResult<AcceptOrganizationJoinResponse>>
+  organizationListMembers(organizationId: string): Promise<OrganizationRpcResult<{ members: OrganizationMember[] }>>
+  organizationListInvitations(organizationId: string): Promise<OrganizationRpcResult<{ invitations: OrganizationInvitation[] }>>
+  organizationCreateInvitation(
+    organizationId: string,
+    input: CreateOrganizationInvitationInput,
+  ): Promise<OrganizationRpcResult<CreateOrganizationInvitationResponse>>
+  organizationCancelInvitation(
+    organizationId: string,
+    invitationId: string,
+  ): Promise<OrganizationRpcResult<{ invitation: Pick<OrganizationInvitation, 'id' | 'status' | 'cancelledAt'> }>>
+  organizationCreateJoinLink(
+    organizationId: string,
+    input: CreateOrganizationJoinLinkInput,
+  ): Promise<OrganizationRpcResult<CreateOrganizationJoinLinkResponse>>
+  organizationRevokeJoinLink(
+    organizationId: string,
+    joinLinkId: string,
+  ): Promise<OrganizationRpcResult<{ joinLink: Pick<OrganizationJoinLink, 'id' | 'status' | 'revokedAt'> }>>
+  organizationUpdateMember(
+    organizationId: string,
+    memberId: string,
+    input: UpdateOrganizationMemberInput,
+  ): Promise<OrganizationRpcResult<{ membership: OrganizationMembership }>>
+  organizationRemoveMember(
+    organizationId: string,
+    memberId: string,
+    reason?: string,
+  ): Promise<OrganizationRpcResult<{ membership: OrganizationMembership }>>
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>

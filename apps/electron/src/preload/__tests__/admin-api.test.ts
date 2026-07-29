@@ -49,6 +49,71 @@ describe('admin preload RPC chain', () => {
     expect(on).toHaveBeenCalledWith('admin:reauthRequired', listener)
   })
 
+  it('forwards organization operations without mixing in workspaceId', async () => {
+    const calls: unknown[][] = []
+    const api = buildAdminPreloadApi({
+      invoke: mock(async (...args: unknown[]) => {
+        calls.push(args)
+        return { success: true }
+      }),
+      on: mock(() => () => {}),
+    })
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    const resourceId = '22222222-2222-4222-8222-222222222222'
+    const token = 'join-token-12345678901234567890'
+
+    await api.organizationList()
+    await api.organizationCreate({
+      type: 'creator_space',
+      name: 'Studio',
+      purpose: 'Publish apps',
+      idempotencyKey: 'request-1',
+    })
+    await api.organizationPreviewJoin(token)
+    await api.organizationAcceptJoin(token)
+    await api.organizationListMembers(organizationId)
+    await api.organizationListInvitations(organizationId)
+    await api.organizationCreateInvitation(organizationId, { maxUses: 10 })
+    await api.organizationCancelInvitation(organizationId, resourceId)
+    await api.organizationCreateJoinLink(organizationId, { maxUses: null })
+    await api.organizationRevokeJoinLink(organizationId, resourceId)
+    await api.organizationUpdateMember(organizationId, resourceId, { role: 'manager' })
+    await api.organizationRemoveMember(organizationId, resourceId, 'Left team')
+
+    expect(calls).toEqual([
+      [RPC_CHANNELS.admin.LIST_ORGANIZATIONS],
+      [
+        RPC_CHANNELS.admin.CREATE_ORGANIZATION,
+        {
+          type: 'creator_space',
+          name: 'Studio',
+          purpose: 'Publish apps',
+          idempotencyKey: 'request-1',
+        },
+      ],
+      [RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN, token],
+      [RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN, token],
+      [RPC_CHANNELS.admin.LIST_ORGANIZATION_MEMBERS, organizationId],
+      [RPC_CHANNELS.admin.LIST_ORGANIZATION_INVITATIONS, organizationId],
+      [RPC_CHANNELS.admin.CREATE_ORGANIZATION_INVITATION, organizationId, { maxUses: 10 }],
+      [RPC_CHANNELS.admin.CANCEL_ORGANIZATION_INVITATION, organizationId, resourceId],
+      [RPC_CHANNELS.admin.CREATE_ORGANIZATION_JOIN_LINK, organizationId, { maxUses: null }],
+      [RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK, organizationId, resourceId],
+      [
+        RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER,
+        organizationId,
+        resourceId,
+        { role: 'manager' },
+      ],
+      [
+        RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER,
+        organizationId,
+        resourceId,
+        'Left team',
+      ],
+    ])
+  })
+
   it('gets an issuer-signed challenge through the production preload provider', async () => {
     let resolveCallback!: (payload: { query: Record<string, string> }) => void
     const callbackPromise = new Promise<{ query: Record<string, string> }>(resolve => {
