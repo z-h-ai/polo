@@ -132,6 +132,8 @@ interface ManagedProcessOperation {
   kind: 'dependency-preparation' | 'runtime'
   child: ChildProcess
   processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner
+  /** False only while a Windows launch gate has not entered its Job Object. */
+  processTreeOwnerAssigned?: boolean
   cleanupPromise?: Promise<void>
   lastCleanupError?: unknown
 }
@@ -197,6 +199,12 @@ export interface LocalAppRuntimeManagerOptions {
   now?: () => number
   /** Test/embedding seam; production allocates an ephemeral localhost port. */
   portAllocator?: () => Promise<number>
+  /** Test/embedding seam; production uses child_process.spawn. */
+  processSpawner?: typeof spawn
+  /** Test/embedding seam for Windows Job Object setup. */
+  windowsJobObjectOwnerFactory?: () => Promise<WindowsJobObjectOwner>
+  /** Test/embedding seam for the Windows snapshot fallback. */
+  windowsProcessTreeOwnerFactory?: (rootPid: number) => WindowsProcessTreeOwner
 }
 
 const noopLogger: LocalAppRuntimeLogger = {
@@ -288,6 +296,9 @@ export class LocalAppRuntimeManager {
   private readonly logger: LocalAppRuntimeLogger
   private readonly now: () => number
   private readonly portAllocator?: () => Promise<number>
+  private readonly processSpawner: typeof spawn
+  private readonly windowsJobObjectOwnerFactory: () => Promise<WindowsJobObjectOwner>
+  private readonly windowsProcessTreeOwnerFactory: (rootPid: number) => WindowsProcessTreeOwner
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly managedProcesses = new Map<string, ManagedProcessOperation>()
@@ -323,6 +334,11 @@ export class LocalAppRuntimeManager {
     this.logger = options.logger ?? noopLogger
     this.now = options.now ?? Date.now
     this.portAllocator = options.portAllocator
+    this.processSpawner = options.processSpawner ?? spawn
+    this.windowsJobObjectOwnerFactory = options.windowsJobObjectOwnerFactory
+      ?? createWindowsJobObjectOwner
+    this.windowsProcessTreeOwnerFactory = options.windowsProcessTreeOwnerFactory
+      ?? createWindowsProcessTreeOwner
   }
 
   initialize(): Promise<void> {
@@ -1373,18 +1389,15 @@ export class LocalAppRuntimeManager {
     signal: AbortSignal,
   ): Promise<void> {
     this.appendLog(appId, 'system', `Preparing dependencies with ${basename(command)}`)
-    const { child, processTreeOwner } = await this.spawnManagedCommand(
+    const managedProcess = await this.spawnManagedCommand(
+      appId,
+      'dependency-preparation',
       command,
       args,
       cwd,
       env,
     )
-    const managedProcess = this.registerManagedProcess(
-      appId,
-      'dependency-preparation',
-      child,
-      processTreeOwner,
-    )
+    const { child } = managedProcess
     this.captureChildOutput(appId, child)
 
     type InstallProcessOutcome =
@@ -1683,18 +1696,15 @@ export class LocalAppRuntimeManager {
           ...manifest.entry.slice(1),
         ]
       : [entryPath, ...manifest.entry.slice(1)]
-    const { child, processTreeOwner } = await this.spawnManagedCommand(
+    const managedProcess = await this.spawnManagedCommand(
+      appId,
+      'runtime',
       executable,
       args,
       versionDir,
       this.buildRuntimeEnvironment(appId, version, versionDir, port, healthToken),
     )
-    const managedProcess = this.registerManagedProcess(
-      appId,
-      'runtime',
-      child,
-      processTreeOwner,
-    )
+    const { child, processTreeOwner } = managedProcess
     this.captureChildOutput(appId, child)
 
     let resolveExit!: (outcome: { code: number | null; signal: NodeJS.Signals | null }) => void
@@ -1748,30 +1758,28 @@ export class LocalAppRuntimeManager {
   }
 
   private async spawnManagedCommand(
+    appId: string,
+    kind: ManagedProcessOperation['kind'],
     command: string,
     args: string[],
     cwd: string,
     env: NodeJS.ProcessEnv,
-  ): Promise<{
-    child: ChildProcess
-    processTreeOwner?: WindowsJobObjectOwner
-  }> {
-    if (process.platform !== 'win32') {
-      return {
-        child: spawn(command, args, {
-          cwd,
-          env,
-          detached: true,
-          shell: false,
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        }),
-      }
+  ): Promise<ManagedProcessOperation> {
+    if (this.platform !== 'win32') {
+      const child = this.processSpawner(command, args, {
+        cwd,
+        env,
+        detached: true,
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      return this.registerManagedProcess(appId, kind, child)
     }
 
     let owner: WindowsJobObjectOwner
     try {
-      owner = await createWindowsJobObjectOwner()
+      owner = await this.windowsJobObjectOwnerFactory()
     } catch (error) {
       throw new LocalAppRuntimeError(
         'RUNTIME_UNAVAILABLE',
@@ -1779,7 +1787,7 @@ export class LocalAppRuntimeManager {
         { cause: error instanceof Error ? error.message : String(error) },
       )
     }
-    const child = spawn(process.execPath, ['-e', WINDOWS_JOB_GATE_SOURCE], {
+    const child = this.processSpawner(process.execPath, ['-e', WINDOWS_JOB_GATE_SOURCE], {
       cwd,
       env: {
         ...env,
@@ -1790,40 +1798,72 @@ export class LocalAppRuntimeManager {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
-    if (!child.pid || !child.stdin) {
-      await owner.terminate().catch(() => {})
-      child.kill()
-      throw new LocalAppRuntimeError(
-        'RUNTIME_UNAVAILABLE',
-        'Windows managed process gate could not be launched',
-      )
-    }
+    // Register the gate before any fallible initialization. From this point on,
+    // shutdown/uninstall can always find the gate and retry owner-confirmed
+    // cleanup, even when Job assignment or stdin delivery fails.
+    const managedProcess = this.registerManagedProcess(
+      appId,
+      kind,
+      child,
+      owner,
+      false,
+    )
     try {
+      if (!child.pid || !child.stdin) {
+        throw new Error('Windows managed process gate has no PID or stdin')
+      }
       // The gate cannot create the target until this assignment succeeds.
       // Every later descendant therefore inherits this Job Object.
       owner.assignProcess(child.pid)
-      owner.setSnapshotFallback(createWindowsProcessTreeOwner(child.pid))
+      managedProcess.processTreeOwnerAssigned = true
+      owner.setSnapshotFallback(this.windowsProcessTreeOwnerFactory(child.pid))
       const payload = Buffer.from(JSON.stringify({ command, args, cwd }), 'utf8')
         .toString('base64')
       await new Promise<void>((resolveWrite, rejectWrite) => {
         const stdin = child.stdin!
-        const onError = (error: Error) => rejectWrite(error)
-        stdin.once('error', onError)
-        stdin.end(`${payload}\n`, () => {
+        const cleanupListeners = () => {
           stdin.removeListener('error', onError)
+          stdin.removeListener('finish', onFinish)
+        }
+        const onError = (error: Error) => {
+          cleanupListeners()
+          rejectWrite(error)
+        }
+        const onFinish = () => {
+          cleanupListeners()
           resolveWrite()
-        })
+        }
+        stdin.once('error', onError)
+        stdin.once('finish', onFinish)
+        try {
+          stdin.end(`${payload}\n`)
+        } catch (error) {
+          onError(error instanceof Error ? error : new Error(String(error)))
+        }
       })
     } catch (error) {
-      await owner.terminate().catch(() => {})
-      child.kill()
+      try {
+        await this.cleanupManagedProcess(managedProcess)
+      } catch (cleanupError) {
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          'Windows managed process initialization failed and its process tree could not be confirmed stopped',
+          {
+            appId,
+            kind,
+            pid: child.pid,
+            cause: error instanceof Error ? error.message : String(error),
+            cleanupError: this.formatError(cleanupError),
+          },
+        )
+      }
       throw new LocalAppRuntimeError(
         'RUNTIME_UNAVAILABLE',
-        'Windows managed process could not enter its Job Object',
+        'Windows managed process could not be initialized',
         { cause: error instanceof Error ? error.message : String(error) },
       )
     }
-    return { child, processTreeOwner: owner }
+    return managedProcess
   }
 
   private async startStaticRuntime(
@@ -2198,6 +2238,7 @@ export class LocalAppRuntimeManager {
     kind: ManagedProcessOperation['kind'],
     child: ChildProcess,
     processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner,
+    processTreeOwnerAssigned?: boolean,
   ): ManagedProcessOperation {
     const operation: ManagedProcessOperation = {
       id: randomUUID(),
@@ -2205,6 +2246,7 @@ export class LocalAppRuntimeManager {
       kind,
       child,
       processTreeOwner,
+      processTreeOwnerAssigned,
     }
     this.managedProcesses.set(operation.id, operation)
     return operation
@@ -2215,9 +2257,7 @@ export class LocalAppRuntimeManager {
     force = false,
   ): Promise<void> {
     if (operation.cleanupPromise) return operation.cleanupPromise
-    const cleanupPromise: Promise<void> = (force
-      ? this.forceTerminateManagedProcess(operation)
-      : this.killProcessTree(operation.child, operation.processTreeOwner))
+    const cleanupPromise: Promise<void> = this.terminateManagedProcess(operation, force)
       .then(() => {
         delete operation.lastCleanupError
         if (this.managedProcesses.get(operation.id) === operation) {
@@ -2235,6 +2275,53 @@ export class LocalAppRuntimeManager {
       })
     operation.cleanupPromise = cleanupPromise
     return cleanupPromise
+  }
+
+  private async terminateManagedProcess(
+    operation: ManagedProcessOperation,
+    force: boolean,
+  ): Promise<void> {
+    if (
+      operation.processTreeOwner
+      && operation.processTreeOwnerAssigned === false
+    ) {
+      await this.terminateUnassignedWindowsGate(operation, force)
+      return
+    }
+    if (force) {
+      await this.forceTerminateManagedProcess(operation)
+      return
+    }
+    await this.killProcessTree(operation.child, operation.processTreeOwner)
+  }
+
+  private async terminateUnassignedWindowsGate(
+    operation: ManagedProcessOperation,
+    force: boolean,
+  ): Promise<void> {
+    let ownerError: unknown
+    let gateError: unknown
+    try {
+      await operation.processTreeOwner!.terminate()
+    } catch (error) {
+      ownerError = error
+    }
+    try {
+      if (force) await this.forceKillProcessTree(operation.child)
+      else await this.killProcessTree(operation.child)
+    } catch (error) {
+      gateError = error
+    }
+    if (ownerError || gateError) {
+      throw new LocalAppRuntimeError(
+        'STOP_FAILED',
+        `Unassigned Windows ${operation.kind} gate ${operation.child.pid ?? 'unknown'} could not be fully cleaned up`,
+        {
+          ...(ownerError ? { ownerError: this.formatError(ownerError) } : {}),
+          ...(gateError ? { gateError: this.formatError(gateError) } : {}),
+        },
+      )
+    }
   }
 
   private async forceTerminateManagedProcess(
@@ -2372,9 +2459,10 @@ export class LocalAppRuntimeManager {
   private async forceKillProcessTree(child: ChildProcess): Promise<void> {
     const pid = child.pid
     if (!pid) return
-    if (process.platform === 'win32') {
+    if (this.platform === 'win32') {
+      if (child.exitCode != null || child.signalCode != null) return
       await new Promise<void>((resolveKill) => {
-        const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        const killer = this.processSpawner('taskkill', ['/pid', String(pid), '/T', '/F'], {
           windowsHide: true,
           stdio: 'ignore',
         })
@@ -2416,17 +2504,17 @@ export class LocalAppRuntimeManager {
     processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner,
   ): Promise<void> {
     const pid = child.pid
-    if (!pid) return
     if (processTreeOwner) {
       try {
         await processTreeOwner.terminate()
       } catch (error) {
         throw new LocalAppRuntimeError(
           'STOP_FAILED',
-          `Windows process tree ${pid} could not be fully terminated`,
+          `Windows process tree ${pid ?? 'unknown'} could not be fully terminated`,
           { cause: error instanceof Error ? error.message : String(error) },
         )
       }
+      if (!pid) return
       if (!await this.waitForChildExit(child, 1_000)) {
         throw new LocalAppRuntimeError(
           'STOP_FAILED',
@@ -2435,10 +2523,11 @@ export class LocalAppRuntimeManager {
       }
       return
     }
-    if (process.platform === 'win32') {
+    if (!pid) return
+    if (this.platform === 'win32') {
       if (child.exitCode != null || child.signalCode != null) return
       await new Promise<void>((resolveKill) => {
-        const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        const killer = this.processSpawner('taskkill', ['/pid', String(pid), '/T', '/F'], {
           windowsHide: true,
           stdio: 'ignore',
         })

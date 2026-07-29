@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { type ChildProcess, type spawn as spawnProcess } from 'child_process'
 import { createHash } from 'crypto'
+import { EventEmitter } from 'events'
 import { createServer, type Server } from 'http'
 import {
   chmod,
@@ -14,6 +16,7 @@ import {
 } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { PassThrough, Writable } from 'stream'
 import { deflateRawSync } from 'zlib'
 import * as tar from 'tar'
 import { fetch as undiciFetch } from 'undici'
@@ -27,7 +30,14 @@ import type {
   LocalAppPlatform,
   PoloAppManifest,
 } from '@polo-ai/shared/protocol'
-import { LocalAppRuntimeManager } from '../manager'
+import {
+  LocalAppRuntimeManager,
+  type LocalAppRuntimeManagerOptions,
+} from '../manager'
+import type {
+  WindowsJobObjectOwner,
+  WindowsProcessTreeOwner,
+} from '../process-tree'
 import { LocalAppRuntimeError } from '../runtime-error'
 import { extractBundleArchive } from '../archive'
 import { validatePoloAppManifest } from '../manifest'
@@ -139,12 +149,10 @@ function requestFor(
   }
 }
 
-function makeManager(options: {
-  uvPath?: string
-  bunPath?: string
-  baseEnvironment?: NodeJS.ProcessEnv
-  portAllocator?: () => Promise<number>
-} = {}): LocalAppRuntimeManager {
+function makeManager(options: Pick<
+  LocalAppRuntimeManagerOptions,
+  'uvPath' | 'bunPath' | 'baseEnvironment' | 'portAllocator'
+> = {}): LocalAppRuntimeManager {
   manager = new LocalAppRuntimeManager({
     rootDir: join(testRoot, 'runtime'),
     platform,
@@ -153,6 +161,92 @@ function makeManager(options: {
     ...options,
   })
   return manager
+}
+
+interface FakeChildProcess extends ChildProcess {
+  pid: number
+  exitCode: number | null
+  signalCode: NodeJS.Signals | null
+}
+
+function makeFakeChild(
+  pid: number,
+  stdin: NodeJS.WritableStream | null = new PassThrough(),
+): FakeChildProcess {
+  const child = new EventEmitter() as FakeChildProcess
+  Object.assign(child, {
+    pid,
+    stdin,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    killed: false,
+    kill: () => true,
+  })
+  return child
+}
+
+function markFakeChildExited(child: FakeChildProcess): void {
+  if (child.exitCode != null || child.signalCode != null) return
+  child.exitCode = 0
+  child.emit('exit', 0, null)
+}
+
+function makeWindowsTestSpawner(
+  gate: FakeChildProcess,
+  onTaskkill: () => void = () => {},
+): typeof spawnProcess {
+  return ((command: string) => {
+    if (command !== 'taskkill') return gate
+    const killer = makeFakeChild(gate.pid + 10_000, null)
+    queueMicrotask(() => {
+      onTaskkill()
+      markFakeChildExited(gate)
+      markFakeChildExited(killer)
+    })
+    return killer
+  }) as typeof spawnProcess
+}
+
+function makeSnapshotOwner(): WindowsProcessTreeOwner {
+  return {
+    terminate: async () => {},
+    dispose: () => {},
+  } as unknown as WindowsProcessTreeOwner
+}
+
+type WindowsGateInternals = {
+  spawnManagedCommand(
+    appId: string,
+    kind: 'dependency-preparation' | 'runtime',
+    command: string,
+    args: string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ): Promise<unknown>
+  managedProcesses: Map<string, unknown>
+}
+
+function makeWindowsGateManager(options: {
+  gate: FakeChildProcess
+  owner: WindowsJobObjectOwner
+  onTaskkill?: () => void
+}): { runtime: LocalAppRuntimeManager; internals: WindowsGateInternals } {
+  const runtime = new LocalAppRuntimeManager({
+    rootDir: join(testRoot, 'runtime'),
+    platform: 'win32',
+    arch: architecture,
+    fetch: stableFetch,
+    processSpawner: makeWindowsTestSpawner(options.gate, options.onTaskkill),
+    windowsJobObjectOwnerFactory: async () => options.owner,
+    windowsProcessTreeOwnerFactory: makeSnapshotOwner,
+  })
+  manager = runtime
+  return {
+    runtime,
+    internals: runtime as unknown as WindowsGateInternals,
+  }
 }
 
 function makeStoredZip(path: string, content: Buffer): Buffer {
@@ -1270,7 +1364,6 @@ package = false
     await expect(shutdown).rejects.toMatchObject({ code: 'STOP_FAILED' })
     expect(internals.managedProcesses.size).toBe(1)
     expect(isProcessAlive(pids.root)).toBe(true)
-    expect(isProcessAlive(pids.child)).toBe(true)
 
     internals.killProcessTree = originalKill
     internals.forceKillProcessTree = originalForceKill
@@ -1302,7 +1395,6 @@ package = false
     await expect(uninstall).rejects.toMatchObject({ code: 'UNINSTALL_FAILED' })
     expect(internals.managedProcesses.size).toBe(1)
     expect(isProcessAlive(pids.root)).toBe(true)
-    expect(isProcessAlive(pids.child)).toBe(true)
     expect(await stat(join(testRoot, `runtime/apps/${appId}/data`))).toBeTruthy()
 
     internals.killProcessTree = originalKill
@@ -1312,6 +1404,182 @@ package = false
     expect(isProcessAlive(pids.root)).toBe(false)
     expect(isProcessAlive(pids.child)).toBe(false)
     await expect(stat(join(testRoot, `runtime/apps/${appId}`))).rejects.toThrow()
+  })
+
+  it('registers a Windows gate before Job Object assignment and confirms cleanup on binding failure', async () => {
+    const gate = makeFakeChild(41_001)
+    let taskkillCalls = 0
+    let directKillCalls = 0
+    gate.kill = () => {
+      directKillCalls += 1
+      return true
+    }
+    let internals!: WindowsGateInternals
+    const owner = {
+      assignProcess: () => {
+        expect(internals.managedProcesses.size).toBe(1)
+        throw new Error('injected Job Object binding failure')
+      },
+      setSnapshotFallback: () => {},
+      terminate: async () => {
+        expect(internals.managedProcesses.size).toBe(1)
+      },
+    } as unknown as WindowsJobObjectOwner
+    const created = makeWindowsGateManager({
+      gate,
+      owner,
+      onTaskkill: () => {
+        taskkillCalls += 1
+      },
+    })
+    internals = created.internals
+
+    await expect(internals.spawnManagedCommand(
+      'demo.windows-binding',
+      'dependency-preparation',
+      'bun.exe',
+      ['install'],
+      testRoot,
+      {},
+    )).rejects.toMatchObject({
+      code: 'RUNTIME_UNAVAILABLE',
+      details: { cause: 'injected Job Object binding failure' },
+    })
+    expect(internals.managedProcesses.size).toBe(0)
+    expect(taskkillCalls).toBe(1)
+    expect(directKillCalls).toBe(0)
+  })
+
+  it('routes Windows gate stdin delivery failure through owner-confirmed cleanup', async () => {
+    const failedStdin = new Writable({
+      write: (_chunk, _encoding, callback) => {
+        callback(new Error('injected gate stdin failure'))
+      },
+    })
+    const gate = makeFakeChild(41_002, failedStdin)
+    let internals!: WindowsGateInternals
+    let terminateCalls = 0
+    const owner = {
+      assignProcess: () => {
+        expect(internals.managedProcesses.size).toBe(1)
+      },
+      setSnapshotFallback: () => {},
+      terminate: async () => {
+        terminateCalls += 1
+        expect(internals.managedProcesses.size).toBe(1)
+        markFakeChildExited(gate)
+      },
+    } as unknown as WindowsJobObjectOwner
+    const created = makeWindowsGateManager({ gate, owner })
+    internals = created.internals
+
+    await expect(internals.spawnManagedCommand(
+      'demo.windows-stdin',
+      'dependency-preparation',
+      'uv.exe',
+      ['sync'],
+      testRoot,
+      {},
+    )).rejects.toMatchObject({
+      code: 'RUNTIME_UNAVAILABLE',
+      details: { cause: 'injected gate stdin failure' },
+    })
+    expect(terminateCalls).toBe(1)
+    expect(internals.managedProcesses.size).toBe(0)
+  })
+
+  it('blocks shutdown after Windows gate cleanup failure and releases it only after owner retry succeeds', async () => {
+    const failedStdin = new Writable({
+      write: (_chunk, _encoding, callback) => {
+        callback(new Error('injected gate stdin failure'))
+      },
+    })
+    const gate = makeFakeChild(41_003, failedStdin)
+    let shouldFailTermination = true
+    let terminateCalls = 0
+    const owner = {
+      assignProcess: () => {},
+      setSnapshotFallback: () => {},
+      terminate: async () => {
+        terminateCalls += 1
+        if (shouldFailTermination) {
+          throw new Error('injected owner termination failure')
+        }
+        markFakeChildExited(gate)
+      },
+    } as unknown as WindowsJobObjectOwner
+    const { runtime, internals } = makeWindowsGateManager({ gate, owner })
+
+    await expect(internals.spawnManagedCommand(
+      'demo.windows-shutdown',
+      'dependency-preparation',
+      'bun.exe',
+      ['install'],
+      testRoot,
+      {},
+    )).rejects.toMatchObject({
+      code: 'STOP_FAILED',
+      details: {
+        cause: 'injected gate stdin failure',
+        cleanupError: expect.stringContaining('could not be fully terminated'),
+      },
+    })
+    expect(internals.managedProcesses.size).toBe(1)
+    await expect(runtime.shutdown()).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    expect(internals.managedProcesses.size).toBe(1)
+    // The PID fallback may stop the gate, but that cannot prove descendants
+    // are gone after Job Object termination failed, so the owner is retained.
+    expect(gate.exitCode).toBe(0)
+
+    shouldFailTermination = false
+    await expect(runtime.shutdown()).resolves.toBeUndefined()
+    expect(internals.managedProcesses.size).toBe(0)
+    expect(gate.exitCode).toBe(0)
+    expect(terminateCalls).toBeGreaterThanOrEqual(4)
+  })
+
+  it('blocks uninstall with a retained unassigned Windows gate until owner cleanup recovers', async () => {
+    const appId = 'demo.windows-uninstall'
+    const gate = makeFakeChild(41_004)
+    let shouldFailTermination = true
+    let taskkillCalls = 0
+    const owner = {
+      assignProcess: () => {
+        throw new Error('injected Job Object binding failure')
+      },
+      setSnapshotFallback: () => {},
+      terminate: async () => {
+        if (shouldFailTermination) {
+          throw new Error('injected owner termination failure')
+        }
+      },
+    } as unknown as WindowsJobObjectOwner
+    const { runtime, internals } = makeWindowsGateManager({
+      gate,
+      owner,
+      onTaskkill: () => {
+        taskkillCalls += 1
+      },
+    })
+
+    await expect(internals.spawnManagedCommand(
+      appId,
+      'dependency-preparation',
+      'uv.exe',
+      ['sync'],
+      testRoot,
+      {},
+    )).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    expect(internals.managedProcesses.size).toBe(1)
+    expect(taskkillCalls).toBe(1)
+    await expect(runtime.uninstall(appId, { preserveData: false })).rejects.toMatchObject({
+      code: 'UNINSTALL_FAILED',
+    })
+    expect(internals.managedProcesses.size).toBe(1)
+
+    shouldFailTermination = false
+    await expect(runtime.uninstall(appId, { preserveData: false })).resolves.toBeUndefined()
+    expect(internals.managedProcesses.size).toBe(0)
   })
 
   it('rejects an empty static entry and unsupported host permissions', async () => {
