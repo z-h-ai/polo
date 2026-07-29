@@ -12,6 +12,7 @@ type FunctionKeys<T> = {
 }[keyof T] & string
 
 type BrowserPaneKeys = `browserPane.${FunctionKeys<ElectronAPI['browserPane']>}`
+type LocalAppKeys = `localApps.${FunctionKeys<ElectronAPI['localApps']>}`
 
 // Methods excluded from CHANNEL_MAP because they are implemented directly in the preload
 // (no IPC round-trip to the main process). Each reads local state or orchestrates client-side.
@@ -33,7 +34,7 @@ type ApiToChannelMapKeys = Exclude<
   | 'sendDeepLinkActionResult' // direct IPC to main process — webview protocol callback ack
   | 'changeLanguage' // direct IPC to main process — syncs i18n language
   | 'getFilePath' // renderer-local — webUtils.getPathForFile, no IPC round-trip
-> | BrowserPaneKeys
+> | BrowserPaneKeys | LocalAppKeys
 type ChannelMapKeys = keyof typeof CHANNEL_MAP & string
 
 type AssertNever<T extends never> = true
@@ -63,6 +64,27 @@ describe('CHANNEL_MAP runtime contract', () => {
     const values = Object.values(CHANNEL_MAP)
     expect(values.some((entry) => entry.type === 'listener')).toBe(true)
     expect(values.some((entry) => entry.type === 'invoke')).toBe(true)
+  })
+
+  it('routes catalog update metadata through the local-app RPC surface', async () => {
+    expect(CHANNEL_MAP['localApps.setAvailableRelease']).toEqual({
+      type: 'invoke',
+      channel: RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+    })
+    const invoke = mock(async () => ({ status: 'update_available' }))
+    const client = {
+      invoke,
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    await api.localApps.setAvailableRelease('demo.app', { version: '2.0.0' })
+
+    expect(invoke).toHaveBeenCalledWith(
+      RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+      'demo.app',
+      { version: '2.0.0' },
+    )
   })
 
   it('forwards phone auth and password calls through the typed local RPC surface', async () => {

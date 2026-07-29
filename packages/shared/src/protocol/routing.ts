@@ -133,6 +133,18 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tabBrowser.GET_APPS,
   RPC_CHANNELS.tabBrowser.SAVE_APPS,
 
+  // localApps — downloaded bundles and processes live on this device
+  RPC_CHANNELS.localApps.INSTALL,
+  RPC_CHANNELS.localApps.CANCEL_INSTALL,
+  RPC_CHANNELS.localApps.START,
+  RPC_CHANNELS.localApps.STOP,
+  RPC_CHANNELS.localApps.RESTART,
+  RPC_CHANNELS.localApps.UNINSTALL,
+  RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+  RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
+  RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
+  RPC_CHANNELS.localApps.GET_LOGS,
+
   // notification — local OS notifications
   RPC_CHANNELS.notification.SHOW,
   RPC_CHANNELS.notification.NAVIGATE,

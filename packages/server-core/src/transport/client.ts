@@ -12,6 +12,7 @@
 import {
   PROTOCOL_VERSION,
   REQUEST_TIMEOUT_MS,
+  getRpcRequestTimeoutMs,
   SEQUENCE_ACK_INTERVAL_MS,
   isErrorCode,
   type ErrorCode,
@@ -184,10 +185,11 @@ export class WsRpcClient implements RpcClient {
       }
 
       const id = crypto.randomUUID()
+      const requestTimeout = getRpcRequestTimeoutMs(channel, this.requestTimeout)
       const timeout = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`Request timeout: ${channel} (${this.requestTimeout}ms)`))
-      }, this.requestTimeout)
+        reject(new Error(`Request timeout: ${channel} (${requestTimeout}ms)`))
+      }, requestTimeout)
 
       this.pending.set(id, { resolve, reject, timeout })
 

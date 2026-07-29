@@ -177,6 +177,9 @@ win:
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    # Native FFI used by LocalAppRuntimeManager for Windows Job Objects.
+    - from: ../../node_modules/koffi
+      to: app/node_modules/koffi
     - from: vendor/bun/bun.exe
       to: vendor/bun/bun.exe
     - from: resources/bin/win32-x64
