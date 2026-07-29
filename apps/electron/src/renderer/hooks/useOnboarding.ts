@@ -122,6 +122,9 @@ export function resolveInitialStep(initialSetupNeeds: SetupNeeds | undefined, fa
 
 export function mapAdminLoginError(error: unknown): string {
   const errorLike = error as { errorCode?: string; message?: string; status?: number } | undefined
+  if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
+    return i18n.t('onboarding.adminLogin.genericError')
+  }
   if (errorLike?.errorCode === 'INVALID_CREDENTIALS' || errorLike?.errorCode === 'invalid_credentials') {
     return i18n.t('onboarding.adminLogin.invalidCredentials')
   }
@@ -131,10 +134,6 @@ export function mapAdminLoginError(error: unknown): string {
   if (errorLike?.errorCode === 'NETWORK_ERROR') {
     return i18n.t('onboarding.adminLogin.networkError')
   }
-  if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
-    return i18n.t('onboarding.adminLogin.genericError')
-  }
-
   const message = error instanceof Error ? error.message : errorLike?.message
   if (message && /network|fetch|failed to reach|connection/i.test(message)) {
     return i18n.t('onboarding.adminLogin.networkError')
@@ -150,6 +149,10 @@ export function mapAdminPhoneAuthError(error: unknown): string {
     retryAfter?: number
     status?: number
   } | undefined
+
+  if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
+    return i18n.t('onboarding.adminLogin.phoneAuthUnavailable')
+  }
 
   switch (errorLike?.errorCode) {
     case 'invalid_phone':
@@ -178,12 +181,9 @@ export function mapAdminPhoneAuthError(error: unknown): string {
   }
 
   if (
-    typeof errorLike?.status === 'number' && errorLike.status >= 500
-    || error instanceof Error && /network|fetch|failed to reach|connection/i.test(error.message)
+    error instanceof Error && /network|fetch|failed to reach|connection/i.test(error.message)
   ) {
-    return error instanceof Error && /network|fetch|failed to reach|connection/i.test(error.message)
-      ? i18n.t('onboarding.adminLogin.networkError')
-      : i18n.t('onboarding.adminLogin.phoneAuthUnavailable')
+    return i18n.t('onboarding.adminLogin.networkError')
   }
 
   return i18n.t('onboarding.adminLogin.genericError')

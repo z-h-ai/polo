@@ -11,6 +11,7 @@ import {
   canSendPhoneAuthCode,
   canVerifyPhoneAuthCode,
   createExclusiveRunner,
+  getRemainingPhoneAuthResendSeconds,
   INITIAL_PHONE_AUTH_FORM_STATE,
   maskMainlandPhone,
   reducePhoneAuthForm,
@@ -19,7 +20,9 @@ import {
 interface PhoneAuthStepProps {
   isLoading: boolean
   onClearError: () => void
+  resendDeadlines: ReadonlyMap<string, number>
   onSendCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
+  onCodeSent: (phone: string, resendAfter: number) => void
   onVerify: (phone: string, code: string) => Promise<boolean>
   onUsePassword: () => void
 }
@@ -27,7 +30,9 @@ interface PhoneAuthStepProps {
 export function PhoneAuthStep({
   isLoading,
   onClearError,
+  resendDeadlines,
   onSendCode,
+  onCodeSent,
   onVerify,
   onUsePassword,
 }: PhoneAuthStepProps) {
@@ -35,18 +40,21 @@ export function PhoneAuthStep({
   const [form, dispatch] = useReducer(reducePhoneAuthForm, INITIAL_PHONE_AUTH_FORM_STATE)
   const [isSending, setIsSending] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
+  const [countdownTick, setCountdownTick] = useState(0)
   const sendRunner = useRef(createExclusiveRunner())
   const verifyRunner = useRef(createExclusiveRunner())
+  const resendDeadline = resendDeadlines.get(form.phone)
+  const resendSeconds = getRemainingPhoneAuthResendSeconds(resendDeadline)
 
   useEffect(() => {
-    if (form.resendSeconds <= 0) return
-    const timer = window.setInterval(() => {
-      dispatch({ type: 'countdownTicked' })
-    }, 1000)
-    return () => window.clearInterval(timer)
-  }, [form.resendSeconds])
+    if (resendSeconds <= 0 || resendDeadline === undefined) return
+    const timer = window.setTimeout(() => {
+      setCountdownTick(value => value + 1)
+    }, Math.min(1_000, Math.max(1, resendDeadline - Date.now())))
+    return () => window.clearTimeout(timer)
+  }, [countdownTick, resendDeadline, resendSeconds])
 
-  const canSend = canSendPhoneAuthCode(form)
+  const canSend = canSendPhoneAuthCode(form) && resendSeconds === 0
   const canVerify = canVerifyPhoneAuthCode(form)
   const isBusy = isLoading || isSending || isVerifying
   const maskedPhone = useMemo(() => maskMainlandPhone(form.phone), [form.phone])
@@ -62,7 +70,8 @@ export function PhoneAuthStep({
       }
     })
     if (result?.success) {
-      dispatch({ type: 'codeSent', resendAfter: result.resendAfter })
+      onCodeSent(form.phone, result.resendAfter)
+      dispatch({ type: 'codeSent' })
     }
   }
 
@@ -150,6 +159,8 @@ export function PhoneAuthStep({
                 <Spinner className="mr-1.5" />
                 {t("onboarding.adminLogin.sendingCode")}
               </>
+            ) : resendSeconds > 0 ? (
+              t("onboarding.adminLogin.resendIn", { count: resendSeconds })
             ) : (
               t("onboarding.adminLogin.sendCode")
             )}
@@ -191,12 +202,12 @@ export function PhoneAuthStep({
               <Button
                 type="button"
                 variant="outline"
-                disabled={isBusy || form.resendSeconds > 0}
+                disabled={isBusy || resendSeconds > 0}
                 onClick={sendCode}
                 className="h-11 shrink-0 rounded-[10px]"
               >
-                {form.resendSeconds > 0
-                  ? t("onboarding.adminLogin.resendIn", { count: form.resendSeconds })
+                {resendSeconds > 0
+                  ? t("onboarding.adminLogin.resendIn", { count: resendSeconds })
                   : t("onboarding.adminLogin.resend")}
               </Button>
             </div>

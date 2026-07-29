@@ -1,5 +1,5 @@
 import { describe, it, expect, mock } from 'bun:test'
-import { setupI18n } from '@polo-ai/shared/i18n/setupI18n'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import {
   resolveSlugForMethod,
   apiSetupMethodToConnectionSetup,
@@ -7,6 +7,7 @@ import {
   resolveInitialStep,
   resolveAdminLoginSuccessState,
   resolveAdminLoginFailureState,
+  mapAdminLoginError,
   mapAdminPhoneAuthError,
   resolvePhoneAuthAvailability,
   sendPhoneAuthCodeWithChallenge,
@@ -255,6 +256,27 @@ describe('admin onboarding flow', () => {
       errorCode: 'invalid_credentials',
       message: 'challenge verifier secret detail',
     })).toBe('Verification challenge failed. Please try again.')
+  })
+
+  it('maps all 5xx login and phone failures before business codes or messages', () => {
+    expect(mapAdminLoginError({
+      errorCode: 'INVALID_CREDENTIALS',
+      message: 'sensitive upstream credential detail',
+      status: 500,
+    })).toBe(i18n.t('onboarding.adminLogin.genericError'))
+
+    expect(mapAdminPhoneAuthError({
+      errorCode: 'verification_code_expired',
+      message: 'sensitive provider stack',
+      status: 500,
+    })).toBe(i18n.t('onboarding.adminLogin.phoneAuthUnavailable'))
+
+    expect(mapAdminPhoneAuthError({
+      errorCode: 'sms_rate_limited',
+      message: 'sensitive rate-limit backend detail',
+      retryAfter: 86_400,
+      status: 503,
+    })).toBe(i18n.t('onboarding.adminLogin.phoneAuthUnavailable'))
   })
 
   it('falls back to password login when no real challenge issuer is configured', () => {

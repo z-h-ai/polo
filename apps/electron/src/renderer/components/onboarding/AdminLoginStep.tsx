@@ -11,7 +11,10 @@ import { cn } from "@/lib/utils"
 import { PoloAiSymbol } from "@/components/icons/PoloAiSymbol"
 import { PhoneAuthStep } from "./PhoneAuthStep"
 import { AdminLoginMethodTabs } from "./AdminLoginMethodTabs"
-import { resolvePreferredAdminLoginMode } from "./phone-auth-utils"
+import {
+  createPhoneAuthResendDeadline,
+  resolvePreferredAdminLoginMode,
+} from "./phone-auth-utils"
 import type { AdminSendPhoneAuthCodeResult } from "../../../shared/types"
 
 interface AdminLoginStepProps {
@@ -40,6 +43,9 @@ export function AdminLoginStep({
   const [loginMode, setLoginMode] = useState<"phone" | "password">(
     resolvePreferredAdminLoginMode(phoneAuthEnabled),
   )
+  const [phoneAuthResendDeadlines, setPhoneAuthResendDeadlines] = useState<
+    ReadonlyMap<string, number>
+  >(() => new Map())
 
   useEffect(() => {
     if (phoneAuthEnabled !== undefined) {
@@ -103,7 +109,15 @@ export function AdminLoginStep({
         <PhoneAuthStep
           isLoading={isLoading}
           onClearError={onClearError}
+          resendDeadlines={phoneAuthResendDeadlines}
           onSendCode={onSendPhoneCode}
+          onCodeSent={(phone, resendAfter) => {
+            setPhoneAuthResendDeadlines(current => {
+              const next = new Map(current)
+              next.set(phone, createPhoneAuthResendDeadline(resendAfter))
+              return next
+            })
+          }}
           onVerify={onVerifyPhoneCode}
           onUsePassword={() => {
             setLoginMode("password")

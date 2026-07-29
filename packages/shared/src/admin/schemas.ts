@@ -11,6 +11,12 @@ const sessionLifetimeSeconds = z.number().finite().int().min(1).max(31_536_000)
 const phoneAuthLifetimeSeconds = z.number().finite().int().min(1).max(86_400)
 const phoneAuthDelaySeconds = z.number().finite().int().min(0).max(86_400)
 
+export const MainlandChinaPhoneSchema = z.string().regex(/^1[3-9]\d{9}$/)
+
+export function isValidMainlandChinaPhone(value: string): boolean {
+  return MainlandChinaPhoneSchema.safeParse(value).success
+}
+
 /**
  * Runtime boundary for user data received from Admin.
  * Zod objects strip unknown fields by default, so only this explicit allowlist
@@ -67,12 +73,12 @@ export const AdminLoginRpcInputSchema = z.object({
 })
 
 export const SendPhoneAuthCodeRpcInputSchema = z.object({
-  phone: z.string().regex(/^1[3-9]\d{9}$/),
+  phone: MainlandChinaPhoneSchema,
   challengeToken: nonBlankString(8_192),
 })
 
 export const VerifyPhoneAuthCodeRpcInputSchema = z.object({
-  phone: z.string().regex(/^1[3-9]\d{9}$/),
+  phone: MainlandChinaPhoneSchema,
   code: z.string().regex(/^\d{6}$/),
 })
 

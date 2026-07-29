@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
-import { createElement } from 'react'
+import { createElement, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 
@@ -116,7 +116,9 @@ describe('PhoneAuthStep rendered interactions', () => {
     renderWithI18n(createElement(PhoneAuthStep, {
       isLoading: false,
       onClearError: mock(() => {}),
+      resendDeadlines: new Map(),
       onSendCode,
+      onCodeSent: mock(() => {}),
       onVerify: mock(async () => true),
       onUsePassword: mock(() => {}),
     }))
@@ -149,13 +151,29 @@ describe('PhoneAuthStep rendered interactions', () => {
     const onVerify = mock(async () => true)
     const user = userEvent.setup({ document: window.document })
 
-    renderWithI18n(createElement(PhoneAuthStep, {
-      isLoading: false,
-      onClearError: mock(() => {}),
-      onSendCode,
-      onVerify,
-      onUsePassword: mock(() => {}),
-    }))
+    function PhoneAuthHarness() {
+      const [resendDeadlines, setResendDeadlines] = useState<
+        ReadonlyMap<string, number>
+      >(() => new Map())
+
+      return createElement(PhoneAuthStep, {
+        isLoading: false,
+        onClearError: mock(() => {}),
+        resendDeadlines,
+        onSendCode,
+        onCodeSent: (phone: string, resendAfter: number) => {
+          setResendDeadlines(current => {
+            const next = new Map(current)
+            next.set(phone, Date.now() + resendAfter * 1_000)
+            return next
+          })
+        },
+        onVerify,
+        onUsePassword: mock(() => {}),
+      })
+    }
+
+    renderWithI18n(createElement(PhoneAuthHarness))
 
     fireEvent.change(screen.getByLabelText('Phone number'), {
       target: { value: '13800138000' },
@@ -204,6 +222,57 @@ describe('AdminLoginStep rendered modes', () => {
     await user.click(screen.getByRole('tab', { name: 'Password' }))
     expect(screen.getByLabelText('Phone number or username')).toBeTruthy()
     expect(screen.getAllByRole('tab')[1].getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('keeps per-phone resend deadlines across edit and login tab remounts', async () => {
+    const onSendPhoneCode = mock(async () => ({
+      success: true as const,
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 60,
+    }))
+    const user = userEvent.setup({ document: window.document })
+    renderWithI18n(createElement(AdminLoginStep, {
+      phoneAuthEnabled: true,
+      onClearError: mock(() => {}),
+      onSendPhoneCode,
+      onVerifyPhoneCode: mock(async () => false),
+      onSubmit: mock(() => {}),
+    }))
+
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13800138000' },
+    })
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Send verification code' }))
+    await screen.findByLabelText('Verification code')
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    const samePhoneSend = screen.getByTestId('phone-auth-send-code')
+    expect((samePhoneSend as HTMLButtonElement).disabled).toBe(true)
+    expect(samePhoneSend.textContent).toContain('Resend in')
+
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13900139000' },
+    })
+    expect((samePhoneSend as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13800138000' },
+    })
+    expect((samePhoneSend as HTMLButtonElement).disabled).toBe(true)
+
+    await user.click(screen.getByRole('tab', { name: 'Password' }))
+    await user.click(screen.getByRole('tab', { name: 'Verification code' }))
+    fireEvent.change(screen.getByLabelText('Phone number'), {
+      target: { value: '13800138000' },
+    })
+    await user.click(screen.getByRole('checkbox'))
+
+    const remountedSend = screen.getByTestId('phone-auth-send-code')
+    expect((remountedSend as HTMLButtonElement).disabled).toBe(true)
+    expect(remountedSend.textContent).toContain('Resend in')
+    expect(onSendPhoneCode).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to password-only mode and submits a legacy username as identifier', async () => {

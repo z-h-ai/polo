@@ -581,11 +581,23 @@ describe('registerAdminHandlers', () => {
       errorCode: 'INVALID_CREDENTIALS',
       message: 'Invalid username or password',
     })
-    expect(await sendPhoneAuthCode(context, 'not-a-phone', 'challenge')).toEqual({
-      success: false,
-      errorCode: 'invalid_phone',
-      message: 'Phone number is invalid',
-    })
+    for (const invalidPhone of [
+      '12000000000',
+      '1380013800',
+      '138001380000',
+      'a3800138000',
+    ]) {
+      expect(await sendPhoneAuthCode(context, invalidPhone, 'challenge')).toEqual({
+        success: false,
+        errorCode: 'invalid_phone',
+        message: 'Phone number is invalid',
+      })
+      expect(await verifyPhoneAuthCode(context, invalidPhone, '123456')).toEqual({
+        success: false,
+        errorCode: 'invalid_phone',
+        message: 'Phone number is invalid',
+      })
+    }
     expect(await sendPhoneAuthCode(
       context,
       '13800138000',

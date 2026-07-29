@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,10 +11,12 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { build } from 'esbuild'
+import {
+  getPol53SourceCandidates,
+  POL53_PHONE_AUTH_CONTRACT_COMMIT,
+} from './electron-phone-auth-e2e-utils'
 
 const rootDirectory = join(import.meta.dir, '..')
-const pol53SourceDirectory = process.env.POL53_WORKTREE?.trim()
-  || '/Users/wow/project/z-h-ai/polo-admin-dir/POL-53/feat/phone-auth-registration'
 const databaseBaseUrl = process.env.POL53_E2E_DATABASE_URL?.trim()
   || 'postgresql://postgres:postgres@localhost:5432/polo_admin_test'
 const runId = randomBytes(6).toString('hex')
@@ -136,6 +139,49 @@ function runCaptured(
     throw new Error(`Command failed (${result.exitCode}): ${command.join(' ')}`)
   }
   return result.stdout.toString().trim()
+}
+
+function resolvePol53Dependency(): { directory: string; commit: string } {
+  const candidates = getPol53SourceCandidates(
+    rootDirectory,
+    process.env.POL53_WORKTREE,
+  )
+
+  for (const directory of candidates) {
+    if (!existsSync(directory)) continue
+    const head = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], {
+      cwd: directory,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    })
+    if (head.exitCode !== 0) continue
+
+    const containsRequiredContract = Bun.spawnSync([
+      'git',
+      'merge-base',
+      '--is-ancestor',
+      POL53_PHONE_AUTH_CONTRACT_COMMIT,
+      'HEAD',
+    ], {
+      cwd: directory,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    }).exitCode === 0
+    if (containsRequiredContract) {
+      return {
+        directory,
+        commit: head.stdout.toString().trim(),
+      }
+    }
+  }
+
+  const configured = process.env.POL53_WORKTREE?.trim()
+  const source = configured
+    ? `configured POL53_WORKTREE ${candidates[0]}`
+    : `repository-relative candidates ${candidates.join(', ')}`
+  throw new Error(
+    `No polo-admin dependency containing POL-53 contract ${POL53_PHONE_AUTH_CONTRACT_COMMIT} was found in ${source}`,
+  )
 }
 
 function hasPol53RuntimeDependencies(directory: string): boolean {
@@ -478,23 +524,17 @@ async function buildElectronFixture(): Promise<void> {
 
 async function main(): Promise<void> {
   validateSafetyBoundaries()
-  const pol53Head = Bun.spawnSync(['git', 'rev-parse', '--short', 'HEAD'], {
-    cwd: pol53SourceDirectory,
-  }).stdout.toString().trim()
-  const containsRequiredContract = Bun.spawnSync([
-    'git',
-    'merge-base',
-    '--is-ancestor',
-    '6e6455a',
-    'HEAD',
-  ], {
-    cwd: pol53SourceDirectory,
-  }).exitCode === 0
-  if (!pol53Head || !containsRequiredContract) {
-    throw new Error(
-      `Expected POL-53 HEAD to contain contract 6e6455a, received ${pol53Head || 'unknown'}`,
-    )
-  }
+  const {
+    directory: pol53SourceDirectory,
+    commit: pol53Head,
+  } = resolvePol53Dependency()
+  const copySourceDependencies = hasPol53RuntimeDependencies(pol53SourceDirectory)
+  console.log(JSON.stringify({
+    event: 'pol53_dependency',
+    directory: pol53SourceDirectory,
+    commit: pol53Head,
+    dependencyMode: copySourceDependencies ? 'fs.cp' : 'npm-ci',
+  }))
 
   // Run the upstream service from an isolated local clone. Next.js rewrites
   // next-env.d.ts during startup, so executing inside the dependency worktree
@@ -509,13 +549,12 @@ async function main(): Promise<void> {
     pol53Directory,
   ], temporaryDirectory)
   runChecked(['git', 'checkout', '--detach', pol53Head], pol53Directory)
-  if (hasPol53RuntimeDependencies(pol53SourceDirectory)) {
-    runChecked([
-      'cp',
-      '-cR',
+  if (copySourceDependencies) {
+    cpSync(
       join(pol53SourceDirectory, 'node_modules'),
       join(pol53Directory, 'node_modules'),
-    ], temporaryDirectory)
+      { recursive: true },
+    )
   } else {
     // External task worktrees are disposable. When the remaining contract
     // worktree has incomplete dependencies, install only inside the temporary

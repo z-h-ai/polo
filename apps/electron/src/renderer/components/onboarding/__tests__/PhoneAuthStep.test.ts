@@ -2,7 +2,9 @@ import { describe, expect, it, mock } from 'bun:test'
 import {
   canSendPhoneAuthCode,
   canVerifyPhoneAuthCode,
+  createPhoneAuthResendDeadline,
   createExclusiveRunner,
+  getRemainingPhoneAuthResendSeconds,
   INITIAL_PHONE_AUTH_FORM_STATE,
   maskMainlandPhone,
   normalizeMainlandPhoneInput,
@@ -48,25 +50,49 @@ describe('PhoneAuthStep interaction state', () => {
     expect(canSendPhoneAuthCode(consented)).toBe(true)
   })
 
-  it('uses the server resend interval and counts down without going negative', () => {
+  it('uses the same mainland phone rule as the LOCAL_ONLY RPC boundary', () => {
+    for (const input of [
+      '12000000000',
+      '1380013800',
+      '138001380000',
+      'a3800138000',
+    ]) {
+      const withPhone = reducePhoneAuthForm(
+        { ...INITIAL_PHONE_AUTH_FORM_STATE, consented: true },
+        { type: 'phoneChanged', value: input },
+      )
+      expect(canSendPhoneAuthCode(withPhone)).toBe(false)
+    }
+
+    for (const input of ['13000000000', '19999999999']) {
+      const withPhone = reducePhoneAuthForm(
+        { ...INITIAL_PHONE_AUTH_FORM_STATE, consented: true },
+        { type: 'phoneChanged', value: input },
+      )
+      expect(canSendPhoneAuthCode(withPhone)).toBe(true)
+    }
+  })
+
+  it('derives the server resend interval from an absolute deadline', () => {
+    const deadline = createPhoneAuthResendDeadline(41.2, 1_000)
+    expect(deadline).toBe(43_000)
+    expect(getRemainingPhoneAuthResendSeconds(deadline, 1_000)).toBe(42)
+    expect(getRemainingPhoneAuthResendSeconds(deadline, 2_001)).toBe(41)
+    expect(getRemainingPhoneAuthResendSeconds(deadline, 43_001)).toBe(0)
+
     const verifying = reducePhoneAuthForm(
       {
         ...INITIAL_PHONE_AUTH_FORM_STATE,
         phone: '13800138000',
         consented: true,
       },
-      { type: 'codeSent', resendAfter: 41.2 },
+      { type: 'codeSent' },
     )
 
     expect(verifying).toMatchObject({
       mode: 'verify',
       code: '',
-      resendSeconds: 42,
     })
-    expect(reducePhoneAuthForm(
-      { ...verifying, resendSeconds: 0 },
-      { type: 'countdownTicked' },
-    ).resendSeconds).toBe(0)
   })
 
   it('accepts only a complete six-digit code for verification', () => {
@@ -90,14 +116,13 @@ describe('PhoneAuthStep interaction state', () => {
     expect(canVerifyPhoneAuthCode(complete)).toBe(true)
   })
 
-  it('clears the code and countdown when the phone is edited', () => {
+  it('clears the code without owning or discarding the parent resend deadline', () => {
     const edited = reducePhoneAuthForm(
       {
         mode: 'verify',
         phone: '13800138000',
         code: '123456',
         consented: true,
-        resendSeconds: 37,
       },
       { type: 'phoneEditRequested' },
     )
@@ -107,7 +132,6 @@ describe('PhoneAuthStep interaction state', () => {
       phone: '13800138000',
       code: '',
       consented: true,
-      resendSeconds: 0,
     })
   })
 
