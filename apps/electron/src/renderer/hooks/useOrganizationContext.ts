@@ -14,6 +14,10 @@ import {
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
 } from '@/lib/organization-storage'
+import {
+  emitAdminAuthFailure,
+  normalizeAdminError,
+} from '@/lib/admin-auth-failure'
 
 export type OrganizationFlowState =
   | 'idle'
@@ -25,24 +29,40 @@ export type OrganizationFlowState =
 
 export interface OrganizationFlowError {
   code: string
+  status?: number
+  authFailureHandled?: true
+}
+
+export interface AcceptJoinOutcome {
+  completed: boolean
 }
 
 function resultError(result: {
   errorCode?: string
+  status?: number
 }): OrganizationFlowError {
-  return {
-    code: result.errorCode || 'request_failed',
-  }
+  const normalized = normalizeAdminError(result)
+  const authFailureHandled = emitAdminAuthFailure(normalized)
+  return authFailureHandled
+    ? { ...normalized, authFailureHandled: true }
+    : normalized
 }
 
 function caughtError(caught: unknown): OrganizationFlowError {
   if (caught && typeof caught === 'object') {
-    const code = 'code' in caught && typeof caught.code === 'string'
-      ? caught.code
-      : 'errorCode' in caught && typeof caught.errorCode === 'string'
-        ? caught.errorCode
-        : 'request_failed'
-    return { code }
+    const record = caught as Record<string, unknown>
+    const normalized = normalizeAdminError({
+      code: typeof record.code === 'string' ? record.code : undefined,
+      errorCode: typeof record.errorCode === 'string' ? record.errorCode : undefined,
+      status: typeof record.status === 'number' ? record.status : undefined,
+    })
+    if (record.authFailureHandled === true) {
+      return { ...normalized, authFailureHandled: true }
+    }
+    const authFailureHandled = emitAdminAuthFailure(normalized)
+    return authFailureHandled
+      ? { ...normalized, authFailureHandled: true }
+      : normalized
   }
   return { code: 'request_failed' }
 }
@@ -259,14 +279,20 @@ export function useOrganizationContextState() {
       const result = await window.electronAPI.organizationAcceptJoin(token)
       if (!result.success) throw resultError(result)
 
-      const summaries = await loadOrganizations()
-      if (
-        generation !== joinPreviewGenerationRef.current
-        || joinPreviewTokenRef.current !== token
-        || pendingJoinTokenRef.current !== token
-      ) {
-        return result
+      const isCurrentJoin = () => (
+        generation === joinPreviewGenerationRef.current
+        && joinPreviewTokenRef.current === token
+        && pendingJoinTokenRef.current === token
+      )
+      if (!isCurrentJoin()) {
+        return { completed: false } satisfies AcceptJoinOutcome
       }
+
+      const summaries = await loadOrganizations()
+      if (!isCurrentJoin()) {
+        return { completed: false } satisfies AcceptJoinOutcome
+      }
+
       const accountId = accountIdRef.current
       if (!accountId) {
         throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
@@ -278,7 +304,7 @@ export function useOrganizationContextState() {
       setPendingJoinToken(null)
       setJoinPreview(null)
       activateOrganization(accountId, summaries, result.membership.organizationId)
-      return result
+      return { completed: true } satisfies AcceptJoinOutcome
     } catch (caught) {
       const nextError = caughtError(caught)
       if (
@@ -316,18 +342,24 @@ export function useOrganizationContextState() {
     return summaries
   }, [activeOrganizationId, loadOrganizations])
 
-  const clearAccount = useCallback((accountId?: string | null) => {
+  const clearAccount = useCallback((
+    accountId?: string | null,
+    options?: { preservePendingJoinToken?: boolean },
+  ) => {
     const targetAccountId = accountId ?? accountIdRef.current
     if (targetAccountId) clearStoredActiveOrganizationId(targetAccountId)
-    clearPendingOrganizationJoinToken()
+    const preservedJoinToken = options?.preservePendingJoinToken
+      ? pendingJoinTokenRef.current ?? getPendingOrganizationJoinToken()
+      : null
+    if (!options?.preservePendingJoinToken) clearPendingOrganizationJoinToken()
     joinPreviewGenerationRef.current += 1
     joinPreviewTokenRef.current = null
-    pendingJoinTokenRef.current = null
+    pendingJoinTokenRef.current = preservedJoinToken
     accountIdRef.current = null
     setOrganizationSummaries([])
     setActiveOrganizationId(null)
     setOrganizationMembershipRole(null)
-    setPendingJoinToken(null)
+    setPendingJoinToken(preservedJoinToken)
     setJoinPreview(null)
     setError(null)
     setContextVersion(version => version + 1)

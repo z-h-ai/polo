@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { createElement, useEffect, useState } from 'react'
 
 GlobalRegistrator.register()
 
-const { act, cleanup, renderHook } = await import('@testing-library/react')
+const { act, cleanup, render, renderHook, screen } = await import('@testing-library/react')
 const { useOrganizationContextState } = await import('../useOrganizationContext')
+const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 const {
   clearPendingOrganizationJoinToken,
   getStoredActiveOrganizationId,
@@ -39,11 +41,24 @@ const organizations = [
   },
 ]
 
-let organizationList = mock(async () => ({
+type OrganizationListResult = Awaited<ReturnType<Window['electronAPI']['organizationList']>>
+type OrganizationPreviewJoinResult = Awaited<
+  ReturnType<Window['electronAPI']['organizationPreviewJoin']>
+>
+type OrganizationCreateResult = Awaited<
+  ReturnType<Window['electronAPI']['organizationCreate']>
+>
+type OrganizationAcceptJoinResult = Awaited<
+  ReturnType<Window['electronAPI']['organizationAcceptJoin']>
+>
+
+let organizationList = mock(async (): Promise<OrganizationListResult> => ({
   success: true as const,
   organizations,
 }))
-let organizationPreviewJoin = mock(async (_token: string) => ({
+let organizationPreviewJoin = mock(async (
+  _token: string,
+): Promise<OrganizationPreviewJoinResult> => ({
   success: true as const,
   organization: organizations[0],
   join: {
@@ -59,13 +74,15 @@ let organizationCreate = mock(async (_input: {
   name: string
   purpose: string
   idempotencyKey: string
-}) => ({
+}): Promise<OrganizationCreateResult> => ({
   success: true as const,
   organization: organizations[0],
   membership: organizations[0].membership,
   replayed: false,
 }))
-let organizationAcceptJoin = mock(async (_token: string) => ({
+let organizationAcceptJoin = mock(async (
+  _token: string,
+): Promise<OrganizationAcceptJoinResult> => ({
   success: true as const,
   membership: {
     ...organizations[1].membership,
@@ -78,11 +95,13 @@ let organizationAcceptJoin = mock(async (_token: string) => ({
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
-  organizationList = mock(async () => ({
+  organizationList = mock(async (): Promise<OrganizationListResult> => ({
     success: true as const,
     organizations,
   }))
-  organizationPreviewJoin = mock(async (_token: string) => ({
+  organizationPreviewJoin = mock(async (
+    _token: string,
+  ): Promise<OrganizationPreviewJoinResult> => ({
     success: true as const,
     organization: organizations[0],
     join: {
@@ -98,13 +117,15 @@ beforeEach(() => {
     name: string
     purpose: string
     idempotencyKey: string
-  }) => ({
+  }): Promise<OrganizationCreateResult> => ({
     success: true as const,
     organization: organizations[0],
     membership: organizations[0].membership,
     replayed: false,
   }))
-  organizationAcceptJoin = mock(async (_token: string) => ({
+  organizationAcceptJoin = mock(async (
+    _token: string,
+  ): Promise<OrganizationAcceptJoinResult> => ({
     success: true as const,
     membership: {
       ...organizations[1].membership,
@@ -291,5 +312,135 @@ describe('useOrganizationContextState', () => {
     expect(organizationAcceptJoin).toHaveBeenCalledTimes(1)
     expect(organizationAcceptJoin).toHaveBeenCalledWith(tokenB)
     expect(result.current.activeOrganizationId).toBe(organizations[1].id)
+  })
+
+  it('routes an organizationList auth failure back to the phone login flow', async () => {
+    organizationList = mock(async (): Promise<OrganizationListResult> => ({
+      success: false,
+      errorCode: 'TOKEN_EXPIRED',
+      status: 401,
+    }))
+
+    function AuthRoutingHarness() {
+      const organization = useOrganizationContextState()
+      const [route, setRoute] = useState<'organization' | 'phone-login'>('organization')
+      useEffect(() => subscribeToAdminAuthFailures(() => {
+        setRoute('phone-login')
+      }), [])
+      useEffect(() => {
+        void organization.bootstrap('expired-account').catch(() => {})
+      }, [])
+      return createElement('div', null, route)
+    }
+
+    render(createElement(AuthRoutingHarness))
+    expect(await screen.findByText('phone-login')).toBeTruthy()
+  })
+
+  it('emits the same auth failure for organization creation and invitation acceptance', async () => {
+    const authFailures: string[] = []
+    const unsubscribe = subscribeToAdminAuthFailures(error => {
+      authFailures.push(error.code)
+    })
+    organizationList = mock(async (): Promise<OrganizationListResult> => ({
+      success: true,
+      organizations: [],
+    }))
+    organizationCreate = mock(async (): Promise<OrganizationCreateResult> => ({
+      success: false,
+      errorCode: 'INVALID_TOKEN',
+      status: 401,
+    }))
+    const { result } = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await result.current.bootstrap('expired-account')
+    })
+    await act(async () => {
+      await result.current.createOrganization({
+        type: 'creator_space',
+        name: 'Studio',
+        purpose: 'Publish apps',
+        idempotencyKey: 'expired-create-request',
+      }).catch(() => {})
+    })
+
+    organizationPreviewJoin = mock(async (): Promise<OrganizationPreviewJoinResult> => ({
+      success: true,
+      organization: organizations[1],
+      join: {
+        kind: 'invitation',
+        effectiveStatus: 'active',
+        expiresAt: null,
+        usesRemaining: 1,
+        requiresPhoneMatch: true,
+      },
+    }))
+    organizationAcceptJoin = mock(async (): Promise<OrganizationAcceptJoinResult> => ({
+      success: false,
+      errorCode: 'UNAUTHORIZED',
+      status: 401,
+    }))
+    await act(async () => {
+      await result.current.receiveJoinToken('auth-failure-token-abcdefghijklmnopqrstuvwxyz')
+    })
+    await act(async () => {
+      await result.current.acceptJoin().catch(() => {})
+    })
+
+    expect(authFailures).toEqual(['INVALID_TOKEN', 'UNAUTHORIZED'])
+    unsubscribe()
+  })
+
+  it('keeps invitation B visible when acceptance of invitation A completes stale', async () => {
+    const tokenA = 'accept-token-aaaaaaaaaaaaaaaaaaaa'
+    const tokenB = 'accept-token-bbbbbbbbbbbbbbbbbbbb'
+    let resolveAcceptA!: (value: OrganizationAcceptJoinResult) => void
+    organizationAcceptJoin = mock(() => new Promise<OrganizationAcceptJoinResult>(resolve => {
+      resolveAcceptA = resolve
+    }))
+    organizationPreviewJoin = mock(async (token: string): Promise<OrganizationPreviewJoinResult> => ({
+      success: true,
+      organization: token === tokenB ? organizations[1] : organizations[0],
+      join: {
+        kind: 'join_link',
+        effectiveStatus: 'active',
+        expiresAt: null,
+        usesRemaining: null,
+        requiresPhoneMatch: false,
+      },
+    }))
+
+    const { result } = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await result.current.bootstrap('account-stale-accept')
+      await result.current.receiveJoinToken(tokenA)
+    })
+
+    let acceptA!: ReturnType<typeof result.current.acceptJoin>
+    act(() => {
+      acceptA = result.current.acceptJoin()
+    })
+    await act(async () => {
+      await result.current.receiveJoinToken(tokenB)
+    })
+    let outcome!: Awaited<typeof acceptA>
+    await act(async () => {
+      resolveAcceptA({
+        success: true,
+        membership: {
+          ...organizations[0].membership,
+          organizationId: organizations[0].id,
+          userId: 'user-stale-accept',
+        },
+        replayed: false,
+      })
+      outcome = await acceptA
+    })
+
+    expect(outcome.completed).toBe(false)
+    expect(result.current.flowState).toBe('join')
+    expect(result.current.pendingJoinToken).toBe(tokenB)
+    expect(result.current.joinPreview?.organization.name).toBe('Acme')
+    expect(result.current.activeOrganizationId).toBeNull()
   })
 })

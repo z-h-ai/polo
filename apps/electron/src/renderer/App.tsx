@@ -82,6 +82,12 @@ import {
   type OrganizationContextValue,
 } from '@/context/OrganizationContext'
 import { useOrganizationContextState } from '@/hooks/useOrganizationContext'
+import {
+  getAdminErrorCode,
+  isAdminAuthFailureResult,
+  subscribeToAdminAuthFailures,
+  type AdminErrorLike,
+} from '@/lib/admin-auth-failure'
 
 type AppState = 'loading' | 'onboarding' | 'reauth' | 'organization' | 'workspace-picker' | 'ready'
 
@@ -116,14 +122,6 @@ function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Re
 
 function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
   return result.errorCode === 'TOKEN_REVOKED'
-}
-
-function isAdminAuthFailureResult(result: { errorCode?: string; status?: number }): boolean {
-  return result.errorCode === 'TOKEN_REVOKED'
-    || result.errorCode === 'UNAUTHORIZED'
-    || result.errorCode === 'INVALID_TOKEN'
-    || result.errorCode === 'TOKEN_EXPIRED'
-    || result.status === 401
 }
 
 function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
@@ -724,7 +722,7 @@ export default function App() {
         setAppState('organization')
       }
     } catch (error) {
-      if (isAdminAuthFailureResult(error as { errorCode?: string; status?: number })) {
+      if (isAdminAuthFailureResult(error as AdminErrorLike)) {
         setCurrentAdminUser(null)
         setAppState('onboarding')
       } else {
@@ -796,6 +794,23 @@ export default function App() {
     setAppState('onboarding')
   }, [showAdminKicked])
 
+  const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
+    clearOrganizationAccount(currentAdminUser?.userId, {
+      preservePendingJoinToken: true,
+    })
+    setCurrentAdminUser(null)
+    if (getAdminErrorCode(failure) === 'TOKEN_REVOKED') {
+      enterAdminKicked()
+    } else {
+      enterAdminLogin()
+    }
+  }, [
+    clearOrganizationAccount,
+    currentAdminUser?.userId,
+    enterAdminKicked,
+    enterAdminLogin,
+  ])
+
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
     const validation = await window.electronAPI.adminValidate()
@@ -838,21 +853,13 @@ export default function App() {
         if (adminStatus.adminUrl) {
           const validation = await window.electronAPI.adminValidate()
           if (!validation.loggedIn) {
-            if (isAdminKickedResult(validation)) {
-              enterAdminKicked()
-            } else {
-              enterAdminLogin()
-            }
+            handleAdminAuthFailure(validation)
             return
           }
 
           const syncResult = await window.electronAPI.adminSyncConnections()
           if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
-            if (syncResult.errorCode === 'TOKEN_REVOKED') {
-              enterAdminKicked()
-            } else {
-              enterAdminLogin()
-            }
+            handleAdminAuthFailure(syncResult)
             return
           }
 
@@ -890,6 +897,7 @@ export default function App() {
   }, [
     enterAdminKicked,
     enterAdminLogin,
+    handleAdminAuthFailure,
     refreshAdminUser,
     routeThroughOrganization,
     setWindowWorkspaceId,
@@ -897,21 +905,15 @@ export default function App() {
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
-      clearOrganizationAccount(currentAdminUser?.userId)
-      setCurrentAdminUser(null)
-      if (!validation.loggedIn && isAdminKickedResult(validation)) {
-        enterAdminKicked()
-      } else {
-        enterAdminLogin()
-      }
+      if (validation.loggedIn) return
+      handleAdminAuthFailure(validation)
     })
     return () => { cleanup() }
-  }, [
-    currentAdminUser?.userId,
-    enterAdminKicked,
-    enterAdminLogin,
-    clearOrganizationAccount,
-  ])
+  }, [handleAdminAuthFailure])
+
+  useEffect(() => {
+    return subscribeToAdminAuthFailures(handleAdminAuthFailure)
+  }, [handleAdminAuthFailure])
 
   useEffect(() => {
     return window.electronAPI.onDeepLinkNavigate((navigation) => {
@@ -2352,8 +2354,8 @@ export default function App() {
               handleOrganizationFlowComplete()
             }}
             onAcceptJoin={async () => {
-              await organization.acceptJoin()
-              handleOrganizationFlowComplete()
+              const outcome = await organization.acceptJoin()
+              if (outcome.completed) handleOrganizationFlowComplete()
             }}
             onDismissJoin={() => {
               const next = organization.dismissJoin()

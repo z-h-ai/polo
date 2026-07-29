@@ -94,7 +94,8 @@ import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { initializeBackendHostRuntime } from '@polo-ai/shared/agent/backend'
 import { setPowerShellValidatorRoot } from '@polo-ai/shared/agent'
 import { handleDeepLink } from './deep-link'
-import { describeDeepLinkForLog } from './deep-link-log'
+import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
+import { findDeepLinkArgument } from './deep-link-argv'
 import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import { BrowserPaneManager } from './browser-pane-manager'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
@@ -332,10 +333,18 @@ const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
 } else {
+  if (process.platform !== 'darwin') {
+    const initialUrl = findDeepLinkArgument(process.argv, DEEPLINK_SCHEME)
+    if (initialUrl) {
+      mainLog.info('Received deeplink from initial argv', describeDeepLinkForLog(initialUrl))
+      pendingDeepLink = initialUrl
+    }
+  }
+
   app.on('second-instance', (_event, commandLine, _workingDirectory) => {
     // Someone tried to run a second instance, we should focus our window.
     // On Windows/Linux, the deeplink is in commandLine
-    const url = commandLine.find(arg => arg.startsWith(`${DEEPLINK_SCHEME}://`))
+    const url = findDeepLinkArgument(commandLine, DEEPLINK_SCHEME)
     if (url && windowManager) {
       mainLog.info('Received deeplink from second instance', describeDeepLinkForLog(url))
       handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(() => {
@@ -384,7 +393,10 @@ async function createInitialWindows(): Promise<void> {
       if (!validWorkspaceIds.includes(saved.workspaceId)) continue
 
       // Restore main window with focused mode if it was saved
-      mainLog.info(`Restoring window: workspaceId=${saved.workspaceId}, focused=${saved.focused ?? false}, url=${saved.url ?? 'none'}`)
+      mainLog.info(
+        `Restoring window: workspaceId=${saved.workspaceId}, focused=${saved.focused ?? false}`,
+        describeUrlForLog(saved.url ?? 'none'),
+      )
       const win = windowManager.createWindow({
         workspaceId: saved.workspaceId,
         focused: saved.focused,

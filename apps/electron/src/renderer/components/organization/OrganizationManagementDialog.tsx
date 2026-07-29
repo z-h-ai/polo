@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -33,6 +33,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useOrganizationContext } from '@/context/OrganizationContext'
 import { createOrganizationJoinDeepLink } from '@/lib/organization-storage'
+import {
+  emitAdminAuthFailure,
+  type AdminErrorLike,
+} from '@/lib/admin-auth-failure'
 import type {
   OrganizationInvitation,
   OrganizationJoinLink,
@@ -71,28 +75,53 @@ export function OrganizationManagementDialog({
   const [maxUses, setMaxUses] = useState('1')
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [generatedLink, setGeneratedLink] = useState<GeneratedLink | null>(null)
+  const loadGenerationRef = useRef(0)
 
   const isOwner = organization.organizationMembershipRole === 'owner'
   const canManage = isOwner || organization.organizationMembershipRole === 'manager'
+  const loadScopeRef = useRef({
+    open,
+    canManage,
+    organizationId: organization.activeOrganizationId,
+  })
+  loadScopeRef.current = {
+    open,
+    canManage,
+    organizationId: organization.activeOrganizationId,
+  }
   const organizationErrorMessage = useCallback((result: {
+    code?: string
     errorCode?: string
+    status?: number
   }) => {
-    const translated = result.errorCode
-      ? t(`organization.errors.${result.errorCode}`, { defaultValue: '' })
+    emitAdminAuthFailure(result)
+    const errorCode = result.code || result.errorCode
+    const translated = errorCode
+      ? t(`organization.errors.${errorCode}`, { defaultValue: '' })
       : ''
     return translated || t('organization.manage.actionFailed')
   }, [t])
 
   const loadData = useCallback(async () => {
     if (!open || !canManage) return
+    const requestOrganizationId = organization.activeOrganizationId
+    const generation = ++loadGenerationRef.current
+    const isCurrentRequest = () => {
+      const scope = loadScopeRef.current
+      return generation === loadGenerationRef.current
+        && scope.open
+        && scope.canManage
+        && scope.organizationId === requestOrganizationId
+    }
     setLoading(true)
     setMembersError(null)
     setInvitationsError(null)
     try {
       const [membersResult, invitationsResult] = await Promise.all([
-        window.electronAPI.organizationListMembers(organization.activeOrganizationId),
-        window.electronAPI.organizationListInvitations(organization.activeOrganizationId),
+        window.electronAPI.organizationListMembers(requestOrganizationId),
+        window.electronAPI.organizationListInvitations(requestOrganizationId),
       ])
+      if (!isCurrentRequest()) return
       if (membersResult.success) {
         setMembers(membersResult.members)
       } else {
@@ -105,13 +134,15 @@ export function OrganizationManagementDialog({
         setInvitations([])
         setInvitationsError(organizationErrorMessage(invitationsResult))
       }
-    } catch {
+    } catch (caught) {
+      if (!isCurrentRequest()) return
+      emitAdminAuthFailure(caught as AdminErrorLike)
       setMembers([])
       setInvitations([])
       setMembersError(t('organization.manage.loadFailed'))
       setInvitationsError(t('organization.manage.loadFailed'))
     } finally {
-      setLoading(false)
+      if (isCurrentRequest()) setLoading(false)
     }
   }, [
     canManage,
@@ -122,13 +153,24 @@ export function OrganizationManagementDialog({
   ])
 
   useEffect(() => {
-    if (open) void loadData()
-  }, [loadData, open])
-
-  useEffect(() => {
+    loadGenerationRef.current += 1
+    setMembers([])
+    setInvitations([])
+    setMembersError(null)
+    setInvitationsError(null)
+    setLoading(false)
     setGeneratedLink(null)
     setActionError(null)
-  }, [organization.activeOrganizationId])
+    if (open && canManage) void loadData()
+    return () => {
+      loadGenerationRef.current += 1
+    }
+  }, [
+    canManage,
+    loadData,
+    open,
+    organization.activeOrganizationId,
+  ])
 
   const runAction = async (
     action: string,
@@ -145,7 +187,8 @@ export function OrganizationManagementDialog({
         return
       }
       await after?.()
-    } catch {
+    } catch (caught) {
+      emitAdminAuthFailure(caught as AdminErrorLike)
       setActionError(t('organization.manage.actionFailed'))
     } finally {
       setBusyAction(null)
