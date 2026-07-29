@@ -1,7 +1,7 @@
 /**
  * Secure Storage Backend
  *
- * Stores credentials in an encrypted file at ~/.polo-ai/credentials.enc
+ * Stores credentials in an encrypted file under CONFIG_DIR.
  * Uses AES-256-GCM for authenticated encryption.
  *
  * Encryption key is derived from OS-native hardware UUID using PBKDF2:
@@ -34,16 +34,14 @@ import {
 import { execSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { hostname, userInfo, homedir } from 'os';
-import { join, dirname } from 'path';
+import { join } from 'path';
 
 import type { CredentialBackend } from './types.ts';
 import type { CredentialId, StoredCredential } from '../types.ts';
 import { credentialIdToAccount, accountToCredentialId } from '../types.ts';
 import { CONFIG_DIR } from '../../config/paths.ts';
 
-// File location
-const CREDENTIALS_DIR = CONFIG_DIR;
-const CREDENTIALS_FILE = join(CREDENTIALS_DIR, 'credentials.enc');
+const DEFAULT_CREDENTIALS_DIR = join(homedir(), '.polo-ai');
 
 // File format constants
 const MAGIC_BYTES = Buffer.from('POLOAI1\0');
@@ -109,13 +107,36 @@ interface CredentialStore {
   };
 }
 
+export interface SecureStorageBackendOptions {
+  /** Override used by isolated instances and tests. Defaults to CONFIG_DIR. */
+  credentialsDir?: string;
+  /**
+   * Pre-CONFIG_DIR location used only when the new instance file is absent.
+   * The legacy file is read-only and a successfully decrypted store is
+   * re-encrypted into credentialsDir.
+   */
+  legacyCredentialsDir?: string;
+}
+
 export class SecureStorageBackend implements CredentialBackend {
   readonly name = 'secure-storage';
   readonly priority = 100;
 
+  private readonly credentialsDir: string;
+  private readonly credentialsFile: string;
+  private readonly legacyCredentialsFile: string;
   private cachedStore: CredentialStore | null = null;
   private encryptionKey: Buffer | null = null;
   private salt: Buffer | null = null;
+
+  constructor(options: SecureStorageBackendOptions = {}) {
+    this.credentialsDir = options.credentialsDir ?? CONFIG_DIR;
+    this.credentialsFile = join(this.credentialsDir, 'credentials.enc');
+    this.legacyCredentialsFile = join(
+      options.legacyCredentialsDir ?? DEFAULT_CREDENTIALS_DIR,
+      'credentials.enc',
+    );
+  }
 
   async isAvailable(): Promise<boolean> {
     // File backend is always available - we can always write to filesystem
@@ -200,25 +221,52 @@ export class SecureStorageBackend implements CredentialBackend {
     // Return cached store if available
     if (this.cachedStore) return this.cachedStore;
 
-    if (!existsSync(CREDENTIALS_FILE)) return null;
+    const instanceFileExists = existsSync(this.credentialsFile);
+    if (instanceFileExists) {
+      return this.loadStoreFromFile(this.credentialsFile, true);
+    }
 
+    // Before CONFIG_DIR support, every instance read the fixed default file.
+    // Preserve that exact upgrade path only while the instance has no file of
+    // its own. Never overwrite an existing instance and never mutate/delete
+    // the shared legacy source.
+    if (
+      this.credentialsFile !== this.legacyCredentialsFile
+      && existsSync(this.legacyCredentialsFile)
+    ) {
+      const legacyStore = this.loadStoreFromFile(
+        this.legacyCredentialsFile,
+        false,
+      );
+      if (legacyStore) {
+        this.saveStoreSync(legacyStore);
+        return legacyStore;
+      }
+    }
+
+    return null;
+  }
+
+  private loadStoreFromFile(
+    filePath: string,
+    deleteIfCorrupted: boolean,
+  ): CredentialStore | null {
     let fileData: Buffer;
     try {
-      fileData = readFileSync(CREDENTIALS_FILE);
+      fileData = readFileSync(filePath);
     } catch {
       return null;
     }
 
     // Validate minimum size
     if (fileData.length < HEADER_SIZE + IV_SIZE + AUTH_TAG_SIZE) {
-      // File is corrupted, delete and return null
-      this.handleCorruptedFile();
+      this.resetFailedLoad(filePath, deleteIfCorrupted);
       return null;
     }
 
     // Validate magic bytes
     if (!fileData.subarray(0, MAGIC_SIZE).equals(MAGIC_BYTES)) {
-      this.handleCorruptedFile();
+      this.resetFailedLoad(filePath, deleteIfCorrupted);
       return null;
     }
 
@@ -251,8 +299,8 @@ export class SecureStorageBackend implements CredentialBackend {
       return store;
     }
 
-    // Both keys failed - file is truly corrupted
-    this.handleCorruptedFile();
+    // Both keys failed - the selected file is truly corrupted.
+    this.resetFailedLoad(filePath, deleteIfCorrupted);
     return null;
   }
 
@@ -281,8 +329,8 @@ export class SecureStorageBackend implements CredentialBackend {
 
   private saveStoreSync(store: CredentialStore): void {
     // Ensure directory exists
-    if (!existsSync(CREDENTIALS_DIR)) {
-      mkdirSync(CREDENTIALS_DIR, { recursive: true, mode: 0o700 });
+    if (!existsSync(this.credentialsDir)) {
+      mkdirSync(this.credentialsDir, { recursive: true, mode: 0o700 });
     }
 
     // Use existing salt or generate new one
@@ -313,7 +361,7 @@ export class SecureStorageBackend implements CredentialBackend {
     const fileData = Buffer.concat([header, iv, authTag, ciphertext]);
 
     // Write with restrictive permissions (owner read/write only)
-    writeFileSync(CREDENTIALS_FILE, fileData, { mode: 0o600 });
+    writeFileSync(this.credentialsFile, fileData, { mode: 0o600 });
     this.cachedStore = store;
   }
 
@@ -348,11 +396,12 @@ export class SecureStorageBackend implements CredentialBackend {
     return pbkdf2Sync(legacyMachineId, salt, PBKDF2_ITERATIONS, KEY_SIZE, 'sha256');
   }
 
-  private handleCorruptedFile(): void {
-    // Delete corrupted file - user will need to re-enter credentials
+  private resetFailedLoad(filePath: string, deleteIfCorrupted: boolean): void {
+    // Delete only a corrupted instance-owned file. A legacy fallback is a
+    // shared compatibility source and must remain untouched.
     try {
-      if (existsSync(CREDENTIALS_FILE)) {
-        unlinkSync(CREDENTIALS_FILE);
+      if (deleteIfCorrupted && existsSync(filePath)) {
+        unlinkSync(filePath);
       }
     } catch {
       // Ignore deletion errors

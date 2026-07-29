@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -26,10 +26,15 @@ const pol53Directory = join(temporaryDirectory, 'pol53')
 const configDirectory = join(temporaryDirectory, 'config')
 const mainOutput = join(temporaryDirectory, 'main.cjs')
 const preloadOutput = join(temporaryDirectory, 'bootstrap-preload.cjs')
-const rendererOutput = join(temporaryDirectory, 'renderer.js')
-const rendererHtml = join(temporaryDirectory, 'renderer.html')
+const rendererHtml = join(
+  rootDirectory,
+  'apps/electron/dist/renderer/index.html',
+)
 const electronExecutable = require('electron') as string
 let pol53Runner: ReturnType<typeof Bun.spawn> | undefined
+let pol53CloneReady = false
+let e2eCompleted = false
+let aliceLastLoginAtBeforeRun: string | null = null
 
 function validateSafetyBoundaries(): void {
   const url = new URL(databaseUrl)
@@ -61,6 +66,182 @@ function runChecked(command: string[], cwd: string, env?: Record<string, string>
   if (result.exitCode !== 0) {
     throw new Error(`Command failed (${result.exitCode}): ${command.join(' ')}`)
   }
+}
+
+function runCaptured(
+  command: string[],
+  cwd: string,
+  env?: Record<string, string>,
+): string {
+  const result = Bun.spawnSync(command, {
+    cwd,
+    env: { ...process.env, ...env },
+    stderr: 'inherit',
+    stdout: 'pipe',
+  })
+  if (result.exitCode !== 0) {
+    throw new Error(`Command failed (${result.exitCode}): ${command.join(' ')}`)
+  }
+  return result.stdout.toString().trim()
+}
+
+function captureAliceBaseline(): string | null {
+  const output = runCaptured([
+    'node',
+    '-e',
+    `
+      const { PrismaClient } = require('@prisma/client');
+      const prisma = new PrismaClient();
+      prisma.user.findUnique({
+        where: { username: 'alice' },
+        select: { lastLoginAt: true },
+      }).then((user) => {
+        process.stdout.write(JSON.stringify({
+          lastLoginAt: user?.lastLoginAt?.toISOString() ?? null,
+        }));
+      }).finally(() => prisma.$disconnect());
+    `,
+  ], pol53Directory, { DATABASE_URL: databaseUrl })
+  return (JSON.parse(output) as { lastLoginAt: string | null }).lastLoginAt
+}
+
+function cleanupPol53Run(requireEvidence: boolean): void {
+  const output = runCaptured([
+    'node',
+    '-e',
+    `
+      const { PrismaClient } = require('@prisma/client');
+      const prisma = new PrismaClient();
+      const phone = process.argv[1];
+      const normalizedPhone = phone.startsWith('+') ? phone : '+86' + phone;
+      const marker = process.argv[2];
+      const requireEvidence = process.argv[3] === 'true';
+      const baselineLastLoginAt = process.argv[4] === 'null'
+        ? null
+        : new Date(process.argv[4]);
+
+      async function cleanup() {
+        const user = await prisma.user.findUnique({
+          where: { phone: normalizedPhone },
+          select: { id: true },
+        });
+        const actions = user
+          ? await prisma.adminAuditLog.groupBy({
+              by: ['action'],
+              where: { targetUserId: user.id },
+              _count: { _all: true },
+            })
+          : [];
+        const actionCounts = Object.fromEntries(
+          actions.map((entry) => [entry.action, entry._count._all]),
+        );
+        if (
+          requireEvidence
+          && (
+            !user
+            || !actionCounts.phone_auth_registration
+            || !actionCounts.phone_auth_login_success
+            || !actionCounts.set_password
+          )
+        ) {
+          throw new Error(
+            'Missing POL-53 registration/login/password audit evidence: '
+            + JSON.stringify(actionCounts),
+          );
+        }
+
+        const result = await prisma.$transaction(async (tx) => {
+          let deletedRandomUser = 0;
+          if (user) {
+            await tx.adminAuditLog.deleteMany({
+              where: {
+                OR: [
+                  { targetUserId: user.id },
+                  { adminUserId: user.id },
+                ],
+              },
+            });
+            await tx.session.deleteMany({ where: { userId: user.id } });
+            await tx.usageRecord.deleteMany({ where: { userId: user.id } });
+            await tx.quotaPeriod.deleteMany({ where: { userId: user.id } });
+            await tx.userGroup.deleteMany({ where: { userId: user.id } });
+            await tx.userLlmConfig.deleteMany({ where: { userId: user.id } });
+            deletedRandomUser = (await tx.user.deleteMany({
+              where: { id: user.id, phone: normalizedPhone },
+            })).count;
+          }
+
+          const deletedCodes = (await tx.phoneVerificationCode.deleteMany({
+            where: { phone: { in: [phone, normalizedPhone] } },
+          })).count;
+          const alice = await tx.user.findUnique({
+            where: { username: 'alice' },
+            select: { id: true },
+          });
+          let deletedLegacySessions = 0;
+          let deletedLegacyAudits = 0;
+          if (alice) {
+            deletedLegacySessions = (await tx.session.deleteMany({
+              where: { userId: alice.id, deviceInfo: marker },
+            })).count;
+            deletedLegacyAudits = (await tx.adminAuditLog.deleteMany({
+              where: {
+                targetUserId: alice.id,
+                action: 'login_success',
+                detail: {
+                  path: ['deviceInfo'],
+                  equals: marker,
+                },
+              },
+            })).count;
+            await tx.user.update({
+              where: { id: alice.id },
+              data: { lastLoginAt: baselineLastLoginAt },
+            });
+          }
+          return {
+            deletedRandomUser,
+            deletedCodes,
+            deletedLegacySessions,
+            deletedLegacyAudits,
+          };
+        });
+
+        const [remainingUser, remainingCodes, remainingMarkerSessions] =
+          await Promise.all([
+            prisma.user.count({ where: { phone: normalizedPhone } }),
+            prisma.phoneVerificationCode.count({
+              where: { phone: { in: [phone, normalizedPhone] } },
+            }),
+            prisma.session.count({ where: { deviceInfo: marker } }),
+          ]);
+        if (remainingUser || remainingCodes || remainingMarkerSessions) {
+          throw new Error('POL-53 E2E cleanup left targeted records behind');
+        }
+        process.stdout.write(JSON.stringify({
+          event: 'pol53_e2e_cleanup',
+          phone,
+          ...result,
+          remainingUser,
+          remainingCodes,
+          remainingMarkerSessions,
+          evidence: actionCounts,
+        }));
+      }
+
+      cleanup()
+        .finally(() => prisma.$disconnect())
+        .catch((error) => {
+          console.error(error);
+          process.exit(1);
+        });
+    `,
+    phone,
+    `polo-phone-auth-e2e/${phone}`,
+    String(requireEvidence),
+    aliceLastLoginAtBeforeRun ?? 'null',
+  ], pol53Directory, { DATABASE_URL: databaseUrl })
+  console.log(output)
 }
 
 async function waitForPol53(): Promise<void> {
@@ -96,24 +277,28 @@ async function waitForPol53(): Promise<void> {
 }
 
 async function buildElectronFixture(): Promise<void> {
+  const workspaceDirectory = join(configDirectory, 'workspace')
   mkdirSync(configDirectory, { recursive: true })
+  mkdirSync(workspaceDirectory, { recursive: true })
   writeFileSync(join(configDirectory, 'config.json'), JSON.stringify({
-    workspaces: [],
-    activeWorkspaceId: null,
+    workspaces: [{
+      id: 'phone-auth-e2e-workspace',
+      name: 'Phone Auth E2E',
+      slug: 'phone-auth-e2e',
+      rootPath: workspaceDirectory,
+      createdAt: Date.now(),
+    }],
+    activeWorkspaceId: 'phone-auth-e2e-workspace',
     activeSessionId: null,
     adminUrl: adminBaseUrl,
   }, null, 2))
-  writeFileSync(rendererHtml, [
-    '<!doctype html>',
-    '<html>',
-    '<head>',
-    '<meta charset="utf-8">',
-    '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; connect-src ws://127.0.0.1:* http://127.0.0.1:*">',
-    '<link rel="stylesheet" href="./renderer.css">',
-    '</head>',
-    '<body><div id="root"></div><script src="./renderer.js"></script></body>',
-    '</html>',
-  ].join('\n'))
+
+  // Build and load the real Vite Renderer entry. No E2E Renderer harness is
+  // generated or mounted.
+  runChecked(['bun', 'run', 'electron:build:renderer'], rootDirectory)
+  if (!existsSync(rendererHtml)) {
+    throw new Error(`Production Renderer build is missing: ${rendererHtml}`)
+  }
 
   await Promise.all([
     build({
@@ -128,38 +313,14 @@ async function buildElectronFixture(): Promise<void> {
     build({
       absWorkingDir: rootDirectory,
       bundle: true,
+      define: {
+        __POLO_AI_TRUSTED_PHONE_AUTH_E2E__: 'true',
+      },
       entryPoints: ['apps/electron/src/preload/bootstrap.ts'],
       external: ['electron'],
       format: 'cjs',
       outfile: preloadOutput,
       platform: 'node',
-    }),
-    build({
-      absWorkingDir: rootDirectory,
-      bundle: true,
-      entryPoints: ['apps/electron/e2e/phone-auth/renderer.tsx'],
-      format: 'iife',
-      outfile: rendererOutput,
-      platform: 'browser',
-      tsconfig: 'apps/electron/tsconfig.json',
-      loader: {
-        '.ttf': 'dataurl',
-        '.woff': 'dataurl',
-        '.woff2': 'dataurl',
-      },
-      plugins: [{
-        name: 'vite-url-import-stub',
-        setup(buildContext) {
-          buildContext.onResolve({ filter: /\?url$/ }, args => ({
-            path: args.path,
-            namespace: 'vite-url-stub',
-          }))
-          buildContext.onLoad({ filter: /.*/, namespace: 'vite-url-stub' }, () => ({
-            contents: 'export default ""',
-            loader: 'js',
-          }))
-        },
-      }],
     }),
   ])
 }
@@ -192,10 +353,13 @@ async function main(): Promise<void> {
     join(pol53SourceDirectory, 'node_modules'),
     join(pol53Directory, 'node_modules'),
   ], temporaryDirectory)
+  pol53CloneReady = true
 
   runChecked(['npm', 'run', 'db:seed-test'], pol53Directory, {
     DATABASE_URL: databaseUrl,
   })
+  aliceLastLoginAtBeforeRun = captureAliceBaseline()
+  cleanupPol53Run(false)
 
   pol53Runner = Bun.spawn(['npm', 'run', 'dev:phone-auth-e2e'], {
     cwd: pol53Directory,
@@ -227,7 +391,6 @@ async function main(): Promise<void> {
       ...process.env,
       NODE_ENV: 'development',
       POLO_AI_CONFIG_DIR: configDirectory,
-      POLO_AI_PHONE_AUTH_E2E: 'true',
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
     },
     stderr: 'inherit',
@@ -237,6 +400,7 @@ async function main(): Promise<void> {
   if (exitCode !== 0) {
     throw new Error(`Native Electron phone auth E2E exited with ${exitCode}`)
   }
+  e2eCompleted = true
 }
 
 try {
@@ -244,5 +408,6 @@ try {
 } finally {
   pol53Runner?.kill('SIGTERM')
   if (pol53Runner) await pol53Runner.exited
+  if (pol53CloneReady) cleanupPol53Run(e2eCompleted)
   rmSync(temporaryDirectory, { force: true, recursive: true })
 }

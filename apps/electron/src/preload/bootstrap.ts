@@ -269,8 +269,18 @@ client.onConnectionStateChanged((state) => {
 }
 
 // Admin auth — explicit, testable preload surface for admin-managed deployments.
+// Plaintext loopback issuers are a build-time capability. The production
+// preload build pins this constant to false; only the local native E2E bundle
+// pins it to true. Renderer input, discovery data, and runtime environment
+// variables therefore cannot weaken the production HTTPS requirement.
+declare const __POLO_AI_TRUSTED_PHONE_AUTH_E2E__: boolean
+const trustedPhoneAuthE2eMode = (
+  typeof __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === 'boolean'
+  && __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === true
+)
 Object.assign(api, buildAdminPreloadApi(client, {
-  openExternal: process.env.POLO_AI_PHONE_AUTH_E2E === 'true'
+  allowInsecureLoopbackIssuer: trustedPhoneAuthE2eMode,
+  openExternal: trustedPhoneAuthE2eMode
     ? url => ipcRenderer.invoke('__phone-auth-e2e:open-external', url)
     : url => shell.openExternal(url),
 }))

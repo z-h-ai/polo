@@ -8,12 +8,18 @@ import { RPC_CHANNELS } from '../shared/types'
 
 const CHALLENGE_TIMEOUT_MS = 120_000
 const MAX_CHALLENGE_TOKEN_LENGTH = 4096
+export const MAX_PHONE_AUTH_ISSUER_URL_LENGTH = 2048
 
 export type PhoneAuthChallengeResult =
   | { success: true; challengeToken: string }
   | { success: false; errorCode: 'phone_auth_configuration_error' }
 
 export interface PhoneAuthChallengeDependencies {
+  /**
+   * Trusted host-only capability for local development/E2E providers.
+   * Renderer input and discovery payloads must never control this value.
+   */
+  allowInsecureLoopbackIssuer?: boolean
   createCallback?: () => Promise<CallbackServer>
   openExternal: (url: string) => Promise<unknown>
   timeoutMs?: number
@@ -25,14 +31,26 @@ function isLoopbackHost(hostname: string): boolean {
 
 export function resolvePhoneAuthChallengeIssuerUrl(
   discoveredIssuerUrl: string,
+  allowInsecureLoopbackIssuer = false,
 ): URL {
+  if (
+    !discoveredIssuerUrl
+    || discoveredIssuerUrl.length > MAX_PHONE_AUTH_ISSUER_URL_LENGTH
+  ) {
+    throw new Error('Phone auth challenge issuer URL is invalid')
+  }
+
   const issuerUrl = new URL(discoveredIssuerUrl)
+  const isTrustedLoopbackHttp = (
+    allowInsecureLoopbackIssuer
+    && issuerUrl.protocol === 'http:'
+    && isLoopbackHost(issuerUrl.hostname)
+  )
 
   if (
     issuerUrl.username
     || issuerUrl.password
-    || (issuerUrl.protocol !== 'https:'
-      && !(issuerUrl.protocol === 'http:' && isLoopbackHost(issuerUrl.hostname)))
+    || (issuerUrl.protocol !== 'https:' && !isTrustedLoopbackHttp)
   ) {
     throw new Error('Phone auth challenge issuer must use HTTPS')
   }
@@ -87,7 +105,10 @@ export async function acquirePhoneAuthChallenge(
       return { success: false, errorCode: 'phone_auth_configuration_error' }
     }
 
-    const issuerUrl = resolvePhoneAuthChallengeIssuerUrl(discovery.issuerUrl)
+    const issuerUrl = resolvePhoneAuthChallengeIssuerUrl(
+      discovery.issuerUrl,
+      dependencies.allowInsecureLoopbackIssuer === true,
+    )
     callbackServer = await (dependencies.createCallback
       ? dependencies.createCallback()
       : createCallbackServer({

@@ -92,6 +92,7 @@ async function buildEntry(entry: string, outfile: string): Promise<number> {
       "--format=cjs",
       `--outfile=${outfile}`,
       "--external:electron",
+      "--define:__POLO_AI_TRUSTED_PHONE_AUTH_E2E__=false",
     ],
     cwd: ROOT_DIR,
     stdout: "inherit",

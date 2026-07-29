@@ -170,6 +170,7 @@ export function OnboardingWizard({
 
   return (
     <div
+      data-testid="onboarding-wizard"
       className={cn(
         "bg-foreground-2 overflow-y-auto",
         !className?.includes('h-full') && "h-dvh",

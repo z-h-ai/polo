@@ -15,7 +15,7 @@ export default function AccountSecuritySettingsPage() {
   const { t } = useTranslation()
 
   return (
-    <div className="flex h-full flex-col">
+    <div data-testid="account-security-settings-page" className="flex h-full flex-col">
       <PanelHeader
         title={t('settings.accountSecurity.title')}
         actions={<HeaderMenu route={routes.view.settings('account-security')} />}
