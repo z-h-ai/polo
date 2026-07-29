@@ -180,6 +180,10 @@ export const RPC_CHANNELS = {
   },
   admin: {
     LOGIN: 'admin:login',
+    GET_AUTH_CONFIG: 'admin:getAuthConfig',
+    SEND_PHONE_AUTH_CODE: 'admin:sendPhoneAuthCode',
+    VERIFY_PHONE_AUTH_CODE: 'admin:verifyPhoneAuthCode',
+    SET_PASSWORD: 'admin:setPassword',
     VALIDATE: 'admin:validate',
     LOGOUT: 'admin:logout',
     GET_STATUS: 'admin:getStatus',

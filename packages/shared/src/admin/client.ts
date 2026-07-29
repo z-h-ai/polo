@@ -1,10 +1,17 @@
 import {
   AdminError,
+  type AdminAuthConfig,
   type AdminErrorCode,
   type AdminLlmConnectionsResponse,
   type AdminLoginResponse,
+  type AdminPhoneAuthResponse,
   type AdminRefreshResponse,
+  type SendPhoneAuthCodeInput,
+  type SendPhoneAuthCodeResponse,
+  type SetAdminPasswordInput,
+  type SetAdminPasswordResponse,
   type AdminValidateResponse,
+  type VerifyPhoneAuthCodeInput,
 } from './types.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -20,7 +27,28 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'SERVER_ERROR',
   'NETWORK_ERROR',
   'UNKNOWN_ERROR',
+  'phone_auth_disabled',
+  'invalid_phone',
+  'verification_code_invalid',
+  'verification_code_expired',
+  'verification_attempts_exceeded',
+  'phone_not_registered',
+  'sms_rate_limited',
+  'sms_send_failed',
+  'phone_auth_configuration_error',
+  'invalid_credentials',
 ]);
+
+const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
+  account_disabled: 'ACCOUNT_DISABLED',
+  forbidden: 'FORBIDDEN',
+  invalid_token: 'INVALID_TOKEN',
+  not_found: 'NOT_FOUND',
+  token_expired: 'TOKEN_EXPIRED',
+  token_revoked: 'TOKEN_REVOKED',
+  unauthorized: 'UNAUTHORIZED',
+  validation_error: 'VALIDATION_ERROR',
+};
 
 export interface AdminClientTokenStore {
   getRefreshToken(): string | null | Promise<string | null>;
@@ -40,11 +68,59 @@ export class AdminClient {
     this.tokenStore = options?.tokenStore;
   }
 
-  login(username: string, password: string): Promise<AdminLoginResponse> {
+  login(identifier: string, password: string): Promise<AdminLoginResponse> {
     return this.request('/api/auth/login', {
       method: 'POST',
-      body: { username, password },
+      body: { identifier, password },
     });
+  }
+
+  async getAuthConfig(): Promise<AdminAuthConfig> {
+    const response = await this.request<AdminAuthConfig>('/api/auth/config', {
+      method: 'GET',
+    });
+    return { phoneAuthEnabled: response.phoneAuthEnabled === true };
+  }
+
+  async sendPhoneAuthCode(input: SendPhoneAuthCodeInput): Promise<SendPhoneAuthCodeResponse> {
+    const response = await this.request<SendPhoneAuthCodeResponse>('/api/auth/phone/send-code', {
+      method: 'POST',
+      body: {
+        phone: input.phone,
+        challengeToken: input.challengeToken,
+      },
+    });
+    return {
+      accepted: response.accepted === true,
+      expiresIn: response.expiresIn,
+      resendAfter: response.resendAfter,
+    };
+  }
+
+  async verifyPhoneAuthCode(input: VerifyPhoneAuthCodeInput): Promise<AdminPhoneAuthResponse> {
+    const response = await this.request<AdminPhoneAuthResponse>('/api/auth/phone/verify', {
+      method: 'POST',
+      body: {
+        phone: input.phone,
+        code: input.code,
+      },
+    });
+    return {
+      accessToken: response.accessToken,
+      refreshToken: response.refreshToken,
+      expiresIn: response.expiresIn,
+      user: response.user,
+      isNewUser: response.isNewUser === true,
+    };
+  }
+
+  async setPassword(accessToken: string, input: SetAdminPasswordInput): Promise<SetAdminPasswordResponse> {
+    const response = await this.request<SetAdminPasswordResponse>('/api/auth/password', {
+      method: 'POST',
+      accessToken,
+      body: { password: input.password },
+    });
+    return { success: response.success === true };
   }
 
   refresh(refreshToken: string): Promise<AdminRefreshResponse> {
@@ -148,12 +224,39 @@ export class AdminClient {
       this.readString(data, 'message') ??
       this.readString(data, 'error_description') ??
       this.readString(data, 'error');
-    const message = (bodyMessage ?? response.statusText) || 'Admin request failed';
+    const message = this.safeErrorMessage(response.status, errorCode, bodyMessage, response.statusText);
 
     return new AdminError(message, errorCode, {
       status: response.status,
-      details: data,
+      details: this.readSafeErrorDetails(data),
     });
+  }
+
+  private safeErrorMessage(
+    status: number,
+    errorCode: AdminErrorCode,
+    bodyMessage: string | null,
+    statusText: string,
+  ): string {
+    if (status >= 500 || errorCode === 'sms_send_failed' || errorCode === 'phone_auth_configuration_error') {
+      return 'Admin service is temporarily unavailable';
+    }
+    if (errorCode === 'NETWORK_ERROR') {
+      return 'Failed to reach admin server';
+    }
+    return (bodyMessage ?? statusText) || 'Admin request failed';
+  }
+
+  private readSafeErrorDetails(data: unknown): { retryAfter?: number } | undefined {
+    if (!data || typeof data !== 'object') return undefined;
+    const record = data as Record<string, unknown>;
+    const nested = record.details && typeof record.details === 'object'
+      ? (record.details as Record<string, unknown>).retryAfter
+      : undefined;
+    const value = record.retryAfter ?? nested;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0
+      ? { retryAfter: Math.ceil(value) }
+      : undefined;
   }
 
   private readAdminErrorCode(data: unknown): AdminErrorCode | null {
@@ -161,6 +264,9 @@ export class AdminClient {
       this.readString(data, 'errorCode') ??
       this.readString(data, 'code') ??
       this.readString(data, 'error');
+    if (value && ADMIN_ERROR_CODE_ALIASES[value]) {
+      return ADMIN_ERROR_CODE_ALIASES[value];
+    }
     if (value && ADMIN_ERROR_CODES.has(value as AdminErrorCode)) {
       return value as AdminErrorCode;
     }

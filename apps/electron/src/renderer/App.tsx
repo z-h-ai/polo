@@ -2169,6 +2169,8 @@ export default function App() {
             onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
             onSubmitCredential={onboarding.handleSubmitCredential}
             onAdminLogin={onboarding.handleAdminLogin}
+            onAdminSendPhoneCode={onboarding.handleAdminSendPhoneCode}
+            onAdminVerifyPhoneCode={onboarding.handleAdminVerifyPhoneCode}
             onAdminRelogin={onboarding.handleAdminRelogin}
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}
             onStartOAuth={onboarding.handleStartOAuth}

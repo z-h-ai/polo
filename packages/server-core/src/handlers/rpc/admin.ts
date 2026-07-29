@@ -1,4 +1,10 @@
-import { AdminClient, AdminError, type AdminLlmConnection, type AdminRefreshResponse } from '@polo-ai/shared/admin'
+import {
+  AdminClient,
+  AdminError,
+  type AdminLlmConnection,
+  type AdminLoginResponse,
+  type AdminRefreshResponse,
+} from '@polo-ai/shared/admin'
 import {
   addLlmConnection,
   deleteLlmConnection,
@@ -18,6 +24,10 @@ import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
+  RPC_CHANNELS.admin.GET_AUTH_CONFIG,
+  RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
+  RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE,
+  RPC_CHANNELS.admin.SET_PASSWORD,
   RPC_CHANNELS.admin.VALIDATE,
   RPC_CHANNELS.admin.LOGOUT,
   RPC_CHANNELS.admin.GET_STATUS,
@@ -32,32 +42,90 @@ type TokenValidationResult =
 export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
 
-  server.handle(RPC_CHANNELS.admin.LOGIN, async (_ctx, username: string, password: string) => {
+  server.handle(RPC_CHANNELS.admin.LOGIN, async (_ctx, identifier: string, password: string) => {
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
       const client = createAdminClient(adminUrl, manager)
-      const login = await client.login(username, password)
-
-      await manager.setAdminTokens({
-        accessToken: login.accessToken,
-        refreshToken: login.refreshToken,
-        expiresAt: expiresAtFromNow(login.expiresIn),
-        userId: login.user.id,
-        username: login.user.username,
-        displayName: login.user.displayName,
-      })
-
-      await syncAdminConnections({
-        adminUrl,
-        manager,
-        accessToken: login.accessToken,
-      })
+      const login = await client.login(identifier, password)
+      await completeAdminLogin({ adminUrl, manager, login })
 
       return { success: true, user: login.user }
     } catch (error) {
       const adminError = toAdminRpcError(error)
       log?.warn('[Admin] login failed:', adminError.message)
+      return { success: false, ...adminError }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.admin.GET_AUTH_CONFIG, async () => {
+    try {
+      return await createAdminClient(requireAdminUrl(), getCredentialManager()).getAuthConfig()
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn('[Admin] getAuthConfig failed:', adminError.message)
+      return { phoneAuthEnabled: false, ...adminError }
+    }
+  })
+
+  server.handle(
+    RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
+    async (_ctx, phone: string, challengeToken: string) => {
+      try {
+        const result = await createAdminClient(requireAdminUrl(), getCredentialManager())
+          .sendPhoneAuthCode({ phone, challengeToken })
+        return { success: true, ...result }
+      } catch (error) {
+        const adminError = toAdminRpcError(error)
+        log?.warn('[Admin] sendPhoneAuthCode failed:', adminError.message)
+        return { success: false, ...adminError }
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE,
+    async (_ctx, phone: string, code: string) => {
+      try {
+        const adminUrl = requireAdminUrl()
+        const manager = getCredentialManager()
+        const login = await createAdminClient(adminUrl, manager)
+          .verifyPhoneAuthCode({ phone, code })
+        await completeAdminLogin({ adminUrl, manager, login })
+        return {
+          success: true,
+          user: login.user,
+          isNewUser: login.isNewUser,
+        }
+      } catch (error) {
+        const adminError = toAdminRpcError(error)
+        log?.warn('[Admin] verifyPhoneAuthCode failed:', adminError.message)
+        return { success: false, ...adminError }
+      }
+    },
+  )
+
+  server.handle(RPC_CHANNELS.admin.SET_PASSWORD, async (_ctx, password: string) => {
+    try {
+      const adminUrl = requireAdminUrl()
+      const manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(adminUrl, manager)
+      if (!tokenResult.tokens) {
+        return {
+          success: false,
+          ...(tokenResult.authError ?? {
+            errorCode: 'UNAUTHORIZED',
+            message: 'Admin session is not logged in',
+          }),
+        }
+      }
+
+      const result = await createAdminClient(adminUrl, manager)
+        .setPassword(tokenResult.tokens.accessToken, { password })
+      return { success: result.success }
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn('[Admin] setPassword failed:', adminError.message)
       return { success: false, ...adminError }
     }
   })
@@ -171,6 +239,27 @@ function createAdminClient(adminUrl: string, manager: CredentialManager): AdminC
         await persistRefreshedTokens(manager, tokens)
       },
     },
+  })
+}
+
+async function completeAdminLogin(args: {
+  adminUrl: string
+  manager: CredentialManager
+  login: AdminLoginResponse
+}): Promise<void> {
+  await args.manager.setAdminTokens({
+    accessToken: args.login.accessToken,
+    refreshToken: args.login.refreshToken,
+    expiresAt: expiresAtFromNow(args.login.expiresIn),
+    userId: args.login.user.id,
+    username: args.login.user.username,
+    displayName: args.login.user.displayName ?? undefined,
+  })
+
+  await syncAdminConnections({
+    adminUrl: args.adminUrl,
+    manager: args.manager,
+    accessToken: args.login.accessToken,
   })
 }
 
@@ -365,12 +454,20 @@ function isAuthFailure(error: unknown): boolean {
   )
 }
 
-function toAdminRpcError(error: unknown): { errorCode: string; message: string; status?: number } {
+function toAdminRpcError(error: unknown): {
+  errorCode: string
+  message: string
+  status?: number
+  retryAfter?: number
+} {
   if (error instanceof AdminError) {
     return {
       errorCode: error.errorCode,
       message: error.message,
       ...(typeof error.status === 'number' ? { status: error.status } : {}),
+      ...(typeof error.details?.retryAfter === 'number'
+        ? { retryAfter: error.details.retryAfter }
+        : {}),
     }
   }
   if (error instanceof Error) {

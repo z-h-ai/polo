@@ -47,9 +47,9 @@ type TestEncryptedApiKey = {
 class TestAdminError extends Error {
   readonly errorCode: string
   readonly status?: number
-  readonly details?: unknown
+  readonly details?: { retryAfter?: number }
 
-  constructor(message: string, errorCode: string, options?: { status?: number; details?: unknown }) {
+  constructor(message: string, errorCode: string, options?: { status?: number; details?: { retryAfter?: number } }) {
     super(message)
     this.name = 'AdminError'
     this.errorCode = errorCode
@@ -69,6 +69,18 @@ const adminClientBehavior = {
   validate: async (_accessToken: string): Promise<any> => {
     throw new Error('validate behavior not configured')
   },
+  getAuthConfig: async (): Promise<any> => ({ phoneAuthEnabled: true }),
+  sendPhoneAuthCode: async (_input: { phone: string; challengeToken: string }): Promise<any> => ({
+    accepted: true,
+    expiresIn: 300,
+    resendAfter: 60,
+  }),
+  verifyPhoneAuthCode: async (_input: { phone: string; code: string }): Promise<any> => {
+    throw new Error('verifyPhoneAuthCode behavior not configured')
+  },
+  setPassword: async (_accessToken: string, _input: { password: string }): Promise<any> => ({
+    success: true,
+  }),
   logout: async (_refreshToken: string): Promise<void> => {},
   getLlmConnections: async (_accessToken: string): Promise<any> => ({
     configVersion: 'config-v1',
@@ -87,6 +99,26 @@ class MockAdminClient {
   async login(username: string, password: string) {
     adminClientCalls.push({ method: 'login', args: [username, password] })
     return adminClientBehavior.login(username, password)
+  }
+
+  async getAuthConfig() {
+    adminClientCalls.push({ method: 'getAuthConfig', args: [] })
+    return adminClientBehavior.getAuthConfig()
+  }
+
+  async sendPhoneAuthCode(input: { phone: string; challengeToken: string }) {
+    adminClientCalls.push({ method: 'sendPhoneAuthCode', args: [input] })
+    return adminClientBehavior.sendPhoneAuthCode(input)
+  }
+
+  async verifyPhoneAuthCode(input: { phone: string; code: string }) {
+    adminClientCalls.push({ method: 'verifyPhoneAuthCode', args: [input] })
+    return adminClientBehavior.verifyPhoneAuthCode(input)
+  }
+
+  async setPassword(accessToken: string, input: { password: string }) {
+    adminClientCalls.push({ method: 'setPassword', args: [input], accessToken })
+    return adminClientBehavior.setPassword(accessToken, input)
   }
 
   async refresh(refreshToken: string) {
@@ -243,6 +275,10 @@ function createHarness() {
 
   return {
     login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
+    getAuthConfig: requiredHandler(handlers, RPC_CHANNELS.admin.GET_AUTH_CONFIG),
+    sendPhoneAuthCode: requiredHandler(handlers, RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE),
+    verifyPhoneAuthCode: requiredHandler(handlers, RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE),
+    setPassword: requiredHandler(handlers, RPC_CHANNELS.admin.SET_PASSWORD),
     validate: requiredHandler(handlers, RPC_CHANNELS.admin.VALIDATE),
     logout: requiredHandler(handlers, RPC_CHANNELS.admin.LOGOUT),
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
@@ -329,6 +365,26 @@ beforeEach(() => {
       groupIds: [],
     },
   })
+  adminClientBehavior.getAuthConfig = async () => ({ phoneAuthEnabled: true })
+  adminClientBehavior.sendPhoneAuthCode = async () => ({
+    accepted: true,
+    expiresIn: 300,
+    resendAfter: 60,
+  })
+  adminClientBehavior.verifyPhoneAuthCode = async () => ({
+    accessToken: 'phone-access-token',
+    refreshToken: 'phone-refresh-token',
+    expiresIn: 3600,
+    user: {
+      id: 'phone-user-1',
+      username: 'phone_13800138000',
+      displayName: null,
+      role: 'user',
+      groupIds: ['group-1'],
+    },
+    isNewUser: true,
+  })
+  adminClientBehavior.setPassword = async () => ({ success: true })
   adminClientBehavior.logout = async () => {}
   adminClientBehavior.getLlmConnections = async () => ({
     configVersion: 'config-v1',
@@ -338,6 +394,126 @@ beforeEach(() => {
 })
 
 describe('registerAdminHandlers', () => {
+  it('registers every admin channel', () => {
+    const harness = createHarness()
+
+    expect(Object.keys(harness).sort()).toEqual([
+      'getAuthConfig',
+      'login',
+      'logout',
+      'sendPhoneAuthCode',
+      'setPassword',
+      'syncConnections',
+      'validate',
+      'verifyPhoneAuthCode',
+    ])
+  })
+
+  it('reads the public phone auth config', async () => {
+    const { getAuthConfig } = createHarness()
+
+    const result = await getAuthConfig({ clientId: 'client-1', workspaceId: null, webContentsId: null })
+
+    expect(result).toEqual({ phoneAuthEnabled: true })
+    expect(adminClientCalls.map(call => call.method)).toEqual(['getAuthConfig'])
+  })
+
+  it('sends a phone code and preserves the safe retry timing', async () => {
+    const { sendPhoneAuthCode } = createHarness()
+
+    const result = await sendPhoneAuthCode(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      '13800138000',
+      'verified-challenge',
+    )
+
+    expect(result).toEqual({
+      success: true,
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 60,
+    })
+    expect(adminClientCalls[0]).toMatchObject({
+      method: 'sendPhoneAuthCode',
+      args: [{ phone: '13800138000', challengeToken: 'verified-challenge' }],
+    })
+
+    adminClientBehavior.sendPhoneAuthCode = async () => {
+      throw new TestAdminError('sms_rate_limited', 'sms_rate_limited', {
+        status: 429,
+        details: { retryAfter: 42 },
+      })
+    }
+    const limited = await sendPhoneAuthCode(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      '13800138000',
+      'verified-challenge',
+    )
+    expect(limited).toEqual({
+      success: false,
+      errorCode: 'sms_rate_limited',
+      message: 'sms_rate_limited',
+      status: 429,
+      retryAfter: 42,
+    })
+  })
+
+  it('verifies a phone code through the same token and connection persistence path', async () => {
+    const { verifyPhoneAuthCode } = createHarness()
+
+    const result = await verifyPhoneAuthCode(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      '13800138000',
+      '123456',
+    )
+
+    expect(result).toEqual({
+      success: true,
+      user: {
+        id: 'phone-user-1',
+        username: 'phone_13800138000',
+        displayName: null,
+        role: 'user',
+        groupIds: ['group-1'],
+      },
+      isNewUser: true,
+    })
+    expect(managerState.tokens).toMatchObject({
+      accessToken: 'phone-access-token',
+      refreshToken: 'phone-refresh-token',
+      userId: 'phone-user-1',
+      username: 'phone_13800138000',
+    })
+    expect(configState.connections).toHaveLength(1)
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'verifyPhoneAuthCode',
+      'getLlmConnections',
+    ])
+  })
+
+  it('sets a password with the current encrypted admin session token only', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    const { setPassword } = createHarness()
+
+    const result = await setPassword(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'new-password-123',
+    )
+
+    expect(result).toEqual({ success: true })
+    expect(adminClientCalls).toEqual([{
+      method: 'setPassword',
+      args: [{ password: 'new-password-123' }],
+      accessToken: 'access-token',
+    }])
+  })
+
   it('decrypts transit-encrypted admin api keys', () => {
     const apiKey = readApiKey(adminConnection({
       apiKey: encryptedApiKey('sk-transit-secret', 'access-token'),

@@ -7,6 +7,7 @@ import {
   resolveInitialStep,
   resolveAdminLoginSuccessState,
   resolveAdminLoginFailureState,
+  mapAdminPhoneAuthError,
   resolveAdminReloginState,
   resolveAdminKickedState,
 } from '../useOnboarding'
@@ -225,6 +226,27 @@ describe('admin onboarding flow', () => {
     expect(next.step).toBe('admin-login')
     expect(next.loginStatus).toBe('error')
     expect(next.errorMessage).toBe('Username or password is incorrect.')
+  })
+
+  it('maps stable phone auth errors without exposing server messages', () => {
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'verification_code_expired',
+      message: 'internal provider detail',
+    })).toBe('The verification code has expired. Request a new one.')
+
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'sms_rate_limited',
+      retryAfter: 42,
+    })).toBe('Too many requests. Try again in 42 seconds.')
+
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'phone_auth_configuration_error',
+      message: 'secret stack',
+      status: 503,
+    })).toBe('Phone verification is temporarily unavailable. Please try again later.')
   })
 
   it('moves from kicked back to admin-login when relogin is requested', () => {

@@ -53,9 +53,130 @@ describe('AdminClient', () => {
       'Content-Type': 'application/json',
     });
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
-      username: 'admin',
+      identifier: 'admin',
       password: 'secret',
     }));
+  });
+
+  it('returns only the supported auth config field', async () => {
+    mockJsonFetch({
+      phoneAuthEnabled: true,
+      selfRegistrationEnabled: true,
+      internalProvider: 'must-not-leak',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.getAuthConfig();
+
+    expect(result).toEqual({ phoneAuthEnabled: true });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/config');
+    expect(fetchCalls[0]!.init.method).toBe('GET');
+  });
+
+  it('sends phone code input and returns stable timing fields', async () => {
+    mockJsonFetch({
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 60,
+      providerRequestId: 'must-not-leak',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.sendPhoneAuthCode({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    });
+
+    expect(result).toEqual({ accepted: true, expiresIn: 300, resendAfter: 60 });
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    }));
+  });
+
+  it('verifies a phone code without returning server-only fields', async () => {
+    const response = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'user-1',
+        username: 'phone_user',
+        displayName: null,
+        role: 'user',
+        groupIds: [],
+      },
+      isNewUser: true,
+      internalGrant: 'must-not-leak',
+    };
+    mockJsonFetch(response);
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.verifyPhoneAuthCode({
+      phone: '13800138000',
+      code: '123456',
+    });
+
+    expect(result).toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: response.user,
+      isNewUser: true,
+    });
+  });
+
+  it('sets a password with bearer auth', async () => {
+    mockJsonFetch({ success: true, authorizationChanged: true });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.setPassword('access-token', { password: 'password-123' });
+
+    expect(result).toEqual({ success: true });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/password');
+    expect(fetchCalls[0]!.init.headers).toEqual({
+      Accept: 'application/json',
+      Authorization: 'Bearer access-token',
+      'Content-Type': 'application/json',
+    });
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({ password: 'password-123' }));
+  });
+
+  it('keeps only retryAfter from stable phone auth errors', async () => {
+    mockJsonFetch({
+      error: 'sms_rate_limited',
+      message: 'sms_rate_limited',
+      details: { retryAfter: 31.2 },
+      providerSecret: 'must-not-leak',
+    }, 429);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.sendPhoneAuthCode({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    })).rejects.toMatchObject({
+      errorCode: 'sms_rate_limited',
+      status: 429,
+      details: { retryAfter: 32 },
+    });
+  });
+
+  it('uses a safe message for provider and server failures', async () => {
+    mockJsonFetch({
+      error: 'sms_send_failed',
+      message: 'provider secret and stack',
+    }, 502);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.sendPhoneAuthCode({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    })).rejects.toMatchObject({
+      errorCode: 'sms_send_failed',
+      message: 'Admin service is temporarily unavailable',
+    });
   });
 
   it('sends refresh request as JSON', async () => {
@@ -125,6 +246,20 @@ describe('AdminClient', () => {
       expect((error as AdminError).status).toBe(401);
       expect((error as AdminError).message).toBe('Invalid username or password');
     }
+  });
+
+  it('normalizes lowercase admin auth errors used by polo-admin', async () => {
+    mockJsonFetch({
+      error: 'account_disabled',
+      message: 'account_disabled',
+    }, 403);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.login('admin', 'secret')).rejects.toMatchObject({
+      errorCode: 'ACCOUNT_DISABLED',
+      status: 403,
+    });
   });
 
   it('refreshes tokens and retries once on authenticated 401 responses', async () => {

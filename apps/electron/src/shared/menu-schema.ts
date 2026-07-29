@@ -380,6 +380,7 @@ export interface SettingsMenuItem {
  */
 const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   app: 'ToggleRight',
+  'account-security': 'ShieldCheck',
   appearance: 'Palette',
   input: 'Keyboard',
   workspace: 'Building2',

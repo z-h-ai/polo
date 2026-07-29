@@ -270,6 +270,14 @@ client.onConnectionStateChanged((state) => {
 // Admin auth — explicit preload surface for admin-managed deployments.
 ;(api as ElectronAPI).adminLogin = (username: string, password: string) =>
   client.invoke(RPC_CHANNELS.admin.LOGIN, username, password)
+;(api as ElectronAPI).adminGetAuthConfig = () =>
+  client.invoke(RPC_CHANNELS.admin.GET_AUTH_CONFIG)
+;(api as ElectronAPI).adminSendPhoneAuthCode = (phone: string, challengeToken: string) =>
+  client.invoke(RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE, phone, challengeToken)
+;(api as ElectronAPI).adminVerifyPhoneAuthCode = (phone: string, code: string) =>
+  client.invoke(RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE, phone, code)
+;(api as ElectronAPI).adminSetPassword = (password: string) =>
+  client.invoke(RPC_CHANNELS.admin.SET_PASSWORD, password)
 ;(api as ElectronAPI).adminValidate = () =>
   client.invoke(RPC_CHANNELS.admin.VALIDATE)
 ;(api as ElectronAPI).adminLogout = () =>

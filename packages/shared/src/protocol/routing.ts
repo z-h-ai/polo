@@ -216,6 +216,10 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 
   // admin — local admin credentials and local connection sync
   RPC_CHANNELS.admin.LOGIN,
+  RPC_CHANNELS.admin.GET_AUTH_CONFIG,
+  RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
+  RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE,
+  RPC_CHANNELS.admin.SET_PASSWORD,
   RPC_CHANNELS.admin.VALIDATE,
   RPC_CHANNELS.admin.LOGOUT,
   RPC_CHANNELS.admin.GET_STATUS,
