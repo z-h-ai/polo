@@ -52,6 +52,27 @@ describe('WindowsProcessTreeOwner', () => {
     await Promise.all([owner.terminate(), owner.terminate()])
     expect(snapshots).toBe(1)
   })
+
+  it('retains ownership and retries after a failed termination', async () => {
+    let snapshots = 0
+    const adapter: WindowsProcessTreeAdapter = {
+      snapshot: async () => {
+        snapshots += 1
+        if (snapshots <= 4) throw new Error('temporary snapshot failure')
+        return []
+      },
+      killTree: async () => {},
+    }
+    const owner = new WindowsProcessTreeOwner({
+      rootPid: 300,
+      adapter,
+      sampleIntervalMs: 0,
+    })
+
+    await expect(owner.terminate()).rejects.toThrow('temporary snapshot failure')
+    await expect(owner.terminate()).resolves.toBeUndefined()
+    expect(snapshots).toBe(5)
+  })
 })
 
 describe('WindowsJobObjectOwner', () => {
@@ -100,5 +121,23 @@ describe('WindowsJobObjectOwner', () => {
 
     await Promise.all([owner.terminate(), owner.terminate()])
     expect(closes).toBe(1)
+  })
+
+  it('retries a failed job close instead of caching the rejection', async () => {
+    let closes = 0
+    const owner = new WindowsJobObjectOwner({
+      adapter: {
+        createKillOnCloseJob: () => ({}),
+        assignProcess: () => {},
+        terminateAndClose: () => {
+          closes += 1
+          if (closes === 1) throw new Error('temporary close failure')
+        },
+      },
+    })
+
+    await expect(owner.terminate()).rejects.toThrow('temporary close failure')
+    await expect(owner.terminate()).resolves.toBeUndefined()
+    expect(closes).toBe(2)
   })
 })

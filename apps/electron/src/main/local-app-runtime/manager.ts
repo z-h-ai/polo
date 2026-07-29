@@ -60,6 +60,7 @@ const MAX_STATIC_CONCURRENT_STREAMS = 32
 const MAX_STATIC_ASSET_BYTES = 256 * 1024 * 1024
 const POST_HEALTH_STABILITY_MS = 50
 const SHUTDOWN_FORCE_RETRY_DELAY_MS = 100
+const MAX_FORCE_CLEANUP_ATTEMPTS = 2
 const HEALTH_OWNERSHIP_HEADER = 'x-polo-app-health-token'
 const RUNTIME_ENV_ALLOWLIST = [
   'PATH',
@@ -107,6 +108,7 @@ interface ManagedRuntime {
   stopRequested: boolean
   stopPromise?: Promise<void>
   cleanupPromise?: Promise<void>
+  managedProcess?: ManagedProcessOperation
   processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner
   exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
   spawnError?: Error
@@ -122,6 +124,21 @@ interface ActiveInstall {
   identity: ActiveReleaseIdentity
   controller: AbortController
   promise: Promise<LocalAppInstalledApp>
+}
+
+interface ManagedProcessOperation {
+  id: string
+  appId: string
+  kind: 'dependency-preparation' | 'runtime'
+  child: ChildProcess
+  processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner
+  cleanupPromise?: Promise<void>
+  lastCleanupError?: unknown
+}
+
+interface TrackedLifecycleOperation {
+  appId: string
+  promise: Promise<unknown>
 }
 
 const WINDOWS_JOB_GATE_SOURCE = String.raw`
@@ -273,9 +290,11 @@ export class LocalAppRuntimeManager {
   private readonly portAllocator?: () => Promise<number>
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
+  private readonly managedProcesses = new Map<string, ManagedProcessOperation>()
   private readonly startPromises = new Map<string, Promise<LocalAppStartResult>>()
   private readonly startControllers = new Map<string, AbortController>()
   private readonly lifecycleQueues = new Map<string, Promise<void>>()
+  private readonly activeLifecycleOperations = new Set<TrackedLifecycleOperation>()
   private readonly statuses = new Map<string, LocalAppRuntimeStatus>()
   private readonly installationStatuses = new Map<string, {
     status: 'downloading' | 'installing'
@@ -437,24 +456,98 @@ export class LocalAppRuntimeManager {
   uninstall(appId: string, options: LocalAppUninstallOptions = {}): Promise<void> {
     const safeAppId = validateRequestIdentifier(appId, 'appId')
     const activeInstall = this.activeInstalls.get(safeAppId)
+    const lifecycleOperations = [...this.activeLifecycleOperations]
+      .filter(operation => operation.appId === safeAppId)
     activeInstall?.controller.abort(new LocalAppRuntimeError(
       'INSTALL_CANCELLED',
       `Installation of ${safeAppId} was cancelled by uninstall`,
     ))
     this.cancelStart(safeAppId, `Start of ${safeAppId} was cancelled by uninstall`)
-    const enqueueUninstall = () =>
-      this.enqueueLifecycle(safeAppId, () => this.performUninstall(safeAppId, options))
-    return activeInstall
-      ? activeInstall.promise.catch(() => {}).then(enqueueUninstall)
-      : enqueueUninstall()
+    const coordinatedOperations = [
+      ...(activeInstall
+        ? [{
+            type: 'install' as const,
+            promise: activeInstall.promise as Promise<unknown>,
+          }]
+        : []),
+      ...lifecycleOperations.map(operation => ({
+        type: 'lifecycle' as const,
+        promise: operation.promise,
+      })),
+    ]
+    const enqueueUninstall = (
+      operationFailures: Array<{ type: 'install' | 'lifecycle'; error: string }>,
+    ) => this.enqueueLifecycle(
+      safeAppId,
+      () => this.performUninstall(safeAppId, options, operationFailures),
+    )
+    if (coordinatedOperations.length === 0) return enqueueUninstall([])
+    return Promise.allSettled(coordinatedOperations.map(operation => operation.promise))
+      .then((results) => {
+        const operationFailures = results.flatMap((result, index) => {
+          if (
+            result.status === 'fulfilled'
+            || !(result.reason instanceof LocalAppRuntimeError)
+            || result.reason.code !== 'STOP_FAILED'
+          ) {
+            return []
+          }
+          return [{
+            type: coordinatedOperations[index]!.type,
+            error: this.formatError(result.reason),
+          }]
+        })
+        return enqueueUninstall(operationFailures)
+      })
   }
 
   private async performUninstall(
     appId: string,
     options: LocalAppUninstallOptions,
+    operationFailures: Array<{ type: 'install' | 'lifecycle'; error: string }> = [],
   ): Promise<void> {
     try {
-      await this.performStop(appId)
+      let stopFailure: string | undefined
+      try {
+        await this.performStop(appId)
+      } catch (error) {
+        stopFailure = this.formatError(error)
+        const runtime = this.runtimes.get(appId)
+        if (runtime) {
+          for (let attempt = 0; attempt < MAX_FORCE_CLEANUP_ATTEMPTS; attempt += 1) {
+            if (attempt > 0) await delay(SHUTDOWN_FORCE_RETRY_DELAY_MS)
+            try {
+              await this.forceStopRuntime(runtime)
+              break
+            } catch {
+              // The retained handles and final retry result are checked below.
+            }
+          }
+        }
+      }
+      const managedProcessFailures = await this.retryManagedProcessCleanup(appId)
+      const remainingManagedProcesses = [...this.managedProcesses.values()]
+        .filter(operation => operation.appId === appId)
+      if (
+        operationFailures.length > 0
+        || stopFailure
+        || managedProcessFailures.length > 0
+        || remainingManagedProcesses.length > 0
+      ) {
+        throw new LocalAppRuntimeError(
+          'UNINSTALL_FAILED',
+          `Could not confirm every managed process for ${appId} exited`,
+          {
+            operationFailures,
+            ...(stopFailure ? { stopFailure } : {}),
+            managedProcessFailures,
+            remainingManagedProcesses: remainingManagedProcesses.map(operation => ({
+              kind: operation.kind,
+              pid: operation.child.pid,
+            })),
+          },
+        )
+      }
       const logWriter = this.logWriters.get(appId)
       await logWriter?.flush()
       this.logWriters.delete(appId)
@@ -618,7 +711,9 @@ export class LocalAppRuntimeManager {
   }
 
   private async performShutdown(): Promise<void> {
-    for (const install of this.activeInstalls.values()) {
+    const installs = [...this.activeInstalls.values()]
+    const lifecycleOperations = [...this.activeLifecycleOperations]
+    for (const install of installs) {
       install.controller.abort(new LocalAppRuntimeError(
         'INSTALL_CANCELLED',
         'Installation was cancelled because Polo is shutting down',
@@ -627,10 +722,43 @@ export class LocalAppRuntimeManager {
     for (const [appId] of this.startControllers) {
       this.cancelStart(appId, `Start of ${appId} was cancelled because Polo is shutting down`)
     }
+    const coordinatedOperations = [
+      ...installs.map(install => ({
+        type: 'install' as const,
+        appId: install.identity.appId,
+        promise: install.promise,
+      })),
+      ...lifecycleOperations.map(operation => ({
+        type: 'lifecycle' as const,
+        appId: operation.appId,
+        promise: operation.promise,
+      })),
+    ]
+    const coordinatedResults = await Promise.allSettled(
+      coordinatedOperations.map(operation => operation.promise),
+    )
+    // Tails are intentionally fulfillment-only for queue serialization. Wait
+    // for them too, while using the tracked raw promises above to retain the
+    // actual rejection result for the quit decision.
     await Promise.allSettled([
-      ...[...this.activeInstalls.values()].map(install => install.promise),
       ...this.lifecycleQueues.values(),
     ])
+    const operationFailures = coordinatedResults.flatMap((result, index) => {
+      if (
+        result.status === 'fulfilled'
+        || !(result.reason instanceof LocalAppRuntimeError)
+        || result.reason.code !== 'STOP_FAILED'
+      ) {
+        return []
+      }
+      const operation = coordinatedOperations[index]!
+      return [{
+        type: operation.type,
+        appId: operation.appId,
+        error: this.formatError(result.reason),
+      }]
+    })
+
     const runtimes = [...new Set(this.runtimes.values())]
     const stopResults = await Promise.allSettled(
       runtimes.map(runtime => this.stopRuntime(runtime)),
@@ -653,13 +781,17 @@ export class LocalAppRuntimeManager {
         initialError: this.formatError(result.reason),
       }
       failures.push(failure)
-      await delay(SHUTDOWN_FORCE_RETRY_DELAY_MS)
-      try {
-        await this.forceStopRuntime(runtime)
-      } catch (forceError) {
-        failure.forcedError = this.formatError(forceError)
+      for (let attempt = 0; attempt < MAX_FORCE_CLEANUP_ATTEMPTS; attempt += 1) {
+        if (attempt > 0) await delay(SHUTDOWN_FORCE_RETRY_DELAY_MS)
+        try {
+          await this.forceStopRuntime(runtime)
+          break
+        } catch (forceError) {
+          failure.forcedError = this.formatError(forceError)
+        }
       }
     }
+    const managedProcessFailures = await this.retryManagedProcessCleanup()
 
     const flushResults = await Promise.allSettled(
       [...this.logWriters.values()].map(writer => writer.flush()),
@@ -669,11 +801,23 @@ export class LocalAppRuntimeManager {
         this.logger.warn('[local-apps] failed to flush a runtime log during shutdown', result.reason)
       }
     }
-    if (failures.length > 0) {
+    if (
+      operationFailures.length > 0
+      || failures.length > 0
+      || managedProcessFailures.length > 0
+      || this.managedProcesses.size > 0
+      || this.activeLifecycleOperations.size > 0
+    ) {
       throw new LocalAppRuntimeError(
         'STOP_FAILED',
-        `Failed to cleanly stop ${failures.length} local app runtime(s)`,
-        { failures },
+        'Failed to confirm every managed local app process exited',
+        {
+          operationFailures,
+          runtimeFailures: failures,
+          managedProcessFailures,
+          remainingManagedProcesses: this.managedProcesses.size,
+          remainingLifecycleOperations: this.activeLifecycleOperations.size,
+        },
       )
     }
   }
@@ -702,6 +846,12 @@ export class LocalAppRuntimeManager {
   private enqueueLifecycle<T>(appId: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.lifecycleQueues.get(appId) ?? Promise.resolve()
     const result = previous.catch(() => {}).then(operation)
+    const tracked: TrackedLifecycleOperation = { appId, promise: result }
+    this.activeLifecycleOperations.add(tracked)
+    void result.then(
+      () => this.activeLifecycleOperations.delete(tracked),
+      () => this.activeLifecycleOperations.delete(tracked),
+    )
     const tail = result.then(() => {}, () => {})
     this.lifecycleQueues.set(appId, tail)
     void tail.then(() => {
@@ -979,7 +1129,9 @@ export class LocalAppRuntimeManager {
       if (!installed) throw new LocalAppRuntimeError('NOT_INSTALLED', 'Installed metadata could not be reloaded')
       return installed
     } catch (error) {
-      const runtimeError = signal.aborted
+      const cleanupFailed = error instanceof LocalAppRuntimeError
+        && error.code === 'STOP_FAILED'
+      const runtimeError = signal.aborted && !cleanupFailed
         ? this.getAbortError(
             signal,
             new LocalAppRuntimeError('INSTALL_CANCELLED', `Installation of ${request.appId} was cancelled`),
@@ -1227,6 +1379,12 @@ export class LocalAppRuntimeManager {
       cwd,
       env,
     )
+    const managedProcess = this.registerManagedProcess(
+      appId,
+      'dependency-preparation',
+      child,
+      processTreeOwner,
+    )
     this.captureChildOutput(appId, child)
 
     type InstallProcessOutcome =
@@ -1254,8 +1412,24 @@ export class LocalAppRuntimeManager {
     if (timeout) clearTimeout(timeout)
     if (abortListener) signal.removeEventListener('abort', abortListener)
 
+    try {
+      // Dependency installers are allowed only one managed process tree. Reap
+      // the complete tree even after the root exits successfully, since package
+      // managers may otherwise leave daemon descendants behind.
+      await this.cleanupManagedProcess(managedProcess)
+    } catch (error) {
+      throw new LocalAppRuntimeError(
+        'STOP_FAILED',
+        `Could not confirm dependency preparation for ${appId} fully exited`,
+        {
+          pid: child.pid,
+          cause: this.formatError(error),
+          outcome: outcome.kind,
+        },
+      )
+    }
+
     if (outcome.kind === 'abort' || outcome.kind === 'timeout') {
-      await this.killProcessTree(child, processTreeOwner)
       if (outcome.kind === 'abort') {
         throw this.getAbortError(
           signal,
@@ -1268,21 +1442,18 @@ export class LocalAppRuntimeManager {
       )
     }
     if (outcome.kind === 'error') {
-      await this.killProcessTree(child, processTreeOwner).catch(() => {})
       throw new LocalAppRuntimeError(
         'RUNTIME_UNAVAILABLE',
         `Could not launch ${basename(command)}: ${outcome.error.message}`,
       )
     }
     if (outcome.code !== 0) {
-      await processTreeOwner?.terminate().catch(() => {})
       throw new LocalAppRuntimeError(
         'DEPENDENCY_INSTALL_FAILED',
         `Dependency preparation exited with code ${outcome.code ?? 'null'}`,
         { signal: outcome.signal },
       )
     }
-    await processTreeOwner?.terminate()
   }
 
   private async performStart(appId: string, signal: AbortSignal): Promise<LocalAppStartResult> {
@@ -1518,6 +1689,12 @@ export class LocalAppRuntimeManager {
       versionDir,
       this.buildRuntimeEnvironment(appId, version, versionDir, port, healthToken),
     )
+    const managedProcess = this.registerManagedProcess(
+      appId,
+      'runtime',
+      child,
+      processTreeOwner,
+    )
     this.captureChildOutput(appId, child)
 
     let resolveExit!: (outcome: { code: number | null; signal: NodeJS.Signals | null }) => void
@@ -1531,6 +1708,7 @@ export class LocalAppRuntimeManager {
       port,
       url: this.buildAppUrl(port, manifest.webPath),
       child,
+      managedProcess,
       processTreeOwner,
       healthy: false,
       stopRequested: false,
@@ -1543,7 +1721,7 @@ export class LocalAppRuntimeManager {
     child.once('exit', (code, signal) => {
       resolveExit({ code, signal })
       if (handle.stopRequested) return
-      handle.cleanupPromise = this.killProcessTree(child, handle.processTreeOwner)
+      handle.cleanupPromise = this.cleanupManagedProcess(managedProcess)
         .then(() => {
           if (this.runtimes.get(appId) === handle) this.runtimes.delete(appId)
         })
@@ -2015,6 +2193,118 @@ export class LocalAppRuntimeManager {
     })
   }
 
+  private registerManagedProcess(
+    appId: string,
+    kind: ManagedProcessOperation['kind'],
+    child: ChildProcess,
+    processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner,
+  ): ManagedProcessOperation {
+    const operation: ManagedProcessOperation = {
+      id: randomUUID(),
+      appId,
+      kind,
+      child,
+      processTreeOwner,
+    }
+    this.managedProcesses.set(operation.id, operation)
+    return operation
+  }
+
+  private cleanupManagedProcess(
+    operation: ManagedProcessOperation,
+    force = false,
+  ): Promise<void> {
+    if (operation.cleanupPromise) return operation.cleanupPromise
+    const cleanupPromise: Promise<void> = (force
+      ? this.forceTerminateManagedProcess(operation)
+      : this.killProcessTree(operation.child, operation.processTreeOwner))
+      .then(() => {
+        delete operation.lastCleanupError
+        if (this.managedProcesses.get(operation.id) === operation) {
+          this.managedProcesses.delete(operation.id)
+        }
+      })
+      .catch((error) => {
+        operation.lastCleanupError = error
+        throw error
+      })
+      .finally(() => {
+        if (operation.cleanupPromise === cleanupPromise) {
+          operation.cleanupPromise = undefined
+        }
+      })
+    operation.cleanupPromise = cleanupPromise
+    return cleanupPromise
+  }
+
+  private async forceTerminateManagedProcess(
+    operation: ManagedProcessOperation,
+  ): Promise<void> {
+    if (operation.processTreeOwner) {
+      try {
+        await this.killProcessTree(operation.child, operation.processTreeOwner)
+        return
+      } catch (ownerError) {
+        let forceError: unknown
+        try {
+          await this.forceKillProcessTree(operation.child)
+        } catch (error) {
+          forceError = error
+        }
+        // A PID-based fallback cannot prove that descendants of an already
+        // exited Windows root are gone. Keep the owner registered so its Job
+        // Object/snapshot confirmation can be retried.
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          `Managed ${operation.kind} process tree ${operation.child.pid ?? 'unknown'} lacks owner-confirmed cleanup`,
+          {
+            ownerError: this.formatError(ownerError),
+            ...(forceError ? { forceError: this.formatError(forceError) } : {}),
+          },
+        )
+      }
+    }
+    await this.forceKillProcessTree(operation.child)
+  }
+
+  private async retryManagedProcessCleanup(
+    appId?: string,
+  ): Promise<Array<{
+    appId: string
+    kind: ManagedProcessOperation['kind']
+    pid?: number
+    attempts: number
+    error: string
+  }>> {
+    const operations = [...this.managedProcesses.values()]
+      .filter(operation => appId === undefined || operation.appId === appId)
+    const results = await Promise.all(operations.map(async (operation) => {
+      let attempts = 0
+      let lastError = operation.lastCleanupError
+      while (
+        attempts < MAX_FORCE_CLEANUP_ATTEMPTS
+        && this.managedProcesses.get(operation.id) === operation
+      ) {
+        attempts += 1
+        if (attempts > 1) await delay(SHUTDOWN_FORCE_RETRY_DELAY_MS)
+        try {
+          await this.cleanupManagedProcess(operation, true)
+        } catch (error) {
+          lastError = error
+        }
+      }
+      if (this.managedProcesses.get(operation.id) !== operation) return null
+      return {
+        appId: operation.appId,
+        kind: operation.kind,
+        ...(operation.child.pid ? { pid: operation.child.pid } : {}),
+        attempts,
+        error: this.formatError(lastError),
+      }
+    }))
+    return results.filter((result): result is NonNullable<typeof result> => result !== null)
+  }
+
   private stopRuntime(handle: ManagedRuntime): Promise<void> {
     if (handle.stopPromise) return handle.stopPromise
     const stopPromise = (async () => {
@@ -2034,14 +2324,22 @@ export class LocalAppRuntimeManager {
           || (handle.child.exitCode == null && handle.child.signalCode == null)
         )
       ) {
-        await this.killProcessTree(handle.child, handle.processTreeOwner)
+        if (handle.managedProcess) {
+          await this.cleanupManagedProcess(handle.managedProcess)
+        } else {
+          await this.killProcessTree(handle.child, handle.processTreeOwner)
+        }
       }
       if (this.runtimes.get(handle.appId) === handle) this.runtimes.delete(handle.appId)
       this.appendLog(handle.appId, 'system', `Stopped ${handle.version}`)
     })()
     const trackedStopPromise = stopPromise.catch((error) => {
       if (handle.stopPromise === trackedStopPromise) handle.stopPromise = undefined
-      throw error
+      throw asLocalAppRuntimeError(
+        error,
+        'STOP_FAILED',
+        `Failed to stop ${handle.appId}`,
+      )
     })
     handle.stopPromise = trackedStopPromise
     return trackedStopPromise
@@ -2062,7 +2360,9 @@ export class LocalAppRuntimeManager {
       await handle.cleanupPromise.catch(() => {})
       handle.cleanupPromise = undefined
     }
-    if (handle.child) {
+    if (handle.managedProcess) {
+      await this.cleanupManagedProcess(handle.managedProcess, true)
+    } else if (handle.child) {
       await this.forceKillProcessTree(handle.child)
     }
     if (this.runtimes.get(handle.appId) === handle) this.runtimes.delete(handle.appId)

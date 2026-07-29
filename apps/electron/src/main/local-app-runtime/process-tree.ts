@@ -64,8 +64,15 @@ export class WindowsJobObjectOwner {
 
   terminate(): Promise<void> {
     if (this.terminationPromise) return this.terminationPromise
-    this.terminationPromise = this.performTermination()
-    return this.terminationPromise
+    const terminationPromise: Promise<void> = this.performTermination()
+      .catch((error) => {
+        if (this.terminationPromise === terminationPromise) {
+          this.terminationPromise = undefined
+        }
+        throw error
+      })
+    this.terminationPromise = terminationPromise
+    return terminationPromise
   }
 
   private async performTermination(): Promise<void> {
@@ -108,8 +115,15 @@ export class WindowsProcessTreeOwner {
 
   terminate(): Promise<void> {
     if (this.terminationPromise) return this.terminationPromise
-    this.terminationPromise = this.performTermination()
-    return this.terminationPromise
+    const terminationPromise: Promise<void> = this.performTermination()
+      .catch((error) => {
+        if (this.terminationPromise === terminationPromise) {
+          this.terminationPromise = undefined
+        }
+        throw error
+      })
+    this.terminationPromise = terminationPromise
+    return terminationPromise
   }
 
   dispose(): void {

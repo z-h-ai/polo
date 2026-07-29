@@ -261,6 +261,59 @@ function ownedNodeServerSource(options: { listenDelayMs?: number; body?: string 
   `
 }
 
+async function launchHangingDependencyInstall(appId: string): Promise<{
+  runtime: LocalAppRuntimeManager
+  install: ReturnType<LocalAppRuntimeManager['install']>
+  pids: { root: number; child: number }
+}> {
+  const fakeBunPath = join(testRoot, `fake-bun-${appId}`)
+  await writeFile(fakeBunPath, `#!${process.execPath}
+    const { mkdirSync, writeFileSync } = require('fs')
+    const { join } = require('path')
+    const { spawn } = require('child_process')
+    const dataDir = process.env.POLO_APP_DATA_DIR
+    mkdirSync(dataDir, { recursive: true })
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+    })
+    writeFileSync(join(dataDir, 'installer-pids.json'), JSON.stringify({
+      root: process.pid,
+      child: child.pid,
+    }))
+    setInterval(() => {}, 1000)
+  `)
+  await chmod(fakeBunPath, 0o755)
+  const bundle = await writeBundle(
+    appId,
+    '1.0.0',
+    {
+      runtime: 'js',
+      entry: ['server.js'],
+    },
+    {
+      'server.js': 'setInterval(() => {}, 1000)',
+      'package.json': `{"name":"${appId}","version":"1.0.0"}`,
+      'bun.lock': 'test lock placeholder',
+    },
+  )
+  const archive = await archiveBundle(bundle, appId)
+  const url = await serveArchive(archive)
+  const runtime = makeManager({ bunPath: fakeBunPath })
+  const install = runtime.install(requestFor(appId, '1.0.0', url, archive))
+  const pidFile = join(testRoot, `runtime/apps/${appId}/data/installer-pids.json`)
+  let pids: { root: number; child: number } | undefined
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      pids = JSON.parse(await readFile(pidFile, 'utf8')) as { root: number; child: number }
+      break
+    } catch {
+      await Bun.sleep(10)
+    }
+  }
+  if (!pids) throw new Error(`dependency installer for ${appId} did not start`)
+  return { runtime, install, pids }
+}
+
 describe('LocalAppRuntimeManager', () => {
   it('keeps the install RPC deadline beyond the manager operation ceiling', () => {
     expect(LOCAL_APP_INSTALL_RPC_TIMEOUT_MS).toBeGreaterThan(
@@ -762,6 +815,66 @@ describe('LocalAppRuntimeManager', () => {
     expect(isProcessAlive(status.pid!)).toBe(false)
   })
 
+  it('propagates a rejected lifecycle cleanup even when shutdown subsequently reaps the process', async () => {
+    const bundleDir = await writeBundle(
+      'demo.lifecycle-rejection',
+      '1.0.0',
+      { runtime: 'js', entry: ['server.js'] },
+      { 'server.js': ownedNodeServerSource() },
+    )
+    const archive = await archiveBundle(bundleDir, 'lifecycle-rejection')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.lifecycle-rejection', '1.0.0', url, archive))
+    await runtime.start('demo.lifecycle-rejection')
+    const status = await runtime.getRuntimeStatus('demo.lifecycle-rejection')
+
+    const internals = runtime as unknown as {
+      killProcessTree: (...args: unknown[]) => Promise<void>
+    }
+    const originalKill = internals.killProcessTree.bind(runtime)
+    let releaseFirstKill!: () => void
+    let markFirstKillStarted!: () => void
+    const firstKillStarted = new Promise<void>(resolveStarted => {
+      markFirstKillStarted = resolveStarted
+    })
+    const releaseGate = new Promise<void>(resolveRelease => {
+      releaseFirstKill = resolveRelease
+    })
+    let killCalls = 0
+    internals.killProcessTree = async (...args: unknown[]) => {
+      killCalls += 1
+      if (killCalls === 1) {
+        markFirstKillStarted()
+        await releaseGate
+        throw new Error('injected queued lifecycle cleanup failure')
+      }
+      return originalKill(...args)
+    }
+
+    const stop = runtime.stop('demo.lifecycle-rejection')
+    await firstKillStarted
+    const shutdown = runtime.shutdown()
+    releaseFirstKill()
+
+    await expect(stop).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    await expect(shutdown).rejects.toMatchObject({
+      code: 'STOP_FAILED',
+      details: {
+        operationFailures: [
+          expect.objectContaining({
+            type: 'lifecycle',
+            appId: 'demo.lifecycle-rejection',
+          }),
+        ],
+      },
+    })
+    expect(isProcessAlive(status.pid!)).toBe(false)
+
+    internals.killProcessTree = originalKill
+    await expect(runtime.shutdown()).resolves.toBeUndefined()
+  })
+
   it('runs JS and Python bundles with isolated runtime and data directories', async () => {
     const bunPath = process.execPath
     const uvPath = Bun.which('uv')
@@ -1132,6 +1245,73 @@ package = false
     await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
     expect(isProcessAlive(pids!.root)).toBe(false)
     expect(isProcessAlive(pids!.child)).toBe(false)
+  })
+
+  it('blocks shutdown on retained dependency cleanup handles and succeeds after retry recovery', async () => {
+    const { runtime, install, pids } = await launchHangingDependencyInstall(
+      'demo.install-shutdown-retain',
+    )
+    const internals = runtime as unknown as {
+      killProcessTree: (...args: unknown[]) => Promise<void>
+      forceKillProcessTree: (...args: unknown[]) => Promise<void>
+      managedProcesses: Map<string, unknown>
+    }
+    const originalKill = internals.killProcessTree.bind(runtime)
+    const originalForceKill = internals.forceKillProcessTree.bind(runtime)
+    internals.killProcessTree = async () => {
+      throw new Error('injected dependency abort cleanup failure')
+    }
+    internals.forceKillProcessTree = async () => {
+      throw new Error('injected dependency forced cleanup failure')
+    }
+
+    const shutdown = runtime.shutdown()
+    await expect(install).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    await expect(shutdown).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    expect(internals.managedProcesses.size).toBe(1)
+    expect(isProcessAlive(pids.root)).toBe(true)
+    expect(isProcessAlive(pids.child)).toBe(true)
+
+    internals.killProcessTree = originalKill
+    internals.forceKillProcessTree = originalForceKill
+    await expect(runtime.shutdown()).resolves.toBeUndefined()
+    expect(internals.managedProcesses.size).toBe(0)
+    expect(isProcessAlive(pids.root)).toBe(false)
+    expect(isProcessAlive(pids.child)).toBe(false)
+  })
+
+  it('blocks uninstall on retained dependency cleanup handles and removes files only after retry recovery', async () => {
+    const appId = 'demo.install-uninstall-retain'
+    const { runtime, install, pids } = await launchHangingDependencyInstall(appId)
+    const internals = runtime as unknown as {
+      killProcessTree: (...args: unknown[]) => Promise<void>
+      forceKillProcessTree: (...args: unknown[]) => Promise<void>
+      managedProcesses: Map<string, unknown>
+    }
+    const originalKill = internals.killProcessTree.bind(runtime)
+    const originalForceKill = internals.forceKillProcessTree.bind(runtime)
+    internals.killProcessTree = async () => {
+      throw new Error('injected dependency abort cleanup failure')
+    }
+    internals.forceKillProcessTree = async () => {
+      throw new Error('injected dependency forced cleanup failure')
+    }
+
+    const uninstall = runtime.uninstall(appId, { preserveData: false })
+    await expect(install).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    await expect(uninstall).rejects.toMatchObject({ code: 'UNINSTALL_FAILED' })
+    expect(internals.managedProcesses.size).toBe(1)
+    expect(isProcessAlive(pids.root)).toBe(true)
+    expect(isProcessAlive(pids.child)).toBe(true)
+    expect(await stat(join(testRoot, `runtime/apps/${appId}/data`))).toBeTruthy()
+
+    internals.killProcessTree = originalKill
+    internals.forceKillProcessTree = originalForceKill
+    await expect(runtime.uninstall(appId, { preserveData: false })).resolves.toBeUndefined()
+    expect(internals.managedProcesses.size).toBe(0)
+    expect(isProcessAlive(pids.root)).toBe(false)
+    expect(isProcessAlive(pids.child)).toBe(false)
+    await expect(stat(join(testRoot, `runtime/apps/${appId}`))).rejects.toThrow()
   })
 
   it('rejects an empty static entry and unsupported host permissions', async () => {
