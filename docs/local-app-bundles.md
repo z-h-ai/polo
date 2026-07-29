@@ -28,13 +28,16 @@ and one HTTP port.
   bundle-relative file (or the static content directory); remaining items are
   passed as literal arguments.
 - `healthcheck` and `webPath` are local HTTP paths beginning with `/`.
+- Phase one accepts only an empty `permissions` array. Privileged host
+  capabilities are rejected until a brokered permission API is available.
 - `platforms`, `architectures`, `name`, and `startTimeoutMs` are optional.
 - Bundle paths must not be absolute, contain `..`, or use archive links.
 
 ## Runtime conventions
 
-- `static`: `entry[0]` points to a dist directory or HTML file. Polo's built-in
-  static server owns the port and answers the declared health-check path.
+- `static`: `entry[0]` points to a readable HTML file or a dist directory that
+  contains a readable `index.html`. Polo's built-in static server owns the port
+  and verifies both the declared health-check path and the actual `webPath`.
 - `python`: the bundle includes `pyproject.toml` and `uv.lock`; `entry[0]`
   points to the Python server file. Polo uses its bundled `uv`, creates a
   version-specific environment, and starts it offline after preparation.
@@ -50,4 +53,8 @@ app still has one root process and one port.
 Dynamic runtimes receive `PORT`, `HOST=127.0.0.1`, `POLO_APP_ID`,
 `POLO_APP_VERSION`, `POLO_APP_DATA_DIR`, and `POLO_APP_BUNDLE_DIR`. Runtime
 cache paths are isolated by app and version. User data is stored outside
-version directories and survives updates and normal uninstall.
+version directories and survives updates and normal uninstall. The parent Polo
+environment is not inherited: only runtime essentials (`PATH`, temporary
+directory variables, locale/timezone, and required Windows system variables)
+plus the documented app variables are passed through. Polo credentials,
+tokens, proxy credentials, and internal configuration are not exposed.

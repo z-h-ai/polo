@@ -20,8 +20,8 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerLocalAppHandlers(server: RpcServer): void {
-  server.handle(RPC_CHANNELS.localApps.INSTALL, (_ctx, request: LocalAppInstallRequest) =>
-    getLocalAppRuntimeManager().install(request))
+  server.handle(RPC_CHANNELS.localApps.INSTALL, (ctx, request: LocalAppInstallRequest) =>
+    getLocalAppRuntimeManager().install(request, { signal: ctx.signal }))
   server.handle(RPC_CHANNELS.localApps.CANCEL_INSTALL, (_ctx, appId: string) =>
     getLocalAppRuntimeManager().cancelInstall(appId))
   server.handle(RPC_CHANNELS.localApps.START, (_ctx, appId: string) =>

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto'
-import { existsSync } from 'fs'
+import { constants as fsConstants, existsSync } from 'fs'
 import {
   access,
   appendFile,
@@ -18,6 +18,7 @@ import { createServer as createNetServer } from 'net'
 import { arch as hostArch, platform as hostPlatform } from 'os'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { spawn, type ChildProcess } from 'child_process'
+import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@polo-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
   LocalAppErrorPayload,
@@ -42,6 +43,22 @@ const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 const INSTALL_COMMAND_TIMEOUT_MS = 10 * 60_000
 const STOP_GRACE_MS = 3_000
 const MAX_LOG_TAIL = 10_000
+const RUNTIME_ENV_ALLOWLIST = [
+  'PATH',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  // Windows needs these to locate core system DLLs and spawn child processes.
+  'SystemRoot',
+  'WINDIR',
+  'ComSpec',
+  'PATHEXT',
+] as const
 
 interface InstalledVersionRecord {
   manifest: PoloAppManifest
@@ -54,6 +71,7 @@ interface AppMetadata {
   appId: string
   currentVersion: string
   previousVersion?: string
+  lastKnownGoodVersion?: string
   versions: Record<string, InstalledVersionRecord>
   brokenVersions?: Record<string, LocalAppErrorPayload>
 }
@@ -91,6 +109,7 @@ export interface LocalAppRuntimeManagerOptions {
   uvPath?: string
   bunPath?: string
   fetch?: typeof globalThis.fetch
+  baseEnvironment?: NodeJS.ProcessEnv
   logger?: LocalAppRuntimeLogger
   now?: () => number
 }
@@ -180,11 +199,14 @@ export class LocalAppRuntimeManager {
   private readonly uvPath?: string
   private readonly bunPath?: string
   private readonly fetchImpl: typeof globalThis.fetch
+  private readonly baseEnvironment: NodeJS.ProcessEnv
   private readonly logger: LocalAppRuntimeLogger
   private readonly now: () => number
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly startPromises = new Map<string, Promise<LocalAppStartResult>>()
+  private readonly startControllers = new Map<string, AbortController>()
+  private readonly lifecycleQueues = new Map<string, Promise<void>>()
   private readonly statuses = new Map<string, LocalAppRuntimeStatus>()
   private readonly logWriteQueues = new Map<string, Promise<void>>()
   private initializationPromise?: Promise<void>
@@ -204,6 +226,7 @@ export class LocalAppRuntimeManager {
     this.uvPath = options.uvPath
     this.bunPath = options.bunPath
     this.fetchImpl = options.fetch ?? globalThis.fetch
+    this.baseEnvironment = { ...(options.baseEnvironment ?? process.env) }
     this.logger = options.logger ?? noopLogger
     this.now = options.now ?? Date.now
   }
@@ -225,7 +248,10 @@ export class LocalAppRuntimeManager {
     return this.initializationPromise
   }
 
-  install(request: LocalAppInstallRequest): Promise<LocalAppInstalledApp> {
+  install(
+    request: LocalAppInstallRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<LocalAppInstalledApp> {
     const validated = this.validateInstallRequest(request)
     if (this.shuttingDown) {
       return Promise.reject(new LocalAppRuntimeError('INSTALL_CANCELLED', 'Polo is shutting down'))
@@ -242,8 +268,25 @@ export class LocalAppRuntimeManager {
     }
 
     const controller = new AbortController()
+    const timeoutError = new LocalAppRuntimeError(
+      'INSTALL_TIMEOUT',
+      `Installation exceeded ${LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS}ms`,
+    )
+    const timeout = setTimeout(
+      () => controller.abort(timeoutError),
+      LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
+    )
+    const abortFromCaller = () => controller.abort(
+      options.signal?.reason instanceof LocalAppRuntimeError
+        ? options.signal.reason
+        : new LocalAppRuntimeError('INSTALL_CANCELLED', 'Installation request was cancelled'),
+    )
+    if (options.signal?.aborted) abortFromCaller()
+    else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
     const promise = this.performInstall(validated, controller.signal)
       .finally(() => {
+        clearTimeout(timeout)
+        options.signal?.removeEventListener('abort', abortFromCaller)
         const active = this.activeInstalls.get(validated.appId)
         if (active?.promise === promise) this.activeInstalls.delete(validated.appId)
       })
@@ -259,7 +302,10 @@ export class LocalAppRuntimeManager {
     const safeAppId = validateRequestIdentifier(appId, 'appId')
     const active = this.activeInstalls.get(safeAppId)
     if (!active) return false
-    active.controller.abort()
+    active.controller.abort(new LocalAppRuntimeError(
+      'INSTALL_CANCELLED',
+      `Installation of ${safeAppId} was cancelled`,
+    ))
     return true
   }
 
@@ -270,64 +316,67 @@ export class LocalAppRuntimeManager {
     }
     const existing = this.startPromises.get(safeAppId)
     if (existing) return existing
+    return this.trackStartOperation(
+      safeAppId,
+      signal => this.performStart(safeAppId, signal),
+    )
+  }
 
-    const promise = this.performStart(safeAppId).finally(() => {
-      if (this.startPromises.get(safeAppId) === promise) this.startPromises.delete(safeAppId)
+  stop(appId: string): Promise<LocalAppRuntimeStatus> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    this.cancelStart(safeAppId, `Start of ${safeAppId} was cancelled by stop`)
+    return this.enqueueLifecycle(safeAppId, () => this.performStop(safeAppId))
+  }
+
+  restart(appId: string): Promise<LocalAppStartResult> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    if (this.shuttingDown) {
+      return Promise.reject(new LocalAppRuntimeError('START_FAILED', 'Polo is shutting down'))
+    }
+    this.cancelStart(safeAppId, `Start of ${safeAppId} was cancelled by restart`)
+    return this.trackStartOperation(safeAppId, async (signal) => {
+      await this.performStop(safeAppId)
+      return this.performStart(safeAppId, signal)
     })
-    this.startPromises.set(safeAppId, promise)
-    return promise
   }
 
-  async stop(appId: string): Promise<LocalAppRuntimeStatus> {
-    const safeAppId = validateRequestIdentifier(appId, 'appId')
-    const handle = this.runtimes.get(safeAppId)
-    if (handle) await this.stopRuntime(handle)
-
-    const metadata = await this.readMetadata(safeAppId)
-    const status: LocalAppRuntimeStatus = metadata
-      ? {
-          appId: safeAppId,
-          status: 'stopped',
-          currentVersion: metadata.currentVersion,
-          previousVersion: metadata.previousVersion,
-        }
-      : { appId: safeAppId, status: 'not_installed' }
-    this.statuses.set(safeAppId, status)
-    return status
-  }
-
-  async restart(appId: string): Promise<LocalAppStartResult> {
-    const safeAppId = validateRequestIdentifier(appId, 'appId')
-    await this.stop(safeAppId)
-    return this.start(safeAppId)
-  }
-
-  async uninstall(appId: string, options: LocalAppUninstallOptions = {}): Promise<void> {
+  uninstall(appId: string, options: LocalAppUninstallOptions = {}): Promise<void> {
     const safeAppId = validateRequestIdentifier(appId, 'appId')
     const activeInstall = this.activeInstalls.get(safeAppId)
-    if (activeInstall) {
-      activeInstall.controller.abort()
-      await activeInstall.promise.catch(() => {})
-    }
+    activeInstall?.controller.abort(new LocalAppRuntimeError(
+      'INSTALL_CANCELLED',
+      `Installation of ${safeAppId} was cancelled by uninstall`,
+    ))
+    this.cancelStart(safeAppId, `Start of ${safeAppId} was cancelled by uninstall`)
+    return this.enqueueLifecycle(safeAppId, async () => {
+      await activeInstall?.promise.catch(() => {})
+      await this.performUninstall(safeAppId, options)
+    })
+  }
+
+  private async performUninstall(
+    appId: string,
+    options: LocalAppUninstallOptions,
+  ): Promise<void> {
     try {
-      await this.stop(safeAppId)
-      const appDir = this.getAppDir(safeAppId)
+      await this.performStop(appId)
+      const appDir = this.getAppDir(appId)
       if (options.preserveData ?? true) {
         await Promise.all([
           rm(join(appDir, 'versions'), { recursive: true, force: true }),
           rm(join(appDir, 'metadata.json'), { force: true }),
           rm(join(appDir, 'logs'), { recursive: true, force: true }),
-          rm(join(this.runtimeCacheDir, safeAppId), { recursive: true, force: true }),
+          rm(join(this.runtimeCacheDir, appId), { recursive: true, force: true }),
         ])
       } else {
         await Promise.all([
           rm(appDir, { recursive: true, force: true }),
-          rm(join(this.runtimeCacheDir, safeAppId), { recursive: true, force: true }),
+          rm(join(this.runtimeCacheDir, appId), { recursive: true, force: true }),
         ])
       }
-      this.statuses.set(safeAppId, { appId: safeAppId, status: 'not_installed' })
+      this.statuses.set(appId, { appId, status: 'not_installed' })
     } catch (error) {
-      throw asLocalAppRuntimeError(error, 'UNINSTALL_FAILED', `Failed to uninstall ${safeAppId}`)
+      throw asLocalAppRuntimeError(error, 'UNINSTALL_FAILED', `Failed to uninstall ${appId}`)
     }
   }
 
@@ -403,14 +452,70 @@ export class LocalAppRuntimeManager {
   async shutdown(): Promise<void> {
     if (this.shuttingDown) return
     this.shuttingDown = true
-    for (const install of this.activeInstalls.values()) install.controller.abort()
+    for (const install of this.activeInstalls.values()) {
+      install.controller.abort(new LocalAppRuntimeError(
+        'INSTALL_CANCELLED',
+        'Installation was cancelled because Polo is shutting down',
+      ))
+    }
+    for (const [appId] of this.startControllers) {
+      this.cancelStart(appId, `Start of ${appId} was cancelled because Polo is shutting down`)
+    }
     await Promise.allSettled([
-      ...[...this.runtimes.values()].map(runtime => this.stopRuntime(runtime)),
-      ...this.startPromises.values(),
       ...[...this.activeInstalls.values()].map(install => install.promise),
+      ...this.lifecycleQueues.values(),
     ])
     await Promise.allSettled([...this.runtimes.values()].map(runtime => this.stopRuntime(runtime)))
     await Promise.allSettled(this.logWriteQueues.values())
+  }
+
+  private trackStartOperation(
+    appId: string,
+    operation: (signal: AbortSignal) => Promise<LocalAppStartResult>,
+  ): Promise<LocalAppStartResult> {
+    const controller = new AbortController()
+    const promise = this.enqueueLifecycle(appId, () => operation(controller.signal))
+      .finally(() => {
+        if (this.startPromises.get(appId) === promise) this.startPromises.delete(appId)
+        if (this.startControllers.get(appId) === controller) this.startControllers.delete(appId)
+      })
+    this.startControllers.set(appId, controller)
+    this.startPromises.set(appId, promise)
+    return promise
+  }
+
+  private cancelStart(appId: string, message: string): void {
+    this.startControllers.get(appId)?.abort(
+      new LocalAppRuntimeError('START_FAILED', message),
+    )
+  }
+
+  private enqueueLifecycle<T>(appId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.lifecycleQueues.get(appId) ?? Promise.resolve()
+    const result = previous.catch(() => {}).then(operation)
+    const tail = result.then(() => {}, () => {})
+    this.lifecycleQueues.set(appId, tail)
+    void tail.then(() => {
+      if (this.lifecycleQueues.get(appId) === tail) this.lifecycleQueues.delete(appId)
+    })
+    return result
+  }
+
+  private async performStop(appId: string): Promise<LocalAppRuntimeStatus> {
+    const handle = this.runtimes.get(appId)
+    if (handle) await this.stopRuntime(handle)
+
+    const metadata = await this.readMetadata(appId)
+    const status: LocalAppRuntimeStatus = metadata
+      ? {
+          appId,
+          status: 'stopped',
+          currentVersion: metadata.currentVersion,
+          previousVersion: metadata.previousVersion,
+        }
+      : { appId, status: 'not_installed' }
+    this.statuses.set(appId, status)
+    return status
   }
 
   private validateInstallRequest(request: LocalAppInstallRequest): LocalAppInstallRequest {
@@ -493,7 +598,7 @@ export class LocalAppRuntimeManager {
 
       this.setInstallProgress(request, 'verifying', request.sizeBytes)
       this.setInstallProgress(request, 'extracting', request.sizeBytes)
-      await extractBundleArchive(archivePath, extractedPath)
+      await extractBundleArchive(archivePath, extractedPath, signal)
       this.throwIfCancelled(signal)
 
       const manifest = await this.loadAndValidateManifest(extractedPath)
@@ -539,6 +644,9 @@ export class LocalAppRuntimeManager {
         appId: request.appId,
         currentVersion: request.version,
         ...(previousVersion ? { previousVersion } : {}),
+        ...(metadata?.lastKnownGoodVersion
+          ? { lastKnownGoodVersion: metadata.lastKnownGoodVersion }
+          : {}),
         versions,
         ...(metadata?.brokenVersions ? { brokenVersions: metadata.brokenVersions } : {}),
       }
@@ -555,7 +663,10 @@ export class LocalAppRuntimeManager {
       return installed
     } catch (error) {
       const runtimeError = signal.aborted
-        ? new LocalAppRuntimeError('INSTALL_CANCELLED', `Installation of ${request.appId} was cancelled`)
+        ? this.getAbortError(
+            signal,
+            new LocalAppRuntimeError('INSTALL_CANCELLED', `Installation of ${request.appId} was cancelled`),
+          )
         : asLocalAppRuntimeError(error, 'DOWNLOAD_FAILED', `Failed to install ${request.appId}`)
       const metadata = await this.readMetadata(request.appId)
       this.statuses.set(request.appId, metadata
@@ -592,7 +703,12 @@ export class LocalAppRuntimeManager {
         redirect: 'follow',
       })
     } catch (error) {
-      if (signal.aborted) throw new LocalAppRuntimeError('INSTALL_CANCELLED', 'Bundle download was cancelled')
+      if (signal.aborted) {
+        throw this.getAbortError(
+          signal,
+          new LocalAppRuntimeError('INSTALL_CANCELLED', 'Bundle download was cancelled'),
+        )
+      }
       throw new LocalAppRuntimeError(
         'DOWNLOAD_FAILED',
         `Could not download bundle: ${error instanceof Error ? error.message : String(error)}`,
@@ -701,6 +817,21 @@ export class LocalAppRuntimeManager {
       if (!entryStat.isDirectory() && !entryStat.isFile()) {
         throw new LocalAppRuntimeError('INVALID_MANIFEST', 'Static entry must be a file or directory')
       }
+      const serviceEntry = entryStat.isDirectory()
+        ? join(entryPath, 'index.html')
+        : entryPath
+      try {
+        const serviceEntryStat = await stat(serviceEntry)
+        if (!serviceEntryStat.isFile()) throw new Error('not a file')
+        await access(serviceEntry, fsConstants.R_OK)
+      } catch {
+        throw new LocalAppRuntimeError(
+          'INVALID_MANIFEST',
+          entryStat.isDirectory()
+            ? `Static entry directory must contain a readable index.html: ${manifest.entry[0]}`
+            : `Static entry file is not readable: ${manifest.entry[0]}`,
+        )
+      }
       return
     }
     if (!entryStat.isFile()) {
@@ -778,41 +909,57 @@ export class LocalAppRuntimeManager {
     const child = spawn(command, args, {
       cwd,
       env,
+      detached: process.platform !== 'win32',
       shell: false,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     this.captureChildOutput(appId, child)
 
-    const outcome = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolveExit, rejectExit) => {
-      const timeout = setTimeout(() => {
-        void this.killProcessTree(child).catch(error =>
-          this.logger.warn(`[local-apps] failed to terminate dependency installer for ${appId}`, error))
-        rejectExit(new LocalAppRuntimeError(
-          'DEPENDENCY_INSTALL_FAILED',
-          `Dependency preparation exceeded ${INSTALL_COMMAND_TIMEOUT_MS}ms`,
-        ))
-      }, INSTALL_COMMAND_TIMEOUT_MS)
-      const abort = () => {
-        void this.killProcessTree(child).catch(error =>
-          this.logger.warn(`[local-apps] failed to cancel dependency installer for ${appId}`, error))
-        rejectExit(new LocalAppRuntimeError('INSTALL_CANCELLED', 'Dependency preparation was cancelled'))
-      }
-      signal.addEventListener('abort', abort, { once: true })
-      child.once('error', (error) => {
-        clearTimeout(timeout)
-        signal.removeEventListener('abort', abort)
-        rejectExit(new LocalAppRuntimeError(
-          'RUNTIME_UNAVAILABLE',
-          `Could not launch ${basename(command)}: ${error.message}`,
-        ))
-      })
-      child.once('exit', (code, exitSignal) => {
-        clearTimeout(timeout)
-        signal.removeEventListener('abort', abort)
-        resolveExit({ code, signal: exitSignal })
-      })
+    type InstallProcessOutcome =
+      | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null }
+      | { kind: 'error'; error: Error }
+      | { kind: 'abort' }
+      | { kind: 'timeout' }
+    const processOutcome = new Promise<InstallProcessOutcome>((resolveOutcome) => {
+      child.once('error', error => resolveOutcome({ kind: 'error', error }))
+      child.once('exit', (code, exitSignal) =>
+        resolveOutcome({ kind: 'exit', code, signal: exitSignal }))
     })
+    let abortListener: (() => void) | undefined
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const interruption = new Promise<InstallProcessOutcome>((resolveInterruption) => {
+      abortListener = () => resolveInterruption({ kind: 'abort' })
+      if (signal.aborted) abortListener()
+      else signal.addEventListener('abort', abortListener, { once: true })
+      timeout = setTimeout(
+        () => resolveInterruption({ kind: 'timeout' }),
+        INSTALL_COMMAND_TIMEOUT_MS,
+      )
+    })
+    const outcome = await Promise.race([processOutcome, interruption])
+    if (timeout) clearTimeout(timeout)
+    if (abortListener) signal.removeEventListener('abort', abortListener)
+
+    if (outcome.kind === 'abort' || outcome.kind === 'timeout') {
+      await this.killProcessTree(child)
+      if (outcome.kind === 'abort') {
+        throw this.getAbortError(
+          signal,
+          new LocalAppRuntimeError('INSTALL_CANCELLED', 'Dependency preparation was cancelled'),
+        )
+      }
+      throw new LocalAppRuntimeError(
+        'DEPENDENCY_INSTALL_FAILED',
+        `Dependency preparation exceeded ${INSTALL_COMMAND_TIMEOUT_MS}ms`,
+      )
+    }
+    if (outcome.kind === 'error') {
+      throw new LocalAppRuntimeError(
+        'RUNTIME_UNAVAILABLE',
+        `Could not launch ${basename(command)}: ${outcome.error.message}`,
+      )
+    }
     if (outcome.code !== 0) {
       throw new LocalAppRuntimeError(
         'DEPENDENCY_INSTALL_FAILED',
@@ -822,7 +969,8 @@ export class LocalAppRuntimeManager {
     }
   }
 
-  private async performStart(appId: string): Promise<LocalAppStartResult> {
+  private async performStart(appId: string, signal: AbortSignal): Promise<LocalAppStartResult> {
+    this.throwIfStartCancelled(signal, appId)
     const running = this.runtimes.get(appId)
     if (running) {
       return {
@@ -839,19 +987,21 @@ export class LocalAppRuntimeManager {
 
     const requestedVersion = metadata.currentVersion
     try {
-      return await this.startVersion(metadata, requestedVersion)
+      return await this.startVersion(metadata, requestedVersion, signal)
     } catch (error) {
       const primaryError = asLocalAppRuntimeError(error, 'START_FAILED', `Failed to start ${appId}`)
-      if (this.shuttingDown) {
+      if (this.shuttingDown || signal.aborted) {
         this.statuses.set(appId, {
           appId,
           status: 'stopped',
           currentVersion: requestedVersion,
         })
-        throw primaryError
+        throw signal.aborted
+          ? this.getAbortError(signal, primaryError)
+          : primaryError
       }
       await this.markVersionBroken(metadata, requestedVersion, primaryError)
-      const fallbackVersion = metadata.previousVersion
+      const fallbackVersion = metadata.lastKnownGoodVersion
       if (
         !fallbackVersion
         || fallbackVersion === requestedVersion
@@ -872,7 +1022,7 @@ export class LocalAppRuntimeManager {
       metadata.previousVersion = requestedVersion
       await this.writeMetadata(metadata)
       try {
-        const result = await this.startVersion(metadata, fallbackVersion)
+        const result = await this.startVersion(metadata, fallbackVersion, signal)
         return { ...result, rolledBackFrom: requestedVersion }
       } catch (fallbackError) {
         const rollbackError = asLocalAppRuntimeError(
@@ -897,10 +1047,15 @@ export class LocalAppRuntimeManager {
     }
   }
 
-  private async startVersion(metadata: AppMetadata, version: string): Promise<LocalAppStartResult> {
+  private async startVersion(
+    metadata: AppMetadata,
+    version: string,
+    signal: AbortSignal,
+  ): Promise<LocalAppStartResult> {
     if (this.shuttingDown) {
       throw new LocalAppRuntimeError('START_FAILED', `Start of ${metadata.appId} was cancelled during shutdown`)
     }
+    this.throwIfStartCancelled(signal, metadata.appId)
     const record = metadata.versions[version]
     if (!record) throw new LocalAppRuntimeError('NOT_INSTALLED', `Version ${version} is not installed`)
     const { manifest } = record
@@ -922,7 +1077,17 @@ export class LocalAppRuntimeManager {
     }
     this.runtimes.set(metadata.appId, handle)
     try {
-      await this.waitForHealthcheck(handle, manifest.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS)
+      await this.waitForHealthcheck(
+        handle,
+        manifest.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS,
+        signal,
+      )
+      metadata.lastKnownGoodVersion = version
+      if (metadata.brokenVersions?.[version]) {
+        delete metadata.brokenVersions[version]
+        if (Object.keys(metadata.brokenVersions).length === 0) delete metadata.brokenVersions
+      }
+      await this.writeMetadata(metadata)
     } catch (error) {
       await this.stopRuntime(handle)
       throw error
@@ -1000,6 +1165,8 @@ export class LocalAppRuntimeManager {
       resolveExit({ code, signal })
       if (this.runtimes.get(appId) === handle) this.runtimes.delete(appId)
       if (handle.stopRequested) return
+      void this.killProcessTree(child).catch(error =>
+        this.logger.warn(`[local-apps] failed to reap descendants after ${appId} exited`, error))
       const runtimeError = new LocalAppRuntimeError(
         'PROCESS_CRASHED',
         `${appId} exited unexpectedly with code ${code ?? 'null'}`,
@@ -1090,7 +1257,9 @@ export class LocalAppRuntimeManager {
     } catch {
       return { status: 400, headers: {}, body: 'Bad request' }
     }
-    if (pathname === new URL(options.healthcheck, 'http://127.0.0.1').pathname) {
+    const healthPath = new URL(options.healthcheck, 'http://127.0.0.1').pathname
+    const webPath = new URL(options.webPath, 'http://127.0.0.1').pathname
+    if (pathname === healthPath && healthPath !== webPath) {
       return {
         status: 200,
         headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -1139,13 +1308,18 @@ export class LocalAppRuntimeManager {
     }
   }
 
-  private async waitForHealthcheck(handle: ManagedRuntime, timeoutMs: number): Promise<void> {
+  private async waitForHealthcheck(
+    handle: ManagedRuntime,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     const deadline = this.now() + timeoutMs
     const healthUrl = `http://127.0.0.1:${handle.port}${handle.manifest.healthcheck}`
     while (this.now() < deadline) {
       if (handle.stopRequested || this.shuttingDown) {
         throw new LocalAppRuntimeError('START_FAILED', `Start of ${handle.appId} was cancelled`)
       }
+      this.throwIfStartCancelled(signal, handle.appId)
       if (handle.spawnError) {
         throw new LocalAppRuntimeError(
           'START_FAILED',
@@ -1159,7 +1333,9 @@ export class LocalAppRuntimeManager {
           { exitCode: handle.child.exitCode, signal: handle.child.signalCode },
         )
       }
-      if (await this.isHealthy(healthUrl)) return
+      if (await this.isHealthy(healthUrl)) {
+        if (handle.manifest.runtime !== 'static' || await this.isHealthy(handle.url)) return
+      }
       await delay(200)
     }
     throw new LocalAppRuntimeError(
@@ -1204,8 +1380,9 @@ export class LocalAppRuntimeManager {
 
   private async killProcessTree(child: ChildProcess): Promise<void> {
     const pid = child.pid
-    if (!pid || child.exitCode != null || child.signalCode != null) return
+    if (!pid) return
     if (process.platform === 'win32') {
+      if (child.exitCode != null || child.signalCode != null) return
       await new Promise<void>((resolveKill) => {
         const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
           windowsHide: true,
@@ -1232,13 +1409,47 @@ export class LocalAppRuntimeManager {
       }
     }
     signalGroup('SIGTERM')
-    const exited = await this.waitForChildExit(child, STOP_GRACE_MS)
-    if (!exited) {
+    const [rootExited, groupExited] = await Promise.all([
+      this.waitForChildExit(child, STOP_GRACE_MS),
+      this.waitForProcessGroupExit(pid, STOP_GRACE_MS),
+    ])
+    if (!rootExited || !groupExited) {
       signalGroup('SIGKILL')
-      if (!await this.waitForChildExit(child, 1_000)) {
+      const [rootKilled, groupKilled] = await Promise.all([
+        this.waitForChildExit(child, 1_000),
+        this.waitForProcessGroupExit(pid, 1_000),
+      ])
+      if (!rootKilled || !groupKilled) {
         throw new LocalAppRuntimeError('STOP_FAILED', `Process tree ${pid} did not exit after SIGKILL`)
       }
     }
+  }
+
+  private waitForProcessGroupExit(processGroupId: number, timeoutMs: number): Promise<boolean> {
+    const isAlive = () => {
+      try {
+        process.kill(-processGroupId, 0)
+        return true
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+      }
+    }
+    if (!isAlive()) return Promise.resolve(true)
+    return new Promise(resolveExit => {
+      const deadline = Date.now() + timeoutMs
+      const poll = () => {
+        if (!isAlive()) {
+          resolveExit(true)
+          return
+        }
+        if (Date.now() >= deadline) {
+          resolveExit(false)
+          return
+        }
+        setTimeout(poll, 25)
+      }
+      setTimeout(poll, 25)
+    })
   }
 
   private waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
@@ -1314,8 +1525,13 @@ export class LocalAppRuntimeManager {
     port: number,
   ): NodeJS.ProcessEnv {
     const cacheDir = join(this.runtimeCacheDir, appId, version)
+    const environment: NodeJS.ProcessEnv = {}
+    for (const key of RUNTIME_ENV_ALLOWLIST) {
+      const value = this.readBaseEnvironmentValue(key)
+      if (value !== undefined) environment[key] = value
+    }
     return {
-      ...process.env,
+      ...environment,
       PORT: String(port),
       HOST: '127.0.0.1',
       HOSTNAME: '127.0.0.1',
@@ -1325,8 +1541,19 @@ export class LocalAppRuntimeManager {
       POLO_APP_BUNDLE_DIR: versionDir,
       UV_PROJECT_ENVIRONMENT: join(cacheDir, 'python-venv'),
       UV_CACHE_DIR: join(cacheDir, 'uv-cache'),
+      UV_NO_CONFIG: '1',
+      PYTHONNOUSERSITE: '1',
+      PYTHONUTF8: '1',
       BUN_INSTALL_CACHE_DIR: join(cacheDir, 'bun-cache'),
     }
+  }
+
+  private readBaseEnvironmentValue(key: string): string | undefined {
+    if (this.baseEnvironment[key] !== undefined) return this.baseEnvironment[key]
+    if (this.platform !== 'win32') return undefined
+    const match = Object.keys(this.baseEnvironment)
+      .find(candidate => candidate.toLowerCase() === key.toLowerCase())
+    return match ? this.baseEnvironment[match] : undefined
   }
 
   private async requireRuntimeExecutable(value: string | undefined, label: string): Promise<string> {
@@ -1382,6 +1609,9 @@ export class LocalAppRuntimeManager {
       ...(metadata.brokenVersions ?? {}),
       [version]: error.toJSON(),
     }
+    if (metadata.lastKnownGoodVersion === version) {
+      delete metadata.lastKnownGoodVersion
+    }
     await this.writeMetadata(metadata)
     await this.appendLog(metadata.appId, 'system', `${error.code}: ${error.message}`)
   }
@@ -1429,8 +1659,29 @@ export class LocalAppRuntimeManager {
 
   private throwIfCancelled(signal: AbortSignal): void {
     if (signal.aborted) {
-      throw new LocalAppRuntimeError('INSTALL_CANCELLED', 'Installation was cancelled')
+      throw this.getAbortError(
+        signal,
+        new LocalAppRuntimeError('INSTALL_CANCELLED', 'Installation was cancelled'),
+      )
     }
+  }
+
+  private throwIfStartCancelled(signal: AbortSignal, appId: string): void {
+    if (signal.aborted) {
+      throw this.getAbortError(
+        signal,
+        new LocalAppRuntimeError('START_FAILED', `Start of ${appId} was cancelled`),
+      )
+    }
+  }
+
+  private getAbortError(
+    signal: AbortSignal,
+    fallback: LocalAppRuntimeError,
+  ): LocalAppRuntimeError {
+    return signal.reason instanceof LocalAppRuntimeError
+      ? signal.reason
+      : fallback
   }
 
   private getAppDir(appId: string): string {

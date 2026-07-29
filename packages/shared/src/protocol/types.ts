@@ -4,7 +4,10 @@
  * Shared between server (main process / headless) and client (renderer / Node).
  */
 
-import type { LocalAppErrorCode } from './local-apps'
+import {
+  LOCAL_APP_INSTALL_RPC_TIMEOUT_MS,
+  type LocalAppErrorCode,
+} from './local-apps'
 
 // ---------------------------------------------------------------------------
 // Message envelope
@@ -120,6 +123,7 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'ARCH_MISMATCH',
   'DOWNLOAD_FAILED',
   'INSTALL_CANCELLED',
+  'INSTALL_TIMEOUT',
   'SIZE_MISMATCH',
   'CHECKSUM_MISMATCH',
   'UNSUPPORTED_ARCHIVE',
@@ -178,7 +182,7 @@ export const HEARTBEAT_MAX_MISSED = 2
 
 /** Default request timeout in ms. */
 export const REQUEST_TIMEOUT_MS = 30_000
-export const LONG_RUNNING_REQUEST_TIMEOUT_MS = 10 * 60_000
+export const LONG_RUNNING_REQUEST_TIMEOUT_MS = LOCAL_APP_INSTALL_RPC_TIMEOUT_MS
 
 /** Runtime installation may include a large download and dependency preparation. */
 export function getRpcRequestTimeoutMs(channel: string, defaultTimeoutMs: number): number {

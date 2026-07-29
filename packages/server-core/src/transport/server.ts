@@ -100,6 +100,8 @@ export interface WsRpcServerOptions {
   serverVersion?: string
   /** Maximum concurrent clients. 0 = unlimited. Default: 50 */
   maxClients?: number
+  /** Handler timeout override for tests and embedded deployments. */
+  handlerTimeoutMs?: number
   /** Called when a client completes handshake. */
   onClientConnected?: (info: { clientId: string; webContentsId: number | null; workspaceId: string | null; capabilities: string[] }) => void
   /** Called when a client disconnects. */
@@ -143,6 +145,7 @@ export class WsRpcServer implements RpcServer {
   private readonly tlsOptions: WsRpcTlsOptions | null
   private readonly serverVersion: string
   private readonly maxClients: number
+  private readonly handlerTimeoutMs: number
   private readonly onClientConnected: WsRpcServerOptions['onClientConnected']
   private readonly onClientDisconnected: WsRpcServerOptions['onClientDisconnected']
   private readonly httpHandler: WsRpcServerOptions['httpHandler']
@@ -157,6 +160,7 @@ export class WsRpcServer implements RpcServer {
     this.serverVersion = opts?.serverVersion ?? ''
     this.tlsOptions = opts?.tls ?? null
     this.maxClients = opts?.maxClients ?? 50
+    this.handlerTimeoutMs = opts?.handlerTimeoutMs ?? 60_000
     this.onClientConnected = opts?.onClientConnected
     this.onClientDisconnected = opts?.onClientDisconnected
     this.httpHandler = opts?.httpHandler
@@ -637,9 +641,6 @@ export class WsRpcServer implements RpcServer {
   // Request dispatching
   // -------------------------------------------------------------------------
 
-  /** Server-side timeout for RPC handler execution (ms). */
-  private static readonly HANDLER_TIMEOUT_MS = 60_000
-
   private async onRequest(client: ClientConnection, envelope: MessageEnvelope): Promise<void> {
     const { channel, id, args } = envelope
 
@@ -654,21 +655,26 @@ export class WsRpcServer implements RpcServer {
       return
     }
 
+    const handlerAbortController = new AbortController()
     const ctx: RequestContext = {
       clientId: client.id,
       workspaceId: client.workspaceId,
       webContentsId: client.webContentsId,
+      signal: handlerAbortController.signal,
     }
 
     let handlerTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const handlerTimeout = getRpcRequestTimeoutMs(channel, WsRpcServer.HANDLER_TIMEOUT_MS)
+      const handlerTimeout = getRpcRequestTimeoutMs(channel, this.handlerTimeoutMs)
       const result = await Promise.race([
         handler(ctx, ...(args ?? [])),
-        new Promise<never>((_, reject) =>
-          { handlerTimer = setTimeout(() => reject(new Error(`Handler timeout: ${channel} (${handlerTimeout}ms)`)),
-            handlerTimeout) },
-        ),
+        new Promise<never>((_, reject) => {
+          handlerTimer = setTimeout(() => {
+            const timeoutError = new Error(`Handler timeout: ${channel} (${handlerTimeout}ms)`)
+            handlerAbortController.abort(timeoutError)
+            reject(timeoutError)
+          }, handlerTimeout)
+        }),
       ])
       const response: MessageEnvelope = {
         id,

@@ -107,6 +107,7 @@ import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeU
 import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
 import { hasLocalAppRuntimeManager, shutdownLocalAppRuntime } from './local-app-runtime'
+import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -144,7 +145,12 @@ if (isDebugMode) {
   process.env.POLO_AI_UV = bundledUvExists ? uvBinary : (fallbackUv ?? uvBinary)
 
   // Bun runtime (packaged builds should prefer bundled runtime over PATH)
-  const bunBinary = join(resourcesBase, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
+  const bunBinary = resolveBundledBunPath({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+    appResourcesBase: resourcesBase,
+  })
   if (existsSync(bunBinary)) {
     process.env.POLO_AI_BUN = bunBinary
   } else if (!app.isPackaged) {

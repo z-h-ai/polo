@@ -58,6 +58,7 @@ function createTestHarness(overrides?: { workspaceId?: string | null }) {
     clientId: 'client-1',
     workspaceId: overrides?.workspaceId ?? 'ws-1',
     webContentsId: 101,
+    signal: new AbortController().signal,
   }
 
   return { openUrl, ctx, invokeClientCalls, pushCalls }

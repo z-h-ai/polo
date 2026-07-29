@@ -11,6 +11,9 @@ const VERSION_PATTERN = /^[0-9A-Za-z](?:[0-9A-Za-z._+-]{0,126}[0-9A-Za-z])?$/
 const VALID_RUNTIMES = new Set(['static', 'python', 'js'])
 const VALID_PLATFORMS = new Set<LocalAppPlatform>(['darwin', 'win32', 'linux'])
 const VALID_ARCHITECTURES = new Set<LocalAppArchitecture>(['arm64', 'x64'])
+// Phase one exposes no privileged host capability API. Fail closed until a
+// permission has an enforceable, brokered implementation.
+const SUPPORTED_PERMISSIONS = new Set<string>()
 
 function invalid(message: string, details?: Record<string, unknown>): never {
   throw new LocalAppRuntimeError('INVALID_MANIFEST', message, details)
@@ -148,6 +151,11 @@ export function validatePoloAppManifest(
   }
 
   const permissions = requireStringArray(raw.permissions, 'permissions', true)
+  for (const permission of permissions) {
+    if (!SUPPORTED_PERMISSIONS.has(permission)) {
+      invalid(`polo-app.json requests unsupported permission "${permission}"`)
+    }
+  }
   const name = raw.name == null ? undefined : requireString(raw.name, 'name', { maxLength: 200 })
   let startTimeoutMs: number | undefined
   if (raw.startTimeoutMs != null) {

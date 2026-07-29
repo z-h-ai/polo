@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { createHash } from 'crypto'
 import { createServer, type Server } from 'http'
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { deflateRawSync } from 'zlib'
 import * as tar from 'tar'
 import { fetch as undiciFetch } from 'undici'
+import {
+  LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
+  LOCAL_APP_INSTALL_RPC_TIMEOUT_MS,
+} from '@polo-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
   LocalAppInstallRequest,
@@ -124,7 +129,11 @@ function requestFor(
   }
 }
 
-function makeManager(options: { uvPath?: string; bunPath?: string } = {}): LocalAppRuntimeManager {
+function makeManager(options: {
+  uvPath?: string
+  bunPath?: string
+  baseEnvironment?: NodeJS.ProcessEnv
+} = {}): LocalAppRuntimeManager {
   manager = new LocalAppRuntimeManager({
     rootDir: join(testRoot, 'runtime'),
     platform,
@@ -167,7 +176,54 @@ function makeStoredZip(path: string, content: Buffer): Buffer {
   return Buffer.concat([local, name, content, central, name, eocd])
 }
 
+function makeDeflatedZip(path: string, content: Buffer): Buffer {
+  const name = Buffer.from(path)
+  const compressed = deflateRawSync(content)
+  const local = Buffer.alloc(30)
+  local.writeUInt32LE(0x04034b50, 0)
+  local.writeUInt16LE(20, 4)
+  local.writeUInt16LE(8, 8)
+  local.writeUInt32LE(compressed.length, 18)
+  local.writeUInt32LE(content.length, 22)
+  local.writeUInt16LE(name.length, 26)
+
+  const central = Buffer.alloc(46)
+  central.writeUInt32LE(0x02014b50, 0)
+  central.writeUInt16LE(20, 4)
+  central.writeUInt16LE(20, 6)
+  central.writeUInt16LE(8, 10)
+  central.writeUInt32LE(compressed.length, 20)
+  central.writeUInt32LE(content.length, 24)
+  central.writeUInt16LE(name.length, 28)
+  central.writeUInt32LE((0o100644 * 0x10000) >>> 0, 38)
+
+  const centralOffset = local.length + name.length + compressed.length
+  const centralSize = central.length + name.length
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(1, 8)
+  eocd.writeUInt16LE(1, 10)
+  eocd.writeUInt32LE(centralSize, 12)
+  eocd.writeUInt32LE(centralOffset, 16)
+  return Buffer.concat([local, name, compressed, central, name, eocd])
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 describe('LocalAppRuntimeManager', () => {
+  it('keeps the install RPC deadline beyond the manager operation ceiling', () => {
+    expect(LOCAL_APP_INSTALL_RPC_TIMEOUT_MS).toBeGreaterThan(
+      LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
+    )
+  })
+
   it('installs, starts, stops, and idempotently restarts a static bundle', async () => {
     const bundleDir = await writeBundle(
       'demo.static',
@@ -201,11 +257,87 @@ describe('LocalAppRuntimeManager', () => {
     expect(logs).toContain('Healthy at')
   })
 
+  it('serializes stop against an in-flight start and leaves no running process', async () => {
+    const bundleDir = await writeBundle(
+      'demo.start-stop',
+      '1.0.0',
+      {
+        runtime: 'js',
+        entry: ['server.js'],
+        startTimeoutMs: 5_000,
+      },
+      {
+        'server.js': `
+          const http = require('http')
+          const readyAt = Date.now() + 2_000
+          http.createServer((request, response) => {
+            const healthy = request.url !== '/health' || Date.now() >= readyAt
+            response.statusCode = healthy ? 200 : 503
+            response.end(healthy ? 'ok' : 'starting')
+          }).listen(Number(process.env.PORT), '127.0.0.1')
+        `,
+      },
+    )
+    const archive = await archiveBundle(bundleDir, 'start-stop')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.start-stop', '1.0.0', url, archive))
+
+    const startResult = runtime.start('demo.start-stop').then(
+      value => ({ value, error: null }),
+      error => ({ value: null, error }),
+    )
+    let startingUrl: string | undefined
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await runtime.getRuntimeStatus('demo.start-stop')
+      if (status.status === 'starting' && status.url) {
+        startingUrl = status.url
+        break
+      }
+      await Bun.sleep(10)
+    }
+    expect(startingUrl).toBeTruthy()
+
+    const stopped = await runtime.stop('demo.start-stop')
+    const startOutcome = await startResult
+    expect(startOutcome.value).toBeNull()
+    expect(startOutcome.error).toMatchObject({ code: 'START_FAILED' })
+    expect(stopped.status).toBe('stopped')
+    expect((await runtime.getRuntimeStatus('demo.start-stop')).status).toBe('stopped')
+    await expect(stableFetch(startingUrl!)).rejects.toThrow()
+
+    const secondStart = runtime.start('demo.start-stop').then(
+      value => ({ value, error: null }),
+      error => ({ value: null, error }),
+    )
+    let secondUrl: string | undefined
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await runtime.getRuntimeStatus('demo.start-stop')
+      if (status.status === 'starting' && status.url) {
+        secondUrl = status.url
+        break
+      }
+      await Bun.sleep(10)
+    }
+    await runtime.uninstall('demo.start-stop')
+    expect((await secondStart).error).toMatchObject({ code: 'START_FAILED' })
+    expect((await runtime.getRuntimeStatus('demo.start-stop')).status).toBe('not_installed')
+    await expect(stableFetch(secondUrl!)).rejects.toThrow()
+  })
+
   it('runs JS and Python bundles with isolated runtime and data directories', async () => {
     const bunPath = process.execPath
     const uvPath = Bun.which('uv')
     expect(uvPath).toBeTruthy()
-    const runtime = makeManager({ bunPath, uvPath: uvPath! })
+    const runtime = makeManager({
+      bunPath,
+      uvPath: uvPath!,
+      baseEnvironment: {
+        ...process.env,
+        POLO_ADMIN_TOKEN: 'must-not-leak',
+        HTTPS_PROXY: 'http://user:secret@example.invalid',
+      },
+    })
 
     const jsBundle = await writeBundle(
       'demo.js',
@@ -226,6 +358,9 @@ describe('LocalAppRuntimeManager', () => {
                 appId: process.env.POLO_APP_ID,
                 dataDir: process.env.POLO_APP_DATA_DIR,
                 cacheDir: process.env.BUN_INSTALL_CACHE_DIR,
+                path: process.env.PATH ?? null,
+                adminToken: process.env.POLO_ADMIN_TOKEN ?? null,
+                proxy: process.env.HTTPS_PROXY ?? null,
               })
             },
           })
@@ -321,6 +456,9 @@ package = false
     expect(jsEnv.cacheDir).not.toBe(pythonEnv.venvDir)
     expect(jsEnv.cacheDir).toContain('/demo.js/1.0.0/')
     expect(pythonEnv.venvDir).toContain('/demo.python/1.0.0/')
+    expect(jsEnv.path).toBe(process.env.PATH!)
+    expect(jsEnv.adminToken).toBeNull()
+    expect(jsEnv.proxy).toBeNull()
 
     await runtime.stop('demo.js')
     await runtime.stop('demo.python')
@@ -345,6 +483,7 @@ package = false
     const v1Url = await serveArchive(v1Archive)
     const runtime = makeManager({ bunPath: process.execPath })
     await runtime.install(requestFor('demo.rollback', '1.0.0', v1Url, v1Archive))
+    await runtime.start('demo.rollback')
     await runtime.stop('demo.rollback')
     await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
     downloadServer = null
@@ -364,10 +503,26 @@ package = false
     const v2Archive = await archiveBundle(v2Bundle, 'rollback-v2')
     const v2Url = await serveArchive(v2Archive)
     await runtime.install(requestFor('demo.rollback', '2.0.0', v2Url, v2Archive))
+    await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+    downloadServer = null
+
+    const v3Bundle = await writeBundle(
+      'demo.rollback',
+      '3.0.0',
+      {
+        runtime: 'js',
+        entry: ['crash.js'],
+        startTimeoutMs: 1_000,
+      },
+      { 'crash.js': 'console.error("second intentional crash"); process.exit(18)' },
+    )
+    const v3Archive = await archiveBundle(v3Bundle, 'rollback-v3')
+    const v3Url = await serveArchive(v3Archive)
+    await runtime.install(requestFor('demo.rollback', '3.0.0', v3Url, v3Archive))
 
     const started = await runtime.start('demo.rollback')
     expect(started.version).toBe('1.0.0')
-    expect(started.rolledBackFrom).toBe('2.0.0')
+    expect(started.rolledBackFrom).toBe('3.0.0')
     expect(await (await stableFetch(started.url)).text()).toContain('stable-v1')
     expect(await readFile(dataFile, 'utf8')).toContain('dark')
 
@@ -428,6 +583,85 @@ package = false
     expect((await runtime.getRuntimeStatus('demo.cancel')).status).toBe('broken')
   })
 
+  it('cancels and reaps the complete dependency preparation process tree', async () => {
+    const fakeBunPath = join(testRoot, 'fake-bun')
+    await writeFile(fakeBunPath, `#!${process.execPath}
+      const { mkdirSync, writeFileSync } = require('fs')
+      const { join } = require('path')
+      const { spawn } = require('child_process')
+      const dataDir = process.env.POLO_APP_DATA_DIR
+      mkdirSync(dataDir, { recursive: true })
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+        stdio: 'ignore',
+      })
+      writeFileSync(join(dataDir, 'installer-pids.json'), JSON.stringify({
+        root: process.pid,
+        child: child.pid,
+      }))
+      setInterval(() => {}, 1000)
+    `)
+    await chmod(fakeBunPath, 0o755)
+    const bundle = await writeBundle(
+      'demo.install-tree',
+      '1.0.0',
+      {
+        runtime: 'js',
+        entry: ['server.js'],
+      },
+      {
+        'server.js': 'setInterval(() => {}, 1000)',
+        'package.json': '{"name":"install-tree","version":"1.0.0"}',
+        'bun.lock': 'test lock placeholder',
+      },
+    )
+    const archive = await archiveBundle(bundle, 'install-tree')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: fakeBunPath })
+    const install = runtime.install(requestFor('demo.install-tree', '1.0.0', url, archive))
+    const pidFile = join(
+      testRoot,
+      'runtime/apps/demo.install-tree/data/installer-pids.json',
+    )
+    let pids: { root: number; child: number } | undefined
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      try {
+        pids = JSON.parse(await readFile(pidFile, 'utf8')) as { root: number; child: number }
+        break
+      } catch {
+        await Bun.sleep(10)
+      }
+    }
+    expect(pids?.root).toBeGreaterThan(0)
+    expect(pids?.child).toBeGreaterThan(0)
+
+    expect(runtime.cancelInstall('demo.install-tree')).toBe(true)
+    await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
+    expect(isProcessAlive(pids!.root)).toBe(false)
+    expect(isProcessAlive(pids!.child)).toBe(false)
+  })
+
+  it('rejects an empty static entry and unsupported host permissions', async () => {
+    expect(() => validatePoloAppManifest({
+      schemaVersion: 1,
+      appId: 'demo.permission',
+      version: '1.0.0',
+      runtime: 'static',
+      entry: ['dist'],
+      healthcheck: '/health',
+      webPath: '/',
+      permissions: ['polo.credentials.read'],
+    }, { platform, arch: architecture })).toThrow(LocalAppRuntimeError)
+
+    const bundle = await writeBundle('demo.empty-static', '1.0.0')
+    await mkdir(join(bundle, 'dist'), { recursive: true })
+    const archive = await archiveBundle(bundle, 'empty-static')
+    const url = await serveArchive(archive)
+    const runtime = makeManager()
+    await expect(
+      runtime.install(requestFor('demo.empty-static', '1.0.0', url, archive)),
+    ).rejects.toMatchObject({ code: 'INVALID_MANIFEST' })
+  })
+
   it('rejects shell-string entries and archive path traversal before writing outside staging', async () => {
     expect(() => validatePoloAppManifest({
       schemaVersion: 1,
@@ -448,5 +682,20 @@ package = false
       code: 'UNSAFE_ARCHIVE',
     })
     await expect(stat(escaped)).rejects.toThrow()
+
+    const safeZipPath = join(testRoot, 'safe.zip')
+    const safeDestination = join(testRoot, 'safe-output')
+    await writeFile(safeZipPath, makeStoredZip('safe.txt', Buffer.from('streamed')))
+    await extractBundleArchive(safeZipPath, safeDestination)
+    expect(await readFile(join(safeDestination, 'safe.txt'), 'utf8')).toBe('streamed')
+
+    const bombPath = join(testRoot, 'compression-bomb.zip')
+    await writeFile(
+      bombPath,
+      makeDeflatedZip('huge.txt', Buffer.alloc(2 * 1024 * 1024, 0x61)),
+    )
+    await expect(
+      extractBundleArchive(bombPath, join(testRoot, 'bomb-output')),
+    ).rejects.toMatchObject({ code: 'UNSAFE_ARCHIVE' })
   })
 })

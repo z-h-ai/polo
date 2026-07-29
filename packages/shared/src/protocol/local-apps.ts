@@ -14,6 +14,16 @@ export type LocalAppLifecycleStatus =
   | 'broken'
   | 'update_available'
 
+/** Hard ceiling enforced by the runtime manager for one complete installation. */
+export const LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS = 20 * 60_000
+
+/**
+ * Transport timeout leaves cleanup headroom after the manager's own deadline.
+ * The server also aborts the handler signal if this ceiling is ever reached.
+ */
+export const LOCAL_APP_INSTALL_RPC_TIMEOUT_MS =
+  LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS + 2 * 60_000
+
 /**
  * The on-disk `polo-app.json` contract.
  *
@@ -99,6 +109,7 @@ export type LocalAppErrorCode =
   | 'ARCH_MISMATCH'
   | 'DOWNLOAD_FAILED'
   | 'INSTALL_CANCELLED'
+  | 'INSTALL_TIMEOUT'
   | 'SIZE_MISMATCH'
   | 'CHECKSUM_MISMATCH'
   | 'UNSUPPORTED_ARCHIVE'
