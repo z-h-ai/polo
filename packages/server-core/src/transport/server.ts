@@ -146,6 +146,7 @@ export class WsRpcServer implements RpcServer {
   private readonly serverVersion: string
   private readonly maxClients: number
   private readonly handlerTimeoutMs: number
+  private readonly hasExplicitHandlerTimeout: boolean
   private readonly onClientConnected: WsRpcServerOptions['onClientConnected']
   private readonly onClientDisconnected: WsRpcServerOptions['onClientDisconnected']
   private readonly httpHandler: WsRpcServerOptions['httpHandler']
@@ -161,6 +162,7 @@ export class WsRpcServer implements RpcServer {
     this.tlsOptions = opts?.tls ?? null
     this.maxClients = opts?.maxClients ?? 50
     this.handlerTimeoutMs = opts?.handlerTimeoutMs ?? 60_000
+    this.hasExplicitHandlerTimeout = opts?.handlerTimeoutMs !== undefined
     this.onClientConnected = opts?.onClientConnected
     this.onClientDisconnected = opts?.onClientDisconnected
     this.httpHandler = opts?.httpHandler
@@ -665,7 +667,9 @@ export class WsRpcServer implements RpcServer {
 
     let handlerTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const handlerTimeout = getRpcRequestTimeoutMs(channel, this.handlerTimeoutMs)
+      const handlerTimeout = this.hasExplicitHandlerTimeout
+        ? this.handlerTimeoutMs
+        : getRpcRequestTimeoutMs(channel, this.handlerTimeoutMs)
       const result = await Promise.race([
         handler(ctx, ...(args ?? [])),
         new Promise<never>((_, reject) => {

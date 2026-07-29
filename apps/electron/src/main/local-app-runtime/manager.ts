@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from 'crypto'
-import { constants as fsConstants, existsSync } from 'fs'
+import { constants as fsConstants, createReadStream, existsSync } from 'fs'
 import {
   access,
-  appendFile,
   mkdir,
   mkdtemp,
   open,
@@ -13,7 +12,13 @@ import {
   stat,
   writeFile,
 } from 'fs/promises'
-import { createServer as createHttpServer, get as httpGet, type Server as HttpServer } from 'http'
+import {
+  createServer as createHttpServer,
+  get as httpGet,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from 'http'
 import { createServer as createNetServer } from 'net'
 import { arch as hostArch, platform as hostPlatform } from 'os'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
@@ -34,7 +39,12 @@ import type {
   PoloAppManifest,
 } from '@polo-ai/shared/protocol'
 import { extractBundleArchive } from './archive'
+import { BoundedLogWriter } from './bounded-log'
 import { assertSafeRelativePath, validatePoloAppManifest } from './manifest'
+import {
+  createWindowsProcessTreeOwner,
+  type WindowsProcessTreeOwner,
+} from './process-tree'
 import { asLocalAppRuntimeError, LocalAppRuntimeError } from './runtime-error'
 
 const METADATA_SCHEMA_VERSION = 1
@@ -43,6 +53,8 @@ const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 const INSTALL_COMMAND_TIMEOUT_MS = 10 * 60_000
 const STOP_GRACE_MS = 3_000
 const MAX_LOG_TAIL = 10_000
+const MAX_STATIC_CONCURRENT_STREAMS = 32
+const MAX_STATIC_ASSET_BYTES = 256 * 1024 * 1024
 const RUNTIME_ENV_ALLOWLIST = [
   'PATH',
   'TMPDIR',
@@ -84,8 +96,11 @@ interface ManagedRuntime {
   url: string
   child?: ChildProcess
   server?: HttpServer
+  healthy: boolean
   stopRequested: boolean
   stopPromise?: Promise<void>
+  cleanupPromise?: Promise<void>
+  processTreeOwner?: WindowsProcessTreeOwner
   exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
   spawnError?: Error
 }
@@ -208,7 +223,11 @@ export class LocalAppRuntimeManager {
   private readonly startControllers = new Map<string, AbortController>()
   private readonly lifecycleQueues = new Map<string, Promise<void>>()
   private readonly statuses = new Map<string, LocalAppRuntimeStatus>()
-  private readonly logWriteQueues = new Map<string, Promise<void>>()
+  private readonly installationStatuses = new Map<string, {
+    status: 'downloading' | 'installing'
+    progress: LocalAppInstallProgress
+  }>()
+  private readonly logWriters = new Map<string, BoundedLogWriter>()
   private initializationPromise?: Promise<void>
   private shuttingDown = false
 
@@ -288,7 +307,10 @@ export class LocalAppRuntimeManager {
         clearTimeout(timeout)
         options.signal?.removeEventListener('abort', abortFromCaller)
         const active = this.activeInstalls.get(validated.appId)
-        if (active?.promise === promise) this.activeInstalls.delete(validated.appId)
+        if (active?.promise === promise) {
+          this.activeInstalls.delete(validated.appId)
+          this.installationStatuses.delete(validated.appId)
+        }
       })
     this.activeInstalls.set(validated.appId, {
       version: validated.version,
@@ -348,10 +370,11 @@ export class LocalAppRuntimeManager {
       `Installation of ${safeAppId} was cancelled by uninstall`,
     ))
     this.cancelStart(safeAppId, `Start of ${safeAppId} was cancelled by uninstall`)
-    return this.enqueueLifecycle(safeAppId, async () => {
-      await activeInstall?.promise.catch(() => {})
-      await this.performUninstall(safeAppId, options)
-    })
+    const enqueueUninstall = () =>
+      this.enqueueLifecycle(safeAppId, () => this.performUninstall(safeAppId, options))
+    return activeInstall
+      ? activeInstall.promise.catch(() => {}).then(enqueueUninstall)
+      : enqueueUninstall()
   }
 
   private async performUninstall(
@@ -360,6 +383,9 @@ export class LocalAppRuntimeManager {
   ): Promise<void> {
     try {
       await this.performStop(appId)
+      const logWriter = this.logWriters.get(appId)
+      await logWriter?.flush()
+      this.logWriters.delete(appId)
       const appDir = this.getAppDir(appId)
       if (options.preserveData ?? true) {
         await Promise.all([
@@ -408,18 +434,37 @@ export class LocalAppRuntimeManager {
   async getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus> {
     const safeAppId = validateRequestIdentifier(appId, 'appId')
     const handle = this.runtimes.get(safeAppId)
+    const installation = this.installationStatuses.get(safeAppId)
+    const transient = this.statuses.get(safeAppId)
     if (handle) {
+      if (
+        transient?.status === 'broken'
+        && (handle.child?.exitCode != null || handle.child?.signalCode != null)
+      ) {
+        return { ...transient }
+      }
       return {
         appId: safeAppId,
-        status: this.statuses.get(safeAppId)?.status === 'starting' ? 'starting' : 'running',
+        status: handle.healthy ? 'running' : 'starting',
         currentVersion: (await this.readMetadata(safeAppId))?.currentVersion,
         runningVersion: handle.version,
         url: handle.url,
         port: handle.port,
         ...(handle.child?.pid ? { pid: handle.child.pid } : {}),
+        ...(installation ? { installationStatus: installation.status } : {}),
+        ...(installation ? { progress: installation.progress } : {}),
       }
     }
-    const transient = this.statuses.get(safeAppId)
+    if (installation) {
+      const metadata = await this.readMetadata(safeAppId)
+      return {
+        appId: safeAppId,
+        status: installation.status,
+        currentVersion: metadata?.currentVersion,
+        previousVersion: metadata?.previousVersion,
+        progress: installation.progress,
+      }
+    }
     if (transient && ['downloading', 'installing', 'broken', 'stopped'].includes(transient.status)) {
       return { ...transient }
     }
@@ -435,18 +480,9 @@ export class LocalAppRuntimeManager {
 
   async getLogs(appId: string, options: LocalAppLogsOptions = {}): Promise<string> {
     const safeAppId = validateRequestIdentifier(appId, 'appId')
-    await this.logWriteQueues.get(safeAppId)
-    let content: string
-    try {
-      content = await readFile(this.getLogPath(safeAppId), 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
-      throw error
-    }
     const requestedTail = options.tail ?? 500
     const tail = Math.max(1, Math.min(MAX_LOG_TAIL, Math.floor(requestedTail)))
-    const lines = content.split(/\r?\n/)
-    return lines.slice(Math.max(0, lines.length - tail - 1)).join('\n')
+    return this.getLogWriter(safeAppId).readTail(tail)
   }
 
   async shutdown(): Promise<void> {
@@ -466,7 +502,7 @@ export class LocalAppRuntimeManager {
       ...this.lifecycleQueues.values(),
     ])
     await Promise.allSettled([...this.runtimes.values()].map(runtime => this.stopRuntime(runtime)))
-    await Promise.allSettled(this.logWriteQueues.values())
+    await Promise.allSettled([...this.logWriters.values()].map(writer => writer.flush()))
   }
 
   private trackStartOperation(
@@ -580,6 +616,16 @@ export class LocalAppRuntimeManager {
     await this.initialize()
     const existingMetadata = await this.readMetadata(request.appId)
     const existingVersion = existingMetadata?.versions[request.version]
+    if (existingVersion && existingVersion.checksum !== request.checksum) {
+      throw new LocalAppRuntimeError(
+        'CHECKSUM_MISMATCH',
+        `Installed ${request.appId}@${request.version} has a different checksum`,
+        {
+          installedChecksum: existingVersion.checksum,
+          requestedChecksum: request.checksum,
+        },
+      )
+    }
     if (existingVersion && await this.isInstalledVersionUsable(request.appId, request.version)) {
       const installed = (await this.getInstalledApps()).find(app => app.appId === request.appId)
       if (!installed) {
@@ -620,44 +666,50 @@ export class LocalAppRuntimeManager {
       await this.prepareRuntime(request.appId, request.version, extractedPath, manifest, signal)
       this.throwIfCancelled(signal)
 
-      const appDir = this.getAppDir(request.appId)
-      const versionsDir = join(appDir, 'versions')
-      const targetDir = this.getVersionDir(request.appId, request.version)
-      await mkdir(versionsDir, { recursive: true })
-      if (existsSync(targetDir)) await rm(targetDir, { recursive: true, force: true })
-      await rename(extractedPath, targetDir)
-      await mkdir(this.getDataDir(request.appId), { recursive: true })
+      const nextMetadata = await this.enqueueLifecycle(request.appId, async () => {
+        this.throwIfCancelled(signal)
+        const appDir = this.getAppDir(request.appId)
+        const versionsDir = join(appDir, 'versions')
+        const targetDir = this.getVersionDir(request.appId, request.version)
+        await mkdir(versionsDir, { recursive: true })
+        if (existsSync(targetDir)) await rm(targetDir, { recursive: true, force: true })
+        await rename(extractedPath, targetDir)
+        await mkdir(this.getDataDir(request.appId), { recursive: true })
 
-      const metadata = await this.readMetadata(request.appId)
-      const versions = metadata?.versions ?? {}
-      versions[request.version] = {
-        manifest,
-        installedAt: this.now(),
-        checksum: request.checksum,
-      }
-      const priorCurrent = metadata?.currentVersion
-      const previousVersion = priorCurrent && priorCurrent !== request.version
-        ? priorCurrent
-        : metadata?.previousVersion
-      const nextMetadata: AppMetadata = {
-        schemaVersion: METADATA_SCHEMA_VERSION,
-        appId: request.appId,
-        currentVersion: request.version,
-        ...(previousVersion ? { previousVersion } : {}),
-        ...(metadata?.lastKnownGoodVersion
-          ? { lastKnownGoodVersion: metadata.lastKnownGoodVersion }
-          : {}),
-        versions,
-        ...(metadata?.brokenVersions ? { brokenVersions: metadata.brokenVersions } : {}),
-      }
-      await this.writeMetadata(nextMetadata)
+        // Re-read inside the app lifecycle queue so a start health write cannot
+        // overwrite a concurrently prepared update with stale metadata.
+        const metadata = await this.readMetadata(request.appId)
+        const versions = metadata?.versions ?? {}
+        versions[request.version] = {
+          manifest,
+          installedAt: this.now(),
+          checksum: request.checksum,
+        }
+        const priorCurrent = metadata?.currentVersion
+        const previousVersion = priorCurrent && priorCurrent !== request.version
+          ? priorCurrent
+          : metadata?.previousVersion
+        const committedMetadata: AppMetadata = {
+          schemaVersion: METADATA_SCHEMA_VERSION,
+          appId: request.appId,
+          currentVersion: request.version,
+          ...(previousVersion ? { previousVersion } : {}),
+          ...(metadata?.lastKnownGoodVersion
+            ? { lastKnownGoodVersion: metadata.lastKnownGoodVersion }
+            : {}),
+          versions,
+          ...(metadata?.brokenVersions ? { brokenVersions: metadata.brokenVersions } : {}),
+        }
+        await this.writeMetadata(committedMetadata)
+        return committedMetadata
+      })
       this.statuses.set(request.appId, {
         appId: request.appId,
         status: 'installed',
         currentVersion: request.version,
         previousVersion: nextMetadata.previousVersion,
       })
-      await this.appendLog(request.appId, 'system', `Installed ${request.version} (${manifest.runtime})`)
+      this.appendLog(request.appId, 'system', `Installed ${request.version} (${manifest.runtime})`)
       const installed = (await this.getInstalledApps()).find(app => app.appId === request.appId)
       if (!installed) throw new LocalAppRuntimeError('NOT_INSTALLED', 'Installed metadata could not be reloaded')
       return installed
@@ -684,7 +736,7 @@ export class LocalAppRuntimeManager {
           force: true,
         })
       }
-      await this.appendLog(request.appId, 'system', `${runtimeError.code}: ${runtimeError.message}`)
+      this.appendLog(request.appId, 'system', `${runtimeError.code}: ${runtimeError.message}`)
       throw runtimeError
     } finally {
       await rm(stagingRoot, { recursive: true, force: true })
@@ -777,10 +829,8 @@ export class LocalAppRuntimeManager {
       sizeBytes: request.sizeBytes,
       percent: Math.min(100, Math.round((bytesDownloaded / request.sizeBytes) * 100)),
     }
-    this.statuses.set(request.appId, {
-      appId: request.appId,
+    this.installationStatuses.set(request.appId, {
       status: phase === 'downloading' ? 'downloading' : 'installing',
-      currentVersion: undefined,
       progress,
     })
   }
@@ -905,7 +955,7 @@ export class LocalAppRuntimeManager {
     env: NodeJS.ProcessEnv,
     signal: AbortSignal,
   ): Promise<void> {
-    await this.appendLog(appId, 'system', `Preparing dependencies with ${basename(command)}`)
+    this.appendLog(appId, 'system', `Preparing dependencies with ${basename(command)}`)
     const child = spawn(command, args, {
       cwd,
       env,
@@ -1017,7 +1067,7 @@ export class LocalAppRuntimeManager {
         throw primaryError
       }
 
-      await this.appendLog(appId, 'system', `Start failed for ${requestedVersion}; rolling back to ${fallbackVersion}`)
+      this.appendLog(appId, 'system', `Start failed for ${requestedVersion}; rolling back to ${fallbackVersion}`)
       metadata.currentVersion = fallbackVersion
       metadata.previousVersion = requestedVersion
       await this.writeMetadata(metadata)
@@ -1082,6 +1132,7 @@ export class LocalAppRuntimeManager {
         manifest.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS,
         signal,
       )
+      handle.healthy = true
       metadata.lastKnownGoodVersion = version
       if (metadata.brokenVersions?.[version]) {
         delete metadata.brokenVersions[version]
@@ -1101,7 +1152,7 @@ export class LocalAppRuntimeManager {
       port: handle.port,
       ...(handle.child?.pid ? { pid: handle.child.pid } : {}),
     })
-    await this.appendLog(metadata.appId, 'system', `Healthy at ${handle.url}`)
+    this.appendLog(metadata.appId, 'system', `Healthy at ${handle.url}`)
     return {
       appId: metadata.appId,
       version,
@@ -1148,6 +1199,9 @@ export class LocalAppRuntimeManager {
     const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise) => {
       resolveExit = resolvePromise
     })
+    const processTreeOwner = process.platform === 'win32' && child.pid
+      ? createWindowsProcessTreeOwner(child.pid)
+      : undefined
     const handle: ManagedRuntime = {
       appId,
       version,
@@ -1155,6 +1209,8 @@ export class LocalAppRuntimeManager {
       port,
       url: this.buildAppUrl(port, manifest.webPath),
       child,
+      processTreeOwner,
+      healthy: false,
       stopRequested: false,
       exitPromise,
     }
@@ -1163,10 +1219,13 @@ export class LocalAppRuntimeManager {
     })
     child.once('exit', (code, signal) => {
       resolveExit({ code, signal })
-      if (this.runtimes.get(appId) === handle) this.runtimes.delete(appId)
       if (handle.stopRequested) return
-      void this.killProcessTree(child).catch(error =>
-        this.logger.warn(`[local-apps] failed to reap descendants after ${appId} exited`, error))
+      handle.cleanupPromise = this.killProcessTree(child, handle.processTreeOwner)
+        .catch(error =>
+          this.logger.warn(`[local-apps] failed to reap descendants after ${appId} exited`, error))
+        .finally(() => {
+          if (this.runtimes.get(appId) === handle) this.runtimes.delete(appId)
+        })
       const runtimeError = new LocalAppRuntimeError(
         'PROCESS_CRASHED',
         `${appId} exited unexpectedly with code ${code ?? 'null'}`,
@@ -1178,9 +1237,9 @@ export class LocalAppRuntimeManager {
         currentVersion: version,
         error: runtimeError.toJSON(),
       })
-      void this.appendLog(appId, 'system', `${runtimeError.code}: ${runtimeError.message}`)
+      this.appendLog(appId, 'system', `${runtimeError.code}: ${runtimeError.message}`)
     })
-    await this.appendLog(appId, 'system', `Starting ${version} on port ${port}`)
+    this.appendLog(appId, 'system', `Starting ${version} on port ${port}`)
     return handle
   }
 
@@ -1194,22 +1253,23 @@ export class LocalAppRuntimeManager {
     const entryStat = await stat(entryPath)
     const staticRoot = entryStat.isDirectory() ? entryPath : dirname(entryPath)
     const fallbackFile = entryStat.isDirectory() ? join(entryPath, 'index.html') : entryPath
+    const streamState = { active: 0 }
     const server = createHttpServer((request, response) => {
-      void this.handleStaticRequest(request.url ?? '/', request.method ?? 'GET', {
+      void this.handleStaticRequest(request, response, {
         staticRoot,
         fallbackFile,
         healthcheck: manifest.healthcheck,
         webPath: manifest.webPath,
-      }).then((result) => {
-        response.statusCode = result.status
-        for (const [name, value] of Object.entries(result.headers)) response.setHeader(name, value)
-        if (request.method === 'HEAD') response.end()
-        else response.end(result.body)
+        streamState,
       }).catch((error) => {
-        response.statusCode = 500
-        response.setHeader('content-type', 'text/plain; charset=utf-8')
-        response.end('Internal server error')
-        void this.appendLog(appId, 'stderr', error instanceof Error ? error.message : String(error))
+        if (!response.headersSent) {
+          response.statusCode = 500
+          response.setHeader('content-type', 'text/plain; charset=utf-8')
+          response.end('Internal server error')
+        } else {
+          response.destroy()
+        }
+        this.appendLog(appId, 'stderr', error instanceof Error ? error.message : String(error))
       })
     })
     const port = await new Promise<number>((resolvePort, rejectPort) => {
@@ -1236,76 +1296,192 @@ export class LocalAppRuntimeManager {
       port,
       url: this.buildAppUrl(port, manifest.webPath),
       server,
+      healthy: false,
       stopRequested: false,
       exitPromise,
     }
-    await this.appendLog(appId, 'system', `Starting static ${version} on port ${port}`)
+    this.appendLog(appId, 'system', `Starting static ${version} on port ${port}`)
     return handle
   }
 
   private async handleStaticRequest(
-    rawUrl: string,
-    method: string,
-    options: { staticRoot: string; fallbackFile: string; healthcheck: string; webPath: string },
-  ): Promise<{ status: number; headers: Record<string, string>; body: Buffer | string }> {
+    request: IncomingMessage,
+    response: ServerResponse,
+    options: {
+      staticRoot: string
+      fallbackFile: string
+      healthcheck: string
+      webPath: string
+      streamState: { active: number }
+    },
+  ): Promise<void> {
+    const method = request.method ?? 'GET'
     if (method !== 'GET' && method !== 'HEAD') {
-      return { status: 405, headers: { allow: 'GET, HEAD' }, body: 'Method not allowed' }
+      this.sendStaticText(response, method, 405, 'Method not allowed', { allow: 'GET, HEAD' })
+      return
     }
     let pathname: string
     try {
-      pathname = decodeURIComponent(new URL(rawUrl, 'http://127.0.0.1').pathname)
+      pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://127.0.0.1').pathname)
     } catch {
-      return { status: 400, headers: {}, body: 'Bad request' }
+      this.sendStaticText(response, method, 400, 'Bad request')
+      return
     }
     const healthPath = new URL(options.healthcheck, 'http://127.0.0.1').pathname
     const webPath = new URL(options.webPath, 'http://127.0.0.1').pathname
     if (pathname === healthPath && healthPath !== webPath) {
-      return {
-        status: 200,
-        headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-        body: '{"ok":true}',
-      }
+      this.sendStaticText(response, method, 200, '{"ok":true}', {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+      })
+      return
     }
 
     const mountPath = new URL(options.webPath, 'http://127.0.0.1').pathname.replace(/\/+$/, '') || '/'
     if (mountPath !== '/' && pathname !== mountPath && !pathname.startsWith(`${mountPath}/`)) {
-      return { status: 404, headers: {}, body: 'Not found' }
+      this.sendStaticText(response, method, 404, 'Not found')
+      return
     }
     const relativeUrlPath = mountPath === '/'
       ? pathname.slice(1)
       : pathname.slice(mountPath.length).replace(/^\/+/, '')
     if (relativeUrlPath.split('/').includes('..') || relativeUrlPath.includes('\0')) {
-      return { status: 403, headers: {}, body: 'Forbidden' }
+      this.sendStaticText(response, method, 403, 'Forbidden')
+      return
     }
 
     const candidate = resolve(options.staticRoot, relativeUrlPath || 'index.html')
     const rootPrefix = options.staticRoot.endsWith(sep) ? options.staticRoot : `${options.staticRoot}${sep}`
     if (candidate !== options.staticRoot && !candidate.startsWith(rootPrefix)) {
-      return { status: 403, headers: {}, body: 'Forbidden' }
+      this.sendStaticText(response, method, 403, 'Forbidden')
+      return
     }
     let selected = candidate
+    let selectedStat
     try {
       const candidateStat = await stat(selected)
       if (candidateStat.isDirectory()) selected = join(selected, 'index.html')
-      const selectedStat = await stat(selected)
+      selectedStat = await stat(selected)
       if (!selectedStat.isFile()) throw new Error('not a file')
     } catch {
       selected = options.fallbackFile
-    }
-    try {
-      const body = await readFile(selected)
-      return {
-        status: 200,
-        headers: {
-          'content-type': CONTENT_TYPES[extname(selected).toLowerCase()] ?? 'application/octet-stream',
-          'x-content-type-options': 'nosniff',
-          'cache-control': selected.endsWith('.html') ? 'no-cache' : 'public, max-age=3600',
-        },
-        body,
+      try {
+        selectedStat = await stat(selected)
+        if (!selectedStat.isFile()) throw new Error('not a file')
+      } catch {
+        this.sendStaticText(response, method, 404, 'Not found')
+        return
       }
-    } catch {
-      return { status: 404, headers: {}, body: 'Not found' }
     }
+    if (selectedStat.size > MAX_STATIC_ASSET_BYTES) {
+      this.sendStaticText(response, method, 413, 'Static asset is too large')
+      return
+    }
+
+    const requestedRange = request.headers.range
+    const range = requestedRange
+      ? this.parseStaticRange(requestedRange, selectedStat.size)
+      : undefined
+    if (range === null) {
+      this.sendStaticText(response, method, 416, 'Range not satisfiable', {
+        'content-range': `bytes */${selectedStat.size}`,
+        'accept-ranges': 'bytes',
+      })
+      return
+    }
+    const start = range?.start ?? 0
+    const end = range?.end ?? Math.max(0, selectedStat.size - 1)
+    const contentLength = selectedStat.size === 0 ? 0 : end - start + 1
+    const status = range ? 206 : 200
+    if (
+      method !== 'HEAD'
+      && selectedStat.size > 0
+      && options.streamState.active >= MAX_STATIC_CONCURRENT_STREAMS
+    ) {
+      this.sendStaticText(response, method, 503, 'Static server is busy', { 'retry-after': '1' })
+      return
+    }
+    response.statusCode = status
+    response.setHeader(
+      'content-type',
+      CONTENT_TYPES[extname(selected).toLowerCase()] ?? 'application/octet-stream',
+    )
+    response.setHeader('x-content-type-options', 'nosniff')
+    response.setHeader(
+      'cache-control',
+      selected.endsWith('.html') ? 'no-cache' : 'public, max-age=3600',
+    )
+    response.setHeader('accept-ranges', 'bytes')
+    response.setHeader('content-length', String(contentLength))
+    if (range) response.setHeader('content-range', `bytes ${start}-${end}/${selectedStat.size}`)
+    if (method === 'HEAD' || selectedStat.size === 0) {
+      response.end()
+      return
+    }
+
+    options.streamState.active += 1
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      options.streamState.active -= 1
+    }
+    response.once('finish', release)
+    const stream = createReadStream(selected, { start, end })
+    response.once('close', () => {
+      release()
+      stream.destroy()
+    })
+    stream.once('error', () => {
+      release()
+      if (response.headersSent) response.destroy()
+      else {
+        this.sendStaticText(response, method, 500, 'Static asset could not be read')
+      }
+    })
+    stream.pipe(response)
+  }
+
+  private sendStaticText(
+    response: ServerResponse,
+    method: string,
+    status: number,
+    body: string,
+    headers: Record<string, string> = {},
+  ): void {
+    response.statusCode = status
+    for (const [name, value] of Object.entries(headers)) response.setHeader(name, value)
+    if (!response.hasHeader('content-type')) {
+      response.setHeader('content-type', 'text/plain; charset=utf-8')
+    }
+    response.setHeader('content-length', String(Buffer.byteLength(body)))
+    response.end(method === 'HEAD' ? undefined : body)
+  }
+
+  private parseStaticRange(
+    header: string,
+    size: number,
+  ): { start: number; end: number } | null {
+    if (size <= 0 || !header.startsWith('bytes=') || header.includes(',')) return null
+    const match = /^bytes=(\d*)-(\d*)$/.exec(header)
+    if (!match || (!match[1] && !match[2])) return null
+    if (!match[1]) {
+      const suffixLength = Number(match[2])
+      if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null
+      return { start: Math.max(0, size - suffixLength), end: size - 1 }
+    }
+    const start = Number(match[1])
+    const requestedEnd = match[2] ? Number(match[2]) : size - 1
+    if (
+      !Number.isSafeInteger(start)
+      || !Number.isSafeInteger(requestedEnd)
+      || start < 0
+      || start >= size
+      || requestedEnd < start
+    ) {
+      return null
+    }
+    return { start, end: Math.min(requestedEnd, size - 1) }
   }
 
   private async waitForHealthcheck(
@@ -1369,18 +1545,41 @@ export class LocalAppRuntimeManager {
           handle.server!.closeAllConnections?.()
         })
       }
-      if (handle.child && handle.child.exitCode == null && handle.child.signalCode == null) {
-        await this.killProcessTree(handle.child)
+      if (handle.cleanupPromise) {
+        await handle.cleanupPromise
+      } else if (
+        handle.child
+        && (
+          handle.processTreeOwner
+          || (handle.child.exitCode == null && handle.child.signalCode == null)
+        )
+      ) {
+        await this.killProcessTree(handle.child, handle.processTreeOwner)
       }
       if (this.runtimes.get(handle.appId) === handle) this.runtimes.delete(handle.appId)
-      await this.appendLog(handle.appId, 'system', `Stopped ${handle.version}`)
+      this.appendLog(handle.appId, 'system', `Stopped ${handle.version}`)
     })()
     return handle.stopPromise
   }
 
-  private async killProcessTree(child: ChildProcess): Promise<void> {
+  private async killProcessTree(
+    child: ChildProcess,
+    processTreeOwner?: WindowsProcessTreeOwner,
+  ): Promise<void> {
     const pid = child.pid
     if (!pid) return
+    if (processTreeOwner) {
+      try {
+        await processTreeOwner.terminate()
+      } catch (error) {
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          `Windows process tree ${pid} could not be fully terminated`,
+          { cause: error instanceof Error ? error.message : String(error) },
+        )
+      }
+      return
+    }
     if (process.platform === 'win32') {
       if (child.exitCode != null || child.signalCode != null) return
       await new Promise<void>((resolveKill) => {
@@ -1470,28 +1669,33 @@ export class LocalAppRuntimeManager {
   private captureChildOutput(appId: string, child: ChildProcess): void {
     const capture = (source: 'stdout' | 'stderr', chunk: Buffer | string) => {
       for (const line of String(chunk).split(/\r?\n/)) {
-        if (line) void this.appendLog(appId, source, line)
+        if (line) this.appendLog(appId, source, line)
       }
     }
     child.stdout?.on('data', chunk => capture('stdout', chunk))
     child.stderr?.on('data', chunk => capture('stderr', chunk))
   }
 
-  private appendLog(appId: string, source: 'stdout' | 'stderr' | 'system', message: string): Promise<void> {
-    const safeMessage = message.replaceAll('\0', '').replace(/\r?\n/g, '\n')
-    const line = `[${new Date(this.now()).toISOString()}] [${source}] ${safeMessage}\n`
-    const previous = this.logWriteQueues.get(appId) ?? Promise.resolve()
-    const next = previous
-      .catch(() => {})
-      .then(async () => {
-        await mkdir(dirname(this.getLogPath(appId)), { recursive: true })
-        await appendFile(this.getLogPath(appId), line, 'utf8')
+  private appendLog(
+    appId: string,
+    source: 'stdout' | 'stderr' | 'system',
+    message: string,
+  ): void {
+    this.getLogWriter(appId).append(source, message)
+  }
+
+  private getLogWriter(appId: string): BoundedLogWriter {
+    let writer = this.logWriters.get(appId)
+    if (!writer) {
+      writer = new BoundedLogWriter({
+        path: this.getLogPath(appId),
+        now: this.now,
+        onError: error =>
+          this.logger.warn(`[local-apps] failed to write bounded log for ${appId}`, error),
       })
-      .catch((error) => {
-        this.logger.warn(`[local-apps] failed to append log for ${appId}`, error)
-      })
-    this.logWriteQueues.set(appId, next)
-    return next
+      this.logWriters.set(appId, writer)
+    }
+    return writer
   }
 
   private async allocatePort(): Promise<number> {
@@ -1613,7 +1817,7 @@ export class LocalAppRuntimeManager {
       delete metadata.lastKnownGoodVersion
     }
     await this.writeMetadata(metadata)
-    await this.appendLog(metadata.appId, 'system', `${error.code}: ${error.message}`)
+    this.appendLog(metadata.appId, 'system', `${error.code}: ${error.message}`)
   }
 
   private async readMetadata(appId: string): Promise<AppMetadata | null> {

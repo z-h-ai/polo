@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { createHash } from 'crypto'
 import { createServer, type Server } from 'http'
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  truncate,
+  writeFile,
+} from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { deflateRawSync } from 'zlib'
@@ -229,7 +239,10 @@ describe('LocalAppRuntimeManager', () => {
       'demo.static',
       '1.0.0',
       { webPath: '/app' },
-      { 'dist/index.html': '<h1>static-ready</h1>' },
+      {
+        'dist/index.html': '<h1>static-ready</h1>',
+        'dist/asset.txt': '0123456789',
+      },
     )
     const archive = await archiveBundle(bundleDir, 'static')
     const url = await serveArchive(archive)
@@ -241,10 +254,25 @@ describe('LocalAppRuntimeManager', () => {
     expect(firstInstall.currentVersion).toBe('1.0.0')
     expect(secondInstall.versions).toEqual(['1.0.0'])
     expect(await readdir(join(testRoot, 'runtime/apps/demo.static/versions'))).toEqual(['1.0.0'])
+    const oversizedAsset = join(
+      testRoot,
+      'runtime/apps/demo.static/versions/1.0.0/dist/oversized.bin',
+    )
+    await writeFile(oversizedAsset, '')
+    await truncate(oversizedAsset, 256 * 1024 * 1024 + 1)
 
     const started = await runtime.start('demo.static')
     expect(started.url).toContain('/app')
     expect(await (await stableFetch(started.url)).text()).toContain('static-ready')
+    const assetUrl = new URL('/app/asset.txt', started.url)
+    const partialAsset = await stableFetch(assetUrl, { headers: { range: 'bytes=2-5' } })
+    expect(partialAsset.status).toBe(206)
+    expect(partialAsset.headers.get('content-range')).toBe('bytes 2-5/10')
+    expect(await partialAsset.text()).toBe('2345')
+    const assetHead = await stableFetch(assetUrl, { method: 'HEAD' })
+    expect(assetHead.headers.get('content-length')).toBe('10')
+    expect(await assetHead.text()).toBe('')
+    expect((await stableFetch(new URL('/app/oversized.bin', started.url))).status).toBe(413)
     expect((await runtime.getRuntimeStatus('demo.static')).status).toBe('running')
 
     await runtime.stop('demo.static')
@@ -323,6 +351,64 @@ describe('LocalAppRuntimeManager', () => {
     expect((await secondStart).error).toMatchObject({ code: 'START_FAILED' })
     expect((await runtime.getRuntimeStatus('demo.start-stop')).status).toBe('not_installed')
     await expect(stableFetch(secondUrl!)).rejects.toThrow()
+  })
+
+  it('serializes an update commit behind a slow start without losing either version', async () => {
+    const v1Bundle = await writeBundle(
+      'demo.concurrent-update',
+      '1.0.0',
+      {
+        runtime: 'js',
+        entry: ['server.js'],
+        startTimeoutMs: 5_000,
+      },
+      {
+        'server.js': `
+          const http = require('http')
+          const readyAt = Date.now() + 600
+          http.createServer((request, response) => {
+            response.statusCode = request.url === '/health' && Date.now() < readyAt ? 503 : 200
+            response.end('v1')
+          }).listen(Number(process.env.PORT), '127.0.0.1')
+        `,
+      },
+    )
+    const v1Archive = await archiveBundle(v1Bundle, 'concurrent-v1')
+    const v1Url = await serveArchive(v1Archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.concurrent-update', '1.0.0', v1Url, v1Archive))
+    await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+    downloadServer = null
+
+    const v2Bundle = await writeBundle(
+      'demo.concurrent-update',
+      '2.0.0',
+      {},
+      { 'dist/index.html': 'v2' },
+    )
+    const v2Archive = await archiveBundle(v2Bundle, 'concurrent-v2')
+    const v2Url = await serveArchive(v2Archive)
+    const start = runtime.start('demo.concurrent-update')
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await runtime.getRuntimeStatus('demo.concurrent-update')).status === 'starting') break
+      await Bun.sleep(10)
+    }
+    const install = runtime.install(
+      requestFor('demo.concurrent-update', '2.0.0', v2Url, v2Archive),
+    )
+
+    const [started, installed] = await Promise.all([start, install])
+    expect(started.version).toBe('1.0.0')
+    expect(installed.currentVersion).toBe('2.0.0')
+    expect(installed.versions).toEqual(['1.0.0', '2.0.0'])
+    const status = await runtime.getRuntimeStatus('demo.concurrent-update')
+    expect(status.status).toBe('running')
+    expect(status.runningVersion).toBe('1.0.0')
+    expect(status.currentVersion).toBe('2.0.0')
+    expect((await readdir(join(
+      testRoot,
+      'runtime/apps/demo.concurrent-update/versions',
+    ))).sort()).toEqual(['1.0.0', '2.0.0'])
   })
 
   it('runs JS and Python bundles with isolated runtime and data directories', async () => {
@@ -551,6 +637,13 @@ package = false
     expect(requestCount).toBe(0)
 
     await runtime.install(requestFor('demo.validation', '1.0.0', url, archive))
+    const conflictingRelease = requestFor('demo.validation', '1.0.0', url, archive)
+    conflictingRelease.checksum = 'f'.repeat(64)
+    await expect(runtime.install(conflictingRelease)).rejects.toMatchObject({
+      code: 'CHECKSUM_MISMATCH',
+    })
+    expect(requestCount).toBe(1)
+
     const badUpdate = requestFor('demo.validation', '2.0.0', url, archive)
     badUpdate.checksum = '0'.repeat(64)
     await expect(runtime.install(badUpdate)).rejects.toMatchObject({ code: 'CHECKSUM_MISMATCH' })
@@ -581,6 +674,49 @@ package = false
     expect(runtime.cancelInstall('demo.cancel')).toBe(true)
     await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
     expect((await runtime.getRuntimeStatus('demo.cancel')).status).toBe('broken')
+  })
+
+  it('reports update installation progress alongside a running version', async () => {
+    const v1Bundle = await writeBundle(
+      'demo.running-update',
+      '1.0.0',
+      {},
+      { 'dist/index.html': 'v1' },
+    )
+    const v1Archive = await archiveBundle(v1Bundle, 'running-update-v1')
+    const v1Url = await serveArchive(v1Archive)
+    const runtime = makeManager()
+    await runtime.install(requestFor('demo.running-update', '1.0.0', v1Url, v1Archive))
+    await runtime.start('demo.running-update')
+    await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+    downloadServer = null
+
+    const v2Bundle = await writeBundle(
+      'demo.running-update',
+      '2.0.0',
+      {},
+      { 'dist/index.html': '0123456789abcdef'.repeat(4_000) },
+    )
+    const v2Archive = await archiveBundle(v2Bundle, 'running-update-v2')
+    const v2Url = await serveArchive(v2Archive, { chunkDelayMs: 10 })
+    const install = runtime.install(
+      requestFor('demo.running-update', '2.0.0', v2Url, v2Archive),
+    )
+
+    let progressStatus
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      progressStatus = await runtime.getRuntimeStatus('demo.running-update')
+      if ((progressStatus.progress?.bytesDownloaded ?? 0) > 0) break
+      await Bun.sleep(5)
+    }
+    expect(progressStatus?.status).toBe('running')
+    expect(progressStatus?.runningVersion).toBe('1.0.0')
+    expect(progressStatus?.installationStatus).toBe('downloading')
+    expect(progressStatus?.progress?.bytesDownloaded).toBeGreaterThan(0)
+
+    expect(runtime.cancelInstall('demo.running-update')).toBe(true)
+    await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
+    expect((await runtime.getRuntimeStatus('demo.running-update')).status).toBe('running')
   })
 
   it('cancels and reaps the complete dependency preparation process tree', async () => {

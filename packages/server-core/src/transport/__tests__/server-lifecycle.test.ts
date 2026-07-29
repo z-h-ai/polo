@@ -206,6 +206,38 @@ describe('WsRpcServer lifecycle', () => {
     expect(handlerWasAborted).toBe(true)
   })
 
+  it('honors an explicit short timeout for the long-running install channel', async () => {
+    server = createServer({ handlerTimeoutMs: 20 })
+    await server.listen()
+    const url = `ws://127.0.0.1:${server.port}`
+
+    let handlerWasAborted = false
+    server.handle('local-apps:install', async (ctx) => {
+      ctx.signal?.addEventListener('abort', () => {
+        handlerWasAborted = true
+      }, { once: true })
+      await new Promise(() => {})
+    })
+
+    const { ws } = await handshake(url, TEST_TOKEN)
+    openSockets.push(ws)
+    const reqId = crypto.randomUUID()
+    ws.send(JSON.stringify({
+      id: reqId,
+      type: 'request',
+      channel: 'local-apps:install',
+    }))
+
+    const response = await new Promise<Record<string, any>>((resolve) => {
+      ws.on('message', (data) => {
+        const message = JSON.parse(data.toString()) as Record<string, any>
+        if (message.id === reqId) resolve(message)
+      })
+    })
+    expect(response.error?.message).toContain('Handler timeout: local-apps:install (20ms)')
+    expect(handlerWasAborted).toBe(true)
+  })
+
   // -- Protocol version tests --
 
   it('rejects wrong protocol major version', async () => {

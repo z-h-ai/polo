@@ -71,6 +71,8 @@ export interface LocalAppRuntimeStatus {
   url?: string
   port?: number
   pid?: number
+  /** Present when an update is downloading/installing while another version is running. */
+  installationStatus?: 'downloading' | 'installing'
   progress?: LocalAppInstallProgress
   error?: LocalAppErrorPayload
 }
