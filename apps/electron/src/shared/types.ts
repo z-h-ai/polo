@@ -212,6 +212,12 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  LocalAppInstallRequest,
+  LocalAppInstalledApp,
+  LocalAppRuntimeStatus,
+  LocalAppStartResult,
+  LocalAppLogsOptions,
+  LocalAppUninstallOptions,
 } from '@polo-ai/shared/protocol'
 import type { AdminUser } from '@polo-ai/shared/admin/types'
 import type { AppDefinition } from './tab-browser-types'
@@ -443,6 +449,19 @@ export interface ElectronAPI {
   // Tab browser app launcher configuration
   getTabBrowserApps(): Promise<AppDefinition[]>
   saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
+
+  // Local App Bundle installation and runtime
+  localApps: {
+    install(request: LocalAppInstallRequest): Promise<LocalAppInstalledApp>
+    cancelInstall(appId: string): Promise<boolean>
+    start(appId: string): Promise<LocalAppStartResult>
+    stop(appId: string): Promise<LocalAppRuntimeStatus>
+    restart(appId: string): Promise<LocalAppStartResult>
+    uninstall(appId: string, options?: LocalAppUninstallOptions): Promise<void>
+    getInstalledApps(): Promise<LocalAppInstalledApp[]>
+    getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus>
+    getLogs(appId: string, options?: LocalAppLogsOptions): Promise<string>
+  }
 
   // Auth
   showLogoutConfirmation(): Promise<boolean>

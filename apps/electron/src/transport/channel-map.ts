@@ -120,6 +120,17 @@ export const CHANNEL_MAP = {
   getTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.GET_APPS),
   saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
 
+  // Local App Bundle runtime
+  'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
+  'localApps.cancelInstall': invoke(RPC_CHANNELS.localApps.CANCEL_INSTALL),
+  'localApps.start': invoke(RPC_CHANNELS.localApps.START),
+  'localApps.stop': invoke(RPC_CHANNELS.localApps.STOP),
+  'localApps.restart': invoke(RPC_CHANNELS.localApps.RESTART),
+  'localApps.uninstall': invoke(RPC_CHANNELS.localApps.UNINSTALL),
+  'localApps.getInstalledApps': invoke(RPC_CHANNELS.localApps.GET_INSTALLED_APPS),
+  'localApps.getRuntimeStatus': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS),
+  'localApps.getLogs': invoke(RPC_CHANNELS.localApps.GET_LOGS),
+
   // Auth
   showLogoutConfirmation: invoke(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION),
   showDeleteSessionConfirmation: invoke(RPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION),

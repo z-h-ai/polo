@@ -18,6 +18,7 @@ import {
   EVENT_BUFFER_MAX_SIZE,
   EVENT_BUFFER_TTL_MS,
   DISCONNECTED_CLIENT_TTL_MS,
+  getRpcRequestTimeoutMs,
   isErrorCode,
   type MessageEnvelope,
   type PushTarget,
@@ -659,12 +660,14 @@ export class WsRpcServer implements RpcServer {
       webContentsId: client.webContentsId,
     }
 
+    let handlerTimer: ReturnType<typeof setTimeout> | undefined
     try {
+      const handlerTimeout = getRpcRequestTimeoutMs(channel, WsRpcServer.HANDLER_TIMEOUT_MS)
       const result = await Promise.race([
         handler(ctx, ...(args ?? [])),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Handler timeout: ${channel} (${WsRpcServer.HANDLER_TIMEOUT_MS}ms)`)),
-            WsRpcServer.HANDLER_TIMEOUT_MS),
+          { handlerTimer = setTimeout(() => reject(new Error(`Handler timeout: ${channel} (${handlerTimeout}ms)`)),
+            handlerTimeout) },
         ),
       ])
       const response: MessageEnvelope = {
@@ -678,7 +681,10 @@ export class WsRpcServer implements RpcServer {
       const message = err instanceof Error ? err.message : String(err)
       const rawCode = (err as { code?: unknown } | null)?.code
       const code: ErrorCode = isErrorCode(rawCode) ? rawCode : 'HANDLER_ERROR'
-      this.sendResponseError(client.ws, id, channel, code, message)
+      const data = (err as { details?: unknown } | null)?.details
+      this.sendResponseError(client.ws, id, channel, code, message, data)
+    } finally {
+      if (handlerTimer) clearTimeout(handlerTimer)
     }
   }
 
@@ -830,13 +836,13 @@ export class WsRpcServer implements RpcServer {
   /** Handler/request errors — sent as type:'response' with error field. */
   private sendResponseError(
     ws: WebSocket, id: string, channel: string | undefined,
-    code: ErrorCode, message: string,
+    code: ErrorCode, message: string, data?: unknown,
   ): void {
     const envelope: MessageEnvelope = {
       id,
       type: 'response',
       channel,
-      error: { code, message },
+      error: { code, message, ...(data !== undefined ? { data } : {}) },
     }
     this.safeSend(ws, serializeEnvelope(envelope))
   }

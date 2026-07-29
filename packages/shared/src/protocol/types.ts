@@ -4,6 +4,8 @@
  * Shared between server (main process / headless) and client (renderer / Node).
  */
 
+import type { LocalAppErrorCode } from './local-apps'
+
 // ---------------------------------------------------------------------------
 // Message envelope
 // ---------------------------------------------------------------------------
@@ -91,6 +93,7 @@ export type ErrorCode =
   | 'BROWSER_INSTANCE_NOT_OWNED'
   | 'BROWSER_REMOTE_UPLOAD_NOT_SUPPORTED'
   | 'BROWSER_REMOTE_EVALUATE_BLOCKED'
+  | LocalAppErrorCode
 
 const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'HANDLER_ERROR',
@@ -111,6 +114,25 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'BROWSER_INSTANCE_NOT_OWNED',
   'BROWSER_REMOTE_UPLOAD_NOT_SUPPORTED',
   'BROWSER_REMOTE_EVALUATE_BLOCKED',
+  'INVALID_REQUEST',
+  'INVALID_MANIFEST',
+  'PLATFORM_MISMATCH',
+  'ARCH_MISMATCH',
+  'DOWNLOAD_FAILED',
+  'INSTALL_CANCELLED',
+  'SIZE_MISMATCH',
+  'CHECKSUM_MISMATCH',
+  'UNSUPPORTED_ARCHIVE',
+  'UNSAFE_ARCHIVE',
+  'RUNTIME_UNAVAILABLE',
+  'DEPENDENCY_INSTALL_FAILED',
+  'NOT_INSTALLED',
+  'START_FAILED',
+  'START_TIMEOUT',
+  'PORT_UNAVAILABLE',
+  'PROCESS_CRASHED',
+  'STOP_FAILED',
+  'UNINSTALL_FAILED',
 ])
 
 export function isErrorCode(value: unknown): value is ErrorCode {
@@ -156,6 +178,14 @@ export const HEARTBEAT_MAX_MISSED = 2
 
 /** Default request timeout in ms. */
 export const REQUEST_TIMEOUT_MS = 30_000
+export const LONG_RUNNING_REQUEST_TIMEOUT_MS = 10 * 60_000
+
+/** Runtime installation may include a large download and dependency preparation. */
+export function getRpcRequestTimeoutMs(channel: string, defaultTimeoutMs: number): number {
+  return channel === 'local-apps:install'
+    ? Math.max(defaultTimeoutMs, LONG_RUNNING_REQUEST_TIMEOUT_MS)
+    : defaultTimeoutMs
+}
 
 // -- Reliable delivery constants --
 

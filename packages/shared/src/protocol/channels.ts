@@ -160,6 +160,17 @@ export const RPC_CHANNELS = {
     GET_APPS: 'tab-browser:getApps',
     SAVE_APPS: 'tab-browser:saveApps',
   },
+  localApps: {
+    INSTALL: 'local-apps:install',
+    CANCEL_INSTALL: 'local-apps:cancelInstall',
+    START: 'local-apps:start',
+    STOP: 'local-apps:stop',
+    RESTART: 'local-apps:restart',
+    UNINSTALL: 'local-apps:uninstall',
+    GET_INSTALLED_APPS: 'local-apps:getInstalledApps',
+    GET_RUNTIME_STATUS: 'local-apps:getRuntimeStatus',
+    GET_LOGS: 'local-apps:getLogs',
+  },
   auth: {
     LOGOUT: 'auth:logout',
     SHOW_LOGOUT_CONFIRMATION: 'auth:showLogoutConfirmation',

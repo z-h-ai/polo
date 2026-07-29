@@ -9,6 +9,7 @@ import { registerWorkspaceGuiHandlers } from './workspace'
 import { registerBrowserHandlers } from './browser'
 import { registerSettingsGuiHandlers } from './settings'
 import { registerTabBrowserHandlers } from './tab-browser'
+import { registerLocalAppHandlers } from './local-apps'
 
 export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): void {
   registerSystemGuiHandlers(server, deps)
@@ -16,6 +17,7 @@ export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): vo
   registerBrowserHandlers(server, deps)
   registerSettingsGuiHandlers(server, deps)
   registerTabBrowserHandlers(server)
+  registerLocalAppHandlers(server)
 }
 
 export function registerAllRpcHandlers(server: RpcServer, deps: HandlerDeps, serverCtx?: ServerHandlerContext): void {

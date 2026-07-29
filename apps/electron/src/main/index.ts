@@ -106,6 +106,7 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
 import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
+import { hasLocalAppRuntimeManager, shutdownLocalAppRuntime } from './local-app-runtime'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -146,6 +147,8 @@ if (isDebugMode) {
   const bunBinary = join(resourcesBase, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
   if (existsSync(bunBinary)) {
     process.env.POLO_AI_BUN = bunBinary
+  } else if (!app.isPackaged) {
+    process.env.POLO_AI_BUN = process.env.POLO_AI_BUN || 'bun'
   }
 
   process.env.POLO_AI_SCRIPTS = scriptsDir
@@ -1218,10 +1221,20 @@ app.on('before-quit', async (event) => {
     })
   }
 
+  const mustStopLocalApps = hasLocalAppRuntimeManager()
+  if (sessionManager || mustStopLocalApps) {
+    // Prevent quit until local app processes and session writes are flushed.
+    event.preventDefault()
+    try {
+      await shutdownLocalAppRuntime()
+      mainLog.info('Stopped all local app runtimes')
+    } catch (error) {
+      mainLog.error('Failed to stop local app runtimes:', error)
+    }
+  }
+
   // Flush all pending session writes before quitting
   if (sessionManager) {
-    // Prevent quit until sessions are flushed
-    event.preventDefault()
     try {
       await sessionManager.flushAllSessions()
       mainLog.info('Flushed all pending session writes')
@@ -1271,6 +1284,11 @@ app.on('before-quit', async (event) => {
 
     // Now actually quit
     app.exit(0)
+  } else if (mustStopLocalApps) {
+    // The local app RPC can initialize before SessionManager in partial-startup
+    // failure paths. Still wait for its process tree to stop before exiting.
+    if (isUpdating()) app.quit()
+    else app.exit(0)
   }
 })
 
