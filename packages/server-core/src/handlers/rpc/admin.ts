@@ -1,6 +1,7 @@
 import {
   AdminClient,
   AdminError,
+  getSafeAdminErrorMessage,
   type AdminLlmConnection,
   type AdminLoginResponse,
   type AdminRefreshResponse,
@@ -205,9 +206,9 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     const manager = getCredentialManager()
     const tokens = await manager.getAdminTokens()
 
-    if (adminUrl && tokens?.refreshToken) {
+    if (adminUrl && tokens?.accessToken) {
       try {
-        await createAdminClient(adminUrl, manager).logout(tokens.refreshToken)
+        await createAdminClient(adminUrl, manager).logout(tokens.accessToken)
       } catch (error) {
         log?.warn('[Admin] remote logout failed; clearing local state:', error instanceof Error ? error.message : String(error))
       }
@@ -506,15 +507,18 @@ function toAdminRpcError(error: unknown): {
   if (error instanceof AdminError) {
     return {
       errorCode: error.errorCode,
-      message: error.message,
+      message: getSafeAdminErrorMessage(error.errorCode, error.status),
       ...(typeof error.status === 'number' ? { status: error.status } : {}),
       ...(typeof error.details?.retryAfter === 'number'
+        && Number.isFinite(error.details.retryAfter)
+        && error.details.retryAfter > 0
+        && error.details.retryAfter <= 86_400
         ? { retryAfter: error.details.retryAfter }
         : {}),
     }
   }
   if (error instanceof Error) {
-    return { errorCode: 'UNKNOWN_ERROR', message: error.message }
+    return { errorCode: 'UNKNOWN_ERROR', message: 'Admin request failed' }
   }
-  return { errorCode: 'UNKNOWN_ERROR', message: String(error) }
+  return { errorCode: 'UNKNOWN_ERROR', message: 'Admin request failed' }
 }

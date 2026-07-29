@@ -51,6 +51,43 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
   validation_error: 'VALIDATION_ERROR',
 };
 
+const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+  INVALID_CREDENTIALS: 'Invalid username or password',
+  ACCOUNT_DISABLED: 'Admin account is disabled',
+  TOKEN_REVOKED: 'Admin session is no longer valid',
+  TOKEN_EXPIRED: 'Admin session is no longer valid',
+  INVALID_TOKEN: 'Admin session is no longer valid',
+  UNAUTHORIZED: 'Admin session is no longer valid',
+  FORBIDDEN: 'Admin request is not permitted',
+  NOT_FOUND: 'Admin resource was not found',
+  VALIDATION_ERROR: 'Admin request was rejected',
+  SERVER_ERROR: 'Admin service is temporarily unavailable',
+  NETWORK_ERROR: 'Failed to reach admin server',
+  UNKNOWN_ERROR: 'Admin request failed',
+  phone_auth_disabled: 'Phone authentication is unavailable',
+  invalid_phone: 'Phone number is invalid',
+  verification_code_invalid: 'Verification code is invalid',
+  verification_code_expired: 'Verification code has expired',
+  verification_attempts_exceeded: 'Verification attempts exceeded',
+  phone_not_registered: 'Phone number is not registered',
+  sms_rate_limited: 'Phone authentication request was rate limited',
+  sms_send_failed: 'Admin service is temporarily unavailable',
+  phone_auth_configuration_error: 'Admin service is temporarily unavailable',
+  invalid_credentials: 'Invalid username or password',
+};
+
+const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+export function getSafeAdminErrorMessage(
+  errorCode: AdminErrorCode,
+  status?: number,
+): string {
+  if (typeof status === 'number' && status >= 500) {
+    return 'Admin service is temporarily unavailable';
+  }
+  return SAFE_ADMIN_ERROR_MESSAGES[errorCode] ?? 'Admin request failed';
+}
+
 export interface AdminClientTokenStore {
   getRefreshToken(): string | null | Promise<string | null>;
   onTokensRefreshed?(tokens: AdminRefreshResponse): void | Promise<void>;
@@ -163,10 +200,10 @@ export class AdminClient {
     });
   }
 
-  async logout(refreshToken: string): Promise<void> {
+  async logout(accessToken: string): Promise<void> {
     await this.request('/api/auth/logout', {
       method: 'POST',
-      body: { refreshToken },
+      accessToken,
     });
   }
 
@@ -246,11 +283,7 @@ export class AdminClient {
   private createError(response: Response, data: unknown): AdminError {
     const statusCode = this.errorCodeForStatus(response.status);
     const errorCode = this.readAdminErrorCode(data) ?? statusCode;
-    const bodyMessage =
-      this.readString(data, 'message') ??
-      this.readString(data, 'error_description') ??
-      this.readString(data, 'error');
-    const message = this.safeErrorMessage(response.status, errorCode, bodyMessage, response.statusText);
+    const message = this.safeErrorMessage(response.status, errorCode);
 
     return new AdminError(message, errorCode, {
       status: response.status,
@@ -261,16 +294,8 @@ export class AdminClient {
   private safeErrorMessage(
     status: number,
     errorCode: AdminErrorCode,
-    bodyMessage: string | null,
-    statusText: string,
   ): string {
-    if (status >= 500 || errorCode === 'sms_send_failed' || errorCode === 'phone_auth_configuration_error') {
-      return 'Admin service is temporarily unavailable';
-    }
-    if (errorCode === 'NETWORK_ERROR') {
-      return 'Failed to reach admin server';
-    }
-    return (bodyMessage ?? statusText) || 'Admin request failed';
+    return getSafeAdminErrorMessage(errorCode, status);
   }
 
   private readSafeErrorDetails(data: unknown): { retryAfter?: number } | undefined {
@@ -280,7 +305,12 @@ export class AdminClient {
       ? (record.details as Record<string, unknown>).retryAfter
       : undefined;
     const value = record.retryAfter ?? nested;
-    return typeof value === 'number' && Number.isFinite(value) && value > 0
+    return (
+      typeof value === 'number'
+      && Number.isFinite(value)
+      && value > 0
+      && value <= MAX_RETRY_AFTER_SECONDS
+    )
       ? { retryAfter: Math.ceil(value) }
       : undefined;
   }

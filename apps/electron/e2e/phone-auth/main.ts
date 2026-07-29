@@ -12,6 +12,9 @@ const rendererHtmlPath = process.argv[3]
 const providerBaseUrl = process.argv[4]
 const providerBearerToken = process.argv[5]
 const phone = process.argv[6]
+const legacyIdentifier = process.argv[7]
+const legacyPassword = process.argv[8]
+const adminBaseUrl = process.argv[9]
 const configDirectory = process.env.POLO_AI_CONFIG_DIR
 
 if (
@@ -20,20 +23,33 @@ if (
   || !providerBaseUrl
   || !providerBearerToken
   || !phone
+  || !legacyIdentifier
+  || !legacyPassword
+  || !adminBaseUrl
   || !configDirectory
 ) {
   throw new Error('Phone auth E2E runtime configuration is incomplete')
 }
 
 const password = 'phone-password-123'
-const legacyIdentifier = 'alice'
-const legacyPassword = 'alice-password-123'
 const e2eUserAgent = `polo-phone-auth-e2e/${phone}`
 const runtimeFetch = globalThis.fetch
-globalThis.fetch = ((input, init = {}) => {
+const logoutHttpStatuses: number[] = []
+const revokedValidateStatuses: number[] = []
+const revokedRefreshStatuses: number[] = []
+globalThis.fetch = (async (input, init = {}) => {
   const headers = new Headers(init.headers)
   headers.set('User-Agent', e2eUserAgent)
-  return runtimeFetch(input, { ...init, headers })
+  const response = await runtimeFetch(input, { ...init, headers })
+  const requestUrl = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url
+  if (new URL(requestUrl).pathname === '/api/auth/logout') {
+    logoutHttpStatuses.push(response.status)
+  }
+  return response
 }) as typeof globalThis.fetch
 const workspace: Workspace = {
   id: 'phone-auth-e2e-workspace',
@@ -277,17 +293,71 @@ async function setPassword(): Promise<void> {
   ))
   await submit('[data-testid="account-security-password-form"]')
   await waitFor('password setting success', () => evaluate<boolean>(
-    `Boolean(document.querySelector('[data-testid="account-security-password-form"] [role="status"]'))`,
+    `(() => {
+      const password = document.querySelector('#account-password');
+      const confirmation = document.querySelector('#account-password-confirmation');
+      const message = document.querySelector(
+        '[data-testid="account-security-password-form"] p[role="status"]'
+      );
+      return password instanceof HTMLInputElement
+        && confirmation instanceof HTMLInputElement
+        && password.value === ''
+        && confirmation.value === ''
+        && Boolean(message);
+    })()`,
   ))
 }
 
 async function logoutThroughProductionUi(): Promise<void> {
+  const tokens = await getCredentialManager().getAdminTokens()
+  if (!tokens) {
+    throw new Error('Production logout started without persisted Admin credentials')
+  }
+  const logoutCountBefore = logoutHttpStatuses.length
   await click('[data-testid="sidebar-user-menu-trigger"]')
   await waitForSelector('[data-testid="sidebar-user-menu-logout"]')
   await click('[data-testid="sidebar-user-menu-logout"]')
   await waitForOnboardingLogin()
   if (await getCredentialManager().getAdminTokens()) {
     throw new Error('Production logout did not clear encrypted Admin credentials')
+  }
+
+  const newLogoutStatuses = logoutHttpStatuses.slice(logoutCountBefore)
+  if (newLogoutStatuses.length !== 1 || newLogoutStatuses[0] !== 200) {
+    throw new Error(
+      `Expected one successful POL-53 logout response, received ${JSON.stringify(newLogoutStatuses)}`,
+    )
+  }
+
+  const [validateResponse, refreshResponse] = await Promise.all([
+    runtimeFetch(`${adminBaseUrl}/api/auth/validate`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${tokens.accessToken}`,
+        'User-Agent': e2eUserAgent,
+      },
+    }),
+    runtimeFetch(`${adminBaseUrl}/api/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': e2eUserAgent,
+      },
+      body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+    }),
+  ])
+  revokedValidateStatuses.push(validateResponse.status)
+  revokedRefreshStatuses.push(refreshResponse.status)
+  if (validateResponse.status !== 401 || refreshResponse.status !== 401) {
+    throw new Error(
+      'POL-53 logout did not revoke the prior session and refresh token: '
+      + JSON.stringify({
+        validateStatus: validateResponse.status,
+        refreshStatus: refreshResponse.status,
+      }),
+    )
   }
 }
 
@@ -367,6 +437,7 @@ async function run(): Promise<void> {
   await runPasswordLogin(legacyIdentifier, legacyPassword)
   await assertEncryptedCredentials(legacyIdentifier)
   await finishOnboarding()
+  await logoutThroughProductionUi()
 
   completed = true
   console.log(JSON.stringify({
@@ -398,7 +469,16 @@ async function run(): Promise<void> {
       'returning-phone-code-login',
       'phone-password-login',
       'legacy-username-login',
+      'logout-http-200',
+      'revoked-access-token',
+      'revoked-refresh-token',
     ],
+    logoutEvidence: {
+      expectedCount: 4,
+      statuses: logoutHttpStatuses,
+      revokedValidateStatuses,
+      revokedRefreshStatuses,
+    },
   }))
   app.quit()
 }

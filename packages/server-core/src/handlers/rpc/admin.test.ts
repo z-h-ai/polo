@@ -85,7 +85,7 @@ const adminClientBehavior = {
   setPassword: async (_accessToken: string, _input: { password: string }): Promise<any> => ({
     success: true,
   }),
-  logout: async (_refreshToken: string): Promise<void> => {},
+  logout: async (_accessToken: string): Promise<void> => {},
   getLlmConnections: async (_accessToken: string): Promise<any> => ({
     configVersion: 'config-v1',
     connections: [],
@@ -140,9 +140,9 @@ class MockAdminClient {
     return adminClientBehavior.validate(accessToken)
   }
 
-  async logout(refreshToken: string) {
-    adminClientCalls.push({ method: 'logout', args: [refreshToken] })
-    return adminClientBehavior.logout(refreshToken)
+  async logout(accessToken: string) {
+    adminClientCalls.push({ method: 'logout', args: [accessToken], accessToken })
+    return adminClientBehavior.logout(accessToken)
   }
 
   async getLlmConnections(accessToken: string) {
@@ -202,6 +202,26 @@ const mockCredentialManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
+  getSafeAdminErrorMessage: (errorCode: string, status?: number) => {
+    if (typeof status === 'number' && status >= 500) {
+      return 'Admin service is temporarily unavailable'
+    }
+    if (errorCode === 'sms_rate_limited') {
+      return 'Phone authentication request was rate limited'
+    }
+    if (errorCode === 'INVALID_CREDENTIALS') {
+      return 'Invalid username or password'
+    }
+    if (
+      errorCode === 'TOKEN_REVOKED'
+      || errorCode === 'TOKEN_EXPIRED'
+      || errorCode === 'INVALID_TOKEN'
+      || errorCode === 'UNAUTHORIZED'
+    ) {
+      return 'Admin session is no longer valid'
+    }
+    return 'Admin request failed'
+  },
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
@@ -492,10 +512,36 @@ describe('registerAdminHandlers', () => {
     expect(limited).toEqual({
       success: false,
       errorCode: 'sms_rate_limited',
-      message: 'sms_rate_limited',
+      message: 'Phone authentication request was rate limited',
       status: 429,
       retryAfter: 42,
     })
+  })
+
+  it('does not forward sensitive AdminError text through RPC', async () => {
+    adminClientBehavior.sendPhoneAuthCode = async () => {
+      throw new TestAdminError(
+        'AccessKeyId=LTAI-DO-NOT-LEAK\\nError at /srv/private.ts:42',
+        'VALIDATION_ERROR',
+        { status: 400, details: { retryAfter: 86_401 } },
+      )
+    }
+    const { sendPhoneAuthCode } = createHarness()
+
+    const result = await sendPhoneAuthCode(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      '13800138000',
+      'verified-challenge',
+    )
+
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'Admin request failed',
+      status: 400,
+    })
+    expect(JSON.stringify(result)).not.toContain('LTAI')
+    expect(JSON.stringify(result)).not.toContain('/srv/private')
   })
 
   it('verifies a phone code through the same token and connection persistence path', async () => {
@@ -866,7 +912,7 @@ describe('registerAdminHandlers', () => {
     expect(result).toEqual({
       loggedIn: false,
       errorCode: 'TOKEN_REVOKED',
-      message: 'Refresh token revoked',
+      message: 'Admin session is no longer valid',
       status: 401,
     })
     expect(managerState.tokens).toBeNull()
@@ -1003,11 +1049,44 @@ describe('registerAdminHandlers', () => {
     const result = await logout({ clientId: 'client-1', workspaceId: null, webContentsId: null })
 
     expect(result).toEqual({ success: true })
-    expect(adminClientCalls.map(call => call.method)).toEqual(['logout'])
+    expect(adminClientCalls).toEqual([{
+      method: 'logout',
+      args: ['access-token'],
+      accessToken: 'access-token',
+    }])
     expect(managerState.tokens).toBeNull()
     expect(configState.adminConfigVersion).toBeUndefined()
     expect(configState.connections.map(connection => connection.slug)).toEqual(['user-local'])
     expect(managerState.deletedCredentialSlugs).toEqual(['admin-anthropic'])
     expect(managerState.llmApiKeys.has('admin-anthropic')).toBe(false)
+  })
+
+  it('clears local credentials even when remote logout fails', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    adminClientBehavior.logout = async () => {
+      throw new Error('remote unavailable')
+    }
+    const { logout } = createHarness()
+
+    const result = await logout({
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    })
+
+    expect(result).toEqual({ success: true })
+    expect(adminClientCalls[0]).toMatchObject({
+      method: 'logout',
+      args: ['access-token'],
+    })
+    expect(managerState.tokens).toBeNull()
+    expect(loggerWarn).toHaveBeenCalled()
   })
 })

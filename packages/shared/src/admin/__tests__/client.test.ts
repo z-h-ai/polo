@@ -262,6 +262,21 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.body).toBeUndefined();
   });
 
+  it('logs out with the current access token and no refresh-token body', async () => {
+    mockJsonFetch({ success: true });
+
+    const client = new AdminClient('https://admin.example.com');
+    await client.logout('access-token');
+
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/logout');
+    expect(fetchCalls[0]!.init.method).toBe('POST');
+    expect(fetchCalls[0]!.init.headers).toEqual({
+      Accept: 'application/json',
+      Authorization: 'Bearer access-token',
+    });
+    expect(fetchCalls[0]!.init.body).toBeUndefined();
+  });
+
   it('throws AdminError for server error responses', async () => {
     mockJsonFetch({
       errorCode: 'INVALID_CREDENTIALS',
@@ -278,6 +293,85 @@ describe('AdminClient', () => {
       expect((error as AdminError).errorCode).toBe('INVALID_CREDENTIALS');
       expect((error as AdminError).status).toBe(401);
       expect((error as AdminError).message).toBe('Invalid username or password');
+    }
+  });
+
+  it('never exposes unknown 4xx upstream messages, secrets, or stacks', async () => {
+    mockJsonFetch({
+      error: 'upstream_private_failure',
+      message: 'AccessKeyId=LTAI-DO-NOT-LEAK',
+      error_description: 'Error: private failure\\n    at /srv/admin/secret.ts:42',
+      stack: 'private-stack',
+    }, 418);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    try {
+      await client.login('admin', 'secret');
+      throw new Error('expected throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AdminError);
+      expect(error).toMatchObject({
+        errorCode: 'VALIDATION_ERROR',
+        status: 418,
+        message: 'Admin request was rejected',
+      });
+      const serialized = JSON.stringify({
+        message: (error as AdminError).message,
+        details: (error as AdminError).details,
+      });
+      expect(serialized).not.toContain('LTAI');
+      expect(serialized).not.toContain('/srv/admin');
+      expect(serialized).not.toContain('private-stack');
+    }
+  });
+
+  it('uses a local generic message for non-JSON and 5xx responses', async () => {
+    fetchCalls = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      fetchCalls.push({ url, init: init ?? {} });
+      return new Response(
+        'AccessKeySecret=do-not-leak\\nError at /srv/private.ts:9',
+        { status: 502, statusText: 'Private upstream exception' },
+      );
+    }) as typeof globalThis.fetch;
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.login('admin', 'secret')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+      status: 502,
+      message: 'Admin service is temporarily unavailable',
+    });
+  });
+
+  it('drops retryAfter values outside the stable numeric range', async () => {
+    for (const retryAfter of [-1, 0, 86_401, '60', { seconds: 60 }]) {
+      mockJsonFetch({
+        error: 'sms_rate_limited',
+        message: 'AccessKeyId=LTAI-DO-NOT-LEAK',
+        retryAfter,
+      }, 429);
+      const client = new AdminClient('https://admin.example.com');
+
+      try {
+        await client.sendPhoneAuthCode({
+          phone: '13800138000',
+          challengeToken: 'verified-challenge',
+        });
+        throw new Error('expected throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(AdminError);
+        expect((error as AdminError).details).toBeUndefined();
+        expect((error as AdminError).message).toBe(
+          'Phone authentication request was rate limited',
+        );
+      }
     }
   });
 

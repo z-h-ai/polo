@@ -65,7 +65,30 @@ describe('secure storage CONFIG_DIR compatibility', () => {
     });
   });
 
-  it('migrates the old fixed-path store once when a custom instance has no file', async () => {
+  it('keeps a brand-new custom or E2E profile empty by default', async () => {
+    const root = temporaryDirectory('isolated-profile');
+    const customDirectory = join(root, 'custom-e2e-profile');
+    const legacyDirectory = join(root, 'legacy-default-profile');
+    await new SecureStorageBackend({
+      credentialsDir: legacyDirectory,
+      legacyCredentialsDir: legacyDirectory,
+    }).set(adminCredential, {
+      value: 'default-access-token',
+      refreshToken: 'default-refresh-token',
+    });
+
+    const isolated = new SecureStorageBackend({
+      credentialsDir: customDirectory,
+      legacyCredentialsDir: legacyDirectory,
+    });
+
+    expect(await isolated.get(adminCredential)).toBeNull();
+    expect(await isolated.list()).toEqual([]);
+    expect(existsSync(join(customDirectory, 'credentials.enc'))).toBe(false);
+    expect(existsSync(join(legacyDirectory, 'credentials.enc'))).toBe(true);
+  });
+
+  it('migrates the old fixed-path store once only with the trusted host switch', async () => {
     const root = temporaryDirectory('migration');
     const customDirectory = join(root, 'custom');
     const legacyDirectory = join(root, 'legacy');
@@ -84,6 +107,7 @@ describe('secure storage CONFIG_DIR compatibility', () => {
     const migrated = await new SecureStorageBackend({
       credentialsDir: customDirectory,
       legacyCredentialsDir: legacyDirectory,
+      allowLegacyPathMigration: true,
     }).get(adminCredential);
 
     expect(migrated).toMatchObject({
@@ -119,10 +143,40 @@ describe('secure storage CONFIG_DIR compatibility', () => {
     const result = await new SecureStorageBackend({
       credentialsDir: customDirectory,
       legacyCredentialsDir: legacyDirectory,
+      allowLegacyPathMigration: true,
     }).get(adminCredential);
 
     expect(result).toBeNull();
     expect(readFileSync(legacyPath)).toEqual(corrupted);
     expect(existsSync(join(customDirectory, 'credentials.enc'))).toBe(false);
+  });
+
+  it('never falls back when the current instance file is corrupted', async () => {
+    const root = temporaryDirectory('corrupt-current');
+    const customDirectory = join(root, 'custom');
+    const legacyDirectory = join(root, 'legacy');
+    await new SecureStorageBackend({
+      credentialsDir: legacyDirectory,
+      legacyCredentialsDir: legacyDirectory,
+    }).set(adminCredential, { value: 'must-not-inherit' });
+    await new SecureStorageBackend({
+      credentialsDir: customDirectory,
+      legacyCredentialsDir: customDirectory,
+    }).set(adminCredential, { value: 'custom-before-corruption' });
+    const currentPath = join(customDirectory, 'credentials.enc');
+    writeFileSync(currentPath, Buffer.from('corrupted-current-instance'));
+
+    const result = await new SecureStorageBackend({
+      credentialsDir: customDirectory,
+      legacyCredentialsDir: legacyDirectory,
+      allowLegacyPathMigration: true,
+    }).get(adminCredential);
+
+    expect(result).toBeNull();
+    expect(existsSync(currentPath)).toBe(false);
+    expect(await new SecureStorageBackend({
+      credentialsDir: legacyDirectory,
+      legacyCredentialsDir: legacyDirectory,
+    }).get(adminCredential)).toEqual({ value: 'must-not-inherit' });
   });
 });

@@ -10,7 +10,8 @@
  * - Linux: /var/lib/dbus/machine-id (set at OS install)
  *
  * This is more stable than the previous hostname-based derivation, which could
- * change with network/DHCP. Legacy credentials are auto-migrated on first load.
+ * change with network/DHCP. Legacy key derivation is migrated within the same
+ * instance file on first successful load.
  *
  * File format:
  *   [Header - 64 bytes]
@@ -111,11 +112,16 @@ export interface SecureStorageBackendOptions {
   /** Override used by isolated instances and tests. Defaults to CONFIG_DIR. */
   credentialsDir?: string;
   /**
-   * Pre-CONFIG_DIR location used only when the new instance file is absent.
-   * The legacy file is read-only and a successfully decrypted store is
-   * re-encrypted into credentialsDir.
+   * Pre-CONFIG_DIR location used only by an explicitly trusted host migration.
+   * Merely choosing a custom profile never reads credentials from this path.
    */
   legacyCredentialsDir?: string;
+  /**
+   * Explicit, host-only upgrade switch for copying a legacy fixed-path store
+   * into an empty instance. Defaults to false and is not exposed over RPC or
+   * Preload.
+   */
+  allowLegacyPathMigration?: boolean;
 }
 
 export class SecureStorageBackend implements CredentialBackend {
@@ -125,6 +131,7 @@ export class SecureStorageBackend implements CredentialBackend {
   private readonly credentialsDir: string;
   private readonly credentialsFile: string;
   private readonly legacyCredentialsFile: string;
+  private readonly allowLegacyPathMigration: boolean;
   private cachedStore: CredentialStore | null = null;
   private encryptionKey: Buffer | null = null;
   private salt: Buffer | null = null;
@@ -136,6 +143,7 @@ export class SecureStorageBackend implements CredentialBackend {
       options.legacyCredentialsDir ?? DEFAULT_CREDENTIALS_DIR,
       'credentials.enc',
     );
+    this.allowLegacyPathMigration = options.allowLegacyPathMigration === true;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -226,11 +234,12 @@ export class SecureStorageBackend implements CredentialBackend {
       return this.loadStoreFromFile(this.credentialsFile, true);
     }
 
-    // Before CONFIG_DIR support, every instance read the fixed default file.
-    // Preserve that exact upgrade path only while the instance has no file of
+    // Profile isolation is the default. A trusted host may explicitly perform
+    // the one-time fixed-path upgrade only while the instance has no file of
     // its own. Never overwrite an existing instance and never mutate/delete
-    // the shared legacy source.
+    // the legacy source.
     if (
+      this.allowLegacyPathMigration &&
       this.credentialsFile !== this.legacyCredentialsFile
       && existsSync(this.legacyCredentialsFile)
     ) {
