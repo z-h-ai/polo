@@ -19,6 +19,11 @@ export interface AdminAuthConfig {
   phoneAuthEnabled: boolean;
 }
 
+export interface AdminPhoneAuthChallengeConfig {
+  type: 'browser_redirect';
+  issuerUrl: string;
+}
+
 export interface SendPhoneAuthCodeInput {
   phone: string;
   challengeToken: string;

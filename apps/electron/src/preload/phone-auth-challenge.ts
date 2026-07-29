@@ -6,7 +6,6 @@ import {
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import { RPC_CHANNELS } from '../shared/types'
 
-const DEFAULT_CHALLENGE_PATH = '/auth/phone-challenge'
 const CHALLENGE_TIMEOUT_MS = 120_000
 const MAX_CHALLENGE_TOKEN_LENGTH = 4096
 
@@ -15,7 +14,6 @@ export type PhoneAuthChallengeResult =
   | { success: false; errorCode: 'phone_auth_configuration_error' }
 
 export interface PhoneAuthChallengeDependencies {
-  configuredIssuerUrl?: string
   createCallback?: () => Promise<CallbackServer>
   openExternal: (url: string) => Promise<unknown>
   timeoutMs?: number
@@ -26,12 +24,9 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 export function resolvePhoneAuthChallengeIssuerUrl(
-  adminUrl: string,
-  configuredIssuerUrl?: string,
+  discoveredIssuerUrl: string,
 ): URL {
-  const issuerUrl = configuredIssuerUrl?.trim()
-    ? new URL(configuredIssuerUrl)
-    : new URL(DEFAULT_CHALLENGE_PATH, adminUrl)
+  const issuerUrl = new URL(discoveredIssuerUrl)
 
   if (
     issuerUrl.username
@@ -76,17 +71,23 @@ export async function acquirePhoneAuthChallenge(
   )
 
   try {
-    const status = await client.invoke(RPC_CHANNELS.admin.GET_STATUS) as {
-      adminUrl?: string
+    const discovery = await client.invoke(
+      RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG,
+    ) as {
+      success?: boolean
+      type?: string
+      issuerUrl?: string
     }
-    if (!status.adminUrl) {
+    if (
+      discovery.success !== true
+      || discovery.type !== 'browser_redirect'
+      || typeof discovery.issuerUrl !== 'string'
+      || !discovery.issuerUrl.trim()
+    ) {
       return { success: false, errorCode: 'phone_auth_configuration_error' }
     }
 
-    const issuerUrl = resolvePhoneAuthChallengeIssuerUrl(
-      status.adminUrl,
-      dependencies.configuredIssuerUrl,
-    )
+    const issuerUrl = resolvePhoneAuthChallengeIssuerUrl(discovery.issuerUrl)
     callbackServer = await (dependencies.createCallback
       ? dependencies.createCallback()
       : createCallbackServer({

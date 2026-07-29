@@ -14,12 +14,14 @@ describe('admin preload RPC chain', () => {
     })
 
     await api.adminGetAuthConfig()
+    await api.adminGetPhoneAuthChallengeConfig()
     await api.adminSendPhoneAuthCode('13800138000', 'issuer-signed-opaque-token')
     await api.adminVerifyPhoneAuthCode('13800138000', '123456')
     await api.adminSetPassword('password-123')
 
     expect(calls).toEqual([
       [RPC_CHANNELS.admin.GET_AUTH_CONFIG],
+      [RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG],
       [
         RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
         '13800138000',
@@ -53,8 +55,12 @@ describe('admin preload RPC chain', () => {
       resolveCallback = resolve
     })
     const invoke = mock(async (channel: string) => {
-      expect(channel).toBe(RPC_CHANNELS.admin.GET_STATUS)
-      return { adminUrl: 'https://admin.example.com/' }
+      expect(channel).toBe(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG)
+      return {
+        success: true,
+        type: 'browser_redirect',
+        issuerUrl: 'https://challenge.example.com/issue',
+      }
     })
     const openExternal = mock(async (value: string) => {
       const url = new URL(value)
@@ -73,7 +79,6 @@ describe('admin preload RPC chain', () => {
     const api = buildAdminPreloadApi(
       { invoke, on: mock(() => () => {}) },
       {
-        configuredIssuerUrl: 'https://challenge.example.com/issue',
         createCallback: async () => ({
           promise: callbackPromise,
           url: 'http://localhost:6477',

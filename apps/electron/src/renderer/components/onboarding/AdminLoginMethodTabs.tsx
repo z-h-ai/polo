@@ -26,6 +26,7 @@ export function AdminLoginMethodTabs({
         return (
           <button
             key={method}
+            data-testid={`admin-login-method-${method}`}
             type="button"
             role="tab"
             aria-selected={selected}

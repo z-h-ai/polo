@@ -6,20 +6,18 @@ import {
 } from '../phone-auth-challenge'
 
 describe('phone auth challenge provider', () => {
-  it('derives the deployed challenge page from the configured admin origin', () => {
+  it('uses only the discovered challenge issuer', () => {
     expect(resolvePhoneAuthChallengeIssuerUrl(
-      'https://polo-admin.example.com/base/',
-    ).toString()).toBe('https://polo-admin.example.com/auth/phone-challenge')
+      'https://challenge.example.com/phone-auth',
+    ).toString()).toBe('https://challenge.example.com/phone-auth')
   })
 
   it('allows HTTP only for a loopback mock provider', () => {
     expect(resolvePhoneAuthChallengeIssuerUrl(
-      'https://admin.example.com',
       'http://127.0.0.1:9090/challenge',
     ).toString()).toBe('http://127.0.0.1:9090/challenge')
 
     expect(() => resolvePhoneAuthChallengeIssuerUrl(
-      'https://admin.example.com',
       'http://challenge.example.com/issue',
     )).toThrow('must use HTTPS')
   })
@@ -29,8 +27,12 @@ describe('phone auth challenge provider', () => {
     const result = await acquirePhoneAuthChallenge(
       {
         invoke: mock(async (channel: string) => {
-          expect(channel).toBe(RPC_CHANNELS.admin.GET_STATUS)
-          return { adminUrl: 'https://admin.example.com' }
+          expect(channel).toBe(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG)
+          return {
+            success: true,
+            type: 'browser_redirect',
+            issuerUrl: 'https://challenge.example.com/issue',
+          }
         }),
       },
       {
@@ -55,11 +57,14 @@ describe('phone auth challenge provider', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
-  it('fails closed instead of manufacturing a token when no admin is configured', async () => {
+  it('fails closed instead of guessing an issuer when discovery is unavailable', async () => {
     const openExternal = mock(async () => {})
     const result = await acquirePhoneAuthChallenge(
       {
-        invoke: mock(async () => ({ adminUrl: undefined })),
+        invoke: mock(async () => ({
+          success: false,
+          errorCode: 'phone_auth_configuration_error',
+        })),
       },
       { openExternal },
     )

@@ -78,12 +78,14 @@ describe('CHANNEL_MAP runtime contract', () => {
     const api = buildClientApi(client, CHANNEL_MAP)
 
     await api.adminGetAuthConfig()
+    await api.adminGetPhoneAuthChallengeConfig()
     await api.adminSendPhoneAuthCode('13800138000', 'issuer-signed-token')
     await api.adminVerifyPhoneAuthCode('13800138000', '123456')
     await api.adminSetPassword('password-123')
 
     expect(calls).toEqual([
       [RPC_CHANNELS.admin.GET_AUTH_CONFIG],
+      [RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG],
       [RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE, '13800138000', 'issuer-signed-token'],
       [RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE, '13800138000', '123456'],
       [RPC_CHANNELS.admin.SET_PASSWORD, 'password-123'],

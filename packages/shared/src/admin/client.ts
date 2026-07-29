@@ -5,6 +5,7 @@ import {
   type AdminLlmConnectionsResponse,
   type AdminLoginResponse,
   type AdminPhoneAuthResponse,
+  type AdminPhoneAuthChallengeConfig,
   type AdminRefreshResponse,
   type SendPhoneAuthCodeInput,
   type SendPhoneAuthCodeResponse,
@@ -80,6 +81,31 @@ export class AdminClient {
       method: 'GET',
     });
     return { phoneAuthEnabled: response.phoneAuthEnabled === true };
+  }
+
+  async getPhoneAuthChallengeConfig(): Promise<AdminPhoneAuthChallengeConfig> {
+    const response = await this.request<unknown>('/api/auth/phone/challenge/config', {
+      method: 'GET',
+    });
+    const issuerUrl = response && typeof response === 'object'
+      ? (response as Record<string, unknown>).issuerUrl
+      : undefined;
+    if (
+      !response
+      || typeof response !== 'object'
+      || (response as Record<string, unknown>).type !== 'browser_redirect'
+      || typeof issuerUrl !== 'string'
+      || !issuerUrl
+    ) {
+      throw new AdminError(
+        'Phone auth challenge configuration is invalid',
+        'phone_auth_configuration_error',
+      );
+    }
+    return {
+      type: 'browser_redirect',
+      issuerUrl,
+    };
   }
 
   async sendPhoneAuthCode(input: SendPhoneAuthCodeInput): Promise<SendPhoneAuthCodeResponse> {

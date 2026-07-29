@@ -99,7 +99,7 @@ export function PhoneAuthStep({
       />
 
       {form.mode === "entry" ? (
-        <form onSubmit={handleSend} className="mt-5 space-y-4">
+        <form data-testid="phone-auth-entry" onSubmit={handleSend} className="mt-5 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="phone-auth-phone" className="text-xs text-foreground/70">
               {t("onboarding.adminLogin.phone")}
@@ -124,6 +124,7 @@ export function PhoneAuthStep({
 
           <label className="flex cursor-pointer items-start gap-2 text-xs leading-5 text-muted-foreground">
             <input
+              data-testid="phone-auth-consent"
               type="checkbox"
               checked={form.consented}
               onChange={(event) => dispatch({ type: 'consentChanged', value: event.target.checked })}
@@ -139,6 +140,7 @@ export function PhoneAuthStep({
           </label>
 
           <Button
+            data-testid="phone-auth-send-code"
             type="submit"
             disabled={isBusy || !canSend}
             className="h-11 w-full rounded-[10px] bg-accent text-background hover:bg-accent/90"
@@ -154,7 +156,7 @@ export function PhoneAuthStep({
           </Button>
         </form>
       ) : (
-        <form onSubmit={handleVerify} className="mt-5 space-y-4">
+        <form data-testid="phone-auth-verify" onSubmit={handleVerify} className="mt-5 space-y-4">
           <div className="flex items-center justify-between rounded-[10px] bg-foreground/5 px-3 py-2.5 text-sm">
             <strong className="font-medium text-foreground">{maskedPhone}</strong>
             <button
@@ -202,6 +204,7 @@ export function PhoneAuthStep({
           </div>
 
           <Button
+            data-testid="phone-auth-continue"
             type="submit"
             disabled={isBusy || !canVerify}
             className="h-11 w-full rounded-[10px] bg-accent text-background hover:bg-accent/90"

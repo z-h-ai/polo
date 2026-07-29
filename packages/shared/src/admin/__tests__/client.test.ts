@@ -73,6 +73,39 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.method).toBe('GET');
   });
 
+  it('discovers the public browser redirect challenge contract', async () => {
+    mockJsonFetch({
+      type: 'browser_redirect',
+      issuerUrl: 'https://challenge.example.com/phone-auth',
+      verifierUrl: 'https://secret.example.com/must-not-leak',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.getPhoneAuthChallengeConfig();
+
+    expect(result).toEqual({
+      type: 'browser_redirect',
+      issuerUrl: 'https://challenge.example.com/phone-auth',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/auth/phone/challenge/config',
+    );
+    expect(fetchCalls[0]!.init.method).toBe('GET');
+  });
+
+  it('fails closed when the challenge discovery payload is invalid', async () => {
+    mockJsonFetch({
+      type: 'unknown',
+      issuerUrl: 'https://challenge.example.com/phone-auth',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.getPhoneAuthChallengeConfig()).rejects.toMatchObject({
+      errorCode: 'phone_auth_configuration_error',
+    });
+  });
+
   it('sends phone code input and returns stable timing fields', async () => {
     mockJsonFetch({
       accepted: true,

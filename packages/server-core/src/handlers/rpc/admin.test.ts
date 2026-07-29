@@ -70,6 +70,10 @@ const adminClientBehavior = {
     throw new Error('validate behavior not configured')
   },
   getAuthConfig: async (): Promise<any> => ({ phoneAuthEnabled: true }),
+  getPhoneAuthChallengeConfig: async (): Promise<any> => ({
+    type: 'browser_redirect',
+    issuerUrl: 'https://challenge.example.com/phone-auth',
+  }),
   sendPhoneAuthCode: async (_input: { phone: string; challengeToken: string }): Promise<any> => ({
     accepted: true,
     expiresIn: 300,
@@ -104,6 +108,11 @@ class MockAdminClient {
   async getAuthConfig() {
     adminClientCalls.push({ method: 'getAuthConfig', args: [] })
     return adminClientBehavior.getAuthConfig()
+  }
+
+  async getPhoneAuthChallengeConfig() {
+    adminClientCalls.push({ method: 'getPhoneAuthChallengeConfig', args: [] })
+    return adminClientBehavior.getPhoneAuthChallengeConfig()
   }
 
   async sendPhoneAuthCode(input: { phone: string; challengeToken: string }) {
@@ -278,6 +287,10 @@ function createHarness() {
   return {
     login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
     getAuthConfig: requiredHandler(handlers, RPC_CHANNELS.admin.GET_AUTH_CONFIG),
+    getPhoneAuthChallengeConfig: requiredHandler(
+      handlers,
+      RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG,
+    ),
     sendPhoneAuthCode: requiredHandler(handlers, RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE),
     verifyPhoneAuthCode: requiredHandler(handlers, RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE),
     setPassword: requiredHandler(handlers, RPC_CHANNELS.admin.SET_PASSWORD),
@@ -369,6 +382,10 @@ beforeEach(() => {
     },
   })
   adminClientBehavior.getAuthConfig = async () => ({ phoneAuthEnabled: true })
+  adminClientBehavior.getPhoneAuthChallengeConfig = async () => ({
+    type: 'browser_redirect',
+    issuerUrl: 'https://challenge.example.com/phone-auth',
+  })
   adminClientBehavior.sendPhoneAuthCode = async () => ({
     accepted: true,
     expiresIn: 300,
@@ -402,6 +419,7 @@ describe('registerAdminHandlers', () => {
 
     expect(Object.keys(harness).sort()).toEqual([
       'getAuthConfig',
+      'getPhoneAuthChallengeConfig',
       'login',
       'logout',
       'sendPhoneAuthCode',
@@ -409,6 +427,25 @@ describe('registerAdminHandlers', () => {
       'syncConnections',
       'validate',
       'verifyPhoneAuthCode',
+    ])
+  })
+
+  it('discovers the public phone challenge issuer through the local handler', async () => {
+    const { getPhoneAuthChallengeConfig } = createHarness()
+
+    const result = await getPhoneAuthChallengeConfig({
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    })
+
+    expect(result).toEqual({
+      success: true,
+      type: 'browser_redirect',
+      issuerUrl: 'https://challenge.example.com/phone-auth',
+    })
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'getPhoneAuthChallengeConfig',
     ])
   })
 

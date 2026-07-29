@@ -122,7 +122,11 @@ export function AdminLoginStep({
               }}
             />
           ) : null}
-          <form onSubmit={handleSubmit} className={phoneAuthEnabled ? "mt-5 space-y-4" : "mt-6 space-y-4"}>
+          <form
+            data-testid="admin-password-login-form"
+            onSubmit={handleSubmit}
+            className={phoneAuthEnabled ? "mt-5 space-y-4" : "mt-6 space-y-4"}
+          >
             <div className="space-y-2">
               <Label htmlFor="admin-identifier" className="text-xs text-foreground/70">
                 {t("onboarding.adminLogin.identifier")}

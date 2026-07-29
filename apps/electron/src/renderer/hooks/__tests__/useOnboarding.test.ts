@@ -258,9 +258,10 @@ describe('admin onboarding flow', () => {
   })
 
   it('falls back to password login when no real challenge issuer is configured', () => {
-    expect(resolvePhoneAuthAvailability(true, undefined)).toBe(false)
-    expect(resolvePhoneAuthAvailability(false, async () => 'signed-token')).toBe(false)
-    expect(resolvePhoneAuthAvailability(true, async () => 'signed-token')).toBe(true)
+    expect(resolvePhoneAuthAvailability(true, undefined, true)).toBe(false)
+    expect(resolvePhoneAuthAvailability(false, async () => 'signed-token', true)).toBe(false)
+    expect(resolvePhoneAuthAvailability(true, async () => 'signed-token', false)).toBe(false)
+    expect(resolvePhoneAuthAvailability(true, async () => 'signed-token', true)).toBe(true)
   })
 
   it('does not send a code without an issuer-signed challenge token', async () => {

@@ -192,8 +192,13 @@ export function mapAdminPhoneAuthError(error: unknown): string {
 export function resolvePhoneAuthAvailability(
   serverEnabled: boolean,
   challengeProvider: UseOnboardingOptions['phoneAuthChallengeProvider'],
+  discoveryAvailable: boolean,
 ): boolean {
-  return serverEnabled && typeof challengeProvider === 'function'
+  return (
+    serverEnabled
+    && discoveryAvailable
+    && typeof challengeProvider === 'function'
+  )
 }
 
 export async function sendPhoneAuthCodeWithChallenge(
@@ -387,11 +392,17 @@ export function useOnboarding({
     if (state.step !== 'admin-login' || state.phoneAuthEnabled !== undefined) return
     let cancelled = false
     window.electronAPI.adminGetAuthConfig()
-      .then(result => {
+      .then(async result => {
         if (!cancelled) {
+          const discovery = result.phoneAuthEnabled
+            ? await window.electronAPI.adminGetPhoneAuthChallengeConfig()
+                .catch(() => ({ success: false as const }))
+            : { success: false as const }
+          if (cancelled) return
           const phoneAuthEnabled = resolvePhoneAuthAvailability(
             result.phoneAuthEnabled,
             phoneAuthChallengeProvider,
+            discovery.success,
           )
           setState(s => ({
             ...s,

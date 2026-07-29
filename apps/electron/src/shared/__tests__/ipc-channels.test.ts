@@ -23,6 +23,7 @@ const EXPECTED_CHANNELS: string[] = [
   'LLM_Connection:setWorkspaceDefault',
   'LLM_Connection:test',
   'admin:getAuthConfig',
+  'admin:getPhoneAuthChallengeConfig',
   'admin:getStatus',
   'admin:login',
   'admin:logout',

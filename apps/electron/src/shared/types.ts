@@ -231,6 +231,14 @@ export interface AdminAuthConfigResult extends AdminRpcErrorPayload {
   phoneAuthEnabled: boolean
 }
 
+export type AdminPhoneAuthChallengeConfigResult =
+  | {
+      success: true
+      type: 'browser_redirect'
+      issuerUrl: string
+    }
+  | ({ success: false } & AdminRpcErrorPayload)
+
 export type AdminSendPhoneAuthCodeResult =
   | {
       success: true
@@ -444,6 +452,7 @@ export interface ElectronAPI {
   // Admin auth
   adminLogin(identifier: string, password: string): Promise<AdminLoginResult>
   adminGetAuthConfig(): Promise<AdminAuthConfigResult>
+  adminGetPhoneAuthChallengeConfig(): Promise<AdminPhoneAuthChallengeConfigResult>
   adminAcquirePhoneAuthChallenge(): Promise<AdminPhoneAuthChallengeResult>
   adminSendPhoneAuthCode(phone: string, challengeToken: string): Promise<AdminSendPhoneAuthCodeResult>
   adminVerifyPhoneAuthCode(phone: string, code: string): Promise<AdminVerifyPhoneAuthCodeResult>

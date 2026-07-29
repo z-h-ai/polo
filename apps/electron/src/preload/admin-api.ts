@@ -9,6 +9,7 @@ type AdminPreloadApi = Pick<
   ElectronAPI,
   | 'adminLogin'
   | 'adminGetAuthConfig'
+  | 'adminGetPhoneAuthChallengeConfig'
   | 'adminAcquirePhoneAuthChallenge'
   | 'adminSendPhoneAuthCode'
   | 'adminVerifyPhoneAuthCode'
@@ -29,6 +30,8 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.admin.LOGIN, identifier, password),
     adminGetAuthConfig: () =>
       client.invoke(RPC_CHANNELS.admin.GET_AUTH_CONFIG),
+    adminGetPhoneAuthChallengeConfig: () =>
+      client.invoke(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG),
     adminAcquirePhoneAuthChallenge: () => challengeDependencies
       ? acquirePhoneAuthChallenge(client, challengeDependencies)
       : Promise.resolve({

@@ -270,8 +270,9 @@ client.onConnectionStateChanged((state) => {
 
 // Admin auth — explicit, testable preload surface for admin-managed deployments.
 Object.assign(api, buildAdminPreloadApi(client, {
-  configuredIssuerUrl: process.env.POLO_AI_PHONE_AUTH_CHALLENGE_URL,
-  openExternal: url => shell.openExternal(url),
+  openExternal: process.env.POLO_AI_PHONE_AUTH_E2E === 'true'
+    ? url => ipcRenderer.invoke('__phone-auth-e2e:open-external', url)
+    : url => shell.openExternal(url),
 }))
 
 // ── performOAuth ─────────────────────────────────────────────────────────

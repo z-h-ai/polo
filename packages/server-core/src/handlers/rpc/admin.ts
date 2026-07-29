@@ -25,6 +25,7 @@ import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
   RPC_CHANNELS.admin.GET_AUTH_CONFIG,
+  RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG,
   RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
   RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE,
   RPC_CHANNELS.admin.SET_PASSWORD,
@@ -70,6 +71,20 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       const adminError = toAdminRpcError(error)
       log?.warn('[Admin] getAuthConfig failed:', adminError.message)
       return { phoneAuthEnabled: false, ...adminError }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG, async () => {
+    try {
+      const result = await createAdminClient(
+        requireAdminUrl(),
+        getCredentialManager(),
+      ).getPhoneAuthChallengeConfig()
+      return { success: true, ...result }
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn('[Admin] getPhoneAuthChallengeConfig failed:', adminError.message)
+      return { success: false, ...adminError }
     }
   })
 
