@@ -108,6 +108,7 @@ import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
 import { hasLocalAppRuntimeManager, shutdownLocalAppRuntime } from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
+import { canQuitAfterLocalAppShutdown } from './local-app-runtime/quit-guard'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -1231,11 +1232,20 @@ app.on('before-quit', async (event) => {
   if (sessionManager || mustStopLocalApps) {
     // Prevent quit until local app processes and session writes are flushed.
     event.preventDefault()
-    try {
-      await shutdownLocalAppRuntime()
-      mainLog.info('Stopped all local app runtimes')
-    } catch (error) {
-      mainLog.error('Failed to stop local app runtimes:', error)
+  }
+  if (mustStopLocalApps) {
+    const canQuit = await canQuitAfterLocalAppShutdown(
+      shutdownLocalAppRuntime,
+      {
+        info: message => mainLog.info(message),
+        error: (message, error) => mainLog.error(message, error),
+      },
+    )
+    if (!canQuit) {
+      isQuitting = false
+      windowManager?.setAppQuitting(false)
+      mainLog.error('Quit cancelled because local app runtimes were not fully stopped')
+      return
     }
   }
 

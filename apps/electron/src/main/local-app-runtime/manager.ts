@@ -59,6 +59,8 @@ const MAX_LOG_TAIL = 10_000
 const MAX_STATIC_CONCURRENT_STREAMS = 32
 const MAX_STATIC_ASSET_BYTES = 256 * 1024 * 1024
 const POST_HEALTH_STABILITY_MS = 50
+const SHUTDOWN_FORCE_RETRY_DELAY_MS = 100
+const HEALTH_OWNERSHIP_HEADER = 'x-polo-app-health-token'
 const RUNTIME_ENV_ALLOWLIST = [
   'PATH',
   'TMPDIR',
@@ -108,6 +110,7 @@ interface ManagedRuntime {
   processTreeOwner?: WindowsJobObjectOwner | WindowsProcessTreeOwner
   exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
   spawnError?: Error
+  healthToken: string
 }
 
 type ActiveReleaseIdentity = Pick<
@@ -175,6 +178,8 @@ export interface LocalAppRuntimeManagerOptions {
   baseEnvironment?: NodeJS.ProcessEnv
   logger?: LocalAppRuntimeLogger
   now?: () => number
+  /** Test/embedding seam; production allocates an ephemeral localhost port. */
+  portAllocator?: () => Promise<number>
 }
 
 const noopLogger: LocalAppRuntimeLogger = {
@@ -265,6 +270,7 @@ export class LocalAppRuntimeManager {
   private readonly baseEnvironment: NodeJS.ProcessEnv
   private readonly logger: LocalAppRuntimeLogger
   private readonly now: () => number
+  private readonly portAllocator?: () => Promise<number>
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly startPromises = new Map<string, Promise<LocalAppStartResult>>()
@@ -277,6 +283,7 @@ export class LocalAppRuntimeManager {
   }>()
   private readonly logWriters = new Map<string, BoundedLogWriter>()
   private initializationPromise?: Promise<void>
+  private shutdownPromise?: Promise<void>
   private shuttingDown = false
 
   constructor(options: LocalAppRuntimeManagerOptions) {
@@ -296,6 +303,7 @@ export class LocalAppRuntimeManager {
     this.baseEnvironment = { ...(options.baseEnvironment ?? process.env) }
     this.logger = options.logger ?? noopLogger
     this.now = options.now ?? Date.now
+    this.portAllocator = options.portAllocator
   }
 
   initialize(): Promise<void> {
@@ -594,8 +602,22 @@ export class LocalAppRuntimeManager {
   }
 
   async shutdown(): Promise<void> {
-    if (this.shuttingDown) return
     this.shuttingDown = true
+    if (this.shutdownPromise) return this.shutdownPromise
+    const shutdownPromise = this.performShutdown()
+    this.shutdownPromise = shutdownPromise
+    void shutdownPromise.then(
+      () => {
+        if (this.shutdownPromise === shutdownPromise) this.shutdownPromise = undefined
+      },
+      () => {
+        if (this.shutdownPromise === shutdownPromise) this.shutdownPromise = undefined
+      },
+    )
+    return shutdownPromise
+  }
+
+  private async performShutdown(): Promise<void> {
     for (const install of this.activeInstalls.values()) {
       install.controller.abort(new LocalAppRuntimeError(
         'INSTALL_CANCELLED',
@@ -609,8 +631,51 @@ export class LocalAppRuntimeManager {
       ...[...this.activeInstalls.values()].map(install => install.promise),
       ...this.lifecycleQueues.values(),
     ])
-    await Promise.allSettled([...this.runtimes.values()].map(runtime => this.stopRuntime(runtime)))
-    await Promise.allSettled([...this.logWriters.values()].map(writer => writer.flush()))
+    const runtimes = [...new Set(this.runtimes.values())]
+    const stopResults = await Promise.allSettled(
+      runtimes.map(runtime => this.stopRuntime(runtime)),
+    )
+    const failures: Array<{
+      appId: string
+      initialError: string
+      forcedError?: string
+    }> = []
+    for (let index = 0; index < stopResults.length; index += 1) {
+      const result = stopResults[index]!
+      if (result.status === 'fulfilled') continue
+      const runtime = runtimes[index]!
+      const failure: {
+        appId: string
+        initialError: string
+        forcedError?: string
+      } = {
+        appId: runtime.appId,
+        initialError: this.formatError(result.reason),
+      }
+      failures.push(failure)
+      await delay(SHUTDOWN_FORCE_RETRY_DELAY_MS)
+      try {
+        await this.forceStopRuntime(runtime)
+      } catch (forceError) {
+        failure.forcedError = this.formatError(forceError)
+      }
+    }
+
+    const flushResults = await Promise.allSettled(
+      [...this.logWriters.values()].map(writer => writer.flush()),
+    )
+    for (const result of flushResults) {
+      if (result.status === 'rejected') {
+        this.logger.warn('[local-apps] failed to flush a runtime log during shutdown', result.reason)
+      }
+    }
+    if (failures.length > 0) {
+      throw new LocalAppRuntimeError(
+        'STOP_FAILED',
+        `Failed to cleanly stop ${failures.length} local app runtime(s)`,
+        { failures },
+      )
+    }
   }
 
   private trackStartOperation(
@@ -1229,7 +1294,7 @@ export class LocalAppRuntimeManager {
         running.healthy
         && this.isRuntimeHandleLive(running)
         && !running.cleanupPromise
-        && await this.isHealthy(healthUrl)
+        && (await this.probeOwnedHealthcheck(healthUrl, running.healthToken)).kind === 'healthy'
         && this.runtimes.get(appId) === running
         && this.isRuntimeHandleLive(running)
       ) {
@@ -1265,6 +1330,15 @@ export class LocalAppRuntimeManager {
         throw signal.aborted
           ? this.getAbortError(signal, primaryError)
           : primaryError
+      }
+      if (primaryError.code === 'PORT_UNAVAILABLE') {
+        this.statuses.set(appId, {
+          appId,
+          status: 'stopped',
+          currentVersion: requestedVersion,
+          error: primaryError.toJSON(),
+        })
+        throw primaryError
       }
       await this.markVersionBroken(metadata, requestedVersion, primaryError)
       const fallbackVersion = metadata.lastKnownGoodVersion
@@ -1419,6 +1493,8 @@ export class LocalAppRuntimeManager {
     manifest: PoloAppManifest,
   ): Promise<ManagedRuntime> {
     const port = await this.allocatePort()
+    await this.assertPortAvailable(port)
+    const healthToken = randomUUID().replaceAll('-', '')
     const executable = manifest.runtime === 'python'
       ? await this.requireRuntimeExecutable(this.uvPath, 'uv')
       : await this.requireRuntimeExecutable(this.bunPath, 'Bun')
@@ -1440,7 +1516,7 @@ export class LocalAppRuntimeManager {
       executable,
       args,
       versionDir,
-      this.buildRuntimeEnvironment(appId, version, versionDir, port),
+      this.buildRuntimeEnvironment(appId, version, versionDir, port, healthToken),
     )
     this.captureChildOutput(appId, child)
 
@@ -1459,6 +1535,7 @@ export class LocalAppRuntimeManager {
       healthy: false,
       stopRequested: false,
       exitPromise,
+      healthToken,
     }
     child.once('error', (error) => {
       handle.spawnError = error
@@ -1467,11 +1544,14 @@ export class LocalAppRuntimeManager {
       resolveExit({ code, signal })
       if (handle.stopRequested) return
       handle.cleanupPromise = this.killProcessTree(child, handle.processTreeOwner)
-        .catch(error =>
-          this.logger.warn(`[local-apps] failed to reap descendants after ${appId} exited`, error))
-        .finally(() => {
+        .then(() => {
           if (this.runtimes.get(appId) === handle) this.runtimes.delete(appId)
         })
+        .catch((error) => {
+          this.logger.warn(`[local-apps] failed to reap descendants after ${appId} exited`, error)
+          throw error
+        })
+      void handle.cleanupPromise.catch(() => {})
       const runtimeError = new LocalAppRuntimeError(
         'PROCESS_CRASHED',
         `${appId} exited unexpectedly with code ${code ?? 'null'}`,
@@ -1579,6 +1659,7 @@ export class LocalAppRuntimeManager {
     const staticRoot = entryStat.isDirectory() ? entryPath : dirname(entryPath)
     const fallbackFile = entryStat.isDirectory() ? join(entryPath, 'index.html') : entryPath
     const streamState = { active: 0 }
+    const healthToken = randomUUID().replaceAll('-', '')
     const server = createHttpServer((request, response) => {
       void this.handleStaticRequest(request, response, {
         staticRoot,
@@ -1586,6 +1667,7 @@ export class LocalAppRuntimeManager {
         healthcheck: manifest.healthcheck,
         webPath: manifest.webPath,
         streamState,
+        healthToken,
       }).catch((error) => {
         if (!response.headersSent) {
           response.statusCode = 500
@@ -1624,6 +1706,7 @@ export class LocalAppRuntimeManager {
       healthy: false,
       stopRequested: false,
       exitPromise,
+      healthToken,
     }
     this.appendLog(appId, 'system', `Starting static ${version} on port ${port}`)
     return handle
@@ -1638,6 +1721,7 @@ export class LocalAppRuntimeManager {
       healthcheck: string
       webPath: string
       streamState: { active: number }
+      healthToken: string
     },
   ): Promise<void> {
     const method = request.method ?? 'GET'
@@ -1654,6 +1738,9 @@ export class LocalAppRuntimeManager {
     }
     const healthPath = new URL(options.healthcheck, 'http://127.0.0.1').pathname
     const webPath = new URL(options.webPath, 'http://127.0.0.1').pathname
+    // Polo owns the static listener directly, so every response can carry the
+    // per-start ownership proof (including healthcheck === webPath).
+    response.setHeader(HEALTH_OWNERSHIP_HEADER, options.healthToken)
     if (pathname === healthPath && healthPath !== webPath) {
       this.sendStaticText(response, method, 200, '{"ok":true}', {
         'content-type': 'application/json; charset=utf-8',
@@ -1816,6 +1903,7 @@ export class LocalAppRuntimeManager {
   ): Promise<void> {
     const deadline = this.now() + timeoutMs
     const healthUrl = `http://127.0.0.1:${handle.port}${handle.manifest.healthcheck}`
+    let ownershipProven = false
     while (this.now() < deadline) {
       if (handle.stopRequested || this.shuttingDown) {
         throw new LocalAppRuntimeError('START_FAILED', `Start of ${handle.appId} was cancelled`)
@@ -1828,16 +1916,54 @@ export class LocalAppRuntimeManager {
         )
       }
       if (handle.child?.exitCode != null || handle.child?.signalCode != null) {
+        if (await this.isPortInUse(handle.port)) {
+          throw new LocalAppRuntimeError(
+            'PORT_UNAVAILABLE',
+            `Port ${handle.port} was claimed by another listener before ${handle.appId} became healthy`,
+            { port: handle.port, healthUrl },
+          )
+        }
         throw new LocalAppRuntimeError(
           'PROCESS_CRASHED',
           `${handle.appId} exited before its health check succeeded`,
           { exitCode: handle.child.exitCode, signal: handle.child.signalCode },
         )
       }
-      if (await this.isHealthy(healthUrl)) {
-        if (handle.manifest.runtime !== 'static' || await this.isHealthy(handle.url)) return
+      const healthProbe = await this.probeOwnedHealthcheck(healthUrl, handle.healthToken)
+      if (healthProbe.kind === 'foreign') {
+        throw new LocalAppRuntimeError(
+          'PORT_UNAVAILABLE',
+          `Port ${handle.port} responded without the ownership challenge for ${handle.appId}`,
+          {
+            port: handle.port,
+            healthUrl,
+            statusCode: healthProbe.statusCode,
+          },
+        )
+      }
+      if (healthProbe.kind === 'healthy' || healthProbe.kind === 'owned_unhealthy') {
+        ownershipProven = true
+      }
+      if (healthProbe.kind === 'healthy') {
+        if (handle.manifest.runtime !== 'static') return
+        const webProbe = await this.probeOwnedHealthcheck(handle.url, handle.healthToken)
+        if (webProbe.kind === 'foreign') {
+          throw new LocalAppRuntimeError(
+            'PORT_UNAVAILABLE',
+            `Static port ${handle.port} failed its ownership challenge`,
+            { port: handle.port, url: handle.url },
+          )
+        }
+        if (webProbe.kind === 'healthy') return
       }
       await delay(200)
+    }
+    if (!ownershipProven && await this.isPortInUse(handle.port)) {
+      throw new LocalAppRuntimeError(
+        'PORT_UNAVAILABLE',
+        `Port ${handle.port} is occupied but ${handle.appId} did not prove ownership`,
+        { port: handle.port, healthUrl },
+      )
     }
     throw new LocalAppRuntimeError(
       'START_TIMEOUT',
@@ -1846,23 +1972,52 @@ export class LocalAppRuntimeManager {
     )
   }
 
-  private isHealthy(url: string): Promise<boolean> {
+  private probeOwnedHealthcheck(
+    url: string,
+    healthToken: string,
+  ): Promise<{
+    kind: 'healthy' | 'owned_unhealthy' | 'foreign' | 'unreachable'
+    statusCode?: number
+  }> {
     return new Promise(resolveHealth => {
+      let settled = false
+      const settle = (
+        result: {
+          kind: 'healthy' | 'owned_unhealthy' | 'foreign' | 'unreachable'
+          statusCode?: number
+        },
+      ) => {
+        if (settled) return
+        settled = true
+        resolveHealth(result)
+      }
       const request = httpGet(url, { timeout: 1_000 }, response => {
         response.resume()
-        resolveHealth(Boolean(response.statusCode && response.statusCode >= 200 && response.statusCode < 400))
+        const statusCode = response.statusCode
+        const presentedToken = response.headers[HEALTH_OWNERSHIP_HEADER]
+        const ownsPort = presentedToken === healthToken
+        if (!ownsPort) {
+          settle({ kind: 'foreign', ...(statusCode ? { statusCode } : {}) })
+          return
+        }
+        settle({
+          kind: statusCode && statusCode >= 200 && statusCode < 400
+            ? 'healthy'
+            : 'owned_unhealthy',
+          ...(statusCode ? { statusCode } : {}),
+        })
       })
       request.once('timeout', () => {
         request.destroy()
-        resolveHealth(false)
+        settle({ kind: 'unreachable' })
       })
-      request.once('error', () => resolveHealth(false))
+      request.once('error', () => settle({ kind: 'unreachable' }))
     })
   }
 
   private stopRuntime(handle: ManagedRuntime): Promise<void> {
     if (handle.stopPromise) return handle.stopPromise
-    handle.stopPromise = (async () => {
+    const stopPromise = (async () => {
       handle.stopRequested = true
       if (handle.server) {
         await new Promise<void>((resolveClose) => {
@@ -1884,7 +2039,76 @@ export class LocalAppRuntimeManager {
       if (this.runtimes.get(handle.appId) === handle) this.runtimes.delete(handle.appId)
       this.appendLog(handle.appId, 'system', `Stopped ${handle.version}`)
     })()
-    return handle.stopPromise
+    const trackedStopPromise = stopPromise.catch((error) => {
+      if (handle.stopPromise === trackedStopPromise) handle.stopPromise = undefined
+      throw error
+    })
+    handle.stopPromise = trackedStopPromise
+    return trackedStopPromise
+  }
+
+  private async forceStopRuntime(handle: ManagedRuntime): Promise<void> {
+    handle.stopRequested = true
+    if (handle.server?.listening) {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        handle.server!.close(error => {
+          if (error) rejectClose(error)
+          else resolveClose()
+        })
+        handle.server!.closeAllConnections?.()
+      })
+    }
+    if (handle.cleanupPromise) {
+      await handle.cleanupPromise.catch(() => {})
+      handle.cleanupPromise = undefined
+    }
+    if (handle.child) {
+      await this.forceKillProcessTree(handle.child)
+    }
+    if (this.runtimes.get(handle.appId) === handle) this.runtimes.delete(handle.appId)
+    this.appendLog(handle.appId, 'system', `Force-stopped ${handle.version}`)
+  }
+
+  private async forceKillProcessTree(child: ChildProcess): Promise<void> {
+    const pid = child.pid
+    if (!pid) return
+    if (process.platform === 'win32') {
+      await new Promise<void>((resolveKill) => {
+        const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        })
+        killer.once('error', () => resolveKill())
+        killer.once('exit', () => resolveKill())
+      })
+      if (!await this.waitForChildExit(child, 1_000)) {
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          `Windows process tree ${pid} survived forced taskkill`,
+        )
+      }
+      return
+    }
+
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // The process exited between the checks.
+      }
+    }
+    const [rootKilled, groupKilled] = await Promise.all([
+      this.waitForChildExit(child, 1_000),
+      this.waitForProcessGroupExit(pid, 1_000),
+    ])
+    if (!rootKilled || !groupKilled) {
+      throw new LocalAppRuntimeError(
+        'STOP_FAILED',
+        `Process tree ${pid} survived forced SIGKILL`,
+      )
+    }
   }
 
   private async killProcessTree(
@@ -2015,6 +2239,11 @@ export class LocalAppRuntimeManager {
     this.getLogWriter(appId).append(source, message)
   }
 
+  private formatError(error: unknown): string {
+    if (error instanceof Error) return `${error.name}: ${error.message}`
+    return String(error)
+  }
+
   private getLogWriter(appId: string): BoundedLogWriter {
     let writer = this.logWriters.get(appId)
     if (!writer) {
@@ -2030,6 +2259,16 @@ export class LocalAppRuntimeManager {
   }
 
   private async allocatePort(): Promise<number> {
+    if (this.portAllocator) {
+      const port = await this.portAllocator()
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+        throw new LocalAppRuntimeError(
+          'PORT_UNAVAILABLE',
+          `Port allocator returned an invalid port: ${String(port)}`,
+        )
+      }
+      return port
+    }
     return new Promise<number>((resolvePort, rejectPort) => {
       const server = createNetServer()
       server.unref()
@@ -2053,11 +2292,38 @@ export class LocalAppRuntimeManager {
     })
   }
 
+  private async assertPortAvailable(port: number): Promise<void> {
+    if (!await this.isPortInUse(port)) return
+    throw new LocalAppRuntimeError(
+      'PORT_UNAVAILABLE',
+      `Localhost port ${port} is already in use`,
+      { port },
+    )
+  }
+
+  private isPortInUse(port: number): Promise<boolean> {
+    return new Promise(resolveCheck => {
+      const server = createNetServer()
+      let settled = false
+      const settle = (inUse: boolean) => {
+        if (settled) return
+        settled = true
+        resolveCheck(inUse)
+      }
+      server.unref()
+      server.once('error', () => settle(true))
+      server.listen(port, '127.0.0.1', () => {
+        server.close(error => settle(Boolean(error)))
+      })
+    })
+  }
+
   private buildRuntimeEnvironment(
     appId: string,
     version: string,
     versionDir: string,
     port: number,
+    healthToken?: string,
   ): NodeJS.ProcessEnv {
     const cacheDir = join(this.runtimeCacheDir, appId, version)
     const environment: NodeJS.ProcessEnv = {}
@@ -2074,6 +2340,7 @@ export class LocalAppRuntimeManager {
       POLO_APP_VERSION: version,
       POLO_APP_DATA_DIR: this.getDataDir(appId),
       POLO_APP_BUNDLE_DIR: versionDir,
+      ...(healthToken ? { POLO_APP_HEALTH_TOKEN: healthToken } : {}),
       UV_PROJECT_ENVIRONMENT: join(cacheDir, 'python-venv'),
       UV_CACHE_DIR: join(cacheDir, 'uv-cache'),
       UV_NO_CONFIG: '1',

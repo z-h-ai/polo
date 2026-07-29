@@ -143,6 +143,7 @@ function makeManager(options: {
   uvPath?: string
   bunPath?: string
   baseEnvironment?: NodeJS.ProcessEnv
+  portAllocator?: () => Promise<number>
 } = {}): LocalAppRuntimeManager {
   manager = new LocalAppRuntimeManager({
     rootDir: join(testRoot, 'runtime'),
@@ -227,6 +228,39 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+async function getFreeLocalPort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once('error', rejectListen)
+    server.listen(0, '127.0.0.1', () => resolveListen())
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('test server has no port')
+  const port = address.port
+  await new Promise<void>((resolveClose, rejectClose) => {
+    server.close(error => {
+      if (error) rejectClose(error)
+      else resolveClose()
+    })
+  })
+  return port
+}
+
+function ownedNodeServerSource(options: { listenDelayMs?: number; body?: string } = {}): string {
+  const listenDelayMs = options.listenDelayMs ?? 0
+  const body = JSON.stringify(options.body ?? 'owned')
+  return `
+    const http = require('http')
+    const listen = () => {
+      http.createServer((_request, response) => {
+        response.setHeader('x-polo-app-health-token', process.env.POLO_APP_HEALTH_TOKEN)
+        response.end(${body})
+      }).listen(Number(process.env.PORT), '127.0.0.1')
+    }
+    ${listenDelayMs > 0 ? `setTimeout(listen, ${listenDelayMs})` : 'listen()'}
+  `
+}
+
 describe('LocalAppRuntimeManager', () => {
   it('keeps the install RPC deadline beyond the manager operation ceiling', () => {
     expect(LOCAL_APP_INSTALL_RPC_TIMEOUT_MS).toBeGreaterThan(
@@ -264,6 +298,9 @@ describe('LocalAppRuntimeManager', () => {
     const started = await runtime.start('demo.static')
     expect(started.url).toContain('/app')
     expect(await (await stableFetch(started.url)).text()).toContain('static-ready')
+    const staticHealth = await stableFetch(new URL('/health', started.url))
+    expect(staticHealth.status).toBe(200)
+    expect(staticHealth.headers.get('x-polo-app-health-token')).toBeTruthy()
     const assetUrl = new URL('/app/asset.txt', started.url)
     const partialAsset = await stableFetch(assetUrl, { headers: { range: 'bytes=2-5' } })
     expect(partialAsset.status).toBe(206)
@@ -301,6 +338,7 @@ describe('LocalAppRuntimeManager', () => {
           http.createServer((request, response) => {
             const healthy = request.url !== '/health' || Date.now() >= readyAt
             response.statusCode = healthy ? 200 : 503
+            response.setHeader('x-polo-app-health-token', process.env.POLO_APP_HEALTH_TOKEN)
             response.end(healthy ? 'ok' : 'starting')
           }).listen(Number(process.env.PORT), '127.0.0.1')
         `,
@@ -368,6 +406,7 @@ describe('LocalAppRuntimeManager', () => {
           const readyAt = Date.now() + 600
           http.createServer((request, response) => {
             response.statusCode = request.url === '/health' && Date.now() < readyAt ? 503 : 200
+            response.setHeader('x-polo-app-health-token', process.env.POLO_APP_HEALTH_TOKEN)
             response.end('v1')
           }).listen(Number(process.env.PORT), '127.0.0.1')
         `,
@@ -507,7 +546,10 @@ describe('LocalAppRuntimeManager', () => {
               stdio: 'ignore',
             })
           }
-          http.createServer((_request, response) => response.end(first ? 'first' : 'retry'))
+          http.createServer((_request, response) => {
+            response.setHeader('x-polo-app-health-token', process.env.POLO_APP_HEALTH_TOKEN)
+            response.end(first ? 'first' : 'retry')
+          })
             .listen(Number(process.env.PORT), '127.0.0.1')
           if (first) setTimeout(() => process.exit(23), 500)
         `,
@@ -544,6 +586,7 @@ describe('LocalAppRuntimeManager', () => {
         'server.js': `
           const http = require('http')
           http.createServer((_request, response) => {
+            response.setHeader('x-polo-app-health-token', process.env.POLO_APP_HEALTH_TOKEN)
             response.end('ok', () => process.exit(0))
           }).listen(Number(process.env.PORT), '127.0.0.1')
         `,
@@ -558,6 +601,165 @@ describe('LocalAppRuntimeManager', () => {
       code: 'PROCESS_CRASHED',
     })
     expect((await runtime.getRuntimeStatus('demo.health-exit')).status).toBe('broken')
+  })
+
+  it('rejects an unrelated healthy listener that claims the allocated port', async () => {
+    const bundleDir = await writeBundle(
+      'demo.foreign-listener',
+      '1.0.0',
+      {
+        runtime: 'js',
+        entry: ['server.js'],
+        startTimeoutMs: 3_000,
+      },
+      {
+        'server.js': ownedNodeServerSource({ listenDelayMs: 10_000 }),
+      },
+    )
+    const archive = await archiveBundle(bundleDir, 'foreign-listener')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.foreign-listener', '1.0.0', url, archive))
+
+    const start = runtime.start('demo.foreign-listener')
+    let allocatedPort = 0
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await runtime.getRuntimeStatus('demo.foreign-listener')
+      if (status.status === 'starting' && status.port) {
+        allocatedPort = status.port
+        break
+      }
+      await Bun.sleep(10)
+    }
+    expect(allocatedPort).toBeGreaterThan(0)
+
+    const foreignServer = createServer((_request, response) => {
+      response.statusCode = 200
+      response.end('UNRELATED_LISTENER')
+    })
+    try {
+      await new Promise<void>((resolveListen, rejectListen) => {
+        foreignServer.once('error', rejectListen)
+        foreignServer.listen(allocatedPort, '127.0.0.1', () => resolveListen())
+      })
+      await expect(start).rejects.toMatchObject({
+        code: 'PORT_UNAVAILABLE',
+        details: { port: allocatedPort },
+      })
+    } finally {
+      await new Promise<void>(resolveClose => foreignServer.close(() => resolveClose()))
+    }
+    expect((await runtime.getRuntimeStatus('demo.foreign-listener')).status).toBe('stopped')
+  })
+
+  it('rejects a second App competing for the same local port', async () => {
+    const fixedPort = await getFreeLocalPort()
+    const runtime = makeManager({
+      bunPath: process.execPath,
+      portAllocator: async () => fixedPort,
+    })
+    for (const appId of ['demo.port-owner-a', 'demo.port-owner-b']) {
+      const bundleDir = await writeBundle(
+        appId,
+        '1.0.0',
+        {
+          runtime: 'js',
+          entry: ['server.js'],
+          startTimeoutMs: 2_000,
+        },
+        { 'server.js': ownedNodeServerSource({ body: appId }) },
+      )
+      const archive = await archiveBundle(bundleDir, appId)
+      const url = await serveArchive(archive)
+      await runtime.install(requestFor(appId, '1.0.0', url, archive))
+      await new Promise<void>(resolveClose => downloadServer!.close(() => resolveClose()))
+      downloadServer = null
+    }
+
+    const owner = await runtime.start('demo.port-owner-a')
+    expect(owner.port).toBe(fixedPort)
+    await expect(runtime.start('demo.port-owner-b')).rejects.toMatchObject({
+      code: 'PORT_UNAVAILABLE',
+      details: { port: fixedPort },
+    })
+    expect(await (await stableFetch(owner.url)).text()).toBe('demo.port-owner-a')
+    expect((await runtime.getRuntimeStatus('demo.port-owner-a')).status).toBe('running')
+    expect((await runtime.getRuntimeStatus('demo.port-owner-b')).status).toBe('stopped')
+  })
+
+  it('rejects shutdown after a stop failure even when forced retry reaps the process', async () => {
+    const bundleDir = await writeBundle(
+      'demo.shutdown-retry',
+      '1.0.0',
+      { runtime: 'js', entry: ['server.js'] },
+      { 'server.js': ownedNodeServerSource() },
+    )
+    const archive = await archiveBundle(bundleDir, 'shutdown-retry')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.shutdown-retry', '1.0.0', url, archive))
+    await runtime.start('demo.shutdown-retry')
+    const status = await runtime.getRuntimeStatus('demo.shutdown-retry')
+    expect(status.pid).toBeGreaterThan(0)
+
+    const internals = runtime as unknown as {
+      killProcessTree: (...args: unknown[]) => Promise<void>
+      runtimes: Map<string, unknown>
+    }
+    const originalKill = internals.killProcessTree.bind(runtime)
+    internals.killProcessTree = async () => {
+      throw new Error('injected graceful stop failure')
+    }
+
+    await expect(runtime.shutdown()).rejects.toMatchObject({
+      code: 'STOP_FAILED',
+    })
+    expect(isProcessAlive(status.pid!)).toBe(false)
+    expect(internals.runtimes.has('demo.shutdown-retry')).toBe(false)
+
+    internals.killProcessTree = originalKill
+    await expect(runtime.shutdown()).resolves.toBeUndefined()
+  })
+
+  it('retains an uncleared runtime after shutdown fallback fails and reaps it on retry', async () => {
+    const bundleDir = await writeBundle(
+      'demo.shutdown-retain',
+      '1.0.0',
+      { runtime: 'js', entry: ['server.js'] },
+      { 'server.js': ownedNodeServerSource() },
+    )
+    const archive = await archiveBundle(bundleDir, 'shutdown-retain')
+    const url = await serveArchive(archive)
+    const runtime = makeManager({ bunPath: process.execPath })
+    await runtime.install(requestFor('demo.shutdown-retain', '1.0.0', url, archive))
+    await runtime.start('demo.shutdown-retain')
+    const status = await runtime.getRuntimeStatus('demo.shutdown-retain')
+    expect(status.pid).toBeGreaterThan(0)
+
+    const internals = runtime as unknown as {
+      killProcessTree: (...args: unknown[]) => Promise<void>
+      forceKillProcessTree: (...args: unknown[]) => Promise<void>
+      runtimes: Map<string, unknown>
+    }
+    const originalKill = internals.killProcessTree.bind(runtime)
+    const originalForceKill = internals.forceKillProcessTree.bind(runtime)
+    internals.killProcessTree = async () => {
+      throw new Error('injected stop failure')
+    }
+    internals.forceKillProcessTree = async () => {
+      throw new Error('injected fallback failure')
+    }
+
+    await expect(runtime.shutdown()).rejects.toMatchObject({
+      code: 'STOP_FAILED',
+    })
+    expect(internals.runtimes.has('demo.shutdown-retain')).toBe(true)
+    expect(isProcessAlive(status.pid!)).toBe(true)
+
+    internals.killProcessTree = originalKill
+    internals.forceKillProcessTree = originalForceKill
+    await expect(runtime.shutdown()).resolves.toBeUndefined()
+    expect(isProcessAlive(status.pid!)).toBe(false)
   })
 
   it('runs JS and Python bundles with isolated runtime and data directories', async () => {
@@ -588,7 +790,13 @@ describe('LocalAppRuntimeManager', () => {
             port: Number(process.env.PORT),
             fetch(request) {
               const path = new URL(request.url).pathname
-              if (path === '/health') return new Response('ok')
+              if (path === '/health') {
+                return new Response('ok', {
+                  headers: {
+                    'x-polo-app-health-token': process.env.POLO_APP_HEALTH_TOKEN,
+                  },
+                })
+              }
               return Response.json({
                 appId: process.env.POLO_APP_ID,
                 dataDir: process.env.POLO_APP_DATA_DIR,
@@ -644,6 +852,7 @@ class Handler(BaseHTTPRequestHandler):
                 "venvDir": os.environ["UV_PROJECT_ENVIRONMENT"],
             }).encode()
         self.send_response(200)
+        self.send_header("X-Polo-App-Health-Token", os.environ["POLO_APP_HEALTH_TOKEN"])
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
