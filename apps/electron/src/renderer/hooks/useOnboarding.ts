@@ -244,6 +244,7 @@ export function resolveAdminReloginState(state: OnboardingState): OnboardingStat
     ...state,
     step: 'admin-login',
     loginStatus: 'idle',
+    phoneAuthEnabled: undefined,
     errorMessage: undefined,
   }
 }

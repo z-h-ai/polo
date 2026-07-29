@@ -35,6 +35,7 @@ const password = 'phone-password-123'
 const e2eUserAgent = `polo-phone-auth-e2e/${phone}`
 const runtimeFetch = globalThis.fetch
 const logoutHttpStatuses: number[] = []
+const authConfigHttpStatuses: number[] = []
 const revokedValidateStatuses: number[] = []
 const revokedRefreshStatuses: number[] = []
 globalThis.fetch = (async (input, init = {}) => {
@@ -46,8 +47,12 @@ globalThis.fetch = (async (input, init = {}) => {
     : input instanceof URL
       ? input.toString()
       : input.url
-  if (new URL(requestUrl).pathname === '/api/auth/logout') {
+  const pathname = new URL(requestUrl).pathname
+  if (pathname === '/api/auth/logout') {
     logoutHttpStatuses.push(response.status)
+  }
+  if (pathname === '/api/auth/config') {
+    authConfigHttpStatuses.push(response.status)
   }
   return response
 }) as typeof globalThis.fetch
@@ -314,6 +319,7 @@ async function logoutThroughProductionUi(): Promise<void> {
     throw new Error('Production logout started without persisted Admin credentials')
   }
   const logoutCountBefore = logoutHttpStatuses.length
+  const authConfigCountBefore = authConfigHttpStatuses.length
   await click('[data-testid="sidebar-user-menu-trigger"]')
   await waitForSelector('[data-testid="sidebar-user-menu-logout"]')
   await click('[data-testid="sidebar-user-menu-logout"]')
@@ -326,6 +332,13 @@ async function logoutThroughProductionUi(): Promise<void> {
   if (newLogoutStatuses.length !== 1 || newLogoutStatuses[0] !== 200) {
     throw new Error(
       `Expected one successful POL-53 logout response, received ${JSON.stringify(newLogoutStatuses)}`,
+    )
+  }
+  const newAuthConfigStatuses = authConfigHttpStatuses.slice(authConfigCountBefore)
+  if (newAuthConfigStatuses.length !== 1 || newAuthConfigStatuses[0] !== 200) {
+    throw new Error(
+      'Expected relogin to rediscover phone auth config exactly once, received '
+      + JSON.stringify(newAuthConfigStatuses),
     )
   }
 
@@ -439,6 +452,16 @@ async function run(): Promise<void> {
   await finishOnboarding()
   await logoutThroughProductionUi()
 
+  if (
+    authConfigHttpStatuses.length !== 5
+    || authConfigHttpStatuses.some(status => status !== 200)
+  ) {
+    throw new Error(
+      'Expected initial discovery plus one successful auth config rediscovery per relogin, received '
+      + JSON.stringify(authConfigHttpStatuses),
+    )
+  }
+
   completed = true
   console.log(JSON.stringify({
     event: 'native_phone_auth_e2e_pass',
@@ -466,6 +489,7 @@ async function run(): Promise<void> {
       'account-security-navigation',
       'set-password',
       'real-logout',
+      'relogin-auth-config-rediscovery',
       'returning-phone-code-login',
       'phone-password-login',
       'legacy-username-login',
@@ -478,6 +502,10 @@ async function run(): Promise<void> {
       statuses: logoutHttpStatuses,
       revokedValidateStatuses,
       revokedRefreshStatuses,
+    },
+    authConfigEvidence: {
+      expectedCount: 5,
+      statuses: authConfigHttpStatuses,
     },
   }))
   app.quit()

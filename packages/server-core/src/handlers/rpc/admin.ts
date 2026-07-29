@@ -2,10 +2,17 @@ import {
   AdminClient,
   AdminError,
   getSafeAdminErrorMessage,
+  type AdminErrorCode,
   type AdminLlmConnection,
   type AdminLoginResponse,
   type AdminRefreshResponse,
 } from '@polo-ai/shared/admin'
+import {
+  AdminLoginRpcInputSchema,
+  SendPhoneAuthCodeRpcInputSchema,
+  SetAdminPasswordRpcInputSchema,
+  VerifyPhoneAuthCodeRpcInputSchema,
+} from '@polo-ai/shared/admin/schemas'
 import {
   addLlmConnection,
   deleteLlmConnection,
@@ -44,12 +51,17 @@ type TokenValidationResult =
 export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
 
-  server.handle(RPC_CHANNELS.admin.LOGIN, async (_ctx, identifier: string, password: string) => {
+  server.handle(RPC_CHANNELS.admin.LOGIN, async (_ctx, identifier: unknown, password: unknown) => {
+    const input = AdminLoginRpcInputSchema.safeParse({ identifier, password })
+    if (!input.success) {
+      return adminInputError('INVALID_CREDENTIALS')
+    }
+
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
       const client = createAdminClient(adminUrl, manager)
-      const login = await client.login(identifier, password)
+      const login = await client.login(input.data.identifier, input.data.password)
       await completeAdminLogin({
         adminUrl,
         manager,
@@ -91,10 +103,17 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   server.handle(
     RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE,
-    async (_ctx, phone: string, challengeToken: string) => {
+    async (_ctx, phone: unknown, challengeToken: unknown) => {
+      const input = SendPhoneAuthCodeRpcInputSchema.safeParse({ phone, challengeToken })
+      if (!input.success) {
+        return adminInputError(hasValidationIssue(input.error.issues, 'phone')
+          ? 'invalid_phone'
+          : 'phone_auth_configuration_error')
+      }
+
       try {
         const result = await createAdminClient(requireAdminUrl(), getCredentialManager())
-          .sendPhoneAuthCode({ phone, challengeToken })
+          .sendPhoneAuthCode(input.data)
         return { success: true, ...result }
       } catch (error) {
         const adminError = toAdminRpcError(error)
@@ -106,12 +125,19 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   server.handle(
     RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE,
-    async (_ctx, phone: string, code: string) => {
+    async (_ctx, phone: unknown, code: unknown) => {
+      const input = VerifyPhoneAuthCodeRpcInputSchema.safeParse({ phone, code })
+      if (!input.success) {
+        return adminInputError(hasValidationIssue(input.error.issues, 'phone')
+          ? 'invalid_phone'
+          : 'verification_code_invalid')
+      }
+
       try {
         const adminUrl = requireAdminUrl()
         const manager = getCredentialManager()
         const login = await createAdminClient(adminUrl, manager)
-          .verifyPhoneAuthCode({ phone, code })
+          .verifyPhoneAuthCode(input.data)
         await completeAdminLogin({
           adminUrl,
           manager,
@@ -131,7 +157,12 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     },
   )
 
-  server.handle(RPC_CHANNELS.admin.SET_PASSWORD, async (_ctx, password: string) => {
+  server.handle(RPC_CHANNELS.admin.SET_PASSWORD, async (_ctx, password: unknown) => {
+    const input = SetAdminPasswordRpcInputSchema.safeParse({ password })
+    if (!input.success) {
+      return adminInputError('VALIDATION_ERROR')
+    }
+
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
@@ -147,7 +178,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
 
       const result = await createAdminClient(adminUrl, manager)
-        .setPassword(tokenResult.tokens.accessToken, { password })
+        .setPassword(tokenResult.tokens.accessToken, input.data)
       return { success: result.success }
     } catch (error) {
       const adminError = toAdminRpcError(error)
@@ -521,4 +552,23 @@ function toAdminRpcError(error: unknown): {
     return { errorCode: 'UNKNOWN_ERROR', message: 'Admin request failed' }
   }
   return { errorCode: 'UNKNOWN_ERROR', message: 'Admin request failed' }
+}
+
+function adminInputError(errorCode: AdminErrorCode): {
+  success: false
+  errorCode: AdminErrorCode
+  message: string
+} {
+  return {
+    success: false,
+    errorCode,
+    message: getSafeAdminErrorMessage(errorCode),
+  }
+}
+
+function hasValidationIssue(
+  issues: ReadonlyArray<{ path: PropertyKey[] }>,
+  field: string,
+): boolean {
+  return issues.some(issue => issue.path[0] === field)
 }

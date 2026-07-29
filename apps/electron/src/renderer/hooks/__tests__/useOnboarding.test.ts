@@ -300,11 +300,13 @@ describe('admin onboarding flow', () => {
   it('moves from kicked back to admin-login when relogin is requested', () => {
     const next = resolveAdminReloginState(adminState({
       step: 'admin-kicked',
+      phoneAuthEnabled: true,
       errorMessage: 'stale error',
     }))
 
     expect(next.step).toBe('admin-login')
     expect(next.loginStatus).toBe('idle')
+    expect(next.phoneAuthEnabled).toBeUndefined()
     expect(next.errorMessage).toBeUndefined()
   })
 

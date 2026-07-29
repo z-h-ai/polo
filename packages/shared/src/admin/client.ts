@@ -1,5 +1,6 @@
 import {
   AdminError,
+  type AdminUser,
   type AdminAuthConfig,
   type AdminErrorCode,
   type AdminLlmConnectionsResponse,
@@ -14,6 +15,7 @@ import {
   type AdminValidateResponse,
   type VerifyPhoneAuthCodeInput,
 } from './types.ts';
+import { AdminUserSchema } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -106,11 +108,17 @@ export class AdminClient {
     this.tokenStore = options?.tokenStore;
   }
 
-  login(identifier: string, password: string): Promise<AdminLoginResponse> {
-    return this.request('/api/auth/login', {
+  async login(identifier: string, password: string): Promise<AdminLoginResponse> {
+    const response = await this.request<AdminLoginResponse>('/api/auth/login', {
       method: 'POST',
       body: { identifier, password },
     });
+    return {
+      accessToken: response.accessToken,
+      refreshToken: response.refreshToken,
+      expiresIn: response.expiresIn,
+      user: this.readAdminUser(response.user),
+    };
   }
 
   async getAuthConfig(): Promise<AdminAuthConfig> {
@@ -172,7 +180,7 @@ export class AdminClient {
       accessToken: response.accessToken,
       refreshToken: response.refreshToken,
       expiresIn: response.expiresIn,
-      user: response.user,
+      user: this.readAdminUser(response.user),
       isNewUser: response.isNewUser === true,
     };
   }
@@ -193,11 +201,16 @@ export class AdminClient {
     });
   }
 
-  validate(accessToken: string): Promise<AdminValidateResponse> {
-    return this.request('/api/auth/validate', {
+  async validate(accessToken: string): Promise<AdminValidateResponse> {
+    const response = await this.request<AdminValidateResponse>('/api/auth/validate', {
       method: 'POST',
       accessToken,
     });
+    return {
+      valid: response.valid === true,
+      user: this.readAdminUser(response.user),
+      configVersion: response.configVersion,
+    };
   }
 
   async logout(accessToken: string): Promise<void> {
@@ -327,6 +340,17 @@ export class AdminClient {
       return value as AdminErrorCode;
     }
     return null;
+  }
+
+  private readAdminUser(data: unknown): AdminUser {
+    const result = AdminUserSchema.safeParse(data);
+    if (!result.success) {
+      throw new AdminError(
+        'Admin response user is invalid',
+        'SERVER_ERROR',
+      );
+    }
+    return result.data;
   }
 
   private readString(data: unknown, key: string): string | null {

@@ -165,6 +165,26 @@ function createLegacyUser(): void {
   ], pol53Directory, { DATABASE_URL: databaseUrl })
 }
 
+function createIsolatedDatabaseSchema(): void {
+  const bootstrapUrl = new URL(databaseUrl)
+  bootstrapUrl.searchParams.set('schema', 'public')
+  runChecked([
+    'node',
+    '-e',
+    `
+      const { PrismaClient } = require('@prisma/client');
+      const prisma = new PrismaClient();
+      const schema = process.argv[1];
+      if (!/^polo_phone_auth_e2e_[a-f0-9]{12}$/.test(schema)) {
+        throw new Error('Refusing to create an unexpected E2E schema');
+      }
+      prisma.$executeRawUnsafe('CREATE SCHEMA "' + schema + '"')
+        .finally(() => prisma.$disconnect());
+    `,
+    databaseSchema,
+  ], pol53Directory, { DATABASE_URL: bootstrapUrl.toString() })
+}
+
 function dropIsolatedDatabaseSchema(): void {
   const cleanupUrl = new URL(databaseUrl)
   cleanupUrl.searchParams.set('schema', 'public')
@@ -486,6 +506,13 @@ async function main(): Promise<void> {
   ], temporaryDirectory)
   pol53CloneReady = true
 
+  runChecked([
+    join(pol53Directory, 'node_modules', '.bin', 'prisma'),
+    'generate',
+  ], pol53Directory, {
+    DATABASE_URL: databaseUrl,
+  })
+  createIsolatedDatabaseSchema()
   runChecked([
     join(pol53Directory, 'node_modules', '.bin', 'prisma'),
     'migrate',

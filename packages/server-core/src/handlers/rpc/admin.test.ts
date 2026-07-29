@@ -212,6 +212,18 @@ mock.module('@polo-ai/shared/admin', () => ({
     if (errorCode === 'INVALID_CREDENTIALS') {
       return 'Invalid username or password'
     }
+    if (errorCode === 'invalid_phone') {
+      return 'Phone number is invalid'
+    }
+    if (errorCode === 'verification_code_invalid') {
+      return 'Verification code is invalid'
+    }
+    if (errorCode === 'phone_auth_configuration_error') {
+      return 'Phone authentication is not configured'
+    }
+    if (errorCode === 'VALIDATION_ERROR') {
+      return 'Admin request was rejected'
+    }
     if (
       errorCode === 'TOKEN_REVOKED'
       || errorCode === 'TOKEN_EXPIRED'
@@ -537,11 +549,68 @@ describe('registerAdminHandlers', () => {
     expect(result).toEqual({
       success: false,
       errorCode: 'VALIDATION_ERROR',
-      message: 'Admin request failed',
+      message: 'Admin request was rejected',
       status: 400,
     })
     expect(JSON.stringify(result)).not.toContain('LTAI')
     expect(JSON.stringify(result)).not.toContain('/srv/private')
+  })
+
+  it('rejects malformed auth RPC inputs locally without calling AdminClient', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    const {
+      login,
+      sendPhoneAuthCode,
+      verifyPhoneAuthCode,
+      setPassword,
+    } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    expect(await login(context, '', 'x'.repeat(100_000))).toEqual({
+      success: false,
+      errorCode: 'INVALID_CREDENTIALS',
+      message: 'Invalid username or password',
+    })
+    expect(await sendPhoneAuthCode(context, 'not-a-phone', 'challenge')).toEqual({
+      success: false,
+      errorCode: 'invalid_phone',
+      message: 'Phone number is invalid',
+    })
+    expect(await sendPhoneAuthCode(
+      context,
+      '13800138000',
+      'x'.repeat(100_000),
+    )).toEqual({
+      success: false,
+      errorCode: 'phone_auth_configuration_error',
+      message: 'Phone authentication is not configured',
+    })
+    expect(await verifyPhoneAuthCode(context, '13800138000', '')).toEqual({
+      success: false,
+      errorCode: 'verification_code_invalid',
+      message: 'Verification code is invalid',
+    })
+    expect(await verifyPhoneAuthCode(context, undefined, '123456')).toEqual({
+      success: false,
+      errorCode: 'invalid_phone',
+      message: 'Phone number is invalid',
+    })
+    expect(await setPassword(context, 'x'.repeat(100_000))).toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'Admin request was rejected',
+    })
+    expect(adminClientCalls).toEqual([])
   })
 
   it('verifies a phone code through the same token and connection persistence path', async () => {

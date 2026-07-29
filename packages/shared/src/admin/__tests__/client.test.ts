@@ -138,6 +138,11 @@ describe('AdminClient', () => {
         displayName: null,
         role: 'user',
         groupIds: [],
+        phone: '13800138000',
+        internalSecret: 'must-not-leak',
+        profile: {
+          internalSecret: 'nested-must-not-leak',
+        },
       },
       isNewUser: true,
       internalGrant: 'must-not-leak',
@@ -154,8 +159,42 @@ describe('AdminClient', () => {
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
       expiresIn: 3600,
-      user: response.user,
+      user: {
+        id: 'user-1',
+        username: 'phone_user',
+        displayName: null,
+        role: 'user',
+        groupIds: [],
+      },
       isNewUser: true,
+    });
+    expect(JSON.stringify(result)).not.toContain('13800138000');
+    expect(JSON.stringify(result)).not.toContain('internalSecret');
+  });
+
+  it('rejects malformed Admin users at the response boundary', async () => {
+    mockJsonFetch({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'user-1',
+        username: 'phone_user',
+        displayName: null,
+        role: 'user',
+        groupIds: 'not-an-array',
+      },
+      isNewUser: false,
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.verifyPhoneAuthCode({
+      phone: '13800138000',
+      code: '123456',
+    })).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+      message: 'Admin response user is invalid',
     });
   });
 
