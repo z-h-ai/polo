@@ -91,6 +91,22 @@ function Write-State([bool]$PathEntryAddedByPolo) {
     Write-AtomicUtf8 $stateFile $state
 }
 
+function Test-LegacyPoloLauncher {
+    if (-not (Test-Path $legacyLauncher)) {
+        return $false
+    }
+    try {
+        # POO-14 replaces the pre-unified launcher created by install-app.ps1.
+        # Match that exact two-line file so an unrelated polo-ai.cmd can never
+        # transfer ownership of a user-created PATH entry to Polo.
+        $actual = ((Get-Content $legacyLauncher -Raw) -replace "`r`n", "`n").Trim()
+        $expected = "@echo off`nstart `"`" `"$exePath`" %*"
+        return $actual -ieq $expected
+    } catch {
+        return $false
+    }
+}
+
 function Assert-PackagedArtifacts {
     foreach ($required in @($exePath, $bunPath, $cliPath, $serverPath, $packagePath)) {
         if (-not (Test-Path $required)) {
@@ -170,13 +186,21 @@ if ($Mode -eq "Validate") {
 
 if ($Mode -eq "Install") {
     Assert-PackagedArtifacts
-    Install-LauncherFiles (-not $SkipCommandConflict)
 
     $previousState = Read-State
     $userPath = Get-UserPath
     $entries = @($userPath -split ";" | Where-Object { $_ })
     $pathEntryPresent = Test-PathEntry $entries $BinDir
-    $pathEntryOwned = [bool]($previousState -and $previousState.pathEntryAddedByPolo)
+    $legacyPathEntryOwned = -not $previousState `
+        -and $pathEntryPresent `
+        -and (Test-LegacyPoloLauncher)
+
+    Install-LauncherFiles (-not $SkipCommandConflict)
+
+    $pathEntryOwned = [bool](
+        ($previousState -and $previousState.pathEntryAddedByPolo) `
+        -or $legacyPathEntryOwned
+    )
     if (-not $pathEntryPresent) {
         # Persist ownership before mutating PATH so an interrupted install never
         # loses track of an entry Polo intended to add.

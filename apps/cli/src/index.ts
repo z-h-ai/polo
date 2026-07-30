@@ -636,13 +636,16 @@ export interface RunConnection {
   stop?: () => Promise<void>
 }
 
-function createConfiguredClient(args: CliArgs): CliRpcClient {
+function createConfiguredClient(
+  args: CliArgs,
+  expectedServerVersion?: string,
+): CliRpcClient {
   return new CliRpcClient(args.url, {
     token: args.token || undefined,
     workspaceId: args.workspace,
     requestTimeout: args.timeout,
     connectTimeout: args.timeout,
-    expectedServerVersion: cliVersion,
+    expectedServerVersion,
   })
 }
 
@@ -680,7 +683,10 @@ export async function connectForCommand(args: CliArgs): Promise<CliRpcClient> {
     )
   }
 
-  const client = createConfiguredClient(args)
+  // Discovery identifies the matching installed App, so enforce the release
+  // compatibility contract there. Explicit --url/env connections retain the
+  // existing remote-server behavior and may target older/custom servers.
+  const client = createConfiguredClient(args, discovery ? cliVersion : undefined)
   try {
     await client.connect()
     return client
@@ -703,7 +709,7 @@ export async function connectForRun(args: CliArgs): Promise<RunConnection> {
   const discovery = applyRuntimeDiscovery(args)
 
   if (args.url) {
-    const client = createConfiguredClient(args)
+    const client = createConfiguredClient(args, discovery ? cliVersion : undefined)
     try {
       await client.connect()
       return {

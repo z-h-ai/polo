@@ -41,6 +41,25 @@ try {
     $afterUninstall = (Get-Content $userPathFile -Raw).Trim()
     Assert-True ($afterUninstall -eq $originalPath) "Uninstall removed or changed the user's pre-existing PATH entry."
     Assert-True (-not (Test-Path (Join-Path $binDir "polo.cmd"))) "Managed launcher was not removed."
+
+    # Upgrade from the old install-app.ps1 launcher. That installer added the
+    # same bin directory to PATH but had no ownership state file. The exact
+    # legacy launcher is sufficient evidence that Polo owns this PATH entry.
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    $legacyLauncher = Join-Path $binDir "polo-ai.cmd"
+    $exePath = Join-Path $installDir "Polo AI.exe"
+    Set-Content -Path $legacyLauncher -Value "@echo off`r`nstart `"`" `"$exePath`" %*" -Encoding ASCII
+    Set-Content -Path $userPathFile -Value "$binDir;C:\User Tools" -Encoding ASCII
+
+    & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
+
+    $migratedState = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
+    Assert-True $migratedState.pathEntryAddedByPolo "Polo did not claim its legacy PATH entry during upgrade."
+
+    & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+
+    $migratedPath = (Get-Content $userPathFile -Raw).Trim()
+    Assert-True ($migratedPath -eq "C:\User Tools") "Uninstall left the legacy Polo PATH entry behind."
     Write-Host "Windows terminal integration ownership test passed."
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

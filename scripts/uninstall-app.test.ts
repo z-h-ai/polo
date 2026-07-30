@@ -59,4 +59,24 @@ describe('macOS/Linux terminal cleanup', () => {
     expect(readFileSync(polo, 'utf8')).toContain('unrelated')
     expect(result.stderr.toString()).toContain('Left non-Polo file unchanged')
   })
+
+  it('removes the managed block from Bash login fallback files', () => {
+    const home = createHome()
+    const bashLogin = join(home, '.bash_login')
+    writeFileSync(
+      bashLogin,
+      'export LANG=en_US.UTF-8\n# >>> Polo CLI >>>\n'
+        + 'export PATH="$HOME/.local/bin:$PATH"\n# <<< Polo CLI <<<\n',
+    )
+
+    const result = Bun.spawnSync(['bash', script], {
+      env: { ...process.env, HOME: home },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(readFileSync(bashLogin, 'utf8')).toContain('export LANG=en_US.UTF-8')
+    expect(readFileSync(bashLogin, 'utf8')).not.toContain('# >>> Polo CLI >>>')
+  })
 })

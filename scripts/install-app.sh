@@ -40,6 +40,19 @@ configure_managed_path() {
             profile_path="$HOME/.zprofile"
             path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
+        bash)
+            # Bash login shells read only the first existing file in this
+            # order. Updating .profile while .bash_profile/.bash_login exists
+            # would leave a fresh Terminal unable to find `polo`.
+            if [ -e "$HOME/.bash_profile" ]; then
+                profile_path="$HOME/.bash_profile"
+            elif [ -e "$HOME/.bash_login" ]; then
+                profile_path="$HOME/.bash_login"
+            else
+                profile_path="$HOME/.profile"
+            fi
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
+            ;;
         *)
             profile_path="$HOME/.profile"
             path_line='export PATH="$HOME/.local/bin:$PATH"'

@@ -23,6 +23,8 @@ interface MockServerOptions {
   workspaces?: unknown[]
   /** Version returned by the WebSocket handshake */
   serverVersion?: string
+  /** Simulate a legacy/custom server that predates versioned handshakes. */
+  omitServerVersion?: boolean
   /** RPC errors returned after a successful handshake, keyed by channel. */
   requestErrors?: Record<string, { code: ErrorCode; message: string }>
   /** Called when this server receives a handshake, before replying. */
@@ -89,13 +91,16 @@ function createMockServer(opts?: MockServerOptions): MockServer {
             }))
             return
           }
-          ws.send(serializeEnvelope({
+          const acknowledgment = {
             id: crypto.randomUUID(),
             type: 'handshake_ack',
             clientId: 'run-test-client',
             protocolVersion: '1.0',
-            serverVersion: opts?.serverVersion ?? '0.10.0',
-          }))
+            ...(!opts?.omitServerVersion
+              ? { serverVersion: opts?.serverVersion ?? '0.10.0' }
+              : {}),
+          } as const
+          ws.send(serializeEnvelope(acknowledgment))
           return
         }
 
@@ -299,6 +304,38 @@ describe('run command', () => {
     expect(connection.source).toBe('explicit')
     expect(spawnCount).toBe(0)
     connection.client.destroy()
+  })
+
+  it('keeps explicit remote run connections independent of the installed App version', async () => {
+    mockWsServer?.close()
+    mockWsServer = createMockServer({ serverVersion: '1.0.0' })
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--url', mockWsServer.url,
+      '--token', mockWsServer.token,
+      'run', 'hello',
+    ])
+
+    const connection = await connectForRun(args)
+    expect(connection.source).toBe('explicit')
+    expect(connection.client.serverVersion).toBe('1.0.0')
+    expect(spawnCount).toBe(0)
+    connection.client.destroy()
+  })
+
+  it('keeps explicit remote resource commands independent of the installed App version', async () => {
+    mockWsServer?.close()
+    mockWsServer = createMockServer({ omitServerVersion: true })
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--url', mockWsServer.url,
+      '--token', mockWsServer.token,
+      'sessions',
+    ])
+
+    const client = await connectForCommand(args)
+    expect(client.serverVersion).toBeNull()
+    client.destroy()
   })
 
   it('does not fall back when an explicit connection fails', async () => {

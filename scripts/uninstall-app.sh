@@ -82,6 +82,7 @@ remove_managed_file \
 
 remove_managed_path_block "$HOME/.profile"
 remove_managed_path_block "$HOME/.bash_profile"
+remove_managed_path_block "$HOME/.bash_login"
 remove_managed_path_block "$HOME/.zprofile"
 remove_managed_path_block "$HOME/.config/fish/conf.d/polo.fish"
 

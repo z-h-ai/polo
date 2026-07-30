@@ -14,4 +14,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Terminal upgrade and remote connection compatibility** — Preserve explicit remote server connections across App release versions, migrate ownership of the legacy Windows PATH entry safely, and configure the Bash login file that a fresh Linux terminal actually reads. (POO-14)
+
 ## Breaking Changes
