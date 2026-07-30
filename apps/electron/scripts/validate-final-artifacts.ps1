@@ -99,14 +99,21 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
         $uvManifest.version -cne $uvLock.version -or
         $uvManifest.binary -cne "uv.exe" -or
         $uvManifest.sha256 -cne $uvTarget.binarySha256 -or
-        $uvManifest.sha256 -cne $uvHash -or
         $uvManifest.releaseAsset -cne $uvTarget.asset -or
         $uvManifest.releaseAssetSha256 -cne $uvTarget.archiveSha256
     ) {
         throw "Installed NSIS pinned uv runtime manifest is invalid"
     }
+    if ($uvHash -cne $uvTarget.binarySha256) {
+        $uvSignature = Get-AuthenticodeSignature -LiteralPath $uvPath
+        if ($uvSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+            throw "Installed NSIS uv differs from the pinned bytes without a valid Authenticode signature"
+        }
+    }
     $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $uvOutput -cne "uv $($uvLock.version)") {
+    $expectedUvOutput = "uv $($uvLock.version)"
+    $expectedUvPattern = "^$([regex]::Escape($expectedUvOutput))(?: \([^()]+\))?$"
+    if ($LASTEXITCODE -ne 0 -or $uvOutput -cnotmatch $expectedUvPattern) {
         throw "Installed NSIS uv runtime smoke failed: $uvOutput"
     }
     if ($RequireRunHelpers) {
@@ -400,14 +407,21 @@ function Get-CurrentNsisArtifactVersion([string]$Artifact, [string]$Label) {
         $uvManifest.version -cne $uvLock.version -or
         $uvManifest.binary -cne "uv.exe" -or
         $uvManifest.sha256 -cne $uvTarget.binarySha256 -or
-        $uvManifest.sha256 -cne $uvHash -or
         $uvManifest.releaseAsset -cne $uvTarget.asset -or
         $uvManifest.releaseAssetSha256 -cne $uvTarget.archiveSha256
     ) {
         throw "$Label NSIS pinned uv runtime manifest is invalid"
     }
+    if ($uvHash -cne $uvTarget.binarySha256) {
+        $uvSignature = Get-AuthenticodeSignature -LiteralPath $uvPath
+        if ($uvSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+            throw "$Label NSIS uv differs from the pinned bytes without a valid Authenticode signature"
+        }
+    }
     $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $uvOutput -cne "uv $($uvLock.version)") {
+    $expectedUvOutput = "uv $($uvLock.version)"
+    $expectedUvPattern = "^$([regex]::Escape($expectedUvOutput))(?: \([^()]+\))?$"
+    if ($LASTEXITCODE -ne 0 -or $uvOutput -cnotmatch $expectedUvPattern) {
         throw "$Label NSIS uv runtime smoke failed: $uvOutput"
     }
     return [string]$metadataJson.version

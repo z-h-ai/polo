@@ -158,9 +158,12 @@ function validatePackagedCli(context) {
     encoding: 'utf8',
     timeout: 30_000,
   });
+  const uvVersionPattern = new RegExp(
+    `^uv ${uvLock.version.replaceAll('.', '\\.')}(?: \\([^()\\r\\n]+\\))?$`,
+  );
   if (
     uvVersionCheck.status !== 0
-    || uvVersionCheck.stdout.trim() !== `uv ${uvLock.version}`
+    || !uvVersionPattern.test(uvVersionCheck.stdout.trim())
   ) {
     throw new Error(
       `POO-14 unpacked uv execution failed: ${uvVersionCheck.stderr || uvVersionCheck.stdout}`,

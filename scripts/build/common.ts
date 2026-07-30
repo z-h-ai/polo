@@ -144,6 +144,12 @@ export function sha256File(filePath: string): string {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
+export function isPinnedUvVersionOutput(output: string): boolean {
+  const normalized = output.trim();
+  const escapedVersion = UV_VERSION.replaceAll('.', '\\.');
+  return new RegExp(`^uv ${escapedVersion}(?: \\([^()\\r\\n]+\\))?$`).test(normalized);
+}
+
 export function getUvRuntimeManifestPath(config: BuildConfig): string {
   return join(
     config.electronDir,

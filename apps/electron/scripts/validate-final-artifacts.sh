@@ -127,7 +127,12 @@ validate_app_bundle() {
       'process.stdout.write(JSON.parse(await Bun.file(process.argv[1]).text()).version)' \
       "$uv_manifest"
   )"
-  test "$uv_version" = "uv $expected_uv_version"
+  if [ "$uv_version" != "uv $expected_uv_version" ] \
+    && ! printf '%s\n' "$uv_version" \
+      | grep -E "^uv ${expected_uv_version//./\\.} \\([^()]+\\)$" >/dev/null; then
+    echo "$label uv runtime version mismatch: $uv_version" >&2
+    return 1
+  fi
   if [ "$require_run_helpers" = "true" ]; then
     for required in \
       "$app_root/resources/pi-agent-server/index.js" \
@@ -189,12 +194,18 @@ validate_app_bundle() {
       || runtimeManifest.version !== uvLock.version
       || runtimeManifest.binary !== "uv"
       || runtimeManifest.sha256 !== uvTarget.binarySha256
-      || runtimeManifest.sha256 !== sha256(uv)
+      || (platform !== "darwin" && runtimeManifest.sha256 !== sha256(uv))
       || runtimeManifest.releaseAsset !== uvTarget.asset
       || runtimeManifest.releaseAssetSha256 !== uvTarget.archiveSha256
     ) throw new Error("Pinned uv runtime manifest mismatch");
   ' "$app_root" "$platform_key" "$uv_lock"
   )
+  if [ "$SYSTEM_NAME" = "Darwin" ]; then
+    # electron-builder re-signs nested Mach-O binaries after afterPack, which
+    # changes uv's on-disk hash. The manifest still pins the downloaded bytes;
+    # the final container must retain a valid nested signature.
+    codesign --verify --strict "$uv"
+  fi
 
   local expected_version
   expected_version="$(

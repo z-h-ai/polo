@@ -19,6 +19,7 @@ import {
   getUvRuntimeManifestPath,
   installPinnedUvBinary,
   isPinnedUvRuntime,
+  isPinnedUvVersionOutput,
   sha256File,
   validateUvRuntimeManifest,
   type Arch,
@@ -54,6 +55,14 @@ afterEach(() => {
 })
 
 describe('preparePlatformRuntime', () => {
+  it('accepts only the pinned uv version with an optional official build suffix', () => {
+    expect(isPinnedUvVersionOutput('uv 0.10.6')).toBe(true)
+    expect(isPinnedUvVersionOutput('uv 0.10.6 (a91bcf268 2026-02-24)')).toBe(true)
+    expect(isPinnedUvVersionOutput('uv 0.10.60 (a91bcf268 2026-02-24)')).toBe(false)
+    expect(isPinnedUvVersionOutput('uv 0.10.6 malicious')).toBe(false)
+    expect(isPinnedUvVersionOutput('uv 0.10.6 ()')).toBe(false)
+  })
+
   it('materializes every ignored runtime dependency into a clean Electron tree', async () => {
     const root = mkdtempSync(join(tmpdir(), 'polo clean runtime 根目录 '))
     roots.push(root)

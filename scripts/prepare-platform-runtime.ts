@@ -23,7 +23,7 @@ import {
   downloadBun,
   downloadUv,
   getPlatformKey,
-  UV_VERSION,
+  isPinnedUvVersionOutput,
   validateUvRuntimeManifest,
   verifyUvBinaryArchitecture,
   verifySDKCopy,
@@ -135,7 +135,7 @@ export async function stageUvRuntime(
       timeout: 10_000,
       maxBuffer: 64 * 1024,
     }).trim()
-    if (output !== `uv ${UV_VERSION}`) {
+    if (!isPinnedUvVersionOutput(output)) {
       throw new Error(`Unexpected uv version output: ${output}`)
     }
   }
