@@ -1123,25 +1123,25 @@ export function registerAdminHandlers(
               organizationId.data,
             )
             const nextAvailableAppIds = new Set(result.apps.map(app => app.id))
-            const withdrawnLocalAppIds = (currentCatalog?.apps ?? [])
+            const withdrawnAppIds = (currentCatalog?.apps ?? [])
               .filter(app => (
-                app.deliveryMode === 'local_bundle'
-                && (
+                (
                   app.availability === undefined
                   || app.availability === 'available'
                 )
                 && !nextAvailableAppIds.has(app.id)
               ))
               .map(app => app.id)
-            if (withdrawnLocalAppIds.length > 0) {
+            if (withdrawnAppIds.length > 0) {
               // This host callback must advance every exact app lifecycle
-              // generation synchronously. Cache commit follows only after that
-              // fence exists, so an already-entered manager result cannot race
-              // the new withdrawn authorization truth.
+              // generation synchronously for local and remote Apps. Cache
+              // commit follows only after that fence exists, so neither an
+              // already-entered manager result nor an old cached remote URL
+              // can race the new withdrawn authorization truth.
               const cleanup = deps.onAdminCatalogAppsWithdrawn?.(
                 accountId,
                 organizationId.data,
-                withdrawnLocalAppIds,
+                withdrawnAppIds,
               )
               void cleanup?.catch(error => {
                 log?.warn(
@@ -1160,9 +1160,7 @@ export function registerAdminHandlers(
             deps.onAdminCatalogAppsAuthorized?.(
               accountId,
               organizationId.data,
-              result.apps
-                .filter(app => app.deliveryMode === 'local_bundle')
-                .map(app => app.id),
+              result.apps.map(app => app.id),
             )
             setAppCatalogAccessMode(accountId, organizationId.data, 'online')
             return {

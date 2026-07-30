@@ -456,9 +456,9 @@ describe('HomePage round-two regressions', () => {
     expect(management).toBeTruthy()
     fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
     await waitFor(() => {
-      expect(screen.getByText('View logs')).toBeTruthy()
       expect(screen.getByText('Uninstall')).toBeTruthy()
       expect(screen.getByText('Stop')).toBeTruthy()
+      expect(screen.queryByText('View logs')).toBeNull()
     })
   })
 
@@ -549,8 +549,8 @@ describe('HomePage round-two regressions', () => {
     fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
     await waitFor(() => {
       expect(screen.getByText('Stop')).toBeTruthy()
-      expect(screen.getByText('View logs')).toBeTruthy()
       expect(screen.getByText('Uninstall')).toBeTruthy()
+      expect(screen.queryByText('View logs')).toBeNull()
     })
     fireEvent.click(screen.getByText('Stop'))
     await waitFor(() => {

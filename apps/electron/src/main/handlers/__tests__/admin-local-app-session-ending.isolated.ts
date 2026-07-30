@@ -1247,6 +1247,59 @@ describe('Admin session and scoped local app production wiring', () => {
     expect(managerCalls).toEqual(['logs', 'stop', 'uninstall', 'start'])
   })
 
+  it('keeps a withdrawn remote URL denied when its replacement cache write fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-remote-withdrawn-save-failure-'))
+    temporaryRoots.push(root)
+    const remoteScope: CatalogLocalAppScope = {
+      ...scope,
+      catalogAppId: 'remote-app',
+    }
+    catalog = {
+      ...createCatalog(),
+      apps: [{
+        id: remoteScope.catalogAppId,
+        organizationId: remoteScope.organizationId,
+        name: 'Remote App',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://stale.example.com/app',
+        availability: 'available',
+        sortOrder: 0,
+      }],
+    }
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({ rootDir: root })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    saveCatalogError = new Error('disk full')
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [],
+    })
+    const { handlers, context } = registerProductionHandlers(root)
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+    const resolveRemoteUrl = handlers.get(
+      RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+    )!
+
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toEqual({
+        success: false,
+        errorCode: 'UNKNOWN_ERROR',
+        message: 'Admin request failed',
+      })
+    expect(catalog.appConfigVersion).toBe('catalog-v1')
+    expect(catalog.apps).toEqual([
+      expect.objectContaining({
+        id: remoteScope.catalogAppId,
+        remoteUrl: 'https://stale.example.com/app',
+        availability: 'available',
+      }),
+    ])
+    await expect(resolveRemoteUrl(context, remoteScope))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+  })
+
   it('keeps an entered start valid when a successful refresh retains that app', async () => {
     const startEntered = createDeferred<void>()
     const finishStart = createDeferred<LocalAppStartResult>()

@@ -49,9 +49,9 @@ export interface HandlerDeps<
     organizationId: string,
   ) => Promise<void>
   /**
-   * Host-owned app authorization fence. Invocation must synchronously
-   * invalidate in-flight lifecycle commits for exactly these full Catalog
-   * scopes before returning the slow app-scoped stop/cancel cleanup promise.
+   * Host-owned app authorization fence. Invocation must synchronously deny
+   * exactly these full Catalog scopes, including remote URL Apps, before
+   * returning the slow local-runtime stop/cancel cleanup promise.
    */
   onAdminCatalogAppsWithdrawn?: (
     accountId: string,
@@ -59,8 +59,8 @@ export interface HandlerDeps<
     catalogAppIds: readonly string[],
   ) => Promise<void>
   /**
-   * Releases exact App lifecycle deny gates only after a successful Catalog
-   * cache commit explicitly includes those Apps again.
+   * Releases exact App deny gates only after a successful Catalog cache commit
+   * explicitly includes those Apps again.
    */
   onAdminCatalogAppsAuthorized?: (
     accountId: string,

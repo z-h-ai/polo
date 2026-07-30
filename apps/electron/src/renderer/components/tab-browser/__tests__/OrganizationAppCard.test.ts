@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next'
 import type { CatalogApp } from '@polo-ai/shared/admin'
 import type { LocalAppRuntimeStatus } from '@polo-ai/shared/protocol'
 import {
+  canViewOrganizationAppLogs,
   primaryActionFor,
   statusText,
 } from '../OrganizationAppCard'
@@ -121,6 +122,30 @@ describe('OrganizationAppCard invalid version state', () => {
       .toBe('homeApps.errors.openGeneric')
   })
 
+  it('does not expose logs for healthy installed or running apps', () => {
+    for (const runtimeStatus of ['installed', 'running', 'stopped'] as const) {
+      expect(canViewOrganizationAppLogs({
+        appId: app.id,
+        status: runtimeStatus,
+        currentVersion: '1.0.0',
+      })).toBe(false)
+    }
+  })
+
+  it('exposes logs only for broken failure recovery regardless of member role', () => {
+    for (const _role of ['member', 'manager', 'owner'] as const) {
+      expect(canViewOrganizationAppLogs({
+        appId: app.id,
+        status: 'broken',
+        currentVersion: '1.0.0',
+        error: {
+          code: 'START_FAILED',
+          message: 'not rendered directly',
+        },
+      })).toBe(true)
+    }
+  })
+
   it('uses the observable install phase before the top-level installing state', () => {
     const verifying: LocalAppRuntimeStatus = {
       appId: app.id,
@@ -161,5 +186,6 @@ describe('OrganizationAppCard invalid version state', () => {
       .toBe('unavailable')
     expect(statusText(translate, withdrawnApp, status, true))
       .toBe('homeApps.status.withdrawn')
+    expect(canViewOrganizationAppLogs(status)).toBe(false)
   })
 })

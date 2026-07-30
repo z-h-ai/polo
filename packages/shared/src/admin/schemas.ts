@@ -156,6 +156,19 @@ export const CatalogAppSchema = z.object({
 export const AppCatalogResponseSchema = z.object({
   appConfigVersion: nonBlankString(512),
   apps: z.array(CatalogAppSchema).max(10_000),
+}).superRefine((catalog, context) => {
+  const appIds = new Set<string>()
+  catalog.apps.forEach((app, index) => {
+    if (appIds.has(app.id)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Catalog app ids must be unique',
+        path: ['apps', index, 'id'],
+      })
+      return
+    }
+    appIds.add(app.id)
+  })
 })
 
 export const CreateOrganizationResponseSchema = z.object({

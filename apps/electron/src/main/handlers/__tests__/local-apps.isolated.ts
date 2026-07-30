@@ -15,6 +15,7 @@ type Handler = (
 let signedInAccountId: string | null = 'account-a'
 let accessMode: 'online' | 'offline' | 'denied' = 'online'
 let accountAccessDenied = false
+let appAccessDenied = false
 let catalog: AppCatalogCacheEntry = createCatalog(1)
 
 const getCachedAppCatalog = mock(() => catalog)
@@ -51,8 +52,16 @@ const scopedStatuses = mock(async (
   status: 'not_installed',
 })))
 const isInstalledAndReady = mock(async () => true)
+const assertAppAuthorized = mock(() => {
+  if (appAccessDenied) {
+    throw Object.assign(new Error('Catalog app authorization is ending'), {
+      code: 'NOT_AUTHORIZED',
+    })
+  }
+})
 
 const scopedRegistry = {
+  assertAppAuthorized,
   install: scopedInstall,
   cancelInstall: mock(async () => false),
   start: scopedStart,
@@ -189,11 +198,13 @@ describe('local app main-process authorization boundary', () => {
     signedInAccountId = 'account-a'
     accessMode = 'online'
     accountAccessDenied = false
+    appAccessDenied = false
     catalog = createCatalog(1)
     handlers.clear()
     for (const handlerMock of [
       getCachedAppCatalog,
       getAppCatalogAccessMode,
+      assertAppAuthorized,
       scopedInstall,
       scopedRegistry.cancelInstall,
       scopedStart,
@@ -530,6 +541,11 @@ describe('local app main-process authorization boundary', () => {
       url: 'https://trusted.example.com/app',
     })
 
+    appAccessDenied = true
+    await expect(resolveRemoteUrl(context, scope()))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    appAccessDenied = false
     accessMode = 'denied'
     await expect(resolveRemoteUrl(context, scope()))
       .rejects.toThrow('no longer authorized')

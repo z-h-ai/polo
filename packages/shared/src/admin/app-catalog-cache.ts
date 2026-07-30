@@ -23,7 +23,7 @@ const CachedCatalogAppSchema = CatalogAppSchema.and(z.object({
   availability: z.enum(['available', 'withdrawn', 'unavailable']).optional(),
 }))
 
-const AppCatalogCacheEntryV1Schema = AppCatalogResponseSchema.extend({
+const AppCatalogCacheEntryV1Schema = AppCatalogResponseSchema.safeExtend({
   accountId: z.string().min(1).max(512),
   organizationId: z.string().min(1).max(512),
   authorizationStatus: z.enum(['authorized', 'denied']).default('authorized'),
@@ -31,7 +31,7 @@ const AppCatalogCacheEntryV1Schema = AppCatalogResponseSchema.extend({
   apps: z.array(CachedCatalogAppSchema).max(MAX_CACHED_APPS),
 })
 
-const AppCatalogCacheEntryV2Schema = AppCatalogCacheEntryV1Schema.extend({
+const AppCatalogCacheEntryV2Schema = AppCatalogCacheEntryV1Schema.safeExtend({
   trustedReleases: z.record(z.string(), AppReleaseSummarySchema).default({}),
   warnings: z.array(z.object({
     code: z.literal('invalid_semver'),
@@ -39,7 +39,7 @@ const AppCatalogCacheEntryV2Schema = AppCatalogCacheEntryV1Schema.extend({
   })).max(MAX_CACHED_APPS).default([]),
 })
 
-const AppCatalogCacheEntrySchema = AppCatalogCacheEntryV2Schema.extend({
+const AppCatalogCacheEntrySchema = AppCatalogCacheEntryV2Schema.safeExtend({
   withdrawnApps: z.array(CachedCatalogAppSchema).max(MAX_CACHED_APPS).default([]),
 })
 

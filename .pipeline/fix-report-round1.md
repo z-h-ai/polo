@@ -1,63 +1,92 @@
-# POL-51 第 1 轮审查修复报告
+# POL-51 Reviewer 第 1 轮修复报告
 
-## 逐条处理
+## 逐条处理结果
 
-1. App 级 deny gate 范围
-   - 将 scoped registry 的生命周期 fence 改为按操作策略捕获。
-   - App/组织 fence 只约束 `INSTALL`、`START`、`RESTART` 及其迟到提交；状态、安装记录、日志、取消、`STOP`、`UNINSTALL` 和 retained-scope 扫描只保留账号会话 fence。
-   - 保持“先建立 deny gate、后写 Catalog 缓存”的 fail-closed 时序。缓存写入失败不会释放 gate；后续成功同步明确重新包含 App 并成功提交缓存后才释放。
-   - production wiring 回归覆盖：缓存写失败时生命周期仍拒绝；状态、日志、停止、卸载和 retained 扫描可用；成功重新收录后可再次启动。
+### 1. remote_url 撤下后的授权 deny fence
 
-2. 不兼容新 Release 与旧版本启动
-   - 平台/架构兼容性只限制未安装 App 的安装和已安装 App 的更新。
-   - 已安装旧版本在新 Release 不兼容时，在线和受限离线均保留“打开”；不会误显示“更新”。
-   - 增加已安装/未安装、在线/离线组合回归。
+- 已修复。
+- Catalog 成功响应在写缓存前会计算全部被撤下 App，不再只筛选
+  `local_bundle`，并按完整 `accountId + organizationId + catalogAppId`
+  scope 同步建立进程内 deny gate。
+- `local-apps:resolveRemoteUrl` 在返回 URL 前校验同一个 App 级 gate。
+  即使 `saveAppCatalog` 写入失败、旧缓存仍显示 available，也会返回
+  `NOT_AUTHORIZED`。
+- 只有后续成功写入且明确重新包含该 App 的 Catalog 才调用授权释放。
+- 新增 production wiring 确定性回归测试，覆盖 remote_url 撤下、
+  缓存写失败、旧 URL 仍在缓存但无法解析。
 
-3. 明确组织失权后的本地数据管理
-   - renderer 不再清空已有 Catalog 和运行状态；将目录标记为 `denied/unavailable`，刷新真实本地状态并推进授权上下文 generation，丢弃失权后迟到的启动结果。
-   - HomePage 保留已安装 App 卡片，主操作不可用，同时继续提供状态、日志、停止和卸载入口。
-   - Local Apps IPC 拆分“可执行生命周期授权”和“已缓存 scope 数据管理授权”：组织级拒绝后允许状态、日志、停止、卸载；安装/更新/启动/重启继续 fail closed。
-   - 新增账号级 session-ending gate 查询，确保慢登出窗口内所有公开 RPC 仍立即 fail closed，不把组织级受限管理扩展到已结束账号。
+### 2. Catalog App 身份唯一性与组织绑定
 
-4. 安装确认大小单位国际化
-   - `formatBytes` 的 B/KB/MB/GB 全部改为 `t()` locale key。
-   - 为 en、zh-Hans、de、es、hu、ja、pl 补齐并排序 4 个单位 key。
-   - 增加英语、简体中文、德语格式化测试，并通过 locale parity/sorted/coverage 校验。
+- 已修复。
+- `AppCatalogResponseSchema` 拒绝一次响应内重复的 App ID，并保持
+  10,000 项上限。
+- `AdminClient.getAppCatalog` 在共享 schema 校验后，结合请求参数校验
+  每个 `app.organizationId` 必须与请求的 `organizationId` 完全一致，
+  否则 fail closed 为 `SERVER_ERROR`。
+- 缓存 schema 改用 `safeExtend`，保留响应 schema 的唯一性 refinement。
+- 新增重复 `remote_url`、重复 `local_bundle`、组织 ID 不匹配测试。
+
+### 3. 普通成员日志入口收敛
+
+- 已修复。
+- `OrganizationAppCard` 仅在运行状态为 `broken` 时显示“查看日志”；
+  healthy installed/running/stopped 状态不再暴露日志入口。
+- 该规则不因成员角色变化而放宽，避免健康 App 日志中的路径、配置或
+  用户数据被普通成员看到。
+- withdrawn/denied App 仍保留 STOP 与 UNINSTALL 本地数据管理入口。
+- 更新 HomePage 交互回归，验证 withdrawn 与 denied healthy App
+  无日志入口但仍可停止、卸载；补充 broken 与健康状态单元测试。
 
 ## 关键文件
 
+- `packages/server-core/src/handlers/rpc/admin.ts`
+- `packages/server-core/src/handlers/handler-deps.ts`
+- `packages/shared/src/admin/schemas.ts`
+- `packages/shared/src/admin/client.ts`
+- `packages/shared/src/admin/app-catalog-cache.ts`
 - `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
 - `apps/electron/src/main/handlers/local-apps.ts`
-- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
 - `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `packages/shared/src/admin/app-catalog-access.ts`
-- `packages/shared/src/i18n/locales/*.json`
-- 对应 main、renderer、production-wiring、i18n 回归测试文件
+- `packages/shared/src/admin/__tests__/schemas.test.ts`
+- `packages/shared/src/admin/__tests__/client.test.ts`
+- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+- `apps/electron/src/renderer/components/tab-browser/__tests__/OrganizationAppCard.test.ts`
+- `apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
 
 ## 自测结果
 
-- `bun test`
-  - 4802 pass，19 skip，0 fail（365 个测试文件）。
-- 4 个受影响 isolated 测试文件逐个执行
-  - Local Apps IPC：18 pass。
-  - Admin + scoped runtime production wiring：12 pass。
-  - `useAppCatalog` 交互：19 pass。
-  - HomePage 交互：10 pass。
-- 定向非 isolated 回归
-  - App Catalog 账号 gate、scoped registry、OrganizationAppCard、locale parity：59 pass，0 fail。
-- `bun run --cwd apps/electron typecheck`
+- `bun test packages/shared/src/admin/__tests__/schemas.test.ts packages/shared/src/admin/__tests__/client.test.ts apps/electron/src/renderer/components/tab-browser/__tests__/OrganizationAppCard.test.ts`
+  - 51 pass，0 fail。
+- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+  - 16 pass，0 fail。
+- `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+  - 18 pass，0 fail；包含 remote URL 对 App 级 deny gate 的直接边界测试。
+- `bun test ./apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
+  - 10 pass，0 fail。
+- 全部 `*.isolated.ts` 逐文件执行
+  - 全部通过。
+- `bun test apps/electron/src/main/handlers/__tests__/registration-profiles.test.ts apps/electron/src/main/handlers/__tests__/registration.test.ts apps/electron/src/main/handlers/__tests__/session-watcher.test.ts packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
+  - 18 pass，0 fail。
+- `bun test packages/server/src/__tests__/smoke.test.ts`
+  - 4 pass，0 fail。
+- `bun run typecheck:electron`、shared `tsc --noEmit`、server-core
+  `tsc --noEmit`
+  - 全部通过。
+- `bun run validate:ci`
+  - 通过；包含全仓 typecheck、shared 测试、19 项文档工具测试、
+  i18n parity/sorted/coverage。
+- Electron 与 shared 本轮改动文件定向 ESLint
+  - 0 errors；HomePage 既有 localStorage 测试代码报告 3 warnings。
+- `git diff --check`
   - 通过。
-- `bun run --cwd apps/electron lint`
-  - 通过，0 error；仅仓库既有 warning。
-- `bun run lint:i18n:parity`
-  - 通过，6 个非英文 locale 与英文 1706 keys 一致。
-- `bun run lint:i18n:sorted`
-  - 通过。
-- `bun run lint:i18n:coverage`
-  - 通过。
+- `bun run test`
+  - 最新全量尝试为 4,815 pass、19 skip、1 fail；唯一失败是与本轮无关
+    的既有墙钟型 `session-watcher.test.ts` watcher 通知竞态。该文件定向
+    复跑曾通过 3/3，连续复跑时也复现过 0 通知，确认其本身存在波动。
 
 ## 遗留问题
 
-- 本轮 4 项阻塞审查问题均已处理，无已知功能遗留。
-- 工作区原有 `fix-report-round2.md`～`fix-report-round4.md` 删除状态及未跟踪的 `design-demos/`、`docs/spec-home-app-admin-config*.md` 未纳入本轮修改与提交。
+- 全仓 `session-watcher.test.ts` 仍有既有墙钟等待型偶发失败，本轮未改动
+  session watcher 生产代码或测试，避免扩大 POL-51 reviewer 修复范围。
+- 无本轮 blocking issue 遗留。

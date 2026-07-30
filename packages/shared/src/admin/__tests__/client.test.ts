@@ -946,6 +946,30 @@ describe('AdminClient', () => {
       .toBe('Bearer organization-access-token');
   });
 
+  it('rejects an app catalog containing another organization identity', async () => {
+    mockJsonFetch({
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'remote-app',
+        organizationId: 'organization-b',
+        name: 'Remote App',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://catalog.example.com/remote',
+        sortOrder: 0,
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppCatalog(
+      'organization-access-token',
+      'organization-a',
+    )).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+      message: 'Admin app catalog contains an app from another organization',
+    });
+  });
+
   it('returns notModified for a 304 app catalog response', async () => {
     fetchCalls = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {

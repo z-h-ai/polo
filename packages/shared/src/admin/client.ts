@@ -311,6 +311,12 @@ export class AdminClient {
     });
     if (response === undefined) return { notModified: true };
     const catalog = this.readSuccessResponse(response, AppCatalogResponseSchema);
+    if (catalog.apps.some(app => app.organizationId !== organizationId)) {
+      throw new AdminError(
+        'Admin app catalog contains an app from another organization',
+        'SERVER_ERROR',
+      );
+    }
     return { notModified: false, ...catalog };
   }
 

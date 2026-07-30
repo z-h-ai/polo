@@ -127,6 +127,14 @@ export function statusText(
   }
 }
 
+export function canViewOrganizationAppLogs(
+  status: LocalAppRuntimeStatus | undefined,
+): boolean {
+  // Logs can contain runtime paths, configuration, and user data. Keep this
+  // recovery affordance role-independent and expose it only after a failure.
+  return status?.status === 'broken'
+}
+
 function actionLabel(t: TFunction, action: CatalogPrimaryAction): string {
   switch (action) {
     case 'cancel':
@@ -184,6 +192,7 @@ export function OrganizationAppCard({
     && app.availability === 'withdrawn'
     && statusUnavailable
   )
+  const logsAvailable = canViewOrganizationAppLogs(status)
   const progress = status?.progress?.percent
 
   return (
@@ -224,11 +233,13 @@ export function OrganizationAppCard({
                   {t('homeApps.actions.stop')}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onSelect={() => onViewLogs(app)}>
-                <Icons.FileText />
-                {t('homeApps.actions.viewLogs')}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              {logsAvailable && (
+                <DropdownMenuItem onSelect={() => onViewLogs(app)}>
+                  <Icons.FileText />
+                  {t('homeApps.actions.viewLogs')}
+                </DropdownMenuItem>
+              )}
+              {logsAvailable && <DropdownMenuSeparator />}
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() => onUninstall(app)}

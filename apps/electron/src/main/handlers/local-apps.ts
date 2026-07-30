@@ -114,6 +114,10 @@ async function requireAuthorizedCatalogEntry(
       'This organization app is no longer authorized for installation or launch',
     )
   }
+  // The cache can still contain the previous Catalog when its replacement
+  // fails to persist. The process-local scope fence is the newer authorization
+  // truth for both Bundle and remote URL launch paths.
+  getScopedLocalAppRuntimeRegistry().assertAppAuthorized(scope)
   return authorized
 }
 

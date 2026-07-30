@@ -669,6 +669,10 @@ export class ScopedLocalAppRuntimeRegistry {
     }
   }
 
+  assertAppAuthorized(rawScope: CatalogLocalAppScope): void {
+    this.assertAppSessionActive(validateCatalogLocalAppScope(rawScope))
+  }
+
   resumeAccount(accountId: string): void {
     const safeAccountId = validateScopeField(accountId, 'accountId')
     if (this.stopAccountPromises.has(safeAccountId)) {
