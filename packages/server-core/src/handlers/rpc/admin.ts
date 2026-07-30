@@ -1021,9 +1021,22 @@ export function registerAdminHandlers(
           requestContext.session,
           async (): Promise<AppCatalogSyncResult> => {
             if (!isCurrentCatalogSync()) return supersededCatalogResult()
-            setAppCatalogAccessMode(accountId, organizationId.data, 'offline')
             const current = getCachedAppCatalog(accountId, organizationId.data)
+            if (current?.authorizationStatus === 'denied') {
+              // A refresh transport failure is not new authorization evidence.
+              // Preserve an already-denied Catalog so cold renderers can recover
+              // retained local-data controls without reopening lifecycle access.
+              setAppCatalogAccessMode(accountId, organizationId.data, 'denied')
+              return {
+                success: false,
+                errorCode: 'NETWORK_ERROR',
+                message: tokenResult.warning ?? 'Failed to reach admin server',
+                catalog: markAppCatalogAccessDenied(current),
+                accessMode: 'denied',
+              }
+            }
             if (current?.authorizationStatus === 'authorized') {
+              setAppCatalogAccessMode(accountId, organizationId.data, 'offline')
               return {
                 success: true,
                 catalog: current,
@@ -1034,6 +1047,7 @@ export function registerAdminHandlers(
                 warning: tokenResult.warning ?? 'Failed to reach admin server',
               }
             }
+            setAppCatalogAccessMode(accountId, organizationId.data, 'offline')
             return {
               success: false,
               errorCode: 'NETWORK_ERROR',

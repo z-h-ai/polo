@@ -2067,6 +2067,57 @@ describe('registerAdminHandlers', () => {
     expect(adminSessionEnding).not.toHaveBeenCalled()
   })
 
+  it('preserves a denied Catalog when token refresh is offline during cold sync', async () => {
+    const organizationId = '35555555-5555-4555-8555-555555555555'
+    managerState.tokens = {
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'denied',
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [{
+        id: 'retained-app',
+        organizationId,
+        deliveryMode: 'local_bundle',
+        availability: 'available',
+      }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'denied')
+    adminClientBehavior.refresh = async () => {
+      throw new TestAdminError('offline', 'NETWORK_ERROR')
+    }
+    const { syncAppCatalog } = createHarness()
+
+    expect(await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      { force: true },
+    )).toMatchObject({
+      success: false,
+      errorCode: 'NETWORK_ERROR',
+      accessMode: 'denied',
+      catalog: {
+        authorizationStatus: 'denied',
+        apps: [{
+          id: 'retained-app',
+          availability: 'unavailable',
+        }],
+      },
+    })
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
+    expect(adminSessionEnding).not.toHaveBeenCalled()
+    expect(adminClientCalls.map(call => call.method)).toEqual(['refresh'])
+  })
+
   it('keeps a non-expired verified identity when cold-start validation is offline', async () => {
     managerState.tokens = {
       accessToken: 'access-token',

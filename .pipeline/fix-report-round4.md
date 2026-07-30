@@ -1,80 +1,60 @@
-# POL-51 第 4 轮 Review 修复报告
+# POL-51 第 4 轮阻塞审查修复报告
 
-## 每条 issue 的处理结果
+## 逐条处理
 
-### 1. 组织明确失权未封锁已进入的本地生命周期操作
-
-已修复。
-
-- `ScopedLocalAppRuntimeRegistry` 新增 `accountId + organizationId` 级 lifecycle generation、同步 denied fence、在途操作集合与去重清理 Promise。
-- 组织失权时，`denyCatalogScope()` 会先推进 Catalog authorization epoch 并关闭内存 access mode，然后立即调用生产接线的 `stopOrganization()`；该调用在任何 manager、文件系统或操作等待前同步推进组织 lifecycle generation 并建立 fence，慢停止／取消在锁外继续。
-- 安装、启动、重启及其他 scoped runtime 操作进入时同时捕获账号与组织 generation，manager 成功或失败返回后都再次校验；撤权后的迟到结果统一转为 `NOT_AUTHORIZED`。
-- 组织清理只取消和停止该账号、该组织的安装任务与运行实例，不影响同账号其他组织。
-- 新增真实 Admin handler、Local Apps handler 与 `ScopedLocalAppRuntimeRegistry` 接线竞态测试：覆盖 deferred START 遇到 `LIST_ORGANIZATIONS` 成员移除，以及 deferred INSTALL 遇到 Catalog `NOT_FOUND`。两者均不能提交成功，产生的进程被停止、安装任务被取消。
-
-### 2. renderer 多来源状态读取可被旧响应乱序覆盖
+### 1. token refresh 网络失败不得把 persisted denied Catalog 降级为 offline
 
 已修复。
 
-- `useAppCatalog` 新增按完整 scope 隔离的单调 status-read generation。
-- Catalog 全量读取、START/STOP 等生命周期完成刷新和 busy poll 共用同一代次；每轮读取开始即登记 token，提交时只接收仍为该 scope 最新 token 的结果。
-- replace 批量中仅失效的 scope 保留当前可信状态，其他仍为最新的 scope 正常合并；旧请求也不能清除新请求维护的 loading/error 状态。
-- START 在 finally 刷新后再次校验 lifecycle action generation，STOP 已成为更新意图时，迟到 START 不返回 localhost URL。
-- 新增确定性竞态测试：全量状态读取、START-finally 和 STOP-finally 同时挂起，STOP 的 `stopped` 先提交后，两个旧 `running` 响应依次返回仍不能覆盖最终状态。
+- `SYNC_APP_CATALOG` 在 token refresh 返回 `NETWORK_ERROR` 的冷启动路径中重新读取当前 Catalog 缓存。
+- 最近可信缓存已经是 `authorizationStatus = denied` 时，保持主进程 Catalog access mode 为 `denied`，不再写成 `offline`。
+- 返回给冷 renderer 的失败响应包含清洗后的 denied Catalog；所有可见和 retained App 均为 `availability = unavailable`。
+- 账号 token 和最近验证身份继续保留，但安装、更新、启动和重启仍由 denied gate 拒绝。
+- 新增 server-core handler 与真实 Electron Admin/Local Apps production wiring 回归，覆盖过期 token、refresh 网络失败、persisted denied cache、冷 renderer 响应和生命周期 fail closed。
 
-### 3. 受限离线 broken Bundle 错误显示“重试”
-
-已修复。
-
-- `OrganizationAppCard.primaryActionFor()` 在 `offline + broken` 时返回 `unavailable`，主按钮因此显示不可用并禁用，不再触发主进程必然拒绝的 START。
-- 新增组件决策测试，同时验证在线 broken 仍保留“重试”。
-
-### 4. Home App 文案重复 common 翻译键
+### 2. 大批量 App 撤下的 fence、扫描和停止并发
 
 已修复。
 
-- `AddAppDialog`、`OrganizationAppCard`、安装确认和卸载弹窗改用 `common.cancel/open/retry/unavailable/name/url`。
-- 从全部 locale 删除无上下文差异的六组 `homeApps` 重复键。
-- locale parity、排序和 literal coverage 检查全部通过。
+- `stopApps()` 先验证并去重完整 scopes，再在同一个无 `await` 的同步循环中为全部撤下 App 建立 deny gate 并推进 lifecycle generation；任何目录扫描、manager 查找或慢清理开始前，完整撤下集合已全部 fail closed。
+- 同一批次按 `accountId + organizationId` 分组，每个账号/组织只执行一次 persisted scope 扫描；不再为每个 App 重复遍历全部 scope 目录。
+- 新增 registry 级全局 stop/cancel slot queue，上限为 `STOP_CLEANUP_CONCURRENCY = 8`。App、组织和账号清理共用同一并发门禁，并发 bulk cleanup 也不能叠加突破上限。
+- entered install/start 的取消与迟到提交语义保持不变；清理失败继续聚合为 `STOP_FAILED`，App deny gate 不会因慢清理完成而自动释放。
+- 新增 1,000 App 回归，断言全部 fence 同步建立且组织只扫描一次。
+- 新增 10,000 App、两个并发组织批次回归，断言每个组织只扫描一次、10,000 个实例全部停止、全局最大同时 stop 数严格为 8。
 
 ## 关键文件
 
-- `packages/server-core/src/handlers/handler-deps.ts`
 - `packages/server-core/src/handlers/rpc/admin.ts`
-- `apps/electron/src/main/index.ts`
+- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
 - `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
 - `apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
 - `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
-- `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-- `apps/electron/src/renderer/components/tab-browser/AddAppDialog.tsx`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
-- `apps/electron/src/renderer/components/tab-browser/__tests__/OrganizationAppCard.test.ts`
-- `packages/shared/src/i18n/locales/*.json`
 - `.pipeline/fix-report-round4.md`
 
-## 自测命令与结果
+## 自测结果
 
-- `bun test`
-  - 结果：4796 pass、19 skip、0 fail，共 4815 tests / 365 files。
-- 逐文件执行仓库全部 `*.isolated.ts`
-  - 结果：19 个 isolated 测试文件全部通过。
-  - 关键套件：Admin 生产接线 8 pass；Local Apps 授权边界 17 pass；renderer Catalog 交互 18 pass；server-core Admin 50 pass。
-- `bun test apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts apps/electron/src/renderer/components/tab-browser/__tests__/OrganizationAppCard.test.ts`
-  - 结果：22 pass、0 fail。
+- `bun run test`
+  - 全量通过。
+  - 常规测试：4809 pass，19 skip，0 fail，共 4828 tests / 366 files。
+  - 全部 isolated 测试：280 pass，0 fail。
+  - 合计：5089 pass，19 skip，0 fail。
+- 定向回归：
+  - server-core Admin handler：54 pass，0 fail。
+  - Electron Admin/Local Apps production wiring：15 pass，0 fail。
+  - scoped local app runtime registry：18 pass，0 fail；包含 1,000/10,000 撤下规模测试。
 - `bun run typecheck:all`
-  - 结果：通过。
-- `bun run lint:electron`
-  - 结果：0 error、128 个仓库既有 warning。
+  - 全部 workspace 类型检查通过。
+- 本轮 Electron 变更文件定向 ESLint
+  - 0 error，0 warning。
 - `bun run lint:i18n:parity && bun run lint:i18n:sorted && bun run lint:i18n:coverage`
-  - 结果：通过；6 个附加 locale 与英文基准均为 1702 keys，排序和 literal coverage 正常。
-- `bun run electron:build:main && bun run electron:build:renderer`
-  - 结果：主进程与 renderer 生产构建通过；仅有既有的大 chunk 非阻断警告。
+  - 通过；6 个 locale 各 1706 keys，排序和覆盖检查通过。
+- `bun run electron:build:main`
+  - 主进程生产构建和产物校验通过。
 - `git diff --check`
-  - 结果：通过。
+  - 通过。
 
 ## 遗留问题
 
-- 未发现本轮 4 条 review issue 的已知代码遗留。
-- 未连接真实 POL-52 与签名 Bundle 做端到端撤权联调；本轮以真实主进程生产接线、scoped runtime registry 和确定性并发测试覆盖。
+- 未发现本轮两个阻塞问题的已知代码遗留。
+- 仓库根级 lint 仍依赖当前 checkout 中不存在的 `scripts/check-raw-sends.sh` 与 `scripts/check-task-tool-checks.sh`；本轮相关文件的定向 ESLint、全量类型检查、全量测试和主进程构建均已通过。

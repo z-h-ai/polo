@@ -21,6 +21,7 @@ import {
   createCatalogRuntimeAppId,
   PERSISTED_SCOPE_READ_CONCURRENCY,
   ScopedLocalAppRuntimeRegistry,
+  STOP_CLEANUP_CONCURRENCY,
   type CatalogLocalAppScope,
 } from '../scoped-registry'
 
@@ -36,6 +37,24 @@ function scope(
     organizationId,
     catalogAppId: 'demo.catalog-app',
   }
+}
+
+interface RegistryTestInternals {
+  managers: Map<string, LocalAppRuntimeManager>
+  managerScopes: Map<string, CatalogLocalAppScope>
+  deniedApps: Set<string>
+  appLifecycleGenerations: Map<string, number>
+  readPersistedScopes: (filter: {
+    accountId?: string
+    organizationId?: string
+    catalogAppId?: string
+  }) => Promise<CatalogLocalAppScope[]>
+}
+
+function registryInternals(
+  registry: ScopedLocalAppRuntimeRegistry,
+): RegistryTestInternals {
+  return registry as unknown as RegistryTestInternals
 }
 
 beforeEach(async () => {
@@ -509,6 +528,92 @@ describe('scoped local app runtime registry', () => {
       .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     registry.authorizeApps([withdrawnScope])
     expect(stopped).toEqual([withdrawnRuntimeId])
+  })
+
+  it('fences 1,000 withdrawn Apps synchronously and scans their organization once', async () => {
+    const withdrawnScopes = Array.from({ length: 1_000 }, (_, index) => ({
+      ...scope('account-a'),
+      catalogAppId: `withdrawn-${index}`,
+    }))
+    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
+    const internals = registryInternals(registry)
+    let persistedScans = 0
+    internals.readPersistedScopes = async filter => {
+      persistedScans += 1
+      expect(filter).toEqual({
+        accountId: 'account-a',
+        organizationId: 'organization-1',
+      })
+      return []
+    }
+
+    const cleanup = registry.stopApps(withdrawnScopes)
+
+    expect(internals.deniedApps.size).toBe(1_000)
+    expect(internals.appLifecycleGenerations.size).toBe(1_000)
+    await expect(registry.start(withdrawnScopes[999]!))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await cleanup
+    expect(persistedScans).toBe(1)
+  })
+
+  it('uses one scan per organization and a registry-wide bounded worker pool for 10,000 withdrawals', async () => {
+    const withdrawnScopes = Array.from({ length: 10_000 }, (_, index) => ({
+      ...scope('account-a', index < 5_000 ? 'organization-1' : 'organization-2'),
+      catalogAppId: `withdrawn-${index}`,
+    }))
+    let activeStops = 0
+    let maxActiveStops = 0
+    let stopCalls = 0
+    let cancelCalls = 0
+    class TrackingManager extends LocalAppRuntimeManager {
+      override cancelInstall(): boolean {
+        cancelCalls += 1
+        return false
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        activeStops += 1
+        maxActiveStops = Math.max(maxActiveStops, activeStops)
+        try {
+          await Promise.resolve()
+          stopCalls += 1
+          return { appId, status: 'stopped' }
+        } finally {
+          activeStops -= 1
+        }
+      }
+    }
+    const manager = new TrackingManager({ rootDir })
+    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
+    const internals = registryInternals(registry)
+    for (const catalogScope of withdrawnScopes) {
+      const appKey = createCatalogLocalAppScopeKey(catalogScope)
+      internals.managers.set(appKey, manager)
+      internals.managerScopes.set(appKey, catalogScope)
+    }
+    const scansByOrganization = new Map<string, number>()
+    internals.readPersistedScopes = async filter => {
+      const organizationId = filter.organizationId!
+      scansByOrganization.set(
+        organizationId,
+        (scansByOrganization.get(organizationId) ?? 0) + 1,
+      )
+      return []
+    }
+
+    await Promise.all([
+      registry.stopApps(withdrawnScopes.slice(0, 5_000)),
+      registry.stopApps(withdrawnScopes.slice(5_000)),
+    ])
+
+    expect(scansByOrganization).toEqual(new Map([
+      ['organization-1', 1],
+      ['organization-2', 1],
+    ]))
+    expect(stopCalls).toBe(10_000)
+    expect(cancelCalls).toBe(20_000)
+    expect(maxActiveStops).toBe(STOP_CLEANUP_CONCURRENCY)
   })
 
   it('rejects an in-flight start after logout and deduplicates account cleanup', async () => {

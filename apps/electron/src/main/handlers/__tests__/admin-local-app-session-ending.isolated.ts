@@ -639,6 +639,53 @@ describe('Admin session and scoped local app production wiring', () => {
     expect(managerFactoryCalls()).toBe(0)
   })
 
+  it('keeps a persisted denied Catalog closed when cold token refresh is offline', async () => {
+    const {
+      handlers,
+      context,
+      managerFactoryCalls,
+    } = await createAuthorizationHarness()
+    catalog = {
+      ...catalog,
+      authorizationStatus: 'denied',
+      apps: catalog.apps.map(app => ({
+        ...app,
+        availability: 'available',
+      })),
+    }
+    accessMode = 'denied'
+    tokensExpired = true
+    refreshAdmin = async () => {
+      throw new TestAdminError('network unavailable', 'NETWORK_ERROR')
+    }
+
+    await expect(handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!(
+      context,
+      scope.organizationId,
+      { force: true },
+    )).resolves.toMatchObject({
+      success: false,
+      errorCode: 'NETWORK_ERROR',
+      accessMode: 'denied',
+      catalog: {
+        authorizationStatus: 'denied',
+        apps: [{
+          id: scope.catalogAppId,
+          availability: 'unavailable',
+        }],
+      },
+    })
+    expect(accessMode).toBe('denied')
+    expect(tokens).toMatchObject({ userId: scope.accountId })
+    await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL)!(
+      context,
+      installRequest(),
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await expect(handlers.get(RPC_CHANNELS.localApps.START)!(context, scope))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(managerFactoryCalls()).toBe(0)
+  })
+
   it('downgrades online Catalog access when validation is offline', async () => {
     const {
       handlers,
