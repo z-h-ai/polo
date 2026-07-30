@@ -264,6 +264,10 @@ export interface AdminRpcErrorPayload {
   retryAfter?: number
 }
 
+export type SessionLogoutResult =
+  | { success: true }
+  | ({ success: false } & AdminRpcErrorPayload)
+
 export type AdminLoginResult =
   | { success: true; user: AdminUser }
   | ({ success: false } & AdminRpcErrorPayload)
@@ -516,7 +520,7 @@ export interface ElectronAPI {
   // Auth
   showLogoutConfirmation(): Promise<boolean>
   showDeleteSessionConfirmation(name: string): Promise<boolean>
-  logout(): Promise<void>
+  logout(): Promise<SessionLogoutResult>
 
   // Admin auth
   adminLogin(identifier: string, password: string): Promise<AdminLoginResult>
@@ -527,7 +531,7 @@ export interface ElectronAPI {
   adminVerifyPhoneAuthCode(phone: string, code: string): Promise<AdminVerifyPhoneAuthCodeResult>
   adminSetPassword(password: string): Promise<AdminSetPasswordResult>
   adminValidate(): Promise<AdminValidateResult>
-  adminLogout(): Promise<{ success: boolean }>
+  adminLogout(): Promise<SessionLogoutResult>
   adminGetStatus(): Promise<AdminStatusResult>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
   adminSyncAppCatalog(

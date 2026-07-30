@@ -108,6 +108,16 @@ export interface LocalAppCatalogReleaseFingerprint {
   arch: LocalAppArchitecture | null
 }
 
+export function normalizeLocalAppPermissions(
+  permissions: readonly string[] | null | undefined,
+): string[] {
+  return [...new Set(
+    (permissions ?? [])
+      .map(permission => permission.trim())
+      .filter(Boolean),
+  )].sort()
+}
+
 export interface LocalAppCatalogInstallRequest {
   scope: CatalogLocalAppScope
   /**
@@ -115,6 +125,10 @@ export interface LocalAppCatalogInstallRequest {
    * compares it with the currently authorized Catalog before downloading.
    */
   release: LocalAppCatalogReleaseFingerprint
+  /** Catalog configuration shown with the confirmation dialog. */
+  appConfigVersion: string
+  /** Normalized permissions shown with the confirmation dialog. */
+  permissions: string[]
 }
 
 export interface LocalAppLegacyInstallRequest extends LocalAppInstallRequest {

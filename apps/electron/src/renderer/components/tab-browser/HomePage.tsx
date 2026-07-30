@@ -152,7 +152,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const { installedApps, openApp, removeApp } = useTabShell()
   const catalog = useAppCatalog()
   const [recentApps, setRecentApps] = useState(readRecentApps)
-  const [installTarget, setInstallTarget] = useState<CatalogApp | null>(null)
+  const [installTarget, setInstallTarget] = useState<{
+    app: CatalogApp
+    appConfigVersion: string
+  } | null>(null)
+  const installTargetApp = installTarget?.app ?? null
   const [uninstallTarget, setUninstallTarget] = useState<CatalogApp | null>(null)
   const [preserveData, setPreserveData] = useState(true)
   const [logsTarget, setLogsTarget] = useState<CatalogApp | null>(null)
@@ -243,7 +247,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
     action: CatalogPrimaryAction,
   ) => {
     if (action === 'install' || action === 'update') {
-      setInstallTarget(app)
+      const appConfigVersion = catalog.state.catalog?.appConfigVersion
+      if (!appConfigVersion) {
+        toast.error(t('homeApps.errors.staleContext'))
+        return
+      }
+      setInstallTarget({ app, appConfigVersion })
       return
     }
     if (action === 'cancel') {
@@ -260,7 +269,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
     if (action === 'retry') {
       const status = catalog.getStatus(app)
       if (!status?.currentVersion) {
-        setInstallTarget(app)
+        const appConfigVersion = catalog.state.catalog?.appConfigVersion
+        if (!appConfigVersion) {
+          toast.error(t('homeApps.errors.staleContext'))
+          return
+        }
+        setInstallTarget({ app, appConfigVersion })
         return
       }
     }
@@ -270,11 +284,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
   }
 
   const confirmInstall = async () => {
-    const app = installTarget
-    if (!app) return
+    const target = installTarget
+    if (!target) return
     setInstallTarget(null)
+    const { app, appConfigVersion } = target
     try {
-      await catalog.install(app)
+      await catalog.install(app, appConfigVersion)
       toast.success(t('homeApps.toast.installed', { name: app.name }))
     } catch (error) {
       if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
@@ -590,33 +605,33 @@ export function HomePage({ onAddApp }: HomePageProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {installTarget && catalog.getStatus(installTarget)?.availableRelease
+              {installTargetApp && catalog.getStatus(installTargetApp)?.availableRelease
                 ? t('homeApps.install.updateTitle', {
-                    name: installTarget?.name ?? t('homeApps.appFallback'),
+                    name: installTargetApp.name,
                   })
                 : t('homeApps.install.installTitle', {
-                    name: installTarget?.name ?? t('homeApps.appFallback'),
+                    name: installTargetApp?.name ?? t('homeApps.appFallback'),
                   })}
             </DialogTitle>
             <DialogDescription>
               {t('homeApps.install.description')}
             </DialogDescription>
           </DialogHeader>
-          {installTarget?.currentRelease && (
+          {installTargetApp?.currentRelease && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-foreground/4 p-3">
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.version')}
                   </p>
-                  <p className="mt-1 font-medium">{installTarget.currentRelease.version}</p>
+                  <p className="mt-1 font-medium">{installTargetApp.currentRelease.version}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">
                     {t('homeApps.install.downloadSize')}
                   </p>
                   <p className="mt-1 font-medium">
-                    {formatBytes(t, installTarget.currentRelease.sizeBytes)}
+                    {formatBytes(t, installTargetApp.currentRelease.sizeBytes)}
                   </p>
                 </div>
               </div>
@@ -624,9 +639,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t('homeApps.install.permissions')}
                 </p>
-                {installTarget.permissions?.length ? (
+                {installTargetApp.permissions?.length ? (
                   <ul className="mt-2 space-y-1.5">
-                    {installTarget.permissions.map(permission => (
+                    {installTargetApp.permissions.map(permission => (
                       <li key={permission} className="flex items-start gap-2">
                         <Icons.ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                         <span>{permission}</span>
@@ -646,7 +661,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
               {t('homeApps.actions.cancel')}
             </Button>
             <Button type="button" onClick={() => { void confirmInstall() }}>
-              {installTarget && catalog.getStatus(installTarget)?.availableRelease
+              {installTargetApp && catalog.getStatus(installTargetApp)?.availableRelease
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
             </Button>

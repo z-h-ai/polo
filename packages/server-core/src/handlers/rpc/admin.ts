@@ -895,27 +895,30 @@ export function registerAdminHandlers(
         }
         const adminError = toAdminRpcError(error)
         if (isSessionEndingAuthFailure(error)) {
+          const denied = await sessions.mutateIfCurrent(
+            manager,
+            requestContext.session,
+            async () => {
+              // Close Catalog lifecycle authorization before potentially slow
+              // account-scoped process cleanup. Concurrent transport failures
+              // must not serve an authorized offline cache after the session
+              // has received an explicit revocation result.
+              denyAppCatalogAccessForAccount(accountId)
+              denyCachedAppCatalogAuthorizationForAccount(accountId)
+            },
+          )
+          if (!denied.applied) return staleAdminSessionResult()
           const ended = await endAdminSession(
             manager,
             deps,
             sessions,
             requestContext.session,
-            undefined,
-            isCurrentCatalogSync,
           )
           if (!ended) {
-            const current = await sessions.mutateIfCurrent(
-              manager,
-              requestContext.session,
-              async () => (
-                isCurrentCatalogSync()
-                  ? staleAdminSessionResult()
-                  : supersededCatalogResult()
-              ),
-            )
-            return current.applied
-              ? current.value!
-              : staleAdminSessionResult()
+            // Catalog request ordering is not an authentication truth source.
+            // Only a real session generation/account change may suppress an
+            // explicit session-ending failure from an older request.
+            return staleAdminSessionResult()
           }
           log?.warn('[Admin] app catalog authorization denied:', adminError.message)
           return { success: false, ...adminError }

@@ -444,7 +444,7 @@ describe('useAppCatalog scoped async state', () => {
 
     let installOutcome!: Promise<'fulfilled' | 'rejected'>
     act(() => {
-      installOutcome = result.current.install(catalogApp).then(
+      installOutcome = result.current.install(catalogApp, 'initial').then(
         () => 'fulfilled',
         () => 'rejected',
       )
@@ -475,6 +475,7 @@ describe('useAppCatalog scoped async state', () => {
   it('refreshes a changed Release and requires confirmation of the new fingerprint', async () => {
     const releaseA: CatalogApp = {
       ...app('organization-a'),
+      permissions: ['selected files', 'camera', 'camera'],
       currentRelease: {
         version: '1.0.0',
         runtime: 'static',
@@ -518,7 +519,10 @@ describe('useAppCatalog scoped async state', () => {
     const confirmedApp = result.current.state.catalog!.apps[0]!
 
     await act(async () => {
-      await expect(result.current.install(confirmedApp)).rejects.toMatchObject({
+      await expect(result.current.install(
+        confirmedApp,
+        'release-a',
+      )).rejects.toMatchObject({
         code: 'RELEASE_CHANGED',
       })
     })
@@ -530,6 +534,8 @@ describe('useAppCatalog scoped async state', () => {
         organizationId: 'organization-a',
         catalogAppId: 'shared-app-id',
       },
+      appConfigVersion: 'release-a',
+      permissions: ['camera', 'selected files'],
       release: {
         version: '1.0.0',
         checksum: 'a'.repeat(64),
@@ -635,7 +641,10 @@ describe('useAppCatalog scoped async state', () => {
       organizationId: 'organization-a',
       catalogAppId: 'shared-app-id',
     }))
-    await expect(result.current.install(catalogApp)).rejects.toThrow()
+    await expect(result.current.install(
+      catalogApp,
+      result.current.state.catalog!.appConfigVersion,
+    )).rejects.toThrow()
     expect(installLocalApp).not.toHaveBeenCalled()
   })
 

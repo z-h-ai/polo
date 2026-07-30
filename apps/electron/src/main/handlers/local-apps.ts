@@ -6,7 +6,10 @@ import {
   type CatalogApp,
 } from '@polo-ai/shared/admin'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import {
+  normalizeLocalAppPermissions,
+  RPC_CHANNELS,
+} from '@polo-ai/shared/protocol'
 import type {
   CatalogLocalAppScope,
   LegacyLocalAppScope,
@@ -59,6 +62,7 @@ async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promis
 
 interface AuthorizedCatalogApp {
   app: CatalogApp
+  appConfigVersion: string
   accessMode: 'online' | 'offline' | 'denied'
 }
 
@@ -83,20 +87,20 @@ async function requireAuthorizedCatalogEntry(
       'This organization app is no longer authorized for installation or launch',
     )
   }
-  return { app, accessMode }
+  return { app, appConfigVersion: catalog.appConfigVersion, accessMode }
 }
 
 async function requireAuthorizedCatalogApp(
   scope: CatalogLocalAppScope,
 ): Promise<AuthorizedCatalogApp> {
-  const { app, accessMode } = await requireAuthorizedCatalogEntry(scope)
+  const { app, appConfigVersion, accessMode } = await requireAuthorizedCatalogEntry(scope)
   if (app.deliveryMode !== 'local_bundle') {
     throw new LocalAppRuntimeError(
       'INVALID_REQUEST',
       'Remote URL apps cannot use the local bundle runtime',
     )
   }
-  return { app, accessMode }
+  return { app, appConfigVersion, accessMode }
 }
 
 async function withReference<T>(
@@ -138,11 +142,26 @@ function normalizedCatalogVersion(version: string): string | null {
 
 function matchesConfirmedRelease(
   request: LocalAppCatalogInstallRequest,
+  app: CatalogApp,
+  appConfigVersion: string,
   release: AppReleaseSummary,
 ): boolean {
   const confirmed = request.release
+  if (
+    !Array.isArray(request.permissions)
+    || request.permissions.some(permission => typeof permission !== 'string')
+  ) {
+    return false
+  }
+  const confirmedPermissions = normalizeLocalAppPermissions(request.permissions)
+  const currentPermissions = normalizeLocalAppPermissions(app.permissions)
   return Boolean(
     confirmed
+    && request.appConfigVersion === appConfigVersion
+    && confirmedPermissions.length === currentPermissions.length
+    && confirmedPermissions.every(
+      (permission, index) => permission === currentPermissions[index],
+    )
     && confirmed.version === release.version
     && confirmed.checksum === release.checksum
     && confirmed.sizeBytes === release.sizeBytes
@@ -270,7 +289,11 @@ export function registerLocalAppHandlers(server: RpcServer): void {
         )
       }
 
-      const { app, accessMode } = await requireAuthorizedCatalogApp(reference)
+      const {
+        app,
+        appConfigVersion,
+        accessMode,
+      } = await requireAuthorizedCatalogApp(reference)
       if (accessMode !== 'online') {
         throw new LocalAppRuntimeError(
           'NOT_AUTHORIZED',
@@ -286,6 +309,8 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       const release = app.currentRelease
       if (!matchesConfirmedRelease(
         rawRequest as LocalAppCatalogInstallRequest,
+        app,
+        appConfigVersion,
         release,
       )) {
         throw new LocalAppRuntimeError(

@@ -5,6 +5,7 @@ import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
 import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
 import {
   createLocalAppScopeKey,
+  normalizeLocalAppPermissions,
   type CatalogLocalAppScope,
   type LocalAppRuntimeStatus,
   type LocalAppStartResult,
@@ -518,7 +519,10 @@ export function useAppCatalog() {
     }
   }, [isCurrentSnapshot])
 
-  const install = useCallback((app: CatalogApp) => {
+  const install = useCallback((
+    app: CatalogApp,
+    confirmedAppConfigVersion: string,
+  ) => {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
@@ -557,6 +561,8 @@ export function useAppCatalog() {
       try {
         await window.electronAPI.localApps.install({
           scope,
+          appConfigVersion: confirmedAppConfigVersion,
+          permissions: normalizeLocalAppPermissions(app.permissions),
           release: {
             version: release.version,
             checksum: release.checksum,

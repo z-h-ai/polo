@@ -261,6 +261,8 @@ describe('local app main-process authorization boundary', () => {
     const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
     await install(context, {
       scope: scope(),
+      appConfigVersion: 'version-1',
+      permissions: [],
       release: confirmedRelease(),
       downloadUrl: 'https://attacker.example/bundle.zip',
     })
@@ -289,9 +291,60 @@ describe('local app main-process authorization boundary', () => {
     for (const release of staleFingerprints) {
       await expect(install(context, {
         scope: scope(),
+        appConfigVersion: 'version-1',
+        permissions: [],
         release,
       })).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
     }
+    expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('rejects changed permissions from the confirmed Catalog snapshot', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      permissions: ['camera', 'selected files'],
+    }
+
+    await expect(install(context, {
+      scope: scope(),
+      appConfigVersion: 'version-1',
+      permissions: ['camera'],
+      release: confirmedRelease(),
+    })).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
+    expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('compares confirmed permissions as a normalized set', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      permissions: ['selected files', 'camera', 'camera'],
+    }
+
+    await install(context, {
+      scope: scope(),
+      appConfigVersion: 'version-1',
+      permissions: [' camera ', 'selected files', 'camera'],
+      release: confirmedRelease(),
+    })
+
+    expect(scopedInstall).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a confirmation from an older appConfigVersion', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    catalog = {
+      ...catalog,
+      appConfigVersion: 'version-2',
+    }
+
+    await expect(install(context, {
+      scope: scope(),
+      appConfigVersion: 'version-1',
+      permissions: [],
+      release: confirmedRelease(),
+    })).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
     expect(scopedInstall).not.toHaveBeenCalled()
   })
 

@@ -2334,6 +2334,126 @@ describe('registerAdminHandlers', () => {
     expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('online')
   })
 
+  it('does not let a newer temporary Catalog failure suppress an explicit session revocation', async () => {
+    const cases = [
+      {
+        organizationId: '16666666-6666-4666-8666-666666666661',
+        authError: new TestAdminError(
+          'protected endpoint rejected the token',
+          'TOKEN_REVOKED',
+          { status: 401 },
+        ),
+        temporaryError: new TestAdminError('offline', 'NETWORK_ERROR'),
+      },
+      {
+        organizationId: '16666666-6666-4666-8666-666666666662',
+        authError: new TestAdminError(
+          'membership forbidden',
+          'FORBIDDEN',
+          { status: 403 },
+        ),
+        temporaryError: new TestAdminError(
+          'service unavailable',
+          'SERVER_ERROR',
+          { status: 503 },
+        ),
+      },
+    ]
+
+    for (const testCase of cases) {
+      managerState.tokens = {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: Date.now() + 3600_000,
+        userId: 'user-1',
+        username: 'admin',
+      }
+      const cacheKey = `user-1:${testCase.organizationId}`
+      appCatalogCache.set(cacheKey, {
+        accountId: 'user-1',
+        organizationId: testCase.organizationId,
+        authorizationStatus: 'authorized',
+        appConfigVersion: 'apps-v1',
+        syncedAt: 50,
+        apps: [{
+          id: 'private-app',
+          organizationId: testCase.organizationId,
+          deliveryMode: 'local_bundle',
+          availability: 'available',
+        }],
+      })
+      appCatalogAccess.set(cacheKey, 'online')
+
+      const olderFailure = createDeferred<any>()
+      const newerFailure = createDeferred<any>()
+      const requestStarted = [
+        createDeferred<void>(),
+        createDeferred<void>(),
+      ]
+      const cleanupStarted = createDeferred<void>()
+      const releaseCleanup = createDeferred<void>()
+      adminSessionEnding.mockClear()
+      adminSessionEnding.mockImplementationOnce(async () => {
+        cleanupStarted.resolve()
+        await releaseCleanup.promise
+      })
+      let requestIndex = 0
+      adminClientBehavior.getAppCatalog = async () => {
+        const index = requestIndex++
+        requestStarted[index]!.resolve()
+        return index === 0 ? olderFailure.promise : newerFailure.promise
+      }
+      const { syncAppCatalog } = createHarness()
+      const context = {
+        clientId: 'client-1',
+        workspaceId: null,
+        webContentsId: null,
+      }
+
+      const older = syncAppCatalog(
+        context,
+        testCase.organizationId,
+        { force: true },
+      )
+      await requestStarted[0]!.promise
+      const newer = syncAppCatalog(
+        context,
+        testCase.organizationId,
+        { force: true },
+      )
+      await requestStarted[1]!.promise
+
+      olderFailure.reject(testCase.authError)
+      await cleanupStarted.promise
+      expect(appCatalogCache.get(cacheKey)).toMatchObject({
+        authorizationStatus: 'denied',
+        apps: [{ availability: 'unavailable' }],
+      })
+
+      newerFailure.reject(testCase.temporaryError)
+      expect(await newer).toMatchObject({
+        success: false,
+        errorCode: testCase.temporaryError.errorCode,
+      })
+
+      releaseCleanup.resolve()
+      expect(await older).toMatchObject({
+        success: false,
+        errorCode: testCase.authError.errorCode,
+        status: testCase.authError.status,
+      })
+      expect(managerState.tokens).toBeNull()
+      expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+      expect(appCatalogAccess.get(cacheKey)).toBe('denied')
+      expect(appCatalogCache.get(cacheKey)).toMatchObject({
+        authorizationStatus: 'denied',
+        apps: [{ availability: 'unavailable' }],
+      })
+      appCatalogCache.clear()
+      appCatalogAccess.clear()
+    }
+  })
+
   it('does not let a pending Catalog response reopen an organization removed by a newer list', async () => {
     const organizationId = '14444444-4444-4444-8444-444444444444'
     managerState.tokens = {
