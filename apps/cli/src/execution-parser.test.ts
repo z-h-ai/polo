@@ -117,4 +117,44 @@ describe('execution parser', () => {
     const value = argv('--workspace', 'work', '--provider=openai', 'exec', 'hello')
     expect(findExecutionCommandIndex(value)).toBe(5)
   })
+
+  it('routes run around legacy server options and rejects them as usage errors', () => {
+    const before = [
+      argv('--url', 'ws://electron.invalid', 'run', 'hello'),
+      argv('--token', 'server-secret', 'run', 'hello'),
+      argv('--tls-ca', '/tmp/ca.pem', 'run', 'hello'),
+      argv('--url=ws://electron.invalid', 'run', 'hello'),
+    ]
+    for (const value of before) {
+      expect(findExecutionCommandIndex(value)).toBeGreaterThanOrEqual(0)
+      expect(() => parseExecutionArgs(value)).toThrow(
+        /unsupported option for run: --(?:url|token|tls-ca)/,
+      )
+    }
+
+    const after = [
+      argv('run', '--url', 'ws://electron.invalid', 'hello'),
+      argv('run', '--token', 'server-secret', 'hello'),
+      argv('run', '--tls-ca', '/tmp/ca.pem', 'hello'),
+    ]
+    for (const value of after) {
+      expect(findExecutionCommandIndex(value)).toBe(2)
+      expect(() => parseExecutionArgs(value)).toThrow(
+        /unsupported option for run: --(?:url|token|tls-ca)/,
+      )
+    }
+
+    const unsupportedBeforeRun = argv(
+      '--sandbox',
+      'read-only',
+      '--output-schema',
+      '/tmp/schema.json',
+      'run',
+      'hello',
+    )
+    expect(findExecutionCommandIndex(unsupportedBeforeRun)).toBe(6)
+    expect(() => parseExecutionArgs(unsupportedBeforeRun)).toThrow(
+      'unsupported option: --sandbox',
+    )
+  })
 })

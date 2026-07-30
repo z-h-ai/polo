@@ -39,25 +39,73 @@ export class UsageError extends Error {
   readonly exitCode = 2
 }
 
-const VALUE_OPTIONS = new Set([
-  '--workspace',
-  '-C',
-  '--cd',
-  '--provider',
-  '-m',
-  '--model',
-  '--api-key',
-  '--base-url',
-  '--color',
-  '-o',
-  '--output-last-message',
-  '--source',
-  '--mode',
-  '--output-format',
-  '--server-entry',
-  '--timeout',
-  '--workspace-dir',
-  '--send-timeout',
+/**
+ * Authoritative arity table used while locating run/exec among options.
+ * It includes both one-shot options and legacy server-client options so an
+ * unsupported legacy value can never be mistaken for the command or route a
+ * run invocation back to the full server path.
+ */
+export const CLI_OPTION_ARITY: Readonly<Record<string, 0 | 1>> = Object.freeze({
+  '--workspace': 1,
+  '-C': 1,
+  '--cd': 1,
+  '--provider': 1,
+  '-m': 1,
+  '--model': 1,
+  '--api-key': 1,
+  '--base-url': 1,
+  '--color': 1,
+  '-o': 1,
+  '--output-last-message': 1,
+  '--source': 1,
+  '--mode': 1,
+  '--output-format': 1,
+  '--server-entry': 1,
+  '--timeout': 1,
+  '--workspace-dir': 1,
+  '--send-timeout': 1,
+  '--url': 1,
+  '--token': 1,
+  '--tls-ca': 1,
+  '--json': 0,
+  '--yolo': 0,
+  '--dangerously-bypass-approvals-and-sandbox': 0,
+  '--ephemeral': 0,
+  '--no-cleanup': 0,
+  '--last': 0,
+  '--disable-spinner': 0,
+  '--no-spinner': 0,
+  '--stdin': 0,
+  '--verbose': 0,
+  '-v': 0,
+  '-h': 0,
+  '--help': 0,
+  '-V': 0,
+  '--version': 0,
+  '--validate-server': 0,
+  '--sandbox': 1,
+  '--add-dir': 1,
+  '--skip-git-repo-check': 0,
+  '--image': 1,
+  '-i': 1,
+  '--output-schema': 1,
+  '--config': 1,
+  '-c': 1,
+  '--profile': 1,
+  '--enable': 1,
+  '--disable': 1,
+  '--strict-config': 0,
+  '--oss': 0,
+  '--local-provider': 1,
+  '--ignore-user-config': 0,
+  '--ignore-rules': 0,
+  '--dangerously-bypass-hook-trust': 0,
+})
+
+const LEGACY_SERVER_ONLY_OPTIONS = new Set([
+  '--url',
+  '--token',
+  '--tls-ca',
 ])
 
 const UNSUPPORTED_OPTIONS = new Set([
@@ -85,7 +133,7 @@ export function findExecutionCommandIndex(argv: string[]): number {
   for (let i = 0; i < args.length; i++) {
     const token = args[i]!
     const [name, inline] = splitLongOption(token)
-    if (VALUE_OPTIONS.has(name)) {
+    if (CLI_OPTION_ARITY[name] === 1) {
       if (inline === undefined) i++
       continue
     }
@@ -162,6 +210,9 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
     }
 
     const [name, inline] = splitLongOption(token)
+    if (LEGACY_SERVER_ONLY_OPTIONS.has(name)) {
+      throw new UsageError(`unsupported option for ${command}: ${name}`)
+    }
     if (UNSUPPORTED_OPTIONS.has(name)) {
       throw new UsageError(`unsupported option: ${name}`)
     }

@@ -13,6 +13,7 @@ import { ExecEventAdapter, type InternalSessionEvent } from './exec-event-adapte
 import { parseExecutionArgs } from './execution-parser.ts'
 import {
   createConfigurationSnapshot,
+  normalizeCredentialFreeBaseUrl,
   readCliMainSessionSummary,
   runExecutionCommand,
   waitForTurn,
@@ -25,6 +26,18 @@ afterEach(async () => {
 })
 
 describe('one-shot execution internals', () => {
+  it('rejects userinfo and sensitive base URL query parameters', () => {
+    expect(() => normalizeCredentialFreeBaseUrl(
+      'https://user:oauth-secret@example.test/v1',
+    )).toThrow('userinfo credentials')
+    expect(() => normalizeCredentialFreeBaseUrl(
+      'https://example.test/v1?access_token=oauth-secret',
+    )).toThrow('sensitive query parameter: access_token')
+    expect(normalizeCredentialFreeBaseUrl(
+      'https://example.test/v1?api-version=2026-01-01',
+    )).toBe('https://example.test/v1?api-version=2026-01-01')
+  })
+
   it('seeds a completely fresh global config snapshot from bundled defaults', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'polo-fresh-config-'))
     tempDirs.push(temp)
@@ -77,6 +90,9 @@ describe('one-shot execution internals', () => {
           sessionId: 'session-1',
         } satisfies InternalSessionEvent)
       },
+      waitForDisconnect() {
+        return new Promise<Error>(() => {})
+      },
     } as unknown as CliRpcClient
     const args = parseExecutionArgs(['bun', 'index.ts', 'exec', 'hello'])
 
@@ -110,6 +126,9 @@ describe('one-shot execution internals', () => {
         } satisfies InternalSessionEvent)
         listener?.({ type: 'complete', sessionId: 'session-1' } satisfies InternalSessionEvent)
       },
+      waitForDisconnect() {
+        return new Promise<Error>(() => {})
+      },
     } as unknown as CliRpcClient
     const args = parseExecutionArgs(['bun', 'index.ts', 'exec', 'hello'])
 
@@ -123,6 +142,118 @@ describe('one-shot execution internals', () => {
 
     expect(result.status).toBe('completed')
     expect(result.finalMessage).toBe('\u001B[31manswer\u001B[39m')
+  })
+
+  it('strips ANSI from every run text/tool path for all color modes and JSONL', async () => {
+    const originalWrite = process.stdout.write
+    try {
+      for (const color of ['always', 'never', 'auto'] as const) {
+        for (const outputFormat of ['text', 'stream-json'] as const) {
+          let listener: ((value: unknown) => void) | undefined
+          let stdout = ''
+          process.stdout.write = ((chunk: string | Uint8Array) => {
+            stdout += String(chunk)
+            return true
+          }) as typeof process.stdout.write
+          const client = {
+            on(_channel: string, callback: (value: unknown) => void) {
+              listener = callback
+              return () => {
+                listener = undefined
+              }
+            },
+            async invoke() {
+              for (const event of [
+                {
+                  type: 'text_delta',
+                  sessionId: 'session-1',
+                  delta: '\u001B[31mtext\u001B[39m',
+                },
+                {
+                  type: 'tool_start',
+                  sessionId: 'session-1',
+                  toolName: '\u001B[31mtool\u001B[39m',
+                  toolIntent: '\u001B[33mintent\u001B[39m',
+                },
+                {
+                  type: 'tool_result',
+                  sessionId: 'session-1',
+                  result: '\u001B[32mresult\u001B[39m',
+                },
+                {
+                  type: 'complete',
+                  sessionId: 'session-1',
+                },
+              ] satisfies InternalSessionEvent[]) {
+                listener?.(event)
+              }
+            },
+            waitForDisconnect() {
+              return new Promise<Error>(() => {})
+            },
+          } as unknown as CliRpcClient
+          const args = parseExecutionArgs([
+            'bun',
+            'index.ts',
+            'run',
+            '--color',
+            color,
+            ...(outputFormat === 'stream-json'
+              ? ['--output-format', 'stream-json']
+              : []),
+            'hello',
+          ])
+
+          const result = await waitForTurn(
+            client,
+            'session-1',
+            'hello',
+            args,
+            new ExecEventAdapter({ json: false }),
+          )
+
+          expect(result.status).toBe('completed')
+          expect(stdout).not.toContain('\u001B')
+          if (outputFormat === 'text') {
+            expect(stdout).toContain('text')
+            expect(stdout).toContain('[tool: tool — intent]')
+            expect(stdout).toContain('result')
+          } else {
+            for (const line of stdout.trim().split('\n')) {
+              expect(() => JSON.parse(line)).not.toThrow()
+            }
+          }
+        }
+      }
+    } finally {
+      process.stdout.write = originalWrite
+    }
+  })
+
+  it('finishes failed when the client disconnects after sendMessage ACK', async () => {
+    const client = {
+      on() {
+        return () => {}
+      },
+      async invoke() {
+        return undefined
+      },
+      async waitForDisconnect() {
+        return new Error('fixture disconnected after ACK')
+      },
+    } as unknown as CliRpcClient
+    const args = parseExecutionArgs(['bun', 'index.ts', 'exec', 'hello'])
+
+    const result = await waitForTurn(
+      client,
+      'session-1',
+      'hello',
+      args,
+      new ExecEventAdapter({ json: false }),
+    )
+
+    expect(result.status).toBe('failed')
+    expect(result.error?.message).toContain('disconnected after ACK')
   })
 
   it('resolves resume connection in invocation-env, Thread, current-default order', async () => {
@@ -147,6 +278,33 @@ describe('one-shot execution internals', () => {
     expect(exitCode, stderr).toBe(0)
     expect(stdout).toBe('ok\n')
   }, 15_000)
+
+  it('rejects base URL secrets before args or resolved connections reach metadata', async () => {
+    for (const mode of ['args', 'resolved']) {
+      const temp = await mkdtemp(join(tmpdir(), `polo-base-url-${mode}-`))
+      tempDirs.push(temp)
+      const proc = Bun.spawn([
+        'bun',
+        'run',
+        join(import.meta.dir, '__fixtures__', 'base-url-secret.ts'),
+        temp,
+        mode,
+      ], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env },
+      })
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      expect(exitCode, stderr).toBe(0)
+      expect(stdout).toBe('ok\n')
+      expect(stderr).not.toContain('oauth-real-token-123456')
+      expect(stderr).not.toContain('sk-query-secret-123456')
+    }
+  }, 20_000)
 
   it('validates resume --ephemeral before cloning the original Thread', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'polo-resume-ephemeral-validation-'))

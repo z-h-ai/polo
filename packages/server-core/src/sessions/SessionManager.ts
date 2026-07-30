@@ -3243,7 +3243,13 @@ export class SessionManager implements ISessionManager {
       const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager)
 
       // Create centralized MCP client pool (all backends use it)
-      managed.mcpPool = new McpClientPool({ debug: (msg) => sessionLog.debug(msg), workspaceRootPath: managed.workspace.rootPath, sessionPath })
+      managed.mcpPool = new McpClientPool({
+        debug: (msg) => sessionLog.debug(msg),
+        workspaceRootPath: managed.workspace.rootPath,
+        sessionPath,
+        environmentPolicy:
+          this.runtimeProfile === 'cli-one-shot' ? 'cli-one-shot' : 'desktop',
+      })
 
       // Backends that run as external subprocesses need an HTTP pool server
       let poolServerUrl: string | undefined

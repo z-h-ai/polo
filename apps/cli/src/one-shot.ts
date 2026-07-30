@@ -75,6 +75,43 @@ function configRoot(): string {
   return resolve(process.env.POLO_AI_CONFIG_DIR || join(homedir(), '.polo-ai'))
 }
 
+const SENSITIVE_BASE_URL_QUERY =
+  /^(?:api[-_]?key|access[-_]?token|auth(?:orization)?|bearer|credential|oauth[-_]?token|password|secret|token)$/i
+
+export function normalizeCredentialFreeBaseUrl(value: string): string {
+  const trimmed = value.trim()
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    throw new Error('base URL must be a valid absolute URL')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('base URL must use http or https')
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('base URL must not contain userinfo credentials')
+  }
+  for (const key of parsed.searchParams.keys()) {
+    if (SENSITIVE_BASE_URL_QUERY.test(key)) {
+      throw new Error(`base URL must not contain sensitive query parameter: ${key}`)
+    }
+  }
+  if (parsed.hash) {
+    throw new Error('base URL must not contain a fragment')
+  }
+  return trimmed
+}
+
+function normalizeInvocationBaseUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    return normalizeCredentialFreeBaseUrl(value)
+  } catch (error) {
+    throw new UsageError(error instanceof Error ? error.message : String(error))
+  }
+}
+
 async function ensureDirectory(
   path: string,
   options: { throwUsageError?: boolean } = {},
@@ -294,9 +331,12 @@ export async function resolveConnection(
   const provider = args.provider
     ?? saved?.provider
     ?? selectedConnection?.piAuthProvider
-  const baseUrl = args.baseUrl
+  const baseUrlCandidate = args.baseUrl
     ?? saved?.baseUrl
     ?? selectedConnection?.baseUrl
+  const baseUrl = baseUrlCandidate
+    ? normalizeCredentialFreeBaseUrl(baseUrlCandidate)
+    : undefined
   const model = args.model
     ?? saved?.model
     ?? selectedConnection?.defaultModel
@@ -308,7 +348,7 @@ export async function resolveConnection(
     || needsSavedSyntheticConnection
     || (!!args.apiKey && !selectedConnection)
   if (!needsSyntheticConnection && selectedConnection) {
-    const connection = { ...selectedConnection }
+    const connection = { ...selectedConnection, baseUrl }
     return {
       connection,
       apiKey: resolveInvocationApiKey(args, connection.piAuthProvider),
@@ -365,6 +405,23 @@ function signalExitCode(signal: NodeJS.Signals): number {
   return 128 + (number || 0)
 }
 
+const NON_INTERRUPT_SIGNALS = new Set([
+  'SIGCHLD',
+  'SIGCONT',
+  'SIGURG',
+  'SIGWINCH',
+])
+
+export function getCatchableInterruptSignals(): NodeJS.Signals[] {
+  return (Object.keys(osConstants.signals) as NodeJS.Signals[])
+    .filter(signal =>
+      signal.startsWith('SIG')
+      && signal !== 'SIGKILL'
+      && signal !== 'SIGSTOP'
+      && !NON_INTERRUPT_SIGNALS.has(signal),
+    )
+}
+
 function formatError(error: unknown, adapter?: ExecEventAdapter): string {
   const message = error instanceof Error ? error.message : String(error)
   return adapter ? adapter.redact(message) : message
@@ -376,6 +433,7 @@ export async function waitForTurn(
   prompt: string,
   args: ExecutionArgs,
   adapter: ExecEventAdapter,
+  options: { lifecycleFailure?: Promise<Error> } = {},
 ): Promise<TurnResult> {
   let finalMessage = ''
   let settled = false
@@ -407,12 +465,16 @@ export async function waitForTurn(
       return
     }
     if (event.type === 'tool_start' && args.kind === 'run' && args.outputFormat !== 'stream-json') {
-      process.stdout.write(`\n[tool: ${event.toolName || 'tool'}${event.toolIntent ? ` — ${event.toolIntent}` : ''}]\n`)
+      process.stdout.write(stripAnsi(
+        `\n[tool: ${event.toolName || 'tool'}${event.toolIntent ? ` — ${event.toolIntent}` : ''}]\n`,
+      ))
       return
     }
     if (event.type === 'tool_result' && args.kind === 'run' && args.outputFormat !== 'stream-json') {
-      const output = String(event.result ?? '')
-      if (output) process.stdout.write(`${output.length > 200 ? `${output.slice(0, 200)}...` : output}\n`)
+      const output = stripAnsi(String(event.result ?? ''))
+      if (output) {
+        process.stdout.write(`${output.length > 200 ? `${output.slice(0, 200)}...` : output}\n`)
+      }
       return
     }
     if (event.type === 'complete') finish({ status: 'completed', finalMessage })
@@ -439,7 +501,7 @@ export async function waitForTurn(
     }
   })
 
-  const installedSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP']
+  const installedSignals: NodeJS.Signals[] = []
   let receivedSignal: NodeJS.Signals | undefined
   const turnTimeout = args.kind === 'run' && args.sendTimeout
     ? setTimeout(() => {
@@ -458,11 +520,29 @@ export async function waitForTurn(
     void client.invoke('sessions:cancel', sessionId, true).catch(() => {})
     finish({ status: 'interrupted', finalMessage: '', signal })
   }
-  for (const signal of installedSignals) process.on(signal, signalHandler)
+  for (const signal of getCatchableInterruptSignals()) {
+    try {
+      process.on(signal, signalHandler)
+      installedSignals.push(signal)
+    } catch {
+      // Signal availability differs by platform and Node/Bun runtime.
+    }
+  }
 
   try {
     await client.invoke('sessions:sendMessage', sessionId, prompt)
-    return await resultPromise
+    const failed = (error: Error): TurnResult => {
+      void client.invoke('sessions:cancel', sessionId, true).catch(() => {})
+      return { status: 'failed', finalMessage: '', error }
+    }
+    const competitors: Array<Promise<TurnResult>> = [
+      resultPromise,
+      client.waitForDisconnect().then(failed),
+    ]
+    if (options.lifecycleFailure) {
+      competitors.push(options.lifecycleFailure.then(failed))
+    }
+    return await Promise.race(competitors)
   } catch (error) {
     return { status: 'failed', finalMessage: '', error: error instanceof Error ? error : new Error(String(error)) }
   } finally {
@@ -549,7 +629,7 @@ async function createOrResolveExecution(
       ? {
           provider: args.provider,
           model: args.model,
-          baseUrl: args.baseUrl,
+          baseUrl: normalizeInvocationBaseUrl(args.baseUrl),
         }
       : undefined,
   })
@@ -571,6 +651,15 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
   let protocolStarted = false
   let lifecycleState: 'initializing' | 'leased' | 'runtime' | 'cleaning' | 'cleaned' = 'initializing'
   let cleanupPromise: Promise<void> | undefined
+  let reportLifecycleFailure!: (error: Error) => void
+  let lifecycleFailureReported = false
+  const lifecycleFailure = new Promise<Error>(resolveFailure => {
+    reportLifecycleFailure = (error) => {
+      if (lifecycleFailureReported) return
+      lifecycleFailureReported = true
+      resolveFailure(error)
+    }
+  })
   const ownsNewThread = args.kind !== 'resume' || args.ephemeral
 
   const cleanup = (): Promise<void> => {
@@ -601,9 +690,13 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
           await updateCliThread(record, {
             status: result.status,
             lastUsedAt: Date.now(),
-            workingDirectory,
-            configurationWorkspaceId: scope.workspace?.id,
-            configurationWorkspacePath: scope.path,
+            ...(ownsNewThread
+              ? {
+                  workingDirectory,
+                  configurationWorkspaceId: scope.workspace?.id,
+                  configurationWorkspacePath: scope.path,
+                }
+              : {}),
           })
           if (result.status === 'completed' && args.outputLastMessage) {
             await atomicWriteLastMessage(args.outputLastMessage, result.finalMessage)
@@ -697,6 +790,9 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
     heartbeatTimer = setInterval(() => {
       void activeLease.heartbeat().catch(error => {
         cleanupError = error instanceof Error ? error : new Error(String(error))
+        reportLifecycleFailure(cleanupError)
+        void client?.invoke('sessions:cancel', record?.metadata.mainSessionId, true)
+          .catch(() => {})
       })
     }, 2000)
     heartbeatTimer.unref()
@@ -746,7 +842,9 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       adapter.start(record.metadata.threadId)
       protocolStarted = true
     }
-    result = await waitForTurn(client, sessionId, prompt, args, adapter)
+    result = await waitForTurn(client, sessionId, prompt, args, adapter, {
+      lifecycleFailure,
+    })
     if (result.status === 'completed' && args.kind !== 'run') {
       adapter.agentMessage(result.finalMessage)
     }
@@ -987,6 +1085,10 @@ export async function runExecutionCommand(args: ExecutionArgs): Promise<number> 
   if (args.kind === 'sessions') return listSessionsCommand(args)
   if (args.kind === 'delete') return deleteSessionCommand(args)
 
+  args = {
+    ...args,
+    baseUrl: normalizeInvocationBaseUrl(args.baseUrl),
+  }
   const prompt = await readExecutionPrompt(args.prompt, args.forceStdin)
   if (!prompt.trim()) throw new UsageError('no prompt provided')
   return executeTurn(args, prompt)

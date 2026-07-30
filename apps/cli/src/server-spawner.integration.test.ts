@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
+import { constants as osConstants, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Subprocess } from 'bun'
-import { processIdentityMatches } from './cli-thread-store.ts'
+import {
+  createCliThread,
+  processIdentityMatches,
+  updateCliThread,
+} from './cli-thread-store.ts'
 import { spawnServer, type SpawnedServer } from './server-spawner.ts'
 
 const tempDirs: string[] = []
@@ -39,6 +51,48 @@ async function readJsonLine(proc: Subprocess, timeoutMs = 20_000): Promise<Recor
       throw new Error('timed out waiting for fixture JSON')
     }),
   ])
+}
+
+async function runLifecycleFailure(mode: 'disconnect' | 'heartbeat') {
+  const root = await mkdtemp(join(tmpdir(), `polo-${mode}-failure-`))
+  tempDirs.push(root)
+  const proc = Bun.spawn([
+    'bun',
+    'run',
+    join(import.meta.dir, 'index.ts'),
+    'exec',
+    '--json',
+    '--server-entry',
+    join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
+    'hello',
+  ], {
+    cwd: root,
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: {
+      ...process.env,
+      POLO_AI_CONFIG_DIR: root,
+      POLO_TEST_FAILURE_MODE: mode,
+    },
+  })
+  processes.push(proc)
+  const exitCode = await Promise.race([
+    proc.exited,
+    Bun.sleep(12_000).then(() => {
+      proc.kill('SIGKILL')
+      throw new Error(`${mode} lifecycle process did not terminate`)
+    }),
+  ])
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout!).text(),
+    new Response(proc.stderr!).text(),
+  ])
+  const executionsRoot = join(root, 'cli-sessions', 'global', 'executions')
+  const threadIds = await readdir(executionsRoot)
+  expect(threadIds).toHaveLength(1)
+  const threadRoot = join(executionsRoot, threadIds[0]!)
+  return { root, exitCode, stdout, stderr, threadRoot }
 }
 
 describe('server spawner process integration', () => {
@@ -191,4 +245,298 @@ describe('server spawner process integration', () => {
     expect(await Bun.file(join(threadRoot, 'owner.json')).exists()).toBe(false)
     expect(await Bun.file(join(root, 'sessions')).exists()).toBe(false)
   }, 20_000)
+
+  it('fails and cleans up when RPC disconnects after sendMessage ACK', async () => {
+    const result = await runLifecycleFailure('disconnect')
+    expect(result.exitCode, result.stderr).toBe(1)
+    for (const line of result.stdout.trim().split('\n')) {
+      expect(() => JSON.parse(line)).not.toThrow()
+    }
+    expect(result.stdout).toContain('WebSocket disconnected')
+    const metadata = JSON.parse(
+      await readFile(join(result.threadRoot, 'thread.json'), 'utf-8'),
+    )
+    expect(metadata.status).toBe('failed')
+    expect(await Bun.file(join(result.threadRoot, 'owner.json')).exists()).toBe(false)
+  }, 20_000)
+
+  it('fails and cleans up when lease heartbeat persistence is lost', async () => {
+    const result = await runLifecycleFailure('heartbeat')
+    expect(result.exitCode, result.stderr).toBe(1)
+    expect(result.stdout).toContain('ENOENT')
+    const metadata = JSON.parse(
+      await readFile(join(result.threadRoot, 'thread.json'), 'utf-8'),
+    )
+    expect(metadata.status).toBe('failed')
+    expect(await Bun.file(join(result.threadRoot, 'owner.json')).exists()).toBe(false)
+  }, 20_000)
+
+  it('handles a non-standard catchable signal with interrupted cleanup', async () => {
+    if (process.platform === 'win32' || !osConstants.signals.SIGQUIT) return
+
+    const runCase = async (ephemeral: boolean) => {
+      const root = await mkdtemp(join(tmpdir(), 'polo-sigquit-'))
+      tempDirs.push(root)
+      const runtimeInfo = join(root, 'runtime-info.json')
+      const command = [
+        'bun',
+        'run',
+        join(import.meta.dir, 'index.ts'),
+        'exec',
+        '--json',
+        ...(ephemeral ? ['--ephemeral'] : []),
+        '--server-entry',
+        join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
+        'hello',
+      ]
+      const proc = Bun.spawn(command, {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          ...process.env,
+          POLO_AI_CONFIG_DIR: root,
+          POLO_TEST_FAILURE_MODE: 'hang',
+          POLO_TEST_RUNTIME_INFO_FILE: runtimeInfo,
+        },
+      })
+      processes.push(proc)
+      const deadline = Date.now() + 10_000
+      while (!(await Bun.file(runtimeInfo).exists())) {
+        if (Date.now() >= deadline) throw new Error('runtime did not become ready')
+        await Bun.sleep(20)
+      }
+      await Bun.sleep(250)
+      proc.kill('SIGQUIT')
+      const exitCode = await Promise.race([
+        proc.exited,
+        Bun.sleep(12_000).then(() => {
+          proc.kill('SIGKILL')
+          throw new Error('SIGQUIT process did not terminate')
+        }),
+      ])
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout!).text(),
+        new Response(proc.stderr!).text(),
+      ])
+      const runtime = JSON.parse(await readFile(runtimeInfo, 'utf-8')) as {
+        pid: number
+        processIdentity: string
+      }
+      const runtimeDeadline = Date.now() + 5_000
+      while (
+        Date.now() < runtimeDeadline
+        && processIdentityMatches(runtime.pid, runtime.processIdentity)
+      ) {
+        await Bun.sleep(25)
+      }
+      expect(processIdentityMatches(runtime.pid, runtime.processIdentity)).toBe(false)
+      expect(exitCode, stderr).toBe(128 + osConstants.signals.SIGQUIT)
+      expect(stdout).toContain('"signal":"SIGQUIT"')
+      return { root, stdout }
+    }
+
+    const persistent = await runCase(false)
+    const persistentRoot = join(
+      persistent.root,
+      'cli-sessions',
+      'global',
+      'executions',
+    )
+    const persistentIds = await readdir(persistentRoot)
+    expect(persistentIds).toHaveLength(1)
+    const metadata = JSON.parse(await readFile(
+      join(persistentRoot, persistentIds[0]!, 'thread.json'),
+      'utf-8',
+    ))
+    expect(metadata.status).toBe('interrupted')
+    expect(await Bun.file(
+      join(persistentRoot, persistentIds[0]!, 'owner.json'),
+    ).exists()).toBe(false)
+
+    const ephemeral = await runCase(true)
+    const ephemeralRoot = join(
+      ephemeral.root,
+      'cli-sessions',
+      'global',
+      'executions',
+    )
+    expect(await readdir(ephemeralRoot).catch(() => [])).toEqual([])
+  }, 40_000)
+
+  it('keeps resume workspace and cwd overrides invocation-scoped', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-resume-location-'))
+    tempDirs.push(root)
+    const oldWorkspace = join(root, 'workspace-old')
+    const newWorkspace = join(root, 'workspace-new')
+    const oldCwd = join(root, 'cwd-old')
+    const newCwd = join(root, 'cwd-new')
+    await Promise.all(
+      [oldWorkspace, newWorkspace, oldCwd, newCwd].map(path =>
+        mkdir(path, { recursive: true }),
+      ),
+    )
+    const canonicalOldWorkspace = await realpath(oldWorkspace)
+    const canonicalNewWorkspace = await realpath(newWorkspace)
+    const canonicalOldCwd = await realpath(oldCwd)
+    const workspaces = [
+      {
+        id: 'workspace-old',
+        name: 'Workspace Old',
+        slug: 'workspace-old',
+        rootPath: canonicalOldWorkspace,
+        createdAt: 1,
+      },
+      {
+        id: 'workspace-new',
+        name: 'Workspace New',
+        slug: 'workspace-new',
+        rootPath: canonicalNewWorkspace,
+        createdAt: 2,
+      },
+    ]
+    await writeFile(join(root, 'config.json'), JSON.stringify({
+      workspaces,
+      activeWorkspaceId: 'workspace-old',
+      activeSessionId: null,
+      llmConnections: [],
+    }))
+
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = root
+    let record: Awaited<ReturnType<typeof createCliThread>>
+    try {
+      record = await createCliThread({
+        origin: 'cli-exec',
+        configurationScopeId: 'workspace-old',
+        configurationWorkspaceId: 'workspace-old',
+        configurationWorkspacePath: canonicalOldWorkspace,
+        workingDirectory: canonicalOldCwd,
+        persistence: 'persistent',
+      })
+      await updateCliThread(record, { mainSessionId: 'fixture-session' })
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
+
+    const runCli = async (args: string[]) => {
+      const proc = Bun.spawn([
+        'bun',
+        'run',
+        join(import.meta.dir, 'index.ts'),
+        ...args,
+      ], {
+        cwd: oldCwd,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          ...process.env,
+          POLO_AI_CONFIG_DIR: root,
+          POLO_TEST_FAILURE_MODE: 'disconnect',
+        },
+      })
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      return { exitCode, stdout, stderr }
+    }
+
+    const beforeResume = await runCli([
+      'exec',
+      'sessions',
+      '--workspace',
+      'workspace-old',
+      '-C',
+      oldCwd,
+      '--json',
+    ])
+    expect(beforeResume.exitCode, beforeResume.stderr).toBe(0)
+    expect(beforeResume.stdout).toContain(record.metadata.threadId)
+
+    const resumed = await runCli([
+      'exec',
+      'resume',
+      record.metadata.threadId,
+      '--workspace',
+      'workspace-new',
+      '-C',
+      newCwd,
+      '--server-entry',
+      join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
+      '--',
+      'continue',
+    ])
+    expect(resumed.exitCode, resumed.stderr).toBe(1)
+
+    const metadata = JSON.parse(
+      await readFile(join(record.directory, 'thread.json'), 'utf-8'),
+    )
+    expect(metadata).toMatchObject({
+      configurationScopeId: 'workspace-old',
+      configurationWorkspaceId: 'workspace-old',
+      configurationWorkspacePath: canonicalOldWorkspace,
+      workingDirectory: canonicalOldCwd,
+      status: 'failed',
+    })
+
+    const oldSessions = await runCli([
+      'exec',
+      'sessions',
+      '--workspace',
+      'workspace-old',
+      '-C',
+      oldCwd,
+      '--json',
+    ])
+    expect(oldSessions.exitCode, oldSessions.stderr).toBe(0)
+    expect(oldSessions.stdout).toContain(record.metadata.threadId)
+
+    const newSessions = await runCli([
+      'exec',
+      'sessions',
+      '--workspace',
+      'workspace-new',
+      '-C',
+      newCwd,
+      '--json',
+    ])
+    expect(newSessions.exitCode, newSessions.stderr).toBe(0)
+    expect(newSessions.stdout).toBe('')
+
+    const lastOld = await runCli([
+      'exec',
+      'resume',
+      '--last',
+      '--workspace',
+      'workspace-old',
+      '-C',
+      oldCwd,
+      '--server-entry',
+      join(root, 'missing-server.ts'),
+      '--',
+      'continue',
+    ])
+    expect(lastOld.exitCode).toBe(1)
+    expect(lastOld.stderr).toContain('Server process exited before printing')
+    expect(lastOld.stderr).not.toContain('no resumable CLI exec Thread')
+
+    const lastNew = await runCli([
+      'exec',
+      'resume',
+      '--last',
+      '--workspace',
+      'workspace-new',
+      '-C',
+      newCwd,
+      '--',
+      'continue',
+    ])
+    expect(lastNew.exitCode).toBe(1)
+    expect(lastNew.stderr).toContain('no resumable CLI exec Thread')
+  }, 40_000)
 })

@@ -188,6 +188,65 @@ describe('CLI Thread store', () => {
     expect(metadata.lastUsedAt).toBe(lastUsedAt)
   })
 
+  it('allows only one process to take over a stale lease under contention', async () => {
+    const record = await createExecThread()
+    const workerFixture = join(
+      import.meta.dir,
+      '__fixtures__',
+      'lease-takeover-worker.ts',
+    )
+
+    for (let round = 0; round < 5; round++) {
+      const staleAt = Date.now() - 60_000
+      await writeFile(record.ownerFile, JSON.stringify({
+        leaseId: crypto.randomUUID(),
+        cliPid: 2_147_483_647,
+        cliStartedAt: staleAt,
+        cliProcessIdentity: 'missing-cli',
+        serverPid: 2_147_483_646,
+        serverStartedAt: staleAt,
+        serverProcessIdentity: 'missing-runtime',
+        heartbeatAt: staleAt,
+      }))
+      const barrier = join(root, `takeover-barrier-${round}`)
+      await mkdir(barrier)
+      const workers = Array.from({ length: 8 }, (_, index) =>
+        Bun.spawn([
+          'bun',
+          'run',
+          workerFixture,
+          root,
+          record.metadata.threadId,
+          barrier,
+          String(index),
+        ], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: { ...process.env, POLO_AI_CONFIG_DIR: root },
+        }),
+      )
+      const readyDeadline = Date.now() + 10_000
+      while ((await readdir(barrier)).filter(name => name.endsWith('.ready')).length < workers.length) {
+        if (Date.now() >= readyDeadline) throw new Error('workers did not reach takeover barrier')
+        await Bun.sleep(10)
+      }
+      await writeFile(join(barrier, 'start'), '')
+      const results = await Promise.all(workers.map(async worker => {
+        const [exitCode, stdout, stderr] = await Promise.all([
+          worker.exited,
+          new Response(worker.stdout).text(),
+          new Response(worker.stderr).text(),
+        ])
+        expect(exitCode, stderr).toBe(0)
+        return JSON.parse(stdout.trim()) as { status: string; leaseId?: string }
+      }))
+      expect(results.filter(result => result.status === 'acquired')).toHaveLength(1)
+      expect(new Set(
+        results.flatMap(result => result.leaseId ? [result.leaseId] : []),
+      ).size).toBe(1)
+    }
+  }, 30_000)
+
   it('only reclaims expired ephemeral Threads with dead owners', async () => {
     const ephemeral = await createCliThread({
       origin: 'cli-exec',

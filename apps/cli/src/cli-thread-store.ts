@@ -378,21 +378,76 @@ export async function acquireCliThreadLease(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     await assertCanonicalControlledPath(root, ownerFile)
-    const previous = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
-    if (previous && isOwnerActive(previous)) {
+    const observedOwner = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
+    if (observedOwner && isOwnerActive(observedOwner)) {
       throw new Error(`Thread ${record.metadata.threadId} is already active`)
     }
-    if (
-      options.purpose !== 'clone-source'
-      && record.metadata.origin === 'cli-exec'
-      && record.metadata.status !== 'interrupted'
-    ) {
-      await updateCliThread(record, { status: 'interrupted', lastUsedAt: Date.now() })
+
+    // Only one contender may inspect and replace a stale owner. The lock is
+    // acquired with O_EXCL and the observed lease is checked again while held,
+    // so a delayed contender can never rename a newly installed live owner.
+    const takeoverFile = join(record.directory, '.owner.takeover.lock')
+    const takeoverId = crypto.randomUUID()
+    let takeoverHandle: Awaited<ReturnType<typeof open>> | undefined
+    try {
+      takeoverHandle = await open(takeoverFile, 'wx', FILE_MODE)
+      await takeoverHandle.writeFile(JSON.stringify({
+        takeoverId,
+        pid: process.pid,
+        processIdentity: cliProcessIdentity,
+        createdAt: Date.now(),
+      }), 'utf-8')
+      await takeoverHandle.sync()
+    } catch (takeoverError) {
+      await takeoverHandle?.close().catch(() => {})
+      if ((takeoverError as NodeJS.ErrnoException).code !== 'EEXIST') {
+        await unlinkControlledFile(root, takeoverFile).catch(() => {})
+      }
+      if ((takeoverError as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error(`Thread ${record.metadata.threadId} lease takeover is already in progress`)
+      }
+      throw takeoverError
     }
-    const staleOwner = join(record.directory, `.owner.stale.${crypto.randomUUID()}.json`)
-    await rename(ownerFile, staleOwner)
-    await writeFile(ownerFile, JSON.stringify(owner, null, 2), { flag: 'wx', mode: FILE_MODE })
-    await unlinkControlledFile(root, staleOwner)
+    await takeoverHandle.close()
+    if (process.platform !== 'win32') await chmod(takeoverFile, FILE_MODE)
+
+    try {
+      const currentOwner = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
+      if (currentOwner && isOwnerActive(currentOwner)) {
+        throw new Error(`Thread ${record.metadata.threadId} is already active`)
+      }
+      if (
+        observedOwner
+        && currentOwner
+        && currentOwner.leaseId !== observedOwner.leaseId
+      ) {
+        throw new Error(`Thread ${record.metadata.threadId} lease changed during takeover`)
+      }
+      if (
+        options.purpose !== 'clone-source'
+        && record.metadata.origin === 'cli-exec'
+        && record.metadata.status !== 'interrupted'
+      ) {
+        await updateCliThread(record, { status: 'interrupted', lastUsedAt: Date.now() })
+      }
+      if (currentOwner) {
+        // Keep owner.json present throughout the replacement. Removing it even
+        // briefly would let another process win the initial O_EXCL create path
+        // without observing the takeover lock.
+        await atomicWriteJson(ownerFile, owner)
+      } else {
+        await writeFile(ownerFile, JSON.stringify(owner, null, 2), {
+          flag: 'wx',
+          mode: FILE_MODE,
+        })
+      }
+    } finally {
+      const takeover = await readJson<{ takeoverId?: string }>(takeoverFile)
+        .catch(() => null)
+      if (takeover?.takeoverId === takeoverId) {
+        await unlinkControlledFile(root, takeoverFile)
+      }
+    }
   }
   if (process.platform !== 'win32') await chmod(ownerFile, FILE_MODE)
 

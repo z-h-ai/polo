@@ -117,6 +117,7 @@
       "name": "@polo-ai/cli",
       "version": "0.10.0",
       "bin": {
+        "polo": "src/index.ts",
         "polo-ai": "src/index.ts",
       },
       "dependencies": {

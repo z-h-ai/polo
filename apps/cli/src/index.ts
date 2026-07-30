@@ -632,94 +632,6 @@ async function setupLlmConnection(
   return { connectionSlug }
 }
 
-async function cmdRun(args: CliArgs): Promise<void> {
-  // Prompt = all positional args (no session ID needed, unlike send)
-  const message = await readPrompt(args.rest, args.rest)
-  if (!message.trim()) {
-    err('No prompt provided. Usage: run <message>')
-    process.exit(1)
-  }
-
-  const server = await spawnLocalServer(args)
-
-  let client: CliRpcClient | undefined = server.client
-  let sessionId: string | undefined
-
-  const cleanup = async () => {
-    if (sessionId && client?.isConnected && !args.noCleanup) {
-      await client.invoke('sessions:delete', sessionId).catch(() => {})
-    }
-    client?.destroy()
-    await server.stop()
-  }
-
-  // Signal handling — cancel + clean up on SIGINT/SIGTERM
-  const onSignal = async () => {
-    if (sessionId && client?.isConnected) {
-      await client.invoke('sessions:cancel', sessionId).catch(() => {})
-    }
-    await cleanup()
-    process.exit(130)
-  }
-  process.on('SIGINT', onSignal)
-  process.on('SIGTERM', onSignal)
-
-  try {
-    await client.connect()
-
-    // Bootstrap workspace from directory if specified
-    let bootstrappedWorkspaceId: string | undefined
-    if (args.workspaceDir) {
-      const absPath = resolve(args.workspaceDir)
-      const ws = (await client.invoke('workspaces:create', absPath, 'ci-workspace')) as { id: string }
-      bootstrappedWorkspaceId = ws.id
-      process.stderr.write(`Workspace registered: ${absPath}\n`)
-    }
-
-    // Auto-setup LLM connection from flags / env vars.
-    // When --base-url is provided, always create the custom endpoint connection
-    // (even if other connections exist) so the session routes through it.
-    const connections = (await client.invoke('LLM_Connection:list')) as any[]
-    let connectionSlug: string | undefined
-    if (shouldSetupLlmConnection(connections?.length ?? 0, args)) {
-      const result = await setupLlmConnection(client, args)
-      connectionSlug = result.connectionSlug
-    }
-
-    const workspaceId = bootstrappedWorkspaceId
-      ?? await resolveWorkspace(client, args.workspace)
-    if (bootstrappedWorkspaceId) {
-      await client.invoke('window:switchWorkspace', bootstrappedWorkspaceId).catch(() => {})
-    }
-    if (!workspaceId) {
-      err('No workspace found on server')
-      process.exit(1)
-    }
-
-    const session = (await client.invoke('sessions:create', workspaceId, {
-      permissionMode: args.mode || 'allow-all',
-      enabledSourceSlugs: args.sources.length > 0 ? args.sources : undefined,
-    })) as { id: string }
-    sessionId = session.id
-
-    if (args.model) {
-      await client.invoke('session:setModel', sessionId, workspaceId, args.model, connectionSlug)
-    }
-
-    const exitCode = await sendAndStream(client, sessionId, message, args)
-    await cleanup()
-    process.exit(exitCode)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    err(msg)
-    await cleanup()
-    process.exit(1)
-  } finally {
-    process.off('SIGINT', onSignal)
-    process.off('SIGTERM', onSignal)
-  }
-}
-
 async function cmdValidate(args: CliArgs): Promise<void> {
   let server: LocalServer | undefined
   let client: CliRpcClient
@@ -1897,10 +1809,12 @@ export async function runValidation(
 // Help
 // ---------------------------------------------------------------------------
 
-function printHelp(): void {
-  process.stdout.write(`polo-ai — Terminal client for Polo AI server
+export function printHelp(): void {
+  process.stdout.write(`polo — Terminal client for Polo AI
 
-Usage: polo-ai [options] <command> [args...]
+Usage: polo [options] <command> [args...]
+
+Compatibility: polo-ai is retained as an alias for polo.
 
 Connection:
   --url <ws[s]://...>    Server URL (default: $POLO_AI_SERVER_URL)
@@ -1943,21 +1857,21 @@ Commands:
                          --verbose, -v       Show server stderr output
 
 Examples:
-  polo-ai run "What files are in the current directory?"
-  polo-ai run --source craft-kb "Summarize today's daily note"
-  polo-ai run --workspace-dir .github/agents --source craft-public "Read the doc"
-  polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-  OPENAI_API_KEY=sk-... polo-ai run --provider openai "Hello"
-  GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... polo-ai run --provider deepseek --model deepseek-v4-flash "Hello"
-  echo "Analyze this code" | polo-ai run
-  polo-ai ping
-  polo-ai sessions
-  polo-ai send abc-123 "What files are in the current directory?"
-  echo "Summarize this" | polo-ai send abc-123
-  polo-ai --validate-server
-  polo-ai invoke system:homeDir
-  polo-ai --json workspaces | jq '.[].name'
+  polo run "What files are in the current directory?"
+  polo run --source craft-kb "Summarize today's daily note"
+  polo run --workspace-dir .github/agents --source craft-public "Read the doc"
+  polo run --provider openai --model gpt-4o "Summarize this repo"
+  OPENAI_API_KEY=sk-... polo run --provider openai "Hello"
+  GOOGLE_API_KEY=... polo run --provider google --model gemini-2.0-flash "Hello"
+  DEEPSEEK_API_KEY=sk-... polo run --provider deepseek --model deepseek-v4-flash "Hello"
+  echo "Analyze this code" | polo run
+  polo ping
+  polo sessions
+  polo send abc-123 "What files are in the current directory?"
+  echo "Summarize this" | polo send abc-123
+  polo --validate-server
+  polo invoke system:homeDir
+  polo --json workspaces | jq '.[].name'
 `)
 }
 
@@ -1995,10 +1909,15 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     return
   }
 
-  // run is self-contained — spawns its own server
+  // The legacy full-server run implementation is intentionally sealed. The
+  // complete routing arity table above must have sent every run to one-shot;
+  // retaining this guard prevents future parser drift from reintroducing it.
   if (args.command === 'run') {
-    await cmdRun(args)
-    return
+    process.stderr.write(stderrErrorLine(
+      'run must use the isolated one-shot runner',
+      colorModeFromArgv(argv),
+    ))
+    process.exit(2)
   }
 
   // validate can spawn its own server or use --url
