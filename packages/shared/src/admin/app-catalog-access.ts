@@ -1,0 +1,42 @@
+export type AppCatalogAccessMode = 'online' | 'offline' | 'denied'
+
+const accessModes = new Map<string, AppCatalogAccessMode>()
+
+function key(accountId: string, organizationId: string): string {
+  return JSON.stringify([accountId, organizationId])
+}
+
+/**
+ * Process-local authorization freshness. It intentionally starts offline on
+ * every cold boot; only a successful Admin response upgrades a catalog to
+ * online and permits downloads or updates.
+ */
+export function getAppCatalogAccessMode(
+  accountId: string,
+  organizationId: string,
+): AppCatalogAccessMode {
+  return accessModes.get(key(accountId, organizationId)) ?? 'offline'
+}
+
+export function setAppCatalogAccessMode(
+  accountId: string,
+  organizationId: string,
+  mode: AppCatalogAccessMode,
+): void {
+  accessModes.set(key(accountId, organizationId), mode)
+}
+
+export function denyAppCatalogAccessForAccount(accountId: string): void {
+  for (const [entryKey] of accessModes) {
+    try {
+      const [entryAccountId] = JSON.parse(entryKey) as [string, string]
+      if (entryAccountId === accountId) accessModes.set(entryKey, 'denied')
+    } catch {
+      accessModes.delete(entryKey)
+    }
+  }
+}
+
+export function resetAppCatalogAccessModesForTests(): void {
+  accessModes.clear()
+}

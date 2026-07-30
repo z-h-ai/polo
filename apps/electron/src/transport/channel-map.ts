@@ -131,8 +131,8 @@ export const CHANNEL_MAP = {
   'localApps.setAvailableRelease': invoke(RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE),
   'localApps.getInstalledApps': invoke(RPC_CHANNELS.localApps.GET_INSTALLED_APPS),
   'localApps.getRuntimeStatus': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS),
+  'localApps.getRuntimeStatuses': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES),
   'localApps.getLogs': invoke(RPC_CHANNELS.localApps.GET_LOGS),
-  'localApps.stopAccount': invoke(RPC_CHANNELS.localApps.STOP_ACCOUNT),
 
   // Auth
   showLogoutConfirmation: invoke(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION),

@@ -25,6 +25,7 @@ interface OrganizationAppCardProps {
   app: CatalogApp
   status?: LocalAppRuntimeStatus
   compatible: boolean
+  offline: boolean
   onPrimaryAction: (
     app: CatalogApp,
     action: CatalogPrimaryAction,
@@ -34,22 +35,28 @@ interface OrganizationAppCardProps {
   onViewLogs: (app: CatalogApp) => void
 }
 
-function primaryActionFor(
+export function primaryActionFor(
   app: CatalogApp,
   status: LocalAppRuntimeStatus | undefined,
   compatible: boolean,
+  offline: boolean,
 ): CatalogPrimaryAction {
   if (app.availability !== 'available' || !compatible) return 'unavailable'
   if (app.deliveryMode === 'remote_url') return 'open'
-  if (!status || status.status === 'not_installed') return 'install'
+  if (!status || status.status === 'not_installed') {
+    return offline || status?.versionError === 'invalid_semver'
+      ? 'unavailable'
+      : 'install'
+  }
   if (status.installationStatus) return 'cancel'
   if (status.status === 'downloading' || status.status === 'installing') return 'cancel'
-  if (status.status === 'update_available') return 'update'
+  if (status.versionError === 'invalid_semver') return 'open'
+  if (status.status === 'update_available') return offline ? 'open' : 'update'
   if (status.status === 'broken') return 'retry'
   return 'open'
 }
 
-function statusText(
+export function statusText(
   t: TFunction,
   app: CatalogApp,
   status: LocalAppRuntimeStatus | undefined,
@@ -59,6 +66,9 @@ function statusText(
   if (app.availability === 'unavailable') return t('homeApps.status.unauthorized')
   if (!compatible) return t('homeApps.status.incompatible')
   if (app.deliveryMode === 'remote_url') return t('homeApps.status.remote')
+  if (status?.versionError === 'invalid_semver') {
+    return t('homeApps.status.invalidVersion')
+  }
   if (!status || status.status === 'not_installed') return t('homeApps.status.notInstalled')
   if (status.installationStatus) {
     return status.installationStatus === 'downloading'
@@ -114,13 +124,14 @@ export function OrganizationAppCard({
   app,
   status,
   compatible,
+  offline,
   onPrimaryAction,
   onStop,
   onUninstall,
   onViewLogs,
 }: OrganizationAppCardProps) {
   const { t } = useTranslation()
-  const action = primaryActionFor(app, status, compatible)
+  const action = primaryActionFor(app, status, compatible, offline)
   const busy = status?.status === 'starting'
   const installed = app.deliveryMode === 'local_bundle'
     && Boolean(status && status.status !== 'not_installed'
@@ -189,7 +200,7 @@ export function OrganizationAppCard({
         <div className="min-w-0 flex-1">
           <p className={cn(
             'truncate text-[11px] text-muted-foreground',
-            status?.status === 'broken' && 'text-destructive',
+            (status?.status === 'broken' || status?.versionError) && 'text-destructive',
           )}>
             {statusText(t, app, status, compatible)}
           </p>

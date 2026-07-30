@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { CatalogApp } from '@polo-ai/shared/admin'
+import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 import {
   BUSY_RUNTIME_STATUS_LIMIT,
   CATALOG_RUNTIME_STATUS_LIMIT,
@@ -61,27 +62,37 @@ function bundleApp(id: string): CatalogApp {
 }
 
 describe('organization app runtime status selection', () => {
-  it('caps initial catalog status loading at the documented directory limit', () => {
-    const apps = Array.from(
-      { length: CATALOG_RUNTIME_STATUS_LIMIT + 10 },
-      (_, index) => bundleApp(`app-${index}`),
-    )
-    expect(selectRuntimeStatusApps(apps)).toHaveLength(
-      CATALOG_RUNTIME_STATUS_LIMIT,
-    )
+  it('keeps 1,000, 1,001, and 10,000 item catalogs in the initial batch', () => {
+    for (const count of [1_000, 1_001, CATALOG_RUNTIME_STATUS_LIMIT]) {
+      const apps = Array.from(
+        { length: count },
+        (_, index) => bundleApp(`app-${index}`),
+      )
+      expect(selectRuntimeStatusApps(apps)).toHaveLength(count)
+    }
   })
 
-  it('polls only busy app ids and applies the busy concurrency ceiling', () => {
+  it('polls only complete busy scope keys and applies the busy ceiling', () => {
     const apps = Array.from(
       { length: BUSY_RUNTIME_STATUS_LIMIT + 10 },
       (_, index) => bundleApp(`app-${index}`),
     )
-    const busyIds = new Set(apps.map(app => app.id))
-    const selected = selectRuntimeStatusApps(apps, busyIds)
+    const scopeKey = (app: CatalogApp) => createLocalAppScopeKey({
+      kind: 'catalog',
+      accountId: 'account-1',
+      organizationId: app.organizationId,
+      catalogAppId: app.id,
+    })
+    const busyIds = new Set(apps.map(scopeKey))
+    const selected = selectRuntimeStatusApps(apps, busyIds, scopeKey)
 
     expect(selected).toHaveLength(BUSY_RUNTIME_STATUS_LIMIT)
-    expect(selected.every(app => busyIds.has(app.id))).toBe(true)
-    expect(selectRuntimeStatusApps(apps, new Set(['app-3']))).toEqual([
+    expect(selected.every(app => busyIds.has(scopeKey(app)))).toBe(true)
+    expect(selectRuntimeStatusApps(
+      apps,
+      new Set([scopeKey(apps[3]!)]),
+      scopeKey,
+    )).toEqual([
       apps[3],
     ])
   })

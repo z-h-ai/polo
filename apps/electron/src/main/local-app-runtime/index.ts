@@ -61,6 +61,8 @@ export { LocalAppRuntimeError } from './runtime-error'
 export { validatePoloAppManifest } from './manifest'
 export {
   createCatalogLocalAppScopeKey,
+  createCatalogRuntimeAppId,
+  MAX_CATALOG_STATUS_SCOPES,
   ScopedLocalAppRuntimeRegistry,
   validateCatalogLocalAppScope,
 } from './scoped-registry'

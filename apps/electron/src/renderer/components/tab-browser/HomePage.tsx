@@ -75,12 +75,12 @@ function formatBytes(t: TFunction, sizeBytes: number): string {
 }
 
 function catalogTabDefinition(
-  accountId: string,
+  scopeKey: string,
   app: CatalogApp,
   url: string,
 ): AppDefinition {
   return {
-    id: `organization:${accountId}:${app.organizationId}:${app.id}`,
+    id: `organization:${scopeKey}`,
     name: app.name,
     url,
     iconUrl: app.iconUrl,
@@ -90,8 +90,8 @@ function catalogTabDefinition(
   }
 }
 
-function catalogRecentId(accountId: string, app: CatalogApp): string {
-  return `${accountId}:${app.organizationId}:${app.id}`
+function catalogRecentId(scopeKey: string): string {
+  return scopeKey
 }
 
 function AddExternalAppTile({ onClick }: { onClick: () => void }) {
@@ -169,16 +169,15 @@ export function HomePage({ onAddApp }: HomePageProps) {
       return
     }
     try {
-      const accountId = catalog.state.catalog?.accountId
-      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
+      const scopeKey = catalog.scopeKeyForApp(app)
       if (app.deliveryMode === 'remote_url') {
         if (!app.remoteUrl) throw new Error(t('homeApps.errors.missingUrl'))
-        openApp(catalogTabDefinition(accountId, app, app.remoteUrl))
+        openApp(catalogTabDefinition(scopeKey, app, app.remoteUrl))
       } else {
         const result = await catalog.start(app)
-        openApp(catalogTabDefinition(accountId, app, result.url))
+        openApp(catalogTabDefinition(scopeKey, app, result.url))
       }
-      recordRecent(catalogRecentId(accountId, app), 'organization')
+      recordRecent(catalogRecentId(scopeKey), 'organization')
     } catch (error) {
       const message = error instanceof Error
         ? error.message
@@ -209,7 +208,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
       return
     }
     if (action === 'retry') {
-      const status = catalog.state.statuses[app.id]
+      const status = catalog.getStatus(app)
       if (!status?.currentVersion) {
         setInstallTarget(app)
         return
@@ -298,21 +297,23 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
     for (const item of recentApps) {
       if (item.kind === 'organization') {
-        const accountId = catalog.state.catalog?.accountId
-        const app = accountId
-          ? organizationApps.find(candidate => (
-              catalogRecentId(accountId, candidate) === item.id
-            ))
-          : undefined
+        const app = organizationApps.find(candidate => {
+          try {
+            return catalogRecentId(catalog.scopeKeyForApp(candidate)) === item.id
+          } catch {
+            return false
+          }
+        })
         if (!app || app.availability !== 'available') continue
-        const status = catalog.state.statuses[app.id]
+        const status = catalog.getStatus(app)
         const url = app.remoteUrl || status?.url || 'http://127.0.0.1'
-        const key = `organization:${app.id}`
+        const scopeKey = catalog.scopeKeyForApp(app)
+        const key = `organization:${scopeKey}`
         if (seen.has(key)) continue
         seen.add(key)
         entries.push({
           key,
-          definition: catalogTabDefinition(accountId!, app, url),
+          definition: catalogTabDefinition(scopeKey, app, url),
           onOpen: () => { void openCatalogApp(app) },
         })
         continue
@@ -443,10 +444,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {organizationApps.map(app => (
                   <OrganizationAppCard
-                    key={app.id}
+                    key={catalog.scopeKeyForApp(app)}
                     app={app}
-                    status={catalog.state.statuses[app.id]}
+                    status={catalog.getStatus(app)}
                     compatible={compatibleWithHost(app)}
+                    offline={catalog.state.accessMode === 'offline'}
                     onPrimaryAction={(target, action) => {
                       void handlePrimaryAction(target, action)
                     }}
@@ -489,7 +491,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {catalog.state.statuses[installTarget?.id ?? '']?.status === 'update_available'
+              {installTarget && catalog.getStatus(installTarget)?.status === 'update_available'
                 ? t('homeApps.install.updateTitle', {
                     name: installTarget?.name ?? t('homeApps.appFallback'),
                   })
@@ -545,7 +547,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
               {t('homeApps.actions.cancel')}
             </Button>
             <Button type="button" onClick={() => { void confirmInstall() }}>
-              {catalog.state.statuses[installTarget?.id ?? '']?.status === 'update_available'
+              {installTarget && catalog.getStatus(installTarget)?.status === 'update_available'
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
             </Button>

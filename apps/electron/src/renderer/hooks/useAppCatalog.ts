@@ -5,11 +5,11 @@ import type {
   AppCatalogCacheEntry,
   CatalogApp,
 } from '@polo-ai/shared/admin'
-import type {
-  LocalAppInstallRequest,
-  LocalAppRuntimeStatus,
-  LocalAppScope,
-  LocalAppStartResult,
+import {
+  createLocalAppScopeKey,
+  type CatalogLocalAppScope,
+  type LocalAppRuntimeStatus,
+  type LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
 import { useOptionalOrganizationContext } from '@/context/OrganizationContext'
 import {
@@ -23,6 +23,7 @@ export interface AppCatalogState {
   refreshing: boolean
   warning: string | null
   error: string | null
+  accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
   host: {
     platform: 'darwin' | 'win32' | 'linux'
@@ -31,7 +32,7 @@ export interface AppCatalogState {
 }
 
 export const CATALOG_RUNTIME_STATUS_CONCURRENCY = 8
-export const CATALOG_RUNTIME_STATUS_LIMIT = 1_000
+export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
 export const BUSY_RUNTIME_STATUS_LIMIT = 32
 
 function errorMessage(error: unknown): string {
@@ -47,7 +48,7 @@ export type CatalogVersionComparison =
   | { strategy: 'semver'; order: -1 | 0 | 1 }
   | { strategy: 'invalid'; order: null; reason: 'invalid_semver' }
 
-function normalizeCatalogSemVer(version: string): string | null {
+export function normalizeCatalogSemVer(version: string): string | null {
   const normalized = version.trim().replace(/^v(?=\d)/i, '')
   return valid(normalized, { loose: false })
 }
@@ -71,15 +72,16 @@ export function isNewerCatalogVersion(available: string, installed: string): boo
 
 export function selectRuntimeStatusApps(
   apps: CatalogApp[],
-  busyAppIds?: ReadonlySet<string>,
+  busyScopeKeys?: ReadonlySet<string>,
+  scopeKeyForApp: (app: CatalogApp) => string = app => app.id,
 ): CatalogApp[] {
-  const limit = busyAppIds
+  const limit = busyScopeKeys
     ? BUSY_RUNTIME_STATUS_LIMIT
     : CATALOG_RUNTIME_STATUS_LIMIT
   return apps
     .filter(app => (
       app.deliveryMode === 'local_bundle'
-      && (!busyAppIds || busyAppIds.has(app.id))
+      && (!busyScopeKeys || busyScopeKeys.has(scopeKeyForApp(app)))
     ))
     .slice(0, limit)
 }
@@ -87,7 +89,7 @@ export function selectRuntimeStatusApps(
 async function mapWithConcurrency<T, R>(
   values: T[],
   concurrency: number,
-  callback: (value: T) => Promise<R>,
+  callback: (value: T, index: number) => Promise<R>,
 ): Promise<R[]> {
   const results = new Array<R>(values.length)
   let nextIndex = 0
@@ -95,9 +97,8 @@ async function mapWithConcurrency<T, R>(
     { length: Math.min(concurrency, values.length) },
     async () => {
       while (nextIndex < values.length) {
-        const index = nextIndex
-        nextIndex += 1
-        results[index] = await callback(values[index]!)
+        const index = nextIndex++
+        results[index] = await callback(values[index]!, index)
       }
     },
   )
@@ -105,108 +106,176 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
+function scopeForCatalogApp(
+  catalog: AppCatalogCacheEntry,
+  app: CatalogApp,
+): CatalogLocalAppScope {
+  if (app.organizationId !== catalog.organizationId) {
+    throw new Error(i18n.t('homeApps.errors.staleContext'))
+  }
+  return {
+    kind: 'catalog',
+    accountId: catalog.accountId,
+    organizationId: catalog.organizationId,
+    catalogAppId: app.id,
+  }
+}
+
+interface ContextSnapshot {
+  contextKey: string
+  generation: number
+  catalog: AppCatalogCacheEntry
+}
+
 export function useAppCatalog() {
   const organization = useOptionalOrganizationContext()
+  const organizationContextKey = organization?.organizationContextKey ?? null
   const [state, setState] = useState<AppCatalogState>({
     catalog: null,
     loading: Boolean(organization),
     refreshing: false,
     warning: null,
     error: null,
+    accessMode: null,
     statuses: {},
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
+  const contextKeyRef = useRef<string | null>(organizationContextKey)
+  contextKeyRef.current = organizationContextKey
   const syncGenerationRef = useRef(0)
   const operationsRef = useRef(new Map<string, Promise<unknown>>())
 
-  const scopeForApp = useCallback((app: CatalogApp): LocalAppScope => {
+  const isCurrentSnapshot = useCallback((snapshot: ContextSnapshot): boolean => (
+    contextKeyRef.current === snapshot.contextKey
+    && syncGenerationRef.current === snapshot.generation
+    && catalogRef.current?.accountId === snapshot.catalog.accountId
+    && catalogRef.current?.organizationId === snapshot.catalog.organizationId
+  ), [])
+
+  const currentSnapshotForApp = useCallback((app: CatalogApp): ContextSnapshot => {
     const catalog = catalogRef.current
     if (
-      !catalog
+      !organizationContextKey
+      || !catalog
       || catalog.accountId !== organization?.accountId
       || app.organizationId !== catalog.organizationId
     ) {
       throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
     return {
-      kind: 'catalog',
-      accountId: catalog.accountId,
-      organizationId: catalog.organizationId,
-      catalogAppId: app.id,
+      contextKey: organizationContextKey,
+      generation: syncGenerationRef.current,
+      catalog,
     }
-  }, [organization?.accountId])
+  }, [organization?.accountId, organizationContextKey])
+
+  const scopeForApp = useCallback((app: CatalogApp): CatalogLocalAppScope => (
+    scopeForCatalogApp(currentSnapshotForApp(app).catalog, app)
+  ), [currentSnapshotForApp])
+
+  const scopeKeyForApp = useCallback((app: CatalogApp): string => (
+    createLocalAppScopeKey(scopeForApp(app))
+  ), [scopeForApp])
+
+  const reconcileVersionStatuses = useCallback(async (
+    apps: CatalogApp[],
+    statuses: LocalAppRuntimeStatus[],
+    snapshot: ContextSnapshot,
+  ): Promise<LocalAppRuntimeStatus[]> => mapWithConcurrency(
+    statuses,
+    CATALOG_RUNTIME_STATUS_CONCURRENCY,
+    async (status, index) => {
+      const app = apps[index]!
+      const release = app.currentRelease
+      if (!release) return status
+      if (!normalizeCatalogSemVer(release.version)) {
+        return { ...status, versionError: 'invalid_semver' }
+      }
+      if (!status.currentVersion) return status
+      const comparison = compareCatalogVersions(release.version, status.currentVersion)
+      if (comparison.strategy === 'invalid') {
+        // Preserve the last trusted availableRelease already held by POO-12.
+        return { ...status, versionError: comparison.reason }
+      }
+      const desiredRelease = comparison.order === 1 ? release : null
+      try {
+        const next = await window.electronAPI.localApps.setAvailableRelease(
+          scopeForCatalogApp(snapshot.catalog, app),
+          desiredRelease,
+        )
+        return next
+      } catch {
+        return status
+      }
+    },
+  ), [])
 
   const refreshRuntimeStatuses = useCallback(async (
     apps?: CatalogApp[],
-    busyAppIds?: ReadonlySet<string>,
+    busyScopeKeys?: ReadonlySet<string>,
+    suppliedSnapshot?: ContextSnapshot,
   ) => {
-    const bundleApps = selectRuntimeStatusApps(
-      apps ?? catalogRef.current?.apps ?? [],
-      busyAppIds,
+    const catalog = suppliedSnapshot?.catalog ?? catalogRef.current
+    const contextKey = suppliedSnapshot?.contextKey ?? contextKeyRef.current
+    if (!catalog || !contextKey) {
+      if (!busyScopeKeys) setState(current => ({ ...current, statuses: {} }))
+      return
+    }
+    const snapshot: ContextSnapshot = suppliedSnapshot ?? {
+      contextKey,
+      generation: syncGenerationRef.current,
+      catalog,
+    }
+    if (!isCurrentSnapshot(snapshot)) return
+
+    const selectedApps = selectRuntimeStatusApps(
+      apps ?? catalog.apps,
+      busyScopeKeys,
+      app => createLocalAppScopeKey(scopeForCatalogApp(catalog, app)),
     )
-    if (bundleApps.length === 0) {
-      if (!busyAppIds) {
+    if (selectedApps.length === 0) {
+      if (!busyScopeKeys && isCurrentSnapshot(snapshot)) {
         setState(current => ({ ...current, statuses: {} }))
       }
       return
     }
-    const statuses = await mapWithConcurrency(
-      bundleApps,
-      CATALOG_RUNTIME_STATUS_CONCURRENCY,
-      async app => {
-      try {
-        return await window.electronAPI.localApps.getRuntimeStatus(scopeForApp(app))
-      } catch {
-        return {
-          appId: app.id,
-          status: 'not_installed' as const,
-        }
-      }
-      },
-    )
+
+    const scopes = selectedApps.map(app => scopeForCatalogApp(catalog, app))
+    let statuses: LocalAppRuntimeStatus[]
+    try {
+      statuses = await window.electronAPI.localApps.getRuntimeStatuses({ scopes })
+    } catch {
+      statuses = scopes.map(scope => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'not_installed',
+      }))
+    }
+    statuses = await reconcileVersionStatuses(selectedApps, statuses, snapshot)
+    if (!isCurrentSnapshot(snapshot)) return
+
     setState(current => ({
       ...current,
       statuses: {
-        ...(busyAppIds ? current.statuses : {}),
-        ...Object.fromEntries(statuses.map(status => [status.appId, status])),
+        ...(busyScopeKeys ? current.statuses : {}),
+        ...Object.fromEntries(statuses.map(status => {
+          const scope = status.scope
+          if (!scope || scope.kind !== 'catalog') {
+            throw new Error(i18n.t('homeApps.errors.staleContext'))
+          }
+          return [createLocalAppScopeKey(scope), status]
+        })),
       },
     }))
-  }, [scopeForApp])
-
-  const publishAvailableUpdates = useCallback(async (
-    catalog: AppCatalogCacheEntry,
-  ) => {
-    if (catalog.authorizationStatus !== 'authorized') return
-    const apps = selectRuntimeStatusApps(catalog.apps)
-    await mapWithConcurrency(
-      apps,
-      CATALOG_RUNTIME_STATUS_CONCURRENCY,
-      async app => {
-        const release = app.currentRelease
-        if (!release || app.availability !== 'available') return
-        try {
-          const scope = scopeForApp(app)
-          const status = await window.electronAPI.localApps.getRuntimeStatus(scope)
-          if (!status.currentVersion) return
-          const available = isNewerCatalogVersion(
-            release.version,
-            status.currentVersion,
-          )
-            ? release
-            : null
-          await window.electronAPI.localApps.setAvailableRelease(scope, available)
-        } catch {
-          // An individual damaged or stale installation must not block catalog sync.
-        }
-      },
-    )
-  }, [scopeForApp])
-
-  const organizationContextKey = organization?.organizationContextKey ?? null
+  }, [isCurrentSnapshot, reconcileVersionStatuses])
 
   const sync = useCallback(async (force = false) => {
-    if (!organization) {
+    if (
+      !organization
+      || !organizationContextKey
+      || !organization.activeOrganizationId
+    ) {
       catalogRef.current = null
       setState(current => ({
         ...current,
@@ -215,11 +284,13 @@ export function useAppCatalog() {
         refreshing: false,
         warning: null,
         error: null,
+        accessMode: null,
         statuses: {},
       }))
       return
     }
     const generation = ++syncGenerationRef.current
+    const contextKey = organizationContextKey
     setState(current => ({
       ...current,
       loading: !current.catalog,
@@ -231,7 +302,10 @@ export function useAppCatalog() {
         organization.activeOrganizationId,
         { force },
       )
-      if (generation !== syncGenerationRef.current) return
+      if (
+        generation !== syncGenerationRef.current
+        || contextKeyRef.current !== contextKey
+      ) return
       if (!result.success) {
         emitAdminAuthFailure(normalizeAdminError(result))
         setState(current => ({
@@ -243,6 +317,11 @@ export function useAppCatalog() {
         return
       }
       catalogRef.current = result.catalog
+      const snapshot: ContextSnapshot = {
+        contextKey,
+        generation,
+        catalog: result.catalog,
+      }
       setState(current => ({
         ...current,
         catalog: result.catalog,
@@ -250,12 +329,14 @@ export function useAppCatalog() {
         refreshing: false,
         warning: result.warning ?? null,
         error: null,
+        accessMode: result.accessMode,
       }))
-      await publishAvailableUpdates(result.catalog)
-      if (generation !== syncGenerationRef.current) return
-      await refreshRuntimeStatuses(result.catalog.apps)
+      await refreshRuntimeStatuses(result.catalog.apps, undefined, snapshot)
     } catch (error) {
-      if (generation !== syncGenerationRef.current) return
+      if (
+        generation !== syncGenerationRef.current
+        || contextKeyRef.current !== contextKey
+      ) return
       setState(current => ({
         ...current,
         loading: false,
@@ -263,7 +344,11 @@ export function useAppCatalog() {
         error: errorMessage(error),
       }))
     }
-  }, [organization, publishAvailableUpdates, refreshRuntimeStatuses])
+  }, [
+    organization,
+    organizationContextKey,
+    refreshRuntimeStatuses,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -278,6 +363,8 @@ export function useAppCatalog() {
   }, [])
 
   useEffect(() => {
+    syncGenerationRef.current += 1
+    operationsRef.current.clear()
     catalogRef.current = null
     setState(current => ({
       ...current,
@@ -286,6 +373,7 @@ export function useAppCatalog() {
       refreshing: false,
       warning: null,
       error: null,
+      accessMode: null,
       statuses: {},
     }))
     void sync()
@@ -294,129 +382,197 @@ export function useAppCatalog() {
     }
   }, [organizationContextKey, sync])
 
-  const busyAppIds = useMemo(() => Object.values(state.statuses)
-    .filter(status => (
+  const busyScopes = useMemo(() => Object.entries(state.statuses)
+    .filter(([, status]) => (
       status.status === 'downloading'
       || status.status === 'installing'
       || status.status === 'starting'
       || status.installationStatus !== undefined
     ))
-    .map(status => status.appId)
-    .sort(), [state.statuses])
-  const busyAppIdsKey = busyAppIds.join(',')
+    .slice(0, BUSY_RUNTIME_STATUS_LIMIT)
+    .flatMap(([scopeKey, status]) => (
+      status.scope?.kind === 'catalog'
+        ? [{ scopeKey, scope: status.scope }]
+        : []
+    )), [state.statuses])
+  const busyScopesSignature = JSON.stringify(busyScopes)
 
   useEffect(() => {
-    if (!busyAppIdsKey) return
-    const selectedBusyAppIds = new Set(
-      busyAppIdsKey.split(',').slice(0, BUSY_RUNTIME_STATUS_LIMIT),
-    )
+    const selected = JSON.parse(busyScopesSignature) as Array<{
+      scopeKey: string
+      scope: CatalogLocalAppScope
+    }>
+    if (selected.length === 0) return
+    const busyKeys = new Set(selected.map(item => item.scopeKey))
     const interval = window.setInterval(() => {
-      void refreshRuntimeStatuses(undefined, selectedBusyAppIds)
+      void refreshRuntimeStatuses(undefined, busyKeys)
     }, 500)
     return () => window.clearInterval(interval)
-  }, [busyAppIdsKey, refreshRuntimeStatuses])
+  }, [busyScopesSignature, refreshRuntimeStatuses])
 
   const runExclusive = useCallback(<T,>(
-    appId: string,
+    scopeKey: string,
     operation: () => Promise<T>,
   ): Promise<T> => {
-    const existing = operationsRef.current.get(appId) as Promise<T> | undefined
+    const existing = operationsRef.current.get(scopeKey) as Promise<T> | undefined
     if (existing) return existing
     const promise = operation().finally(() => {
-      if (operationsRef.current.get(appId) === promise) {
-        operationsRef.current.delete(appId)
+      if (operationsRef.current.get(scopeKey) === promise) {
+        operationsRef.current.delete(scopeKey)
       }
     })
-    operationsRef.current.set(appId, promise)
+    operationsRef.current.set(scopeKey, promise)
     return promise
   }, [])
 
-  const install = useCallback((app: CatalogApp) => runExclusive(app.id, async () => {
-    const release = app.currentRelease
-    const host = state.host
-    if (!release || !host) throw new Error(i18n.t('homeApps.errors.releaseUnavailable'))
-    if (app.availability !== 'available') {
-      throw new Error(i18n.t('homeApps.errors.unavailable'))
+  const requireCurrent = useCallback((snapshot: ContextSnapshot) => {
+    if (!isCurrentSnapshot(snapshot)) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
-    const scope = scopeForApp(app)
-    const request: LocalAppInstallRequest = {
-      appId: app.id,
-      scope,
-      version: release.version,
-      downloadUrl: release.downloadUrl,
-      checksum: release.checksum,
-      sizeBytes: release.sizeBytes,
-      platform: release.platform ?? host.platform,
-      arch: release.arch ?? host.arch,
-    }
-    setState(current => ({
-      ...current,
-      statuses: {
-        ...current.statuses,
-        [app.id]: {
-          appId: app.id,
-          status: 'downloading',
-          progress: {
-            phase: 'downloading',
-            bytesDownloaded: 0,
-            sizeBytes: release.sizeBytes,
-            percent: 0,
-          },
-        },
-      },
-    }))
-    try {
-      await window.electronAPI.localApps.install(request)
-    } finally {
-      await refreshRuntimeStatuses([app])
-    }
-  }), [refreshRuntimeStatuses, runExclusive, scopeForApp, state.host])
+  }, [isCurrentSnapshot])
 
-  const start = useCallback((app: CatalogApp): Promise<LocalAppStartResult> => (
-    runExclusive(app.id, async () => {
+  const install = useCallback((app: CatalogApp) => {
+    const snapshot = currentSnapshotForApp(app)
+    const scope = scopeForCatalogApp(snapshot.catalog, app)
+    const scopeKey = createLocalAppScopeKey(scope)
+    return runExclusive(scopeKey, async () => {
+      const release = app.currentRelease
+      if (!release || !state.host) {
+        throw new Error(i18n.t('homeApps.errors.releaseUnavailable'))
+      }
+      if (!normalizeCatalogSemVer(release.version)) {
+        throw new Error(i18n.t('homeApps.errors.invalidVersion'))
+      }
+      if (state.accessMode !== 'online') {
+        throw new Error(i18n.t('homeApps.errors.offlineInstall'))
+      }
       if (app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
       }
-      const scope = scopeForApp(app)
+      requireCurrent(snapshot)
       setState(current => ({
         ...current,
         statuses: {
           ...current.statuses,
-          [app.id]: {
-            ...(current.statuses[app.id] ?? { appId: app.id }),
+          [scopeKey]: {
+            appId: app.id,
+            scope,
+            status: 'downloading',
+            progress: {
+              phase: 'downloading',
+              bytesDownloaded: 0,
+              sizeBytes: release.sizeBytes,
+              percent: 0,
+            },
+          },
+        },
+      }))
+      try {
+        await window.electronAPI.localApps.install({ scope })
+        requireCurrent(snapshot)
+      } finally {
+        if (isCurrentSnapshot(snapshot)) {
+          await refreshRuntimeStatuses([app], undefined, snapshot)
+        }
+      }
+    })
+  }, [
+    currentSnapshotForApp,
+    isCurrentSnapshot,
+    refreshRuntimeStatuses,
+    requireCurrent,
+    runExclusive,
+    state.accessMode,
+    state.host,
+  ])
+
+  const start = useCallback((app: CatalogApp): Promise<LocalAppStartResult> => {
+    const snapshot = currentSnapshotForApp(app)
+    const scope = scopeForCatalogApp(snapshot.catalog, app)
+    const scopeKey = createLocalAppScopeKey(scope)
+    return runExclusive(scopeKey, async () => {
+      if (app.availability !== 'available') {
+        throw new Error(i18n.t('homeApps.errors.unavailable'))
+      }
+      requireCurrent(snapshot)
+      setState(current => ({
+        ...current,
+        statuses: {
+          ...current.statuses,
+          [scopeKey]: {
+            ...(current.statuses[scopeKey] ?? { appId: app.id, scope }),
             status: 'starting',
           },
         },
       }))
       try {
-        return await window.electronAPI.localApps.start(scope)
+        const result = await window.electronAPI.localApps.start(scope)
+        requireCurrent(snapshot)
+        return result
       } finally {
-        await refreshRuntimeStatuses([app])
+        if (isCurrentSnapshot(snapshot)) {
+          await refreshRuntimeStatuses([app], undefined, snapshot)
+        }
       }
     })
-  ), [refreshRuntimeStatuses, runExclusive, scopeForApp])
+  }, [
+    currentSnapshotForApp,
+    isCurrentSnapshot,
+    refreshRuntimeStatuses,
+    requireCurrent,
+    runExclusive,
+  ])
 
-  const stop = useCallback((app: CatalogApp) => runExclusive(app.id, async () => {
-    await window.electronAPI.localApps.stop(scopeForApp(app))
-    await refreshRuntimeStatuses([app])
-  }), [refreshRuntimeStatuses, runExclusive, scopeForApp])
+  const stop = useCallback((app: CatalogApp) => {
+    const snapshot = currentSnapshotForApp(app)
+    const scope = scopeForCatalogApp(snapshot.catalog, app)
+    const scopeKey = createLocalAppScopeKey(scope)
+    return runExclusive(scopeKey, async () => {
+      await window.electronAPI.localApps.stop(scope)
+      requireCurrent(snapshot)
+      await refreshRuntimeStatuses([app], undefined, snapshot)
+    })
+  }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
 
-  const uninstall = useCallback((
-    app: CatalogApp,
-    preserveData: boolean,
-  ) => runExclusive(app.id, async () => {
-    await window.electronAPI.localApps.uninstall(scopeForApp(app), { preserveData })
-    await refreshRuntimeStatuses([app])
-  }), [refreshRuntimeStatuses, runExclusive, scopeForApp])
+  const uninstall = useCallback((app: CatalogApp, preserveData: boolean) => {
+    const snapshot = currentSnapshotForApp(app)
+    const scope = scopeForCatalogApp(snapshot.catalog, app)
+    const scopeKey = createLocalAppScopeKey(scope)
+    return runExclusive(scopeKey, async () => {
+      await window.electronAPI.localApps.uninstall(scope, { preserveData })
+      requireCurrent(snapshot)
+      await refreshRuntimeStatuses([app], undefined, snapshot)
+    })
+  }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
 
-  const cancelInstall = useCallback(async (app: CatalogApp) => {
-    await window.electronAPI.localApps.cancelInstall(scopeForApp(app))
-    await refreshRuntimeStatuses([app])
-  }, [refreshRuntimeStatuses, scopeForApp])
+  const cancelInstall = useCallback((app: CatalogApp) => {
+    const snapshot = currentSnapshotForApp(app)
+    const scope = scopeForCatalogApp(snapshot.catalog, app)
+    const scopeKey = createLocalAppScopeKey(scope)
+    return runExclusive(scopeKey, async () => {
+      await window.electronAPI.localApps.cancelInstall(scope)
+      requireCurrent(snapshot)
+      await refreshRuntimeStatuses([app], undefined, snapshot)
+    })
+  }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
 
-  const getLogs = useCallback((app: CatalogApp) => (
-    window.electronAPI.localApps.getLogs(scopeForApp(app), { tail: 300 })
-  ), [scopeForApp])
+  const getLogs = useCallback(async (app: CatalogApp) => {
+    const snapshot = currentSnapshotForApp(app)
+    const result = await window.electronAPI.localApps.getLogs(
+      scopeForCatalogApp(snapshot.catalog, app),
+      { tail: 300 },
+    )
+    requireCurrent(snapshot)
+    return result
+  }, [currentSnapshotForApp, requireCurrent])
+
+  const getStatus = useCallback((app: CatalogApp): LocalAppRuntimeStatus | undefined => {
+    try {
+      return state.statuses[scopeKeyForApp(app)]
+    } catch {
+      return undefined
+    }
+  }, [scopeKeyForApp, state.statuses])
 
   return {
     organization,
@@ -428,6 +584,9 @@ export function useAppCatalog() {
     uninstall,
     cancelInstall,
     getLogs,
+    getStatus,
+    scopeForApp,
+    scopeKeyForApp,
     refreshRuntimeStatuses,
   }
 }

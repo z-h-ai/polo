@@ -213,7 +213,8 @@ import type {
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
   LocalAppAvailableRelease,
-  LocalAppInstallRequest,
+  LocalAppBatchStatusRequest,
+  LocalAppRpcInstallRequest,
   LocalAppInstalledApp,
   LocalAppReference,
   LocalAppRuntimeStatus,
@@ -299,7 +300,7 @@ export type AdminSetPasswordResult =
   | ({ success: false } & AdminRpcErrorPayload)
 
 export type AdminValidateResult =
-  | { loggedIn: true; user: AdminUser; configVersion: string }
+  | { loggedIn: true; user: AdminUser; configVersion: string; offline?: boolean }
   | ({ loggedIn: false } & AdminRpcErrorPayload)
 
 export interface AdminStatusResult {
@@ -493,7 +494,7 @@ export interface ElectronAPI {
       platform: 'darwin' | 'win32' | 'linux'
       arch: 'arm64' | 'x64'
     }>
-    install(request: LocalAppInstallRequest): Promise<LocalAppInstalledApp>
+    install(request: LocalAppRpcInstallRequest): Promise<LocalAppInstalledApp>
     cancelInstall(app: LocalAppReference): Promise<boolean>
     start(app: LocalAppReference): Promise<LocalAppStartResult>
     stop(app: LocalAppReference): Promise<LocalAppRuntimeStatus>
@@ -503,10 +504,10 @@ export interface ElectronAPI {
       app: LocalAppReference,
       release: LocalAppAvailableRelease | null,
     ): Promise<LocalAppRuntimeStatus>
-    getInstalledApps(scope?: LocalAppReference): Promise<LocalAppInstalledApp[]>
+    getInstalledApps(scope: LocalAppReference): Promise<LocalAppInstalledApp[]>
     getRuntimeStatus(app: LocalAppReference): Promise<LocalAppRuntimeStatus>
+    getRuntimeStatuses(request: LocalAppBatchStatusRequest): Promise<LocalAppRuntimeStatus[]>
     getLogs(app: LocalAppReference, options?: LocalAppLogsOptions): Promise<string>
-    stopAccount(accountId: string): Promise<void>
   }
 
   // Auth

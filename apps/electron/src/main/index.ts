@@ -108,7 +108,11 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
 import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
-import { hasLocalAppRuntimeManager, shutdownLocalAppRuntime } from './local-app-runtime'
+import {
+  getScopedLocalAppRuntimeRegistry,
+  hasLocalAppRuntimeManager,
+  shutdownLocalAppRuntime,
+} from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
   BeforeQuitCleanupCoordinator,
@@ -752,6 +756,9 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
+            onAdminSessionEnding: async (accountId: string) => {
+              await getScopedLocalAppRuntimeRegistry().stopAccount(accountId)
+            },
           }
         },
         // Headless: register only core handlers (no GUI handlers for browser, settings, etc.)

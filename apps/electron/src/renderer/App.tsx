@@ -166,19 +166,6 @@ function isQuotaExhaustedError(error: unknown): boolean {
     || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
 }
 
-async function stopSignedInAccountLocalApps(
-  accountId: string | null | undefined,
-): Promise<void> {
-  if (!accountId) return
-  try {
-    await window.electronAPI.localApps.stopAccount(accountId)
-  } catch (error) {
-    rendererLog.warn('[LocalApps] failed to stop apps while clearing admin account', {
-      error: getErrorText(error),
-    })
-  }
-}
-
 /**
  * Helper to handle background task events from the agent.
  * Updates the backgroundTasksAtomFamily based on event type.
@@ -849,7 +836,6 @@ export default function App() {
   }, [showAdminKicked])
 
   const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
-    void stopSignedInAccountLocalApps(currentAdminUserIdRef.current)
     invalidateOrganizationDeepLinkNavigation()
     clearOrganizationAccount(currentAdminUserIdRef.current, {
       preservePendingJoinToken: true,
@@ -1559,7 +1545,6 @@ export default function App() {
     try {
       const validation = await window.electronAPI.adminValidate()
       if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
-        await stopSignedInAccountLocalApps(currentAdminUser.userId)
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
         currentAdminUserIdRef.current = null
@@ -1573,7 +1558,6 @@ export default function App() {
         status: Number(readErrorField(error, 'status')),
         message: getErrorText(error),
       })) {
-        await stopSignedInAccountLocalApps(currentAdminUser.userId)
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
         currentAdminUserIdRef.current = null
@@ -2086,7 +2070,6 @@ export default function App() {
   const executeReset = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
     try {
-      await stopSignedInAccountLocalApps(currentAdminUser?.userId)
       await window.electronAPI.logout()
       invalidateOrganizationDeepLinkNavigation()
       // Reset all state
@@ -2124,7 +2107,6 @@ export default function App() {
   const handleAdminLogout = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
     try {
-      await stopSignedInAccountLocalApps(currentAdminUser?.userId)
       await window.electronAPI.adminLogout()
     } finally {
       invalidateOrganizationDeepLinkNavigation()

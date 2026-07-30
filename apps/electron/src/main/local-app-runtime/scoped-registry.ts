@@ -3,8 +3,10 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type {
   LocalAppAvailableRelease,
+  LocalAppArchitecture,
   LocalAppInstallRequest,
   LocalAppInstalledApp,
+  LocalAppPlatform,
   LocalAppRuntimeStatus,
   LocalAppScope,
   LocalAppStartResult,
@@ -20,6 +22,8 @@ import { LocalAppRuntimeError } from './runtime-error'
 const SCOPE_SCHEMA_VERSION = 1
 const MAX_SCOPE_FIELD_LENGTH = 512
 const STOP_ACCOUNT_CONCURRENCY = 8
+const STATUS_READ_CONCURRENCY = 8
+export const MAX_CATALOG_STATUS_SCOPES = 10_000
 
 export type CatalogLocalAppScope = Extract<LocalAppScope, { kind: 'catalog' }>
 
@@ -34,6 +38,16 @@ export interface ScopedLocalAppRuntimeRegistryOptions {
   bunPath?: string
   logger?: LocalAppRuntimeLogger
   managerFactory?: (options: LocalAppRuntimeManagerOptions) => LocalAppRuntimeManager
+}
+
+export interface ScopedCatalogInstallRequest {
+  scope: CatalogLocalAppScope
+  version: string
+  downloadUrl: string
+  checksum: string
+  sizeBytes: number
+  platform: LocalAppPlatform
+  arch: LocalAppArchitecture
 }
 
 function validateScopeField(value: unknown, field: string): string {
@@ -54,16 +68,8 @@ export function validateCatalogLocalAppScope(scope: unknown): CatalogLocalAppSco
   }
   const value = scope as CatalogLocalAppScope
   const catalogAppId = validateScopeField(value.catalogAppId, 'scope.catalogAppId')
-  if (
-    catalogAppId.length > 128
-    || !/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/.test(catalogAppId)
-    || catalogAppId === '.'
-    || catalogAppId === '..'
-  ) {
-    throw new LocalAppRuntimeError(
-      'INVALID_REQUEST',
-      'scope.catalogAppId contains unsupported characters',
-    )
+  if (catalogAppId.trim().length === 0) {
+    throw new LocalAppRuntimeError('INVALID_REQUEST', 'scope.catalogAppId is blank')
   }
   return {
     kind: 'catalog',
@@ -84,6 +90,9 @@ export function createCatalogLocalAppScopeKey(scope: CatalogLocalAppScope): stri
     .digest('hex')
   return `catalog-${digest}`
 }
+
+/** Filesystem/process-safe identity used exclusively inside POO-12. */
+export const createCatalogRuntimeAppId = createCatalogLocalAppScopeKey
 
 function scopesEqual(left: CatalogLocalAppScope, right: CatalogLocalAppScope): boolean {
   return left.accountId === right.accountId
@@ -112,7 +121,10 @@ export class ScopedLocalAppRuntimeRegistry {
   ) => LocalAppRuntimeManager
   private readonly managers = new Map<string, LocalAppRuntimeManager>()
   private readonly managerScopes = new Map<string, CatalogLocalAppScope>()
-  private readonly managerPromises = new Map<string, Promise<LocalAppRuntimeManager>>()
+  private readonly managerPromises = new Map<
+    string,
+    Promise<LocalAppRuntimeManager | null>
+  >()
 
   constructor(options: ScopedLocalAppRuntimeRegistryOptions) {
     this.scopesDir = join(resolve(options.rootDir), 'catalog-scopes')
@@ -124,23 +136,20 @@ export class ScopedLocalAppRuntimeRegistry {
   }
 
   async install(
-    request: LocalAppInstallRequest,
+    request: ScopedCatalogInstallRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<LocalAppInstalledApp> {
     const scope = validateCatalogLocalAppScope(request.scope)
-    if (request.appId !== scope.catalogAppId) {
-      throw new LocalAppRuntimeError(
-        'INVALID_REQUEST',
-        'Install appId does not match scope.catalogAppId',
-      )
-    }
     const manager = await this.getManager(scope)
-    const { scope: _scope, ...legacyRequest } = request
+    const runtimeAppId = createCatalogRuntimeAppId(scope)
+    const { scope: _scope, ...release } = request
+    const managerRequest: LocalAppInstallRequest = {
+      ...release,
+      appId: runtimeAppId,
+      expectedManifestAppId: scope.catalogAppId,
+    }
     const installed = await manager.install(
-      {
-        ...legacyRequest,
-        appId: scope.catalogAppId,
-      },
+      managerRequest,
       options,
     )
     return attachScope(installed, scope)
@@ -148,22 +157,22 @@ export class ScopedLocalAppRuntimeRegistry {
 
   async cancelInstall(scope: CatalogLocalAppScope): Promise<boolean> {
     const manager = await this.getManager(scope)
-    return manager.cancelInstall(scope.catalogAppId)
+    return manager.cancelInstall(createCatalogRuntimeAppId(scope))
   }
 
   async start(scope: CatalogLocalAppScope): Promise<LocalAppStartResult> {
     const manager = await this.getManager(scope)
-    return attachScope(await manager.start(scope.catalogAppId), scope)
+    return attachScope(await manager.start(createCatalogRuntimeAppId(scope)), scope)
   }
 
   async stop(scope: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus> {
     const manager = await this.getManager(scope)
-    return attachScope(await manager.stop(scope.catalogAppId), scope)
+    return attachScope(await manager.stop(createCatalogRuntimeAppId(scope)), scope)
   }
 
   async restart(scope: CatalogLocalAppScope): Promise<LocalAppStartResult> {
     const manager = await this.getManager(scope)
-    return attachScope(await manager.restart(scope.catalogAppId), scope)
+    return attachScope(await manager.restart(createCatalogRuntimeAppId(scope)), scope)
   }
 
   async uninstall(
@@ -171,7 +180,7 @@ export class ScopedLocalAppRuntimeRegistry {
     options?: LocalAppUninstallOptions,
   ): Promise<void> {
     const manager = await this.getManager(scope)
-    await manager.uninstall(scope.catalogAppId, options)
+    await manager.uninstall(createCatalogRuntimeAppId(scope), options)
   }
 
   async setAvailableRelease(
@@ -180,7 +189,7 @@ export class ScopedLocalAppRuntimeRegistry {
   ): Promise<LocalAppRuntimeStatus> {
     const manager = await this.getManager(scope)
     return attachScope(
-      await manager.setAvailableRelease(scope.catalogAppId, release),
+      await manager.setAvailableRelease(createCatalogRuntimeAppId(scope), release),
       scope,
     )
   }
@@ -188,18 +197,116 @@ export class ScopedLocalAppRuntimeRegistry {
   async getInstalledApps(
     scope: CatalogLocalAppScope,
   ): Promise<LocalAppInstalledApp[]> {
-    const manager = await this.getManager(scope)
+    const manager = await this.getExistingManager(scope)
+    if (!manager) return []
     return (await manager.getInstalledApps()).map(app => attachScope(app, scope))
   }
 
   async getRuntimeStatus(
     scope: CatalogLocalAppScope,
   ): Promise<LocalAppRuntimeStatus> {
-    const manager = await this.getManager(scope)
-    return attachScope(
-      await manager.getRuntimeStatus(scope.catalogAppId),
-      scope,
+    return (await this.getRuntimeStatuses([scope]))[0]!
+  }
+
+  async getRuntimeStatuses(
+    rawScopes: CatalogLocalAppScope[],
+  ): Promise<LocalAppRuntimeStatus[]> {
+    if (!Array.isArray(rawScopes) || rawScopes.length > MAX_CATALOG_STATUS_SCOPES) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        `At most ${MAX_CATALOG_STATUS_SCOPES} catalog app scopes may be queried`,
+      )
+    }
+    const scopes = rawScopes.map(validateCatalogLocalAppScope)
+    const statuses = new Array<LocalAppRuntimeStatus>(scopes.length)
+    let nextIndex = 0
+    const workers = Array.from(
+      { length: Math.min(STATUS_READ_CONCURRENCY, scopes.length) },
+      async () => {
+        while (nextIndex < scopes.length) {
+          const index = nextIndex++
+          const scope = scopes[index]!
+          const manager = await this.getExistingManager(scope)
+          statuses[index] = manager
+            ? attachScope(
+                await manager.getRuntimeStatus(createCatalogRuntimeAppId(scope)),
+                scope,
+              )
+            : {
+                appId: scope.catalogAppId,
+                scope,
+                status: 'not_installed',
+              }
+        }
+      },
     )
+    await Promise.all(workers)
+    return statuses
+  }
+
+  async isInstalledAndReady(scope: CatalogLocalAppScope): Promise<boolean> {
+    const status = await this.getRuntimeStatus(scope)
+    return Boolean(
+      status.currentVersion
+      && status.status !== 'not_installed'
+      && status.status !== 'downloading'
+      && status.status !== 'installing'
+      && status.status !== 'broken',
+    )
+  }
+
+  private async getExistingManager(
+    rawScope: CatalogLocalAppScope,
+  ): Promise<LocalAppRuntimeManager | null> {
+    const scope = validateCatalogLocalAppScope(rawScope)
+    const key = createCatalogLocalAppScopeKey(scope)
+    const existing = this.managers.get(key)
+    if (existing) return existing
+    const pending = this.managerPromises.get(key)
+    if (pending) return pending
+
+    const managerPromise = this.loadExistingManager(key, scope)
+      .finally(() => {
+        if (this.managerPromises.get(key) === managerPromise) {
+          this.managerPromises.delete(key)
+        }
+      })
+    this.managerPromises.set(key, managerPromise)
+    return managerPromise
+  }
+
+  private async loadExistingManager(
+    key: string,
+    scope: CatalogLocalAppScope,
+  ): Promise<LocalAppRuntimeManager | null> {
+    const rootDir = join(this.scopesDir, key)
+    const persisted = await this.readScopeRecord(join(rootDir, 'scope.json'))
+    if (!persisted) return null
+    if (!scopesEqual(persisted, scope)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'Local app scope key does not match its persisted identity',
+      )
+    }
+    try {
+      await readFile(
+        join(rootDir, 'apps', createCatalogRuntimeAppId(scope), 'metadata.json'),
+        'utf8',
+      )
+    } catch {
+      // A prior cancelled/failed install may have written scope.json. A status
+      // read must not instantiate a manager for that non-installation.
+      return null
+    }
+    const manager = this.managerFactory({
+      rootDir,
+      uvPath: this.uvPath,
+      bunPath: this.bunPath,
+      logger: this.logger,
+    })
+    this.managers.set(key, manager)
+    this.managerScopes.set(key, scope)
+    return manager
   }
 
   async getLogs(
@@ -207,7 +314,7 @@ export class ScopedLocalAppRuntimeRegistry {
     options?: { tail?: number },
   ): Promise<string> {
     const manager = await this.getManager(scope)
-    return manager.getLogs(scope.catalogAppId, options)
+    return manager.getLogs(createCatalogRuntimeAppId(scope), options)
   }
 
   async stopAccount(accountId: string): Promise<void> {
@@ -225,7 +332,10 @@ export class ScopedLocalAppRuntimeRegistry {
     for (let index = 0; index < scopes.length; index += STOP_ACCOUNT_CONCURRENCY) {
       const results = await Promise.allSettled(
         scopes.slice(index, index + STOP_ACCOUNT_CONCURRENCY)
-          .map(scope => this.stop(scope)),
+          .map(async scope => {
+            await this.cancelInstall(scope)
+            return this.stop(scope)
+          }),
       )
       failures.push(...results
         .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -260,7 +370,12 @@ export class ScopedLocalAppRuntimeRegistry {
     const existing = this.managers.get(key)
     if (existing) return existing
     const pending = this.managerPromises.get(key)
-    if (pending) return pending
+    if (pending) {
+      const pendingManager = await pending
+      if (pendingManager) return pendingManager
+    }
+    const existingAfterPending = this.managers.get(key)
+    if (existingAfterPending) return existingAfterPending
 
     const managerPromise = this.createManager(key, scope)
       .finally(() => {

@@ -27,4 +27,9 @@ export interface HandlerDeps<
   browserPaneManager?: TBrowserPaneManager
   oauthFlowStore: TOAuthFlowStore
   messagingRegistry?: IMessagingGatewayRegistry
+  /**
+   * Host-owned cleanup invoked while the trusted Admin identity is still
+   * available and before credentials are deleted.
+   */
+  onAdminSessionEnding?: (accountId: string) => Promise<void>
 }

@@ -12,6 +12,8 @@ type StoredTokens = {
   userId: string
   username: string
   displayName?: string
+  role?: string
+  groupIds?: string[]
 }
 
 type TestConnection = {
@@ -229,6 +231,8 @@ const managerState: {
 
 const loggerWarn = jest.fn()
 const appCatalogCache = new Map<string, any>()
+const appCatalogAccess = new Map<string, string>()
+const adminSessionEnding = jest.fn(async (_accountId: string) => {})
 
 const mockCredentialManager = {
   async getAdminTokens(): Promise<StoredTokens | null> {
@@ -257,6 +261,20 @@ const mockCredentialManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
+  setAppCatalogAccessMode: (
+    accountId: string,
+    organizationId: string,
+    mode: string,
+  ) => {
+    appCatalogAccess.set(`${accountId}:${organizationId}`, mode)
+  },
+  getAppCatalogAccessMode: (accountId: string, organizationId: string) =>
+    appCatalogAccess.get(`${accountId}:${organizationId}`) ?? 'offline',
+  denyAppCatalogAccessForAccount: (accountId: string) => {
+    for (const key of appCatalogAccess.keys()) {
+      if (key.startsWith(`${accountId}:`)) appCatalogAccess.set(key, 'denied')
+    }
+  },
   getCachedAppCatalog: (accountId: string, organizationId: string) =>
     appCatalogCache.get(`${accountId}:${organizationId}`) ?? null,
   denyCachedAppCatalogAuthorization: (accountId: string, organizationId: string) => {
@@ -272,6 +290,23 @@ mock.module('@polo-ai/shared/admin', () => ({
       })),
     }
     appCatalogCache.set(key, denied)
+    return denied
+  },
+  denyCachedAppCatalogAuthorizationForAccount: (accountId: string) => {
+    const denied = []
+    for (const [key, cached] of appCatalogCache) {
+      if (!key.startsWith(`${accountId}:`)) continue
+      const entry = {
+        ...cached,
+        authorizationStatus: 'denied',
+        apps: cached.apps.map((app: Record<string, unknown>) => ({
+          ...app,
+          availability: 'unavailable',
+        })),
+      }
+      appCatalogCache.set(key, entry)
+      denied.push(entry)
+    }
     return denied
   },
   saveAppCatalog: (
@@ -354,6 +389,8 @@ mock.module('@polo-ai/shared/config', () => ({
     configState.defaultConnection = slug
     return true
   },
+  getWorkspaceByNameOrId: () => null,
+  setSetupDeferred: () => {},
 }))
 
 mock.module('@polo-ai/shared/credentials', () => ({
@@ -399,6 +436,7 @@ function createHarness() {
         process: async () => Buffer.from(''),
       },
     },
+    onAdminSessionEnding: adminSessionEnding,
   } satisfies HandlerDeps
 
   registerAdminHandlers(server, deps)
@@ -476,6 +514,7 @@ function encryptedApiKey(apiKey: string, accessToken = 'access-token'): TestEncr
 
 beforeEach(() => {
   loggerWarn.mockClear()
+  adminSessionEnding.mockClear()
   adminClientCalls.length = 0
   configState.adminUrl = 'https://admin.example.com'
   configState.adminConfigVersion = undefined
@@ -485,6 +524,7 @@ beforeEach(() => {
   managerState.llmApiKeys = new Map()
   managerState.deletedCredentialSlugs = []
   appCatalogCache.clear()
+  appCatalogAccess.clear()
 
   adminClientBehavior.login = async () => ({
     accessToken: 'access-token',
@@ -1245,6 +1285,63 @@ describe('registerAdminHandlers', () => {
       status: 401,
     })
     expect(managerState.tokens).toBeNull()
+    expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+  })
+
+  it('keeps an expired verified identity for restricted offline startup when refresh is unreachable', async () => {
+    managerState.tokens = {
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+      role: 'admin',
+      groupIds: ['group-1'],
+    }
+    adminClientBehavior.refresh = async () => {
+      throw new TestAdminError('offline', 'NETWORK_ERROR')
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    })
+
+    expect(result).toMatchObject({
+      loggedIn: true,
+      offline: true,
+      user: { id: 'user-1', role: 'admin', groupIds: ['group-1'] },
+    })
+    expect(managerState.tokens).not.toBeNull()
+    expect(adminSessionEnding).not.toHaveBeenCalled()
+  })
+
+  it('keeps a non-expired verified identity when cold-start validation is offline', async () => {
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      role: 'member',
+      groupIds: [],
+    }
+    adminClientBehavior.validate = async () => {
+      throw new TestAdminError('offline', 'NETWORK_ERROR')
+    }
+    const { validate } = createHarness()
+
+    const result = await validate({
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    })
+
+    expect(result).toMatchObject({ loggedIn: true, offline: true })
+    expect(managerState.tokens).not.toBeNull()
   })
 
   it('syncs admin connections by upserting incoming config and removing admin-deleted connections', async () => {
@@ -1440,6 +1537,7 @@ describe('registerAdminHandlers', () => {
       catalog: cached,
       source: 'cache',
       refreshed: false,
+      accessMode: 'offline',
       warning: 'Admin request failed',
     })
   })
@@ -1494,6 +1592,8 @@ describe('registerAdminHandlers', () => {
       authorizationStatus: 'denied',
       apps: [{ availability: 'unavailable' }],
     })
+    expect(managerState.tokens).toBeNull()
+    expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
   })
 
   it('logs out remotely and removes admin-managed connections and credentials', async () => {
@@ -1528,6 +1628,7 @@ describe('registerAdminHandlers', () => {
       accessToken: 'access-token',
     }])
     expect(managerState.tokens).toBeNull()
+    expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
     expect(configState.adminConfigVersion).toBeUndefined()
     expect(configState.connections.map(connection => connection.slug)).toEqual(['user-local'])
     expect(managerState.deletedCredentialSlugs).toEqual(['admin-anthropic'])

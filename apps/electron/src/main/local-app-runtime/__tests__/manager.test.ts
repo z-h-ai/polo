@@ -415,6 +415,42 @@ describe('LocalAppRuntimeManager', () => {
     )
   })
 
+  it('accepts the full business app id contract independently of the runtime path id', async () => {
+    for (const businessAppId of ['App.ID', '应用-甲', 'x'.repeat(512)]) {
+      expect(validatePoloAppManifest({
+        schemaVersion: 1,
+        appId: businessAppId,
+        version: '1.0.0',
+        runtime: 'static',
+        entry: ['dist'],
+        healthcheck: '/health',
+        webPath: '/',
+        permissions: [],
+      }, { platform, arch: architecture }).appId).toBe(businessAppId)
+    }
+
+    const businessAppId = '应用.App-ID'
+    const runtimeAppId = `catalog-${'a'.repeat(64)}`
+    const bundleDir = await writeBundle(
+      'bundle-source',
+      '1.0.0',
+      { appId: businessAppId },
+      { 'dist/index.html': 'business-id-ready' },
+    )
+    const archive = await archiveBundle(bundleDir, 'business-id')
+    const url = await serveArchive(archive)
+    const runtime = makeManager()
+    const request = {
+      ...requestFor(runtimeAppId, '1.0.0', url, archive),
+      expectedManifestAppId: businessAppId,
+    }
+
+    await expect(runtime.install(request)).resolves.toMatchObject({
+      appId: runtimeAppId,
+      currentVersion: '1.0.0',
+    })
+  })
+
   it('installs, starts, stops, and idempotently restarts a static bundle', async () => {
     const bundleDir = await writeBundle(
       'demo.static',

@@ -5,7 +5,7 @@ import {
   expect,
   it,
 } from 'bun:test'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -15,6 +15,7 @@ import type {
 import { LocalAppRuntimeManager } from '../manager'
 import {
   createCatalogLocalAppScopeKey,
+  createCatalogRuntimeAppId,
   ScopedLocalAppRuntimeRegistry,
   type CatalogLocalAppScope,
 } from '../scoped-registry'
@@ -52,33 +53,120 @@ describe('scoped local app runtime registry', () => {
     expect(first).toMatch(/^catalog-[a-f0-9]{64}$/)
   })
 
-  it('persists separate account scopes without changing the manifest app id', async () => {
-    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
+  it('accepts uppercase, Unicode, and 512-character business ids', () => {
+    for (const catalogAppId of ['App.ID', '应用-甲', 'x'.repeat(512)]) {
+      const value = { ...scope('account-a'), catalogAppId }
+      expect(createCatalogRuntimeAppId(value)).toMatch(/^catalog-[a-f0-9]{64}$/)
+    }
+  })
+
+  it('does not materialize managers or directories for uninstalled status reads', async () => {
+    let managerCount = 0
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => {
+        managerCount += 1
+        return new LocalAppRuntimeManager(options)
+      },
+    })
     const accountA = scope('account-a')
     const accountB = scope('account-b')
 
-    await expect(registry.getRuntimeStatus(accountA)).resolves.toMatchObject({
-      appId: 'demo.catalog-app',
-      scope: accountA,
-      status: 'not_installed',
+    await expect(registry.getRuntimeStatuses([accountA, accountB])).resolves.toEqual([
+      { appId: 'demo.catalog-app', scope: accountA, status: 'not_installed' },
+      { appId: 'demo.catalog-app', scope: accountB, status: 'not_installed' },
+    ])
+    expect(managerCount).toBe(0)
+    await expect(readdir(join(rootDir, 'catalog-scopes'))).rejects.toMatchObject({
+      code: 'ENOENT',
     })
-    await expect(registry.getRuntimeStatus(accountB)).resolves.toMatchObject({
-      appId: 'demo.catalog-app',
-      scope: accountB,
-      status: 'not_installed',
+  })
+
+  it('does not materialize a manager for a scope left by a failed install', async () => {
+    let managerCount = 0
+    const catalogScope = scope('account-a')
+    const scopeDir = join(
+      rootDir,
+      'catalog-scopes',
+      createCatalogLocalAppScopeKey(catalogScope),
+    )
+    await mkdir(scopeDir, { recursive: true })
+    await writeFile(join(scopeDir, 'scope.json'), JSON.stringify({
+      schemaVersion: 1,
+      scope: catalogScope,
+    }))
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => {
+        managerCount += 1
+        return new LocalAppRuntimeManager(options)
+      },
     })
 
-    const directories = await readdir(join(rootDir, 'catalog-scopes'))
-    expect(directories).toHaveLength(2)
-    const records = await Promise.all(directories.map(async directory =>
-      JSON.parse(await readFile(
-        join(rootDir, 'catalog-scopes', directory, 'scope.json'),
-        'utf8',
-      ))))
-    expect(records.map(record => record.scope.accountId).sort()).toEqual([
-      'account-a',
-      'account-b',
+    await expect(registry.getRuntimeStatus(catalogScope)).resolves.toEqual({
+      appId: catalogScope.catalogAppId,
+      scope: catalogScope,
+      status: 'not_installed',
+    })
+    expect(managerCount).toBe(0)
+  })
+
+  it('loads one existing manager for duplicate scopes in a concurrent batch', async () => {
+    let managerCount = 0
+    const catalogScope = scope('account-a')
+    const scopeDir = join(
+      rootDir,
+      'catalog-scopes',
+      createCatalogLocalAppScopeKey(catalogScope),
+    )
+    await mkdir(join(
+      scopeDir,
+      'apps',
+      createCatalogRuntimeAppId(catalogScope),
+    ), { recursive: true })
+    await Promise.all([
+      writeFile(join(scopeDir, 'scope.json'), JSON.stringify({
+        schemaVersion: 1,
+        scope: catalogScope,
+      })),
+      writeFile(join(
+        scopeDir,
+        'apps',
+        createCatalogRuntimeAppId(catalogScope),
+        'metadata.json',
+      ), '{}'),
     ])
+    class TrackingManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus> {
+        return { appId, status: 'installed', currentVersion: '1.0.0' }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => {
+        managerCount += 1
+        return new TrackingManager(options)
+      },
+    })
+
+    const statuses = await registry.getRuntimeStatuses(
+      Array.from({ length: 16 }, () => catalogScope),
+    )
+    expect(statuses).toHaveLength(16)
+    expect(managerCount).toBe(1)
+  })
+
+  it('returns every requested status through the 10,000 item contract', async () => {
+    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
+    for (const count of [1_000, 1_001, 10_000]) {
+      const scopes = Array.from({ length: count }, (_, index) => ({
+        ...scope('account-a'),
+        catalogAppId: `app-${index}`,
+      }))
+      const statuses = await registry.getRuntimeStatuses(scopes)
+      expect(statuses).toHaveLength(count)
+      expect(statuses.at(-1)?.appId).toBe(`app-${count - 1}`)
+    }
   })
 
   it('stops only managers belonging to the requested account', async () => {
@@ -104,29 +192,57 @@ describe('scoped local app runtime registry', () => {
       },
     })
     managerAccounts.push('account-a', 'account-b')
-    await registry.getRuntimeStatus(scope('account-a'))
-    await registry.getRuntimeStatus(scope('account-b'))
+    await registry.stop(scope('account-a'))
+    await registry.stop(scope('account-b'))
+    stopped.length = 0
 
     await registry.stopAccount('account-a')
 
-    expect(stopped).toEqual(['account-a:demo.catalog-app'])
+    expect(stopped).toEqual([
+      `account-a:${createCatalogRuntimeAppId(scope('account-a'))}`,
+    ])
   })
 
-  it('rejects an install whose business app id differs from its scope', async () => {
-    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
-    const request = {
-      appId: 'different.app',
-      scope: scope('account-a'),
+  it('keeps the business manifest id separate from the internal runtime id', async () => {
+    let managerRequest: LocalAppInstallRequest | null = null
+    class TrackingManager extends LocalAppRuntimeManager {
+      override async install(request: LocalAppInstallRequest) {
+        managerRequest = request
+        return {
+          appId: request.appId,
+          currentVersion: request.version,
+          versions: [request.version],
+          runtime: 'static' as const,
+          status: 'installed' as const,
+          installedAt: 1,
+        }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new TrackingManager(options),
+    })
+    const catalogScope = {
+      ...scope('account-a'),
+      catalogAppId: '应用.App-ID',
+    }
+    const installed = await registry.install({
+      scope: catalogScope,
       version: '1.0.0',
       downloadUrl: 'https://example.com/app.zip',
       checksum: 'a'.repeat(64),
       sizeBytes: 1,
       platform: 'darwin',
       arch: 'arm64',
-    } satisfies LocalAppInstallRequest
+    })
 
-    await expect(registry.install(request)).rejects.toMatchObject({
-      code: 'INVALID_REQUEST',
+    expect(managerRequest).toMatchObject({
+      appId: createCatalogRuntimeAppId(catalogScope),
+      expectedManifestAppId: '应用.App-ID',
+    })
+    expect(installed).toMatchObject({
+      appId: '应用.App-ID',
+      scope: catalogScope,
     })
   })
 })

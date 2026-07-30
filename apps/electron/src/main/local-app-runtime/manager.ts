@@ -117,7 +117,13 @@ interface ManagedRuntime {
 
 type ActiveReleaseIdentity = Pick<
   LocalAppInstallRequest,
-  'appId' | 'version' | 'checksum' | 'sizeBytes' | 'platform' | 'arch'
+  | 'appId'
+  | 'expectedManifestAppId'
+  | 'version'
+  | 'checksum'
+  | 'sizeBytes'
+  | 'platform'
+  | 'arch'
 >
 
 interface ActiveInstall {
@@ -274,6 +280,22 @@ function validateRequestIdentifier(value: unknown, field: 'appId' | 'version'): 
     : /^[0-9A-Za-z](?:[0-9A-Za-z._+-]{0,126}[0-9A-Za-z])?$/
   if (!pattern.test(value) || value === '.' || value === '..') {
     throw new LocalAppRuntimeError('INVALID_REQUEST', `${field} contains unsupported characters`, { [field]: value })
+  }
+  return value
+}
+
+function validateManifestBusinessAppId(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > 512
+    || value.includes('\0')
+    || value.trim().length === 0
+  ) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'expectedManifestAppId is invalid',
+    )
   }
   return value
 }
@@ -898,6 +920,9 @@ export class LocalAppRuntimeManager {
       throw new LocalAppRuntimeError('INVALID_REQUEST', 'install request must be an object')
     }
     const appId = validateRequestIdentifier(request.appId, 'appId')
+    const expectedManifestAppId = request.expectedManifestAppId === undefined
+      ? appId
+      : validateManifestBusinessAppId(request.expectedManifestAppId)
     const version = validateRequestIdentifier(request.version, 'version')
     const platform = normalizePlatform(request.platform)
     const arch = normalizeArchitecture(request.arch)
@@ -939,6 +964,7 @@ export class LocalAppRuntimeManager {
     }
     return {
       appId,
+      expectedManifestAppId,
       version,
       downloadUrl: downloadUrl.toString(),
       checksum: normalizeChecksum(request.checksum),
@@ -953,6 +979,7 @@ export class LocalAppRuntimeManager {
     right: LocalAppInstallRequest,
   ): boolean {
     return left.appId === right.appId
+      && left.expectedManifestAppId === right.expectedManifestAppId
       && left.version === right.version
       && left.checksum === right.checksum
       && left.sizeBytes === right.sizeBytes
@@ -963,6 +990,7 @@ export class LocalAppRuntimeManager {
   private getReleaseIdentity(request: LocalAppInstallRequest): ActiveReleaseIdentity {
     return {
       appId: request.appId,
+      expectedManifestAppId: request.expectedManifestAppId,
       version: request.version,
       checksum: request.checksum,
       sizeBytes: request.sizeBytes,
@@ -1053,7 +1081,11 @@ export class LocalAppRuntimeManager {
         },
       )
     }
-    if (existingVersion && await this.isInstalledVersionUsable(request.appId, request.version)) {
+    if (existingVersion && await this.isInstalledVersionUsable(
+      request.appId,
+      request.version,
+      request.expectedManifestAppId,
+    )) {
       const installed = (await this.getInstalledApps()).find(app => app.appId === request.appId)
       if (!installed) {
         throw new LocalAppRuntimeError('NOT_INSTALLED', `Metadata for ${request.appId} is incomplete`)
@@ -1075,10 +1107,10 @@ export class LocalAppRuntimeManager {
       this.throwIfCancelled(signal)
 
       const manifest = await this.loadAndValidateManifest(extractedPath)
-      if (manifest.appId !== request.appId) {
+      if (manifest.appId !== request.expectedManifestAppId) {
         throw new LocalAppRuntimeError(
           'INVALID_MANIFEST',
-          `Manifest appId "${manifest.appId}" does not match release appId "${request.appId}"`,
+          `Manifest appId "${manifest.appId}" does not match expected business appId "${request.expectedManifestAppId}"`,
         )
       }
       if (manifest.version !== request.version) {
@@ -2781,11 +2813,15 @@ export class LocalAppRuntimeManager {
     return absolute
   }
 
-  private async isInstalledVersionUsable(appId: string, version: string): Promise<boolean> {
+  private async isInstalledVersionUsable(
+    appId: string,
+    version: string,
+    expectedManifestAppId = appId,
+  ): Promise<boolean> {
     try {
       const manifest = await this.loadAndValidateManifest(this.getVersionDir(appId, version))
       await this.validateRequiredFiles(this.getVersionDir(appId, version), manifest)
-      return manifest.appId === appId && manifest.version === version
+      return manifest.appId === expectedManifestAppId && manifest.version === version
     } catch {
       return false
     }

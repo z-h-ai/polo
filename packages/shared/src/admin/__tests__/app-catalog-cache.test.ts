@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   denyCachedAppCatalogAuthorization,
+  denyCachedAppCatalogAuthorizationForAccount,
   getCachedAppCatalog,
   saveAppCatalog,
 } from '../app-catalog-cache.ts'
@@ -99,6 +100,30 @@ describe('app catalog cache', () => {
       authorizationStatus: 'authorized',
       apps: [{ id: 'app-a', availability: 'available' }],
     })
+  })
+
+  it('denies every cached organization for a session-ending account only', () => {
+    for (const [accountId, organizationId] of [
+      ['account-a', 'organization-1'],
+      ['account-a', 'organization-2'],
+      ['account-b', 'organization-1'],
+    ] as const) {
+      saveAppCatalog(accountId, organizationId, {
+        appConfigVersion: 'v1',
+        apps: [{
+          ...remoteApp(`${accountId}-${organizationId}`),
+          organizationId,
+        }],
+      }, 100)
+    }
+
+    expect(denyCachedAppCatalogAuthorizationForAccount('account-a')).toHaveLength(2)
+    expect(getCachedAppCatalog('account-a', 'organization-1'))
+      .toMatchObject({ authorizationStatus: 'denied' })
+    expect(getCachedAppCatalog('account-a', 'organization-2'))
+      .toMatchObject({ authorizationStatus: 'denied' })
+    expect(getCachedAppCatalog('account-b', 'organization-1'))
+      .toMatchObject({ authorizationStatus: 'authorized' })
   })
 
   it('ignores a damaged cache and safely starts over', () => {

@@ -33,8 +33,25 @@ export type LocalAppScope =
       catalogAppId: string
     }
 
-/** Existing string references are the explicit legacy compatibility path. */
-export type LocalAppReference = string | LocalAppScope
+/**
+ * Every renderer-to-main lifecycle request carries an explicit identity.
+ * POO-12 callers use `kind: 'legacy'`; a missing scope never falls back to it.
+ */
+export type LocalAppReference = LocalAppScope
+
+export type CatalogLocalAppScope = Extract<LocalAppScope, { kind: 'catalog' }>
+export type LegacyLocalAppScope = Extract<LocalAppScope, { kind: 'legacy' }>
+
+export function createLocalAppScopeKey(scope: LocalAppScope): string {
+  return scope.kind === 'catalog'
+    ? JSON.stringify([
+        'catalog',
+        scope.accountId,
+        scope.organizationId,
+        scope.catalogAppId,
+      ])
+    : JSON.stringify(['legacy', scope.appId])
+}
 
 /** Hard ceiling enforced by the runtime manager for one complete installation. */
 export const LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS = 20 * 60_000
@@ -69,13 +86,34 @@ export interface PoloAppManifest {
 
 export interface LocalAppInstallRequest {
   appId: string
-  scope?: LocalAppScope
+  /**
+   * Business identity expected in polo-app.json. It may use the full Admin
+   * entity-id contract and is deliberately separate from the filesystem-safe
+   * runtime app id.
+   */
+  expectedManifestAppId?: string
   version: string
   downloadUrl: string
   checksum: string
   sizeBytes: number
   platform: LocalAppPlatform
   arch: LocalAppArchitecture
+}
+
+export interface LocalAppCatalogInstallRequest {
+  scope: CatalogLocalAppScope
+}
+
+export interface LocalAppLegacyInstallRequest extends LocalAppInstallRequest {
+  scope: LegacyLocalAppScope
+}
+
+export type LocalAppRpcInstallRequest =
+  | LocalAppCatalogInstallRequest
+  | LocalAppLegacyInstallRequest
+
+export interface LocalAppBatchStatusRequest {
+  scopes: CatalogLocalAppScope[]
 }
 
 /**
@@ -112,6 +150,7 @@ export interface LocalAppRuntimeStatus {
   installationStatus?: 'downloading' | 'installing'
   progress?: LocalAppInstallProgress
   availableRelease?: LocalAppAvailableRelease
+  versionError?: 'invalid_semver'
   error?: LocalAppErrorPayload
 }
 

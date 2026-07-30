@@ -171,8 +171,8 @@ export const RPC_CHANNELS = {
     SET_AVAILABLE_RELEASE: 'local-apps:setAvailableRelease',
     GET_INSTALLED_APPS: 'local-apps:getInstalledApps',
     GET_RUNTIME_STATUS: 'local-apps:getRuntimeStatus',
+    GET_RUNTIME_STATUSES: 'local-apps:getRuntimeStatuses',
     GET_LOGS: 'local-apps:getLogs',
-    STOP_ACCOUNT: 'local-apps:stopAccount',
   },
   auth: {
     LOGOUT: 'auth:logout',

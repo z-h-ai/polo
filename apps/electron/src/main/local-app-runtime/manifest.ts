@@ -6,7 +6,6 @@ import type {
 } from '@polo-ai/shared/protocol'
 import { LocalAppRuntimeError } from './runtime-error'
 
-const APP_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/
 const VERSION_PATTERN = /^[0-9A-Za-z](?:[0-9A-Za-z._+-]{0,126}[0-9A-Za-z])?$/
 const VALID_RUNTIMES = new Set(['static', 'python', 'js'])
 const VALID_PLATFORMS = new Set<LocalAppPlatform>(['darwin', 'win32', 'linux'])
@@ -114,10 +113,10 @@ export function validatePoloAppManifest(
     })
   }
 
-  const appId = requireString(raw.appId, 'appId', { maxLength: 128 })
-  if (!APP_ID_PATTERN.test(appId)) {
-    invalid('polo-app.json appId must use lowercase letters, digits, dots, dashes, or underscores', { appId })
-  }
+  // This is a business entity id, not a filesystem component. Catalog ids may
+  // contain uppercase or Unicode and follow Admin's 512-character contract.
+  const appId = requireString(raw.appId, 'appId', { maxLength: 512 })
+  if (appId.trim().length === 0) invalid('polo-app.json appId must not be blank')
 
   const version = requireString(raw.version, 'version', { maxLength: 128 })
   if (!VERSION_PATTERN.test(version) || version === '.' || version === '..') {

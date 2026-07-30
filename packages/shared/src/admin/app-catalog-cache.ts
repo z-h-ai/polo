@@ -127,6 +127,28 @@ export function denyCachedAppCatalogAuthorization(
   return entry
 }
 
+export function denyCachedAppCatalogAuthorizationForAccount(
+  accountId: string,
+): AppCatalogCacheEntry[] {
+  const cache = readCache()
+  const denied: AppCatalogCacheEntry[] = []
+  for (const [key, previous] of Object.entries(cache.entries)) {
+    if (previous.accountId !== accountId) continue
+    const entry: AppCatalogCacheEntry = {
+      ...previous,
+      authorizationStatus: 'denied',
+      apps: previous.apps.map(app => ({
+        ...app,
+        availability: 'unavailable',
+      })),
+    }
+    cache.entries[key] = entry
+    denied.push(entry)
+  }
+  if (denied.length > 0) writeCache(cache)
+  return denied
+}
+
 export function listCachedAppCatalogs(accountId: string): AppCatalogCacheEntry[] {
   return Object.values(readCache().entries)
     .filter(entry => entry.accountId === accountId)

@@ -205,6 +205,7 @@ export type AppCatalogSyncResult =
       catalog: AppCatalogCacheEntry;
       source: 'network' | 'cache';
       refreshed: boolean;
+      accessMode: 'online' | 'offline' | 'denied';
       warning?: string;
     }
   | {
