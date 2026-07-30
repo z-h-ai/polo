@@ -116,6 +116,12 @@ export interface LocalAppBatchStatusRequest {
   scopes: CatalogLocalAppScope[]
 }
 
+export interface LocalAppRemoteUrlResult {
+  appId: string
+  scope: CatalogLocalAppScope
+  url: string
+}
+
 /**
  * Catalog-provided latest release metadata. Only `version` is required so the
  * client can publish update state before it has fetched full download details.

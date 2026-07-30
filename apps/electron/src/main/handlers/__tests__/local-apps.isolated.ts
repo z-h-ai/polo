@@ -332,6 +332,28 @@ describe('local app main-process authorization boundary', () => {
       .rejects.toThrow('no installable release')
   })
 
+  it('resolves remote URLs from the trusted cache and rejects stale access after denial', async () => {
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://trusted.example.com/app',
+      currentRelease: undefined,
+    }
+    const resolveRemoteUrl = handlers.get(
+      RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+    )!
+
+    await expect(resolveRemoteUrl(context, scope())).resolves.toEqual({
+      appId: '应用.App-ID',
+      scope: scope(),
+      url: 'https://trusted.example.com/app',
+    })
+
+    accessMode = 'denied'
+    await expect(resolveRemoteUrl(context, scope()))
+      .rejects.toThrow('no longer authorized')
+  })
+
   it('rejects catalog lifecycle operations for another or signed-out account', async () => {
     const start = handlers.get(RPC_CHANNELS.localApps.START)!
     signedInAccountId = 'account-b'

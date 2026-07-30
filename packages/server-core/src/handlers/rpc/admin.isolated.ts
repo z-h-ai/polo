@@ -1916,6 +1916,48 @@ describe('registerAdminHandlers', () => {
     expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
   })
 
+  it('fails closed when an expired-token refresh returns a non-temporary client error', async () => {
+    const cases = [
+      { errorCode: 'BAD_REQUEST', status: 400 },
+      { errorCode: 'VALIDATION_ERROR', status: 400 },
+      { errorCode: 'UNKNOWN_CLIENT_FAILURE', status: 422 },
+    ]
+
+    for (const testCase of cases) {
+      managerState.tokens = {
+        accessToken: `expired-${testCase.errorCode}`,
+        refreshToken: `refresh-${testCase.errorCode}`,
+        expiresAt: Date.now() - 1000,
+        userId: 'user-1',
+        username: 'admin',
+        displayName: 'Admin User',
+      }
+      adminSessionEnding.mockClear()
+      adminClientBehavior.refresh = async () => {
+        throw new TestAdminError(
+          'refresh rejected',
+          testCase.errorCode,
+          { status: testCase.status },
+        )
+      }
+      const { validate } = createHarness()
+
+      const result = await validate({
+        clientId: 'client-1',
+        workspaceId: null,
+        webContentsId: null,
+      })
+
+      expect(result).toMatchObject({
+        loggedIn: false,
+        errorCode: testCase.errorCode,
+        status: testCase.status,
+      })
+      expect(managerState.tokens).toBeNull()
+      expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+    }
+  })
+
   it('keeps an expired verified identity for restricted offline startup when refresh is unreachable', async () => {
     managerState.tokens = {
       accessToken: 'expired-access-token',

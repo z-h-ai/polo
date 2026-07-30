@@ -145,6 +145,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
   RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
   RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES,
+  RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
   RPC_CHANNELS.localApps.GET_LOGS,
 
   // notification — local OS notifications

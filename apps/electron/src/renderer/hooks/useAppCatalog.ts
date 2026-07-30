@@ -22,6 +22,8 @@ export interface AppCatalogState {
   refreshing: boolean
   warningCode: string | null
   errorCode: string | null
+  statusErrorCode: 'status_read_failed' | null
+  statusErrorScopeKeys: Record<string, true>
   accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
   host: {
@@ -32,6 +34,30 @@ export interface AppCatalogState {
 
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
 export const BUSY_RUNTIME_STATUS_LIMIT = 32
+
+const CATALOG_ACCESS_DENIED_CODES = new Set([
+  'UNAUTHORIZED',
+  'FORBIDDEN',
+  'ACCOUNT_DISABLED',
+  'INVALID_TOKEN',
+  'TOKEN_REVOKED',
+  'TOKEN_EXPIRED',
+  'MEMBERSHIP_REMOVED',
+  'MEMBERSHIP_SUSPENDED',
+  'ORGANIZATION_UNAVAILABLE',
+  'NOT_FOUND',
+])
+
+function isCatalogAccessDenied(
+  errorCode: string | null | undefined,
+  status?: number,
+): boolean {
+  return (
+    (typeof errorCode === 'string' && CATALOG_ACCESS_DENIED_CODES.has(errorCode))
+    || status === 401
+    || status === 403
+  )
+}
 
 export type CatalogVersionComparison =
   | { strategy: 'semver'; order: -1 | 0 | 1 }
@@ -104,6 +130,8 @@ export function useAppCatalog() {
     refreshing: false,
     warningCode: null,
     errorCode: null,
+    statusErrorCode: null,
+    statusErrorScopeKeys: {},
     accessMode: null,
     statuses: {},
     host: null,
@@ -159,7 +187,12 @@ export function useAppCatalog() {
     const contextKey = suppliedSnapshot?.contextKey ?? contextKeyRef.current
     if (!catalog || !contextKey) {
       if (refreshMode === 'replace') {
-        setState(current => ({ ...current, statuses: {} }))
+        setState(current => ({
+          ...current,
+          statuses: {},
+          statusErrorCode: null,
+          statusErrorScopeKeys: {},
+        }))
       }
       return
     }
@@ -177,43 +210,76 @@ export function useAppCatalog() {
     )
     if (selectedApps.length === 0) {
       if (refreshMode === 'replace' && isCurrentSnapshot(snapshot)) {
-        setState(current => ({ ...current, statuses: {} }))
+        setState(current => ({
+          ...current,
+          statuses: {},
+          statusErrorCode: null,
+          statusErrorScopeKeys: {},
+        }))
       }
       return
     }
 
     const scopes = selectedApps.map(app => scopeForCatalogApp(catalog, app))
-    let statuses: LocalAppRuntimeStatus[]
-    try {
-      statuses = []
-      for (let offset = 0; offset < scopes.length; offset += CATALOG_RUNTIME_STATUS_LIMIT) {
-        const batch = scopes.slice(offset, offset + CATALOG_RUNTIME_STATUS_LIMIT)
-        statuses.push(
-          ...await window.electronAPI.localApps.getRuntimeStatuses({ scopes: batch }),
-        )
-      }
-    } catch {
-      statuses = scopes.map(scope => ({
-        appId: scope.catalogAppId,
-        scope,
-        status: 'not_installed',
-      }))
-    }
-    if (!isCurrentSnapshot(snapshot)) return
-
-    setState(current => ({
-      ...current,
-      statuses: {
-        ...(refreshMode === 'merge' ? current.statuses : {}),
-        ...Object.fromEntries(statuses.map(status => {
+    const successfulStatuses = new Map<string, LocalAppRuntimeStatus>()
+    const failedScopeKeys = new Set<string>()
+    for (let offset = 0; offset < scopes.length; offset += CATALOG_RUNTIME_STATUS_LIMIT) {
+      const batch = scopes.slice(offset, offset + CATALOG_RUNTIME_STATUS_LIMIT)
+      const requestedKeys = new Set(batch.map(createLocalAppScopeKey))
+      try {
+        const statuses = await window.electronAPI.localApps.getRuntimeStatuses({
+          scopes: batch,
+        })
+        for (const status of statuses) {
           const scope = status.scope
           if (!scope || scope.kind !== 'catalog') {
             throw new Error(i18n.t('homeApps.errors.staleContext'))
           }
-          return [createLocalAppScopeKey(scope), status]
-        })),
-      },
-    }))
+          const scopeKey = createLocalAppScopeKey(scope)
+          if (!requestedKeys.has(scopeKey)) {
+            throw new Error(i18n.t('homeApps.errors.staleContext'))
+          }
+          successfulStatuses.set(scopeKey, status)
+        }
+        for (const scopeKey of requestedKeys) {
+          if (!successfulStatuses.has(scopeKey)) failedScopeKeys.add(scopeKey)
+        }
+      } catch {
+        for (const scopeKey of requestedKeys) failedScopeKeys.add(scopeKey)
+      }
+    }
+    if (!isCurrentSnapshot(snapshot)) return
+
+    setState(current => {
+      const nextStatuses: Record<string, LocalAppRuntimeStatus> = (
+        refreshMode === 'merge' ? { ...current.statuses } : {}
+      )
+      for (const [scopeKey, status] of successfulStatuses) {
+        nextStatuses[scopeKey] = status
+      }
+      for (const scopeKey of failedScopeKeys) {
+        const previousStatus = current.statuses[scopeKey]
+        if (previousStatus) {
+          nextStatuses[scopeKey] = previousStatus
+        }
+      }
+      const nextStatusErrorScopeKeys: Record<string, true> = (
+        refreshMode === 'merge' ? { ...current.statusErrorScopeKeys } : {}
+      )
+      for (const scopeKey of successfulStatuses.keys()) {
+        delete nextStatusErrorScopeKeys[scopeKey]
+      }
+      for (const scopeKey of failedScopeKeys) {
+        nextStatusErrorScopeKeys[scopeKey] = true
+      }
+      const hasStatusErrors = Object.keys(nextStatusErrorScopeKeys).length > 0
+      return {
+        ...current,
+        statuses: nextStatuses,
+        statusErrorCode: hasStatusErrors ? 'status_read_failed' : null,
+        statusErrorScopeKeys: nextStatusErrorScopeKeys,
+      }
+    })
   }, [isCurrentSnapshot])
 
   const sync = useCallback(async (force = false) => {
@@ -230,6 +296,8 @@ export function useAppCatalog() {
         refreshing: false,
         warningCode: null,
         errorCode: null,
+        statusErrorCode: null,
+        statusErrorScopeKeys: {},
         accessMode: null,
         statuses: {},
       }))
@@ -254,6 +322,22 @@ export function useAppCatalog() {
       ) return
       if (!result.success) {
         emitAdminAuthFailure(normalizeAdminError(result))
+        if (isCatalogAccessDenied(result.errorCode, result.status)) {
+          catalogRef.current = null
+          setState(current => ({
+            ...current,
+            catalog: null,
+            loading: false,
+            refreshing: false,
+            warningCode: null,
+            errorCode: result.errorCode || 'request_failed',
+            statusErrorCode: null,
+            statusErrorScopeKeys: {},
+            accessMode: 'denied',
+            statuses: {},
+          }))
+          return
+        }
         setState(current => ({
           ...current,
           loading: false,
@@ -288,12 +372,29 @@ export function useAppCatalog() {
         generation !== syncGenerationRef.current
         || contextKeyRef.current !== contextKey
       ) return
-      setState(current => ({
-        ...current,
-        loading: false,
-        refreshing: false,
-        errorCode: getHomeAppErrorCode(error) ?? 'request_failed',
-      }))
+      const errorCode = getHomeAppErrorCode(error) ?? 'request_failed'
+      if (isCatalogAccessDenied(errorCode)) {
+        catalogRef.current = null
+        setState(current => ({
+          ...current,
+          catalog: null,
+          loading: false,
+          refreshing: false,
+          warningCode: null,
+          errorCode,
+          statusErrorCode: null,
+          statusErrorScopeKeys: {},
+          accessMode: 'denied',
+          statuses: {},
+        }))
+      } else {
+        setState(current => ({
+          ...current,
+          loading: false,
+          refreshing: false,
+          errorCode,
+        }))
+      }
     }
   }, [
     organization,
@@ -325,6 +426,8 @@ export function useAppCatalog() {
       refreshing: false,
       warningCode: null,
       errorCode: null,
+      statusErrorCode: null,
+      statusErrorScopeKeys: {},
       accessMode: null,
       statuses: {},
     }))
@@ -538,6 +641,23 @@ export function useAppCatalog() {
     return result
   }, [currentSnapshotForApp, requireCurrent])
 
+  const resolveRemoteUrl = useCallback(async (app: CatalogApp) => {
+    if (app.deliveryMode !== 'remote_url' || app.availability !== 'available') {
+      throw new Error(i18n.t('homeApps.errors.unavailable'))
+    }
+    const snapshot = currentSnapshotForApp(app)
+    const scope = scopeForCatalogApp(snapshot.catalog, app)
+    const result = await window.electronAPI.localApps.resolveRemoteUrl(scope)
+    requireCurrent(snapshot)
+    if (
+      result.appId !== app.id
+      || createLocalAppScopeKey(result.scope) !== createLocalAppScopeKey(scope)
+    ) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
+    }
+    return result.url
+  }, [currentSnapshotForApp, requireCurrent])
+
   const getStatus = useCallback((app: CatalogApp): LocalAppRuntimeStatus | undefined => {
     try {
       return state.statuses[scopeKeyForApp(app)]
@@ -556,6 +676,7 @@ export function useAppCatalog() {
     uninstall,
     cancelInstall,
     getLogs,
+    resolveRemoteUrl,
     getStatus,
     scopeForApp,
     scopeKeyForApp,

@@ -212,11 +212,13 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  CatalogLocalAppScope,
   LocalAppAvailableRelease,
   LocalAppBatchStatusRequest,
   LocalAppRpcInstallRequest,
   LocalAppInstalledApp,
   LocalAppReference,
+  LocalAppRemoteUrlResult,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
   LocalAppLogsOptions,
@@ -507,6 +509,7 @@ export interface ElectronAPI {
     getInstalledApps(scope: LocalAppReference): Promise<LocalAppInstalledApp[]>
     getRuntimeStatus(app: LocalAppReference): Promise<LocalAppRuntimeStatus>
     getRuntimeStatuses(request: LocalAppBatchStatusRequest): Promise<LocalAppRuntimeStatus[]>
+    resolveRemoteUrl(scope: CatalogLocalAppScope): Promise<LocalAppRemoteUrlResult>
     getLogs(app: LocalAppReference, options?: LocalAppLogsOptions): Promise<string>
   }
 

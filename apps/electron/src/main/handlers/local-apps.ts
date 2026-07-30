@@ -61,7 +61,7 @@ interface AuthorizedCatalogApp {
   accessMode: 'online' | 'offline' | 'denied'
 }
 
-async function requireAuthorizedCatalogApp(
+async function requireAuthorizedCatalogEntry(
   scope: CatalogLocalAppScope,
 ): Promise<AuthorizedCatalogApp> {
   await requireTrustedCatalogAccount(scope)
@@ -82,6 +82,13 @@ async function requireAuthorizedCatalogApp(
       'This organization app is no longer authorized for installation or launch',
     )
   }
+  return { app, accessMode }
+}
+
+async function requireAuthorizedCatalogApp(
+  scope: CatalogLocalAppScope,
+): Promise<AuthorizedCatalogApp> {
+  const { app, accessMode } = await requireAuthorizedCatalogEntry(scope)
   if (app.deliveryMode !== 'local_bundle') {
     throw new LocalAppRuntimeError(
       'INVALID_REQUEST',
@@ -220,6 +227,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
   RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
   RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES,
+  RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
   RPC_CHANNELS.localApps.GET_LOGS,
 ] as const
 
@@ -445,6 +453,25 @@ export function registerLocalAppHandlers(server: RpcServer): void {
         localApps.get(scopes[index]!.catalogAppId)!,
         catalog.trustedReleases?.[scopes[index]!.catalogAppId],
       ))
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+    async (_ctx, rawScope: unknown) => {
+      const scope = validateCatalogLocalAppScope(rawScope)
+      const { app } = await requireAuthorizedCatalogEntry(scope)
+      if (app.deliveryMode !== 'remote_url' || !app.remoteUrl) {
+        throw new LocalAppRuntimeError(
+          'INVALID_REQUEST',
+          'The authorized Catalog app is not a remote URL app',
+        )
+      }
+      return {
+        appId: app.id,
+        scope,
+        url: app.remoteUrl,
+      }
     },
   )
 

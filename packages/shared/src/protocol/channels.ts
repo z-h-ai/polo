@@ -172,6 +172,7 @@ export const RPC_CHANNELS = {
     GET_INSTALLED_APPS: 'local-apps:getInstalledApps',
     GET_RUNTIME_STATUS: 'local-apps:getRuntimeStatus',
     GET_RUNTIME_STATUSES: 'local-apps:getRuntimeStatuses',
+    RESOLVE_REMOTE_URL: 'local-apps:resolveRemoteUrl',
     GET_LOGS: 'local-apps:getLogs',
   },
   auth: {

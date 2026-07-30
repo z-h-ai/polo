@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { CatalogApp } from '@polo-ai/shared/admin'
-import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
+import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import {
+  createLocalAppScopeKey,
+  type LocalAppRuntimeStatus,
+} from '@polo-ai/shared/protocol'
 import { AppIcon } from './AppIcon'
 import {
   OrganizationAppCard,
@@ -47,6 +50,27 @@ interface RecentApp {
 }
 
 const MAX_RECENT_APPS = 6
+export const ORGANIZATION_APP_PAGE_SIZE = 60
+
+export function selectOrganizationAppsForDisplay(
+  catalog: AppCatalogCacheEntry | null,
+  statuses: Readonly<Record<string, LocalAppRuntimeStatus>>,
+): CatalogApp[] {
+  if (!catalog) return []
+  const withdrawnWithLocalData = (catalog.withdrawnApps ?? []).filter(app => {
+    if (app.deliveryMode !== 'local_bundle') return false
+    const scopeKey = createLocalAppScopeKey({
+      kind: 'catalog',
+      accountId: catalog.accountId,
+      organizationId: catalog.organizationId,
+      catalogAppId: app.id,
+    })
+    const status = statuses[scopeKey]
+    return Boolean(status && status.status !== 'not_installed')
+  })
+  return [...catalog.apps, ...withdrawnWithLocalData]
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+}
 
 function readRecentApps(): RecentApp[] {
   const raw = getLocalStorage<unknown>(KEYS.homeRecentApps, [])
@@ -130,6 +154,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const [logsTarget, setLogsTarget] = useState<CatalogApp | null>(null)
   const [logs, setLogs] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
+  const [organizationAppLimit, setOrganizationAppLimit] = useState(
+    ORGANIZATION_APP_PAGE_SIZE,
+  )
 
   const externalApps = useMemo(
     () => installedApps
@@ -144,12 +171,19 @@ export function HomePage({ onAddApp }: HomePageProps) {
     [installedApps],
   )
   const organizationApps = useMemo(
-    () => catalog.state.catalog
-      ? getAppCatalogApps(catalog.state.catalog)
-          .sort((left, right) => left.sortOrder - right.sortOrder)
-      : [],
-    [catalog.state.catalog],
+    () => selectOrganizationAppsForDisplay(
+      catalog.state.catalog,
+      catalog.state.statuses,
+    ),
+    [catalog.state.catalog, catalog.state.statuses],
   )
+  const displayedOrganizationApps = organizationApps.slice(0, organizationAppLimit)
+  useEffect(() => {
+    setOrganizationAppLimit(ORGANIZATION_APP_PAGE_SIZE)
+  }, [
+    catalog.organization?.organizationContextKey,
+    catalog.state.catalog?.appConfigVersion,
+  ])
   const activeOrganization = catalog.organization?.organizationSummaries.find(
     item => item.id === catalog.organization?.activeOrganizationId,
   )
@@ -181,13 +215,8 @@ export function HomePage({ onAddApp }: HomePageProps) {
     try {
       const scopeKey = catalog.scopeKeyForApp(app)
       if (app.deliveryMode === 'remote_url') {
-        if (!app.remoteUrl) {
-          toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
-            description: t('homeApps.errors.missingUrl'),
-          })
-          return
-        }
-        openApp(catalogTabDefinition(scopeKey, app, app.remoteUrl))
+        const remoteUrl = await catalog.resolveRemoteUrl(app)
+        openApp(catalogTabDefinition(scopeKey, app, remoteUrl))
       } else {
         const result = await catalog.start(app)
         openApp(catalogTabDefinition(scopeKey, app, result.url))
@@ -424,6 +453,23 @@ export function HomePage({ onAddApp }: HomePageProps) {
               </div>
             )}
 
+            {catalog.state.statusErrorCode && (
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                <span className="flex items-center gap-2">
+                  <Icons.CircleAlert className="size-4 shrink-0" />
+                  {t('homeApps.errors.statusReadFailed')}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { void catalog.refreshRuntimeStatuses() }}
+                >
+                  {t('homeApps.actions.tryAgain')}
+                </Button>
+              </div>
+            )}
+
             {catalog.state.loading ? (
               <div className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10">
                 <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
@@ -460,23 +506,48 @@ export function HomePage({ onAddApp }: HomePageProps) {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {organizationApps.map(app => (
-                  <OrganizationAppCard
-                    key={catalog.scopeKeyForApp(app)}
-                    app={app}
-                    status={catalog.getStatus(app)}
-                    compatible={compatibleWithHost(app)}
-                    offline={catalog.state.accessMode === 'offline'}
-                    onPrimaryAction={(target, action) => {
-                      void handlePrimaryAction(target, action)
-                    }}
-                    onStop={(target) => { void handleStop(target) }}
-                    onUninstall={setUninstallTarget}
-                    onViewLogs={(target) => { void showLogs(target) }}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {displayedOrganizationApps.map(app => {
+                    const scopeKey = catalog.scopeKeyForApp(app)
+                    const status = catalog.getStatus(app)
+                    return (
+                      <OrganizationAppCard
+                        key={scopeKey}
+                        app={app}
+                        status={status}
+                        statusUnavailable={Boolean(
+                          !status
+                          && catalog.state.statusErrorScopeKeys?.[scopeKey],
+                        )}
+                        compatible={compatibleWithHost(app)}
+                        offline={catalog.state.accessMode === 'offline'}
+                        onPrimaryAction={(target, action) => {
+                          void handlePrimaryAction(target, action)
+                        }}
+                        onStop={(target) => { void handleStop(target) }}
+                        onUninstall={setUninstallTarget}
+                        onViewLogs={(target) => { void showLogs(target) }}
+                      />
+                    )
+                  })}
+                </div>
+                {displayedOrganizationApps.length < organizationApps.length && (
+                  <div className="mt-5 flex justify-center">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setOrganizationAppLimit(current => (
+                          current + ORGANIZATION_APP_PAGE_SIZE
+                        ))
+                      }}
+                    >
+                      {t('homeApps.actions.loadMore')}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </section>
         )}

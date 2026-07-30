@@ -1440,11 +1440,16 @@ async function ensureValidTokens(
     if (!await sessions.isCurrent(manager, initialSession)) {
       return { tokens: null, stale: true }
     }
+    const ended = await endAdminSession(
+      manager,
+      deps,
+      sessions,
+      initialSession,
+    )
+    if (!ended) return { tokens: null, stale: true }
     return {
-      tokens,
-      session: initialSession,
-      accessMode: 'offline',
-      warning: toAdminRpcError(error).message,
+      tokens: null,
+      authError: toAdminRpcError(error),
     }
   }
 }

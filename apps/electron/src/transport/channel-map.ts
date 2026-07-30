@@ -132,6 +132,7 @@ export const CHANNEL_MAP = {
   'localApps.getInstalledApps': invoke(RPC_CHANNELS.localApps.GET_INSTALLED_APPS),
   'localApps.getRuntimeStatus': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS),
   'localApps.getRuntimeStatuses': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES),
+  'localApps.resolveRemoteUrl': invoke(RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL),
   'localApps.getLogs': invoke(RPC_CHANNELS.localApps.GET_LOGS),
 
   // Auth

@@ -25,6 +25,7 @@ export type CatalogPrimaryAction =
 interface OrganizationAppCardProps {
   app: CatalogApp
   status?: LocalAppRuntimeStatus
+  statusUnavailable?: boolean
   compatible: boolean
   offline: boolean
   onPrimaryAction: (
@@ -139,6 +140,7 @@ function AppArtwork({ app }: { app: CatalogApp }) {
 export function OrganizationAppCard({
   app,
   status,
+  statusUnavailable = false,
   compatible,
   offline,
   onPrimaryAction,
@@ -147,7 +149,9 @@ export function OrganizationAppCard({
   onViewLogs,
 }: OrganizationAppCardProps) {
   const { t } = useTranslation()
-  const action = primaryActionFor(app, status, compatible, offline)
+  const action = statusUnavailable
+    ? 'unavailable'
+    : primaryActionFor(app, status, compatible, offline)
   const busy = status?.status === 'starting'
   const installed = app.deliveryMode === 'local_bundle'
     && Boolean(status && status.status !== 'not_installed'
@@ -218,7 +222,9 @@ export function OrganizationAppCard({
             'truncate text-[11px] text-muted-foreground',
             (status?.status === 'broken' || status?.versionError) && 'text-destructive',
           )}>
-            {statusText(t, app, status, compatible)}
+            {statusUnavailable
+              ? t('homeApps.status.statusUnavailable')
+              : statusText(t, app, status, compatible)}
           </p>
           {typeof progress === 'number' && (
             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">

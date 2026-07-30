@@ -209,6 +209,11 @@ beforeEach(() => {
           installLocalApp(request),
         cancelInstall: (scope: CatalogLocalAppScope) => cancelInstall(scope),
         start: (scope: CatalogLocalAppScope) => startLocalApp(scope),
+        resolveRemoteUrl: async (scope: CatalogLocalAppScope) => ({
+          appId: scope.catalogAppId,
+          scope,
+          url: 'https://trusted.example.com',
+        }),
       },
     },
   })
@@ -237,6 +242,42 @@ describe('useAppCatalog scoped async state', () => {
     })
     expect(failures).toEqual([{ code: 'FORBIDDEN', status: 403 }])
     unsubscribe()
+  })
+
+  it('clears a previously cached catalog when a later sync returns NOT_FOUND', async () => {
+    const remoteApp: CatalogApp = {
+      ...app('organization-a', 'remote-app'),
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://stale.example.com',
+      currentRelease: undefined,
+    }
+    let syncCount = 0
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
+      syncCount += 1
+      return syncCount === 1
+        ? syncResult('organization-a', 'cached', [remoteApp])
+        : {
+            success: false,
+            errorCode: 'NOT_FOUND',
+            message: 'Organization is unavailable',
+            status: 404,
+          }
+    })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps[0]?.id).toBe('remote-app')
+    })
+    const staleRemoteApp = result.current.state.catalog!.apps[0]!
+
+    await act(async () => {
+      await result.current.sync(true)
+    })
+
+    expect(result.current.state.catalog).toBeNull()
+    expect(result.current.state.accessMode).toBe('denied')
+    expect(result.current.state.errorCode).toBe('NOT_FOUND')
+    expect(result.current.state.statuses).toEqual({})
+    await expect(result.current.resolveRemoteUrl(staleRemoteApp)).rejects.toThrow()
   })
 
   it('discards an out-of-order response after the organization changes', async () => {
@@ -543,6 +584,74 @@ describe('useAppCatalog scoped async state', () => {
       status: 'running',
       currentVersion: '1.0.0',
     })
+    view.unmount()
+  })
+
+  it('merges successful status batches and preserves trusted state when the second batch fails', async () => {
+    const apps = Array.from(
+      { length: 10_001 },
+      (_, index) => app('organization-a', `app-${index}`),
+    )
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> =>
+      syncResult('organization-a', 'partial-batch', apps))
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'installed',
+      currentVersion: '1.0.0',
+    })))
+
+    const view = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(Object.keys(view.result.current.state.statuses)).toHaveLength(10_001)
+    }, { timeout: 10_000 })
+
+    let batch = 0
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => {
+      batch += 1
+      if (batch === 2) throw new Error('second batch unavailable')
+      return request.scopes.map(scope => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'running',
+        currentVersion: '1.0.0',
+        runningVersion: '1.0.0',
+      }))
+    })
+    await act(async () => {
+      await view.result.current.refreshRuntimeStatuses()
+    })
+
+    expect(view.result.current.getStatus(apps[0]!)?.status).toBe('running')
+    expect(view.result.current.getStatus(apps.at(-1)!)?.status).toBe('installed')
+    expect(Object.values(view.result.current.state.statuses)
+      .some(status => status.status === 'not_installed')).toBe(false)
+    expect(view.result.current.state.statusErrorCode).toBe('status_read_failed')
+    expect(view.result.current.state.statusErrorScopeKeys[
+      view.result.current.scopeKeyForApp(apps[0]!)
+    ]).toBeUndefined()
+    expect(view.result.current.state.statusErrorScopeKeys[
+      view.result.current.scopeKeyForApp(apps.at(-1)!)
+    ]).toBe(true)
+
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'stopped',
+      currentVersion: '1.0.0',
+    })))
+    await act(async () => {
+      await view.result.current.refreshRuntimeStatuses()
+    })
+    expect(view.result.current.getStatus(apps.at(-1)!)?.status).toBe('stopped')
+    expect(view.result.current.state.statusErrorCode).toBeNull()
+    expect(view.result.current.state.statusErrorScopeKeys).toEqual({})
     view.unmount()
   })
 
