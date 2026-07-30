@@ -2307,6 +2307,72 @@ describe('registerAdminHandlers', () => {
     )
   })
 
+  it('rejects reuse of a Catalog id with a different delivery mode', async () => {
+    const organizationId = '12222222-2222-4222-8222-222222222222'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    const cached = {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized' as const,
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [{
+        id: 'stable-app-id',
+        organizationId,
+        name: 'Remote App',
+        description: '',
+        deliveryMode: 'remote_url' as const,
+        remoteUrl: 'https://remote.example.com',
+        availability: 'available' as const,
+        sortOrder: 0,
+      }],
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, cached)
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    adminClientBehavior.getAppCatalog = async () => ({
+      notModified: false,
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'stable-app-id',
+        organizationId,
+        name: 'Local App',
+        description: '',
+        deliveryMode: 'local_bundle',
+        currentRelease: {
+          version: '1.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://catalog.example.com/app.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 1,
+        },
+        sortOrder: 0,
+      }],
+    })
+    const { syncAppCatalog } = createHarness()
+
+    expect(await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      { force: true },
+    )).toEqual({
+      success: true,
+      catalog: cached,
+      source: 'cache',
+      refreshed: false,
+      accessMode: 'offline',
+      warningCode: 'SERVER_ERROR',
+      warning: 'Admin request failed',
+    })
+    expect(appCatalogCache.get(`user-1:${organizationId}`)).toEqual(cached)
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('offline')
+  })
+
   it('does not let an older catalog response overwrite a newer committed catalog', async () => {
     const organizationId = '11111111-1111-4111-8111-111111111111'
     managerState.tokens = {

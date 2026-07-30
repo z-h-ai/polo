@@ -1,75 +1,57 @@
-# POL-51 第 2 轮阻塞审查修复报告
+# POL-51 第 2 轮 Blocking Issues 修复报告
 
-## 逐条处理
+## 逐条处理结果
 
-### 1. 区分账号认证失效与 Catalog 组织失权
+### 1. 全量测试中的 transfer TTL 与 session watcher 竞态
 
-- 为 Catalog 同步增加独立的认证失败分类：
-  - `UNAUTHORIZED`、`INVALID_TOKEN`、`TOKEN_REVOKED`、`TOKEN_EXPIRED`、
-    `ACCOUNT_DISABLED` 以及明确 HTTP 401 继续结束可信账号会话。
-  - `FORBIDDEN`、`MEMBERSHIP_REMOVED`、`MEMBERSHIP_SUSPENDED`、
-    `ORGANIZATION_UNAVAILABLE`、`NOT_FOUND` 以及 Catalog HTTP 403
-    只调用 `denyCatalogScope`。
-- Catalog 组织失权不再依赖“必须存在缓存”才建立 deny gate；无缓存时同样
-  fail closed。
-- renderer 的 Catalog 同步使用独立的账号失效事件分类。组织级 403/成员失权
-  不再触发 App 全局登出，账号禁用和 token/session 失效仍触发登出。
-- 组织失权后保留当前账号凭据和 denied Catalog：
-  - `INSTALL`、更新 Release、`START`、`RESTART` 均返回
-    `NOT_AUTHORIZED`。
-  - 运行状态、日志、`STOP`、`UNINSTALL` 继续可用。
-- 增加真实 Admin handler + scoped local runtime production wiring 测试，
-  覆盖 Catalog 403 后账号会话保留、生命周期操作 fail closed，以及本地数据
-  管理继续可用。
-- 增加 App 与 `useAppCatalog` 测试，覆盖组织 403 不清理账号上下文、
-  `ACCOUNT_DISABLED` 仍进入账号认证失效链路。
+- Transfer 收到合法 chunk 后会在文件写入前刷新 TTL，避免旧 deadline 在异步文件 I/O 期间提前清理仍活跃的传输。
+- TTL 回归测试改为 fake timer 驱动，不再依赖 25ms 墙钟等待。
+- Session 文件监听增加可注入的 watcher factory 测试 seam；两组 watcher 测试使用事件控制器明确触发变更并等待目标 client push，不再依赖真实 `fs.watch` 的调度时机和固定 sleep。
+- Transfer + 两组 watcher 回归连续复跑 5 次，均为 10 pass、0 fail。
+- 项目标准 `bun run test` 完整执行 3 次，均成功退出。
 
-### 2. 401/403 响应体半开时保留已知授权状态
+### 2. GET_LOGS 主进程授权边界
 
-- AdminClient 在 `fetch` 返回响应头时立即记录 `Response`。
-- 统一 deadline 仍覆盖 `response.text()`；响应体半开会按期限 abort。
-- 若已收到 HTTP 401/403，body 超时或读取失败不再改写为 `TIMEOUT`：
-  - 401 保留为 `UNAUTHORIZED`，继续遵循既有 token refresh 规则。
-  - 403 保留为 `FORBIDDEN`。
-- 其他 fetch/body 半开行为仍稳定映射为 `TIMEOUT`。
-- 新增 401、403 body 永不结束的确定性测试，验证 abort 只发生一次且不会
-  延迟重复触发。
-- server-core 回归测试确认 Catalog 403 进入 denied Catalog，不会进入
-  `NETWORK_ERROR`/`TIMEOUT` 的旧授权缓存回退。
+- `local-apps:getLogs` 在主进程先读取 scoped registry 的可信运行状态，仅 `status = broken` 时允许读取日志；`installed`、`running`、`stopped` 等健康状态统一返回 `NOT_AUTHORIZED`。
+- denied/withdrawn App 仍可读取状态并执行 STOP、UNINSTALL，但健康状态不能读取日志。
+- 新增直接 RPC 回归，覆盖 healthy installed/running/stopped、denied healthy 均拒绝，以及 broken/启动失败状态可读取日志。
+
+### 3. Catalog 同 ID deliveryMode 变更
+
+- 将 `deliveryMode` 纳入 Catalog App 身份契约：同一账号、组织、Catalog App ID 一旦存在于最近可信的 visible 或 withdrawn Catalog 中，后续成功响应不得把 `remote_url` 与 `local_bundle` 相互切换。
+- 模式冲突会在建立新 fence 或保存新缓存前以 `SERVER_ERROR` 拒绝，新响应不能提交；同步保留上一可信缓存并进入现有受限离线回退。
+- 因旧 local bundle 身份和授权上下文不发生切换，已经进入 manager 的 START/INSTALL 结果仍按旧可信上下文提交，STOP/UNINSTALL 数据管理入口继续可达。
+- 新增 shared handler 级 remote-to-local 冲突测试，以及 production wiring 的 deferred START、deferred INSTALL、STOP、UNINSTALL 确定性测试。
 
 ## 关键文件
 
-- `packages/shared/src/admin/client.ts`
-- `packages/shared/src/admin/__tests__/client.test.ts`
+- `packages/server-core/src/handlers/rpc/transfer.ts`
+- `packages/server-core/src/handlers/rpc/transfer.test.ts`
+- `packages/server-core/src/handlers/handler-deps.ts`
+- `packages/server-core/src/handlers/rpc/sessions.ts`
+- `apps/electron/src/main/handlers/__tests__/session-watcher.test.ts`
+- `apps/electron/src/main/handlers/__tests__/sessions-watchers.test.ts`
+- `apps/electron/src/main/handlers/local-apps.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
 - `packages/server-core/src/handlers/rpc/admin.ts`
 - `packages/server-core/src/handlers/rpc/admin.isolated.ts`
 - `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-- `apps/electron/src/renderer/lib/admin-auth-failure.ts`
-- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
-- `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-- `apps/electron/src/renderer/App.tsx`
-- `apps/electron/src/renderer/__tests__/App.organization-deep-link.interaction.isolated.ts`
 
-## 全量自测结果
+## 自测结果
 
-- 定向回归：
-  - AdminClient：34 pass，0 fail。
-  - Admin RPC：50 pass，0 fail。
-  - production wiring：13 pass，0 fail。
-  - `useAppCatalog`：20 pass，0 fail。
-  - App：6 pass，0 fail。
-- `bun run test`：通过。
-  - 常规测试：4,803 pass，19 skip，0 fail（4,822 tests / 365 files）。
-  - 19 个 isolated 测试文件：268 pass，0 fail。
-  - 合计：5,071 pass，19 skip，0 fail。
-- `bun run typecheck:all`：通过。
-- 修改文件定向 ESLint：0 error；Electron 仅有既存 warning。
+- `bun run test`：完整执行 3 次，均通过；最终复跑为 4,816 pass、19 skip、0 fail。
+- `bun run validate:ci`：通过；包含 shared 配置测试、资源脚本 smoke tests、i18n parity/sorted/coverage 检查。
+- Transfer 与 watcher 三个目标测试文件连续复跑 5 次：每次 10 pass、0 fail。
+- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`：55 pass、0 fail。
+- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`：18 pass、0 fail。
+- `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`：19 pass、0 fail。
+- `bun run typecheck:electron`：通过。
+- `packages/server-core` 执行 `bun run tsc --noEmit`：通过。
+- `packages/shared` 执行 `bun run tsc --noEmit`：通过。
+- 变更涉及的 Electron 文件定向 ESLint：通过。
 - `git diff --check`：通过。
 
 ## 遗留问题
 
-- 功能与阻塞审查项无遗留。
-- 根级 `bun run lint` 目前无法完整启动：仓库引用的
-  `scripts/check-raw-sends.sh` 与 `scripts/check-task-tool-checks.sh`
-  在当前 worktree 不存在；已改为对本轮修改文件执行可用的 package ESLint，
-  结果 0 error。
+- 本轮 3 项 blocking issue 无遗留。
+- worktree 中原有的 `.pipeline/fix-report-round3.md`、`.pipeline/fix-report-round4.md` 删除状态，以及 `design-demos/`、3 个 `docs/spec-home-app-admin-config*.md` 未跟踪内容均未改动，也不会纳入本轮 commit。

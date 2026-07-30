@@ -765,7 +765,7 @@ describe('Admin session and scoped local app production wiring', () => {
     const { handlers, context } = registerProductionHandlers(root)
     const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
 
-    await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(context, scope))
+    await expect(runtimeRegistry.getLogs(scope))
       .resolves.toBe('retained organization logs')
     getAppCatalogAdmin = async () => {
       throw new TestAdminError('membership removed', 'FORBIDDEN', {
@@ -818,7 +818,7 @@ describe('Admin session and scoped local app production wiring', () => {
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       scope,
-    )).resolves.toBe('retained organization logs')
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
       context,
       scope,
@@ -889,7 +889,7 @@ describe('Admin session and scoped local app production wiring', () => {
 
     // Materialize the retained installation before the authorization truth
     // changes, matching a previously installed local app.
-    await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(context, scope))
+    await expect(runtimeRegistry.getLogs(scope))
       .resolves.toBe('removed organization logs')
     await expect(handlers.get(RPC_CHANNELS.admin.LIST_ORGANIZATIONS)!(context))
       .resolves.toMatchObject({
@@ -938,7 +938,7 @@ describe('Admin session and scoped local app production wiring', () => {
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       scope,
-    )).resolves.toBe('removed organization logs')
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
       context,
       scope,
@@ -1210,7 +1210,7 @@ describe('Admin session and scoped local app production wiring', () => {
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       scope,
-    )).resolves.toBe('retained logs')
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
       context,
       scope,
@@ -1225,7 +1225,7 @@ describe('Admin session and scoped local app production wiring', () => {
       scope.organizationId,
     )).resolves.toEqual(new Set([scope.catalogAppId]))
     expect(managerFactoryCalls).toBe(1)
-    expect(managerCalls).toEqual(['logs', 'stop', 'uninstall'])
+    expect(managerCalls).toEqual(['stop', 'uninstall'])
 
     const { availability: _availability, ...networkApp } = catalog.apps[0]!
     saveCatalogError = null
@@ -1244,7 +1244,7 @@ describe('Admin session and scoped local app production wiring', () => {
       })
     await expect(handlers.get(RPC_CHANNELS.localApps.START)!(context, scope))
       .resolves.toMatchObject({ url: 'http://127.0.0.1:4674' })
-    expect(managerCalls).toEqual(['logs', 'stop', 'uninstall', 'start'])
+    expect(managerCalls).toEqual(['stop', 'uninstall', 'start'])
   })
 
   it('keeps a withdrawn remote URL denied when its replacement cache write fails', async () => {
@@ -1355,6 +1355,157 @@ describe('Admin session and scoped local app production wiring', () => {
       url: 'http://127.0.0.1:4673',
     })
     expect(calls).toEqual(['start'])
+  })
+
+  it('rejects a local-to-remote mode change without fencing an entered start', async () => {
+    const startEntered = createDeferred<void>()
+    const finishStart = createDeferred<LocalAppStartResult>()
+    const calls: string[] = []
+    class ModeConflictStartManager extends LocalAppRuntimeManager {
+      override start(): Promise<LocalAppStartResult> {
+        calls.push('start')
+        startEntered.resolve()
+        return finishStart.promise
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        return { appId, status: 'stopped', currentVersion: '1.0.0' }
+      }
+
+      override async uninstall(): Promise<void> {
+        calls.push('uninstall')
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-app-mode-conflict-start-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new ModeConflictStartManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    const currentApp = catalog.apps[0]!
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [{
+        ...currentApp,
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://catalog.example/changed-mode',
+        currentRelease: undefined,
+      }],
+    })
+    const { handlers, context } = registerProductionHandlers(root)
+    const pendingStart = handlers.get(RPC_CHANNELS.localApps.START)!(context, scope)
+    await startEntered.promise
+
+    await expect(handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!(
+      context,
+      scope.organizationId,
+      { force: true },
+    )).resolves.toMatchObject({
+      success: true,
+      source: 'cache',
+      refreshed: false,
+      accessMode: 'offline',
+      warningCode: 'SERVER_ERROR',
+      catalog: {
+        appConfigVersion: 'catalog-v1',
+        apps: [{
+          id: scope.catalogAppId,
+          deliveryMode: 'local_bundle',
+        }],
+      },
+    })
+
+    finishStart.resolve({
+      appId: createCatalogRuntimeAppId(scope),
+      version: '1.0.0',
+      url: 'http://127.0.0.1:4675',
+      port: 4675,
+    })
+    await expect(pendingStart).resolves.toMatchObject({
+      url: 'http://127.0.0.1:4675',
+    })
+    await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(context, scope))
+      .resolves.toMatchObject({ status: 'stopped' })
+    await expect(handlers.get(RPC_CHANNELS.localApps.UNINSTALL)!(
+      context,
+      scope,
+      { preserveData: true },
+    )).resolves.toBeUndefined()
+    expect(calls).toEqual(['start', 'stop', 'uninstall'])
+  })
+
+  it('rejects a local-to-remote mode change without cancelling an entered install', async () => {
+    const installEntered = createDeferred<void>()
+    const finishInstall = createDeferred<LocalAppInstalledApp>()
+    const calls: string[] = []
+    class ModeConflictInstallManager extends LocalAppRuntimeManager {
+      override install(): Promise<LocalAppInstalledApp> {
+        calls.push('install')
+        installEntered.resolve()
+        return finishInstall.promise
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-app-mode-conflict-install-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new ModeConflictInstallManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    const currentApp = catalog.apps[0]!
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [{
+        ...currentApp,
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://catalog.example/changed-mode',
+        currentRelease: undefined,
+      }],
+    })
+    const { handlers, context } = registerProductionHandlers(root)
+    const pendingInstall = handlers.get(RPC_CHANNELS.localApps.INSTALL)!(
+      context,
+      installRequest(),
+    )
+    await installEntered.promise
+
+    await expect(handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!(
+      context,
+      scope.organizationId,
+      { force: true },
+    )).resolves.toMatchObject({
+      success: true,
+      source: 'cache',
+      accessMode: 'offline',
+      catalog: {
+        appConfigVersion: 'catalog-v1',
+        apps: [{
+          id: scope.catalogAppId,
+          deliveryMode: 'local_bundle',
+        }],
+      },
+    })
+
+    finishInstall.resolve({
+      appId: createCatalogRuntimeAppId(scope),
+      currentVersion: '1.0.0',
+      versions: ['1.0.0'],
+      runtime: 'static',
+      status: 'installed',
+      installedAt: 1,
+    })
+    await expect(pendingInstall).resolves.toMatchObject({
+      appId: scope.catalogAppId,
+      currentVersion: '1.0.0',
+      scope,
+    })
+    expect(calls).toEqual(['install'])
   })
 
   it('cancels an entered install when a successful Catalog refresh withdraws that app', async () => {

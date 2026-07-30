@@ -1122,6 +1122,28 @@ export function registerAdminHandlers(
               accountId,
               organizationId.data,
             )
+            const currentAppsById = new Map(
+              [
+                ...(currentCatalog?.withdrawnApps ?? []),
+                ...(currentCatalog?.apps ?? []),
+              ].map(app => [app.id, app]),
+            )
+            const deliveryModeConflict = result.apps.find(app => {
+              const currentApp = currentAppsById.get(app.id)
+              return currentApp
+                && currentApp.deliveryMode !== app.deliveryMode
+            })
+            if (deliveryModeConflict) {
+              // deliveryMode determines whether this identity is resolved as a
+              // remote URL or bound to a scoped local runtime. Reusing the same
+              // Catalog ID for the other mode would make lifecycle and data
+              // management authorization ambiguous, so preserve the last
+              // trusted cache and reject the replacement response.
+              throw new AdminError(
+                `Catalog app ${deliveryModeConflict.id} changed delivery mode`,
+                'SERVER_ERROR',
+              )
+            }
             const nextAvailableAppIds = new Set(result.apps.map(app => app.id))
             const withdrawnAppIds = (currentCatalog?.apps ?? [])
               .filter(app => (

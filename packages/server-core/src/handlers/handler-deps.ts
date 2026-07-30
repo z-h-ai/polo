@@ -5,6 +5,19 @@ import type { IBrowserPaneManager } from './browser-pane-manager-interface'
 import type { IWindowManager } from './window-manager-interface'
 import type { IMessagingGatewayRegistry } from './messaging-registry-interface'
 
+export interface SessionFileWatcher {
+  close(): void
+}
+
+export type SessionFileWatchFactory = (
+  path: string,
+  options: { recursive: boolean },
+  listener: (
+    eventType: string,
+    filename: string | Buffer | null,
+  ) => void,
+) => SessionFileWatcher
+
 /**
  * Generic handler dependency bag.
  * Concrete hosts specialize these generics to their runtime implementations.
@@ -27,6 +40,12 @@ export interface HandlerDeps<
   browserPaneManager?: TBrowserPaneManager
   oauthFlowStore: TOAuthFlowStore
   messagingRegistry?: IMessagingGatewayRegistry
+  /**
+   * Host/test seam for session directory notifications. Production defaults
+   * to node:fs watch; tests inject an event-controlled watcher so assertions
+   * synchronize on phases instead of wall-clock filesystem delivery.
+   */
+  sessionFileWatchFactory?: SessionFileWatchFactory
   /**
    * Host-owned session-ending hook invoked inside the trusted transition lock.
    * It must synchronously fence new and in-flight lifecycle result commits,

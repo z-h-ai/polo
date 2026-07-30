@@ -4,12 +4,12 @@
  * Verifies per-client watcher lifecycle: creation, cleanup, disconnect,
  * and that concurrent clients don't interfere with each other.
  *
- * Uses real temp directories + real fs.watch to avoid mocking fs
- * (which breaks transitive imports that need real fs exports).
+ * Uses an injected event-controlled watcher so registration, delivery, and
+ * cleanup phases are deterministic under full-suite concurrency.
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
-import { mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { describe, it, expect, afterEach, mock } from 'bun:test'
+import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { RpcServer, RequestContext } from '@polo-ai/server-core/transport'
@@ -52,13 +52,28 @@ function makeTempSessionDir(): string {
 function createTestHarness(sessionPaths: Map<string, string>) {
   const handlers = new Map<string, Function>()
   const pushCalls: PushCall[] = []
+  const watchers = new Map<string, {
+    closed: boolean
+    listener: (eventType: string, filename: string | Buffer | null) => void
+  }>()
+  const pushWaiters: Array<{
+    predicate: (call: PushCall) => boolean
+    resolve: (call: PushCall) => void
+  }> = []
 
   const server: RpcServer = {
     handle(channel: string, handler: Function) {
       handlers.set(channel, handler as any)
     },
     push(channel: string, target: any, ...args: any[]) {
-      pushCalls.push({ channel, target, args })
+      const call = { channel, target, args }
+      pushCalls.push(call)
+      for (let index = pushWaiters.length - 1; index >= 0; index -= 1) {
+        const waiter = pushWaiters[index]!
+        if (!waiter.predicate(call)) continue
+        pushWaiters.splice(index, 1)
+        waiter.resolve(call)
+      }
     },
     async invokeClient() {},
     hasClientCapability() { return false },
@@ -83,9 +98,46 @@ function createTestHarness(sessionPaths: Map<string, string>) {
     oauthFlowStore: {
       store: () => {}, getByState: () => null, remove: () => {}, cleanup: () => {}, dispose: () => {}, size: 0,
     } as unknown as HandlerDeps['oauthFlowStore'],
+    sessionFileWatchFactory: (path, _options, listener) => {
+      const watcher = { closed: false, listener }
+      watchers.set(path, watcher)
+      return {
+        close() {
+          watcher.closed = true
+        },
+      }
+    },
   }
 
-  return { server, deps, handlers, pushCalls }
+  const emitFileChange = (path: string, filename: string) => {
+    const watcher = watchers.get(path)
+    if (!watcher || watcher.closed) return
+    watcher.listener('rename', filename)
+  }
+  const waitForPush = (predicate: (call: PushCall) => boolean) =>
+    new Promise<PushCall>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        const waiterIndex = pushWaiters.findIndex(
+          waiter => waiter.resolve === resolvePush,
+        )
+        if (waiterIndex >= 0) pushWaiters.splice(waiterIndex, 1)
+        reject(new Error('Timed out waiting for deterministic watcher push'))
+      }, 2_000)
+      const resolvePush = (call: PushCall) => {
+        clearTimeout(timeout)
+        resolve(call)
+      }
+      pushWaiters.push({ predicate, resolve: resolvePush })
+    })
+
+  return {
+    server,
+    deps,
+    handlers,
+    pushCalls,
+    emitFileChange,
+    waitForPush,
+  }
 }
 
 function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
@@ -108,7 +160,14 @@ describe('session file watcher isolation', () => {
     const dir1 = makeTempSessionDir()
     const dir2 = makeTempSessionDir()
     const sessionPaths = new Map([['s1', dir1], ['s2', dir2]])
-    const { server, deps, handlers, pushCalls } = createTestHarness(sessionPaths)
+    const {
+      server,
+      deps,
+      handlers,
+      pushCalls,
+      emitFileChange,
+      waitForPush,
+    } = createTestHarness(sessionPaths)
 
     const { registerSessionsHandlers, cleanupSessionFileWatchForClient } = await import('@polo-ai/server-core/handlers/rpc')
     registerSessionsHandlers(server, deps)
@@ -120,11 +179,11 @@ describe('session file watcher isolation', () => {
     await watchHandler(makeCtx('client-a'), 's1')
     await watchHandler(makeCtx('client-b'), 's2')
 
-    // Trigger a change in s1
-    writeFileSync(join(dir1, 'output.txt'), 'hello')
-
-    // Wait for debounce + fs.watch delay
-    await new Promise(r => setTimeout(r, 300))
+    const clientAChanged = waitForPush(
+      call => call.target?.clientId === 'client-a',
+    )
+    emitFileChange(dir1, 'output.txt')
+    await clientAChanged
 
     // Only client-a should have received the notification
     const clientAPushes = pushCalls.filter(p => p.target?.clientId === 'client-a')
@@ -142,9 +201,11 @@ describe('session file watcher isolation', () => {
     // Clear push history
     pushCalls.length = 0
 
-    // Trigger a change in s2
-    writeFileSync(join(dir2, 'data.json'), '{}')
-    await new Promise(r => setTimeout(r, 300))
+    const clientBChanged = waitForPush(
+      call => call.target?.clientId === 'client-b',
+    )
+    emitFileChange(dir2, 'data.json')
+    await clientBChanged
 
     // Client B should still receive notifications
     const clientBAfter = pushCalls.filter(p => p.target?.clientId === 'client-b')
@@ -161,7 +222,14 @@ describe('session file watcher isolation', () => {
     const dir1 = makeTempSessionDir()
     const dir2 = makeTempSessionDir()
     const sessionPaths = new Map([['s1', dir1], ['s2', dir2]])
-    const { server, deps, handlers, pushCalls } = createTestHarness(sessionPaths)
+    const {
+      server,
+      deps,
+      handlers,
+      pushCalls,
+      emitFileChange,
+      waitForPush,
+    } = createTestHarness(sessionPaths)
 
     const { registerSessionsHandlers, cleanupSessionFileWatchForClient } = await import('@polo-ai/server-core/handlers/rpc')
     registerSessionsHandlers(server, deps)
@@ -175,8 +243,7 @@ describe('session file watcher isolation', () => {
     await watchHandler(makeCtx('client-a'), 's2')
 
     // Write to s1 — should NOT trigger notification (old watcher closed)
-    writeFileSync(join(dir1, 'old.txt'), 'stale')
-    await new Promise(r => setTimeout(r, 300))
+    emitFileChange(dir1, 'old.txt')
 
     const s1Pushes = pushCalls.filter(p =>
       p.args[0] === 's1' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED
@@ -184,8 +251,11 @@ describe('session file watcher isolation', () => {
     expect(s1Pushes.length).toBe(0)
 
     // Write to s2 — should trigger notification
-    writeFileSync(join(dir2, 'new.txt'), 'fresh')
-    await new Promise(r => setTimeout(r, 300))
+    const sessionTwoChanged = waitForPush(
+      call => call.args[0] === 's2',
+    )
+    emitFileChange(dir2, 'new.txt')
+    await sessionTwoChanged
 
     const s2Pushes = pushCalls.filter(p =>
       p.args[0] === 's2' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED
@@ -198,7 +268,14 @@ describe('session file watcher isolation', () => {
   it('ignores internal session.jsonl and hidden files', async () => {
     const dir = makeTempSessionDir()
     const sessionPaths = new Map([['s1', dir]])
-    const { server, deps, handlers, pushCalls } = createTestHarness(sessionPaths)
+    const {
+      server,
+      deps,
+      handlers,
+      pushCalls,
+      emitFileChange,
+      waitForPush,
+    } = createTestHarness(sessionPaths)
 
     const { registerSessionsHandlers, cleanupSessionFileWatchForClient } = await import('@polo-ai/server-core/handlers/rpc')
     registerSessionsHandlers(server, deps)
@@ -207,15 +284,15 @@ describe('session file watcher isolation', () => {
     await watchHandler(makeCtx('client-a'), 's1')
 
     // Write internal files — should be ignored
-    writeFileSync(join(dir, 'session.jsonl'), 'log entry')
-    writeFileSync(join(dir, '.hidden'), 'secret')
-    await new Promise(r => setTimeout(r, 300))
+    emitFileChange(dir, 'session.jsonl')
+    emitFileChange(dir, '.hidden')
 
     expect(pushCalls.length).toBe(0)
 
     // Write a normal file — should trigger notification
-    writeFileSync(join(dir, 'result.txt'), 'output')
-    await new Promise(r => setTimeout(r, 300))
+    const resultChanged = waitForPush(call => call.args[0] === 's1')
+    emitFileChange(dir, 'result.txt')
+    await resultChanged
 
     expect(pushCalls.length).toBeGreaterThanOrEqual(1)
 

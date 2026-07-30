@@ -8,11 +8,11 @@ import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
-import type { HandlerDeps } from '../handler-deps'
+import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 
 interface ClientSessionWatchState {
-  watcher: import('fs').FSWatcher
+  watcher: SessionFileWatcher
   sessionId: string
   debounceTimer: ReturnType<typeof setTimeout> | null
 }
@@ -461,17 +461,22 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     if (!sessionPath) return
 
     try {
-      const { watch } = await import('fs')
-
       const state: ClientSessionWatchState = {
-        watcher: null as unknown as import('fs').FSWatcher,
+        watcher: null as unknown as SessionFileWatcher,
         sessionId,
         debounceTimer: null,
       }
 
-      state.watcher = watch(sessionPath, { recursive: true }, (_eventType, filename) => {
+      const onChange = (_eventType: string, filename: string | Buffer | null) => {
         // Ignore internal files and hidden files
-        if (filename && (filename.includes('session.jsonl') || filename.startsWith('.'))) {
+        const normalizedFilename = filename?.toString()
+        if (
+          normalizedFilename
+          && (
+            normalizedFilename.includes('session.jsonl')
+            || normalizedFilename.startsWith('.')
+          )
+        ) {
           return
         }
 
@@ -483,7 +488,17 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         state.debounceTimer = setTimeout(() => {
           pushTyped(server, RPC_CHANNELS.sessions.FILES_CHANGED, { to: 'client', clientId }, state.sessionId)
         }, 100)
-      })
+      }
+      if (deps.sessionFileWatchFactory) {
+        state.watcher = deps.sessionFileWatchFactory(
+          sessionPath,
+          { recursive: true },
+          onChange,
+        )
+      } else {
+        const { watch } = await import('fs')
+        state.watcher = watch(sessionPath, { recursive: true }, onChange)
+      }
 
       clientSessionWatches.set(clientId, state)
     } catch (error) {

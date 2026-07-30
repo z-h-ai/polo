@@ -51,6 +51,13 @@ const scopedStatuses = mock(async (
   scope,
   status: 'not_installed',
 })))
+const scopedRuntimeStatus = mock(async (
+  scope: CatalogLocalAppScope,
+): Promise<LocalAppRuntimeStatus> => ({
+  appId: scope.catalogAppId,
+  scope,
+  status: 'not_installed',
+}))
 const isInstalledAndReady = mock(async () => true)
 const assertAppAuthorized = mock(() => {
   if (appAccessDenied) {
@@ -78,13 +85,7 @@ const scopedRegistry = {
     status: 'installed' as const,
   })),
   getInstalledApps: mock(async () => []),
-  getRuntimeStatus: mock(async (
-    scope: CatalogLocalAppScope,
-  ): Promise<LocalAppRuntimeStatus> => ({
-    appId: scope.catalogAppId,
-    scope,
-    status: 'not_installed',
-  })),
+  getRuntimeStatus: scopedRuntimeStatus,
   getRuntimeStatuses: scopedStatuses,
   getLogs: mock(async () => ''),
   isInstalledAndReady,
@@ -213,7 +214,7 @@ describe('local app main-process authorization boundary', () => {
       scopedStatuses,
       isInstalledAndReady,
       scopedRegistry.getInstalledApps,
-      scopedRegistry.getRuntimeStatus,
+      scopedRuntimeStatus,
       scopedRegistry.setAvailableRelease,
       scopedRegistry.getLogs,
     ]) {
@@ -224,6 +225,11 @@ describe('local app main-process authorization boundary', () => {
       scope,
       status: 'not_installed',
     })))
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'not_installed',
+    }))
     const server = {
       handle(channel, handler) {
         handlers.set(channel, handler as Handler)
@@ -658,6 +664,13 @@ describe('local app main-process authorization boundary', () => {
       currentVersion: '1.0.0',
       runningVersion: '1.0.0',
     })))
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+    }))
 
     const deniedScope = scope()
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES)!(
@@ -674,7 +687,7 @@ describe('local app main-process authorization boundary', () => {
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       deniedScope,
-    )).resolves.toBe('')
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
       context,
       deniedScope,
@@ -704,13 +717,59 @@ describe('local app main-process authorization boundary', () => {
     )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
 
     expect(scopedRegistry.stop).toHaveBeenCalledWith(deniedScope)
-    expect(scopedRegistry.getLogs).toHaveBeenCalledWith(deniedScope, undefined)
+    expect(scopedRegistry.getLogs).not.toHaveBeenCalled()
     expect(scopedRegistry.uninstall).toHaveBeenCalledWith(
       deniedScope,
       { preserveData: true },
     )
     expect(scopedStart).not.toHaveBeenCalled()
     expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('allows logs only for a trusted broken runtime status', async () => {
+    const getLogs = handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!
+    for (const runtimeStatus of ['installed', 'running', 'stopped'] as const) {
+      scopedRuntimeStatus.mockResolvedValueOnce({
+        appId: scope().catalogAppId,
+        scope: scope(),
+        status: runtimeStatus,
+        currentVersion: '1.0.0',
+      })
+      await expect(getLogs(context, scope(), { tail: 20 }))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+
+    catalog = {
+      ...catalog,
+      authorizationStatus: 'denied',
+      apps: catalog.apps.map(app => ({
+        ...app,
+        availability: 'unavailable',
+      })),
+    }
+    accessMode = 'denied'
+    scopedRuntimeStatus.mockResolvedValueOnce({
+      appId: scope().catalogAppId,
+      scope: scope(),
+      status: 'installed',
+      currentVersion: '1.0.0',
+    })
+    await expect(getLogs(context, scope()))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    scopedRuntimeStatus.mockResolvedValueOnce({
+      appId: scope().catalogAppId,
+      scope: scope(),
+      status: 'broken',
+      currentVersion: '1.0.0',
+      error: {
+        code: 'START_FAILED',
+        message: 'health check failed',
+      },
+    })
+    await expect(getLogs(context, scope(), { tail: 20 })).resolves.toBe('')
+    expect(scopedRegistry.getLogs).toHaveBeenCalledTimes(1)
+    expect(scopedRegistry.getLogs).toHaveBeenCalledWith(scope(), { tail: 20 })
   })
 
   it('retains a full-directory tombstone with status access but rejects launch', async () => {
