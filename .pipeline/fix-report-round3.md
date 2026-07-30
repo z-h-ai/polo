@@ -1,76 +1,87 @@
-# POL-51 Reviewer 第 3 轮修复报告
+# POL-51 第 3 轮 Review 修复报告
 
-## 逐条问题处理结果
+## 每条 issue 的处理结果
 
-### 1. 受保护请求 401 不得被 refresh 临时错误覆盖
+### 1. 冷启动缓存 scope 未登记时，账号 ending 门禁可能失效
 
-- 已修复。`AdminClient.request()` 在受保护接口明确返回 HTTP 401 后，先保存原始认证错误；自动 refresh 只有完整成功并持久化新 token 后才重试原请求。
-- refresh 网络失败、HTTP 5xx、响应校验失败或 token 持久化失败均重新抛出原始 401，不再把明确失权降级成 `NETWORK_ERROR` / `SERVER_ERROR`。
-- 增加真实 `AdminClient` 回归：本地 token 仍视为未过期时，VALIDATE 返回 401 且 refresh 网络失败，以及 Catalog 返回 401 且 refresh 返回 503，最终都保持 `TOKEN_REVOKED` / HTTP 401。
-- server-core 的 VALIDATE 与 Catalog 链路分别覆盖该保留结果，验证凭据删除、账号进程清理回调执行、Catalog authorization 与 access mode 均变为 denied。
+已修复。
 
-### 2. Catalog 与组织列表共用授权 epoch
+- 在 shared Catalog access 状态中增加独立的账号级进程内 denied gate。`denyAppCatalogAccessForAccount()` 会先关闭账号下所有已登记和未登记 scope；后续单 scope 的 `online` 写入也不能覆盖该账号门禁。
+- 只有完成可信登录并成功持久化新会话后，主进程才调用 `resumeAppCatalogAccessForAccount()` 重新开放账号；各组织仍保持默认 `offline`，直到各自 Catalog 同步成功。
+- denied gate 不依赖 Catalog 缓存写入、scope 枚举或 runtime cleanup 完成，因此磁盘 authorized cache、无内存 access mode、denied-cache 写失败和慢 cleanup 同时出现时仍 fail closed。
+- 新增 shared gate 单测和真实 Admin/Local Apps/scoped registry 接线测试。测试覆盖 cleanup 挂起窗口内 `RESOLVE_REMOTE_URL` 与离线 `START` 均返回 `NOT_AUTHORIZED`，且 runtime manager 未创建。
 
-- 已修复。主进程为 `accountId + organizationId` 维护独立授权 epoch；每次 Catalog 同步注册时在会话锁内捕获当前 epoch。
-- Catalog 的离线快路径、网络提交、授权失败、临时错误缓存回退和普通错误提交都同时校验 session generation、Catalog 请求代次与授权 epoch。
-- LIST_ORGANIZATIONS 成功确认组织移除、暂停或成员非 active 时，在同一可信会话提交锁内推进对应 scope epoch，再 deny Catalog 缓存和 access mode。
-- epoch 同时覆盖已有缓存和正在请求但尚无缓存的 scope，避免无缓存的挂起请求绕过失权结果。
-- 增加确定性竞态测试：Catalog v1 挂起，组织列表先确认移除并提交 denied，v1 随后返回；最终请求为 `REQUEST_SUPERSEDED`，缓存保持旧版本 denied，不能重新写回 authorized/online。
+### 2. STOP 后迟到 START 仍可能返回 localhost URL
 
-### 3. 安装确认 Release 的 TOCTOU 绑定
+已修复。
 
-- 已修复。Catalog 安装协议新增用户确认的 Release 指纹：`version`、`checksum`、`sizeBytes`、`platform`、`arch`；platform/arch 缺失也以显式 `null` 参与比较。
-- renderer 从确认框所持有的 Release A 构造指纹；主进程仍只使用当前授权缓存构造实际下载参数，但下载前逐项严格比较用户确认指纹。
-- 任一字段不一致或缺少指纹时，主进程返回 `RELEASE_CHANGED`，不会创建安装任务或下载新 Release。
-- renderer 收到 `RELEASE_CHANGED` 后强制刷新 Catalog，并显示国际化提示，用户必须基于 Release B 重新打开确认流程。
-- 覆盖五个指纹字段逐项变化的主进程测试，以及“确认 A → 主进程缓存变为 B → 确认提交”的 renderer 跨层回归；验证首次请求只携带 A、未静默安装 B、最终页面刷新为 B。
-- 新文案已补齐全部 locale，并通过 parity、sorted 和 coverage 检查。
+- renderer 为每个完整 scope 增加 lifecycle action generation。
+- START 进入时捕获当前代次，主进程返回后、结果对外提交前再次校验。
+- STOP 与卸载在发送 RPC 前推进该 scope 代次，因此更早进入的 START 即使迟到成功，也只能转为 stale-context 失败，不能把 URL 交给 HomePage 打开。
+- 更新 deferred START/STOP 确定性测试：STOP RPC 真实发送并完成后，迟到 START 的公开 Promise 必须 rejected。
+
+### 3. 首次 runtime status 未返回时短暂暴露“安装”
+
+已修复。
+
+- `useAppCatalog` 新增按完整 scope 隔离的 `statusLoadingScopeKeys`。
+- Catalog 元数据提交后，本地 Bundle App 在首次批量状态读取完成前保持 unknown/loading；成功或明确失败都会清除对应 loading 标记。
+- `HomePage` 将该状态传给 `OrganizationAppCard`，卡片显示国际化“正在读取状态”并禁用主操作，不再把缺失状态折叠成 `not_installed`。
+- 新增 hook deferred 批量状态测试、主操作决策测试和实际 HomePage 禁用按钮交互测试。
+- `homeApps.status.loading` 已补齐全部 locale，并通过 parity、sorted、coverage 检查。
+
+### 4. 无效 SemVer 的可信 Release 保留不变量缺少说明
+
+已处理。
+
+- 在主进程 `deriveCatalogReleaseStatus()` 无效版本分支补充 why 注释：无效服务端元数据必须保持可见且不能清除上一可信更新；仅 installed/stopped/update_available 状态可把可信更新提升为主状态，running/busy/broken 保留当前生命周期状态。
 
 ## 关键文件
 
-- `packages/shared/src/admin/client.ts`
-- `packages/shared/src/admin/__tests__/client.test.ts`
+- `packages/shared/src/admin/app-catalog-access.ts`
+- `packages/shared/src/admin/index.ts`
+- `packages/shared/src/admin/__tests__/app-catalog-access.test.ts`
 - `packages/server-core/src/handlers/rpc/admin.ts`
 - `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-- `packages/shared/src/protocol/local-apps.ts`
 - `apps/electron/src/main/handlers/local-apps.ts`
-- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
 - `apps/electron/src/renderer/hooks/useAppCatalog.ts`
 - `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-- `apps/electron/src/renderer/lib/home-app-errors.ts`
+- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
+- `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
 - `apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
+- `apps/electron/src/renderer/components/tab-browser/__tests__/OrganizationAppCard.test.ts`
 - `packages/shared/src/i18n/locales/*.json`
+- `.pipeline/fix-report-round3.md`
 
-## 自测结果
+## 自测命令与结果
 
-- `bun run test`
-  - 完整通过，退出码 0。
-  - 常规阶段：4783 pass、19 skip、0 fail，4802 tests / 363 files。
-  - 脚本后半段发现并逐文件执行的全部 `*.isolated.ts` 测试通过。
-- `bun test ./packages/shared/src/admin/__tests__/client.test.ts`
-  - 31 pass，0 fail。
-- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 47 pass，0 fail。
-- `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-  - 10 pass，0 fail。
+- `bun test`
+  - 结果：4794 pass，19 skip，0 fail，共 4813 tests / 365 files。
+- `for f in $(find . -name '*.isolated.ts' -not -path './node_modules/*'); do bun test "./${f#./}" || exit 1; done`
+  - 结果：仓库全部 isolated 测试逐文件通过。
+- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+  - 结果：6 pass，0 fail。
 - `bun test ./apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-  - 14 pass，0 fail。
+  - 结果：17 pass，0 fail。
 - `bun test ./apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
-  - 6 pass，0 fail。
+  - 结果：7 pass，0 fail。
+- `bun test packages/shared/src/admin/__tests__/app-catalog-access.test.ts apps/electron/src/renderer/components/tab-browser/__tests__/OrganizationAppCard.test.ts`
+  - 结果：8 pass，0 fail。
 - `bun run typecheck:all`
-  - 通过。
-- `bun run lint:i18n:parity`
-  - 通过，6 个非英文 locale 与英文各 1707 keys。
-- `bun run lint:i18n:sorted`
-  - 通过。
-- `bun run lint:i18n:coverage`
-  - 通过。
-- 变更文件定向 ESLint
-  - 0 error；3 个测试环境既有 `localStorage` 规则 warning。
+  - 结果：通过。
+- `bun run lint:i18n:parity && bun run lint:i18n:sorted && bun run lint:i18n:coverage`
+  - 结果：通过；全部 locale 为 1708 keys，排序与覆盖检查通过。
+- Electron 本轮变更文件定向 ESLint
+  - 结果：0 error；仅测试文件 3 个既有 `localStorage` warning。
+- shared 本轮变更文件定向 ESLint
+  - 结果：0 error，0 warning。
+- `bun run electron:build:main && bun run electron:build:renderer`
+  - 结果：主进程与 renderer 生产构建通过；renderer 仅有既有 chunk size warning。
 - `git diff --check`
-  - 通过。
+  - 结果：通过。
 
 ## 遗留问题
 
-- SemVer 三份实现仍按 Reviewer 第 1 轮报告中的风险判断保留，未在本轮安全与 TOCTOU 修复中扩大重构范围。
-- 无其他已知阻断问题。
+- `bun run lint:shared` 仍被 5 个与 POL-51 无关的仓库既有规则错误阻断，位于 resource bundle / token refresh 文件；本轮未修改这些文件。本轮涉及的 shared 文件定向 ESLint、全量类型检查和全量测试均通过。
+- 未发现本轮 4 条 review issue 的已知代码遗留。

@@ -49,7 +49,8 @@ const scope: CatalogLocalAppScope = {
   catalogAppId: 'catalog-app',
 }
 let tokens: StoredTokens | null = null
-let accessMode: 'online' | 'offline' | 'denied' = 'online'
+let accessMode: 'online' | 'offline' | 'denied' | null = 'online'
+const deniedAccounts = new Set<string>()
 let runtimeRegistry: ScopedLocalAppRuntimeRegistry | null = null
 let remoteLogout: (accessToken: string) => Promise<void> = async () => {}
 let refreshAdmin: (refreshToken: string) => Promise<{
@@ -202,7 +203,8 @@ mock.module('@polo-ai/shared/admin', () => ({
   listCachedAppCatalogs: (accountId: string) =>
     accountId === scope.accountId ? [catalog] : [],
   saveAppCatalog: () => catalog,
-  getAppCatalogAccessMode: () => accessMode,
+  getAppCatalogAccessMode: (accountId: string) =>
+    deniedAccounts.has(accountId) ? 'denied' : accessMode ?? 'offline',
   setAppCatalogAccessMode: (
     _accountId: string,
     _organizationId: string,
@@ -211,7 +213,13 @@ mock.module('@polo-ai/shared/admin', () => ({
     accessMode = mode
   },
   denyAppCatalogAccessForAccount: (accountId: string) => {
-    if (accountId === scope.accountId) accessMode = 'denied'
+    deniedAccounts.add(accountId)
+    if (accountId === scope.accountId && accessMode !== null) {
+      accessMode = 'denied'
+    }
+  },
+  resumeAppCatalogAccessForAccount: (accountId: string) => {
+    deniedAccounts.delete(accountId)
   },
   denyCachedAppCatalogAuthorization: () => {
     if (denyCatalogCacheError) throw denyCatalogCacheError
@@ -227,6 +235,7 @@ mock.module('@polo-ai/shared/admin', () => ({
   },
   denyCachedAppCatalogAuthorizationForAccount: (accountId: string) => {
     if (accountId !== scope.accountId) return []
+    if (denyCatalogCacheError) throw denyCatalogCacheError
     catalog = {
       ...catalog,
       authorizationStatus: 'denied',
@@ -280,7 +289,12 @@ function installRequest(): LocalAppCatalogInstallRequest {
   }
 }
 
-function registerProductionHandlers(root: string) {
+function registerProductionHandlers(
+  root: string,
+  options: {
+    onAdminSessionEnding?: (accountId: string) => Promise<void>
+  } = {},
+) {
   const handlers = new Map<string, HandlerFn>()
   const server = {
     handle(channel, handler) {
@@ -321,8 +335,8 @@ function registerProductionHandlers(root: string) {
         },
       },
     },
-    onAdminSessionEnding: (accountId: string) =>
-      runtimeRegistry!.stopAccount(accountId),
+    onAdminSessionEnding: options.onAdminSessionEnding
+      ?? ((accountId: string) => runtimeRegistry!.stopAccount(accountId)),
     onAdminSessionStarted: (accountId: string) =>
       runtimeRegistry!.resumeAccount(accountId),
   } satisfies HandlerDeps
@@ -362,6 +376,7 @@ afterEach(async () => {
   runtimeRegistry = null
   tokens = null
   accessMode = 'online'
+  deniedAccounts.clear()
   remoteLogout = async () => {}
   refreshAdmin = async () => ({
     accessToken: 'refreshed-access',
@@ -389,6 +404,70 @@ afterEach(async () => {
 })
 
 describe('Admin session and scoped local app production wiring', () => {
+  it('denies cold cached scopes while session cleanup and denied-cache persistence are pending', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-admin-cold-cache-ending-'))
+    temporaryRoots.push(root)
+    let managerFactoryCalls = 0
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: () => {
+        managerFactoryCalls += 1
+        throw new Error('account gate must reject before runtime access')
+      },
+    })
+    tokens = createSignedInTokens()
+    accessMode = null
+    denyCatalogCacheError = new Error('disk full')
+    catalog = {
+      ...createCatalog(),
+      apps: [
+        ...createCatalog().apps,
+        {
+          id: 'remote-app',
+          organizationId: scope.organizationId,
+          name: 'Remote App',
+          description: '',
+          deliveryMode: 'remote_url' as const,
+          remoteUrl: 'https://catalog.example/remote',
+          availability: 'available' as const,
+          sortOrder: 1,
+        },
+      ],
+    }
+    const cleanupStarted = createDeferred<void>()
+    const finishCleanup = createDeferred<void>()
+    const { handlers, context } = registerProductionHandlers(root, {
+      onAdminSessionEnding: async () => {
+        cleanupStarted.resolve()
+        await finishCleanup.promise
+      },
+    })
+    const logout = handlers.get(RPC_CHANNELS.admin.LOGOUT)!
+    const resolveRemote = handlers.get(
+      RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+    )!
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const remoteScope: CatalogLocalAppScope = {
+      ...scope,
+      catalogAppId: 'remote-app',
+    }
+
+    const pendingLogout = logout(context)
+    await cleanupStarted.promise
+
+    expect(catalog.authorizationStatus).toBe('authorized')
+    await expect(resolveRemote(context, remoteScope)).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    await expect(start(context, scope)).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    expect(managerFactoryCalls).toBe(0)
+
+    finishCleanup.resolve()
+    await expect(pendingLogout).resolves.toEqual({ success: true })
+  })
+
   it('fences an entered start before slow remote logout and stops its process', async () => {
     const startEntered = createDeferred<void>()
     const finishStart = createDeferred<LocalAppStartResult>()

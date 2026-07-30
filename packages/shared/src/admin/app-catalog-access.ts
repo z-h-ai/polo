@@ -1,6 +1,7 @@
 export type AppCatalogAccessMode = 'online' | 'offline' | 'denied'
 
 const accessModes = new Map<string, AppCatalogAccessMode>()
+const deniedAccounts = new Set<string>()
 
 function createAppCatalogAccessKey(
   accountId: string,
@@ -18,6 +19,8 @@ export function getAppCatalogAccessMode(
   accountId: string,
   organizationId: string,
 ): AppCatalogAccessMode {
+  if (deniedAccounts.has(accountId)) return 'denied'
+
   return accessModes.get(
     createAppCatalogAccessKey(accountId, organizationId),
   ) ?? 'offline'
@@ -32,6 +35,11 @@ export function setAppCatalogAccessMode(
 }
 
 export function denyAppCatalogAccessForAccount(accountId: string): void {
+  // The account gate covers cold-cache scopes that have not yet been
+  // materialized in accessModes, so session ending fails closed independently
+  // of catalog persistence and scope discovery.
+  deniedAccounts.add(accountId)
+
   for (const [entryKey] of accessModes) {
     try {
       const [entryAccountId] = JSON.parse(entryKey) as [string, string]
@@ -42,6 +50,11 @@ export function denyAppCatalogAccessForAccount(accountId: string): void {
   }
 }
 
+export function resumeAppCatalogAccessForAccount(accountId: string): void {
+  deniedAccounts.delete(accountId)
+}
+
 export function resetAppCatalogAccessModesForTests(): void {
   accessModes.clear()
+  deniedAccounts.clear()
 }

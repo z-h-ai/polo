@@ -15,6 +15,7 @@ export {
   denyAppCatalogAccessForAccount,
   getAppCatalogAccessMode,
   resetAppCatalogAccessModesForTests,
+  resumeAppCatalogAccessForAccount,
   setAppCatalogAccessMode,
   type AppCatalogAccessMode,
 } from './app-catalog-access.ts';

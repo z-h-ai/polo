@@ -8,6 +8,7 @@ import {
   getCachedAppCatalog,
   getSafeAdminErrorMessage,
   listCachedAppCatalogs,
+  resumeAppCatalogAccessForAccount,
   saveAppCatalog,
   setAppCatalogAccessMode,
   type AppCatalogSyncResult,
@@ -1557,6 +1558,9 @@ async function completeAdminLogin(args: {
     }
     await args.deps.onAdminSessionStarted?.(args.login.user.id)
     await args.manager.setAdminTokens(nextTokens)
+    // Only a newly authenticated session may reopen the account-level Catalog
+    // gate. Individual organizations remain offline until their own sync.
+    resumeAppCatalogAccessForAccount(args.login.user.id)
     setAdminConfigVersion(undefined)
 
     if (!switchingAccounts) {

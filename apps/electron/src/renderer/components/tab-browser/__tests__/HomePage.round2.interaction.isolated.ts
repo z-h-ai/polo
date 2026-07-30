@@ -27,6 +27,7 @@ function signedOutCatalogHook() {
       errorCode: null,
       statusErrorCode: null,
       statusErrorScopeKeys: {},
+      statusLoadingScopeKeys: {},
       accessMode: null,
       statuses: {},
       host: null,
@@ -266,6 +267,62 @@ describe('HomePage round-two regressions', () => {
       .hasAttribute('disabled')).toBe(true)
     fireEvent.click(screen.getByText('Try again'))
     expect(refreshRuntimeStatuses).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables install while the initial runtime status is loading', () => {
+    const localApp: CatalogApp = {
+      id: 'loading-status-app',
+      organizationId: 'organization-a',
+      name: 'Loading Status App',
+      description: '',
+      deliveryMode: 'local_bundle',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    const catalog: AppCatalogCacheEntry = {
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      appConfigVersion: 'v1',
+      authorizationStatus: 'authorized',
+      apps: [localApp],
+      syncedAt: 1,
+    }
+    const scopeKey = createLocalAppScopeKey({
+      kind: 'catalog',
+      accountId: catalog.accountId,
+      organizationId: catalog.organizationId,
+      catalogAppId: localApp.id,
+    })
+    appCatalogHook = {
+      ...signedOutCatalogHook(),
+      organization: {
+        accountId: catalog.accountId,
+        activeOrganizationId: catalog.organizationId,
+        organizationContextKey: 'account-a:organization-a',
+        organizationSummaries: [{
+          id: catalog.organizationId,
+          type: 'enterprise',
+          name: 'Organization A',
+        }],
+      },
+      state: {
+        ...signedOutCatalogHook().state,
+        catalog,
+        accessMode: 'online',
+        statusLoadingScopeKeys: { [scopeKey]: true },
+      },
+      scopeKeyForApp: () => scopeKey,
+    }
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    expect(screen.getAllByText('Loading status…')).toHaveLength(2)
+    expect(screen.getByTestId('organization-app-action-loading-status-app')
+      .hasAttribute('disabled')).toBe(true)
   })
 
   it('keeps a retained withdrawn app manageable when its first status batch fails', async () => {

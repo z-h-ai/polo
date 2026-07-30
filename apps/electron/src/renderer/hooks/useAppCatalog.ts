@@ -28,6 +28,7 @@ export interface AppCatalogState {
   errorCode: string | null
   statusErrorCode: 'status_read_failed' | null
   statusErrorScopeKeys: Record<string, true>
+  statusLoadingScopeKeys: Record<string, true>
   accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
   host: {
@@ -241,6 +242,7 @@ export function useAppCatalog() {
     errorCode: null,
     statusErrorCode: null,
     statusErrorScopeKeys: {},
+    statusLoadingScopeKeys: {},
     accessMode: null,
     statuses: {},
     host: null,
@@ -255,6 +257,7 @@ export function useAppCatalog() {
   const syncGenerationRef = useRef(0)
   const operationsRef = useRef(new Map<string, Promise<unknown>>())
   const cancellationOperationsRef = useRef(new Map<string, Promise<void>>())
+  const lifecycleActionGenerationRef = useRef(new Map<string, number>())
   const busyStatusPollerRef = useRef<BusyStatusPoller | null>(null)
 
   const isCurrentSnapshot = useCallback((snapshot: ContextSnapshot): boolean => (
@@ -311,6 +314,7 @@ export function useAppCatalog() {
           statuses: {},
           statusErrorCode: null,
           statusErrorScopeKeys: {},
+          statusLoadingScopeKeys: {},
         }))
       }
       return
@@ -338,12 +342,14 @@ export function useAppCatalog() {
           statuses: {},
           statusErrorCode: null,
           statusErrorScopeKeys: {},
+          statusLoadingScopeKeys: {},
         }))
       }
       return
     }
 
     const scopes = selectedApps.map(app => scopeForCatalogApp(catalog, app))
+    const requestedScopeKeys = new Set(scopes.map(createLocalAppScopeKey))
     const successfulStatuses = new Map<string, LocalAppRuntimeStatus>()
     const failedScopeKeys = new Set<string>()
     for (let offset = 0; offset < scopes.length; offset += CATALOG_RUNTIME_STATUS_LIMIT) {
@@ -395,6 +401,12 @@ export function useAppCatalog() {
       const nextStatusErrorScopeKeys: Record<string, true> = (
         refreshMode === 'merge' ? { ...current.statusErrorScopeKeys } : {}
       )
+      const nextStatusLoadingScopeKeys = {
+        ...current.statusLoadingScopeKeys,
+      }
+      for (const scopeKey of requestedScopeKeys) {
+        delete nextStatusLoadingScopeKeys[scopeKey]
+      }
       for (const scopeKey of successfulStatuses.keys()) {
         delete nextStatusErrorScopeKeys[scopeKey]
       }
@@ -407,6 +419,7 @@ export function useAppCatalog() {
         statuses: nextStatuses,
         statusErrorCode: hasStatusErrors ? 'status_read_failed' : null,
         statusErrorScopeKeys: nextStatusErrorScopeKeys,
+        statusLoadingScopeKeys: nextStatusLoadingScopeKeys,
       }
     })
   }, [isCurrentSnapshot])
@@ -427,6 +440,7 @@ export function useAppCatalog() {
         errorCode: null,
         statusErrorCode: null,
         statusErrorScopeKeys: {},
+        statusLoadingScopeKeys: {},
         accessMode: null,
         statuses: {},
       }))
@@ -481,6 +495,7 @@ export function useAppCatalog() {
             errorCode: result.errorCode || 'request_failed',
             statusErrorCode: null,
             statusErrorScopeKeys: {},
+            statusLoadingScopeKeys: {},
             accessMode: 'denied',
             statuses: {},
           }))
@@ -501,15 +516,36 @@ export function useAppCatalog() {
         catalog: result.catalog,
         syncGeneration,
       }
-      setState(current => ({
-        ...current,
-        catalog: result.catalog,
-        loading: false,
-        refreshing: false,
-        warningCode: result.warningCode ?? null,
-        errorCode: null,
-        accessMode: result.accessMode,
-      }))
+      setState(current => {
+        const sameCatalogContext = (
+          current.catalog?.accountId === result.catalog.accountId
+          && current.catalog.organizationId === result.catalog.organizationId
+        )
+        const knownStatuses = sameCatalogContext ? current.statuses : {}
+        const knownStatusErrors = sameCatalogContext
+          ? current.statusErrorScopeKeys
+          : {}
+        const statusLoadingScopeKeys: Record<string, true> = {}
+        for (const app of getAppCatalogApps(result.catalog)) {
+          if (app.deliveryMode !== 'local_bundle') continue
+          const scopeKey = createLocalAppScopeKey(
+            scopeForCatalogApp(result.catalog, app),
+          )
+          if (!knownStatuses[scopeKey] && !knownStatusErrors[scopeKey]) {
+            statusLoadingScopeKeys[scopeKey] = true
+          }
+        }
+        return {
+          ...current,
+          catalog: result.catalog,
+          loading: false,
+          refreshing: false,
+          warningCode: result.warningCode ?? null,
+          errorCode: null,
+          accessMode: result.accessMode,
+          statusLoadingScopeKeys,
+        }
+      })
       await refreshRuntimeStatuses(
         getAppCatalogApps(result.catalog),
         undefined,
@@ -534,6 +570,7 @@ export function useAppCatalog() {
           errorCode,
           statusErrorCode: null,
           statusErrorScopeKeys: {},
+          statusLoadingScopeKeys: {},
           accessMode: 'denied',
           statuses: {},
         }))
@@ -569,6 +606,7 @@ export function useAppCatalog() {
     syncGenerationRef.current += 1
     operationsRef.current.clear()
     cancellationOperationsRef.current.clear()
+    lifecycleActionGenerationRef.current.clear()
     catalogRef.current = null
     setState(current => ({
       ...current,
@@ -579,6 +617,7 @@ export function useAppCatalog() {
       errorCode: null,
       statusErrorCode: null,
       statusErrorScopeKeys: {},
+      statusLoadingScopeKeys: {},
       accessMode: null,
       statuses: {},
     }))
@@ -684,6 +723,23 @@ export function useAppCatalog() {
     }
   }, [isCurrentSnapshot])
 
+  const advanceLifecycleActionGeneration = useCallback((scopeKey: string) => {
+    const next = (lifecycleActionGenerationRef.current.get(scopeKey) ?? 0) + 1
+    lifecycleActionGenerationRef.current.set(scopeKey, next)
+    return next
+  }, [])
+
+  const requireCurrentLifecycleAction = useCallback((
+    scopeKey: string,
+    generation: number,
+  ) => {
+    if (
+      (lifecycleActionGenerationRef.current.get(scopeKey) ?? 0) !== generation
+    ) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
+    }
+  }, [])
+
   const install = useCallback((
     app: CatalogApp,
     confirmedAppConfigVersion: string,
@@ -767,6 +823,9 @@ export function useAppCatalog() {
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
     return runExclusive(scopeKey, 'start', async () => {
+      const lifecycleActionGeneration = (
+        lifecycleActionGenerationRef.current.get(scopeKey) ?? 0
+      )
       if (app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
       }
@@ -784,6 +843,9 @@ export function useAppCatalog() {
       try {
         const result = await window.electronAPI.localApps.start(scope)
         requireCurrent(snapshot)
+        // STOP/UNINSTALL are newer user intent for this exact scope. A late
+        // START may refresh diagnostics, but its URL must not escape to HomePage.
+        requireCurrentLifecycleAction(scopeKey, lifecycleActionGeneration)
         return result
       } finally {
         if (isCurrentSnapshot(snapshot)) {
@@ -796,6 +858,7 @@ export function useAppCatalog() {
     isCurrentSnapshot,
     refreshRuntimeStatuses,
     requireCurrent,
+    requireCurrentLifecycleAction,
     runExclusive,
   ])
 
@@ -803,23 +866,37 @@ export function useAppCatalog() {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
+    advanceLifecycleActionGeneration(scopeKey)
     return runExclusive(scopeKey, 'stop', async () => {
       await window.electronAPI.localApps.stop(scope)
       requireCurrent(snapshot)
       await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
     })
-  }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
+  }, [
+    advanceLifecycleActionGeneration,
+    currentSnapshotForApp,
+    refreshRuntimeStatuses,
+    requireCurrent,
+    runExclusive,
+  ])
 
   const uninstall = useCallback((app: CatalogApp, preserveData: boolean) => {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
+    advanceLifecycleActionGeneration(scopeKey)
     return runExclusive(scopeKey, 'uninstall', async () => {
       await window.electronAPI.localApps.uninstall(scope, { preserveData })
       requireCurrent(snapshot)
       await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
     })
-  }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
+  }, [
+    advanceLifecycleActionGeneration,
+    currentSnapshotForApp,
+    refreshRuntimeStatuses,
+    requireCurrent,
+    runExclusive,
+  ])
 
   const cancelInstall = useCallback((app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)

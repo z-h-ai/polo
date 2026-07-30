@@ -540,8 +540,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
                         key={scopeKey}
                         app={app}
                         status={status}
+                        statusLoading={Boolean(
+                          catalog.state.statusLoadingScopeKeys?.[scopeKey],
+                        )}
                         statusUnavailable={Boolean(
                           !status
+                          && !catalog.state.statusLoadingScopeKeys?.[scopeKey]
                           && catalog.state.statusErrorScopeKeys?.[scopeKey],
                         )}
                         compatible={compatibleWithHost(app)}

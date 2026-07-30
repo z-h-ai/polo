@@ -559,6 +559,7 @@
   "homeApps.status.installing": "Wird installiert",
   "homeApps.status.installingUpdate": "Update wird installiert",
   "homeApps.status.invalidVersion": "Ungültiges Release-Versionsformat",
+  "homeApps.status.loading": "Status wird geladen…",
   "homeApps.status.notInstalled": "Nicht installiert",
   "homeApps.status.preparing": "App wird vorbereitet",
   "homeApps.status.ready": "Bereit zum Öffnen",

@@ -18,6 +18,7 @@ import type {
   LocalAppRuntimeStatus,
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
+import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 
 GlobalRegistrator.register()
 
@@ -240,6 +241,34 @@ afterEach(() => {
 })
 
 describe('useAppCatalog scoped async state', () => {
+  it('keeps a local app status unknown until its initial batch resolves', async () => {
+    const pendingStatuses = deferred<LocalAppRuntimeStatus[]>()
+    getRuntimeStatuses = mock(() => pendingStatuses.promise)
+    const view = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(view.result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const catalogApp = view.result.current.state.catalog!.apps[0]!
+    const scope = view.result.current.scopeForApp(catalogApp)
+    const scopeKey = createLocalAppScopeKey(scope)
+
+    expect(view.result.current.state.loading).toBe(false)
+    expect(view.result.current.state.statusLoadingScopeKeys[scopeKey]).toBe(true)
+    expect(view.result.current.getStatus(catalogApp)).toBeUndefined()
+
+    pendingStatuses.resolve([{
+      appId: catalogApp.id,
+      scope,
+      status: 'not_installed',
+    }])
+    await waitFor(() => {
+      expect(view.result.current.state.statusLoadingScopeKeys[scopeKey])
+        .toBeUndefined()
+      expect(view.result.current.getStatus(catalogApp)?.status)
+        .toBe('not_installed')
+    })
+  })
+
   it('propagates a cached catalog 403 into the App auth-failure channel', async () => {
     syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
       success: false,
@@ -502,8 +531,13 @@ describe('useAppCatalog scoped async state', () => {
     const catalogApp = result.current.state.catalog!.apps[0]!
 
     let started!: Promise<LocalAppStartResult>
+    let startOutcome!: Promise<'fulfilled' | 'rejected'>
     act(() => {
       started = result.current.start(catalogApp)
+      startOutcome = started.then(
+        () => 'fulfilled',
+        () => 'rejected',
+      )
     })
     await waitFor(() => {
       expect(startLocalApp).toHaveBeenCalledTimes(1)
@@ -533,7 +567,7 @@ describe('useAppCatalog scoped async state', () => {
         url: 'http://127.0.0.1:9912',
         port: 9912,
       })
-      await started
+      expect(await startOutcome).toBe('rejected')
     })
 
     expect(stopLocalApp).toHaveBeenCalledWith(expect.objectContaining({

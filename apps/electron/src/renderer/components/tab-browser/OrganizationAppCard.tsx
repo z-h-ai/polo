@@ -25,6 +25,7 @@ export type CatalogPrimaryAction =
 interface OrganizationAppCardProps {
   app: CatalogApp
   status?: LocalAppRuntimeStatus
+  statusLoading?: boolean
   statusUnavailable?: boolean
   compatible: boolean
   offline: boolean
@@ -42,7 +43,9 @@ export function primaryActionFor(
   status: LocalAppRuntimeStatus | undefined,
   compatible: boolean,
   offline: boolean,
+  statusLoading = false,
 ): CatalogPrimaryAction {
+  if (statusLoading) return 'unavailable'
   if (app.availability !== 'available' || !compatible) return 'unavailable'
   if (app.deliveryMode === 'remote_url') return 'open'
   if (!status || status.status === 'not_installed') {
@@ -140,6 +143,7 @@ function AppArtwork({ app }: { app: CatalogApp }) {
 export function OrganizationAppCard({
   app,
   status,
+  statusLoading = false,
   statusUnavailable = false,
   compatible,
   offline,
@@ -151,8 +155,8 @@ export function OrganizationAppCard({
   const { t } = useTranslation()
   const action = statusUnavailable
     ? 'unavailable'
-    : primaryActionFor(app, status, compatible, offline)
-  const busy = status?.status === 'starting'
+    : primaryActionFor(app, status, compatible, offline, statusLoading)
+  const busy = statusLoading || status?.status === 'starting'
   const installed = app.deliveryMode === 'local_bundle'
     && Boolean(status && status.status !== 'not_installed'
       && status.status !== 'downloading'
@@ -229,7 +233,9 @@ export function OrganizationAppCard({
             'truncate text-[11px] text-muted-foreground',
             (status?.status === 'broken' || status?.versionError) && 'text-destructive',
           )}>
-            {statusUnavailable
+            {statusLoading
+              ? t('homeApps.status.loading')
+              : statusUnavailable
               ? t('homeApps.status.statusUnavailable')
               : statusText(t, app, status, compatible)}
           </p>
@@ -263,7 +269,11 @@ export function OrganizationAppCard({
             data-testid={`organization-app-action-${app.id}`}
           >
             {busy && <Icons.LoaderCircle className="animate-spin" />}
-            {busy ? t('homeApps.status.starting') : actionLabel(t, action)}
+            {statusLoading
+              ? t('homeApps.status.loading')
+              : busy
+                ? t('homeApps.status.starting')
+                : actionLabel(t, action)}
           </Button>
         </div>
       </div>

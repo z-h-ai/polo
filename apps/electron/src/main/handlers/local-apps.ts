@@ -190,6 +190,9 @@ function deriveCatalogReleaseStatus(
 
   const availableVersion = normalizeCatalogSemVer(release.version)
   if (!availableVersion) {
+    // Invalid server metadata stays visible without erasing the last trusted
+    // update. Installed-like states may expose that retained update as the
+    // primary status; running/busy/broken states keep their lifecycle status.
     const retainedRelease = status.availableRelease ?? trustedRelease
     if (!retainedRelease || !status.currentVersion) {
       return { ...status, versionError: 'invalid_semver' }

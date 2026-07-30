@@ -27,6 +27,11 @@ const app: CatalogApp = {
 const translate = ((key: string) => key) as TFunction
 
 describe('OrganizationAppCard invalid version state', () => {
+  it('blocks install while the initial runtime status is unknown', () => {
+    expect(primaryActionFor(app, undefined, true, false, true))
+      .toBe('unavailable')
+  })
+
   it('blocks a fresh install and shows the invalid version warning', () => {
     const status: LocalAppRuntimeStatus = {
       appId: app.id,

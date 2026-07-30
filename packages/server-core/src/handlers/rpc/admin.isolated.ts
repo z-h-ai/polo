@@ -284,6 +284,7 @@ mock.module('@polo-ai/shared/admin', () => ({
       if (key.startsWith(`${accountId}:`)) appCatalogAccess.set(key, 'denied')
     }
   },
+  resumeAppCatalogAccessForAccount: () => {},
   getCachedAppCatalog: (accountId: string, organizationId: string) =>
     appCatalogCache.get(`${accountId}:${organizationId}`) ?? null,
   listCachedAppCatalogs: (accountId: string) => [...appCatalogCache.values()]
