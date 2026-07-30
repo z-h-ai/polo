@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, nativeTheme, Menu, app, session } from 'electron'
+import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
 import { windowLog } from './logger'
 import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
@@ -8,7 +8,8 @@ import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
-import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
+import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
+import { installWebviewSecurityHandlers } from './webview-security'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -129,13 +130,19 @@ export class WindowManager {
     const classification = classifyExternalUrl(url)
 
     if (classification.kind === 'dangerous') {
-      windowLog.warn(`[url-safety] Blocked ${context}: ${formatBlockedUrlError(classification)} url=${url}`)
+      windowLog.warn(
+        `[url-safety] Blocked ${context}: ${formatBlockedUrlError(classification)}`,
+        describeUrlForLog(url),
+      )
       return
     }
 
     if (classification.kind === 'internal-deeplink') {
       if (!sourceWindow) {
-        windowLog.warn(`[url-safety] Blocked ${context}: internal deep link has no target window url=${url}`)
+        windowLog.warn(
+          `[url-safety] Blocked ${context}: internal deep link has no target window`,
+          describeDeepLinkForLog(url),
+        )
         return
       }
 
@@ -148,85 +155,32 @@ export class WindowManager {
           this.clientResolver?.(sourceWindow.webContents.id),
         )
         if (!result.success) {
-          windowLog.warn(`[url-safety] Blocked ${context}: unsupported internal deep link url=${url} error=${result.error ?? 'unknown'}`)
+          windowLog.warn(
+            `[url-safety] Blocked ${context}: unsupported internal deep link`,
+            describeDeepLinkForLog(url),
+          )
         }
-      }).catch((error) => {
-        windowLog.warn(`[url-safety] Failed to route internal deep link from ${context}: ${error instanceof Error ? error.message : String(error)}`)
+      }).catch(() => {
+        windowLog.warn(
+          `[url-safety] Failed to route internal deep link from ${context}`,
+          describeDeepLinkForLog(url),
+        )
       })
       return
     }
 
-    void shell.openExternal(url).catch((error) => {
-      windowLog.warn(`[url-safety] Failed to open external URL from ${context}: ${error instanceof Error ? error.message : String(error)}`)
+    void shell.openExternal(url).catch(() => {
+      windowLog.warn(
+        `[url-safety] Failed to open external URL from ${context}`,
+        describeUrlForLog(url),
+      )
     })
   }
 
   private setupWebviewSecurity(): void {
     if (this.webviewSecurityInitialized) return
     this.webviewSecurityInitialized = true
-
-    const ses = session.fromPartition(BROWSER_PANE_SESSION_PARTITION)
-    const allow = new Set([
-      'fullscreen',
-      'pointerLock',
-      'window-management',
-      'notifications',
-      'geolocation',
-      'media',
-      'clipboard-read',
-      'clipboard-sanitized-write',
-      'idle-detection',
-    ])
-
-    if (typeof ses.setPermissionCheckHandler === 'function') {
-      ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
-        const allowed = allow.has(permission)
-        if (!allowed) {
-          windowLog.warn(`[webview-security] permission check denied: ${permission} origin=${requestingOrigin}`)
-        }
-        return allowed
-      })
-    }
-
-    if (typeof ses.setPermissionRequestHandler === 'function') {
-      ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-        const allowed = allow.has(permission)
-        if (!allowed) {
-          const requestingOrigin = (details as { requestingOrigin?: string } | undefined)?.requestingOrigin ?? 'unknown'
-          windowLog.warn(`[webview-security] permission request denied: ${permission} origin=${requestingOrigin}`)
-        }
-        callback(allowed)
-      })
-    }
-
-    app.on('web-contents-created', (_event, contents) => {
-      if (contents.getType() !== 'webview') return
-
-      contents.setWindowOpenHandler((details) => {
-        const classification = classifyExternalUrl(details.url)
-        if (classification.kind === 'dangerous' || classification.kind === 'internal-deeplink') {
-          windowLog.warn(`[webview-security] blocked popup: ${formatBlockedUrlError(classification)} url=${details.url}`)
-          return { action: 'deny' }
-        }
-
-        void shell.openExternal(details.url).catch((error) => {
-          windowLog.warn(`[webview-security] failed to open popup externally: ${error instanceof Error ? error.message : String(error)}`)
-        })
-        return { action: 'deny' }
-      })
-
-      contents.on('will-navigate', (event, url) => {
-        try {
-          const parsed = new URL(url)
-          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return
-        } catch {
-          // Invalid URLs fall through to blocking.
-        }
-
-        event.preventDefault()
-        windowLog.warn(`[webview-security] blocked navigation url=${url}`)
-      })
-    })
+    installWebviewSecurityHandlers()
   }
 
   /**
@@ -408,7 +362,10 @@ export class WindowManager {
           window.loadURL(devUrl.toString())
         } catch {
           // Fallback if URL parsing fails
-          windowLog.warn('Failed to parse restoreUrl, using default:', restoreUrl)
+          windowLog.warn(
+            'Failed to parse restoreUrl, using default',
+            describeUrlForLog(restoreUrl),
+          )
           const params = new URLSearchParams({ workspaceId, ...(focused && { focused: 'true' }) }).toString()
           window.loadURL(`${VITE_DEV_SERVER_URL}?${params}`)
         }
@@ -465,7 +422,7 @@ export class WindowManager {
         // Import parseDeepLink dynamically to avoid circular dependency
         import('./deep-link').then(({ parseDeepLink }) => {
           const target = parseDeepLink(initialDeepLink)
-          if (target && (target.view || target.action)) {
+          if (target && (target.view || target.action || target.joinToken)) {
             // Wait a bit for React to mount and register IPC listeners
             setTimeout(() => {
               this.pushToWindow(window, RPC_CHANNELS.deeplink.NAVIGATE, {
@@ -473,6 +430,7 @@ export class WindowManager {
                 action: target.action,
                 actionParams: target.actionParams,
                 callbackId: target.callbackId,
+                joinToken: target.joinToken,
               })
             }, 100)
           }

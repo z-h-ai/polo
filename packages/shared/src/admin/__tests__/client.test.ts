@@ -625,4 +625,183 @@ describe('AdminClient', () => {
     ]);
     expect((fetchCalls[2]!.init.headers as Record<string, string>).Authorization).toBe('Bearer fresh-access-token');
   });
+
+  it('lists organizations and strips fields outside the client contract', async () => {
+    mockJsonFetch({
+      organizations: [{
+        id: 'organization-1',
+        type: 'creator_space',
+        name: 'Studio',
+        purpose: 'Publish apps',
+        visibility: 'private',
+        status: 'active',
+        createdAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        membership: {
+          id: 'membership-1',
+          role: 'owner',
+          status: 'active',
+          joinedAt: '2026-07-29T12:00:00.000Z',
+          updatedAt: '2026-07-29T12:00:00.000Z',
+          internalPolicy: 'must-not-leak',
+        },
+        memberCount: 1,
+        billingPlan: 'must-not-leak',
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.listOrganizations('organization-access-token');
+
+    expect(result).toEqual({
+      organizations: [{
+        id: 'organization-1',
+        type: 'creator_space',
+        name: 'Studio',
+        purpose: 'Publish apps',
+        visibility: 'private',
+        status: 'active',
+        createdAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        membership: {
+          id: 'membership-1',
+          role: 'owner',
+          status: 'active',
+          joinedAt: '2026-07-29T12:00:00.000Z',
+          updatedAt: '2026-07-29T12:00:00.000Z',
+        },
+        memberCount: 1,
+      }],
+    });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/me/organizations');
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('accepts the POL-56 member response shape when user.phone is omitted', async () => {
+    mockJsonFetch({
+      members: [{
+        id: 'membership-1',
+        role: 'manager',
+        status: 'active',
+        joinedAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        user: {
+          id: 'user-1',
+          username: 'manager-user',
+          displayName: 'Manager User',
+          internalProfile: 'must-not-leak',
+        },
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.listOrganizationMembers(
+      'organization-access-token',
+      'organization-1',
+    );
+
+    expect(result).toEqual({
+      members: [{
+        id: 'membership-1',
+        role: 'manager',
+        status: 'active',
+        joinedAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        user: {
+          id: 'user-1',
+          username: 'manager-user',
+          displayName: 'Manager User',
+        },
+      }],
+    });
+    expect(fetchCalls[0]!.url)
+      .toBe('https://admin.example.com/api/organizations/organization-1/members');
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('creates organizations with an idempotency key in both trusted boundaries', async () => {
+    mockJsonFetch({
+      organization: {
+        id: 'organization-1',
+        type: 'enterprise_workspace',
+        name: 'Acme',
+        purpose: 'Internal apps',
+      },
+      membership: {
+        id: 'membership-1',
+        role: 'owner',
+        status: 'active',
+      },
+      replayed: false,
+    }, 201);
+
+    const client = new AdminClient('https://admin.example.com');
+    const input = {
+      type: 'enterprise_workspace' as const,
+      name: 'Acme',
+      purpose: 'Internal apps',
+      idempotencyKey: 'organization-request-1',
+    };
+    const result = await client.createOrganization('organization-access-token', input);
+
+    expect(result).toMatchObject({
+      organization: { id: 'organization-1' },
+      membership: { role: 'owner' },
+      replayed: false,
+    });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/organizations');
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify(input));
+    expect(fetchCalls[0]!.init.headers).toMatchObject({
+      Authorization: 'Bearer organization-access-token',
+      'Idempotency-Key': 'organization-request-1',
+    });
+  });
+
+  it('previews join links publicly and accepts them with the current account', async () => {
+    const token = 'join-token-12345678901234567890';
+    const preview = {
+      organization: {
+        id: 'organization-1',
+        type: 'creator_space',
+        name: 'Studio',
+        purpose: 'Publish apps',
+      },
+      join: {
+        kind: 'join_link',
+        effectiveStatus: 'active',
+        expiresAt: null,
+        usesRemaining: null,
+        requiresPhoneMatch: false,
+      },
+    } as const;
+    mockJsonFetch(preview);
+    const client = new AdminClient('https://admin.example.com');
+
+    expect(await client.previewOrganizationJoin(token)).toEqual(preview);
+    expect(fetchCalls[0]!.url).toBe(
+      `https://admin.example.com/api/join/${token}/preview`,
+    );
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBeUndefined();
+
+    mockJsonFetch({
+      membership: {
+        id: 'membership-1',
+        organizationId: 'organization-1',
+        userId: 'user-1',
+        role: 'member',
+        status: 'active',
+      },
+      replayed: true,
+    });
+    expect(await client.acceptOrganizationJoin('organization-access-token', token))
+      .toMatchObject({
+        membership: { organizationId: 'organization-1', role: 'member' },
+        replayed: true,
+      });
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
 });

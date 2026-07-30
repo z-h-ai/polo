@@ -6,6 +6,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Phone number sign-in and account security** — Sign in or automatically create an account with a mainland China phone verification code, discover the deployed browser challenge securely, keep phone number or username password login, and set a password later from Account Security. (POO-8) (`ead3632`, `86523bb`)
 - **Local App Bundle runtime** — Install checksum-verified static, Python, and Bun app bundles into isolated version directories, launch them with a minimal credential-free environment, wait for localhost health checks before launch, manage bounded logs and process trees, and preserve user data across updates and last-known-good rollback. (POO-12) (`fb69d76`, `92b4aef`)
+- **Organization onboarding and switching** — Create a business workspace or creator space after sign-in, resume invitation links through authentication, switch organizations without leaking organization-scoped state, and let Owners and Managers manage members and invitations according to their role. (POO-13) (`56ce30d`)
 
 ## Improvements
 

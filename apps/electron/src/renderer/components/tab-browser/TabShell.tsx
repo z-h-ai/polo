@@ -30,7 +30,7 @@ export function TabShell({ renderPolo }: TabShellProps) {
 
   useEffect(() => {
     return window.electronAPI.onDeepLinkNavigate((nav) => {
-      if (nav.view || nav.action || nav.tabType === 'polo') {
+      if (nav.view || nav.action || nav.joinToken || nav.tabType === 'polo') {
         const poloTab = openTabs.find((tab) => tab.type === 'polo')
         if (poloTab) activateTab(poloTab.id)
       }

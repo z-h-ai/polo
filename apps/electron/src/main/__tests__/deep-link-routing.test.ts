@@ -63,6 +63,16 @@ describe('handleDeepLink routing', () => {
     expect(target?.actionParams).toEqual({ id: 'session-123', input: 'next' })
   })
 
+  it('parses organization join tokens without treating them as workspace ids', () => {
+    const target = parseDeepLink('poloai://join/invitation-token-1234567890%2Bsafe')
+
+    expect(target).toEqual({
+      workspaceId: undefined,
+      joinToken: 'invitation-token-1234567890+safe',
+      windowMode: undefined,
+    })
+  })
+
   it('prefers resolved target client over preferred caller client', async () => {
     const targetWindow = createMockWindow(22)
 

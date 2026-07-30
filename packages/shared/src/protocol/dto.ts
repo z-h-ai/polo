@@ -592,6 +592,8 @@ export interface DeepLinkNavigation {
   action?: string
   actionParams?: Record<string, string>
   callbackId?: string
+  /** Opaque organization invitation/public-join token from poloai://join/<token>. */
+  joinToken?: string
 }
 
 // ---------------------------------------------------------------------------

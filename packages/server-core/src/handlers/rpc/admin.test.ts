@@ -91,6 +91,16 @@ const adminClientBehavior = {
     connections: [],
     defaultConnection: null,
   }),
+  listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
+  createOrganization: async (_accessToken: string, _input: unknown): Promise<any> => {
+    throw new Error('createOrganization behavior not configured')
+  },
+  previewOrganizationJoin: async (_token: string): Promise<any> => {
+    throw new Error('previewOrganizationJoin behavior not configured')
+  },
+  acceptOrganizationJoin: async (_accessToken: string, _token: string): Promise<any> => {
+    throw new Error('acceptOrganizationJoin behavior not configured')
+  },
 }
 
 class MockAdminClient {
@@ -148,6 +158,26 @@ class MockAdminClient {
   async getLlmConnections(accessToken: string) {
     adminClientCalls.push({ method: 'getLlmConnections', args: [accessToken], accessToken })
     return adminClientBehavior.getLlmConnections(accessToken)
+  }
+
+  async listOrganizations(accessToken: string) {
+    adminClientCalls.push({ method: 'listOrganizations', args: [], accessToken })
+    return adminClientBehavior.listOrganizations(accessToken)
+  }
+
+  async createOrganization(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'createOrganization', args: [input], accessToken })
+    return adminClientBehavior.createOrganization(accessToken, input)
+  }
+
+  async previewOrganizationJoin(token: string) {
+    adminClientCalls.push({ method: 'previewOrganizationJoin', args: [token] })
+    return adminClientBehavior.previewOrganizationJoin(token)
+  }
+
+  async acceptOrganizationJoin(accessToken: string, token: string) {
+    adminClientCalls.push({ method: 'acceptOrganizationJoin', args: [token], accessToken })
+    return adminClientBehavior.acceptOrganizationJoin(accessToken, token)
   }
 }
 
@@ -329,6 +359,18 @@ function createHarness() {
     validate: requiredHandler(handlers, RPC_CHANNELS.admin.VALIDATE),
     logout: requiredHandler(handlers, RPC_CHANNELS.admin.LOGOUT),
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+    listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
+    createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
+    previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
+    acceptOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN),
+    listOrganizationMembers: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATION_MEMBERS),
+    listOrganizationInvitations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATION_INVITATIONS),
+    createOrganizationInvitation: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION_INVITATION),
+    cancelOrganizationInvitation: requiredHandler(handlers, RPC_CHANNELS.admin.CANCEL_ORGANIZATION_INVITATION),
+    createOrganizationJoinLink: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION_JOIN_LINK),
+    revokeOrganizationJoinLink: requiredHandler(handlers, RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK),
+    updateOrganizationMember: requiredHandler(handlers, RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER),
+    removeOrganizationMember: requiredHandler(handlers, RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER),
   }
 }
 
@@ -443,6 +485,7 @@ beforeEach(() => {
     connections: [adminConnection()],
     defaultConnection: 'admin-anthropic',
   })
+  adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
 })
 
 describe('registerAdminHandlers', () => {
@@ -450,16 +493,126 @@ describe('registerAdminHandlers', () => {
     const harness = createHarness()
 
     expect(Object.keys(harness).sort()).toEqual([
+      'acceptOrganizationJoin',
+      'cancelOrganizationInvitation',
+      'createOrganization',
+      'createOrganizationInvitation',
+      'createOrganizationJoinLink',
       'getAuthConfig',
       'getPhoneAuthChallengeConfig',
+      'listOrganizationInvitations',
+      'listOrganizationMembers',
+      'listOrganizations',
       'login',
       'logout',
+      'previewOrganizationJoin',
+      'removeOrganizationMember',
+      'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',
       'setPassword',
       'syncConnections',
+      'updateOrganizationMember',
       'validate',
       'verifyPhoneAuthCode',
     ])
+  })
+
+  it('forwards organization onboarding through the authenticated admin session', async () => {
+    managerState.tokens = {
+      accessToken: 'organization-access-token',
+      refreshToken: 'organization-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    const organization = {
+      id: '11111111-1111-4111-8111-111111111111',
+      type: 'creator_space',
+      name: 'Studio',
+      purpose: 'Publish apps',
+      visibility: 'private',
+      status: 'active',
+      createdAt: '2026-07-29T12:00:00.000Z',
+      updatedAt: '2026-07-29T12:00:00.000Z',
+    }
+    adminClientBehavior.listOrganizations = async () => ({
+      organizations: [{
+        ...organization,
+        membership: {
+          id: '22222222-2222-4222-8222-222222222222',
+          role: 'owner',
+          status: 'active',
+        },
+        memberCount: 1,
+      }],
+    })
+    adminClientBehavior.createOrganization = async (_accessToken, input) => ({
+      organization,
+      membership: {
+        id: '22222222-2222-4222-8222-222222222222',
+        role: 'owner',
+        status: 'active',
+      },
+      replayed: false,
+      input,
+    })
+    adminClientBehavior.previewOrganizationJoin = async () => ({
+      organization,
+      join: {
+        kind: 'join_link',
+        effectiveStatus: 'active',
+        expiresAt: null,
+        usesRemaining: null,
+        requiresPhoneMatch: false,
+      },
+    })
+    adminClientBehavior.acceptOrganizationJoin = async () => ({
+      membership: {
+        id: '33333333-3333-4333-8333-333333333333',
+        organizationId: organization.id,
+        userId: 'user-1',
+        role: 'member',
+        status: 'active',
+      },
+      replayed: false,
+    })
+
+    const {
+      listOrganizations,
+      createOrganization,
+      previewOrganizationJoin,
+      acceptOrganizationJoin,
+    } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    const token = 'join-token-12345678901234567890'
+
+    expect(await listOrganizations(context)).toMatchObject({
+      success: true,
+      organizations: [{ id: organization.id }],
+    })
+    expect(await createOrganization(context, {
+      type: 'creator_space',
+      name: 'Studio',
+      purpose: 'Publish apps',
+      idempotencyKey: 'org-request-1',
+    })).toMatchObject({ success: true, organization: { id: organization.id } })
+    expect(await previewOrganizationJoin(context, token)).toMatchObject({
+      success: true,
+      join: { kind: 'join_link' },
+    })
+    expect(await acceptOrganizationJoin(context, token)).toMatchObject({
+      success: true,
+      membership: { organizationId: organization.id },
+    })
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'listOrganizations',
+      'createOrganization',
+      'previewOrganizationJoin',
+      'acceptOrganizationJoin',
+    ])
+    expect(adminClientCalls.filter(call => call.accessToken).every(
+      call => call.accessToken === 'organization-access-token',
+    )).toBe(true)
   })
 
   it('discovers the public phone challenge issuer through the local handler', async () => {

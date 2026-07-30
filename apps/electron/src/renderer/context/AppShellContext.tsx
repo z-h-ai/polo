@@ -53,7 +53,7 @@ export interface AppShellContextType {
   /** Blocking account/config/quota state for the chat input area */
   chatAccessStatus?: ChatAccessStatus | null
   /** Signed-in Admin user, when Admin auth is configured */
-  currentAdminUser?: Pick<AdminStatusResult, 'username' | 'displayName'> | null
+  currentAdminUser?: Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null
   /** Log out the current Admin user and return to login */
   onAdminLogout?: () => Promise<void>
   /** Refresh LLM connections from config */

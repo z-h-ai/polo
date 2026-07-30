@@ -150,6 +150,18 @@ export const CHANNEL_MAP = {
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
   adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
   onAdminReauthRequired: listener('admin:reauthRequired'),
+  organizationList: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
+  organizationCreate: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION),
+  organizationPreviewJoin: invoke(RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
+  organizationAcceptJoin: invoke(RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN),
+  organizationListMembers: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATION_MEMBERS),
+  organizationListInvitations: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATION_INVITATIONS),
+  organizationCreateInvitation: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION_INVITATION),
+  organizationCancelInvitation: invoke(RPC_CHANNELS.admin.CANCEL_ORGANIZATION_INVITATION),
+  organizationCreateJoinLink: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION_JOIN_LINK),
+  organizationRevokeJoinLink: invoke(RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK),
+  organizationUpdateMember: invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER),
+  organizationRemoveMember: invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER),
 
   // Onboarding
   getAuthState: invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE),

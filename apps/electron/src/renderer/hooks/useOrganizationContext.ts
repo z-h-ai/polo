@@ -1,0 +1,510 @@
+import { useCallback, useMemo, useRef, useState } from 'react'
+import type {
+  CreateOrganizationInput,
+  OrganizationJoinPreview,
+  OrganizationRole,
+  OrganizationSummary,
+} from '../../shared/types'
+import {
+  clearPendingOrganizationJoinToken,
+  clearStoredActiveOrganizationId,
+  createOrganizationContextKey,
+  getPendingOrganizationJoinToken,
+  getStoredActiveOrganizationId,
+  setPendingOrganizationJoinToken,
+  setStoredActiveOrganizationId,
+} from '@/lib/organization-storage'
+import {
+  emitAdminAuthFailure,
+  normalizeAdminError,
+} from '@/lib/admin-auth-failure'
+
+export type OrganizationFlowState =
+  | 'idle'
+  | 'loading'
+  | 'create'
+  | 'join'
+  | 'select'
+  | 'ready'
+
+export interface OrganizationFlowError {
+  code: string
+  status?: number
+  authFailureHandled?: true
+}
+
+export interface AcceptJoinOutcome {
+  completed: boolean
+}
+
+interface OrganizationAccountScope {
+  accountId: string
+  generation: number
+}
+
+function resultError(result: {
+  errorCode?: string
+  status?: number
+}): OrganizationFlowError {
+  const normalized = normalizeAdminError(result)
+  const authFailureHandled = emitAdminAuthFailure(normalized)
+  return authFailureHandled
+    ? { ...normalized, authFailureHandled: true }
+    : normalized
+}
+
+function caughtError(caught: unknown): OrganizationFlowError {
+  if (caught && typeof caught === 'object') {
+    const record = caught as Record<string, unknown>
+    const normalized = normalizeAdminError({
+      code: typeof record.code === 'string' ? record.code : undefined,
+      errorCode: typeof record.errorCode === 'string' ? record.errorCode : undefined,
+      status: typeof record.status === 'number' ? record.status : undefined,
+    })
+    if (record.authFailureHandled === true) {
+      return { ...normalized, authFailureHandled: true }
+    }
+    const authFailureHandled = emitAdminAuthFailure(normalized)
+    return authFailureHandled
+      ? { ...normalized, authFailureHandled: true }
+      : normalized
+  }
+  return { code: 'request_failed' }
+}
+
+export function useOrganizationContextState() {
+  const [flowState, setFlowState] = useState<OrganizationFlowState>('idle')
+  const [organizationSummaries, setOrganizationSummaries] = useState<OrganizationSummary[]>([])
+  const [activeOrganizationId, setActiveOrganizationId] = useState<string | null>(null)
+  const [organizationMembershipRole, setOrganizationMembershipRole] = useState<OrganizationRole | null>(null)
+  const [pendingJoinToken, setPendingJoinToken] = useState<string | null>(
+    () => getPendingOrganizationJoinToken(),
+  )
+  // Join concurrency invariant: pendingJoinTokenRef is the newest deep-link intent,
+  // joinPreviewTokenRef identifies the token actually shown, and the generation
+  // invalidates every earlier preview/accept chain when a token is replaced or cleared.
+  const pendingJoinTokenRef = useRef(pendingJoinToken)
+  const joinPreviewTokenRef = useRef<string | null>(null)
+  const joinPreviewGenerationRef = useRef(0)
+  const [joinPreview, setJoinPreview] = useState<OrganizationJoinPreview | null>(null)
+  const [error, setError] = useState<OrganizationFlowError | null>(null)
+  const [contextVersion, setContextVersion] = useState(0)
+  // Account-scope generation invalidates every bootstrap/list/create/accept chain
+  // started for an earlier login, even when its IPC response arrives after account swap.
+  const accountIdRef = useRef<string | null>(null)
+  const accountScopeGenerationRef = useRef(0)
+  const activeOrganizationIdRef = useRef<string | null>(null)
+  const organizationScopeGenerationRef = useRef(0)
+  const refreshGenerationRef = useRef(0)
+
+  const isCurrentAccountScope = useCallback((scope: OrganizationAccountScope) => (
+    accountIdRef.current === scope.accountId
+    && accountScopeGenerationRef.current === scope.generation
+  ), [])
+
+  const activateOrganization = useCallback((
+    accountId: string,
+    summaries: OrganizationSummary[],
+    organizationId: string,
+  ) => {
+    const organization = summaries.find(item => item.id === organizationId)
+    if (!organization || organization.membership.status !== 'active') {
+      throw { code: 'membership_not_active' } satisfies OrganizationFlowError
+    }
+
+    setStoredActiveOrganizationId(accountId, organizationId)
+    accountIdRef.current = accountId
+    activeOrganizationIdRef.current = organizationId
+    organizationScopeGenerationRef.current += 1
+    setActiveOrganizationId(organizationId)
+    setOrganizationMembershipRole(organization.membership.role)
+    setContextVersion(version => version + 1)
+    setFlowState('ready')
+    setError(null)
+
+    window.dispatchEvent(new CustomEvent('polo:organization-changed', {
+      detail: {
+        accountId,
+        organizationId,
+        role: organization.membership.role,
+        contextKey: createOrganizationContextKey(accountId, organizationId),
+      },
+    }))
+  }, [])
+
+  const loadOrganizations = useCallback(async (
+    scope: OrganizationAccountScope,
+  ): Promise<OrganizationSummary[] | null> => {
+    const result = await window.electronAPI.organizationList()
+    if (!isCurrentAccountScope(scope)) return null
+    if (!result.success) throw resultError(result)
+    setOrganizationSummaries(result.organizations)
+    return result.organizations
+  }, [isCurrentAccountScope])
+
+  const previewJoin = useCallback(async (token: string) => {
+    // Starting a preview increments the generation and removes the previously
+    // displayed-token binding. Its response may commit only while token + generation
+    // still describe the latest pending deep link.
+    const generation = ++joinPreviewGenerationRef.current
+    joinPreviewTokenRef.current = null
+    setJoinPreview(null)
+    setError(null)
+    try {
+      const result = await window.electronAPI.organizationPreviewJoin(token)
+      if (
+        generation !== joinPreviewGenerationRef.current
+        || pendingJoinTokenRef.current !== token
+      ) {
+        return null
+      }
+      if (!result.success) {
+        setError(resultError(result))
+        return null
+      }
+      joinPreviewTokenRef.current = token
+      setJoinPreview({
+        organization: result.organization,
+        join: result.join,
+      })
+      return result
+    } catch (caught) {
+      if (
+        generation === joinPreviewGenerationRef.current
+        && pendingJoinTokenRef.current === token
+      ) {
+        setError(caughtError(caught))
+      }
+      return null
+    }
+  }, [])
+
+  const bootstrap = useCallback(async (
+    accountId: string,
+  ): Promise<OrganizationFlowState | null> => {
+    const scope = {
+      accountId,
+      generation: ++accountScopeGenerationRef.current,
+    }
+    accountIdRef.current = accountId
+    joinPreviewGenerationRef.current += 1
+    joinPreviewTokenRef.current = null
+    activeOrganizationIdRef.current = null
+    organizationScopeGenerationRef.current += 1
+    setOrganizationSummaries([])
+    setJoinPreview(null)
+    setActiveOrganizationId(null)
+    setOrganizationMembershipRole(null)
+    setFlowState('loading')
+    setError(null)
+
+    try {
+      const summaries = await loadOrganizations(scope)
+      if (!summaries || !isCurrentAccountScope(scope)) return null
+      const token = getPendingOrganizationJoinToken() ?? pendingJoinTokenRef.current
+      if (token) {
+        pendingJoinTokenRef.current = token
+        setPendingJoinToken(token)
+        await previewJoin(token)
+        if (!isCurrentAccountScope(scope)) return null
+        setFlowState('join')
+        return 'join'
+      }
+
+      if (!isCurrentAccountScope(scope)) return null
+      if (summaries.length === 0) {
+        activeOrganizationIdRef.current = null
+        setActiveOrganizationId(null)
+        setOrganizationMembershipRole(null)
+        setFlowState('create')
+        return 'create'
+      }
+
+      const storedId = getStoredActiveOrganizationId(accountId)
+      const preferred = (
+        storedId ? summaries.find(item => item.id === storedId) : undefined
+      ) ?? (summaries.length === 1 ? summaries[0] : undefined)
+
+      if (preferred) {
+        activateOrganization(accountId, summaries, preferred.id)
+        return 'ready'
+      }
+
+      activeOrganizationIdRef.current = null
+      setActiveOrganizationId(null)
+      setOrganizationMembershipRole(null)
+      setFlowState('select')
+      return 'select'
+    } catch (caught) {
+      if (!isCurrentAccountScope(scope)) return null
+      setError(caughtError(caught))
+      setFlowState('loading')
+      throw caught
+    }
+  }, [
+    activateOrganization,
+    isCurrentAccountScope,
+    loadOrganizations,
+    previewJoin,
+  ])
+
+  const receiveJoinToken = useCallback(async (token: string) => {
+    setPendingOrganizationJoinToken(token)
+    pendingJoinTokenRef.current = token
+    setPendingJoinToken(token)
+    setFlowState('join')
+    await previewJoin(token)
+  }, [previewJoin])
+
+  const dismissJoin = useCallback((): OrganizationFlowState => {
+    clearPendingOrganizationJoinToken()
+    joinPreviewGenerationRef.current += 1
+    joinPreviewTokenRef.current = null
+    pendingJoinTokenRef.current = null
+    setPendingJoinToken(null)
+    setJoinPreview(null)
+    setError(null)
+
+    if (organizationSummaries.length === 0) {
+      setFlowState('create')
+      return 'create'
+    }
+
+    const accountId = accountIdRef.current
+    const storedId = accountId ? getStoredActiveOrganizationId(accountId) : null
+    const preferred = (
+      storedId
+        ? organizationSummaries.find(item => item.id === storedId)
+        : undefined
+    ) ?? (organizationSummaries.length === 1 ? organizationSummaries[0] : undefined)
+
+    if (accountId && preferred) {
+      activateOrganization(accountId, organizationSummaries, preferred.id)
+      return 'ready'
+    }
+
+    setFlowState('select')
+    return 'select'
+  }, [activateOrganization, organizationSummaries])
+
+  const createOrganization = useCallback(async (input: CreateOrganizationInput) => {
+    const accountId = accountIdRef.current
+    if (!accountId) {
+      throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
+    }
+    const scope = {
+      accountId,
+      generation: accountScopeGenerationRef.current,
+    }
+    setError(null)
+    try {
+      const result = await window.electronAPI.organizationCreate(input)
+      if (!isCurrentAccountScope(scope)) return null
+      if (!result.success) throw resultError(result)
+      if (
+        result.membership.role !== 'owner'
+        || result.membership.status !== 'active'
+      ) {
+        throw {
+          code: 'owner_membership_unconfirmed',
+        } satisfies OrganizationFlowError
+      }
+
+      const summaries = await loadOrganizations(scope)
+      if (!summaries || !isCurrentAccountScope(scope)) return null
+      const created = summaries.find(item => item.id === result.organization.id)
+      if (created?.membership.role !== 'owner') {
+        throw {
+          code: 'owner_membership_unconfirmed',
+        } satisfies OrganizationFlowError
+      }
+      activateOrganization(accountId, summaries, result.organization.id)
+      return result
+    } catch (caught) {
+      if (!isCurrentAccountScope(scope)) return null
+      const nextError = caughtError(caught)
+      setError(nextError)
+      throw nextError
+    }
+  }, [activateOrganization, isCurrentAccountScope, loadOrganizations])
+
+  const acceptJoin = useCallback(async () => {
+    // Acceptance snapshots the visible preview token and generation. Every async
+    // boundary must preserve the pending token, displayed token, and generation
+    // before the result may activate an organization or clear the join context.
+    const token = joinPreviewTokenRef.current
+    if (!token || pendingJoinTokenRef.current !== token) {
+      throw { code: 'join_token_unavailable' } satisfies OrganizationFlowError
+    }
+    const generation = joinPreviewGenerationRef.current
+    const accountId = accountIdRef.current
+    if (!accountId) {
+      throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
+    }
+    const accountScope = {
+      accountId,
+      generation: accountScopeGenerationRef.current,
+    }
+    setError(null)
+    try {
+      const result = await window.electronAPI.organizationAcceptJoin(token)
+      if (!isCurrentAccountScope(accountScope)) {
+        return { completed: false } satisfies AcceptJoinOutcome
+      }
+      if (!result.success) throw resultError(result)
+
+      const isCurrentJoin = () => (
+        isCurrentAccountScope(accountScope)
+        && generation === joinPreviewGenerationRef.current
+        && joinPreviewTokenRef.current === token
+        && pendingJoinTokenRef.current === token
+      )
+      if (!isCurrentJoin()) {
+        return { completed: false } satisfies AcceptJoinOutcome
+      }
+
+      const summaries = await loadOrganizations(accountScope)
+      if (!summaries) {
+        return { completed: false } satisfies AcceptJoinOutcome
+      }
+      if (!isCurrentJoin()) {
+        return { completed: false } satisfies AcceptJoinOutcome
+      }
+
+      clearPendingOrganizationJoinToken()
+      joinPreviewGenerationRef.current += 1
+      joinPreviewTokenRef.current = null
+      pendingJoinTokenRef.current = null
+      setPendingJoinToken(null)
+      setJoinPreview(null)
+      activateOrganization(accountId, summaries, result.membership.organizationId)
+      return { completed: true } satisfies AcceptJoinOutcome
+    } catch (caught) {
+      if (!isCurrentAccountScope(accountScope)) {
+        return { completed: false } satisfies AcceptJoinOutcome
+      }
+      const nextError = caughtError(caught)
+      if (
+        generation === joinPreviewGenerationRef.current
+        && joinPreviewTokenRef.current === token
+        && pendingJoinTokenRef.current === token
+      ) {
+        setError(nextError)
+      }
+      throw nextError
+    }
+  }, [activateOrganization, isCurrentAccountScope, loadOrganizations])
+
+  const selectOrganization = useCallback((organizationId: string) => {
+    const accountId = accountIdRef.current
+    if (!accountId) {
+      throw { code: 'account_context_unavailable' } satisfies OrganizationFlowError
+    }
+    activateOrganization(accountId, organizationSummaries, organizationId)
+  }, [activateOrganization, organizationSummaries])
+
+  const refreshOrganizations = useCallback(async () => {
+    const requestAccountId = accountIdRef.current
+    if (!requestAccountId) return []
+    const requestOrganizationId = activeOrganizationIdRef.current
+    const scopeGeneration = organizationScopeGenerationRef.current
+    const refreshGeneration = ++refreshGenerationRef.current
+    const isCurrentScope = () => (
+      refreshGeneration === refreshGenerationRef.current
+      && scopeGeneration === organizationScopeGenerationRef.current
+      && accountIdRef.current === requestAccountId
+      && activeOrganizationIdRef.current === requestOrganizationId
+    )
+
+    const result = await window.electronAPI.organizationList()
+    if (!isCurrentScope()) return result.success ? result.organizations : []
+    if (!result.success) throw resultError(result)
+    const summaries = result.organizations
+
+    setOrganizationSummaries(summaries)
+    if (!requestOrganizationId) return summaries
+    const active = summaries.find(item => item.id === requestOrganizationId)
+    if (!active) {
+      clearStoredActiveOrganizationId(requestAccountId)
+      activeOrganizationIdRef.current = null
+      organizationScopeGenerationRef.current += 1
+      setActiveOrganizationId(null)
+      setOrganizationMembershipRole(null)
+      setFlowState(summaries.length === 0 ? 'create' : 'select')
+      return summaries
+    }
+    setOrganizationMembershipRole(active.membership.role)
+    return summaries
+  }, [])
+
+  const clearAccount = useCallback((
+    accountId?: string | null,
+    options?: { preservePendingJoinToken?: boolean },
+  ) => {
+    const targetAccountId = accountId ?? accountIdRef.current
+    if (targetAccountId) clearStoredActiveOrganizationId(targetAccountId)
+    const preservedJoinToken = options?.preservePendingJoinToken
+      ? pendingJoinTokenRef.current ?? getPendingOrganizationJoinToken()
+      : null
+    if (!options?.preservePendingJoinToken) clearPendingOrganizationJoinToken()
+    joinPreviewGenerationRef.current += 1
+    joinPreviewTokenRef.current = null
+    pendingJoinTokenRef.current = preservedJoinToken
+    accountIdRef.current = null
+    accountScopeGenerationRef.current += 1
+    activeOrganizationIdRef.current = null
+    organizationScopeGenerationRef.current += 1
+    refreshGenerationRef.current += 1
+    setOrganizationSummaries([])
+    setActiveOrganizationId(null)
+    setOrganizationMembershipRole(null)
+    setPendingJoinToken(preservedJoinToken)
+    setJoinPreview(null)
+    setError(null)
+    setContextVersion(version => version + 1)
+    setFlowState('idle')
+  }, [])
+
+  const showCreate = useCallback(() => {
+    setError(null)
+    setFlowState('create')
+  }, [])
+
+  const showSelect = useCallback(() => {
+    setError(null)
+    setFlowState(organizationSummaries.length === 0 ? 'create' : 'select')
+  }, [organizationSummaries.length])
+
+  const activeOrganization = useMemo(
+    () => organizationSummaries.find(item => item.id === activeOrganizationId) ?? null,
+    [activeOrganizationId, organizationSummaries],
+  )
+  const accountId = accountIdRef.current
+  const organizationContextKey = accountId && activeOrganizationId
+    ? createOrganizationContextKey(accountId, activeOrganizationId)
+    : null
+
+  return {
+    accountId,
+    flowState,
+    organizationSummaries,
+    activeOrganization,
+    activeOrganizationId,
+    organizationMembershipRole,
+    organizationContextKey,
+    contextVersion,
+    pendingJoinToken,
+    joinPreview,
+    error,
+    bootstrap,
+    receiveJoinToken,
+    dismissJoin,
+    createOrganization,
+    acceptJoin,
+    selectOrganization,
+    refreshOrganizations,
+    clearAccount,
+    showCreate,
+    showSelect,
+  }
+}

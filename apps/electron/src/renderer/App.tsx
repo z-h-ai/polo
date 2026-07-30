@@ -75,8 +75,26 @@ import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 import { TabShellProvider } from '@/context/TabShellContext'
 import { TabShell } from '@/components/tab-browser/TabShell'
+import { OrganizationOnboarding } from '@/components/organization/OrganizationOnboarding'
+import { OrganizationManagementDialog } from '@/components/organization/OrganizationManagementDialog'
+import {
+  OrganizationProvider,
+  type OrganizationContextValue,
+} from '@/context/OrganizationContext'
+import { useOrganizationContextState } from '@/hooks/useOrganizationContext'
+import {
+  getAdminErrorCode,
+  isAdminAuthFailureResult,
+  subscribeToAdminAuthFailures,
+  type AdminErrorLike,
+} from '@/lib/admin-auth-failure'
+import {
+  createOrganizationDeepLinkNavigationCoordinator,
+  type OrganizationDeepLinkAppState,
+  type OrganizationDeepLinkNavigationCoordinator,
+} from '@/lib/app-organization-deep-link'
 
-type AppState = 'loading' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
+type AppState = OrganizationDeepLinkAppState
 
 /** Type for the Jotai store returned by useStore() */
 type JotaiStore = ReturnType<typeof getDefaultStore>
@@ -109,14 +127,6 @@ function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Re
 
 function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
   return result.errorCode === 'TOKEN_REVOKED'
-}
-
-function isAdminAuthFailureResult(result: { errorCode?: string; status?: number }): boolean {
-  return result.errorCode === 'TOKEN_REVOKED'
-    || result.errorCode === 'UNAUTHORIZED'
-    || result.errorCode === 'INVALID_TOKEN'
-    || result.errorCode === 'TOKEN_EXPIRED'
-    || result.status === 401
 }
 
 function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
@@ -283,6 +293,8 @@ export default function App() {
 
   // App state: loading -> check auth -> onboarding or ready
   const [appState, setAppState] = useState<AppState>('loading')
+  const appStateRef = useRef<AppState>(appState)
+  appStateRef.current = appState
   const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
 
   // Per-session Jotai atom setters for isolated updates
@@ -345,7 +357,22 @@ export default function App() {
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
   const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
-  const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'username' | 'displayName'> | null>(null)
+  const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null>(null)
+  const currentAdminUserIdRef = useRef<string | null>(null)
+  currentAdminUserIdRef.current = currentAdminUser?.userId ?? null
+  const organizationDeepLinkCoordinatorRef = useRef<OrganizationDeepLinkNavigationCoordinator | null>(null)
+  const invalidateOrganizationDeepLinkNavigation = useCallback(() => {
+    organizationDeepLinkCoordinatorRef.current?.invalidate()
+  }, [])
+  const organization = useOrganizationContextState()
+  const {
+    bootstrap: bootstrapOrganization,
+    clearAccount: clearOrganizationAccount,
+    receiveJoinToken: receiveOrganizationJoinToken,
+    selectOrganization,
+    showCreate: showOrganizationCreate,
+  } = organization
+  const [organizationManagementOpen, setOrganizationManagementOpen] = useState(false)
 
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
@@ -672,18 +699,77 @@ export default function App() {
   const refreshAdminUser = useCallback(async () => {
     try {
       const status = await window.electronAPI.adminGetStatus()
-      setCurrentAdminUser(status.loggedIn
-        ? { username: status.username, displayName: status.displayName }
-        : null)
+      const user = status.loggedIn && status.userId
+        ? {
+            userId: status.userId,
+            username: status.username,
+            displayName: status.displayName,
+          }
+        : null
+      if (currentAdminUserIdRef.current !== (user?.userId ?? null)) {
+        invalidateOrganizationDeepLinkNavigation()
+      }
+      currentAdminUserIdRef.current = user?.userId ?? null
+      setCurrentAdminUser(user)
+      return user
     } catch {
+      if (currentAdminUserIdRef.current !== null) {
+        invalidateOrganizationDeepLinkNavigation()
+      }
+      currentAdminUserIdRef.current = null
       setCurrentAdminUser(null)
+      return null
     }
+  }, [invalidateOrganizationDeepLinkNavigation])
+
+  const continueAfterOrganization = useCallback((workspaceId: string | null) => {
+    setAppState(workspaceId ? 'ready' : 'workspace-picker')
   }, [])
+
+  const routeThroughOrganization = useCallback(async (
+    accountId: string | null,
+    workspaceId: string | null,
+  ) => {
+    if (!accountId) {
+      continueAfterOrganization(workspaceId)
+      return
+    }
+
+    try {
+      const next = await bootstrapOrganization(accountId)
+      if (currentAdminUserIdRef.current !== accountId || next === null) return
+      if (next === 'ready') {
+        continueAfterOrganization(workspaceId)
+      } else {
+        setAppState('organization')
+      }
+    } catch (error) {
+      if (currentAdminUserIdRef.current !== accountId) return
+      if (isAdminAuthFailureResult(error as AdminErrorLike)) {
+        invalidateOrganizationDeepLinkNavigation()
+        currentAdminUserIdRef.current = null
+        setCurrentAdminUser(null)
+        setAppState('onboarding')
+      } else {
+        setAppState('organization')
+      }
+    }
+  }, [
+    bootstrapOrganization,
+    continueAfterOrganization,
+    invalidateOrganizationDeepLinkNavigation,
+  ])
 
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
+    // Completing authentication starts a fresh organization bootstrap. Invalidate
+    // any preview callback that began under the anonymous account before awaiting
+    // status/workspace reads, so it cannot reset the completed login flow.
+    invalidateOrganizationDeepLinkNavigation()
+    let targetWorkspaceId: string | null = windowWorkspaceId
+    let signedInUser: Awaited<ReturnType<typeof refreshAdminUser>> = null
     try {
-      await refreshAdminUser()
+      signedInUser = await refreshAdminUser()
       // Reload workspaces after onboarding
       const ws = await window.electronAPI.getWorkspaces()
       if (ws.length > 0) {
@@ -691,15 +777,23 @@ export default function App() {
         await window.electronAPI.switchWorkspace(ws[0].id)
         setWindowWorkspaceId(ws[0].id)
         setWorkspaces(ws)
+        targetWorkspaceId = ws[0].id
       } else {
         setWorkspaces(ws)
+        targetWorkspaceId = null
       }
     } catch (error) {
       console.error('[App] Failed to load workspaces after onboarding:', error)
-      // Still transition to ready — the app can recover via reconnect
+      // The organization route still runs; workspace state can recover later.
     }
-    setAppState('ready')
-  }, [refreshAdminUser])
+    await routeThroughOrganization(signedInUser?.userId ?? null, targetWorkspaceId)
+  }, [
+    invalidateOrganizationDeepLinkNavigation,
+    refreshAdminUser,
+    routeThroughOrganization,
+    setWindowWorkspaceId,
+    windowWorkspaceId,
+  ])
 
   const acquirePhoneAuthChallenge = useCallback(async () => {
     const result = await window.electronAPI.adminAcquirePhoneAuthChallenge()
@@ -739,8 +833,28 @@ export default function App() {
     setAppState('onboarding')
   }, [showAdminKicked])
 
+  const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
+    invalidateOrganizationDeepLinkNavigation()
+    clearOrganizationAccount(currentAdminUserIdRef.current, {
+      preservePendingJoinToken: true,
+    })
+    currentAdminUserIdRef.current = null
+    setCurrentAdminUser(null)
+    if (getAdminErrorCode(failure) === 'TOKEN_REVOKED') {
+      enterAdminKicked()
+    } else {
+      enterAdminLogin()
+    }
+  }, [
+    clearOrganizationAccount,
+    enterAdminKicked,
+    enterAdminLogin,
+    invalidateOrganizationDeepLinkNavigation,
+  ])
+
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
+    invalidateOrganizationDeepLinkNavigation()
     const validation = await window.electronAPI.adminValidate()
     if (!validation.loggedIn && isAdminKickedResult(validation)) {
       enterAdminKicked()
@@ -759,61 +873,83 @@ export default function App() {
       setSetupNeeds(needs)
       setAppState('onboarding')
     }
-  }, [enterAdminKicked, enterAdminLogin])
+  }, [
+    enterAdminKicked,
+    enterAdminLogin,
+    invalidateOrganizationDeepLinkNavigation,
+  ])
 
   // Reauth reset handler - open reset confirmation dialog
   const handleReauthReset = useCallback(() => {
     setShowResetDialog(true)
   }, [])
 
-  // Check auth state and get window's workspace ID on mount
+  const startupInitializationGenerationRef = useRef(0)
+  const startupInitializationHandlersRef = useRef({
+    handleAdminAuthFailure,
+    routeThroughOrganization,
+    setWindowWorkspaceId,
+  })
+  startupInitializationHandlersRef.current = {
+    handleAdminAuthFailure,
+    routeThroughOrganization,
+    setWindowWorkspaceId,
+  }
+
+  // Check auth state and get window's workspace ID exactly once on mount. The
+  // generation prevents a StrictMode/unmount cleanup from committing stale async work.
   useEffect(() => {
+    const generation = ++startupInitializationGenerationRef.current
+    let cancelled = false
+    const isCurrentInitialization = () => (
+      !cancelled
+      && generation === startupInitializationGenerationRef.current
+    )
+
     const initialize = async () => {
       try {
         // Get this window's workspace ID (passed via URL query param from main process)
         const wsId = await window.electronAPI.getWindowWorkspace()
-        setWindowWorkspaceId(wsId)
+        if (!isCurrentInitialization()) return
+        startupInitializationHandlersRef.current.setWindowWorkspaceId(wsId)
 
         let needs = await window.electronAPI.getSetupNeeds()
+        if (!isCurrentInitialization()) return
         const adminStatus = await window.electronAPI.adminGetStatus()
+        if (!isCurrentInitialization()) return
+        let signedInAccountId: string | null = null
 
         if (adminStatus.adminUrl) {
           const validation = await window.electronAPI.adminValidate()
+          if (!isCurrentInitialization()) return
           if (!validation.loggedIn) {
-            if (isAdminKickedResult(validation)) {
-              enterAdminKicked()
-            } else {
-              enterAdminLogin()
-            }
+            startupInitializationHandlersRef.current.handleAdminAuthFailure(validation)
             return
           }
 
           const syncResult = await window.electronAPI.adminSyncConnections()
+          if (!isCurrentInitialization()) return
           if (!syncResult.success && isAdminAuthFailureResult(syncResult)) {
-            if (syncResult.errorCode === 'TOKEN_REVOKED') {
-              enterAdminKicked()
-            } else {
-              enterAdminLogin()
-            }
+            startupInitializationHandlersRef.current.handleAdminAuthFailure(syncResult)
             return
           }
 
-          await refreshAdminUser()
+          const signedInUser = {
+            userId: validation.user.id,
+            username: validation.user.username,
+            displayName: validation.user.displayName,
+          }
+          if (currentAdminUserIdRef.current !== signedInUser.userId) {
+            invalidateOrganizationDeepLinkNavigation()
+          }
+          currentAdminUserIdRef.current = signedInUser.userId
+          setCurrentAdminUser(signedInUser)
+          signedInAccountId = signedInUser.userId
           needs = await window.electronAPI.getSetupNeeds()
+          if (!isCurrentInitialization()) return
         }
 
         setSetupNeeds(needs)
-
-        if (needs.isFullyConfigured) {
-          // If no workspace is selected (thin client without POLO_AI_WORKSPACE_ID),
-          // show workspace picker before entering the main app
-          if (!wsId) {
-            setAppState('workspace-picker')
-          } else {
-            setAppState('ready')
-          }
-          return
-        }
 
         if (needs.needsAdminLogin) {
           setAppState('onboarding')
@@ -823,32 +959,69 @@ export default function App() {
         // LLM connection setup is admin-managed. If local setup is incomplete only
         // because no user-managed LLM connection exists, enter the app and let the
         // existing runtime unavailable-connection handling surface send-time errors.
-        if (!wsId) {
-          setAppState('workspace-picker')
-        } else {
-          setAppState('ready')
-        }
+        await startupInitializationHandlersRef.current.routeThroughOrganization(
+          signedInAccountId,
+          wsId,
+        )
       } catch (error) {
+        if (!isCurrentInitialization()) return
         console.error('Failed to check auth state:', error)
         // If check fails, show onboarding to be safe
         setAppState('onboarding')
       }
     }
 
-    initialize()
-  }, [enterAdminKicked, enterAdminLogin, refreshAdminUser, setWindowWorkspaceId])
+    void initialize()
+    return () => {
+      cancelled = true
+      if (startupInitializationGenerationRef.current === generation) {
+        startupInitializationGenerationRef.current += 1
+      }
+    }
+  }, [invalidateOrganizationDeepLinkNavigation])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
-      setCurrentAdminUser(null)
-      if (!validation.loggedIn && isAdminKickedResult(validation)) {
-        enterAdminKicked()
-      } else {
-        enterAdminLogin()
-      }
+      if (validation.loggedIn) return
+      handleAdminAuthFailure(validation)
     })
     return () => { cleanup() }
-  }, [enterAdminKicked, enterAdminLogin])
+  }, [handleAdminAuthFailure])
+
+  useEffect(() => {
+    return subscribeToAdminAuthFailures(handleAdminAuthFailure)
+  }, [handleAdminAuthFailure])
+
+  const organizationDeepLinkHandlersRef = useRef({
+    receiveJoinToken: receiveOrganizationJoinToken,
+    showAdminLogin: enterAdminLogin,
+  })
+  organizationDeepLinkHandlersRef.current = {
+    receiveJoinToken: receiveOrganizationJoinToken,
+    showAdminLogin: enterAdminLogin,
+  }
+
+  useEffect(() => {
+    const coordinator = createOrganizationDeepLinkNavigationCoordinator({
+      receiveJoinToken: token => (
+        organizationDeepLinkHandlersRef.current.receiveJoinToken(token)
+      ),
+      getCurrentAccountId: () => currentAdminUserIdRef.current,
+      getCurrentAppState: () => appStateRef.current,
+      showOrganization: () => setAppState('organization'),
+      showAdminLogin: () => organizationDeepLinkHandlersRef.current.showAdminLogin(),
+    })
+    organizationDeepLinkCoordinatorRef.current = coordinator
+    const cleanup = window.electronAPI.onDeepLinkNavigate(coordinator.handleNavigation)
+
+    return () => {
+      cleanup()
+      coordinator.dispose()
+      if (organizationDeepLinkCoordinatorRef.current === coordinator) {
+        organizationDeepLinkCoordinatorRef.current = null
+      }
+    }
+  }, [])
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
@@ -1371,6 +1544,8 @@ export default function App() {
       const validation = await window.electronAPI.adminValidate()
       if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
         setRuntimeChatAccessIssue('account-disabled')
+        invalidateOrganizationDeepLinkNavigation()
+        currentAdminUserIdRef.current = null
         setCurrentAdminUser(null)
         return true
       }
@@ -1382,13 +1557,19 @@ export default function App() {
         message: getErrorText(error),
       })) {
         setRuntimeChatAccessIssue('account-disabled')
+        invalidateOrganizationDeepLinkNavigation()
+        currentAdminUserIdRef.current = null
         setCurrentAdminUser(null)
         return true
       }
     }
 
     return false
-  }, [currentAdminUser, runtimeChatAccessIssue])
+  }, [
+    currentAdminUser,
+    invalidateOrganizationDeepLinkNavigation,
+    runtimeChatAccessIssue,
+  ])
 
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
     try {
@@ -1885,8 +2066,10 @@ export default function App() {
 
   // Execute reset after user confirms in dialog
   const executeReset = useCallback(async () => {
+    invalidateOrganizationDeepLinkNavigation()
     try {
       await window.electronAPI.logout()
+      invalidateOrganizationDeepLinkNavigation()
       // Reset all state
       // Clear session atoms - initialize with empty array clears all per-session atoms
       initializeSessions([])
@@ -1894,6 +2077,7 @@ export default function App() {
       setWindowWorkspaceId(null)
       setRuntimeChatAccessIssue(null)
       setLlmConnectionsLoaded(false)
+      clearOrganizationAccount(currentAdminUser?.userId)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
         needsBillingConfig: true,
@@ -1909,12 +2093,22 @@ export default function App() {
     } finally {
       setShowResetDialog(false)
     }
-  }, [onboarding, initializeSessions])
+  }, [
+    currentAdminUser?.userId,
+    onboarding,
+    initializeSessions,
+    clearOrganizationAccount,
+    invalidateOrganizationDeepLinkNavigation,
+    setWindowWorkspaceId,
+  ])
 
   const handleAdminLogout = useCallback(async () => {
+    invalidateOrganizationDeepLinkNavigation()
     try {
       await window.electronAPI.adminLogout()
     } finally {
+      invalidateOrganizationDeepLinkNavigation()
+      clearOrganizationAccount(currentAdminUser?.userId)
       initializeSessions([])
       setWorkspaces([])
       setWindowWorkspaceId(null)
@@ -1923,6 +2117,7 @@ export default function App() {
       setDefaultLlmConnectionSlug(undefined)
       setWorkspaceDefaultLlmConnection(undefined)
       setRuntimeChatAccessIssue(null)
+      currentAdminUserIdRef.current = null
       setCurrentAdminUser(null)
       setSetupNeeds({
         needsBillingConfig: false,
@@ -1933,7 +2128,14 @@ export default function App() {
       handleAdminRelogin()
       setAppState('onboarding')
     }
-  }, [handleAdminRelogin, initializeSessions, setWindowWorkspaceId])
+  }, [
+    currentAdminUser?.userId,
+    handleAdminRelogin,
+    initializeSessions,
+    clearOrganizationAccount,
+    invalidateOrganizationDeepLinkNavigation,
+    setWindowWorkspaceId,
+  ])
 
   // Handle workspace selection
   // - Default: switch workspace in same window (in-window switching)
@@ -2105,6 +2307,53 @@ export default function App() {
     openNewChat,
   ])
 
+  const handleOrganizationFlowComplete = useCallback((accountId: string | null) => {
+    if (!accountId || currentAdminUserIdRef.current !== accountId) return
+    continueAfterOrganization(windowWorkspaceId)
+  }, [continueAfterOrganization, windowWorkspaceId])
+
+  const handleSelectOrganization = useCallback((organizationId: string) => {
+    selectOrganization(organizationId)
+    setOrganizationManagementOpen(false)
+  }, [selectOrganization])
+
+  const handleShowOrganizationCreate = useCallback(() => {
+    showOrganizationCreate()
+    setOrganizationManagementOpen(false)
+    setAppState('organization')
+  }, [showOrganizationCreate])
+
+  const organizationContextValue = useMemo<OrganizationContextValue | null>(() => {
+    if (
+      !currentAdminUser?.userId
+      || !organization.activeOrganizationId
+      || !organization.organizationMembershipRole
+      || !organization.organizationContextKey
+    ) {
+      return null
+    }
+    return {
+      accountId: currentAdminUser.userId,
+      activeOrganizationId: organization.activeOrganizationId,
+      organizationSummaries: organization.organizationSummaries,
+      organizationMembershipRole: organization.organizationMembershipRole,
+      organizationContextKey: organization.organizationContextKey,
+      contextVersion: organization.contextVersion,
+      onSelectOrganization: handleSelectOrganization,
+      onManageOrganization: () => setOrganizationManagementOpen(true),
+      onCreateOrganization: handleShowOrganizationCreate,
+    }
+  }, [
+    currentAdminUser?.userId,
+    handleSelectOrganization,
+    handleShowOrganizationCreate,
+    organization.activeOrganizationId,
+    organization.contextVersion,
+    organization.organizationContextKey,
+    organization.organizationMembershipRole,
+    organization.organizationSummaries,
+  ])
+
   // Platform actions for @polo-ai/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
@@ -2195,6 +2444,51 @@ export default function App() {
     )
   }
 
+  if (appState === 'organization') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <OrganizationOnboarding
+            flowState={organization.flowState}
+            organizations={organization.organizationSummaries}
+            joinPreview={organization.joinPreview}
+            error={organization.error}
+            onCreate={async input => {
+              const requestAccountId = currentAdminUserIdRef.current
+              const created = await organization.createOrganization(input)
+              if (created) handleOrganizationFlowComplete(requestAccountId)
+            }}
+            onAcceptJoin={async () => {
+              const requestAccountId = currentAdminUserIdRef.current
+              const outcome = await organization.acceptJoin()
+              if (outcome.completed) handleOrganizationFlowComplete(requestAccountId)
+            }}
+            onDismissJoin={() => {
+              const requestAccountId = currentAdminUserIdRef.current
+              const next = organization.dismissJoin()
+              if (next === 'ready') handleOrganizationFlowComplete(requestAccountId)
+            }}
+            onSelect={organizationId => {
+              const requestAccountId = currentAdminUserIdRef.current
+              selectOrganization(organizationId)
+              handleOrganizationFlowComplete(requestAccountId)
+            }}
+            onShowCreate={showOrganizationCreate}
+            onShowSelect={organization.showSelect}
+            onRetry={() => {
+              if (!currentAdminUser?.userId) return
+              const requestAccountId = currentAdminUser.userId
+              void bootstrapOrganization(requestAccountId).then(next => {
+                if (next === 'ready') handleOrganizationFlowComplete(requestAccountId)
+              }).catch(() => {})
+            }}
+          />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
   // Workspace picker — thin client with no workspace selected
   if (appState === 'workspace-picker') {
     return (
@@ -2236,8 +2530,12 @@ export default function App() {
             />
           )}
 
-          <TabShellProvider workspaceId={windowWorkspaceId}>
-            <TabShell
+          <MaybeOrganizationProvider value={organizationContextValue}>
+            <TabShellProvider
+              key={organizationContextValue?.organizationContextKey ?? 'local-account'}
+              workspaceId={windowWorkspaceId}
+            >
+              <TabShell
               renderPolo={() => (
                 <NavigationProvider
                   workspaceId={windowWorkspaceId}
@@ -2281,8 +2579,16 @@ export default function App() {
                   </div>
                 </NavigationProvider>
               )}
-            />
-          </TabShellProvider>
+              />
+            </TabShellProvider>
+            {organizationContextValue ? (
+              <OrganizationManagementDialog
+                open={organizationManagementOpen}
+                onOpenChange={setOrganizationManagementOpen}
+                onOrganizationsChanged={organization.refreshOrganizations}
+              />
+            ) : null}
+          </MaybeOrganizationProvider>
 
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
@@ -2302,6 +2608,18 @@ export default function App() {
     </ShikiThemeProvider>
     </PlatformProvider>
   )
+}
+
+function MaybeOrganizationProvider({
+  value,
+  children,
+}: {
+  value: OrganizationContextValue | null
+  children: React.ReactNode
+}) {
+  return value
+    ? <OrganizationProvider value={value}>{children}</OrganizationProvider>
+    : <>{children}</>
 }
 
 /**

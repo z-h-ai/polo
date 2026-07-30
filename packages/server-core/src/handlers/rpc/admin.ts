@@ -9,8 +9,15 @@ import {
 } from '@polo-ai/shared/admin'
 import {
   AdminLoginRpcInputSchema,
+  CreateOrganizationInvitationRpcInputSchema,
+  CreateOrganizationJoinLinkRpcInputSchema,
+  CreateOrganizationRpcInputSchema,
+  OrganizationIdRpcInputSchema,
+  OrganizationJoinTokenRpcInputSchema,
+  RemoveOrganizationMemberRpcInputSchema,
   SendPhoneAuthCodeRpcInputSchema,
   SetAdminPasswordRpcInputSchema,
+  UpdateOrganizationMemberRpcInputSchema,
   VerifyPhoneAuthCodeRpcInputSchema,
 } from '@polo-ai/shared/admin/schemas'
 import {
@@ -41,6 +48,18 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGOUT,
   RPC_CHANNELS.admin.GET_STATUS,
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
+  RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
+  RPC_CHANNELS.admin.CREATE_ORGANIZATION,
+  RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
+  RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
+  RPC_CHANNELS.admin.LIST_ORGANIZATION_MEMBERS,
+  RPC_CHANNELS.admin.LIST_ORGANIZATION_INVITATIONS,
+  RPC_CHANNELS.admin.CREATE_ORGANIZATION_INVITATION,
+  RPC_CHANNELS.admin.CANCEL_ORGANIZATION_INVITATION,
+  RPC_CHANNELS.admin.CREATE_ORGANIZATION_JOIN_LINK,
+  RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK,
+  RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER,
+  RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER,
 ] as const
 
 type StoredAdminTokens = NonNullable<Awaited<ReturnType<CredentialManager['getAdminTokens']>>>
@@ -50,6 +69,34 @@ type TokenValidationResult =
 
 export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
+  const callOrganization = async <T extends object>(
+    operation: string,
+    callback: (client: AdminClient, accessToken: string) => Promise<T>,
+  ) => {
+    try {
+      const adminUrl = requireAdminUrl()
+      const manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(adminUrl, manager)
+      if (!tokenResult.tokens) {
+        return {
+          success: false as const,
+          ...(tokenResult.authError ?? {
+            errorCode: 'UNAUTHORIZED',
+            message: 'Admin session is not logged in',
+          }),
+        }
+      }
+      const result = await callback(
+        createAdminClient(adminUrl, manager),
+        tokenResult.tokens.accessToken,
+      )
+      return { success: true as const, ...result }
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn(`[Admin] ${operation} failed:`, adminError.message)
+      return { success: false as const, ...adminError }
+    }
+  }
 
   server.handle(RPC_CHANNELS.admin.LOGIN, async (_ctx, identifier: unknown, password: unknown) => {
     const input = AdminLoginRpcInputSchema.safeParse({ identifier, password })
@@ -259,6 +306,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     return {
       adminUrl: getAdminUrl(),
       loggedIn: !!tokens,
+      userId: tokens?.userId ?? null,
       username: tokens?.username ?? null,
       displayName: tokens?.displayName ?? tokens?.username ?? null,
     }
@@ -276,6 +324,146 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       return { success: false, ...adminError }
     }
   })
+
+  server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATIONS, async () =>
+    callOrganization('listOrganizations', (client, accessToken) =>
+      client.listOrganizations(accessToken)))
+
+  server.handle(RPC_CHANNELS.admin.CREATE_ORGANIZATION, async (_ctx, rawInput: unknown) => {
+    const input = CreateOrganizationRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('createOrganization', (client, accessToken) =>
+      client.createOrganization(accessToken, input.data))
+  })
+
+  server.handle(RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN, async (_ctx, rawToken: unknown) => {
+    const token = OrganizationJoinTokenRpcInputSchema.safeParse(rawToken)
+    if (!token.success) return adminInputError('VALIDATION_ERROR')
+    try {
+      const result = await createAdminClient(requireAdminUrl(), getCredentialManager())
+        .previewOrganizationJoin(token.data)
+      return { success: true, ...result }
+    } catch (error) {
+      const adminError = toAdminRpcError(error)
+      log?.warn('[Admin] previewOrganizationJoin failed:', adminError.message)
+      return { success: false, ...adminError }
+    }
+  })
+
+  server.handle(RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN, async (_ctx, rawToken: unknown) => {
+    const token = OrganizationJoinTokenRpcInputSchema.safeParse(rawToken)
+    if (!token.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('acceptOrganizationJoin', (client, accessToken) =>
+      client.acceptOrganizationJoin(accessToken, token.data))
+  })
+
+  server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATION_MEMBERS, async (_ctx, rawOrganizationId: unknown) => {
+    const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+    if (!organizationId.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('listOrganizationMembers', (client, accessToken) =>
+      client.listOrganizationMembers(accessToken, organizationId.data))
+  })
+
+  server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATION_INVITATIONS, async (_ctx, rawOrganizationId: unknown) => {
+    const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+    if (!organizationId.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('listOrganizationInvitations', (client, accessToken) =>
+      client.listOrganizationInvitations(accessToken, organizationId.data))
+  })
+
+  server.handle(
+    RPC_CHANNELS.admin.CREATE_ORGANIZATION_INVITATION,
+    async (_ctx, rawOrganizationId: unknown, rawInput: unknown) => {
+      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      const input = CreateOrganizationInvitationRpcInputSchema.safeParse(rawInput)
+      if (!organizationId.success || !input.success) return adminInputError('VALIDATION_ERROR')
+      return callOrganization('createOrganizationInvitation', (client, accessToken) =>
+        client.createOrganizationInvitation(accessToken, organizationId.data, input.data))
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.admin.CANCEL_ORGANIZATION_INVITATION,
+    async (_ctx, rawOrganizationId: unknown, rawInvitationId: unknown) => {
+      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      const invitationId = OrganizationIdRpcInputSchema.safeParse(rawInvitationId)
+      if (!organizationId.success || !invitationId.success) return adminInputError('VALIDATION_ERROR')
+      return callOrganization('cancelOrganizationInvitation', (client, accessToken) =>
+        client.cancelOrganizationInvitation(accessToken, organizationId.data, invitationId.data))
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.admin.CREATE_ORGANIZATION_JOIN_LINK,
+    async (_ctx, rawOrganizationId: unknown, rawInput: unknown) => {
+      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      const input = CreateOrganizationJoinLinkRpcInputSchema.safeParse(rawInput)
+      if (!organizationId.success || !input.success) return adminInputError('VALIDATION_ERROR')
+      return callOrganization('createOrganizationJoinLink', (client, accessToken) =>
+        client.createOrganizationJoinLink(accessToken, organizationId.data, input.data))
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK,
+    async (_ctx, rawOrganizationId: unknown, rawJoinLinkId: unknown) => {
+      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      const joinLinkId = OrganizationIdRpcInputSchema.safeParse(rawJoinLinkId)
+      if (!organizationId.success || !joinLinkId.success) return adminInputError('VALIDATION_ERROR')
+      return callOrganization('revokeOrganizationJoinLink', (client, accessToken) =>
+        client.revokeOrganizationJoinLink(accessToken, organizationId.data, joinLinkId.data))
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER,
+    async (
+      _ctx,
+      rawOrganizationId: unknown,
+      rawMemberId: unknown,
+      rawInput: unknown,
+    ) => {
+      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      const memberId = OrganizationIdRpcInputSchema.safeParse(rawMemberId)
+      const input = UpdateOrganizationMemberRpcInputSchema.safeParse(rawInput)
+      if (!organizationId.success || !memberId.success || !input.success) {
+        return adminInputError('VALIDATION_ERROR')
+      }
+      return callOrganization('updateOrganizationMember', (client, accessToken) =>
+        client.updateOrganizationMember(
+          accessToken,
+          organizationId.data,
+          memberId.data,
+          input.data,
+        ))
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER,
+    async (
+      _ctx,
+      rawOrganizationId: unknown,
+      rawMemberId: unknown,
+      rawReason: unknown,
+    ) => {
+      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      const memberId = OrganizationIdRpcInputSchema.safeParse(rawMemberId)
+      const input = RemoveOrganizationMemberRpcInputSchema.safeParse(
+        rawReason === undefined ? {} : { reason: rawReason },
+      )
+      if (!organizationId.success || !memberId.success || !input.success) {
+        return adminInputError('VALIDATION_ERROR')
+      }
+      return callOrganization('removeOrganizationMember', (client, accessToken) =>
+        client.removeOrganizationMember(
+          accessToken,
+          organizationId.data,
+          memberId.data,
+          input.data.reason,
+        ))
+    },
+  )
 }
 
 function requireAdminUrl(): string {

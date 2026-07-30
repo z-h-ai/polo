@@ -11,6 +11,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { BrowserView, BrowserWindow, app, ipcMain, nativeTheme, session, shell, type Session as ElectronSession } from 'electron'
 import { mainLog } from './logger'
+import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
 import type { WindowManager } from './window-manager'
 import { BrowserCDP, type AccessibilitySnapshot, type ElementGeometry } from './browser-cdp'
 import {
@@ -666,14 +667,20 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     source: 'hash' | 'ipc',
   ): Promise<boolean> {
     const dedupeToken = token ?? route
+    const deepLink = this.buildDeepLinkFromRoute(route)
     if (dedupeToken && instance.lastLaunchToken === dedupeToken) {
-      mainLog.info(`[browser-pane] ignoring duplicate empty-state launch id=${instance.id} source=${source} token=${dedupeToken}`)
+      mainLog.info(
+        `[browser-pane] ignoring duplicate empty-state launch id=${instance.id} source=${source}`,
+        describeDeepLinkForLog(deepLink),
+      )
       return false
     }
 
     instance.lastLaunchToken = dedupeToken
-    const deepLink = this.buildDeepLinkFromRoute(route)
-    mainLog.info(`[browser-pane] handling empty-state launch id=${instance.id} source=${source} route=${route} deepLink=${deepLink}`)
+    mainLog.info(
+      `[browser-pane] handling empty-state launch id=${instance.id} source=${source}`,
+      describeDeepLinkForLog(deepLink),
+    )
 
     await this.handleDeepLinkUrl(deepLink)
     return true
@@ -1315,7 +1322,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         if (this.isDisplaySurfaceUnavailableError(error)) {
           sawDisplaySurfaceUnavailable = true
           mainLog.warn(
-            `[browser-pane] ${options.errorPrefix} display surface unavailable instance=${instance.id} mode=${options.mode} attempt=${attempt}/${SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS} visible=${instance.isVisible} url=${instance.currentUrl}`,
+            `[browser-pane] ${options.errorPrefix} display surface unavailable instance=${instance.id} mode=${options.mode} attempt=${attempt}/${SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS} visible=${instance.isVisible}`,
+            describeUrlForLog(instance.currentUrl),
           )
         } else {
           throw error
@@ -1330,7 +1338,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
 
       mainLog.warn(
-        `[browser-pane] ${options.errorPrefix} empty capture attempt instance=${instance.id} mode=${options.mode} attempt=${attempt}/${SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS} visible=${instance.isVisible} isLoading=${instance.isLoading} url=${instance.currentUrl}`,
+        `[browser-pane] ${options.errorPrefix} empty capture attempt instance=${instance.id} mode=${options.mode} attempt=${attempt}/${SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS} visible=${instance.isVisible} isLoading=${instance.isLoading}`,
+        describeUrlForLog(instance.currentUrl),
       )
 
       if (attempt < SCREENSHOT_HIDDEN_CAPTURE_ATTEMPTS) {
@@ -1366,7 +1375,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           if (this.isDisplaySurfaceUnavailableError(error)) {
             sawDisplaySurfaceUnavailable = true
             mainLog.warn(
-              `[browser-pane] ${options.errorPrefix} display surface unavailable during rescue instance=${instance.id} mode=${options.mode} visible=${instance.isVisible} url=${instance.currentUrl}`,
+              `[browser-pane] ${options.errorPrefix} display surface unavailable during rescue instance=${instance.id} mode=${options.mode} visible=${instance.isVisible}`,
+              describeUrlForLog(instance.currentUrl),
             )
           } else {
             throw error
@@ -1389,7 +1399,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
 
     mainLog.warn(
-      `[browser-pane] ${options.errorPrefix} capture failed after recovery instance=${instance.id} mode=${options.mode} visible=${instance.isVisible} isLoading=${instance.isLoading} url=${instance.currentUrl} rescueUsed=${rescueUsed}`,
+      `[browser-pane] ${options.errorPrefix} capture failed after recovery instance=${instance.id} mode=${options.mode} visible=${instance.isVisible} isLoading=${instance.isLoading} rescueUsed=${rescueUsed}`,
+      describeUrlForLog(instance.currentUrl),
     )
 
     if (sawDisplaySurfaceUnavailable) {
@@ -2187,10 +2198,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       const resolver = (wcId: number) => this.windowManager?.getClientIdForWindow(wcId)
       const result = await handleDeepLink(url, this.windowManager, sink, resolver, undefined, sourceWebContentsId)
       if (!result.success) {
-        mainLog.warn(`[browser-pane] deep-link handling failed: ${result.error ?? 'unknown error'} url=${url}`)
+        mainLog.warn(
+          '[browser-pane] deep-link handling failed',
+          describeDeepLinkForLog(url),
+        )
       }
-    } catch (error) {
-      mainLog.warn(`[browser-pane] deep-link handling threw, falling back to shell.openExternal: ${error instanceof Error ? error.message : String(error)}`)
+    } catch {
+      mainLog.warn(
+        '[browser-pane] deep-link handling threw, falling back to shell.openExternal',
+        describeDeepLinkForLog(url),
+      )
       await shell.openExternal(url)
     }
   }
@@ -3040,25 +3057,33 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.popupParentByWebContentsId.set(popupWcId, parentInstance.id)
 
     const initialUrl = sourceUrl || popupWindow.webContents.getURL?.() || 'about:blank'
-    mainLog.info(`[browser-pane] popup created parent=${parentInstance.id} popupWebContentsId=${popupWcId} url=${initialUrl}`)
+    mainLog.info(
+      `[browser-pane] popup created parent=${parentInstance.id} popupWebContentsId=${popupWcId}`,
+      describeUrlForLog(initialUrl),
+    )
 
     popupWindow.webContents.on('did-navigate', (_event, urlFromEvent) => {
       const popupUrl = typeof popupWindow.webContents.getURL === 'function'
         ? popupWindow.webContents.getURL()
         : (urlFromEvent || initialUrl)
-      mainLog.info(`[browser-pane] popup did-navigate parent=${parentInstance.id} popupWebContentsId=${popupWcId} url=${popupUrl}`)
+      mainLog.info(
+        `[browser-pane] popup did-navigate parent=${parentInstance.id} popupWebContentsId=${popupWcId}`,
+        describeUrlForLog(popupUrl),
+      )
     })
 
     popupWindow.webContents.on('did-redirect-navigation', (_event, popupUrl, isInPlace, isMainFrame) => {
       mainLog.info(
-        `[browser-pane] popup redirect parent=${parentInstance.id} popupWebContentsId=${popupWcId} url=${popupUrl} inPlace=${isInPlace} mainFrame=${isMainFrame}`,
+        `[browser-pane] popup redirect parent=${parentInstance.id} popupWebContentsId=${popupWcId} inPlace=${isInPlace} mainFrame=${isMainFrame}`,
+        describeUrlForLog(popupUrl),
       )
     })
 
     popupWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame) return
       mainLog.warn(
-        `[browser-pane] popup did-fail-load parent=${parentInstance.id} popupWebContentsId=${popupWcId} code=${errorCode} url=${validatedURL} error=${errorDescription}`,
+        `[browser-pane] popup did-fail-load parent=${parentInstance.id} popupWebContentsId=${popupWcId} code=${errorCode} error=${errorDescription}`,
+        describeUrlForLog(validatedURL),
       )
     })
 
@@ -3336,7 +3361,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     toolbarWc.on('did-finish-load', () => {
       const loadedUrl = typeof toolbarWc.getURL === 'function' ? toolbarWc.getURL() : ''
       if (!this.isToolbarUiDocumentUrl(loadedUrl)) {
-        mainLog.info(`[browser-pane] toolbar did-finish-load ignored id=${instance.id} url=${loadedUrl || 'unknown'}`)
+        mainLog.info(
+          `[browser-pane] toolbar did-finish-load ignored id=${instance.id}`,
+          describeUrlForLog(loadedUrl || 'unknown'),
+        )
         this.pushToolbarState(instance)
         return
       }
@@ -3347,7 +3375,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     toolbarWc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame) return
-      mainLog.warn(`[browser-pane] toolbar did-fail-load id=${instance.id} code=${errorCode} url=${validatedURL} error=${errorDescription}`)
+      mainLog.warn(
+        `[browser-pane] toolbar did-fail-load id=${instance.id} code=${errorCode} error=${errorDescription}`,
+        describeUrlForLog(validatedURL),
+      )
     })
 
     pageWc.on('did-start-loading', () => {
@@ -3408,7 +3439,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       const normalized = this.normalizePageState(url, pageWc.getTitle())
       instance.currentUrl = normalized.url
       instance.title = normalized.title
-      mainLog.info(`[browser-pane] did-navigate id=${instance.id} from=${previousUrl} to=${instance.currentUrl}`)
+      mainLog.info(`[browser-pane] did-navigate id=${instance.id}`, {
+        from: describeUrlForLog(previousUrl),
+        to: describeUrlForLog(instance.currentUrl),
+      })
       instance.canGoBack = pageWc.canGoBack()
       instance.canGoForward = pageWc.canGoForward()
       // Drain in-flight count — prior page's requests are cancelled on navigation
@@ -3422,7 +3456,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     pageWc.on('did-redirect-navigation', (_event, url, isInPlace, isMainFrame) => {
       if (!isMainFrame) return
-      mainLog.info(`[browser-pane] did-redirect-navigation id=${instance.id} url=${url} inPlace=${isInPlace}`)
+      mainLog.info(
+        `[browser-pane] did-redirect-navigation id=${instance.id} inPlace=${isInPlace}`,
+        describeUrlForLog(url),
+      )
     })
 
     pageWc.on('did-navigate-in-page', (_event, urlFromEvent) => {
@@ -3471,7 +3508,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     })
 
     pageWc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-      mainLog.warn(`[browser-pane] did-fail-load id=${instance.id} code=${errorCode} url=${validatedURL} error=${errorDescription}`)
+      mainLog.warn(
+        `[browser-pane] did-fail-load id=${instance.id} code=${errorCode} error=${errorDescription}`,
+        describeUrlForLog(validatedURL),
+      )
     })
 
     pageWc.on('console-message', (_event, level, message) => {
@@ -3530,7 +3570,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     pageWc.setWindowOpenHandler((details) => {
       mainLog.info(
-        `[browser-pane] window-open requested id=${instance.id} url=${details.url} disposition=${details.disposition ?? 'unknown'} frameName=${details.frameName || 'none'}`,
+        `[browser-pane] window-open requested id=${instance.id} disposition=${details.disposition ?? 'unknown'} frameName=${details.frameName || 'none'}`,
+        describeUrlForLog(details.url),
       )
 
       if (details.url.startsWith(POLO_AI_DEEPLINK_SCHEME_PREFIX)) {
@@ -3542,12 +3583,18 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       try {
         parsed = new URL(details.url)
       } catch {
-        mainLog.warn(`[browser-pane] window-open denied id=${instance.id} reason=invalid_url url=${details.url}`)
+        mainLog.warn(
+          `[browser-pane] window-open denied id=${instance.id} reason=invalid_url`,
+          describeUrlForLog(details.url),
+        )
         return { action: 'deny' }
       }
 
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        mainLog.warn(`[browser-pane] window-open denied id=${instance.id} reason=unsupported_protocol protocol=${parsed.protocol} url=${details.url}`)
+        mainLog.warn(
+          `[browser-pane] window-open denied id=${instance.id} reason=unsupported_protocol protocol=${parsed.protocol}`,
+          describeUrlForLog(details.url),
+        )
         return { action: 'deny' }
       }
 
