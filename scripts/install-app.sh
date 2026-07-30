@@ -4,6 +4,7 @@ set -e
 
 VERSIONS_URL="https://polo.ai/electron"
 DOWNLOAD_DIR="$HOME/.polo-ai/downloads"
+LOCAL_ARTIFACT="${POLO_AI_INSTALL_ARTIFACT:-}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -109,9 +110,12 @@ case "$OS" in
     *)      error "Unsupported operating system: $OS" ;;
 esac
 
-# Check for required dependencies
+# Check for required dependencies. A local artifact is the explicit CI/offline
+# contract and must not require network tooling.
 DOWNLOADER=""
-if command -v curl >/dev/null 2>&1; then
+if [ -n "$LOCAL_ARTIFACT" ]; then
+    [ -f "$LOCAL_ARTIFACT" ] || error "Local install artifact not found: $LOCAL_ARTIFACT"
+elif command -v curl >/dev/null 2>&1; then
     DOWNLOADER="curl"
 elif command -v wget >/dev/null 2>&1; then
     DOWNLOADER="wget"
@@ -226,7 +230,7 @@ esac
 if [ "$OS_TYPE" = "darwin" ]; then
     platform="darwin-${arch}"
     APP_NAME="Polo AI.app"
-    INSTALL_DIR="/Applications"
+    INSTALL_DIR="${POLO_AI_INSTALL_DIR:-/Applications}"
     ext="zip"
     yml_file="latest-mac.yml"
 else
@@ -236,7 +240,7 @@ else
     fi
     platform="linux-${arch}"
     APP_NAME="Polo-AI-x64.AppImage"
-    INSTALL_DIR="$HOME/.local/bin"
+    INSTALL_DIR="${POLO_AI_BIN_DIR:-$HOME/.local/bin}"
     ext="AppImage"
     yml_file="latest-linux.yml"
 fi
@@ -247,76 +251,83 @@ info "Detected platform: $platform"
 mkdir -p "$DOWNLOAD_DIR"
 mkdir -p "$INSTALL_DIR"
 
-# Fetch YAML manifest directly from /electron/latest/ (no version endpoint needed)
-info "Fetching release info..."
-manifest_yaml=$(download_file "$VERSIONS_URL/latest/$yml_file")
-
-if [ -z "$manifest_yaml" ]; then
-    error "Failed to fetch release info from $yml_file"
-fi
-
-# Extract version from YAML manifest
-if [ "$HAS_YQ" = true ]; then
-    version=$(echo "$manifest_yaml" | yq -r '.version // empty')
+if [ -n "$LOCAL_ARTIFACT" ]; then
+    filename="$(basename "$LOCAL_ARTIFACT")"
+    installer_path="$DOWNLOAD_DIR/$filename"
+    cp "$LOCAL_ARTIFACT" "$installer_path"
+    info "Using local install artifact: $LOCAL_ARTIFACT"
 else
-    version=$(echo "$manifest_yaml" | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//')
+    # Fetch YAML manifest directly from /electron/latest/ (no version endpoint needed)
+    info "Fetching release info..."
+    manifest_yaml=$(download_file "$VERSIONS_URL/latest/$yml_file")
+
+    if [ -z "$manifest_yaml" ]; then
+        error "Failed to fetch release info from $yml_file"
+    fi
+
+    # Extract version from YAML manifest
+    if [ "$HAS_YQ" = true ]; then
+        version=$(echo "$manifest_yaml" | yq -r '.version // empty')
+    else
+        version=$(echo "$manifest_yaml" | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//')
+    fi
+
+    if [ -z "$version" ]; then
+        error "Failed to extract version from manifest"
+    fi
+
+    info "Latest version: $version"
+
+    # Extract sha512 and filename for our architecture
+    if [ "$HAS_YQ" = true ]; then
+        checksum=$(echo "$manifest_yaml" | yq -r ".files[] | select(.arch == \"$arch\") | .sha512")
+        filename=$(echo "$manifest_yaml" | yq -r ".files[] | select(.arch == \"$arch\") | .url")
+    else
+        checksum=$(get_sha512_from_yaml "$manifest_yaml" "$arch")
+        filename=$(get_filename_from_yaml "$manifest_yaml" "$arch")
+    fi
+
+    # Validate checksum format (SHA512 base64 = 88 characters)
+    if [ -z "$checksum" ] || [ ${#checksum} -lt 80 ]; then
+        error "Architecture $arch not found in $yml_file"
+    fi
+
+    # Use default filename if not found
+    if [ -z "$filename" ]; then
+        filename="Polo-AI-${arch}.${ext}"
+    fi
+
+    info "Expected sha512: ${checksum:0:20}..."
+
+    # Download installer
+    installer_url="$VERSIONS_URL/latest/$filename"
+    installer_path="$DOWNLOAD_DIR/$filename"
+
+    info "Downloading $filename..."
+    echo ""
+    if ! download_file "$installer_url" "$installer_path" true; then
+        rm -f "$installer_path"
+        error "Download failed"
+    fi
+    echo ""
+
+    # Verify checksum (sha512, base64 encoded)
+    info "Verifying checksum..."
+    if [ "$OS_TYPE" = "darwin" ]; then
+        # macOS: shasum outputs hex, convert to base64
+        actual=$(shasum -a 512 "$installer_path" | cut -d' ' -f1 | xxd -r -p | base64)
+    else
+        # Linux: sha512sum outputs hex, convert to base64
+        actual=$(sha512sum "$installer_path" | cut -d' ' -f1 | xxd -r -p | base64 | tr -d '\n')
+    fi
+
+    if [ "$actual" != "$checksum" ]; then
+        rm -f "$installer_path"
+        error "Checksum verification failed\n  Expected: $checksum\n  Actual:   $actual"
+    fi
+
+    success "Checksum verified!"
 fi
-
-if [ -z "$version" ]; then
-    error "Failed to extract version from manifest"
-fi
-
-info "Latest version: $version"
-
-# Extract sha512 and filename for our architecture
-if [ "$HAS_YQ" = true ]; then
-    checksum=$(echo "$manifest_yaml" | yq -r ".files[] | select(.arch == \"$arch\") | .sha512")
-    filename=$(echo "$manifest_yaml" | yq -r ".files[] | select(.arch == \"$arch\") | .url")
-else
-    checksum=$(get_sha512_from_yaml "$manifest_yaml" "$arch")
-    filename=$(get_filename_from_yaml "$manifest_yaml" "$arch")
-fi
-
-# Validate checksum format (SHA512 base64 = 88 characters)
-if [ -z "$checksum" ] || [ ${#checksum} -lt 80 ]; then
-    error "Architecture $arch not found in $yml_file"
-fi
-
-# Use default filename if not found
-if [ -z "$filename" ]; then
-    filename="Polo-AI-${arch}.${ext}"
-fi
-
-info "Expected sha512: ${checksum:0:20}..."
-
-# Download installer
-installer_url="$VERSIONS_URL/latest/$filename"
-installer_path="$DOWNLOAD_DIR/$filename"
-
-info "Downloading $filename..."
-echo ""
-if ! download_file "$installer_url" "$installer_path" true; then
-    rm -f "$installer_path"
-    error "Download failed"
-fi
-echo ""
-
-# Verify checksum (sha512, base64 encoded)
-info "Verifying checksum..."
-if [ "$OS_TYPE" = "darwin" ]; then
-    # macOS: shasum outputs hex, convert to base64
-    actual=$(shasum -a 512 "$installer_path" | cut -d' ' -f1 | xxd -r -p | base64)
-else
-    # Linux: sha512sum outputs hex, convert to base64
-    actual=$(sha512sum "$installer_path" | cut -d' ' -f1 | xxd -r -p | base64 | tr -d '\n')
-fi
-
-if [ "$actual" != "$checksum" ]; then
-    rm -f "$installer_path"
-    error "Checksum verification failed\n  Expected: $checksum\n  Actual:   $actual"
-fi
-
-success "Checksum verified!"
 
 # Platform-specific installation
 if [ "$OS_TYPE" = "darwin" ]; then

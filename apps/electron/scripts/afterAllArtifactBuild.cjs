@@ -8,6 +8,12 @@ module.exports = async function afterAllArtifactBuild(context) {
   const joinedNames = artifactPaths.map((artifact) => path.basename(artifact)).join('\n');
   const arch = /(?:^|[-_])arm64(?:[.-]|$)|aarch64/i.test(joinedNames) ? 'arm64' : 'x64';
   const mode = process.env.POLO_AI_ARTIFACT_VALIDATION_MODE || 'smoke';
+  const previousArtifact = process.env.POLO_AI_PREVIOUS_ARTIFACT;
+  if (mode === 'full' && !previousArtifact) {
+    throw new Error(
+      'POO-14 full artifact validation requires POLO_AI_PREVIOUS_ARTIFACT',
+    );
+  }
 
   let command;
   let args;
@@ -27,6 +33,7 @@ module.exports = async function afterAllArtifactBuild(context) {
       releaseDir,
       '-Arch',
       arch,
+      ...(previousArtifact ? ['-PreviousArtifact', previousArtifact] : []),
     ];
   } else {
     command = 'bash';
@@ -38,6 +45,7 @@ module.exports = async function afterAllArtifactBuild(context) {
       releaseDir,
       '--arch',
       arch,
+      ...(previousArtifact ? ['--previous-artifact', previousArtifact] : []),
     ];
   }
 

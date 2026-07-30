@@ -1,0 +1,173 @@
+name: Electron Full Artifact Lifecycle
+
+on:
+  release:
+    types:
+      - created
+  schedule:
+    - cron: "27 8 * * 2,5"
+  workflow_dispatch:
+    inputs:
+      previous_release_tag:
+        description: Fixed previous release tag used for cross-version upgrade
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: electron-artifact-full-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-artifact-lifecycle:
+    name: ${{ matrix.platform }} full artifact lifecycle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-14
+            previous_name: Polo-AI-x64.zip
+            artifact_paths: |
+              apps/electron/release/Polo-AI-x64.dmg
+              apps/electron/release/Polo-AI-x64.zip
+              apps/electron/release/full-validation-macos.txt
+          - platform: windows
+            runner: windows-latest
+            previous_name: Polo-AI-x64.exe
+            artifact_paths: |
+              apps/electron/release/Polo-AI-x64.exe
+              apps/electron/release/full-validation-windows.txt
+          - platform: linux
+            runner: ubuntu-latest
+            previous_name: Polo-AI-x64.AppImage
+            artifact_paths: |
+              apps/electron/release/Polo-AI-x64.AppImage
+              apps/electron/release/full-validation-linux.txt
+    runs-on: ${{ matrix.runner }}
+    env:
+      PREVIOUS_RELEASE_TAG: ${{ inputs.previous_release_tag || vars.POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG }}
+      POLO_AI_ARTIFACT_VALIDATION_MODE: full
+      POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ matrix.previous_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require fixed previous release
+        shell: bash
+        run: |
+          if [ -z "$PREVIOUS_RELEASE_TAG" ]; then
+            echo "::error::Set workflow input previous_release_tag or repository variable POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG."
+            exit 1
+          fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Linux GUI and AppImage dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 xvfb
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download fixed previous Unix artifact
+        if: matrix.platform != 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p previous
+          gh release download "$PREVIOUS_RELEASE_TAG" \
+            --pattern "${{ matrix.previous_name }}" \
+            --dir previous
+          test -f "$POLO_AI_PREVIOUS_ARTIFACT"
+
+      - name: Download fixed previous Windows artifact
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force previous | Out-Null
+          gh release download $env:PREVIOUS_RELEASE_TAG `
+            --pattern "${{ matrix.previous_name }}" `
+            --dir previous
+          if (-not (Test-Path -LiteralPath $env:POLO_AI_PREVIOUS_ARTIFACT)) {
+            throw "Previous NSIS artifact was not downloaded"
+          }
+
+      - name: Run native Windows launcher ownership tests
+        if: matrix.platform == 'windows'
+        shell: powershell
+        run: |
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass `
+            -File apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows terminal integration tests failed"
+          }
+
+      - name: Build and run macOS full lifecycle gate
+        if: matrix.platform == 'macos'
+        run: bun run electron:dist:dev:mac
+
+      - name: Build and run Windows full lifecycle gate
+        if: matrix.platform == 'windows'
+        run: bun run electron:dist:dev:win
+
+      - name: Build and run Linux full lifecycle gate
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a bun run electron:dist:dev:linux
+
+      - name: Record Unix validation result
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          result="apps/electron/release/full-validation-${{ matrix.platform }}.txt"
+          {
+            echo "mode=full"
+            echo "platform=${{ matrix.platform }}"
+            echo "commit=${GITHUB_SHA}"
+            echo "previous_release_tag=${PREVIOUS_RELEASE_TAG}"
+            if [ "${{ matrix.platform }}" = "macos" ]; then
+              shasum -a 256 \
+                apps/electron/release/Polo-AI-x64.dmg \
+                apps/electron/release/Polo-AI-x64.zip
+            else
+              sha256sum apps/electron/release/Polo-AI-x64.AppImage
+            fi
+          } > "$result"
+
+      - name: Record Windows validation result
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $hash = Get-FileHash apps/electron/release/Polo-AI-x64.exe -Algorithm SHA256
+          @(
+            "mode=full"
+            "platform=windows"
+            "commit=$env:GITHUB_SHA"
+            "previous_release_tag=$env:PREVIOUS_RELEASE_TAG"
+            "sha256=$($hash.Hash.ToLowerInvariant())  apps/electron/release/Polo-AI-x64.exe"
+          ) | Set-Content apps/electron/release/full-validation-windows.txt
+
+      - name: Upload blocking artifacts and validation result
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-${{ matrix.platform }}-${{ github.sha }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 14

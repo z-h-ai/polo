@@ -14,10 +14,12 @@ describe('Electron final artifact validation pipeline', () => {
     expect(hook).toContain('validate-final-artifacts.sh')
     expect(hook).toContain('validate-final-artifacts.ps1')
     expect(hook).toContain("POLO_AI_ARTIFACT_VALIDATION_MODE || 'smoke'")
+    expect(hook).toContain('POLO_AI_PREVIOUS_ARTIFACT')
+    expect(hook).toContain('full artifact validation requires')
     expect(hook).toContain('final artifact validation failed')
   })
 
-  it('validates DMG and ZIP mounts, AppImage extraction, and full lifecycle mode', () => {
+  it('validates final Unix containers and real cross-version lifecycle mode', () => {
     const validator = read('apps/electron/scripts/validate-final-artifacts.sh')
 
     expect(validator).toContain('Polo-AI-${ARCH}.dmg')
@@ -25,20 +27,70 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('hdiutil attach')
     expect(validator).toContain('ditto -x -k')
     expect(validator).toContain('--appimage-extract')
-    expect(validator).toContain('run_full_e2e')
+    expect(validator).toContain('Full validation requires --previous-artifact')
+    expect(validator).toContain('POLO_AI_INSTALL_ARTIFACT')
+    expect(validator).toContain('bash "$INSTALL_SCRIPT"')
+    expect(validator).toContain('bash "$UNINSTALL_SCRIPT"')
+    expect(validator).toContain('--polo-terminal-integration install')
+    expect(validator).toContain('--polo-terminal-integration repair')
+    expect(validator).toContain('--polo-terminal-integration uninstall')
+    expect(validator).toContain('Previous artifact version must differ')
+    expect(validator).toContain('polo --help')
+    expect(validator).toContain("polo run 'packaged headless probe'")
+    expect(validator).toContain('polo app')
     expect(validator).toContain('POLO_AI_RUNTIME_DISCOVERY_FILE')
-    expect(validator).toContain('"$launcher" sessions')
+    expect(validator).toContain('polo sessions')
+    expect(validator).toContain('user-owned')
   })
 
-  it('validates the installed NSIS container and exposes full lifecycle mode', () => {
+  it('validates the installed NSIS container and real previous-to-current lifecycle', () => {
     const validator = read('apps/electron/scripts/validate-final-artifacts.ps1')
 
+    expect(validator).toContain('Full validation requires -PreviousArtifact')
     expect(validator).toContain('Invoke-Installer')
     expect(validator).toContain('Test-InstalledContainer')
     expect(validator).toContain('Test-FullLifecycle')
+    expect(validator).toContain('Invoke-Installer $PreviousArtifact')
+    expect(validator).toContain('Previous artifact version must differ')
+    expect(validator).toContain('polo --help')
+    expect(validator).toContain('polo run')
+    expect(validator).toContain('polo app')
     expect(validator).toContain('artifact-manifest.json')
-    expect(validator).toContain('& $launcher sessions')
+    expect(validator).toContain('polo sessions')
+    expect(validator).toContain('rem user modification')
+    expect(validator).toContain('Test-UserCommandConflict')
     expect(validator).toContain('Invoke-Uninstaller')
+  })
+
+  it('defines a blocking release/nightly three-platform full workflow', () => {
+    const workflow = read('.github/workflows/electron-artifact-full.yml')
+
+    expect(workflow).toContain('release:')
+    expect(workflow).toContain('schedule:')
+    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).toContain('previous_release_tag:')
+    expect(workflow).toContain('POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG')
+    expect(workflow).toContain('POLO_AI_ARTIFACT_VALIDATION_MODE: full')
+    expect(workflow).toContain('POLO_AI_PREVIOUS_ARTIFACT:')
+    expect(workflow).toContain('runner: macos-14')
+    expect(workflow).toContain('runner: windows-latest')
+    expect(workflow).toContain('runner: ubuntu-latest')
+    expect(workflow).toContain('gh release download')
+    expect(workflow).toContain('windows-terminal-integration.test.ps1')
+    expect(workflow).toContain('electron:dist:dev:mac')
+    expect(workflow).toContain('electron:dist:dev:win')
+    expect(workflow).toContain('electron:dist:dev:linux')
+    expect(workflow).toContain('actions/upload-artifact@v4')
+    expect(workflow).not.toContain('bun run validate:ci')
+  })
+
+  it('supports explicit local artifacts in the real Unix installer entry', () => {
+    const installer = read('scripts/install-app.sh')
+
+    expect(installer).toContain('POLO_AI_INSTALL_ARTIFACT')
+    expect(installer).toContain('POLO_AI_INSTALL_DIR')
+    expect(installer).toContain('POLO_AI_BIN_DIR')
+    expect(installer).toContain('Using local install artifact')
   })
 
   it('builds and validates dependency-free sanitized CLI metadata', () => {

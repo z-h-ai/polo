@@ -7,7 +7,7 @@
  * messages with real-time streaming, and validating server health.
  */
 
-import { basename, resolve } from 'path'
+import { basename, join, resolve } from 'path'
 import {
   readElectronRuntimeDiscovery,
   removeElectronRuntimeDiscovery,
@@ -263,9 +263,14 @@ async function cmdApp(): Promise<void> {
 
   let command: string[]
   if (process.platform === 'darwin') {
-    command = desktopApp
-      ? ['open', desktopApp]
-      : ['open', '-a', 'Polo AI']
+    const directExecutable = desktopApp
+      ? join(desktopApp, 'Contents', 'MacOS', 'Polo AI')
+      : undefined
+    command = process.env.POLO_AI_E2E_DIRECT_APP === '1' && directExecutable
+      ? [directExecutable]
+      : desktopApp
+        ? ['open', desktopApp]
+        : ['open', '-a', 'Polo AI']
   } else if (process.platform === 'win32' && desktopExecutable) {
     command = [desktopExecutable]
   } else if (process.platform === 'linux' && appImage) {
@@ -276,7 +281,7 @@ async function cmdApp(): Promise<void> {
     )
   }
 
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && command[0] === 'open') {
     const result = Bun.spawnSync(command, {
       stdin: 'ignore',
       stdout: 'ignore',
@@ -906,6 +911,13 @@ async function cmdRun(args: CliArgs): Promise<void> {
   process.on('SIGTERM', onSignal)
 
   try {
+    if (process.env.POLO_AI_E2E_RUN_PROBE === '1') {
+      await client.connect()
+      out(`Run probe connected via ${connection.source}`, false)
+      await cleanup()
+      return
+    }
+
     // Every run has a concrete workspace, including explicit and Electron
     // connections. An explicit --workspace selects an existing one; otherwise
     // the caller's directory (or --workspace-dir) is registered idempotently.

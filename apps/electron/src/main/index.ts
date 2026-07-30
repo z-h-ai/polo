@@ -133,6 +133,10 @@ import {
   uninstallTerminalIntegration,
   type TerminalIntegrationOptions,
 } from './terminal-integration'
+import {
+  executeTerminalIntegrationCommand,
+  parseTerminalIntegrationCommand,
+} from './terminal-integration-command'
 import { runTerminalOnboarding } from './terminal-onboarding'
 import { runNonCriticalTerminalOnboarding } from './startup-continuation'
 import { TERMINAL_INTEGRATION_ERROR_KEYS } from '../shared/terminal-integration'
@@ -278,6 +282,8 @@ let messagingHandle: MessagingBootstrapHandle | null = null
 function terminalIntegrationOptions(): TerminalIntegrationOptions {
   return {
     platform: process.platform,
+    homeDir: process.env.POLO_AI_TERMINAL_HOME,
+    shell: process.env.SHELL,
     resourcesPath: process.resourcesPath,
     appExecutable: process.execPath,
     appVersion: app.getVersion(),
@@ -374,6 +380,7 @@ async function validateAdminSessionAfterResume(args: {
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
+const terminalIntegrationCommand = parseTerminalIntegrationCommand(process.argv)
 
 // Set app name early (before app.whenReady) to ensure correct macOS menu bar title
 // Supports multi-instance dev: POLO_AI_APP_NAME env var (e.g., "Polo AI [1]")
@@ -544,6 +551,23 @@ async function createInitialWindows(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (terminalIntegrationCommand) {
+    try {
+      const status = executeTerminalIntegrationCommand(
+        terminalIntegrationCommand,
+        terminalIntegrationOptions(),
+      )
+      process.stdout.write(`${JSON.stringify(status)}\n`)
+      app.exit(0)
+    } catch (error) {
+      process.stderr.write(
+        `${error instanceof Error ? error.message : String(error)}\n`,
+      )
+      app.exit(1)
+    }
+    return
+  }
+
   await i18n.changeLanguage(electronLocaleToSupportedLanguage(app.getLocale()))
 
   // Export packaged state as env var so logger.ts (and headless Bun) don't need 'electron'
