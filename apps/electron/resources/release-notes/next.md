@@ -14,6 +14,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Terminal upgrade and remote connection compatibility** — Preserve explicit remote server connections across App release versions, migrate ownership of the legacy Windows PATH entry safely, and configure the Bash login file that a fresh Linux terminal actually reads. (POO-14)
+- **Terminal packaging and upgrade safety** — Keep the macOS command attached to the current App bundle across moves and upgrades, preserve modified or user-owned Windows launchers, bound shell readiness checks, and gate releases on CLI smoke tests from final DMG, ZIP, NSIS, and AppImage containers. (POO-14) (`7a5f553`)
 
 ## Breaking Changes

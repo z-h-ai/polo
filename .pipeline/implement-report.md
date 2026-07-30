@@ -2,109 +2,51 @@
 
 ## 变更摘要
 
-- 将 CLI 与 headless server 构建为随 Electron 发布的单文件 artifact，并生成包含版本、路径和 SHA-256 的 manifest；Electron 构建在打包前后校验 artifact、内置 Bun、launcher 和版本一致性。
-- 统一三平台 `polo` 命令语义：`polo app` 启动桌面端，其他子命令进入 CLI；兼容期保留 `polo-ai` shim。
-- 完成 macOS 首次设置和设置页中的安装、修复、卸载入口；launcher 自相对解析安装包资源，shell 配置具备冲突保护、备份、原子更新和幂等清理。
-- Electron 写入权限受控的 runtime discovery；CLI 校验 loopback、PID/进程归属、RPC health 与版本，安全处理 stale discovery。
-- `polo run` 在 App 未运行时启动安装包内临时 headless server，使用独立随机端口、token、runtime 和锁，并在信号或失败后清理。
-- 修复显式 `--url`/`--token` 连接被本地 App major version 错误限制的问题；自动发现本地 App 时仍执行版本兼容校验。
-- 修复 Linux/macOS Bash 登录 shell 已存在 `.bash_profile` 或 `.bash_login` 时写错 PATH 配置文件的问题，卸载同时覆盖三种 Bash 启动文件。
-- 修复 Windows 从旧版 `polo-ai.cmd` GUI launcher 升级时无法接管 Polo 历史 PATH 项的问题；仅精确匹配旧版 Polo launcher 后转移所有权，避免误删用户自有 PATH。
-- 补充远程连接、Bash 配置优先级、Windows 历史升级迁移及卸载行为的自动化测试与 release note。
+- macOS 终端功能改为受管 symlink：`~/.local/bin/polo` 指向当前 App 包内的 `resources/bin/polo`，包内 wrapper 继续以自身真实位置解析 Bun、CLI 与 server。安装、修复、App 移动/升级、冲突检测及卸载均按受管目标和状态处理，不再生成固化资源绝对路径的 launcher 脚本。
+- macOS shell 配置状态升级为 schema 2，记录安装 profile；修复和卸载会安全检查 zsh、bash、fish 的所有受支持 profile，只删除完整且唯一的 Polo 托管块。文件修改继续采用备份和原子替换，并兼容旧状态迁移。
+- login shell 可用性探测增加默认 7 秒 timeout、16 KiB 输出上限及 `ok` / `timeout` / `failed` 结构化状态；子进程超时会被终止，不会无限阻塞 Electron 主进程。
+- Windows launcher 所有权改为 state 路径 + SHA-256 校验；state 缺失时只接受完整内容匹配的严格历史 allowlist。用户自有或被修改的 launcher 会停止升级并提示，卸载不会删除该文件或对应 PATH/state。
+- CLI 构建生成 sanitized `dist/cli/package.json`，只包含稳定的 `name`、`version`、`type`、`main`、`bin`、`license` 字段；artifact manifest 记录其 SHA-256，构建校验与 `afterPack` 均验证字段、版本和 checksum。
+- 新增平台原生最终 artifact validator，并通过 electron-builder `afterAllArtifactBuild` 接入构建门禁：macOS 挂载 DMG、解压 ZIP，Linux 解包 AppImage，Windows 静默安装 NSIS 后，对最终容器中的 launcher、Bun、CLI/server、manifest/checksum、`polo --version` 与 `polo --help` 做 smoke。`POLO_AI_ARTIFACT_VALIDATION_MODE=full` 为 release/nightly 提供真实安装、App discovery、升级和卸载流程。
+- 更新 POO-14 release note，并引用本轮实现提交 `7a5f553`。
 
 ## 关键文件列表
 
-### CLI、server 与运行时发现
-
-- `apps/cli/src/index.ts`
-- `apps/cli/src/client.ts`
-- `apps/cli/src/server-spawner.ts`
-- `apps/cli/src/run.test.ts`
-- `packages/server-core/src/bootstrap/headless-start.ts`
-- `packages/shared/src/runtime-discovery.ts`
-
-### Electron 打包与统一 launcher
-
-- `scripts/build-cli-artifacts.ts`
-- `scripts/validate-cli-artifacts.ts`
-- `scripts/validate-cli-runtime.ts`
-- `apps/electron/electron-builder.yml`
-- `apps/electron/scripts/beforePack.cjs`
-- `apps/electron/scripts/afterPack.cjs`
-- `apps/electron/resources/bin/polo`
-- `apps/electron/resources/bin/polo.cmd`
-
-### 安装、升级与卸载
-
 - `apps/electron/src/main/terminal-integration.ts`
-- `apps/electron/src/main/terminal-onboarding.ts`
+- `apps/electron/src/main/__tests__/terminal-integration.test.ts`
+- `apps/electron/src/shared/types.ts`
 - `apps/electron/resources/scripts/windows-terminal-integration.ps1`
 - `apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1`
 - `apps/electron/scripts/windows-terminal-integration.test.ts`
-- `scripts/install-app.sh`
-- `scripts/install-app-shell.test.ts`
-- `scripts/uninstall-app.sh`
-- `scripts/uninstall-app.test.ts`
+- `scripts/build-cli-artifacts.ts`
+- `scripts/validate-cli-artifacts.ts`
+- `apps/electron/scripts/afterPack.cjs`
+- `apps/electron/scripts/afterAllArtifactBuild.cjs`
+- `apps/electron/scripts/validate-final-artifacts.sh`
+- `apps/electron/scripts/validate-final-artifacts.ps1`
+- `scripts/__tests__/electron-artifact-pipeline.test.ts`
+- `apps/electron/electron-builder.yml`
+- `apps/electron/resources/release-notes/next.md`
 
 ## 自测结果
 
-1. 全量测试
-
-   ```bash
-   bun run test
-   ```
-
-   结果：PASS，退出码 0。标准套件为 4828 passed、19 skipped、0 failed，11491 次断言、367 个测试文件；后续 isolated tests 链路全部通过。
-
-   一次更早的完整运行中，未修改的 `sessions-watchers.test.ts` 文件监听时序用例单次失败；该文件随后连续独立运行 3 次均通过，最终完整测试再次以退出码 0 通过。
-
-2. 本轮专项测试
-
-   ```bash
-   bun test apps/cli/src/run.test.ts scripts/install-app-shell.test.ts scripts/uninstall-app.test.ts apps/electron/scripts/windows-terminal-integration.test.ts
-   ```
-
-   结果：PASS，32 passed、0 failed、90 次断言。
-
-3. 全量类型检查
-
-   ```bash
-   bun run typecheck:all
-   ```
-
-   结果：PASS，退出码 0。
-
-4. Electron 构建与 artifact 校验
-
-   ```bash
-   bun run electron:build
-   bun run electron:validate:cli:runtime
-   ```
-
-   结果：全部 PASS。生成 CLI 0.10.0 与 packaged server 0.10.0；验证了安装后 symlink 自相对 launcher、包含空格和非 ASCII 字符的路径、packaged server 启动以及 CLI 自动发现连接。
-
-5. macOS 实际安装包构建
-
-   ```bash
-   bun run electron:dist:dev:mac
-   ```
-
-   结果：PASS，生成 ad-hoc 签名的 arm64 DMG（216 MB）与 ZIP（208 MB）；`afterPack` 验证了安装包中的终端 artifact。直接从 unpacked App 执行 `polo --version` 返回 `0.10.0`，`polo --help` 成功。
-
-   - DMG SHA-256：`fd8d034ead0e5d8cb7bbd2dc26c5f0fea4fea92d6370ce2eed3d51f875e73081`
-   - ZIP SHA-256：`31a3a31e2587771c05fd3b8c5018d7902faef2de1090cdee88344178ab8e045d`
-
-6. Shell 与 diff 检查
-
-   ```bash
-   bash -n scripts/install-app.sh scripts/uninstall-app.sh
-   git diff --check
-   ```
-
-   结果：全部 PASS。
+- `bun run test`：通过。主测试集 4836 passed、19 skipped、0 failed；其余隔离测试集全部通过。
+- `bun run typecheck:all`：通过。
+- `bun run lint:electron`：通过，0 errors；保留 114 条仓库既有 warnings。
+- `bun run electron:build:cli`：通过，生成 CLI、server、sanitized package metadata 和 artifact manifest。
+- `bun run electron:validate:cli`：通过，metadata 字段/版本/checksum 与所有 runtime artifact 校验成功。
+- `bun run electron:validate:cli:runtime`：通过，覆盖 packaged discovery/server、自相对 symlink launcher、含空格和非 ASCII 路径。
+- macOS terminal integration 单测：16 passed，覆盖 symlink 幂等、App 移动后旧目标消失、默认 shell 切换的遗留 profile 清理、结构化 timeout，以及真实超时子进程终止。
+- Windows ownership 与 artifact pipeline 的 Bun 静态/契约测试：通过；PowerShell 测试补充了 hash state、被修改 launcher 的升级拒绝和卸载保留、历史 allowlist 迁移。
+- `bun run electron:dist:dev:mac`：通过；electron-builder 的最终容器门禁实际挂载/解包并验证：
+  - `apps/electron/release/Polo-AI-arm64.dmg`，SHA-256 `181fa1a4792fe6cbcd5f658d6edbc605991a2c286f3a341848d2298a3ea70f19`
+  - `apps/electron/release/Polo-AI-arm64.zip`，SHA-256 `46c4ef9f78c050349aeb629b32d18b5c39f9f08abc83511b3fa9976d39ffcdc4`
+  - DMG 与 ZIP 的 `polo --version` / `polo --help` smoke 均通过，版本为 `0.10.0`。
+- i18n parity、sorted、coverage：通过，三种语言各 1633 keys。
+- `git diff --check`：通过。
 
 ## 遗留问题
 
-- 当前开发机为 macOS arm64，已完成实际 DMG/ZIP 构建，但 Windows NSIS、Linux AppImage 及对应全新用户环境的安装、升级、卸载验收仍需在发布 CI 或真机完成。
-- 当前环境没有 Windows PowerShell，Windows 迁移逻辑完成了 TypeScript 静态契约测试，PowerShell 行为测试需在 Windows CI 执行。
-- 真实 `polo run "hello"` 需要模型凭据并会发起外部计费调用；本轮以 packaged server 启动、RPC discovery、CLI 连接、并发和清理测试覆盖本地生命周期，未发起计费模型请求。
+- 当前 coder 环境为 macOS，未生成 Windows NSIS 和 Linux AppImage，因此未在本机执行这两个平台的真实最终容器 smoke/full lifecycle；对应原生 validator 已接入各平台构建门禁，需由 Windows/Linux CI 或 release/nightly runner 执行。
+- 当前环境未安装 `pwsh`，PowerShell 原生测试未在本机运行；Windows 逻辑已由 Bun 契约测试覆盖，原生 PowerShell 测试需由 Windows CI 执行。
+- full 模式涉及真实安装、App discovery、升级与卸载，按裁决保留为 release/nightly 或手动触发，不作为普通 PR 的昂贵默认流程。
