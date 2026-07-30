@@ -215,7 +215,9 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         })
       }
       if (!result.success) {
-        toast.error(result.message, { description: result.diagnostic })
+        toast.error(t(`creatorSkills.errors.${result.errorCode}`, {
+          defaultValue: result.message || t('creatorSkills.errors.unknown'),
+        }), { description: result.diagnostic })
         return
       }
       setAvailableVersion(null)
@@ -255,8 +257,15 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         : t('skillInfo.deletedSkill', { name: skill.metadata.name }))
       if (!result.detached) navigate(routes.view.skills())
     } catch (err) {
-      toast.error(t('skillInfo.failedToDelete'), {
-        description: err instanceof Error ? err.message : undefined,
+      const errorCode = err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code ?? '')
+        : ''
+      toast.error(errorCode
+        ? t(`creatorSkills.errors.${errorCode}`, {
+            defaultValue: t('skillInfo.failedToDelete'),
+          })
+        : t('skillInfo.failedToDelete'), {
+        description: errorCode ? undefined : err instanceof Error ? err.message : undefined,
       })
     }
   }, [skill, workspaceId, skillSlug, t])

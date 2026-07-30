@@ -558,10 +558,11 @@ async function rollbackJournal(
     : paths.preserveBackupPath && await exists(paths.preserveBackupPath)
       ? paths.preserveBackupPath
       : undefined
-  if (
-    journal.state === 'new_installed'
-    || journal.state === 'ledger_committed'
-  ) {
+  // A directory rename can be durable before the following journal update.
+  // Once old_backed_up is persisted, targetPath may therefore already contain
+  // the promoted stage even though new_installed was never recorded. The same
+  // applies to the prepared -> old_backed_up window when a backup is present.
+  if (recoverableBackupPath || journal.state !== 'prepared') {
     await rm(paths.targetPath, { recursive: true, force: true })
   }
   if (recoverableBackupPath) {

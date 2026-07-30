@@ -224,7 +224,7 @@ export type CreatorSkillOperationResult =
       operationId: string
       errorCode: string
       stage: CreatorSkillOperationStage
-      message: string
+      message?: string
       path?: string
       conflicts?: CreatorSkillInstallConflict[]
       diagnostic: string

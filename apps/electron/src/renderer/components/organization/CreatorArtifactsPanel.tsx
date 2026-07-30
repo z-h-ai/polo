@@ -466,7 +466,7 @@ export function CreatorArtifactsPanel({
         return
       }
       if (!result.success) {
-        setError(`${result.message}\n${result.diagnostic}`)
+        setError(`${resultMessage(t, result)}\n${result.diagnostic}`)
         return
       }
       setProgress({
@@ -689,7 +689,10 @@ export function CreatorArtifactsPanel({
               </Button>
             ) : null}
             {error ? (
-              <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div
+                role="alert"
+                className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
                 {error}
               </div>
             ) : null}
@@ -990,7 +993,10 @@ export function CreatorArtifactsPanel({
               )) : null}
 
             {error ? (
-              <div className="whitespace-pre-wrap rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div
+                role="alert"
+                className="whitespace-pre-wrap rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
                 {error}
               </div>
             ) : null}

@@ -368,6 +368,8 @@
   "creatorSkills.errors.localFileRequired": "请选择当前设备上的 ZIP 文件。",
   "creatorSkills.errors.unknown": "Creator Skill 请求失败。",
   "creatorSkills.errors.webAppManagementUnavailable": "暂时无法打开 Web App 管理。",
+  "creatorSkills.errors.workspace_context_mismatch": "当前打开的已不是这个 workspace，请重新打开后再试。",
+  "creatorSkills.errors.workspace_read_only": "这个 workspace 为只读状态，不能修改 Skill。",
   "creatorSkills.featureDisabled": "平台管理员已关闭 Creator Skill 发布与分发。",
   "creatorSkills.files.title": "文件（{{count}}）",
   "creatorSkills.install.action": "安装",

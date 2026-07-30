@@ -368,6 +368,8 @@
   "creatorSkills.errors.localFileRequired": "Choose a local ZIP file from this device.",
   "creatorSkills.errors.unknown": "Creator Skill request failed.",
   "creatorSkills.errors.webAppManagementUnavailable": "Web App management is currently unavailable.",
+  "creatorSkills.errors.workspace_context_mismatch": "Ten obszar roboczy nie jest już aktywnym obszarem roboczym. Otwórz go ponownie i spróbuj jeszcze raz.",
+  "creatorSkills.errors.workspace_read_only": "Ten obszar roboczy jest tylko do odczytu. Zmiany Skill są niedozwolone.",
   "creatorSkills.featureDisabled": "Creator Skill publishing and distribution are disabled by the platform administrator.",
   "creatorSkills.files.title": "Files ({{count}})",
   "creatorSkills.install.action": "Install",

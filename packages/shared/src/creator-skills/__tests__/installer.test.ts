@@ -26,6 +26,7 @@ const OP_UNINSTALL = '66666666-6666-4666-8666-666666666666'
 const OP_RECOVERY = '77777777-7777-4777-8777-777777777777'
 const OP_FAULT_LEDGER = '88888888-8888-4888-8888-888888888888'
 const OP_FAULT_COMMITTED = '99999999-9999-4999-8999-999999999999'
+const OP_FAULT_STAGE_PROMOTED = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
 function skillContent(version: string): string {
   return `---
@@ -260,6 +261,91 @@ describe('Creator Skill workspace installer', () => {
 
       expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8')).toBe('old local content')
       expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
+      expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('restores the old directory when stage promotion lands before new_installed', async () => {
+    await withWorkspace(async root => {
+      const operationPath = join(root, '.creator-skill-ops', OP_FAULT_STAGE_PROMOTED)
+      const targetPath = join(root, 'skills', 'install-test')
+      const transactionBackupPath = join(operationPath, 'backup')
+      await mkdir(targetPath, { recursive: true })
+      await mkdir(transactionBackupPath, { recursive: true })
+      await writeFile(join(targetPath, 'SKILL.md'), 'new promoted content')
+      await writeFile(join(transactionBackupPath, 'SKILL.md'), 'old installed content')
+
+      const oldInstallation = {
+        artifactId: 'artifact-old',
+        organizationId: 'organization-1',
+        slug: 'install-test',
+        version: '1.0.0',
+        archiveChecksum: 'a'.repeat(64),
+        contentDigest: 'b'.repeat(64),
+        installedAt: '2026-07-30T00:00:00.000Z',
+      }
+      const oldLedger = `${JSON.stringify({
+        schemaVersion: 1,
+        installed: [oldInstallation],
+      }, null, 2)}\n`
+      await writeFile(join(root, 'creator-skills.json'), JSON.stringify({
+        schemaVersion: 1,
+        installed: [{
+          ...oldInstallation,
+          artifactId: 'artifact-new',
+          version: '2.0.0',
+        }],
+      }))
+      await writeFile(join(operationPath, 'journal.json'), JSON.stringify({
+        schemaVersion: 1,
+        operationId: OP_FAULT_STAGE_PROMOTED,
+        action: 'install',
+        slug: 'install-test',
+        targetPath,
+        transactionBackupPath,
+        ledgerPath: join(root, 'creator-skills.json'),
+        oldLedger,
+        state: 'old_backed_up',
+      }))
+
+      await recoverCreatorSkillOperations(root)
+
+      expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8'))
+        .toBe('old installed content')
+      expect((await readCreatorSkillsLedger(root)).installed[0])
+        .toMatchObject({ artifactId: 'artifact-old', version: '1.0.0' })
+      expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('restores a backup created before old_backed_up was journaled', async () => {
+    await withWorkspace(async root => {
+      const operationId = 'abababab-abab-4bab-8bab-abababababab'
+      const operationPath = join(root, '.creator-skill-ops', operationId)
+      const targetPath = join(root, 'skills', 'install-test')
+      const transactionBackupPath = join(operationPath, 'backup')
+      await mkdir(transactionBackupPath, { recursive: true })
+      await writeFile(join(transactionBackupPath, 'SKILL.md'), 'old prepared content')
+      await writeFile(join(operationPath, 'journal.json'), JSON.stringify({
+        schemaVersion: 1,
+        operationId,
+        action: 'install',
+        slug: 'install-test',
+        targetPath,
+        transactionBackupPath,
+        ledgerPath: join(root, 'creator-skills.json'),
+        oldLedger: null,
+        state: 'prepared',
+      }))
+
+      await recoverCreatorSkillOperations(root)
+
+      expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8'))
+        .toBe('old prepared content')
+      expect(await access(join(root, 'creator-skills.json')).then(
+        () => true,
+        () => false,
+      )).toBe(false)
       expect(await access(operationPath).then(() => true, () => false)).toBe(false)
     })
   })

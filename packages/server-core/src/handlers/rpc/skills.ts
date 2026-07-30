@@ -45,13 +45,10 @@ function getBoundWorkspace(
   deps: HandlerDeps,
 ) {
   const activeId = currentWorkspaceId(ctx, deps)
-  if (!activeId) return null
-  const activeWorkspace = getWorkspaceByNameOrId(activeId)
-  const requestedWorkspace = getWorkspaceByNameOrId(requestedWorkspaceId)
-  if (!activeWorkspace || !requestedWorkspace || activeWorkspace.id !== requestedWorkspace.id) {
-    return null
-  }
-  return requestedWorkspace
+  if (!activeId || activeId !== requestedWorkspaceId) return null
+  const exactMatches = (deps.sessionManager.getWorkspaces?.() ?? [])
+    .filter(workspace => workspace.id === activeId)
+  return exactMatches.length === 1 ? exactMatches[0] ?? null : null
 }
 
 export async function hasWorkspaceSkillWriteAccess(workspaceRoot: string): Promise<boolean> {
@@ -78,9 +75,6 @@ function workspaceMutationError(
     operationId,
     errorCode,
     stage: 'prepare' as const,
-    message: errorCode === 'workspace_read_only'
-      ? 'The active workspace does not allow Skill changes'
-      : 'The requested workspace is not the active workspace for this connection',
     diagnostic: JSON.stringify({ errorCode, stage: 'prepare' }),
     retryable: false,
   }

@@ -368,6 +368,8 @@
   "creatorSkills.errors.localFileRequired": "Choose a local ZIP file from this device.",
   "creatorSkills.errors.unknown": "Creator Skill request failed.",
   "creatorSkills.errors.webAppManagementUnavailable": "Web App management is currently unavailable.",
+  "creatorSkills.errors.workspace_context_mismatch": "このワークスペースは現在開いているワークスペースではありません。開き直してから再試行してください。",
+  "creatorSkills.errors.workspace_read_only": "このワークスペースは読み取り専用です。Skill は変更できません。",
   "creatorSkills.featureDisabled": "Creator Skill publishing and distribution are disabled by the platform administrator.",
   "creatorSkills.files.title": "Files ({{count}})",
   "creatorSkills.install.action": "Install",

@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, mock } from 'bun:test'
+import { afterAll, describe, expect, it } from 'bun:test'
 import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -12,29 +12,30 @@ import type { HandlerDeps } from '../handler-deps'
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'creator-skill-rpc-'))
 const workspaceOne: Workspace = {
-  id: 'workspace-one',
-  name: 'Workspace One',
+  id: '11111111-1111-4111-8111-111111111111',
+  name: '22222222-2222-4222-8222-22222222abcd',
   slug: 'workspace-one',
   rootPath: join(temporaryRoot, 'workspace-one'),
   createdAt: Date.now(),
 }
 const workspaceTwo: Workspace = {
-  id: 'workspace-two',
+  id: '22222222-2222-4222-8222-22222222abcd',
   name: 'Workspace Two',
   slug: 'workspace-two',
   rootPath: join(temporaryRoot, 'workspace-two'),
   createdAt: Date.now(),
 }
+const workspaceCaseCollision: Workspace = {
+  id: '33333333-3333-4333-8333-333333333333',
+  name: workspaceTwo.id.toUpperCase(),
+  slug: 'workspace-case-collision',
+  rootPath: join(temporaryRoot, 'workspace-case-collision'),
+  createdAt: Date.now(),
+}
 await mkdir(workspaceOne.rootPath)
 await mkdir(workspaceTwo.rootPath)
-
-mock.module('@polo-ai/shared/config', () => ({
-  getWorkspaceByNameOrId: (id: string) => (
-    [workspaceOne, workspaceTwo].find(workspace => (
-      workspace.id === id || workspace.name === id
-    )) ?? null
-  ),
-}))
+await mkdir(workspaceCaseCollision.rootPath)
+let workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
 
 const [{ RPC_CHANNELS }, { registerSkillsHandlers }] = await Promise.all([
   import('@polo-ai/shared/protocol'),
@@ -59,7 +60,7 @@ const server: RpcServer = {
 }
 const deps = {
   sessionManager: {
-    getWorkspaces: () => [],
+    getWorkspaces: () => workspaceOrder,
   },
   oauthFlowStore: {},
   platform: {
@@ -131,13 +132,15 @@ describe('Creator Skill workspace RPC boundary', () => {
       success: false,
       errorCode: 'workspace_context_mismatch',
     })
-    expect(await install(ctx, {
+    const installResult = await install(ctx, {
       ...installInput,
       workspaceId: workspaceTwo.id,
-    })).toMatchObject({
+    })
+    expect(installResult).toMatchObject({
       success: false,
       errorCode: 'workspace_context_mismatch',
     })
+    expect(installResult).not.toHaveProperty('message')
     expect(await uninstall(ctx, {
       workspaceId: workspaceTwo.id,
       operationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -146,6 +149,38 @@ describe('Creator Skill workspace RPC boundary', () => {
       success: false,
       errorCode: 'workspace_context_mismatch',
     })
+  })
+
+  it('resolves opaque IDs exactly despite name collisions and workspace order', async () => {
+    const getTarget = handlers.get(RPC_CHANNELS.creatorSkills.GET_TARGET)!
+    const collisionContext = {
+      ...ctx,
+      workspaceId: workspaceTwo.id,
+    }
+    const orders = [
+      [workspaceOne, workspaceCaseCollision, workspaceTwo],
+      [workspaceCaseCollision, workspaceTwo, workspaceOne],
+      [workspaceTwo, workspaceOne, workspaceCaseCollision],
+    ]
+
+    for (const order of orders) {
+      workspaceOrder = order
+      expect(await getTarget(collisionContext, {
+        workspaceId: workspaceTwo.id,
+      })).toMatchObject({
+        success: true,
+        workspaceId: workspaceTwo.id,
+        name: workspaceTwo.name,
+        path: workspaceTwo.rootPath,
+      })
+    }
+    expect(await getTarget(collisionContext, {
+      workspaceId: workspaceTwo.id.toUpperCase(),
+    })).toEqual({
+      success: false,
+      errorCode: 'workspace_context_mismatch',
+    })
+    workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
   })
 
   it('reports actual writability and rejects mutations for a read-only workspace', async () => {
@@ -159,18 +194,22 @@ describe('Creator Skill workspace RPC boundary', () => {
         success: true,
         writable: false,
       })
-      expect(await install(ctx, installInput)).toMatchObject({
+      const installResult = await install(ctx, installInput)
+      expect(installResult).toMatchObject({
         success: false,
         errorCode: 'workspace_read_only',
       })
-      expect(await uninstall(ctx, {
+      expect(installResult).not.toHaveProperty('message')
+      const uninstallResult = await uninstall(ctx, {
         workspaceId: workspaceOne.id,
         operationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
         slug: 'safe-skill',
-      })).toMatchObject({
+      })
+      expect(uninstallResult).toMatchObject({
         success: false,
         errorCode: 'workspace_read_only',
       })
+      expect(uninstallResult).not.toHaveProperty('message')
     } finally {
       await chmod(workspaceOne.rootPath, 0o755)
     }

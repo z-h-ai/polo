@@ -368,6 +368,8 @@
   "creatorSkills.errors.localFileRequired": "Choose a local ZIP file from this device.",
   "creatorSkills.errors.unknown": "Creator Skill request failed.",
   "creatorSkills.errors.webAppManagementUnavailable": "Web App management is currently unavailable.",
+  "creatorSkills.errors.workspace_context_mismatch": "Ez a munkaterület már nem az aktív munkaterület. Nyisd meg újra, majd próbáld meg ismét.",
+  "creatorSkills.errors.workspace_read_only": "Ez a munkaterület csak olvasható. A Skill módosítása nem engedélyezett.",
   "creatorSkills.featureDisabled": "Creator Skill publishing and distribution are disabled by the platform administrator.",
   "creatorSkills.files.title": "Files ({{count}})",
   "creatorSkills.install.action": "Install",
