@@ -3,6 +3,7 @@ import {
   CreateCreatorArtifactRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
   CreatorSkillInstallRpcInputSchema,
+  DeleteSkillRpcInputSchema,
   SkillArchivePolicySchema,
   StableSemverSchema,
 } from '../schemas'
@@ -72,6 +73,27 @@ describe('Creator Skill boundary schemas', () => {
       grant: {},
       injected: true,
     }).success).toBe(false)
+
+    expect(DeleteSkillRpcInputSchema.safeParse({
+      workspaceId: 'workspace-id',
+      skillSlug: 'review-helper',
+      injected: true,
+    }).success).toBe(false)
+  })
+
+  it('rejects unsafe Skill slugs at the delete RPC boundary', () => {
+    for (const skillSlug of [
+      '..',
+      '../outside',
+      '/absolute/outside',
+      '..\\outside',
+      '../\\outside',
+    ]) {
+      expect(DeleteSkillRpcInputSchema.safeParse({
+        workspaceId: 'workspace-id',
+        skillSlug,
+      }).success).toBe(false)
+    }
   })
 
   it('accepts only stable SemVer and never permits policy values above hard limits', () => {

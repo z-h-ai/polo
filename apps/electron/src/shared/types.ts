@@ -797,10 +797,10 @@ export interface ElectronAPI {
   // Skills
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
-  deleteSkill(
-    workspaceId: string,
-    skillSlug: string,
-  ): Promise<{ managed: boolean; detached: boolean }>
+  deleteSkill(input: {
+    workspaceId: string
+    skillSlug: string
+  }): Promise<{ managed: boolean; detached: boolean }>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
 

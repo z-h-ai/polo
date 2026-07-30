@@ -77,6 +77,12 @@ export interface CreatorSkillInstallerDependencies {
   }) => Promise<void>
   /** Transaction checkpoint hook used by deterministic crash/fault tests. */
   onJournalPersisted?: (state: CreatorSkillJournalState) => Promise<void> | void
+  /** Overrides directory fsync for deterministic durability tests. */
+  syncJournalDirectory?: (directoryPath: string) => Promise<void>
+  /** Transaction cleanup hook used by deterministic crash/fault tests. */
+  onCleanupStep?: (
+    step: 'transaction_backup_removed' | 'operation_removed'
+  ) => Promise<void> | void
 }
 
 function errorResult(args: {
@@ -312,7 +318,21 @@ function report(
   })
 }
 
-async function writeJournal(path: string, journal: CreatorSkillJournal): Promise<void> {
+async function syncJournalDirectory(directoryPath: string): Promise<void> {
+  let directoryHandle
+  try {
+    directoryHandle = await open(directoryPath, 'r')
+    await directoryHandle.sync()
+  } finally {
+    await directoryHandle?.close()
+  }
+}
+
+async function writeJournal(
+  path: string,
+  journal: CreatorSkillJournal,
+  syncDirectory: (directoryPath: string) => Promise<void> = syncJournalDirectory,
+): Promise<boolean> {
   const tempPath = `${path}.${randomUUID()}.tmp`
   let handle
   try {
@@ -322,21 +342,20 @@ async function writeJournal(path: string, journal: CreatorSkillJournal): Promise
     await handle.close()
     handle = undefined
     await rename(tempPath, path)
-    // Persist the rename itself before a transaction backup can be deleted.
-    // Directory fsync is not supported by every platform/filesystem, so keep
-    // the file fsync as the mandatory durability boundary and treat an
-    // unsupported directory sync as best effort.
-    let directoryHandle
+    // A successful file fsync does not make the directory-entry rename durable.
+    // Callers must retain transaction recovery material when directory fsync is
+    // unsupported instead of treating that weaker guarantee as committed.
     try {
-      directoryHandle = await open(dirname(path), 'r')
-      await directoryHandle.sync()
+      await syncDirectory(dirname(path))
+      return true
     } catch (error) {
       const code = error && typeof error === 'object'
         ? (error as { code?: string }).code
         : undefined
-      if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EISDIR') throw error
-    } finally {
-      await directoryHandle?.close()
+      if (code === 'EINVAL' || code === 'ENOTSUP' || code === 'EISDIR') {
+        return false
+      }
+      throw error
     }
   } catch (error) {
     await handle?.close().catch(() => {})
@@ -349,9 +368,14 @@ async function persistJournal(
   path: string,
   journal: CreatorSkillJournal,
   dependencies?: CreatorSkillInstallerDependencies,
-): Promise<void> {
-  await writeJournal(path, journal)
+): Promise<boolean> {
+  const durable = await writeJournal(
+    path,
+    journal,
+    dependencies?.syncJournalDirectory,
+  )
   await dependencies?.onJournalPersisted?.(journal.state)
+  return durable
 }
 
 async function readLedgerSnapshot(workspaceRoot: string): Promise<string | null> {
@@ -737,7 +761,11 @@ export async function installCreatorSkill(
       // old transaction backup is deleted, so every earlier checkpoint can
       // still restore both the previous directory and previous Ledger.
       journal.state = 'committed'
-      await writeJournal(journalPath, journal)
+      const committedJournalDurable = await writeJournal(
+        journalPath,
+        journal,
+        dependencies.syncJournalDirectory,
+      )
       committedResult = {
         success: true,
         operationId: input.operationId,
@@ -745,10 +773,20 @@ export async function installCreatorSkill(
         ...(backupPath ? { backupPath } : {}),
       }
       await dependencies.onJournalPersisted?.(journal.state)
+      if (!committedJournalDurable) {
+        // This filesystem cannot prove that the committed rename reached stable
+        // storage. Keep the journal and rollback backup for startup recovery;
+        // it can safely finalize a visible committed journal or roll back an
+        // older checkpoint after a crash.
+        report(dependencies, input, 'refresh', 100, false)
+        return committedResult
+      }
       if (!preserveBackupPath) {
         await rm(transactionBackupPath, { recursive: true, force: true })
+        await dependencies.onCleanupStep?.('transaction_backup_removed')
       }
       await rm(operationPath, { recursive: true, force: true })
+      await dependencies.onCleanupStep?.('operation_removed')
 
       report(dependencies, input, 'refresh', 100, false)
       return committedResult
@@ -892,8 +930,9 @@ export async function uninstallCreatorSkill(args: {
       journal.state = 'ledger_committed'
       await writeJournal(journalPath, journal)
       journal.state = 'committed'
-      await writeJournal(journalPath, journal)
+      const committedJournalDurable = await writeJournal(journalPath, journal)
       committedResult = { success: true, operationId: args.operationId }
+      if (!committedJournalDurable) return committedResult
       await rm(operationPath, { recursive: true, force: true })
       return committedResult
     } catch (error) {

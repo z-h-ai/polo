@@ -148,6 +148,18 @@ describe('CreatorArtifactsPanel', () => {
     })
   })
 
+  it('renders the initial changelog in the active non-English locale', async () => {
+    await i18n.changeLanguage('es')
+    renderPanel(true)
+    const skillRow = await screen.findByText('Review Skill')
+    fireEvent.click(skillRow.closest('button')!)
+
+    await waitFor(() => {
+      const input = document.querySelector('#creator-skill-changelog') as HTMLInputElement | null
+      expect(input?.value).toBe('Lanzamiento inicial')
+    })
+  })
+
   it('localizes workspace mutation errors without a server message', async () => {
     detailVersions = [{
       id: 'version-one',

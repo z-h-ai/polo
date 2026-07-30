@@ -18,6 +18,7 @@ import {
   CreatorSkillStatusUpdateRpcInputSchema,
   CreatorSkillTargetRpcInputSchema,
   CreatorSkillUninstallRpcInputSchema,
+  DeleteSkillRpcInputSchema,
 } from '@polo-ai/shared/creator-skills/schemas'
 import {
   cancelCreatorSkillOperation,
@@ -221,7 +222,14 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   })
 
   // Delete a skill from a workspace
-  server.handle(RPC_CHANNELS.skills.DELETE, async (ctx, workspaceId: string, skillSlug: string) => {
+  server.handle(RPC_CHANNELS.skills.DELETE, async (ctx, rawInput: unknown) => {
+    const input = DeleteSkillRpcInputSchema.safeParse(rawInput)
+    if (!input.success) {
+      throw Object.assign(new Error('VALIDATION_ERROR'), {
+        code: 'VALIDATION_ERROR',
+      })
+    }
+    const { workspaceId, skillSlug } = input.data
     const workspace = getBoundWorkspace(ctx, workspaceId, deps)
     if (!workspace) throw Object.assign(new Error('Workspace context mismatch'), {
       code: 'workspace_context_mismatch',

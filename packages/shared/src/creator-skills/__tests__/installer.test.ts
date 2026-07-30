@@ -27,6 +27,9 @@ const OP_RECOVERY = '77777777-7777-4777-8777-777777777777'
 const OP_FAULT_LEDGER = '88888888-8888-4888-8888-888888888888'
 const OP_FAULT_COMMITTED = '99999999-9999-4999-8999-999999999999'
 const OP_FAULT_STAGE_PROMOTED = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const OP_UNSUPPORTED_DIRECTORY_SYNC = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+const OP_FAULT_BACKUP_REMOVED = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+const OP_FAULT_OPERATION_REMOVED = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 
 function skillContent(version: string): string {
   return `---
@@ -499,6 +502,138 @@ describe('Creator Skill workspace installer', () => {
         '.creator-skill-ops',
         OP_FAULT_COMMITTED,
       )).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('keeps recovery material when committed directory fsync is unsupported', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const operationPath = join(
+        root,
+        '.creator-skill-ops',
+        OP_UNSUPPORTED_DIRECTORY_SYNC,
+      )
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_UNSUPPORTED_DIRECTORY_SYNC,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        syncJournalDirectory: async () => {
+          throw Object.assign(new Error('Directory fsync is not supported'), {
+            code: 'ENOTSUP',
+          })
+        },
+      })
+
+      expect(result.success).toBe(true)
+      expect(await access(join(operationPath, 'backup')).then(
+        () => true,
+        () => false,
+      )).toBe(true)
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('2.0.0')
+
+      // Model a power loss where the latest directory-entry rename is not
+      // durable and recovery observes the previous checkpoint.
+      const journalPath = join(operationPath, 'journal.json')
+      const staleJournal = JSON.parse(await readFile(journalPath, 'utf8'))
+      staleJournal.state = 'ledger_committed'
+      await writeFile(journalPath, JSON.stringify(staleJournal))
+
+      await recoverCreatorSkillOperations(root)
+
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('1.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('finishes committed recovery after a crash following transaction backup cleanup', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const operationPath = join(root, '.creator-skill-ops', OP_FAULT_BACKUP_REMOVED)
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_FAULT_BACKUP_REMOVED,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        onCleanupStep: async step => {
+          if (step !== 'transaction_backup_removed') return
+          expect(await access(join(operationPath, 'backup')).then(
+            () => true,
+            () => false,
+          )).toBe(false)
+          expect(JSON.parse(
+            await readFile(join(operationPath, 'journal.json'), 'utf8'),
+          ).state).toBe('committed')
+          throw new Error('simulated crash after transaction backup cleanup')
+        },
+      })
+
+      expect(result.success).toBe(true)
+      expect(await access(operationPath).then(() => true, () => false)).toBe(true)
+      await recoverCreatorSkillOperations(root)
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('2.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('2.0.0')
+      expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('returns the committed result after a crash following operation cleanup', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const operationPath = join(root, '.creator-skill-ops', OP_FAULT_OPERATION_REMOVED)
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_FAULT_OPERATION_REMOVED,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        onCleanupStep: async step => {
+          if (step !== 'operation_removed') return
+          expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+          throw new Error('simulated crash after operation cleanup')
+        },
+      })
+
+      expect(result.success).toBe(true)
+      expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('2.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('2.0.0')
     })
   })
 })

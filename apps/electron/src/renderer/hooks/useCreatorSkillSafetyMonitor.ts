@@ -10,6 +10,48 @@ interface ScheduledSafetyCheck extends CreatorSkillSafetyScheduleItem {
   skill: LoadedSkill
 }
 
+export interface CreatorSkillSafeVersionCandidate {
+  workspaceId: string
+  artifactId: string
+  slug: string
+  version: string
+}
+
+export function creatorSkillSafeVersionCandidateKey(
+  workspaceId: string,
+  artifactId: string,
+  slug: string,
+): string {
+  return `${workspaceId}\0${artifactId}\0${slug}`
+}
+
+export function selectCreatorSkillSafeVersions(
+  candidates: Record<string, CreatorSkillSafeVersionCandidate>,
+  skills: LoadedSkill[],
+  workspaceId?: string,
+): Record<string, string> {
+  if (!workspaceId) return {}
+  const result: Record<string, string> = {}
+  for (const skill of skills) {
+    const installed = skill.creatorInstallation
+    if (!installed) continue
+    const candidate = candidates[creatorSkillSafeVersionCandidateKey(
+      workspaceId,
+      installed.artifactId,
+      skill.slug,
+    )]
+    if (!candidate) continue
+    const actionable = actionableCreatorSkillSafeVersion({
+      candidate: candidate.version,
+      installedVersion: installed.version,
+      ignoredVersion: installed.ignoredVersion,
+      status: installed.lastKnownStatus ?? 'active',
+    })
+    if (actionable) result[skill.slug] = actionable
+  }
+  return result
+}
+
 export function useCreatorSkillSafetyMonitor(
   skills: LoadedSkill[],
   workspaceId?: string,
@@ -18,7 +60,9 @@ export function useCreatorSkillSafetyMonitor(
   if (!scheduler.current) {
     scheduler.current = new CreatorSkillSafetyScheduler()
   }
-  const [safeVersions, setSafeVersions] = React.useState<Record<string, string>>({})
+  const [safeVersionCandidates, setSafeVersionCandidates] = React.useState<
+    Record<string, CreatorSkillSafeVersionCandidate>
+  >({})
   const activeWorkspaceScope = React.useRef(workspaceId)
   activeWorkspaceScope.current = workspaceId
 
@@ -26,25 +70,29 @@ export function useCreatorSkillSafetyMonitor(
     const isCurrentScope = () => activeWorkspaceScope.current === workspaceId
     if (!workspaceId) {
       scheduler.current?.update([], async () => true)
-      setSafeVersions({})
+      setSafeVersionCandidates({})
       return
     }
 
-    setSafeVersions(current => {
+    setSafeVersionCandidates(current => {
       let changed = false
       const next = { ...current }
-      for (const [slug, candidate] of Object.entries(next)) {
-        const installed = skills.find(skill => skill.slug === slug)?.creatorInstallation
+      for (const [key, candidate] of Object.entries(next)) {
+        const installed = skills.find(skill =>
+          skill.slug === candidate.slug
+          && skill.creatorInstallation?.artifactId === candidate.artifactId
+        )?.creatorInstallation
         if (
           !installed
+          || candidate.workspaceId !== workspaceId
           || !actionableCreatorSkillSafeVersion({
-            candidate,
+            candidate: candidate.version,
             installedVersion: installed.version,
             ignoredVersion: installed.ignoredVersion,
             status: installed.lastKnownStatus ?? 'active',
           })
         ) {
-          delete next[slug]
+          delete next[key]
           changed = true
         }
       }
@@ -69,7 +117,7 @@ export function useCreatorSkillSafetyMonitor(
           archiveChecksum: installed.archiveChecksum,
         })
         if (!result.success || !isCurrentScope()) return false
-        setSafeVersions(current => {
+        setSafeVersionCandidates(current => {
           const next = { ...current }
           const actionable = actionableCreatorSkillSafeVersion({
             candidate: result.safeVersion,
@@ -78,9 +126,23 @@ export function useCreatorSkillSafetyMonitor(
             status: result.status,
           })
           if (actionable) {
-            next[skill.slug] = actionable
+            const key = creatorSkillSafeVersionCandidateKey(
+              workspaceId,
+              installed.artifactId,
+              skill.slug,
+            )
+            next[key] = {
+              workspaceId,
+              artifactId: installed.artifactId,
+              slug: skill.slug,
+              version: actionable,
+            }
           } else {
-            delete next[skill.slug]
+            delete next[creatorSkillSafeVersionCandidateKey(
+              workspaceId,
+              installed.artifactId,
+              skill.slug,
+            )]
           }
           return next
         })
@@ -107,5 +169,12 @@ export function useCreatorSkillSafetyMonitor(
     scheduler.current?.dispose()
   }, [])
 
-  return safeVersions
+  return React.useMemo(
+    () => selectCreatorSkillSafeVersions(
+      safeVersionCandidates,
+      skills,
+      workspaceId,
+    ),
+    [safeVersionCandidates, skills, workspaceId],
+  )
 }

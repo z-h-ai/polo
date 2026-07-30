@@ -1894,7 +1894,10 @@ function AppShellContent({
   const handleDeleteSkill = useCallback(async (skillSlug: string) => {
     if (!activeWorkspace) return
     try {
-      const result = await window.electronAPI.deleteSkill(activeWorkspace.id, skillSlug)
+      const result = await window.electronAPI.deleteSkill({
+        workspaceId: activeWorkspace.id,
+        skillSlug,
+      })
       toast.success(result.detached
         ? t('creatorSkills.uninstall.detached')
         : t('toast.deletedSkill', { slug: skillSlug }))

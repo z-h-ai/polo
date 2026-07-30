@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'bun:test'
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Workspace } from '@polo-ai/core/types'
@@ -213,5 +213,35 @@ describe('Creator Skill workspace RPC boundary', () => {
     } finally {
       await chmod(workspaceOne.rootPath, 0o755)
     }
+  })
+
+  it('strictly rejects unsafe delete slugs before touching the workspace', async () => {
+    const deleteSkill = handlers.get(RPC_CHANNELS.skills.DELETE)!
+    const sentinel = join(workspaceOne.rootPath, 'workspace-sentinel.txt')
+    await writeFile(sentinel, 'keep')
+    const invalidSlugs = [
+      '..',
+      '../outside',
+      temporaryRoot,
+      '..\\outside',
+      '../\\outside',
+    ]
+
+    for (const skillSlug of invalidSlugs) {
+      await expect(deleteSkill(ctx, {
+        workspaceId: workspaceOne.id,
+        skillSlug,
+      })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+      expect(await access(workspaceOne.rootPath).then(() => true, () => false)).toBe(true)
+      expect(await access(sentinel).then(() => true, () => false)).toBe(true)
+    }
+
+    await expect(deleteSkill(ctx, {
+      workspaceId: workspaceOne.id,
+      skillSlug: 'safe-skill',
+      unexpected: true,
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(await access(workspaceOne.rootPath).then(() => true, () => false)).toBe(true)
+    expect(await access(sentinel).then(() => true, () => false)).toBe(true)
   })
 })

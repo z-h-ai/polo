@@ -410,7 +410,7 @@
   "creatorSkills.version.confirmDelete": "Delete this unpublished version draft?",
   "creatorSkills.version.create": "Create version",
   "creatorSkills.version.draft": "Version {{version}}",
-  "creatorSkills.version.initialChangelog": "Initial release",
+  "creatorSkills.version.initialChangelog": "Első kiadás",
   "creatorSkills.version.noChangelog": "No changelog",
   "creatorSkills.version.number": "Stable version",
   "creatorSkills.version.publish": "Publish",

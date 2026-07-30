@@ -251,7 +251,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
 
     try {
       if (skill.source !== 'workspace') return
-      const result = await window.electronAPI.deleteSkill(workspaceId, skillSlug)
+      const result = await window.electronAPI.deleteSkill({ workspaceId, skillSlug })
       toast.success(result.detached
         ? t('creatorSkills.uninstall.detached')
         : t('skillInfo.deletedSkill', { name: skill.metadata.name }))

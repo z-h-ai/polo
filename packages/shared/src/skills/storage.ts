@@ -7,16 +7,19 @@
 
 import {
   existsSync,
+  lstatSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   statSync,
 } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { isAbsolute, join, relative, resolve, sep } from 'path';
 import matter from 'gray-matter';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
+import { SkillSlugSchema } from '../creator-skills/schemas.ts';
 import {
   validateIconValue,
   findIconFile,
@@ -296,19 +299,38 @@ export function getSkillIconPath(workspaceRoot: string, slug: string): string | 
  * @param slug - Skill directory name
  */
 export function deleteSkill(workspaceRoot: string, slug: string): boolean {
-  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
-  const skillDir = join(skillsDir, slug);
-
-  if (!existsSync(skillDir)) {
-    return false;
-  }
-
   try {
+    if (!SkillSlugSchema.safeParse(slug).success) return false;
+
+    const canonicalWorkspace = realpathSync(resolve(workspaceRoot));
+    const skillsDir = getWorkspaceSkillsPath(canonicalWorkspace);
+    if (!existsSync(skillsDir)) return false;
+    const canonicalSkillsDir = realpathSync(skillsDir);
+    if (!isStrictChildPath(canonicalWorkspace, canonicalSkillsDir)) return false;
+
+    const skillDir = resolve(canonicalSkillsDir, slug);
+    if (!isStrictChildPath(canonicalSkillsDir, skillDir) || !existsSync(skillDir)) {
+      return false;
+    }
+    // Refuse all directory-entry symlinks. Even though rm normally unlinks the
+    // link itself, deletion must never depend on platform-specific traversal.
+    if (lstatSync(skillDir).isSymbolicLink()) return false;
+    const canonicalSkillDir = realpathSync(skillDir);
+    if (!isStrictChildPath(canonicalSkillsDir, canonicalSkillDir)) return false;
+
     rmSync(skillDir, { recursive: true });
     return true;
   } catch {
     return false;
   }
+}
+
+function isStrictChildPath(parent: string, candidate: string): boolean {
+  const child = relative(parent, candidate);
+  return child !== ''
+    && child !== '..'
+    && !child.startsWith(`..${sep}`)
+    && !isAbsolute(child);
 }
 
 // ============================================================

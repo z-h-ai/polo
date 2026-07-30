@@ -250,6 +250,11 @@ export const CreatorSkillTargetRpcInputSchema = z.object({
   workspaceId: entityId,
 }).strict()
 
+export const DeleteSkillRpcInputSchema = z.object({
+  workspaceId: entityId,
+  skillSlug,
+}).strict()
+
 export const CreatorSkillSafetyRpcInputSchema = z.object({
   artifactId: entityId,
   version: stableSemver,
