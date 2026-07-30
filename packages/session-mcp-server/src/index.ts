@@ -203,6 +203,7 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     get sourcesPath() { return join(workspaceRootPath, 'sources'); },
     get skillsPath() { return join(workspaceRootPath, 'skills'); },
     plansFolderPath,
+    credentialIsolation: process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot',
     sessionPath,
     dataPath: sessionDataDir,
     callbacks,

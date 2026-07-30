@@ -56,6 +56,7 @@ const server = await spawnServer({
   bootstrapPayload: {
     runtimeConfig: {
       sessionsRoot,
+      controlledRoot: root,
       workspace: {
         id: 'global',
         name: 'Global',

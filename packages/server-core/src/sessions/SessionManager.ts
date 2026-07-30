@@ -50,11 +50,8 @@ import {
   getPendingPlanExecution as getStoredPendingPlanExecution,
   getSessionAttachmentsPath,
   getSessionPath as getSessionStoragePath,
-  ensureSessionDir,
-  getSessionFilePath,
   generateSessionId,
   getHeaderMetadataSignature,
-  writeSessionJsonl,
   serializeSession,
   validateBundle,
   type SessionBundle,
@@ -7974,163 +7971,208 @@ export class SessionManager implements ISessionManager {
     const warnings: string[] = []
     const workspaceRootPath = workspace.rootPath
 
-    // Determine session ID
-    const sessionId = mode === 'move'
-      ? bundle.session.header.id
-      : generateSessionId(workspaceRootPath, this.sessionStorage)
-
-    // Check for ID collision on move
-    if (mode === 'move' && this.sessions.has(sessionId)) {
-      throw new Error(`Session ${sessionId} already exists in target workspace`)
-    }
-
-    // Create session directory with all subdirectories
-    const sessionDir = ensureSessionDir(workspaceRootPath, sessionId, this.sessionStorage)
-
-    // Build the stored session from bundle data
-    const header = bundle.session.header
-    const storedSession: StoredSession = {
-      id: sessionId,
-      workspaceRootPath,
-      sdkSessionId: header.sdkSessionId, // Preserved initially; fork logic below may clear it
-      // Always regenerate sdkCwd for the target workspace.
-      // The source sdkCwd points to a path on the originating server
-      // which doesn't exist here (cross-server transfer).
-      sdkCwd: this.sessionStorage.getSessionPath(workspaceRootPath, sessionId),
-      name: header.name,
-      createdAt: header.createdAt,
-      lastUsedAt: Date.now(),
-      lastMessageAt: header.lastMessageAt,
-      isFlagged: header.isFlagged,
-      permissionMode: header.permissionMode,
-      previousPermissionMode: header.previousPermissionMode,
-      sessionStatus: header.sessionStatus,
-      labels: header.labels,
-      enabledSourceSlugs: header.enabledSourceSlugs,
-      workingDirectory: header.workingDirectory,
-      model: header.model,
-      llmConnection: header.llmConnection,
-      connectionLocked: header.connectionLocked,
-      thinkingLevel: header.thinkingLevel,
-      hidden: header.hidden,
-      transferredSessionSummary: header.transferredSessionSummary,
-      transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
-      messages: bundle.session.messages,
-      tokenUsage: header.tokenUsage ?? DEFAULT_TOKEN_USAGE,
-    }
-
-    // Fork-specific: set up SDK branching if branchInfo provided
-    if (mode === 'fork' && bundle.branchInfo) {
-      storedSession.branchFromSdkSessionId = bundle.branchInfo.sdkSessionId
-      storedSession.branchFromSdkTurnId = bundle.branchInfo.sdkTurnId
-      storedSession.branchFromSdkCwd = bundle.branchInfo.sdkCwd
-    }
-
-    // Fork-specific: clear sharing state and attempt resume-first strategy
-    if (mode === 'fork') {
-      storedSession.sharedUrl = undefined
-      storedSession.sharedId = undefined
-
-      // Resume-first: try to find a compatible LLM connection on the target workspace.
-      // If found and the session has an sdkSessionId, preserve it for API-level resume.
-      // If not, clear SDK state and fall back to transferred session summary.
-      const sourceProviderType = header.llmConnection
-        ? getLlmConnection(header.llmConnection)?.providerType
-        : undefined
-      const compatibleConnection = sourceProviderType
-        ? this.findCompatibleLlmConnection(workspaceRootPath, sourceProviderType)
-        : null
-
-      if (compatibleConnection && storedSession.sdkSessionId) {
-        // Resume path: compatible credentials exist — preserve SDK session ID
-        sessionLog.info(`[import] Fork: compatible ${sourceProviderType} connection "${compatibleConnection}" found — preserving sdkSessionId for resume`)
-        storedSession.llmConnection = compatibleConnection
-        storedSession.connectionLocked = false
-      } else {
-        // Summary path: no compatible connection or no SDK session — clear for fresh start
-        if (storedSession.llmConnection) {
-          sessionLog.info(`[import] Fork: no compatible ${sourceProviderType ?? 'unknown'} connection — clearing, will use summary context`)
+    // Reserve the public ID atomically. A scan remains useful for a readable
+    // candidate, but reserveSession is the cross-process collision authority.
+    let sessionId = ''
+    if (mode === 'move') {
+      sessionId = bundle.session.header.id
+      if (this.sessions.has(sessionId)) {
+        throw new Error(`Session ${sessionId} already exists in target workspace`)
+      }
+      try {
+        this.sessionStorage.reserveSession(workspaceRootPath, sessionId)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new Error(`Session ${sessionId} already exists in target workspace`)
         }
-        storedSession.sdkSessionId = undefined
-        storedSession.llmConnection = undefined
-        storedSession.connectionLocked = false
+        throw error
       }
-      // Clear thinking level so the session inherits the workspace default
-      storedSession.thinkingLevel = undefined
-      // Clear working directory — the source path won't exist on a different server.
-      // The user can set a new cwd after the session is transferred.
-      storedSession.workingDirectory = undefined
-    }
-
-    // Check source compatibility (before writing JSONL so fixes are persisted)
-    if (storedSession.enabledSourceSlugs?.length) {
-      const availableSources = loadWorkspaceSources(workspaceRootPath)
-      const availableSlugs = new Set(availableSources.map(s => s.config.slug))
-      const missingSources = storedSession.enabledSourceSlugs.filter(s => !availableSlugs.has(s))
-      if (missingSources.length > 0) {
-        sessionLog.warn(`[import] Sources not available: ${missingSources.join(', ')}`)
-        warnings.push(`Sources not available in target workspace: ${missingSources.join(', ')}`)
+    } else {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const candidate = generateSessionId(workspaceRootPath, this.sessionStorage)
+        try {
+          this.sessionStorage.reserveSession(workspaceRootPath, candidate)
+          sessionId = candidate
+          break
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || attempt === 19) {
+            throw error
+          }
+        }
       }
+      if (!sessionId) throw new Error('Failed to reserve a unique imported session ID')
     }
 
-    // Check LLM connection compatibility for move mode (fork already cleared above)
-    if (mode === 'move' && storedSession.llmConnection) {
-      sessionLog.info(`[import] Checking LLM connection: "${storedSession.llmConnection}"`)
-      const conn = resolveSessionConnection(storedSession.llmConnection, undefined)
-      if (!conn) {
-        sessionLog.warn(`[import] LLM connection "${storedSession.llmConnection}" not found — clearing to use default`)
-        warnings.push(`LLM connection "${storedSession.llmConnection}" not found in target — session will use default`)
-        storedSession.llmConnection = undefined
-        storedSession.connectionLocked = false
-      } else {
-        sessionLog.info(`[import] LLM connection "${storedSession.llmConnection}" resolved OK`)
+    const sessionDir = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
+    let importCommitted = false
+
+    try {
+      // Build the stored session from bundle data
+      const header = bundle.session.header
+      const storedSession: StoredSession = {
+        id: sessionId,
+        workspaceRootPath,
+        sdkSessionId: header.sdkSessionId, // Preserved initially; fork logic below may clear it
+        // Always regenerate sdkCwd for the target workspace.
+        // The source sdkCwd points to a path on the originating server
+        // which doesn't exist here (cross-server transfer).
+        sdkCwd: this.sessionStorage.getSessionPath(workspaceRootPath, sessionId),
+        name: header.name,
+        createdAt: header.createdAt,
+        lastUsedAt: Date.now(),
+        lastMessageAt: header.lastMessageAt,
+        isFlagged: header.isFlagged,
+        permissionMode: header.permissionMode,
+        previousPermissionMode: header.previousPermissionMode,
+        sessionStatus: header.sessionStatus,
+        labels: header.labels,
+        enabledSourceSlugs: header.enabledSourceSlugs,
+        workingDirectory: header.workingDirectory,
+        model: header.model,
+        llmConnection: header.llmConnection,
+        connectionLocked: header.connectionLocked,
+        thinkingLevel: header.thinkingLevel,
+        hidden: header.hidden,
+        transferredSessionSummary: header.transferredSessionSummary,
+        transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
+        messages: bundle.session.messages,
+        tokenUsage: header.tokenUsage ?? DEFAULT_TOKEN_USAGE,
       }
-    } else if (mode === 'move' && !storedSession.llmConnection) {
-      sessionLog.info('[import] No LLM connection in bundle — will use default')
-    }
 
-    // Write JSONL file (after compatibility checks so remapped values are persisted)
-    const sessionFile = getSessionFilePath(workspaceRootPath, sessionId, this.sessionStorage)
-    sessionLog.info(`[import] Writing JSONL: ${sessionFile} (llmConnection=${storedSession.llmConnection ?? 'default'}, messages=${storedSession.messages.length})`)
-    writeSessionJsonl(sessionFile, storedSession)
+      // Fork-specific: set up SDK branching if branchInfo provided
+      if (mode === 'fork' && bundle.branchInfo) {
+        storedSession.branchFromSdkSessionId = bundle.branchInfo.sdkSessionId
+        storedSession.branchFromSdkTurnId = bundle.branchInfo.sdkTurnId
+        storedSession.branchFromSdkCwd = bundle.branchInfo.sdkCwd
+      }
 
-    // Write all bundle files (attachments, plans, data, downloads, etc.)
-    // Uses restoreFiles() for path traversal, size, and base64 validation.
-    restoreFiles(sessionDir, bundle.files)
+      // Fork-specific: clear sharing state and attempt resume-first strategy
+      if (mode === 'fork') {
+        storedSession.sharedUrl = undefined
+        storedSession.sharedId = undefined
 
-    // Register in-memory — pass session metadata without messages to avoid
-    // StoredMessage[] vs Message[] type mismatch, then convert messages separately
-    const { messages: bundleMessages, ...sessionMeta } = storedSession
-    const managed = createManagedSession(sessionMeta, workspace, {
-      messagesLoaded: true,
-      workingDirectory: storedSession.workingDirectory,
-    })
-    managed.messages = bundleMessages.map(storedToMessage)
+        // Resume-first: try to find a compatible LLM connection on the target workspace.
+        // If found and the session has an sdkSessionId, preserve it for API-level resume.
+        // If not, clear SDK state and fall back to transferred session summary.
+        const sourceProviderType = header.llmConnection
+          ? getLlmConnection(header.llmConnection)?.providerType
+          : undefined
+        const compatibleConnection = sourceProviderType
+          ? this.findCompatibleLlmConnection(workspaceRootPath, sourceProviderType)
+          : null
 
-    setPermissionMode(sessionId, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
-    if (managed.previousPermissionMode) {
-      hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
-    }
+        if (compatibleConnection && storedSession.sdkSessionId) {
+          // Resume path: compatible credentials exist — preserve SDK session ID
+          sessionLog.info(`[import] Fork: compatible ${sourceProviderType} connection "${compatibleConnection}" found — preserving sdkSessionId for resume`)
+          storedSession.llmConnection = compatibleConnection
+          storedSession.connectionLocked = false
+        } else {
+          // Summary path: no compatible connection or no SDK session — clear for fresh start
+          if (storedSession.llmConnection) {
+            sessionLog.info(`[import] Fork: no compatible ${sourceProviderType ?? 'unknown'} connection — clearing, will use summary context`)
+          }
+          storedSession.sdkSessionId = undefined
+          storedSession.llmConnection = undefined
+          storedSession.connectionLocked = false
+        }
+        // Clear thinking level so the session inherits the workspace default
+        storedSession.thinkingLevel = undefined
+        // Clear working directory — the source path won't exist on a different server.
+        // The user can set a new cwd after the session is transferred.
+        storedSession.workingDirectory = undefined
+      }
 
-    this.sessions.set(sessionId, managed)
+      // Check source compatibility (before writing JSONL so fixes are persisted)
+      if (storedSession.enabledSourceSlugs?.length) {
+        const availableSources = loadWorkspaceSources(workspaceRootPath)
+        const availableSlugs = new Set(availableSources.map(s => s.config.slug))
+        const missingSources = storedSession.enabledSourceSlugs.filter(s => !availableSlugs.has(s))
+        if (missingSources.length > 0) {
+          sessionLog.warn(`[import] Sources not available: ${missingSources.join(', ')}`)
+          warnings.push(`Sources not available in target workspace: ${missingSources.join(', ')}`)
+        }
+      }
 
-    // Initialize automation metadata
-    const automationSystem = this.automationSystems.get(workspaceRootPath)
-    if (automationSystem) {
-      automationSystem.setInitialSessionMetadata(sessionId, {
-        permissionMode: storedSession.permissionMode,
-        labels: storedSession.labels,
-        isFlagged: storedSession.isFlagged,
-        sessionStatus: storedSession.sessionStatus,
-        sessionName: managed.name,
+      // Check LLM connection compatibility for move mode (fork already cleared above)
+      if (mode === 'move' && storedSession.llmConnection) {
+        sessionLog.info(`[import] Checking LLM connection: "${storedSession.llmConnection}"`)
+        const conn = resolveSessionConnection(storedSession.llmConnection, undefined)
+        if (!conn) {
+          sessionLog.warn(`[import] LLM connection "${storedSession.llmConnection}" not found — clearing to use default`)
+          warnings.push(`LLM connection "${storedSession.llmConnection}" not found in target — session will use default`)
+          storedSession.llmConnection = undefined
+          storedSession.connectionLocked = false
+        } else {
+          sessionLog.info(`[import] LLM connection "${storedSession.llmConnection}" resolved OK`)
+        }
+      } else if (mode === 'move' && !storedSession.llmConnection) {
+        sessionLog.info('[import] No LLM connection in bundle — will use default')
+      }
+
+      // Persist after compatibility checks so remapped values are durable. The
+      // injected queue supplies CLI no-symlink checks and private atomic writes.
+      sessionLog.info(`[import] Writing JSONL for ${sessionId} (llmConnection=${storedSession.llmConnection ?? 'default'}, messages=${storedSession.messages.length})`)
+      await this.sessionStorage.save(storedSession)
+
+      // Write all bundle files (attachments, plans, data, downloads, etc.)
+      // Uses restoreFiles() for path traversal, size, and base64 validation.
+      restoreFiles(
+        sessionDir,
+        bundle.files,
+        this.sessionStorage.owner === 'cli'
+          ? {
+              directoryMode: 0o700,
+              fileMode: 0o600,
+              assertSafePath: (path, allowMissing) =>
+                this.sessionStorage.assertSafeFilePath?.(path, allowMissing),
+            }
+          : undefined,
+      )
+
+      // Register in-memory — pass session metadata without messages to avoid
+      // StoredMessage[] vs Message[] type mismatch, then convert messages separately
+      const { messages: bundleMessages, ...sessionMeta } = storedSession
+      const managed = createManagedSession(sessionMeta, workspace, {
+        messagesLoaded: true,
+        workingDirectory: storedSession.workingDirectory,
       })
+      managed.messages = bundleMessages.map(storedToMessage)
+
+      setPermissionMode(sessionId, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
+      if (managed.previousPermissionMode) {
+        hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
+      }
+
+      this.sessions.set(sessionId, managed)
+
+      // Initialize automation metadata
+      const automationSystem = this.automationSystems.get(workspaceRootPath)
+      if (automationSystem) {
+        automationSystem.setInitialSessionMetadata(sessionId, {
+          permissionMode: storedSession.permissionMode,
+          labels: storedSession.labels,
+          isFlagged: storedSession.isFlagged,
+          sessionStatus: storedSession.sessionStatus,
+          sessionName: managed.name,
+        })
+      }
+
+      // Emit session_created so renderer picks it up
+      this.sendEvent({ type: 'session_created', sessionId }, workspaceId)
+
+      sessionLog.info(`[import] Complete: sessionId=${sessionId}, transferredSummary=${managed.transferredSessionSummary ? `${managed.transferredSessionSummary.length} chars` : 'none'}, applied=${managed.transferredSessionSummaryApplied}, warnings=${warnings.length > 0 ? warnings.join('; ') : 'none'}`)
+      importCommitted = true
+      return { sessionId, warnings: warnings.length > 0 ? warnings : undefined }
+    } finally {
+      if (!importCommitted) {
+        this.sessions.delete(sessionId)
+        try {
+          this.sessionStorage.delete(workspaceRootPath, sessionId)
+        } catch (cleanupError) {
+          sessionLog.error(`[import] Failed to roll back reservation ${sessionId}:`, cleanupError)
+        }
+      }
     }
-
-    // Emit session_created so renderer picks it up
-    this.sendEvent({ type: 'session_created', sessionId }, workspaceId)
-
-    sessionLog.info(`[import] Complete: sessionId=${sessionId}, transferredSummary=${managed.transferredSessionSummary ? `${managed.transferredSessionSummary.length} chars` : 'none'}, applied=${managed.transferredSessionSummaryApplied}, warnings=${warnings.length > 0 ? warnings.join('; ') : 'none'}`)
-    return { sessionId, warnings: warnings.length > 0 ? warnings : undefined }
   }
 
   /**

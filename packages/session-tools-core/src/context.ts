@@ -387,6 +387,9 @@ export interface SessionToolContext {
    * Used by transform_data and render_template for output files.
    */
   dataPath?: string;
+
+  /** Restrict tool subprocess environments for a CLI one-shot Thread. */
+  credentialIsolation?: boolean;
 }
 
 // ============================================================

@@ -57,13 +57,21 @@ export const TOOL_ENV_ALLOWLIST = new Set([
 ]);
 
 /**
- * Build a tool environment from an explicit allowlist. A denylist cannot
- * protect invocation credentials carried under new provider-specific names.
+ * Desktop tools preserve their historical custom environment behavior while
+ * dropping known credential variables. CLI one-shot tools use an allowlist
+ * because invocation capabilities can use provider-specific names.
  */
-export function createSanitizedEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function createSanitizedEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  credentialIsolation =
+    baseEnv.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot',
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(baseEnv)) {
-    if (value !== undefined && (TOOL_ENV_ALLOWLIST.has(key) || key.startsWith('LC_'))) {
+    if (value === undefined) continue;
+    if (credentialIsolation) {
+      if (TOOL_ENV_ALLOWLIST.has(key) || key.startsWith('LC_')) env[key] = value;
+    } else if (!(BLOCKED_ENV_VARS as readonly string[]).includes(key)) {
       env[key] = value;
     }
   }
@@ -73,6 +81,7 @@ export function createSanitizedEnv(baseEnv: NodeJS.ProcessEnv = process.env): No
 export interface ScriptRuntimeEnvOptions {
   language: ScriptRuntimeLanguage;
   dataDir: string;
+  credentialIsolation?: boolean;
 }
 
 /**
@@ -85,7 +94,7 @@ export function createScriptRuntimeEnv(
   options: ScriptRuntimeEnvOptions,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const env = createSanitizedEnv(baseEnv);
+  const env = createSanitizedEnv(baseEnv, options.credentialIsolation);
   const dataDir = resolve(options.dataDir);
 
   const tmpDir = join(dataDir, '.tmp');

@@ -33,6 +33,7 @@ export { credentialIdToAccount, accountToCredentialId, SOURCE_CREDENTIAL_TYPES, 
 export {
   startInvocationCredentialProxy,
   type InvocationCredentialProxy,
+  type InvocationCredentialHeader,
   type InvocationCredentialProxyOptions,
   type InvocationCredentialProxyTarget,
 } from './invocation-credential-proxy.ts';

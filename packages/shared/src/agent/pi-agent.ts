@@ -533,6 +533,7 @@ export class PiAgent extends BaseAgent {
       workspaceId: this.config.workspace.id,
       piAuth: proxyAuth.piAuth,
       credentialProxy: proxyAuth.credentialProxy,
+      credentialIsolation: this.sessionStorage.owner === 'cli',
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
@@ -760,12 +761,24 @@ export class PiAgent extends BaseAgent {
         ? piAuth.credential.key
         : legacyApiKey ?? undefined;
     const provider = piAuth?.provider || runtime.piAuthProvider;
+    const credentialHeaders = provider === 'anthropic'
+      ? [{ name: 'x-api-key', format: 'raw' as const }]
+      : provider === 'google'
+        ? [{ name: 'x-goog-api-key', format: 'raw' as const }]
+        : provider === 'azure-openai-responses'
+          ? [{ name: 'api-key', format: 'raw' as const }]
+          : [{ name: 'authorization', format: 'bearer' as const }];
     if (this.invocationCredentialProxy) {
-      this.invocationCredentialProxy.updateTarget({ upstreamBaseUrl, credential });
+      this.invocationCredentialProxy.updateTarget({
+        upstreamBaseUrl,
+        credential,
+        credentialHeaders,
+      });
     } else {
       this.invocationCredentialProxy = await startInvocationCredentialProxy({
         upstreamBaseUrl,
         credential,
+        credentialHeaders,
       }, {
         capability: this.createInvocationCapability(provider, credential),
       });

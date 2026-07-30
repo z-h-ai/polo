@@ -117,6 +117,7 @@ interface InitMessage {
   customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
   credentialProxy?: { baseUrl: string; capability: string };
+  credentialIsolation?: boolean;
 }
 
 interface RuntimeConfigUpdateMessage {
@@ -771,7 +772,11 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
 
     // Send to main process for permission checking + transforms
     inputObj = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
-    inputObj = sanitizeShellToolInput(sdkToolName, inputObj);
+    inputObj = sanitizeShellToolInput(
+      sdkToolName,
+      inputObj,
+      initConfig?.credentialIsolation === true,
+    );
 
     // Metadata is for Polo AI UI only. Keep a final defensive strip here so the
     // upstream Pi tool implementation always receives clean executable args,

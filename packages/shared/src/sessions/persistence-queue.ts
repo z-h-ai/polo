@@ -13,6 +13,7 @@ export interface SessionPersistencePaths {
   ensureSession(workspaceRootPath: string, sessionId: string): string
   getSessionFilePath(workspaceRootPath: string, sessionId: string): string
   redactPersistedValue?(value: string): string
+  assertSafeFilePath?(path: string, allowMissing?: boolean): void
 }
 
 interface PendingWrite {
@@ -109,12 +110,14 @@ class SessionPersistenceQueue {
 
     this.pending.delete(sessionId)
 
+    let temporaryFile: string | undefined
     try {
       const { data } = entry
       this.paths.ensureSessionsRoot(data.workspaceRootPath)
       this.paths.ensureSession(data.workspaceRootPath, sessionId)
 
       const filePath = this.paths.getSessionFilePath(data.workspaceRootPath, sessionId)
+      this.paths.assertSafeFilePath?.(filePath, true)
 
       // Prepare session with portable paths for cross-machine compatibility
       const storageSession: StoredSession = {
@@ -170,20 +173,29 @@ class SessionPersistenceQueue {
       const finalSignature = getHeaderMetadataSignature(header)
       this.lastWrittenHeaderSignature.set(sessionId, finalSignature)
 
-      const tmpFile = filePath + '.tmp'
+      const tmpFile = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`
+      temporaryFile = tmpFile
       const privateFile = this.paths.owner === 'cli'
+      this.paths.assertSafeFilePath?.(tmpFile, true)
       await writeFile(tmpFile, lines.join('\n') + '\n', {
         encoding: 'utf-8',
         ...(privateFile ? { mode: 0o600 } : {}),
       })
       if (privateFile && process.platform !== 'win32') await chmod(tmpFile, 0o600)
+      this.paths.assertSafeFilePath?.(tmpFile, false)
+      this.paths.assertSafeFilePath?.(filePath, true)
       // On Windows, rename fails if target exists. Delete first for cross-platform compatibility.
       try { await unlink(filePath) } catch { /* ignore if doesn't exist */ }
+      this.paths.assertSafeFilePath?.(filePath, true)
       await rename(tmpFile, filePath)
+      this.paths.assertSafeFilePath?.(filePath, false)
       if (privateFile && process.platform !== 'win32') await chmod(filePath, 0o600)
       this.writeErrors.delete(sessionId)
       debug(`[PersistenceQueue] Wrote session ${sessionId}`)
     } catch (error) {
+      if (temporaryFile) {
+        try { await unlink(temporaryFile) } catch { /* ignore absent temporary file */ }
+      }
       this.writeErrors.set(sessionId, error)
       console.error(`[PersistenceQueue] Failed to write session ${sessionId}:`, error)
       throw error

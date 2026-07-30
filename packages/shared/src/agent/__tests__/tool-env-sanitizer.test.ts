@@ -32,4 +32,9 @@ describe('sanitizeShellToolInput', () => {
     expect(TOOL_CREDENTIAL_ENV_VARS).toContain('AWS_SESSION_TOKEN');
     expect(TOOL_CREDENTIAL_ENV_VARS).toContain('LLM_API_KEY');
   });
+
+  it('leaves Electron Pi Bash commands unchanged when isolation is disabled', () => {
+    const input = { command: 'printf "%s" "$POLO_CUSTOM_TOOL_ENV"' };
+    expect(sanitizeShellToolInput('Bash', input, false)).toBe(input);
+  });
 });

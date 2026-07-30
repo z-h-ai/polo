@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -127,6 +136,56 @@ describe('CLI Thread store', () => {
 
     await expect(deleteCliThread(record)).rejects.toThrow('symlink')
     expect((await stat(outside)).isDirectory()).toBe(true)
+  })
+
+  it('rejects scope and executions ancestor symlinks before writing outside the CLI root', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'polo-cli-thread-outside-'))
+    try {
+      const cliRoot = join(root, 'cli-sessions')
+      await mkdir(cliRoot)
+      await symlink(outside, join(cliRoot, 'workspace-1'), 'dir')
+
+      await expect(createExecThread()).rejects.toThrow('symlink')
+      expect(await readdir(outside)).toEqual([])
+
+      await rm(join(cliRoot, 'workspace-1'))
+      await mkdir(join(cliRoot, 'workspace-1'))
+      await symlink(outside, join(cliRoot, 'workspace-1', 'executions'), 'dir')
+      await expect(createExecThread()).rejects.toThrow('symlink')
+      expect(await readdir(outside)).toEqual([])
+
+      await rm(cliRoot, { recursive: true, force: true })
+      await symlink(outside, cliRoot, 'dir')
+      await expect(createExecThread()).rejects.toThrow('unsafe')
+      expect(await readdir(outside)).toEqual([])
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('does not repair source metadata when taking over a stale clone-source lease', async () => {
+    const record = await createExecThread()
+    const lastUsedAt = Date.now() - 120_000
+    await updateCliThread(record, { status: 'completed', lastUsedAt })
+    await writeFile(record.ownerFile, JSON.stringify({
+      leaseId: crypto.randomUUID(),
+      cliPid: 2_147_483_647,
+      cliStartedAt: lastUsedAt,
+      cliProcessIdentity: 'missing-cli',
+      serverPid: 2_147_483_646,
+      serverStartedAt: lastUsedAt,
+      serverProcessIdentity: 'missing-runtime',
+      heartbeatAt: lastUsedAt,
+    }))
+
+    const lease = await acquireCliThreadLease(record, { purpose: 'clone-source' })
+    await lease.release()
+
+    const metadata = JSON.parse(
+      await readFile(join(record.directory, 'thread.json'), 'utf-8'),
+    )
+    expect(metadata.status).toBe('completed')
+    expect(metadata.lastUsedAt).toBe(lastUsedAt)
   })
 
   it('only reclaims expired ephemeral Threads with dead owners', async () => {

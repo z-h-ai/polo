@@ -709,6 +709,11 @@ export class ClaudeAgent extends BaseAgent {
       this.invocationCredentialProxy = await startInvocationCredentialProxy({
         upstreamBaseUrl,
         headers: upstreamHeaders,
+        credentialHeaders: [
+          oauthToken || connection.authType === 'bearer_token'
+            ? { name: 'authorization', format: 'bearer' }
+            : { name: 'x-api-key', format: 'raw' },
+        ],
       });
 
       // The Claude subprocess receives only an invocation-scoped loopback URL

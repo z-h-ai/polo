@@ -107,12 +107,108 @@ function assertControlledPath(root: string, target: string): void {
 }
 
 async function assertCanonicalControlledPath(root: string, target: string): Promise<void> {
-  const [rootInfo, targetInfo] = await Promise.all([lstat(root), lstat(target)])
-  if (rootInfo.isSymbolicLink() || targetInfo.isSymbolicLink()) {
-    throw new Error(`Refusing symlink inside controlled CLI root: ${target}`)
+  await assertControlledAncestors(root, target, false)
+}
+
+async function assertControlledAncestors(
+  root: string,
+  target: string,
+  allowMissingLeaf: boolean,
+): Promise<void> {
+  const normalizedRoot = resolve(root)
+  const normalizedTarget = resolve(target)
+  assertControlledPath(normalizedRoot, normalizedTarget)
+  const rootInfo = await lstat(normalizedRoot)
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+    throw new Error(`Refusing unsafe controlled CLI root: ${normalizedRoot}`)
   }
-  const [canonicalRoot, canonicalTarget] = await Promise.all([realpath(root), realpath(target)])
-  assertControlledPath(canonicalRoot, canonicalTarget)
+  const canonicalRoot = await realpath(normalizedRoot)
+  let current = normalizedRoot
+  const relative = normalizedTarget === normalizedRoot
+    ? []
+    : normalizedTarget.slice(normalizedRoot.length + 1).split(sep)
+  for (let index = 0; index < relative.length; index++) {
+    current = join(current, relative[index]!)
+    let info
+    try {
+      info = await lstat(current)
+    } catch (error) {
+      if (
+        allowMissingLeaf
+        && (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
+        return
+      }
+      throw error
+    }
+    if (info.isSymbolicLink()) {
+      throw new Error(`Refusing symlink inside controlled CLI root: ${current}`)
+    }
+    if (index < relative.length - 1 && !info.isDirectory()) {
+      throw new Error(`Refusing non-directory CLI ancestor: ${current}`)
+    }
+    const canonicalCurrent = await realpath(current)
+    assertControlledPath(canonicalRoot, canonicalCurrent)
+  }
+}
+
+async function ensurePrivateDirectoryTree(path: string): Promise<void> {
+  const target = resolve(path)
+  const missing: string[] = []
+  let current = target
+  while (true) {
+    try {
+      const info = await lstat(current)
+      if (info.isSymbolicLink() || !info.isDirectory()) {
+        throw new Error(`Refusing unsafe directory ancestor: ${current}`)
+      }
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      missing.push(basename(current))
+      const parent = dirname(current)
+      if (parent === current) throw error
+      current = parent
+    }
+  }
+  const canonicalAncestor = await realpath(current)
+  for (const segment of missing.reverse()) {
+    current = join(current, segment)
+    try {
+      await mkdir(current, { mode: DIRECTORY_MODE })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    const info = await lstat(current)
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`Refusing unsafe directory ancestor: ${current}`)
+    }
+    assertControlledPath(canonicalAncestor, await realpath(current))
+    if (process.platform !== 'win32') await chmod(current, DIRECTORY_MODE)
+  }
+  if (process.platform !== 'win32') await chmod(target, DIRECTORY_MODE)
+}
+
+async function ensureControlledPrivateDir(root: string, target: string): Promise<void> {
+  await assertControlledAncestors(root, target, true)
+  const normalizedRoot = resolve(root)
+  const normalizedTarget = resolve(target)
+  let current = normalizedRoot
+  const relative = normalizedTarget === normalizedRoot
+    ? []
+    : normalizedTarget.slice(normalizedRoot.length + 1).split(sep)
+  for (const segment of relative) {
+    current = join(current, segment)
+    try {
+      await mkdir(current, { mode: DIRECTORY_MODE })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    await assertCanonicalControlledPath(root, current)
+    const info = await lstat(current)
+    if (!info.isDirectory()) throw new Error(`Refusing non-directory CLI path: ${current}`)
+    if (process.platform !== 'win32') await chmod(current, DIRECTORY_MODE)
+  }
 }
 
 async function unlinkControlledFile(root: string, target: string): Promise<void> {
@@ -127,8 +223,12 @@ async function unlinkControlledFile(root: string, target: string): Promise<void>
 }
 
 async function ensurePrivateDir(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: DIRECTORY_MODE })
-  if (process.platform !== 'win32') await chmod(path, DIRECTORY_MODE)
+  const root = getCliSessionsRoot()
+  if (resolve(path) === resolve(root)) {
+    await ensurePrivateDirectoryTree(path)
+  } else {
+    await ensureControlledPrivateDir(root, path)
+  }
 }
 
 async function makePrivateTree(path: string): Promise<void> {
@@ -147,6 +247,7 @@ async function makePrivateTree(path: string): Promise<void> {
 
 async function atomicWriteJson(path: string, value: unknown): Promise<void> {
   await ensurePrivateDir(dirname(path))
+  await assertControlledAncestors(getCliSessionsRoot(), path, true)
   const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${crypto.randomUUID()}.tmp`)
   const handle = await open(temp, 'wx', FILE_MODE)
   try {
@@ -155,6 +256,7 @@ async function atomicWriteJson(path: string, value: unknown): Promise<void> {
   } finally {
     await handle.close()
   }
+  await assertControlledAncestors(getCliSessionsRoot(), path, true)
   if (process.platform !== 'win32') await chmod(temp, FILE_MODE)
   await rename(temp, path)
   if (process.platform !== 'win32') await chmod(path, FILE_MODE)
@@ -185,6 +287,7 @@ export async function createCliThread(input: {
   const root = getCliSessionsRoot()
   const scopeId = sanitizeScopeId(input.configurationScopeId)
   const executionsRoot = join(root, scopeId, 'executions')
+  await ensurePrivateDir(root)
   await ensurePrivateDir(executionsRoot)
 
   let directory = ''
@@ -247,7 +350,10 @@ export function isOwnerActive(owner: CliThreadOwner, now = Date.now()): boolean 
   return cliMatches || serverMatches || leaseIsFresh
 }
 
-export async function acquireCliThreadLease(record: CliThreadRecord): Promise<CliThreadLease> {
+export async function acquireCliThreadLease(
+  record: CliThreadRecord,
+  options: { purpose?: 'execute' | 'clone-source' } = {},
+): Promise<CliThreadLease> {
   const root = getCliSessionsRoot()
   await assertCanonicalControlledPath(root, record.directory)
   await ensurePrivateDir(record.directory)
@@ -276,7 +382,11 @@ export async function acquireCliThreadLease(record: CliThreadRecord): Promise<Cl
     if (previous && isOwnerActive(previous)) {
       throw new Error(`Thread ${record.metadata.threadId} is already active`)
     }
-    if (record.metadata.origin === 'cli-exec' && record.metadata.status !== 'interrupted') {
+    if (
+      options.purpose !== 'clone-source'
+      && record.metadata.origin === 'cli-exec'
+      && record.metadata.status !== 'interrupted'
+    ) {
       await updateCliThread(record, { status: 'interrupted', lastUsedAt: Date.now() })
     }
     const staleOwner = join(record.directory, `.owner.stale.${crypto.randomUUID()}.json`)
@@ -320,6 +430,7 @@ export async function locateCliThread(threadId: string): Promise<CliThreadRecord
   if (!/^[0-9a-f-]{36}$/i.test(threadId)) return null
   const root = getCliSessionsRoot()
   if (!existsSync(root)) return null
+  await assertCanonicalControlledPath(root, root)
   for (const scope of await readdir(root, { withFileTypes: true })) {
     if (!scope.isDirectory() || scope.name === 'trash') continue
     const directory = join(root, scope.name, 'executions', threadId)
@@ -336,11 +447,19 @@ export async function locateCliThread(threadId: string): Promise<CliThreadRecord
 export async function listCliThreads(): Promise<CliThreadRecord[]> {
   const root = getCliSessionsRoot()
   if (!existsSync(root)) return []
+  await assertCanonicalControlledPath(root, root)
   const records: CliThreadRecord[] = []
   for (const scope of await readdir(root, { withFileTypes: true })) {
     if (!scope.isDirectory() || scope.name === 'trash') continue
+    const scopeRoot = join(root, scope.name)
     const executionsRoot = join(root, scope.name, 'executions')
     if (!existsSync(executionsRoot)) continue
+    try {
+      await assertCanonicalControlledPath(root, scopeRoot)
+      await assertCanonicalControlledPath(root, executionsRoot)
+    } catch {
+      continue
+    }
     for (const entry of await readdir(executionsRoot, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const directory = join(executionsRoot, entry.name)
@@ -467,7 +586,11 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
 export async function threadDiskUsage(record: CliThreadRecord): Promise<number> {
   let total = 0
   const walk = async (path: string): Promise<void> => {
-    const info = await stat(path)
+    await assertCanonicalControlledPath(getCliSessionsRoot(), path)
+    const info = await lstat(path)
+    if (info.isSymbolicLink()) {
+      throw new Error(`Refusing symlink inside controlled CLI root: ${path}`)
+    }
     if (info.isFile()) {
       total += info.size
       return

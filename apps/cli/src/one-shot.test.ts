@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CliRpcClient } from './client.ts'
@@ -7,10 +7,16 @@ import type { CliThreadRecord } from './cli-thread-store.ts'
 import {
   createCliThread,
   listCliThreads,
+  updateCliThread,
 } from './cli-thread-store.ts'
 import { ExecEventAdapter, type InternalSessionEvent } from './exec-event-adapter.ts'
 import { parseExecutionArgs } from './execution-parser.ts'
-import { createConfigurationSnapshot, runExecutionCommand, waitForTurn } from './one-shot.ts'
+import {
+  createConfigurationSnapshot,
+  readCliMainSessionSummary,
+  runExecutionCommand,
+  waitForTurn,
+} from './one-shot.ts'
 
 const tempDirs: string[] = []
 
@@ -169,6 +175,71 @@ describe('one-shot execution internals', () => {
       expect(await runExecutionCommand(args)).toBe(1)
       const records = await listCliThreads()
       expect(records.map(record => record.metadata.threadId)).toEqual([original.metadata.threadId])
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
+  })
+
+  it('reports main-session summaries and explicit missing/corrupt degradation', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-main-session-summary-'))
+    tempDirs.push(temp)
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = temp
+    try {
+      const record = await createCliThread({
+        origin: 'cli-exec',
+        configurationScopeId: 'global',
+        configurationWorkspacePath: temp,
+        workingDirectory: temp,
+        persistence: 'persistent',
+      })
+      expect(await readCliMainSessionSummary(record)).toEqual({
+        state: 'missing',
+        reason: 'thread metadata has no mainSessionId',
+      })
+
+      await updateCliThread(record, { mainSessionId: 'session-1' })
+      expect(await readCliMainSessionSummary(record)).toMatchObject({
+        state: 'missing',
+        sessionId: 'session-1',
+      })
+
+      const sessionDirectory = join(record.sessionsRoot, 'session-1')
+      await mkdir(sessionDirectory)
+      await writeFile(join(sessionDirectory, 'session.jsonl'), '{invalid\n')
+      expect(await readCliMainSessionSummary(record)).toMatchObject({
+        state: 'corrupt',
+        sessionId: 'session-1',
+      })
+
+      await writeFile(join(sessionDirectory, 'session.jsonl'), `${JSON.stringify({
+        id: 'session-1',
+        workspaceRootPath: temp,
+        createdAt: 1,
+        lastUsedAt: 2,
+        lastMessageAt: 3,
+        messageCount: 4,
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+        name: 'Main session',
+        preview: 'hello',
+        model: 'gpt-5',
+      })}\n`)
+      expect(await readCliMainSessionSummary(record)).toMatchObject({
+        state: 'ok',
+        sessionId: 'session-1',
+        name: 'Main session',
+        messageCount: 4,
+        lastMessageAt: 3,
+        preview: 'hello',
+        model: 'gpt-5',
+      })
     } finally {
       if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
       else process.env.POLO_AI_CONFIG_DIR = previousConfigDir

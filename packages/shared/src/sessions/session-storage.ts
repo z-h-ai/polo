@@ -1,5 +1,20 @@
-import { chmodSync, existsSync, mkdirSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path'
 import { sanitizeSessionId } from './validation.ts'
 import { SessionPersistenceQueue } from './persistence-queue.ts'
 import type { SessionConfig, SessionMetadata, StoredSession } from './types.ts'
@@ -48,6 +63,7 @@ export interface SessionStorage {
   flushAll(): Promise<void>
   delete(workspaceRootPath: string, sessionId: string): boolean
   redactPersistedValue?(value: string): string
+  assertSafeFilePath?(path: string, allowMissing?: boolean): void
 }
 
 function ensurePrivateDirectory(path: string): string {
@@ -58,6 +74,52 @@ function ensurePrivateDirectory(path: string): string {
     chmodSync(path, 0o700)
   }
   return path
+}
+
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+function ensurePrivateDirectoryWithoutSymlinks(path: string): string {
+  const target = resolve(path)
+  const missing: string[] = []
+  let current = target
+  while (true) {
+    try {
+      const info = lstatSync(current)
+      if (info.isSymbolicLink() || !info.isDirectory()) {
+        throw new Error(`Refusing unsafe CLI session directory: ${current}`)
+      }
+      break
+    } catch (error) {
+      if (!isMissing(error)) throw error
+      missing.push(basename(current))
+      const parent = dirname(current)
+      if (parent === current) throw error
+      current = parent
+    }
+  }
+  const canonicalAncestor = realpathSync(current)
+  for (const segment of missing.reverse()) {
+    current = join(current, segment)
+    try {
+      mkdirSync(current, { recursive: false, mode: 0o700 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    const info = lstatSync(current)
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`Refusing unsafe CLI session directory: ${current}`)
+    }
+    const canonical = realpathSync(current)
+    const fromAncestor = relative(canonicalAncestor, canonical)
+    if (fromAncestor === '..' || fromAncestor.startsWith(`..${sep}`)) {
+      throw new Error(`Refusing CLI session directory outside controlled root: ${current}`)
+    }
+    if (process.platform !== 'win32') chmodSync(current, 0o700)
+  }
+  if (process.platform !== 'win32') chmodSync(target, 0o700)
+  return target
 }
 
 function ensureDirectory(path: string): string {
@@ -189,36 +251,236 @@ export class WorkspaceSessionStorage extends FilesystemSessionStorage {
 export class RootedSessionStorage extends FilesystemSessionStorage {
   readonly owner = 'cli' as const
   readonly sessionsRoot: string
+  readonly controlledRoot: string
   private readonly secrets: string[]
 
-  constructor(sessionsRoot: string, options?: { secrets?: Array<string | undefined> }) {
+  constructor(
+    sessionsRoot: string,
+    options?: {
+      secrets?: Array<string | undefined>
+      controlledRoot?: string
+    },
+  ) {
     super()
     if (!sessionsRoot || !isAbsolute(sessionsRoot)) {
       throw new Error('CLI sessions root must be an absolute, normalized path')
     }
     this.sessionsRoot = resolve(sessionsRoot)
+    this.controlledRoot = resolve(options?.controlledRoot ?? this.sessionsRoot)
+    const sessionsRelative = relative(this.controlledRoot, this.sessionsRoot)
+    if (
+      sessionsRelative === '..'
+      || sessionsRelative.startsWith(`..${sep}`)
+      || isAbsolute(sessionsRelative)
+    ) {
+      throw new Error('CLI sessions root must be inside its controlled root')
+    }
     this.secrets = (options?.secrets ?? []).filter((value): value is string => !!value)
   }
 
+  private assertControlledPath(path: string, allowMissing = true): void {
+    const target = resolve(path)
+    const fromControlledRoot = relative(this.controlledRoot, target)
+    if (
+      fromControlledRoot === '..'
+      || fromControlledRoot.startsWith(`..${sep}`)
+      || isAbsolute(fromControlledRoot)
+    ) {
+      throw new Error(`Refusing path outside controlled CLI sessions root: ${path}`)
+    }
+
+    let controlledRootInfo
+    try {
+      controlledRootInfo = lstatSync(this.controlledRoot)
+    } catch (error) {
+      if (allowMissing && isMissing(error)) {
+        // Validate the deepest existing ancestor so a dangling or intermediate
+        // symlink cannot later redirect creation outside the Thread.
+        let ancestor = this.controlledRoot
+        while (true) {
+          try {
+            const info = lstatSync(ancestor)
+            if (info.isSymbolicLink() || !info.isDirectory()) {
+              throw new Error(`Refusing unsafe CLI sessions ancestor: ${ancestor}`)
+            }
+            return
+          } catch (ancestorError) {
+            if (!isMissing(ancestorError)) throw ancestorError
+            const parent = dirname(ancestor)
+            if (parent === ancestor) throw ancestorError
+            ancestor = parent
+          }
+        }
+      }
+      throw error
+    }
+    if (controlledRootInfo.isSymbolicLink() || !controlledRootInfo.isDirectory()) {
+      throw new Error(`Refusing unsafe CLI controlled root: ${this.controlledRoot}`)
+    }
+
+    const canonicalRoot = realpathSync(this.controlledRoot)
+    let current = this.controlledRoot
+    const segments = fromControlledRoot ? fromControlledRoot.split(sep) : []
+    for (let index = 0; index < segments.length; index++) {
+      current = join(current, segments[index]!)
+      let info
+      try {
+        info = lstatSync(current)
+      } catch (error) {
+        if (allowMissing && isMissing(error)) return
+        throw error
+      }
+      if (info.isSymbolicLink()) {
+        throw new Error(`Refusing symlink inside controlled CLI sessions root: ${current}`)
+      }
+      if (index < segments.length - 1 && !info.isDirectory()) {
+        throw new Error(`Refusing non-directory CLI session ancestor: ${current}`)
+      }
+      const canonical = realpathSync(current)
+      const canonicalRelative = relative(canonicalRoot, canonical)
+      if (
+        canonicalRelative === '..'
+        || canonicalRelative.startsWith(`..${sep}`)
+        || isAbsolute(canonicalRelative)
+      ) {
+        throw new Error(`Refusing path outside canonical CLI sessions root: ${current}`)
+      }
+    }
+  }
+
+  private ensureControlledDirectory(path: string): string {
+    this.assertControlledPath(path, true)
+    const fromRoot = relative(this.sessionsRoot, resolve(path))
+    let current = this.sessionsRoot
+    for (const segment of fromRoot ? fromRoot.split(sep) : []) {
+      current = join(current, segment)
+      try {
+        mkdirSync(current, { recursive: false, mode: 0o700 })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      this.assertControlledPath(current, false)
+      const info = lstatSync(current)
+      if (!info.isDirectory()) {
+        throw new Error(`Refusing non-directory CLI session path: ${current}`)
+      }
+      if (process.platform !== 'win32') chmodSync(current, 0o700)
+    }
+    return path
+  }
+
+  assertSafeFilePath(path: string, allowMissing = true): void {
+    this.assertControlledPath(path, allowMissing)
+  }
+
   getSessionsRoot(_workspaceRootPath: string): string {
+    this.assertControlledPath(this.sessionsRoot, true)
     return this.sessionsRoot
   }
 
   getSessionPath(_workspaceRootPath: string, sessionId: string): string {
-    return join(this.sessionsRoot, sanitizeSessionId(sessionId))
+    const path = join(this.sessionsRoot, sanitizeSessionId(sessionId))
+    this.assertControlledPath(path, true)
+    return path
   }
 
   getSessionFilePath(workspaceRootPath: string, sessionId: string): string {
-    return join(this.getSessionPath(workspaceRootPath, sessionId), 'session.jsonl')
+    const path = join(this.getSessionPath(workspaceRootPath, sessionId), 'session.jsonl')
+    this.assertControlledPath(path, true)
+    return path
+  }
+
+  private getArtifactPath(
+    workspaceRootPath: string,
+    sessionId: string,
+    name: string,
+  ): string {
+    const path = join(this.getSessionPath(workspaceRootPath, sessionId), name)
+    this.assertControlledPath(path, true)
+    return path
+  }
+
+  getAttachmentsPath(workspaceRootPath: string, sessionId: string): string {
+    return this.getArtifactPath(workspaceRootPath, sessionId, 'attachments')
+  }
+
+  getPlansPath(workspaceRootPath: string, sessionId: string): string {
+    return this.getArtifactPath(workspaceRootPath, sessionId, 'plans')
+  }
+
+  getDataPath(workspaceRootPath: string, sessionId: string): string {
+    return this.getArtifactPath(workspaceRootPath, sessionId, 'data')
+  }
+
+  getDownloadsPath(workspaceRootPath: string, sessionId: string): string {
+    return this.getArtifactPath(workspaceRootPath, sessionId, 'downloads')
+  }
+
+  getLongResponsesPath(workspaceRootPath: string, sessionId: string): string {
+    return this.getArtifactPath(workspaceRootPath, sessionId, 'long_responses')
+  }
+
+  getMetaPath(workspaceRootPath: string, sessionId: string): string {
+    return this.getArtifactPath(workspaceRootPath, sessionId, 'meta')
   }
 
   ensureSessionsRoot(_workspaceRootPath: string): string {
-    return ensurePrivateDirectory(this.sessionsRoot)
+    this.assertControlledPath(this.sessionsRoot, true)
+    const path = ensurePrivateDirectoryWithoutSymlinks(this.sessionsRoot)
+    this.assertControlledPath(this.sessionsRoot, false)
+    return path
   }
 
   ensureSession(workspaceRootPath: string, sessionId: string): string {
     this.ensureSessionsRoot(workspaceRootPath)
-    return ensureSessionTree(this.getSessionPath(workspaceRootPath, sessionId), this.owner)
+    const path = this.ensureControlledDirectory(
+      this.getSessionPath(workspaceRootPath, sessionId),
+    )
+    for (const child of [
+      'plans',
+      'attachments',
+      'long_responses',
+      'data',
+      'downloads',
+      'meta',
+    ]) {
+      this.ensureControlledDirectory(join(path, child))
+    }
+    return path
+  }
+
+  reserveSession(workspaceRootPath: string, sessionId: string): string {
+    this.ensureSessionsRoot(workspaceRootPath)
+    const path = this.getSessionPath(workspaceRootPath, sessionId)
+    this.assertControlledPath(path, true)
+    let reserved = false
+    try {
+      mkdirSync(path, { recursive: false, mode: 0o700 })
+      reserved = true
+      if (process.platform !== 'win32') chmodSync(path, 0o700)
+      for (const child of [
+        'plans',
+        'attachments',
+        'long_responses',
+        'data',
+        'downloads',
+        'meta',
+      ]) {
+        this.ensureControlledDirectory(join(path, child))
+      }
+      return path
+    } catch (error) {
+      if (reserved) {
+        try {
+          this.assertControlledPath(path, false)
+          rmSync(path, { recursive: true, force: true })
+        } catch {
+          // Preserve the original reservation error; unsafe replacement paths
+          // are intentionally not traversed during rollback.
+        }
+      }
+      throw error
+    }
   }
 
   redactPersistedValue(value: string): string {

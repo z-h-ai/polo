@@ -36,7 +36,7 @@ async function startUpstream(
 async function requestProxy(
   url: string,
   headers: Record<string, string> = {},
-): Promise<{ status: number; body: string }> {
+): Promise<{ status: number; body: string; headers: IncomingMessage['headers'] }> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(url, { headers }, response => {
       const chunks: Buffer[] = []
@@ -44,6 +44,7 @@ async function requestProxy(
       response.once('end', () => resolve({
         status: response.statusCode || 0,
         body: Buffer.concat(chunks).toString('utf-8'),
+        headers: response.headers,
       }))
     })
     request.once('error', reject)
@@ -66,6 +67,7 @@ describe('invocation credential proxy', () => {
     const proxy = await startInvocationCredentialProxy({
       upstreamBaseUrl: upstream,
       headers: { Authorization: `Bearer ${realSecret}` },
+      credentialHeaders: [{ name: 'x-api-key', format: 'raw' }],
     })
     proxies.push(proxy)
 
@@ -86,6 +88,7 @@ describe('invocation credential proxy', () => {
     const proxy = await startInvocationCredentialProxy({
       upstreamBaseUrl: upstream,
       credential: 'real-secret',
+      credentialHeaders: [{ name: 'authorization', format: 'bearer' }],
     })
     proxies.push(proxy)
 
@@ -102,6 +105,7 @@ describe('invocation credential proxy', () => {
     const proxy = await startInvocationCredentialProxy({
       upstreamBaseUrl: upstream,
       credential: 'google-real-secret',
+      credentialHeaders: [{ name: 'x-goog-api-key', format: 'raw' }],
     })
     proxies.push(proxy)
 
@@ -127,6 +131,7 @@ describe('invocation credential proxy', () => {
     const proxy = await startInvocationCredentialProxy({
       upstreamBaseUrl: upstream,
       credential: 'real-provider-token',
+      credentialHeaders: [{ name: 'authorization', format: 'bearer' }],
     }, {
       capability: shapedCapability,
     })
@@ -138,5 +143,110 @@ describe('invocation credential proxy', () => {
     expect(response.status).toBe(200)
     expect(upstreamAuthorization).toBe('Bearer real-provider-token')
     expect(upstreamAuthorization).not.toContain(shapedCapability)
+  })
+
+  it('rejects capability substrings outside the dedicated exact credential header', async () => {
+    let upstreamRequests = 0
+    const upstream = await startUpstream((_request, response) => {
+      upstreamRequests++
+      response.end('unexpected')
+    })
+    const proxy = await startInvocationCredentialProxy({
+      upstreamBaseUrl: upstream,
+      credential: 'real-secret',
+      credentialHeaders: [{ name: 'authorization', format: 'bearer' }],
+    })
+    proxies.push(proxy)
+
+    const invalidHeaders: Array<Record<string, string>> = [
+      { 'x-echo': proxy.capability },
+      { authorization: `prefix-${proxy.capability}` },
+      { authorization: `Bearer ${proxy.capability}-suffix` },
+    ]
+    for (const headers of invalidHeaders) {
+      const response = await requestProxy(`${proxy.url}/models`, headers)
+      expect(response.status).toBe(401)
+    }
+    expect(upstreamRequests).toBe(0)
+  })
+
+  it('never substitutes credentials in unrelated headers', async () => {
+    let upstreamEcho = ''
+    const upstream = await startUpstream((request, response) => {
+      upstreamEcho = String(request.headers['x-echo'] || '')
+      response.end('ok')
+    })
+    const proxy = await startInvocationCredentialProxy({
+      upstreamBaseUrl: upstream,
+      credential: 'real-provider-secret',
+      credentialHeaders: [{ name: 'authorization', format: 'bearer' }],
+    })
+    proxies.push(proxy)
+
+    const response = await requestProxy(`${proxy.url}/models`, {
+      authorization: `Bearer ${proxy.capability}`,
+      'x-echo': `opaque-${proxy.capability}-value`,
+    })
+    expect(response.status).toBe(200)
+    expect(upstreamEcho).toBe(`opaque-${proxy.capability}-value`)
+    expect(upstreamEcho).not.toContain('real-provider-secret')
+  })
+
+  it('redacts reflected credentials across response headers and stream chunks', async () => {
+    const apiKey = 'sk-real-reflected-api-key'
+    const oauthToken = 'oauth-real-reflected-token'
+    const upstream = await startUpstream((_request, response) => {
+      const body = `visible:${apiKey}:${oauthToken}:done`
+      response.writeHead(200, {
+        authorization: `Bearer ${oauthToken}`,
+        'x-reflection': `prefix-${apiKey}-suffix-${oauthToken}`,
+        'content-length': String(Buffer.byteLength(body)),
+      })
+      response.write(`visible:${apiKey.slice(0, 9)}`)
+      response.write(apiKey.slice(9))
+      response.write(`:${oauthToken.slice(0, 11)}`)
+      response.end(`${oauthToken.slice(11)}:done`)
+    })
+    const proxy = await startInvocationCredentialProxy({
+      upstreamBaseUrl: upstream,
+      headers: {
+        'x-api-key': apiKey,
+        authorization: `Bearer ${oauthToken}`,
+      },
+      credentialHeaders: [{ name: 'authorization', format: 'bearer' }],
+    })
+    proxies.push(proxy)
+
+    const response = await requestProxy(`${proxy.url}/messages`, {
+      authorization: `Bearer ${proxy.capability}`,
+    })
+    const visibleSurface = JSON.stringify(response)
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('[REDACTED]')
+    expect(response.headers.authorization).toBeUndefined()
+    expect(response.headers['content-length']).toBeUndefined()
+    expect(visibleSurface).not.toContain(apiKey)
+    expect(visibleSurface).not.toContain(oauthToken)
+    expect(visibleSurface).not.toContain('Bearer oauth-real')
+  })
+
+  it('fails closed on encoded responses that cannot be inspected for credential reflection', async () => {
+    const realSecret = 'encoded-real-secret'
+    const upstream = await startUpstream((_request, response) => {
+      response.writeHead(200, { 'content-encoding': 'gzip' })
+      response.end(realSecret)
+    })
+    const proxy = await startInvocationCredentialProxy({
+      upstreamBaseUrl: upstream,
+      credential: realSecret,
+      credentialHeaders: [{ name: 'authorization', format: 'bearer' }],
+    })
+    proxies.push(proxy)
+
+    const response = await requestProxy(`${proxy.url}/models`, {
+      authorization: `Bearer ${proxy.capability}`,
+    })
+    expect(response.status).toBe(502)
+    expect(JSON.stringify(response)).not.toContain(realSecret)
   })
 })

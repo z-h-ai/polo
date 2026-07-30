@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RootedSessionStorage, type StoredSession } from './index.ts'
@@ -71,6 +79,59 @@ describe('RootedSessionStorage', () => {
     expect(persisted).not.toContain(secret)
     expect(persisted).not.toContain('sk-another-secret-123456')
     expect(persisted).toContain('[REDACTED]')
+  })
+
+  it('rejects a session directory replaced by a symlink before resolution or write', async () => {
+    const temp = mkdtempSync(join(tmpdir(), 'polo-rooted-storage-symlink-'))
+    tempDirs.push(temp)
+    const sessionsRoot = join(temp, 'thread', 'sessions')
+    const outside = join(temp, 'outside')
+    mkdirSync(outside)
+    const storage = new RootedSessionStorage(sessionsRoot)
+    const sessionPath = storage.ensureSession('/ignored', 'session-1')
+    rmSync(sessionPath, { recursive: true, force: true })
+    symlinkSync(outside, sessionPath, 'dir')
+
+    expect(() => storage.getSessionFilePath('/ignored', 'session-1')).toThrow('symlink')
+    expect(() => storage.ensureSession('/ignored', 'session-1')).toThrow('symlink')
+    const originalConsoleError = console.error
+    console.error = () => {}
+    try {
+      await expect(storage.save({
+        id: 'session-1',
+        workspaceRootPath: '/ignored',
+        createdAt: 1,
+        lastUsedAt: 1,
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      })).rejects.toThrow('symlink')
+    } finally {
+      console.error = originalConsoleError
+    }
+    expect(existsSync(join(outside, 'session.jsonl'))).toBe(false)
+  })
+
+  it('rejects a symlink ancestor between the controlled root and sessions root', () => {
+    const temp = mkdtempSync(join(tmpdir(), 'polo-rooted-storage-ancestor-'))
+    tempDirs.push(temp)
+    const controlledRoot = join(temp, 'cli-sessions')
+    const outside = join(temp, 'outside')
+    mkdirSync(controlledRoot)
+    mkdirSync(outside)
+    symlinkSync(outside, join(controlledRoot, 'scope'), 'dir')
+    const storage = new RootedSessionStorage(
+      join(controlledRoot, 'scope', 'executions', 'thread', 'sessions'),
+      { controlledRoot },
+    )
+
+    expect(() => storage.ensureSession('/ignored', 'session-1')).toThrow('symlink')
+    expect(existsSync(join(outside, 'executions'))).toBe(false)
   })
 
   it('keeps CRUD, JSONL, and every artifact outside Electron sessions', async () => {

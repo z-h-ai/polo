@@ -20,6 +20,7 @@ import {
   type LlmConnection,
   type Workspace,
 } from '@polo-ai/shared/config'
+import { RootedSessionStorage, type SessionHeader } from '@polo-ai/shared/sessions'
 import { CliRpcClient } from './client.ts'
 import {
   acquireCliThreadLease,
@@ -27,6 +28,7 @@ import {
   cloneCliThreadEphemeral,
   createCliThread,
   deleteCliThread,
+  getCliSessionsRoot,
   isCliThreadActive,
   listCliThreads,
   locateCliThread,
@@ -73,14 +75,19 @@ function configRoot(): string {
   return resolve(process.env.POLO_AI_CONFIG_DIR || join(homedir(), '.polo-ai'))
 }
 
-async function ensureDirectory(path: string, usage = false): Promise<string> {
+async function ensureDirectory(
+  path: string,
+  options: { throwUsageError?: boolean } = {},
+): Promise<string> {
   try {
     const canonical = await realpath(path)
     const info = await stat(canonical)
     if (!info.isDirectory()) throw new Error('not a directory')
     return canonical
   } catch {
-    const error = new (usage ? UsageError : Error)(`directory does not exist: ${path}`)
+    const error = new (options.throwUsageError ? UsageError : Error)(
+      `directory does not exist: ${path}`,
+    )
     throw error
   }
 }
@@ -468,7 +475,10 @@ export async function waitForTurn(
 async function resolveResumeRecord(args: ExecutionArgs): Promise<CliThreadRecord> {
   if (args.last) {
     const scope = await resolveConfigurationScope(args.workspace)
-    const workingDirectory = await ensureDirectory(args.workingDirectory || process.cwd(), !!args.workingDirectory)
+    const workingDirectory = await ensureDirectory(
+      args.workingDirectory || process.cwd(),
+      { throwUsageError: !!args.workingDirectory },
+    )
     let record: CliThreadRecord | undefined
     for (const candidate of await listCliThreads()) {
       if (
@@ -505,11 +515,13 @@ async function createOrResolveExecution(
     const scope = await scopeFromThread(original, args.workspace)
     const workingDirectory = await ensureDirectory(
       args.workingDirectory || original.metadata.workingDirectory,
-      !!args.workingDirectory,
+      { throwUsageError: !!args.workingDirectory },
     )
     let record = original
     if (args.ephemeral) {
-      const sourceLease = await acquireCliThreadLease(original)
+      const sourceLease = await acquireCliThreadLease(original, {
+        purpose: 'clone-source',
+      })
       try {
         record = await cloneCliThreadEphemeral(original)
       } finally {
@@ -522,7 +534,7 @@ async function createOrResolveExecution(
   const scope = await resolveConfigurationScope(args.workspace)
   const workingDirectory = await ensureDirectory(
     args.workingDirectory || process.cwd(),
-    !!args.workingDirectory,
+    { throwUsageError: !!args.workingDirectory },
   )
   const record = await createCliThread({
     origin: args.kind === 'run' ? 'cli-run' : 'cli-exec',
@@ -565,6 +577,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
     if (cleanupPromise) return cleanupPromise
     cleanupPromise = (async () => {
       lifecycleState = 'cleaning'
+      // Phase 1: stop accepting events and terminate the private runtime.
       if (heartbeatTimer) clearInterval(heartbeatTimer)
       if (server) {
         try {
@@ -582,6 +595,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         result = { status: 'failed', finalMessage: '', error: cleanupError }
       }
 
+      // Phase 2: persist the terminal Thread state and atomically publish -o.
       if (record && scope && workingDirectory && (lease || ownsNewThread)) {
         try {
           await updateCliThread(record, {
@@ -601,6 +615,8 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         }
       }
 
+      // Phase 3: release ownership, then apply Thread retention. This block is
+      // idempotent through cleanupPromise and the lease/delete implementations.
       try {
         await lease?.release()
         if (record?.metadata.persistence === 'ephemeral' && (lease || ownsNewThread)) {
@@ -658,6 +674,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       bootstrapPayload: {
         runtimeConfig: {
           sessionsRoot: record.sessionsRoot,
+          controlledRoot: getCliSessionsRoot(),
           workspace,
           connection: resolvedConnection.connection,
         },
@@ -757,6 +774,8 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       }
     }
   } else if (protocolStarted) {
+    // Phase 4: protocol completion is observable only after runtime shutdown,
+    // persistence, output-file publication, retention, and lease release.
     if (result.status === 'completed') {
       adapter?.completed()
     } else {
@@ -832,11 +851,82 @@ Options:
 `)
 }
 
+export interface CliMainSessionSummary {
+  state: 'ok' | 'missing' | 'corrupt'
+  sessionId?: string
+  name?: string
+  messageCount?: number
+  lastMessageAt?: number
+  preview?: string
+  model?: string
+  llmConnection?: string
+  reason?: string
+}
+
+export async function readCliMainSessionSummary(
+  record: CliThreadRecord,
+): Promise<CliMainSessionSummary> {
+  const sessionId = record.metadata.mainSessionId
+  if (!sessionId) {
+    return { state: 'missing', reason: 'thread metadata has no mainSessionId' }
+  }
+  try {
+    const storage = new RootedSessionStorage(record.sessionsRoot, {
+      controlledRoot: getCliSessionsRoot(),
+    })
+    const sessionFile = storage.getSessionFilePath(
+      record.metadata.configurationWorkspacePath,
+      sessionId,
+    )
+    let content: string
+    try {
+      content = await readFile(sessionFile, 'utf-8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return {
+          state: 'missing',
+          sessionId,
+          reason: 'main session header is missing',
+        }
+      }
+      throw error
+    }
+    const firstLine = content.split(/\r?\n/, 1)[0]
+    if (!firstLine) throw new Error('empty session JSONL')
+    const header = JSON.parse(firstLine) as Partial<SessionHeader>
+    if (
+      header.id !== sessionId
+      || typeof header.messageCount !== 'number'
+      || !Number.isFinite(header.messageCount)
+    ) {
+      throw new Error('invalid session header')
+    }
+    return {
+      state: 'ok',
+      sessionId,
+      name: typeof header.name === 'string' ? header.name : undefined,
+      messageCount: header.messageCount,
+      lastMessageAt:
+        typeof header.lastMessageAt === 'number' ? header.lastMessageAt : undefined,
+      preview: typeof header.preview === 'string' ? header.preview : undefined,
+      model: typeof header.model === 'string' ? header.model : undefined,
+      llmConnection:
+        typeof header.llmConnection === 'string' ? header.llmConnection : undefined,
+    }
+  } catch {
+    return {
+      state: 'corrupt',
+      sessionId,
+      reason: 'main session header is unreadable or invalid',
+    }
+  }
+}
+
 async function listSessionsCommand(args: ExecutionArgs): Promise<number> {
   const scope = await resolveConfigurationScope(args.workspace)
   const workingDirectory = await ensureDirectory(
     args.workingDirectory || process.cwd(),
-    !!args.workingDirectory,
+    { throwUsageError: !!args.workingDirectory },
   )
   const records = (await listCliThreads()).filter(record =>
     record.metadata.origin === 'cli-exec'
@@ -845,14 +935,22 @@ async function listSessionsCommand(args: ExecutionArgs): Promise<number> {
     && record.metadata.workingDirectory === workingDirectory
   )
   if (args.json) {
-    for (const record of records) process.stdout.write(`${JSON.stringify(record.metadata)}\n`)
+    for (const record of records) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ...record.metadata,
+          mainSession: await readCliMainSessionSummary(record),
+        })}\n`,
+      )
+    }
     return 0
   }
   for (const record of records) {
     const metadata = record.metadata
+    const mainSession = await readCliMainSessionSummary(record)
     process.stdout.write(
       stripAnsi(
-        `${metadata.threadId}\t${metadata.status || 'unknown'}\t${new Date(metadata.createdAt).toISOString()}\t${new Date(metadata.lastUsedAt).toISOString()}\t${metadata.workingDirectory}\n`,
+        `${metadata.threadId}\t${metadata.status || 'unknown'}\t${new Date(metadata.createdAt).toISOString()}\t${new Date(metadata.lastUsedAt).toISOString()}\t${metadata.workingDirectory}\t${JSON.stringify(mainSession)}\n`,
       ),
     )
   }

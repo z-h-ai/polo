@@ -60,6 +60,7 @@ process.env.POLO_AI_IS_PACKAGED ??= 'false'
 
 interface CliRuntimeConfig {
   sessionsRoot: string
+  controlledRoot: string
   workspace: Workspace
   connection?: LlmConnection
 }
@@ -116,7 +117,12 @@ if (isCliOneShot) {
     process.exit(1)
   }
   const runtimeConfig = cliRuntimeConfig
-  if (!runtimeConfig?.sessionsRoot || !runtimeConfig.workspace?.id || !runtimeConfig.workspace?.rootPath) {
+  if (
+    !runtimeConfig?.sessionsRoot
+    || !runtimeConfig.controlledRoot
+    || !runtimeConfig.workspace?.id
+    || !runtimeConfig.workspace?.rootPath
+  ) {
     console.error('Incomplete CLI runtime configuration')
     process.exit(1)
   }
@@ -297,6 +303,7 @@ const instance = await (async () => {
             profile: 'cli-one-shot',
             sessionStorage: new RootedSessionStorage(cliRuntimeConfig!.sessionsRoot, {
               secrets: [cliInvocationApiKey],
+              controlledRoot: cliRuntimeConfig!.controlledRoot,
             }),
             workspace: cliRuntimeConfig!.workspace,
           })

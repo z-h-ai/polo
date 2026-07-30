@@ -226,6 +226,7 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     plansFolderPath: sessionStorage.getPlansPath(workspacePath, sessionId),
     sessionPath: sessionStorage.getSessionPath(workspacePath, sessionId),
     dataPath: sessionStorage.getDataPath(workspacePath, sessionId),
+    credentialIsolation: sessionStorage.owner === 'cli',
     workingDirectory: options.workingDirectory,
     callbacks,
     fs,
