@@ -84,6 +84,123 @@ describe('Electron runtime discovery', () => {
     expect(readElectronRuntimeDiscovery({ path }).status).toBe('missing')
   })
 
+  it('fails closed when Windows cannot prove that the PID has the current SID', () => {
+    const path = tempPath()
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: 'ws://127.0.0.1:53124',
+      token: '0123456789abcdef',
+      version: '0.10.0',
+    }, { path })
+
+    const checkedProcesses: Array<{ pid: number; startedAt: string }> = []
+    const result = readElectronRuntimeDiscovery({
+      path,
+      platform: 'win32',
+      windowsProcessOwner(pid, startedAt) {
+        checkedProcesses.push({ pid, startedAt })
+        return false
+      },
+    })
+
+    expect(checkedProcesses).toHaveLength(1)
+    expect(checkedProcesses[0]?.pid).toBe(process.pid)
+    expect(Date.parse(checkedProcesses[0]?.startedAt ?? '')).not.toBeNaN()
+    expect(result.status).toBe('stale')
+    expect(result.status === 'stale' ? result.reason : '').toContain('another user')
+  })
+
+  it('rejects a live same-user PID whose creation time is newer than the runtime record', () => {
+    const path = tempPath()
+    const recordedAt = '2026-07-29T12:00:00.000Z'
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: 'ws://127.0.0.1:53124',
+      token: '0123456789abcdef',
+      version: '0.10.0',
+      startedAt: recordedAt,
+    }, { path })
+
+    const result = readElectronRuntimeDiscovery({
+      path,
+      platform: 'win32',
+      windowsProcessOwner(pid, startedAt) {
+        expect(pid).toBe(process.pid)
+        expect(startedAt).toBe(recordedAt)
+        // Simulate a process with the current SID whose CreationDate is newer
+        // than the runtime file, which means the PID has been reused.
+        return false
+      },
+    })
+
+    expect(result.status).toBe('stale')
+  })
+
+  it('does not delete a replacement runtime record during stale cleanup', () => {
+    const path = tempPath()
+    const stalePid = process.pid + 10_000
+    writeElectronRuntimeDiscovery({
+      pid: stalePid,
+      url: 'ws://127.0.0.1:53124',
+      token: '0123456789abcdef',
+      version: '0.10.0',
+    }, { path })
+
+    const result = readElectronRuntimeDiscovery({
+      path,
+      platform: 'win32',
+      cleanupStale: true,
+      windowsProcessOwner() {
+        // Simulate Electron restarting and atomically replacing the discovery
+        // file after the stale record was read but before cleanup.
+        writeElectronRuntimeDiscovery({
+          pid: process.pid,
+          url: 'ws://127.0.0.1:53125',
+          token: 'fedcba9876543210',
+          version: '0.10.0',
+        }, { path })
+        return false
+      },
+    })
+
+    expect(result.status).toBe('stale')
+    const replacement = readElectronRuntimeDiscovery({ path })
+    expect(replacement.status).toBe('available')
+    if (replacement.status === 'available') {
+      expect(replacement.record.pid).toBe(process.pid)
+      expect(replacement.record.url).toBe('ws://127.0.0.1:53125')
+    }
+  })
+
+  it('verifies the current process through Windows SID lookup on Windows', () => {
+    if (process.platform !== 'win32') return
+    const path = tempPath()
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: 'ws://127.0.0.1:53124',
+      token: '0123456789abcdef',
+      version: '0.10.0',
+    }, { path })
+
+    expect(readElectronRuntimeDiscovery({ path }).status).toBe('available')
+  })
+
+  it('rejects a reused current-user PID through Windows creation-time lookup', () => {
+    if (process.platform !== 'win32') return
+    const path = tempPath()
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: 'ws://127.0.0.1:53124',
+      token: '0123456789abcdef',
+      version: '0.10.0',
+      // The current process cannot have existed at this timestamp. If only
+      // the SID were checked this would be incorrectly accepted.
+      startedAt: '2000-01-01T00:00:00.000Z',
+    }, { path })
+
+    expect(readElectronRuntimeDiscovery({ path }).status).toBe('stale')
+  })
+
   it('rejects non-loopback URLs and malformed data', () => {
     const path = tempPath()
     mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 })

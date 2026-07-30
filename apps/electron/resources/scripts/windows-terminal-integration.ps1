@@ -1,20 +1,37 @@
 param(
-    [ValidateSet("Install", "Uninstall")]
+    [ValidateSet("Install", "Uninstall", "Validate")]
     [string]$Mode = "Install",
-    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\Polo AI"
+    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\Polo AI",
+    [string]$BinDir = "",
+    [string]$UserPathFile = "",
+    [switch]$SkipCommandConflict
 )
 
 $ErrorActionPreference = "Stop"
-$binDir = "$env:LOCALAPPDATA\Polo AI\bin"
-$launcher = Join-Path $binDir "polo.cmd"
-$legacyLauncher = Join-Path $binDir "polo-ai.cmd"
+if (-not $BinDir) {
+    $BinDir = "$env:LOCALAPPDATA\Polo AI\bin"
+}
+
+$launcher = Join-Path $BinDir "polo.cmd"
+$legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
+$stateFile = Join-Path $BinDir "terminal-integration.json"
 $exePath = Join-Path $InstallDir "Polo AI.exe"
+$bunPath = Join-Path $InstallDir "resources\vendor\bun\bun.exe"
+$appRoot = Join-Path $InstallDir "resources\app"
+$cliPath = Join-Path $appRoot "dist\cli\polo-cli.js"
+$serverPath = Join-Path $appRoot "dist\server\polo-server.js"
+$packagePath = Join-Path $appRoot "package.json"
 $marker = "Polo CLI launcher (managed by Polo AI)"
 
-function Write-AtomicAscii([string]$Path, [string]$Content) {
+function Write-AtomicUtf8([string]$Path, [string]$Content) {
+    $parent = Split-Path -Parent $Path
+    if ($parent) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
     $temp = "$Path.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
     try {
-        Set-Content -Path $temp -Value $Content -Encoding ASCII
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [IO.File]::WriteAllText($temp, $Content, $utf8NoBom)
         Move-Item -Path $temp -Destination $Path -Force
     } finally {
         Remove-Item -Path $temp -Force -ErrorAction SilentlyContinue
@@ -25,46 +42,155 @@ function Is-Managed([string]$Path, [string]$Pattern) {
     return (Test-Path $Path) -and ((Get-Content $Path -Raw) -match $Pattern)
 }
 
-if ($Mode -eq "Install") {
-    if (-not (Test-Path $exePath)) {
-        throw "Polo executable not found: $exePath"
+function Get-UserPath {
+    if ($UserPathFile) {
+        if (Test-Path $UserPathFile) {
+            return Get-Content $UserPathFile -Raw
+        }
+        return ""
     }
+    return [Environment]::GetEnvironmentVariable("Path", "User")
+}
 
-    $existing = Get-Command polo -ErrorAction SilentlyContinue
-    if ($existing -and $existing.Source -ne $launcher) {
-        throw "Another command named polo already exists at $($existing.Source). Polo did not overwrite it."
+function Set-UserPath([string]$Value) {
+    if ($UserPathFile) {
+        Write-AtomicUtf8 $UserPathFile $Value
+        return
+    }
+    [Environment]::SetEnvironmentVariable("Path", $Value, "User")
+}
+
+function Test-PathEntry([string[]]$Entries, [string]$Path) {
+    return [bool]($Entries | Where-Object {
+        $_ -and $_.Trim().TrimEnd("\") -ieq $Path.TrimEnd("\")
+    } | Select-Object -First 1)
+}
+
+function Read-State {
+    if (-not (Test-Path $stateFile)) {
+        return $null
+    }
+    try {
+        $state = Get-Content $stateFile -Raw | ConvertFrom-Json
+        if ($state.schemaVersion -ne 1) {
+            return $null
+        }
+        return $state
+    } catch {
+        return $null
+    }
+}
+
+function Write-State([bool]$PathEntryAddedByPolo) {
+    $state = @{
+        schemaVersion = 1
+        pathEntryAddedByPolo = $PathEntryAddedByPolo
+        binDir = $BinDir
+        updatedAt = [DateTime]::UtcNow.ToString("o")
+    } | ConvertTo-Json
+    Write-AtomicUtf8 $stateFile $state
+}
+
+function Assert-PackagedArtifacts {
+    foreach ($required in @($exePath, $bunPath, $cliPath, $serverPath, $packagePath)) {
+        if (-not (Test-Path $required)) {
+            throw "Required Polo artifact not found: $required"
+        }
+    }
+}
+
+function Get-LauncherContent {
+    return @"
+@echo off
+chcp 65001 >nul
+setlocal
+rem $marker
+set "POLO_AI_BUN=$bunPath"
+set "POLO_AI_SERVER_ENTRY=$serverPath"
+set "POLO_AI_CLI_ENTRY=$cliPath"
+set "POLO_AI_APP_ROOT=$appRoot"
+set "POLO_AI_RESOURCES_PATH=$appRoot\resources"
+set "POLO_AI_BUNDLED_ASSETS_ROOT=$appRoot"
+set "POLO_AI_DESKTOP_EXECUTABLE=$exePath"
+set "POLO_AI_IS_PACKAGED=true"
+if /I "%~1"=="app" (
+  start "" "$exePath"
+  exit /b 0
+)
+"$bunPath" run "$cliPath" %*
+exit /b %ERRORLEVEL%
+"@
+}
+
+function Install-LauncherFiles([bool]$CheckCommandConflict) {
+    if ($CheckCommandConflict) {
+        $existing = Get-Command polo -ErrorAction SilentlyContinue
+        if ($existing -and $existing.Source.TrimEnd("\") -ine $launcher.TrimEnd("\")) {
+            throw "Another command named polo already exists at $($existing.Source). Polo did not overwrite it."
+        }
     }
     if ((Test-Path $launcher) -and -not (Is-Managed $launcher "managed by Polo AI")) {
         throw "Another file already exists at $launcher. Polo did not overwrite it."
     }
 
-    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-    $content = @"
-@echo off
-rem $marker
-if /I "%~1"=="app" (
-  shift
-  start "" "$exePath" %*
-  exit /b 0
-)
-"$exePath" --polo-cli %*
-exit /b %ERRORLEVEL%
-"@
-    Write-AtomicAscii $launcher $content
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    Write-AtomicUtf8 $launcher (Get-LauncherContent)
 
     if (-not (Test-Path $legacyLauncher) -or (Is-Managed $legacyLauncher "Polo AI|managed by Polo AI|deprecated")) {
         $legacy = "@echo off`r`necho Warning: 'polo-ai' is deprecated; use 'polo' instead. 1>&2`r`ncall `"$launcher`" %*`r`nexit /b %ERRORLEVEL%"
-        Write-AtomicAscii $legacyLauncher $legacy
+        Write-AtomicUtf8 $legacyLauncher $legacy
     }
-
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $entries = @($userPath -split ";" | Where-Object { $_ })
-    if (-not ($entries | Where-Object { $_.TrimEnd("\") -ieq $binDir.TrimEnd("\") })) {
-        [Environment]::SetEnvironmentVariable("Path", (($entries + $binDir) -join ";"), "User")
-    }
-    exit 0
 }
 
+if ($Mode -eq "Validate") {
+    Assert-PackagedArtifacts
+    $validationRoot = Join-Path ([IO.Path]::GetTempPath()) "polo-launcher-$PID-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        $BinDir = $validationRoot
+        $launcher = Join-Path $BinDir "polo.cmd"
+        $legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
+        $stateFile = Join-Path $BinDir "terminal-integration.json"
+        Install-LauncherFiles $false
+        $actualContent = Get-Content $launcher -Raw
+        if ($actualContent -match "--polo-cli" -or
+            $actualContent -notmatch [Regex]::Escape($bunPath) -or
+            $actualContent -notmatch [Regex]::Escape($cliPath)) {
+            throw "Generated launcher does not directly invoke the bundled Bun and CLI."
+        }
+        $expectedVersion = (Get-Content $packagePath -Raw | ConvertFrom-Json).version
+        $output = & $launcher --version 2>&1
+        if ($LASTEXITCODE -ne 0 -or (($output -join "`n").Trim() -ne $expectedVersion)) {
+            throw "Generated launcher validation failed: $($output -join "`n")"
+        }
+    } finally {
+        Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return
+}
+
+if ($Mode -eq "Install") {
+    Assert-PackagedArtifacts
+    Install-LauncherFiles (-not $SkipCommandConflict)
+
+    $previousState = Read-State
+    $userPath = Get-UserPath
+    $entries = @($userPath -split ";" | Where-Object { $_ })
+    $pathEntryPresent = Test-PathEntry $entries $BinDir
+    $pathEntryOwned = [bool]($previousState -and $previousState.pathEntryAddedByPolo)
+    if (-not $pathEntryPresent) {
+        # Persist ownership before mutating PATH so an interrupted install never
+        # loses track of an entry Polo intended to add.
+        $pathEntryOwned = $true
+        Write-State $pathEntryOwned
+        Set-UserPath (($entries + $BinDir) -join ";")
+    } else {
+        # A pre-existing entry without Polo state belongs to the user.
+        Write-State $pathEntryOwned
+    }
+    return
+}
+
+$state = Read-State
 if (Is-Managed $launcher "managed by Polo AI") {
     Remove-Item -Path $launcher -Force
 }
@@ -72,12 +198,15 @@ if (Is-Managed $legacyLauncher "deprecated; use 'polo'") {
     Remove-Item -Path $legacyLauncher -Force
 }
 
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$remaining = @($userPath -split ";" | Where-Object {
-    $_ -and $_.TrimEnd("\") -ine $binDir.TrimEnd("\")
-})
-[Environment]::SetEnvironmentVariable("Path", ($remaining -join ";"), "User")
+if ($state -and $state.pathEntryAddedByPolo) {
+    $userPath = Get-UserPath
+    $remaining = @($userPath -split ";" | Where-Object {
+        $_ -and $_.Trim().TrimEnd("\") -ine $BinDir.TrimEnd("\")
+    })
+    Set-UserPath ($remaining -join ";")
+}
+Remove-Item $stateFile -Force -ErrorAction SilentlyContinue
 
-if ((Test-Path $binDir) -and -not (Get-ChildItem $binDir -Force | Select-Object -First 1)) {
-    Remove-Item $binDir -Force
+if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir -Force | Select-Object -First 1)) {
+    Remove-Item $BinDir -Force
 }

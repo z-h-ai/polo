@@ -8,6 +8,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -90,7 +91,73 @@ function isRecord(value: unknown): value is ElectronRuntimeDiscovery {
     && !Number.isNaN(Date.parse(record.startedAt))
 }
 
-function isProcessAliveAndOwned(pid: number): boolean {
+const WINDOWS_PROCESS_OWNER_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$targetPid = [int]$env:POLO_AI_RUNTIME_PID
+$expectedStartedAt = [DateTimeOffset]::Parse($env:POLO_AI_RUNTIME_STARTED_AT).UtcDateTime
+$currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$target = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = {0}" -f $targetPid)
+if ($null -eq $target) { exit 2 }
+$owner = Invoke-CimMethod -InputObject $target -MethodName GetOwnerSid
+if ($owner.ReturnValue -ne 0 -or [string]::IsNullOrWhiteSpace($owner.Sid)) { exit 3 }
+if ($owner.Sid -cne $currentSid) { exit 4 }
+if ($target.CreationDate.ToUniversalTime() -gt $expectedStartedAt) { exit 5 }
+[Console]::Out.Write('owned')
+`
+
+export function isWindowsProcessOwnedByCurrentUser(pid: number, startedAt: string): boolean {
+  const powershell = process.env.SystemRoot
+    ? join(
+        process.env.SystemRoot,
+        'System32',
+        'WindowsPowerShell',
+        'v1.0',
+        'powershell.exe',
+      )
+    : 'powershell.exe'
+  try {
+    const result = spawnSync(
+      powershell,
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        WINDOWS_PROCESS_OWNER_SCRIPT,
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          POLO_AI_RUNTIME_PID: String(pid),
+          POLO_AI_RUNTIME_STARTED_AT: startedAt,
+        },
+        timeout: 5_000,
+        windowsHide: true,
+      },
+    )
+    return result.status === 0 && result.stdout.trim() === 'owned'
+  } catch {
+    return false
+  }
+}
+
+function isProcessAliveAndOwned(
+  pid: number,
+  startedAt: string,
+  options?: {
+    platform?: NodeJS.Platform
+    windowsProcessOwner?: (pid: number, startedAt: string) => boolean
+  },
+): boolean {
+  const platform = options?.platform ?? process.platform
+  if (platform === 'win32') {
+    // Windows process.kill(pid, 0) does not establish user ownership. Resolve
+    // both SIDs and the target creation time through the OS. The latter rejects
+    // a live same-user process that reused the stale Electron PID.
+    return (options?.windowsProcessOwner ?? isWindowsProcessOwnedByCurrentUser)(pid, startedAt)
+  }
+
   try {
     process.kill(pid, 0)
   } catch {
@@ -99,7 +166,7 @@ function isProcessAliveAndOwned(pid: number): boolean {
 
   // Linux exposes process ownership without invoking a shell. On macOS,
   // process.kill(pid, 0) already rejects another user's process with EPERM.
-  if (process.platform === 'linux' && typeof process.getuid === 'function') {
+  if (platform === 'linux' && typeof process.getuid === 'function') {
     try {
       return statSync(`/proc/${pid}`).uid === process.getuid()
     } catch {
@@ -161,11 +228,14 @@ export function readElectronRuntimeDiscovery(options?: {
   path?: string
   expectedVersion?: string
   cleanupStale?: boolean
+  platform?: NodeJS.Platform
+  windowsProcessOwner?: (pid: number, startedAt: string) => boolean
 }): RuntimeDiscoveryResult {
   const path = options?.path ?? getElectronRuntimeDiscoveryPath()
   if (!existsSync(path)) return { status: 'missing', path }
 
-  if (process.platform !== 'win32' && typeof process.getuid === 'function') {
+  const platform = options?.platform ?? process.platform
+  if (platform !== 'win32' && typeof process.getuid === 'function') {
     const stats = statSync(path)
     const directoryStats = statSync(dirname(path))
     if (directoryStats.uid !== process.getuid()) {
@@ -193,11 +263,18 @@ export function readElectronRuntimeDiscovery(options?: {
     return { status: 'invalid', path, reason: 'Runtime file has an unsupported or unsafe schema' }
   }
 
-  if (!isProcessAliveAndOwned(parsed.pid)) {
+  if (!isProcessAliveAndOwned(parsed.pid, parsed.startedAt, {
+    platform,
+    windowsProcessOwner: options?.windowsProcessOwner,
+  })) {
     if (options?.cleanupStale) {
       removeElectronRuntimeDiscovery({ path, expectedPid: parsed.pid })
     }
-    return { status: 'stale', path, reason: `Electron process ${parsed.pid} is not running` }
+    return {
+      status: 'stale',
+      path,
+      reason: `Electron process ${parsed.pid} is not running or is owned by another user`,
+    }
   }
 
   if (options?.expectedVersion && !areMajorVersionsCompatible(parsed.version, options.expectedVersion)) {

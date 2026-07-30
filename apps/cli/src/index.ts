@@ -7,7 +7,7 @@
  * messages with real-time streaming, and validating server health.
  */
 
-import { resolve } from 'path'
+import { basename, resolve } from 'path'
 import { readElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
 import { CliRpcClient } from './client.ts'
 import { version as cliVersion } from '../package.json'
@@ -183,6 +183,49 @@ async function resolveWorkspace(
     // Fall through — workspace may not be needed
   }
   return undefined
+}
+
+export async function resolveRunWorkspace(
+  client: CliRpcClient,
+  args: Pick<CliArgs, 'workspace' | 'workspaceDir'>,
+  currentDirectory = process.cwd(),
+): Promise<{ id: string; registeredPath?: string } | undefined> {
+  if (args.workspace) {
+    const id = await resolveWorkspace(client, args.workspace)
+    return id ? { id } : undefined
+  }
+
+  const registeredPath = resolve(args.workspaceDir ?? currentDirectory)
+  try {
+    const workspaces = await client.invoke('workspaces:get') as Array<{
+      id?: string
+      rootPath?: string
+    }>
+    const existing = workspaces.find((workspace) => {
+      if (!workspace.id || !workspace.rootPath) return false
+      const existingPath = resolve(workspace.rootPath)
+      return process.platform === 'win32'
+        ? existingPath.toLowerCase() === registeredPath.toLowerCase()
+        : existingPath === registeredPath
+    })
+    if (existing?.id) {
+      await client.invoke('window:switchWorkspace', existing.id).catch(() => {})
+      return { id: existing.id, registeredPath }
+    }
+  } catch {
+    // A fresh local server can still create the workspace directly.
+  }
+
+  const name = basename(registeredPath) || 'workspace'
+  const workspace = await client.invoke(
+    'workspaces:create',
+    registeredPath,
+    name,
+  ) as { id?: string }
+  if (!workspace?.id) return undefined
+
+  await client.invoke('window:switchWorkspace', workspace.id).catch(() => {})
+  return { id: workspace.id, registeredPath }
 }
 
 // ---------------------------------------------------------------------------
@@ -716,13 +759,12 @@ async function cmdRun(args: CliArgs): Promise<void> {
   try {
     await client.connect()
 
-    // Bootstrap workspace from directory if specified
-    let bootstrappedWorkspaceId: string | undefined
-    if (args.workspaceDir) {
-      const absPath = resolve(args.workspaceDir)
-      const ws = (await client.invoke('workspaces:create', absPath, 'ci-workspace')) as { id: string }
-      bootstrappedWorkspaceId = ws.id
-      process.stderr.write(`Workspace registered: ${absPath}\n`)
+    // A local run always has a concrete workspace. An explicit --workspace
+    // selects an existing one; otherwise the caller's directory (or
+    // --workspace-dir) is registered idempotently by rootPath.
+    const runWorkspace = await resolveRunWorkspace(client, args)
+    if (runWorkspace?.registeredPath) {
+      process.stderr.write(`Workspace registered: ${runWorkspace.registeredPath}\n`)
     }
 
     // Auto-setup LLM connection from flags / env vars.
@@ -735,11 +777,7 @@ async function cmdRun(args: CliArgs): Promise<void> {
       connectionSlug = result.connectionSlug
     }
 
-    const workspaceId = bootstrappedWorkspaceId
-      ?? await resolveWorkspace(client, args.workspace)
-    if (bootstrappedWorkspaceId) {
-      await client.invoke('window:switchWorkspace', bootstrappedWorkspaceId).catch(() => {})
-    }
+    const workspaceId = runWorkspace?.id
     if (!workspaceId) {
       err('No workspace found on server')
       process.exit(1)

@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach, mock, beforeEach } from 'bun:test'
+import { mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import {
   serializeEnvelope,
   deserializeEnvelope,
@@ -12,6 +15,8 @@ import type { SpawnedServer } from './server-spawner.ts'
 interface MockServerOptions {
   /** What LLM_Connection:list returns */
   connections?: unknown[]
+  /** What workspaces:get returns */
+  workspaces?: unknown[]
 }
 
 interface MockServer {
@@ -49,6 +54,7 @@ function createMockServer(opts?: MockServerOptions): MockServer {
   const invokeArgs: Record<string, unknown[][]> = {}
   let createSessionArgs: unknown[] | undefined
   const connections = opts?.connections ?? []
+  const workspaces = opts?.workspaces ?? [{ id: 'ws-1', name: 'Test Workspace' }]
 
   const server = Bun.serve({
     port: 0,
@@ -80,7 +86,7 @@ function createMockServer(opts?: MockServerOptions): MockServer {
           let result: unknown
           switch (ch) {
             case 'workspaces:get':
-              result = [{ id: 'ws-1', name: 'Test Workspace' }]
+              result = workspaces
               break
             case 'workspaces:create':
               result = { id: 'ws-1', name: 'ci-workspace' }
@@ -167,13 +173,15 @@ mock.module('./server-spawner.ts', () => ({
 }))
 
 // Import main AFTER mocking
-const { parseArgs } = await import('./index.ts')
+const { parseArgs, resolveRunWorkspace } = await import('./index.ts')
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('run command', () => {
+  const roots: string[] = []
+
   beforeEach(() => {
     mockWsServer = createMockServer()
   })
@@ -181,6 +189,9 @@ describe('run command', () => {
   afterEach(() => {
     mockWsServer?.close()
     mockWsServer = null
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('parseArgs: run with --source accumulates sources', () => {
@@ -328,6 +339,67 @@ describe('run command', () => {
   it('parseArgs: workspaceDir defaults to undefined', () => {
     const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
     expect(args.workspaceDir).toBeUndefined()
+  })
+
+  it('registers the caller cwd for a fresh run without --workspace-dir', async () => {
+    const freshWorkspace = join(
+      tmpdir(),
+      `polo-run-fresh-${crypto.randomUUID()}`,
+      '项目 with spaces',
+    )
+    roots.push(join(freshWorkspace, '..'))
+    mkdirSync(freshWorkspace, { recursive: true })
+
+    const { CliRpcClient } = await import('./client.ts')
+    const client = new CliRpcClient(mockWsServer!.url, {
+      token: mockWsServer!.token,
+      requestTimeout: 5_000,
+    })
+    await client.connect()
+
+    const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
+    const workspace = await resolveRunWorkspace(client, args, freshWorkspace)
+
+    expect(workspace).toEqual({ id: 'ws-1', registeredPath: freshWorkspace })
+    expect(mockWsServer!.invokeArgs['workspaces:create']![0]).toEqual([
+      freshWorkspace,
+      basename(freshWorkspace),
+    ])
+    expect(mockWsServer!.invokedChannels).toEqual([
+      'workspaces:get',
+      'workspaces:create',
+      'window:switchWorkspace',
+    ])
+
+    client.destroy()
+  })
+
+  it('reuses an existing workspace registered for the caller cwd', async () => {
+    const workspacePath = join(tmpdir(), `polo-run-existing-${crypto.randomUUID()}`)
+    mockWsServer?.close()
+    mockWsServer = createMockServer({
+      workspaces: [{ id: 'existing-ws', name: 'Custom Name', rootPath: workspacePath }],
+    })
+
+    const { CliRpcClient } = await import('./client.ts')
+    const client = new CliRpcClient(mockWsServer.url, {
+      token: mockWsServer.token,
+      requestTimeout: 5_000,
+    })
+    await client.connect()
+
+    const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
+    expect(await resolveRunWorkspace(client, args, workspacePath)).toEqual({
+      id: 'existing-ws',
+      registeredPath: workspacePath,
+    })
+    expect(mockWsServer.invokedChannels).toEqual([
+      'workspaces:get',
+      'window:switchWorkspace',
+    ])
+    expect(mockWsServer.invokedChannels).not.toContain('workspaces:create')
+
+    client.destroy()
   })
 
   it('workspace:create returns ID used directly (no workspaces:get needed)', async () => {

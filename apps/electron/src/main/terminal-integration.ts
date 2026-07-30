@@ -96,6 +96,14 @@ function isManagedLauncher(content: string): boolean {
   return content.startsWith(`#!/bin/sh\n${LAUNCHER_MARKER}\n`)
 }
 
+function isExecutable(path: string): boolean {
+  try {
+    return (statSync(path).mode & 0o111) !== 0
+  } catch {
+    return false
+  }
+}
+
 function writeAtomic(path: string, content: string, mode?: number): void {
   mkdirSync(dirname(path), { recursive: true })
   const temp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`
@@ -181,24 +189,30 @@ export function getTerminalIntegrationStatus(
   let blockReady = false
   let malformedProfile = false
   try {
-    blockReady = getManagedBlockRange(profileContent) !== null
+    const range = getManagedBlockRange(profileContent)
+    blockReady = range !== null
+      && profileContent.slice(range.start, range.end) === profile.block
   } catch {
     malformedProfile = true
   }
   const found = lookupCommand(options)
+  const launcherExecutable = installed && isExecutable(launcherPath)
   const conflict = malformedProfile
     ? `Malformed Polo configuration in ${profile.path}`
     : found && found !== launcherPath
       ? found
       : undefined
-  const pathReady = found === launcherPath
+  const pathReady = blockReady
+    && found === launcherPath
+    && launcherExecutable
+    && validateCommand(options)
 
   return {
     supported: true,
     installed,
     pathReady,
     needsRepair: installed
-      ? !blockReady || !launcherCurrent
+      ? !blockReady || !launcherCurrent || !launcherExecutable || !pathReady
       : existsSync(launcherPath) || malformedProfile,
     conflict,
     launcherPath,
@@ -241,20 +255,12 @@ export function installTerminalIntegration(
   }
 
   const content = managedLauncherContent(options)
-  if (content !== existingLauncher) {
-    if (existingLauncher) backup(launcherPath)
+  if (content !== existingLauncher || !isExecutable(launcherPath)) {
+    if (existingLauncher && content !== existingLauncher) backup(launcherPath)
     writeAtomic(launcherPath, content, 0o755)
   }
 
-  const status = getTerminalIntegrationStatus(options)
-  const commandValid = validateCommand(options)
-  return {
-    ...status,
-    pathReady: commandValid || status.pathReady,
-    message: commandValid
-      ? 'Polo terminal features are ready.'
-      : 'Setup completed. Open a new Terminal window to use Polo.',
-  }
+  return getTerminalIntegrationStatus(options)
 }
 
 export function uninstallTerminalIntegration(

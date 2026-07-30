@@ -21,7 +21,7 @@
     "!apps/online-docs"
   ],
   "scripts": {
-    "test": "bun test && for f in $(find . -name '*.isolated.ts' -not -path './node_modules/*'); do bun test \"$f\" || exit 1; done",
+    "test": "bun test --path-ignore-patterns='**/release/**' --path-ignore-patterns='**/dist/**' --path-ignore-patterns='**/generated/**' && bash scripts/run-isolated-tests.sh",
     "typecheck": "bun run typecheck:shared",
     "typecheck:shared": "cd packages/shared && bun run tsc --noEmit",
     "typecheck:staged": "bash scripts/typecheck-staged.sh",

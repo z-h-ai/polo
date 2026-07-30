@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -22,6 +30,7 @@ function setup(shell = '/bin/zsh'): TerminalIntegrationOptions {
   writeFileSync(join(resources, 'vendor', 'bun', 'bun'), '')
   writeFileSync(join(resources, 'app', 'dist', 'cli', 'polo-cli.js'), '')
   writeFileSync(join(resources, 'app', 'dist', 'server', 'polo-server.js'), '')
+  const launcherPath = join(home, '.local', 'bin', 'polo')
   return {
     platform: 'darwin',
     homeDir: home,
@@ -29,7 +38,7 @@ function setup(shell = '/bin/zsh'): TerminalIntegrationOptions {
     resourcesPath: resources,
     appExecutable: join(root, 'Polo AI.app', 'Contents', 'MacOS', 'Polo AI'),
     appVersion: '0.10.0',
-    commandLookup: () => null,
+    commandLookup: () => existsSync(launcherPath) ? launcherPath : null,
     commandValidator: () => ({ ok: true, output: '0.10.0' }),
   }
 }
@@ -81,6 +90,55 @@ describe('macOS terminal integration', () => {
     const status = getTerminalIntegrationStatus(upgraded)
     expect(status.installed).toBe(true)
     expect(status.needsRepair).toBe(false)
+  })
+
+  it('requires the managed launcher to remain executable', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    chmodSync(installed.launcherPath, 0o644)
+
+    const status = getTerminalIntegrationStatus(options)
+    expect(status.installed).toBe(true)
+    expect(status.pathReady).toBe(false)
+    expect(status.needsRepair).toBe(true)
+
+    const repaired = installTerminalIntegration(options)
+    expect(repaired.pathReady).toBe(true)
+    expect(repaired.needsRepair).toBe(false)
+  })
+
+  it('requires the exact managed PATH block content', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const invalidBlock = [
+      '# >>> Polo CLI >>>',
+      'export PATH="/tmp/not-polo:$PATH"',
+      '# <<< Polo CLI <<<',
+      '',
+    ].join('\n')
+    writeFileSync(installed.profilePath!, invalidBlock)
+
+    const status = getTerminalIntegrationStatus(options)
+    expect(status.installed).toBe(true)
+    expect(status.pathReady).toBe(false)
+    expect(status.needsRepair).toBe(true)
+
+    const repaired = installTerminalIntegration(options)
+    expect(repaired.pathReady).toBe(true)
+    expect(repaired.needsRepair).toBe(false)
+    expect(readFileSync(installed.profilePath!, 'utf8')).toContain(
+      'export PATH="$HOME/.local/bin:$PATH"',
+    )
+  })
+
+  it('marks command validation failures for repair', () => {
+    const options = setup()
+    installTerminalIntegration(options)
+    options.commandValidator = () => ({ ok: false })
+
+    const status = getTerminalIntegrationStatus(options)
+    expect(status.pathReady).toBe(false)
+    expect(status.needsRepair).toBe(true)
   })
 
   it('does not overwrite an existing non-Polo launcher', () => {

@@ -267,55 +267,32 @@ function terminalIntegrationOptions(): TerminalIntegrationOptions {
 }
 
 function terminalSetupCopy() {
-  if (app.getLocale().toLowerCase().startsWith('zh')) {
-    return {
-      conflictTitle: 'Polo 设置需要处理',
-      conflictMessage: '已存在名为 polo 的终端命令。',
-      conflictDetail:
-        'Polo 没有覆盖这个命令。请先移除或重命名它，然后前往“设置 → Polo 终端功能”完成设置。',
-      setupTitle: '完成 Polo 设置',
-      setupDetail:
-        '为了让 Polo 能在你的项目中正常工作，需要完成一次终端功能配置。'
-        + '配置完成后，你可以从任意项目中启动 Polo，并使用完整的 AI 工作能力。\n\n'
-        + '只需设置一次，之后会自动保持更新。',
-      completeNow: '立即完成',
-      notNow: '暂不设置',
-      completeTitle: 'Polo 设置已完成',
-      completeMessage: 'Polo 设置已完成。',
-      newTerminal: '请新开一个终端窗口，然后使用 polo 命令。',
-      failedTitle: '无法完成 Polo 设置',
-      failedMessage: 'Polo 没有更改你已有的终端命令。',
-      skippedTitle: '部分 Polo 功能尚未就绪',
-      skippedMessage: '项目操作和终端功能暂时不可用。',
-      skippedDetail: '你可以稍后前往“设置 → Polo 终端功能”完成设置。',
-      ok: '好',
-      done: '完成',
-    }
-  }
   return {
-    conflictTitle: 'Polo Setup Needs Your Attention',
-    conflictMessage: 'Another terminal command named polo already exists.',
-    conflictDetail:
-      'Polo did not overwrite it. Remove or rename that command, then use '
-      + 'Settings → Polo terminal features to complete setup.',
-    setupTitle: 'Complete Polo Setup',
-    setupDetail:
-      'Polo needs a one-time terminal feature setup to work fully in your projects. '
-      + 'After setup, you can start Polo from any project and use its complete AI capabilities.\n\n'
-      + 'Set it up once and Polo will keep it updated.',
-    completeNow: 'Complete Now',
-    notNow: 'Not Now',
-    completeTitle: 'Polo Setup Complete',
-    completeMessage: 'Polo setup is complete.',
-    newTerminal: 'Open a new Terminal window before using the polo command.',
-    failedTitle: 'Polo Setup Could Not Be Completed',
-    failedMessage: 'Polo did not change your existing terminal command.',
-    skippedTitle: 'Some Polo Features Are Not Ready',
-    skippedMessage: 'Project and terminal features will remain unavailable.',
-    skippedDetail: 'You can complete setup later in Settings → Polo terminal features.',
-    ok: 'OK',
-    done: 'Done',
+    conflictTitle: i18n.t('dialog.terminalSetup.conflictTitle'),
+    conflictMessage: i18n.t('dialog.terminalSetup.conflictMessage'),
+    conflictDetail: i18n.t('dialog.terminalSetup.conflictDetail'),
+    setupTitle: i18n.t('dialog.terminalSetup.setupTitle'),
+    setupDetail: i18n.t('dialog.terminalSetup.setupDetail'),
+    completeNow: i18n.t('dialog.terminalSetup.completeNow'),
+    notNow: i18n.t('dialog.terminalSetup.notNow'),
+    completeTitle: i18n.t('dialog.terminalSetup.completeTitle'),
+    completeMessage: i18n.t('dialog.terminalSetup.completeMessage'),
+    newTerminal: i18n.t('dialog.terminalSetup.newTerminal'),
+    failedTitle: i18n.t('dialog.terminalSetup.failedTitle'),
+    failedMessage: i18n.t('dialog.terminalSetup.failedMessage'),
+    skippedTitle: i18n.t('dialog.terminalSetup.skippedTitle'),
+    skippedMessage: i18n.t('dialog.terminalSetup.skippedMessage'),
+    skippedDetail: i18n.t('dialog.terminalSetup.skippedDetail'),
+    ok: i18n.t('common.ok'),
+    done: i18n.t('common.done'),
   }
+}
+
+function electronLocaleToSupportedLanguage(locale: string): string {
+  const base = locale.toLowerCase().split(/[-_]/)[0]
+  if (base === 'zh') return 'zh-Hans'
+  if (['de', 'en', 'es', 'hu', 'ja', 'pl'].includes(base)) return base
+  return 'en'
 }
 
 async function validateAdminSessionAfterResume(args: {
@@ -531,6 +508,8 @@ async function createInitialWindows(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  await i18n.changeLanguage(electronLocaleToSupportedLanguage(app.getLocale()))
+
   // Export packaged state as env var so logger.ts (and headless Bun) don't need 'electron'
   process.env.POLO_AI_IS_PACKAGED = app.isPackaged ? 'true' : 'false'
 
