@@ -1067,4 +1067,50 @@ describe('local app main-process authorization boundary', () => {
     ])
     expect(scopedRegistry.setAvailableRelease).not.toHaveBeenCalled()
   })
+
+  it('isolates prototype-named business IDs with invalid versions in batch wiring', async () => {
+    const getStatuses = handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES)!
+    const prototypeNamedIds = ['constructor', 'toString', '__proto__']
+    const healthyId = 'healthy-app'
+    const ids = [...prototypeNamedIds, healthyId]
+    catalog = createCatalog(ids.length)
+    catalog.apps = catalog.apps.map((app, index) => ({
+      ...app,
+      id: ids[index]!,
+      currentRelease: {
+        ...app.currentRelease!,
+        version: index < prototypeNamedIds.length ? '1.2.3.4' : '1.2.3',
+      },
+    }))
+    catalog.trustedReleases = {}
+    scopedStatuses.mockImplementation(async scopes => scopes.map((item, index) => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'installed',
+      currentVersion: index < prototypeNamedIds.length
+        ? `invalid-installed-${index}`
+        : '1.2.3',
+    })))
+    const scopes = ids.map(scope)
+
+    const result = await getStatuses(
+      context,
+      { scopes },
+    ) as LocalAppRuntimeStatus[]
+
+    expect(result).toHaveLength(ids.length)
+    for (const [index, id] of prototypeNamedIds.entries()) {
+      expect(result[index]).toEqual(expect.objectContaining({
+        appId: id,
+        currentVersion: `invalid-installed-${index}`,
+        versionError: 'invalid_semver',
+      }))
+    }
+    expect(result[prototypeNamedIds.length]).toEqual(expect.objectContaining({
+      appId: healthyId,
+      status: 'installed',
+      currentVersion: '1.2.3',
+    }))
+    expect(result[prototypeNamedIds.length]).not.toHaveProperty('versionError')
+  })
 })

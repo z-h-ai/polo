@@ -1,60 +1,49 @@
 # POL-51 第 4 轮阻塞审查修复报告
 
-## 逐条处理
+## 逐项处理结果
 
-### 1. token refresh 网络失败不得把 persisted denied Catalog 降级为 offline
-
-已修复。
-
-- `SYNC_APP_CATALOG` 在 token refresh 返回 `NETWORK_ERROR` 的冷启动路径中重新读取当前 Catalog 缓存。
-- 最近可信缓存已经是 `authorizationStatus = denied` 时，保持主进程 Catalog access mode 为 `denied`，不再写成 `offline`。
-- 返回给冷 renderer 的失败响应包含清洗后的 denied Catalog；所有可见和 retained App 均为 `availability = unavailable`。
-- 账号 token 和最近验证身份继续保留，但安装、更新、启动和重启仍由 denied gate 拒绝。
-- 新增 server-core handler 与真实 Electron Admin/Local Apps production wiring 回归，覆盖过期 token、refresh 网络失败、persisted denied cache、冷 renderer 响应和生命周期 fail closed。
-
-### 2. 大批量 App 撤下的 fence、扫描和停止并发
+### 1. prototype-named Catalog App ID 批量状态异常
 
 已修复。
 
-- `stopApps()` 先验证并去重完整 scopes，再在同一个无 `await` 的同步循环中为全部撤下 App 建立 deny gate 并推进 lifecycle generation；任何目录扫描、manager 查找或慢清理开始前，完整撤下集合已全部 fail closed。
-- 同一批次按 `accountId + organizationId` 分组，每个账号/组织只执行一次 persisted scope 扫描；不再为每个 App 重复遍历全部 scope 目录。
-- 新增 registry 级全局 stop/cancel slot queue，上限为 `STOP_CLEANUP_CONCURRENCY = 8`。App、组织和账号清理共用同一并发门禁，并发 bulk cleanup 也不能叠加突破上限。
-- entered install/start 的取消与迟到提交语义保持不变；清理失败继续聚合为 `STOP_FAILED`，App deny gate 不会因慢清理完成而自动释放。
-- 新增 1,000 App 回归，断言全部 fence 同步建立且组织只扫描一次。
-- 新增 10,000 App、两个并发组织批次回归，断言每个组织只扫描一次、10,000 个实例全部停止、全局最大同时 stop 数严格为 8。
+- 主进程新增业务 ID 字典的 own-property 读取边界；`trustedReleases` 仅在目标 `catalogAppId` 是字典自有属性时返回值，不再读取 `Object.prototype` 上继承的 `constructor`、`toString` 或 `__proto__`。
+- Catalog App 的合法业务 ID 契约保持不变，没有通过收窄字符集规避问题。
+- 新增真实 Local Apps handler 批量状态回归：同一批包含 `constructor`、`toString`、`__proto__` 和健康 App；前三个 App 同时携带无效 available/installed 版本时均独立返回 `versionError = invalid_semver`，健康 App 保持 `installed`，整个批次不崩溃。
+
+### 2. 同 context 迟到 hydration 覆盖 recent mutation
+
+已修复。
+
+- HomePage 为最近使用记录增加独立的 mutation generation。hydration 开始时捕获 generation，提交结果前同时校验 context load generation 与 mutation generation。
+- 任意同 context 的本地打开都会推进 mutation generation，使更早的 GET 快照失效；跨 context 的旧响应仍由原 load generation 丢弃。
+- 新增 deferred GET 交互回归：hydration 挂起期间连续打开两个内置 App，迟到快照不能覆盖它们；随后再次打开 App 后，preferences 中仍保留全部三条新记录，证明旧快照不会在后续持久化时删除新历史。
 
 ## 关键文件
 
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-- `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
-- `apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
-- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+- `apps/electron/src/main/handlers/local-apps.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
+- `apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
 - `.pipeline/fix-report-round4.md`
 
-## 自测结果
+## 实际测试与结果
 
+- `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts ./apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
+  - 34 pass，0 fail；新增两个确定性回归均通过。
+- `bun run typecheck:electron && bun run typecheck:shared`
+  - Electron 与 shared TypeScript 检查通过。
 - `bun run test`
-  - 全量通过。
-  - 常规测试：4809 pass，19 skip，0 fail，共 4828 tests / 366 files。
-  - 全部 isolated 测试：280 pass，0 fail。
-  - 合计：5089 pass，19 skip，0 fail。
-- 定向回归：
-  - server-core Admin handler：54 pass，0 fail。
-  - Electron Admin/Local Apps production wiring：15 pass，0 fail。
-  - scoped local app runtime registry：18 pass，0 fail；包含 1,000/10,000 撤下规模测试。
-- `bun run typecheck:all`
-  - 全部 workspace 类型检查通过。
-- 本轮 Electron 变更文件定向 ESLint
-  - 0 error，0 warning。
-- `bun run lint:i18n:parity && bun run lint:i18n:sorted && bun run lint:i18n:coverage`
-  - 通过；6 个 locale 各 1706 keys，排序和覆盖检查通过。
-- `bun run electron:build:main`
-  - 主进程生产构建和产物校验通过。
+  - exit 0；基础套件 4833 pass、19 skip、0 fail，随后仓库全部 `*.isolated.ts` 套件通过。
+- `bun run validate:ci`
+  - exit 0；全 workspace typecheck、shared 定向测试、19 个文档工具测试及 i18n parity/sorted/coverage 全部通过；6 个 locale 各 1706 keys。
+- `bun run lint:electron`
+  - exit 0；0 errors、120 个仓库既有 warnings。
+- `bun run electron:build`
+  - exit 0；main、preload、renderer、resources、assets 完整生产构建通过；renderer 转换 5582 modules。
 - `git diff --check`
   - 通过。
 
 ## 遗留问题
 
-- 未发现本轮两个阻塞问题的已知代码遗留。
-- 仓库根级 lint 仍依赖当前 checkout 中不存在的 `scripts/check-raw-sends.sh` 与 `scripts/check-task-tool-checks.sh`；本轮相关文件的定向 ESLint、全量类型检查、全量测试和主进程构建均已通过。
+- 本轮两个审查问题均已闭环，无已知功能或安全遗留。
+- Electron lint 仍报告 120 个既有 warning；完整构建仍有既有大 chunk 提示，均未由本轮变更新增，也不阻断当前验证。

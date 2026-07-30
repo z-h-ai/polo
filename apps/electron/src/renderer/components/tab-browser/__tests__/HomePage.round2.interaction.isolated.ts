@@ -199,6 +199,50 @@ describe('HomePage round-two regressions', () => {
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[1])
   })
 
+  it('does not let delayed hydration overwrite newer same-context recents', async () => {
+    const hydration = createDeferred<any[]>()
+    getHomeRecentApps.mockImplementationOnce(() => hydration.promise)
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+    await waitFor(() => {
+      expect(getHomeRecentApps).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByText('Pro Buddy'))
+    fireEvent.click(screen.getByText('Kanban'))
+    await waitFor(() => {
+      expect(setHomeRecentApps).toHaveBeenCalledTimes(2)
+    })
+
+    await act(async () => {
+      hydration.resolve([{
+        id: BUILTIN_APP_DEFINITIONS[2]!.id,
+        kind: 'builtin',
+        openedAt: 1,
+      }])
+      await hydration.promise
+    })
+
+    const launcher = screen.getByTestId('builtin-app-launcher')
+    expect(within(launcher).queryByText('Pro Buddy')).toBeNull()
+    expect(within(launcher).queryByText('Kanban')).toBeNull()
+    fireEvent.click(screen.getByText('AirDrop'))
+
+    await waitFor(() => {
+      expect(setHomeRecentApps).toHaveBeenCalledTimes(3)
+    })
+    const persisted = [...homeRecentAppsByContext.values()][0]!
+    expect(persisted.map(app => app.id)).toEqual([
+      BUILTIN_APP_DEFINITIONS[2]!.id,
+      BUILTIN_APP_DEFINITIONS[1]!.id,
+      BUILTIN_APP_DEFINITIONS[0]!.id,
+    ])
+  })
+
   it('maps operation and catalog codes through the active non-English locale', async () => {
     await i18n.changeLanguage('zh-Hans')
     const secret = 'backend stack detail must stay hidden'

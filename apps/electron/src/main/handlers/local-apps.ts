@@ -259,6 +259,19 @@ function clearCatalogUpdateState(
   return cleared
 }
 
+function getOwnBusinessIdValue<T>(
+  dictionary: Readonly<Record<string, T>> | undefined,
+  businessId: string,
+): T | undefined {
+  if (
+    !dictionary
+    || !Object.prototype.hasOwnProperty.call(dictionary, businessId)
+  ) {
+    return undefined
+  }
+  return dictionary[businessId]
+}
+
 function deriveCatalogReleaseStatus(
   status: LocalAppRuntimeStatus,
   app: CatalogApp,
@@ -596,7 +609,10 @@ export function registerLocalAppHandlers(server: RpcServer): void {
           ? deriveCatalogReleaseStatus(
               status,
               app,
-              catalog.trustedReleases?.[scopes[index]!.catalogAppId],
+              getOwnBusinessIdValue(
+                catalog.trustedReleases,
+                scopes[index]!.catalogAppId,
+              ),
             )
           : status
         return projectLocalAppStatusForCatalogAccess(

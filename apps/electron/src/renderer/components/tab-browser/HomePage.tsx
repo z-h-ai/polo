@@ -140,6 +140,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const catalog = useAppCatalog()
   const [recentApps, setRecentApps] = useState<HomeRecentAppPreference[]>([])
   const recentLoadGenerationRef = useRef(0)
+  const recentMutationGenerationRef = useRef(0)
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
     appConfigVersion: string
@@ -207,10 +208,16 @@ export function HomePage({ onAddApp }: HomePageProps) {
   useEffect(() => {
     const generation = recentLoadGenerationRef.current + 1
     recentLoadGenerationRef.current = generation
+    const mutationGeneration = recentMutationGenerationRef.current
     setRecentApps([])
     void loadHomeRecentApps(recentContextKey)
       .then(apps => {
-        if (recentLoadGenerationRef.current === generation) {
+        // A local open in this same context fences the older hydration result:
+        // launcher history may never move backwards after a user mutation.
+        if (
+          recentLoadGenerationRef.current === generation
+          && recentMutationGenerationRef.current === mutationGeneration
+        ) {
           setRecentApps(apps)
         }
       })
@@ -223,6 +230,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
     id: string,
     kind: HomeRecentAppKind,
   ) => {
+    recentMutationGenerationRef.current += 1
     setRecentApps(current => {
       const next = [
         { id, kind, openedAt: Date.now() },
