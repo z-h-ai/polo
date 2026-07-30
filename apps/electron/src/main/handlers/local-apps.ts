@@ -1,6 +1,7 @@
 import {
   getAppCatalogAccessMode,
   getCachedAppCatalog,
+  type AppReleaseSummary,
   type CatalogApp,
 } from '@polo-ai/shared/admin'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
@@ -144,21 +145,48 @@ function clearCatalogUpdateState(
 function deriveCatalogReleaseStatus(
   status: LocalAppRuntimeStatus,
   app: CatalogApp,
+  trustedRelease?: AppReleaseSummary,
 ): LocalAppRuntimeStatus {
   const release = app.currentRelease
   if (!release) return clearCatalogUpdateState(status)
 
   const availableVersion = normalizedCatalogVersion(release.version)
   if (!availableVersion) {
-    // Invalid Catalog data must stay visible without clearing the last trusted
-    // update metadata already stored by the runtime manager.
-    return { ...status, versionError: 'invalid_semver' }
+    const retainedRelease = status.availableRelease ?? trustedRelease
+    if (!retainedRelease || !status.currentVersion) {
+      return { ...status, versionError: 'invalid_semver' }
+    }
+    const retainedVersion = normalizedCatalogVersion(retainedRelease.version)
+    const installedVersion = normalizedCatalogVersion(status.currentVersion)
+    const exposesUpdateAsPrimaryStatus = (
+      status.status === 'installed'
+      || status.status === 'stopped'
+      || status.status === 'update_available'
+    )
+    return {
+      ...status,
+      ...(retainedVersion && installedVersion && gt(retainedVersion, installedVersion)
+        ? {
+            status: exposesUpdateAsPrimaryStatus
+              ? 'update_available' as const
+              : status.status,
+            availableRelease: retainedRelease,
+          }
+        : status.availableRelease
+          ? { availableRelease: status.availableRelease }
+          : {}),
+      versionError: 'invalid_semver',
+    }
   }
   if (!status.currentVersion) return clearCatalogUpdateState(status)
 
   const installedVersion = normalizedCatalogVersion(status.currentVersion)
   if (!installedVersion) {
-    return { ...status, versionError: 'invalid_semver' }
+    return {
+      ...status,
+      availableRelease: status.availableRelease ?? trustedRelease ?? release,
+      versionError: 'invalid_semver',
+    }
   }
   if (!gt(availableVersion, installedVersion)) {
     return clearCatalogUpdateState(status)
@@ -412,6 +440,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       return statuses.map((status, index) => deriveCatalogReleaseStatus(
         status,
         localApps.get(scopes[index]!.catalogAppId)!,
+        catalog.trustedReleases?.[scopes[index]!.catalogAppId],
       ))
     },
   )

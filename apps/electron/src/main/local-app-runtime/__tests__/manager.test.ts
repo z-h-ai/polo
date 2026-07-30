@@ -151,7 +151,7 @@ function requestFor(
 
 function makeManager(options: Pick<
   LocalAppRuntimeManagerOptions,
-  'uvPath' | 'bunPath' | 'baseEnvironment' | 'portAllocator'
+  'uvPath' | 'bunPath' | 'baseEnvironment' | 'portAllocator' | 'onInstallProgress'
 > = {}): LocalAppRuntimeManager {
   manager = new LocalAppRuntimeManager({
     rootDir: join(testRoot, 'runtime'),
@@ -1249,6 +1249,48 @@ package = false
     badUpdate.checksum = '0'.repeat(64)
     await expect(runtime.install(badUpdate)).rejects.toMatchObject({ code: 'CHECKSUM_MISMATCH' })
     expect((await runtime.getInstalledApps())[0]?.currentVersion).toBe('1.0.0')
+  })
+
+  it('makes checksum verification observable before archive extraction', async () => {
+    const bundle = await writeBundle(
+      'demo.observable-verification',
+      '1.0.0',
+      {},
+      { 'dist/index.html': 'verified' },
+    )
+    const archive = await archiveBundle(bundle, 'observable-verification')
+    const url = await serveArchive(archive)
+    const phases: string[] = []
+    let resolveVerifying!: () => void
+    const verifying = new Promise<void>(resolve => {
+      resolveVerifying = resolve
+    })
+    const runtime = makeManager({
+      onInstallProgress: (_appId, progress) => {
+        if (phases.at(-1) !== progress.phase) phases.push(progress.phase)
+        if (progress.phase === 'verifying') resolveVerifying()
+      },
+    })
+
+    const installation = runtime.install(requestFor(
+      'demo.observable-verification',
+      '1.0.0',
+      url,
+      archive,
+    ))
+    await verifying
+    expect(await runtime.getRuntimeStatus('demo.observable-verification'))
+      .toMatchObject({
+        status: 'installing',
+        progress: { phase: 'verifying' },
+      })
+    await installation
+    expect(phases).toEqual([
+      'downloading',
+      'verifying',
+      'extracting',
+      'preparing',
+    ])
   })
 
   it('reports download progress and cancels an in-flight install', async () => {

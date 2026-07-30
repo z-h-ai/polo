@@ -1,8 +1,22 @@
+import { ListOrganizationsResponseSchema } from '@polo-ai/shared/admin/schemas'
+import type { OrganizationSummary } from '@polo-ai/shared/admin'
+
 const ACTIVE_ORGANIZATION_PREFIX = 'polo-active-organization:'
+const VERIFIED_ORGANIZATION_CONTEXT_PREFIX = 'polo-verified-organization-context:'
 const PENDING_JOIN_TOKEN_KEY = 'polo-pending-organization-join-token'
 
 function activeOrganizationKey(accountId: string): string {
   return `${ACTIVE_ORGANIZATION_PREFIX}${accountId}`
+}
+
+function verifiedOrganizationContextKey(accountId: string): string {
+  return `${VERIFIED_ORGANIZATION_CONTEXT_PREFIX}${accountId}`
+}
+
+export interface VerifiedOrganizationContext {
+  organizationSummaries: OrganizationSummary[]
+  activeOrganizationId: string | null
+  verifiedAt: number
 }
 
 export function getStoredActiveOrganizationId(accountId: string): string | null {
@@ -27,6 +41,86 @@ export function setStoredActiveOrganizationId(
 export function clearStoredActiveOrganizationId(accountId: string): void {
   try {
     localStorage.removeItem(activeOrganizationKey(accountId))
+  } catch {
+    // Nothing else to clear.
+  }
+}
+
+export function getVerifiedOrganizationContext(
+  accountId: string,
+): VerifiedOrganizationContext | null {
+  try {
+    const raw = localStorage.getItem(verifiedOrganizationContextKey(accountId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<VerifiedOrganizationContext>
+    const organizations = ListOrganizationsResponseSchema.safeParse({
+      organizations: parsed.organizationSummaries,
+    })
+    if (
+      !organizations.success
+      || (parsed.activeOrganizationId !== null
+        && typeof parsed.activeOrganizationId !== 'string')
+      || typeof parsed.verifiedAt !== 'number'
+      || !Number.isInteger(parsed.verifiedAt)
+      || parsed.verifiedAt < 0
+    ) {
+      return null
+    }
+    const activeOrganizationId = parsed.activeOrganizationId ?? null
+    if (
+      activeOrganizationId
+      && !organizations.data.organizations.some(organization => (
+        organization.id === activeOrganizationId
+        && organization.membership.status === 'active'
+      ))
+    ) {
+      return null
+    }
+    return {
+      organizationSummaries: organizations.data.organizations,
+      activeOrganizationId,
+      verifiedAt: parsed.verifiedAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function setVerifiedOrganizationContext(
+  accountId: string,
+  organizationSummaries: OrganizationSummary[],
+  activeOrganizationId: string | null,
+): void {
+  const verified = ListOrganizationsResponseSchema.safeParse({
+    organizations: organizationSummaries,
+  })
+  if (!verified.success) return
+  if (
+    activeOrganizationId
+    && !verified.data.organizations.some(organization => (
+      organization.id === activeOrganizationId
+      && organization.membership.status === 'active'
+    ))
+  ) {
+    return
+  }
+  try {
+    localStorage.setItem(
+      verifiedOrganizationContextKey(accountId),
+      JSON.stringify({
+        organizationSummaries: verified.data.organizations,
+        activeOrganizationId,
+        verifiedAt: Date.now(),
+      } satisfies VerifiedOrganizationContext),
+    )
+  } catch {
+    // The online organization flow remains available without persistence.
+  }
+}
+
+export function clearVerifiedOrganizationContext(accountId: string): void {
+  try {
+    localStorage.removeItem(verifiedOrganizationContextKey(accountId))
   } catch {
     // Nothing else to clear.
   }

@@ -1091,6 +1091,107 @@ describe('registerAdminHandlers', () => {
     })
   })
 
+  it('cleans the trusted old account before password login replaces it', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    appCatalogAccess.set('account-a:organization-1', 'online')
+    appCatalogCache.set('account-a:organization-1', {
+      accountId: 'account-a',
+      organizationId: 'organization-1',
+      authorizationStatus: 'authorized',
+      apps: [],
+    })
+    const { login } = createHarness()
+
+    expect(await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )).toMatchObject({ success: true, user: { id: 'user-1' } })
+
+    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
+    expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
+    expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
+    expect(appCatalogAccess.get('account-a:organization-1')).toBe('denied')
+    expect(appCatalogCache.get('account-a:organization-1'))
+      .toMatchObject({ authorizationStatus: 'denied' })
+  })
+
+  it('cleans the trusted old account before phone login replaces it', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    const { verifyPhoneAuthCode } = createHarness()
+
+    expect(await verifyPhoneAuthCode(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      '13800138000',
+      '123456',
+    )).toMatchObject({ success: true, user: { id: 'phone-user-1' } })
+
+    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
+    expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
+    expect(managerState.tokens).toMatchObject({ userId: 'phone-user-1' })
+  })
+
+  it('does not end the trusted session when the same account logs in again', async () => {
+    managerState.tokens = {
+      accessToken: 'old-token',
+      refreshToken: 'old-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    const { login } = createHarness()
+
+    expect(await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )).toMatchObject({ success: true })
+
+    expect(adminSessionEnding).not.toHaveBeenCalled()
+    expect(managerState.tokens).toMatchObject({
+      userId: 'user-1',
+      accessToken: 'access-token',
+    })
+  })
+
+  it('fails closed without replacing credentials when old-account cleanup fails', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    adminSessionEnding.mockImplementationOnce(async () => {
+      throw new Error('cleanup failed')
+    })
+    const { login } = createHarness()
+
+    expect(await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )).toMatchObject({ success: false })
+    expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
+    expect(managerState.tokens).toMatchObject({
+      userId: 'account-a',
+      accessToken: 'account-a-token',
+    })
+    expect(adminClientCalls.map(call => call.method)).toEqual(['login'])
+  })
+
   it('syncs transit-encrypted admin api keys into credential storage as plaintext', async () => {
     adminClientBehavior.getLlmConnections = async () => ({
       configVersion: 'config-v1',
@@ -1538,6 +1639,7 @@ describe('registerAdminHandlers', () => {
       source: 'cache',
       refreshed: false,
       accessMode: 'offline',
+      warningCode: 'NETWORK_ERROR',
       warning: 'Admin request failed',
     })
   })

@@ -10,6 +10,7 @@ const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure'
 const {
   clearPendingOrganizationJoinToken,
   getStoredActiveOrganizationId,
+  getVerifiedOrganizationContext,
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
 } = await import('@/lib/organization-storage')
@@ -219,6 +220,69 @@ describe('useOrganizationContextState', () => {
     expect(result.current.flowState).toBe('ready')
     expect(result.current.activeOrganizationId).toBe(organizations[0].id)
     expect(getStoredActiveOrganizationId('returning-account')).toBe(organizations[0].id)
+  })
+
+  it('restores the verified organization on valid-token and refresh network failures', async () => {
+    const online = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await online.result.current.bootstrap('offline-account')
+    })
+    act(() => {
+      online.result.current.selectOrganization(organizations[1].id)
+    })
+    online.unmount()
+
+    expect(getVerifiedOrganizationContext('offline-account')).toMatchObject({
+      activeOrganizationId: organizations[1].id,
+      organizationSummaries: organizations,
+    })
+
+    for (const errorCode of ['NETWORK_ERROR', 'TIMEOUT'] as const) {
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: false,
+        errorCode,
+        status: errorCode === 'NETWORK_ERROR' ? 503 : undefined,
+      }))
+      const offline = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        expect(await offline.result.current.bootstrap('offline-account')).toBe('ready')
+      })
+      expect(offline.result.current.activeOrganizationId).toBe(organizations[1].id)
+      expect(offline.result.current.organizationMembershipRole).toBe('member')
+      expect(offline.result.current.organizationSummaries).toEqual(organizations)
+      offline.unmount()
+    }
+  })
+
+  it('fails closed and removes the organization cache after an explicit 403', async () => {
+    const online = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await online.result.current.bootstrap('revoked-account')
+    })
+    act(() => {
+      online.result.current.selectOrganization(organizations[0].id)
+    })
+    online.unmount()
+
+    const authFailures: string[] = []
+    const unsubscribe = subscribeToAdminAuthFailures(error => {
+      authFailures.push(error.code)
+    })
+    organizationList = mock(async (): Promise<OrganizationListResult> => ({
+      success: false,
+      errorCode: 'FORBIDDEN',
+      status: 403,
+    }))
+    const revoked = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await revoked.result.current.bootstrap('revoked-account').catch(() => {})
+    })
+
+    expect(revoked.result.current.flowState).toBe('loading')
+    expect(revoked.result.current.activeOrganizationId).toBeNull()
+    expect(getVerifiedOrganizationContext('revoked-account')).toBeNull()
+    expect(authFailures).toEqual(['FORBIDDEN'])
+    unsubscribe()
   })
 
   it('discards account A bootstrap after clearing A and bootstrapping account B', async () => {

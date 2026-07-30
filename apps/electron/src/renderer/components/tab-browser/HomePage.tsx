@@ -29,6 +29,11 @@ import {
   BUILTIN_APP_IDS,
   type AppDefinition,
 } from '../../../shared/tab-browser-types'
+import {
+  catalogStateMessage,
+  getHomeAppErrorCode,
+  homeAppOperationErrorText,
+} from '@/lib/home-app-errors'
 
 interface HomePageProps {
   onAddApp: () => void
@@ -131,6 +136,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
       .sort((left, right) => left.order - right.order),
     [installedApps],
   )
+  const builtinApps = useMemo(
+    () => installedApps
+      .filter(app => BUILTIN_APP_IDS.has(app.id))
+      .sort((left, right) => left.order - right.order),
+    [installedApps],
+  )
   const organizationApps = useMemo(
     () => [...(catalog.state.catalog?.apps ?? [])]
       .sort((left, right) => left.sortOrder - right.sortOrder),
@@ -167,7 +178,12 @@ export function HomePage({ onAddApp }: HomePageProps) {
     try {
       const scopeKey = catalog.scopeKeyForApp(app)
       if (app.deliveryMode === 'remote_url') {
-        if (!app.remoteUrl) throw new Error(t('homeApps.errors.missingUrl'))
+        if (!app.remoteUrl) {
+          toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
+            description: t('homeApps.errors.missingUrl'),
+          })
+          return
+        }
         openApp(catalogTabDefinition(scopeKey, app, app.remoteUrl))
       } else {
         const result = await catalog.start(app)
@@ -175,11 +191,8 @@ export function HomePage({ onAddApp }: HomePageProps) {
       }
       recordRecent(catalogRecentId(scopeKey), 'organization')
     } catch (error) {
-      const message = error instanceof Error
-        ? error.message
-        : t('homeApps.errors.openGeneric')
       toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
-        description: message,
+        description: homeAppOperationErrorText(t, error, 'open'),
       })
     }
   }
@@ -198,7 +211,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
         toast.success(t('homeApps.toast.installCancelled', { name: app.name }))
       } catch (error) {
         toast.error(t('homeApps.errors.cancelInstall'), {
-          description: error instanceof Error ? error.message : undefined,
+          description: homeAppOperationErrorText(t, error, 'cancel'),
         })
       }
       return
@@ -223,12 +236,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
       await catalog.install(app)
       toast.success(t('homeApps.toast.installed', { name: app.name }))
     } catch (error) {
-      const message = error instanceof Error
-        ? error.message
-        : t('homeApps.errors.installGeneric')
-      if (!/cancel/i.test(message)) {
+      if (getHomeAppErrorCode(error) !== 'INSTALL_CANCELLED') {
         toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
-          description: message,
+          description: homeAppOperationErrorText(t, error, 'install'),
         })
       }
     }
@@ -240,7 +250,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
       toast.success(t('homeApps.toast.stopped', { name: app.name }))
     } catch (error) {
       toast.error(t('homeApps.errors.stopTitle', { name: app.name }), {
-        description: error instanceof Error ? error.message : undefined,
+        description: homeAppOperationErrorText(t, error, 'stop'),
       })
     }
   }
@@ -254,7 +264,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
       toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
     } catch (error) {
       toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
-        description: error instanceof Error ? error.message : undefined,
+        description: homeAppOperationErrorText(t, error, 'uninstall'),
       })
     } finally {
       setPreserveData(true)
@@ -268,7 +278,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
     try {
       setLogs(await catalog.getLogs(app))
     } catch (error) {
-      setLogs(error instanceof Error ? error.message : t('homeApps.errors.logsGeneric'))
+      setLogs(homeAppOperationErrorText(t, error, 'logs'))
     } finally {
       setLogsLoading(false)
     }
@@ -355,6 +365,26 @@ export function HomePage({ onAddApp }: HomePageProps) {
               />
             ))}
           </div>
+          {resolvedRecent.length === 0 && (
+            <div
+              className="rounded-xl border border-foreground/10 bg-foreground/2 p-4"
+              data-testid="builtin-app-launcher"
+            >
+              <h2 className="text-sm font-medium">{t('homeApps.builtin.title')}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t('homeApps.builtin.description')}
+              </p>
+              <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
+                {builtinApps.map(app => (
+                  <AppIcon
+                    key={app.id}
+                    app={app}
+                    onOpen={openPersonalApp}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         {catalog.organization && (
@@ -384,12 +414,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
               </Button>
             </div>
 
-            {catalog.state.warning && (
+            {catalog.state.warningCode && (
               <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                 <Icons.WifiOff className="size-4 shrink-0" />
-                {t('homeApps.organization.cachedWarning', {
-                  error: catalog.state.warning,
-                })}
+                {catalogStateMessage(t, catalog.state.warningCode, 'warning')}
               </div>
             )}
 
@@ -397,13 +425,15 @@ export function HomePage({ onAddApp }: HomePageProps) {
               <div className="flex min-h-32 items-center justify-center rounded-xl border border-foreground/10">
                 <Icons.LoaderCircle className="size-5 animate-spin text-muted-foreground" />
               </div>
-            ) : catalog.state.error && !catalog.state.catalog ? (
+            ) : catalog.state.errorCode && !catalog.state.catalog ? (
               <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center">
                 <Icons.CloudOff className="mb-3 size-6 text-muted-foreground" />
                 <p className="text-sm font-medium">
                   {t('homeApps.organization.loadFailed')}
                 </p>
-                <p className="mt-1 max-w-md text-xs text-muted-foreground">{catalog.state.error}</p>
+                <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                  {catalogStateMessage(t, catalog.state.errorCode, 'error')}
+                </p>
                 <Button
                   type="button"
                   variant="secondary"
@@ -477,7 +507,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {installTarget && catalog.getStatus(installTarget)?.status === 'update_available'
+              {installTarget && catalog.getStatus(installTarget)?.availableRelease
                 ? t('homeApps.install.updateTitle', {
                     name: installTarget?.name ?? t('homeApps.appFallback'),
                   })
@@ -533,7 +563,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
               {t('homeApps.actions.cancel')}
             </Button>
             <Button type="button" onClick={() => { void confirmInstall() }}>
-              {installTarget && catalog.getStatus(installTarget)?.status === 'update_available'
+              {installTarget && catalog.getStatus(installTarget)?.availableRelease
                 ? t('homeApps.actions.update')
                 : t('homeApps.actions.install')}
             </Button>

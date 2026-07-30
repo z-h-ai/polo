@@ -16,13 +16,14 @@ import {
   emitAdminAuthFailure,
   normalizeAdminError,
 } from '@/lib/admin-auth-failure'
+import { getHomeAppErrorCode } from '@/lib/home-app-errors'
 
 export interface AppCatalogState {
   catalog: AppCatalogCacheEntry | null
   loading: boolean
   refreshing: boolean
-  warning: string | null
-  error: string | null
+  warningCode: string | null
+  errorCode: string | null
   accessMode: 'online' | 'offline' | 'denied' | null
   statuses: Record<string, LocalAppRuntimeStatus>
   host: {
@@ -33,15 +34,6 @@ export interface AppCatalogState {
 
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
 export const BUSY_RUNTIME_STATUS_LIMIT = 32
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message
-  if (error && typeof error === 'object') {
-    const message = (error as Record<string, unknown>).message
-    if (typeof message === 'string' && message) return message
-  }
-  return i18n.t('homeApps.errors.localOperation')
-}
 
 export type CatalogVersionComparison =
   | { strategy: 'semver'; order: -1 | 0 | 1 }
@@ -113,8 +105,8 @@ export function useAppCatalog() {
     catalog: null,
     loading: Boolean(organization),
     refreshing: false,
-    warning: null,
-    error: null,
+    warningCode: null,
+    errorCode: null,
     accessMode: null,
     statuses: {},
     host: null,
@@ -233,8 +225,8 @@ export function useAppCatalog() {
         catalog: null,
         loading: false,
         refreshing: false,
-        warning: null,
-        error: null,
+        warningCode: null,
+        errorCode: null,
         accessMode: null,
         statuses: {},
       }))
@@ -246,7 +238,7 @@ export function useAppCatalog() {
       ...current,
       loading: !current.catalog,
       refreshing: Boolean(current.catalog),
-      error: null,
+      errorCode: null,
     }))
     try {
       const result = await window.electronAPI.adminSyncAppCatalog(
@@ -263,7 +255,7 @@ export function useAppCatalog() {
           ...current,
           loading: false,
           refreshing: false,
-          error: result.message,
+          errorCode: result.errorCode || 'request_failed',
         }))
         return
       }
@@ -278,8 +270,8 @@ export function useAppCatalog() {
         catalog: result.catalog,
         loading: false,
         refreshing: false,
-        warning: result.warning ?? null,
-        error: null,
+        warningCode: result.warningCode ?? null,
+        errorCode: null,
         accessMode: result.accessMode,
       }))
       await refreshRuntimeStatuses(
@@ -297,7 +289,7 @@ export function useAppCatalog() {
         ...current,
         loading: false,
         refreshing: false,
-        error: errorMessage(error),
+        errorCode: getHomeAppErrorCode(error) ?? 'request_failed',
       }))
     }
   }, [
@@ -328,8 +320,8 @@ export function useAppCatalog() {
       catalog: null,
       loading: Boolean(organizationContextKey),
       refreshing: false,
-      warning: null,
-      error: null,
+      warningCode: null,
+      errorCode: null,
       accessMode: null,
       statuses: {},
     }))

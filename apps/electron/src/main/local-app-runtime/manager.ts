@@ -211,6 +211,11 @@ export interface LocalAppRuntimeManagerOptions {
   windowsJobObjectOwnerFactory?: () => Promise<WindowsJobObjectOwner>
   /** Test/embedding seam for the Windows snapshot fallback. */
   windowsProcessTreeOwnerFactory?: (rootPid: number) => WindowsProcessTreeOwner
+  /** Optional observer used by hosts/tests that consume install phase events. */
+  onInstallProgress?: (
+    appId: string,
+    progress: LocalAppInstallProgress,
+  ) => void
 }
 
 const noopLogger: LocalAppRuntimeLogger = {
@@ -321,6 +326,7 @@ export class LocalAppRuntimeManager {
   private readonly processSpawner: typeof spawn
   private readonly windowsJobObjectOwnerFactory: () => Promise<WindowsJobObjectOwner>
   private readonly windowsProcessTreeOwnerFactory: (rootPid: number) => WindowsProcessTreeOwner
+  private readonly onInstallProgress?: LocalAppRuntimeManagerOptions['onInstallProgress']
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly managedProcesses = new Map<string, ManagedProcessOperation>()
@@ -361,6 +367,7 @@ export class LocalAppRuntimeManager {
       ?? createWindowsJobObjectOwner
     this.windowsProcessTreeOwnerFactory = options.windowsProcessTreeOwnerFactory
       ?? createWindowsProcessTreeOwner
+    this.onInstallProgress = options.onInstallProgress
   }
 
   initialize(): Promise<void> {
@@ -1102,6 +1109,9 @@ export class LocalAppRuntimeManager {
       this.throwIfCancelled(signal)
 
       this.setInstallProgress(request, 'verifying', request.sizeBytes)
+      await this.verifyBundleChecksum(request, archivePath, signal)
+      this.throwIfCancelled(signal)
+
       this.setInstallProgress(request, 'extracting', request.sizeBytes)
       await extractBundleArchive(archivePath, extractedPath, signal)
       this.throwIfCancelled(signal)
@@ -1247,7 +1257,6 @@ export class LocalAppRuntimeManager {
     }
 
     const output = await open(destination, 'wx')
-    const hash = createHash('sha256')
     let downloaded = 0
     try {
       for await (const rawChunk of response.body as unknown as AsyncIterable<Uint8Array>) {
@@ -1260,7 +1269,6 @@ export class LocalAppRuntimeManager {
             `Bundle exceeds declared size ${request.sizeBytes}`,
           )
         }
-        hash.update(chunk)
         await output.write(chunk)
         this.setInstallProgress(request, 'downloading', downloaded)
       }
@@ -1273,6 +1281,20 @@ export class LocalAppRuntimeManager {
         `Downloaded ${downloaded} bytes, expected ${request.sizeBytes}`,
       )
     }
+  }
+
+  private async verifyBundleChecksum(
+    request: LocalAppInstallRequest,
+    archivePath: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const hash = createHash('sha256')
+    const input = createReadStream(archivePath, { signal })
+    for await (const rawChunk of input) {
+      this.throwIfCancelled(signal)
+      hash.update(rawChunk)
+    }
+    this.throwIfCancelled(signal)
     const checksum = hash.digest('hex')
     if (checksum !== request.checksum) {
       throw new LocalAppRuntimeError(
@@ -1298,6 +1320,7 @@ export class LocalAppRuntimeManager {
       status: phase === 'downloading' ? 'downloading' : 'installing',
       progress,
     })
+    this.onInstallProgress?.(request.appId, progress)
   }
 
   private async loadAndValidateManifest(bundleDir: string): Promise<PoloAppManifest> {

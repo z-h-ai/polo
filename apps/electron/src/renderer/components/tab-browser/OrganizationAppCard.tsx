@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { homeAppOperationErrorText } from '@/lib/home-app-errors'
 
 export type CatalogPrimaryAction =
   | 'open'
@@ -51,6 +52,7 @@ export function primaryActionFor(
   if (status.installationStatus) return 'cancel'
   if (status.status === 'downloading' || status.status === 'installing') return 'cancel'
   if (status.versionError === 'invalid_semver') return 'open'
+  if (status.availableRelease) return offline ? 'open' : 'update'
   if (status.status === 'update_available') return offline ? 'open' : 'update'
   if (status.status === 'broken') return 'retry'
   return 'open'
@@ -66,36 +68,45 @@ export function statusText(
   if (app.availability === 'unavailable') return t('homeApps.status.unauthorized')
   if (!compatible) return t('homeApps.status.incompatible')
   if (app.deliveryMode === 'remote_url') return t('homeApps.status.remote')
-  if (status?.versionError === 'invalid_semver') {
-    return t('homeApps.status.invalidVersion')
-  }
-  if (!status || status.status === 'not_installed') return t('homeApps.status.notInstalled')
+  if (!status) return t('homeApps.status.notInstalled')
   if (status.installationStatus) {
     return status.installationStatus === 'downloading'
       ? t('homeApps.status.downloadingUpdate')
       : t('homeApps.status.installingUpdate')
   }
+  if (status.status === 'downloading') {
+    return status.progress?.phase === 'verifying'
+      ? t('homeApps.status.verifying')
+      : t('homeApps.status.downloading')
+  }
+  if (status.status === 'installing') {
+    if (status.progress?.phase === 'preparing') return t('homeApps.status.preparing')
+    return t('homeApps.status.installing')
+  }
+  if (status.status === 'starting') return t('homeApps.status.starting')
+  if (status.versionError === 'invalid_semver') {
+    return t('homeApps.status.invalidVersion')
+  }
+  if (status.status === 'not_installed') return t('homeApps.status.notInstalled')
+  if (status.availableRelease) {
+    return t('homeApps.status.updateAvailable', {
+      version: status.availableRelease.version,
+    })
+  }
   switch (status.status) {
-    case 'downloading':
-      return status.progress?.phase === 'verifying'
-        ? t('homeApps.status.verifying')
-        : t('homeApps.status.downloading')
-    case 'installing':
-      if (status.progress?.phase === 'preparing') return t('homeApps.status.preparing')
-      return t('homeApps.status.installing')
     case 'installed':
       return t('homeApps.status.installed')
-    case 'starting':
-      return t('homeApps.status.starting')
     case 'running':
       return t('homeApps.status.running')
     case 'stopped':
       return t('homeApps.status.ready')
     case 'broken':
-      return status.error?.message || t('homeApps.status.startFailed')
+      return status.error
+        ? homeAppOperationErrorText(t, status.error, 'open')
+        : t('homeApps.status.startFailed')
     case 'update_available':
       return t('homeApps.status.updateAvailable', {
-        version: status.availableRelease?.version ?? '',
+        version: '',
       })
     default:
       return t('homeApps.status.notInstalled')
@@ -213,17 +224,30 @@ export function OrganizationAppCard({
             </div>
           )}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant={action === 'unavailable' ? 'secondary' : 'default'}
-          disabled={action === 'unavailable' || busy}
-          onClick={() => onPrimaryAction(app, action)}
-          data-testid={`organization-app-action-${app.id}`}
-        >
-          {busy && <Icons.LoaderCircle className="animate-spin" />}
-          {busy ? t('homeApps.status.starting') : actionLabel(t, action)}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {action === 'update' && installed && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => onPrimaryAction(app, 'open')}
+              data-testid={`organization-app-open-${app.id}`}
+            >
+              {t('homeApps.actions.open')}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant={action === 'unavailable' ? 'secondary' : 'default'}
+            disabled={action === 'unavailable' || busy}
+            onClick={() => onPrimaryAction(app, action)}
+            data-testid={`organization-app-action-${app.id}`}
+          >
+            {busy && <Icons.LoaderCircle className="animate-spin" />}
+            {busy ? t('homeApps.status.starting') : actionLabel(t, action)}
+          </Button>
+        </div>
       </div>
     </article>
   )

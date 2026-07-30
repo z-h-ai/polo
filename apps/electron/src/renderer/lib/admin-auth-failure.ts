@@ -13,6 +13,10 @@ export const ADMIN_AUTH_FAILURE_EVENT = 'polo:admin-auth-failure'
 
 const ADMIN_AUTH_FAILURE_CODES = new Set([
   'ACCOUNT_DISABLED',
+  'FORBIDDEN',
+  'MEMBERSHIP_REMOVED',
+  'MEMBERSHIP_SUSPENDED',
+  'ORGANIZATION_UNAVAILABLE',
   'TOKEN_REVOKED',
   'UNAUTHORIZED',
   'INVALID_TOKEN',
@@ -35,7 +39,11 @@ export function normalizeAdminError(
 
 export function isAdminAuthFailureResult(value: AdminErrorLike): boolean {
   const code = getAdminErrorCode(value)
-  return (code ? ADMIN_AUTH_FAILURE_CODES.has(code) : false) || value.status === 401
+  return (
+    (code ? ADMIN_AUTH_FAILURE_CODES.has(code) : false)
+    || value.status === 401
+    || value.status === 403
+  )
 }
 
 export function emitAdminAuthFailure(value: AdminErrorLike): boolean {

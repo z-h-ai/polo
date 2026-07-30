@@ -132,6 +132,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         adminUrl,
         manager,
         login,
+        deps,
         onSyncFailure: error => logPostLoginSyncFailure(log, error),
       })
 
@@ -208,6 +209,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
           adminUrl,
           manager,
           login,
+          deps,
           onSyncFailure: error => logPostLoginSyncFailure(log, error),
         })
         return {
@@ -426,6 +428,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
             source: 'cache',
             refreshed: false,
             accessMode: 'offline',
+            warningCode: 'NETWORK_ERROR',
             warning: tokenResult.warning ?? 'Failed to reach admin server',
           }
         }
@@ -464,6 +467,9 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
             source: 'cache',
             refreshed: false,
             accessMode: 'online',
+            ...(cached.warnings?.length
+              ? { warningCode: 'INVALID_SEMVER' }
+              : {}),
           }
         }
         if (result.apps.some(app => app.organizationId !== organizationId.data)) {
@@ -484,6 +490,9 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
           source: 'network',
           refreshed: true,
           accessMode: 'online',
+          ...(savedCatalog.warnings?.length
+            ? { warningCode: 'INVALID_SEMVER' }
+            : {}),
         }
       } catch (error) {
         const adminError = toAdminRpcError(error)
@@ -504,6 +513,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
               source: 'cache',
               refreshed: false,
               accessMode: 'denied',
+              warningCode: adminError.errorCode,
               warning: adminError.message,
             }
           }
@@ -520,6 +530,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
             source: 'cache',
             refreshed: false,
             accessMode: 'offline',
+            warningCode: adminError.errorCode,
             warning: adminError.message,
           }
         }
@@ -742,8 +753,28 @@ async function completeAdminLogin(args: {
   adminUrl: string
   manager: CredentialManager
   login: AdminLoginResponse
+  deps: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>
   onSyncFailure: (error: unknown) => void
 }): Promise<void> {
+  const previousTokens = await args.manager.getAdminTokens()
+  const previousAdminConnectionSlugs = getAdminManagedConnectionSlugs()
+  const switchingAccounts = Boolean(
+    previousTokens && previousTokens.userId !== args.login.user.id,
+  )
+
+  if (previousTokens && switchingAccounts) {
+    // Cleanup is bound to the old trusted session. The new credentials are not
+    // persisted until that account's processes and managed state are revoked.
+    await args.deps.onAdminSessionEnding?.(previousTokens.userId)
+    await deleteAdminManagedConnections(
+      args.manager,
+      previousAdminConnectionSlugs,
+    )
+    denyAppCatalogAccessForAccount(previousTokens.userId)
+    denyCachedAppCatalogAuthorizationForAccount(previousTokens.userId)
+    setAdminConfigVersion(undefined)
+  }
+
   await args.manager.setAdminTokens({
     accessToken: args.login.accessToken,
     refreshToken: args.login.refreshToken,
@@ -755,11 +786,12 @@ async function completeAdminLogin(args: {
     groupIds: args.login.user.groupIds,
   })
 
-  const previousAdminConnectionSlugs = getAdminManagedConnectionSlugs()
   setAdminConfigVersion(undefined)
 
   try {
-    await deleteAdminManagedConnections(args.manager, previousAdminConnectionSlugs)
+    if (!switchingAccounts) {
+      await deleteAdminManagedConnections(args.manager, previousAdminConnectionSlugs)
+    }
     await syncAdminConnections({
       adminUrl: args.adminUrl,
       manager: args.manager,

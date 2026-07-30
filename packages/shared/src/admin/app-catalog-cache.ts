@@ -3,30 +3,49 @@ import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { CONFIG_DIR } from '../config/paths.ts'
 import {
+  AppReleaseSummarySchema,
   AppCatalogResponseSchema,
   CatalogAppSchema,
 } from './schemas.ts'
 import type {
   AppCatalogCacheEntry,
   AppCatalogResponse,
+  AppReleaseSummary,
   CatalogApp,
 } from './types.ts'
 
-const CACHE_SCHEMA_VERSION = 1
+const CACHE_SCHEMA_VERSION = 2
+const MAX_CACHED_APPS = 10_000
+const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 
-const AppCatalogCacheEntrySchema = AppCatalogResponseSchema.extend({
+const CachedCatalogAppSchema = CatalogAppSchema.and(z.object({
+  availability: z.enum(['available', 'withdrawn', 'unavailable']).optional(),
+}))
+
+const AppCatalogCacheEntryV1Schema = AppCatalogResponseSchema.extend({
   accountId: z.string().min(1).max(512),
   organizationId: z.string().min(1).max(512),
   authorizationStatus: z.enum(['authorized', 'denied']).default('authorized'),
   syncedAt: z.number().int().min(0),
-  apps: z.array(CatalogAppSchema.and(z.object({
-    availability: z.enum(['available', 'withdrawn', 'unavailable']).optional(),
-  }))).max(10_000),
+  apps: z.array(CachedCatalogAppSchema).max(MAX_CACHED_APPS),
+})
+
+const AppCatalogCacheEntrySchema = AppCatalogCacheEntryV1Schema.extend({
+  trustedReleases: z.record(z.string(), AppReleaseSummarySchema).default({}),
+  warnings: z.array(z.object({
+    code: z.literal('invalid_semver'),
+    catalogAppId: z.string().min(1).max(512),
+  })).max(MAX_CACHED_APPS).default([]),
 })
 
 const AppCatalogCacheFileSchema = z.object({
   schemaVersion: z.literal(CACHE_SCHEMA_VERSION),
   entries: z.record(z.string(), AppCatalogCacheEntrySchema),
+})
+
+const AppCatalogCacheFileV1Schema = z.object({
+  schemaVersion: z.literal(1),
+  entries: z.record(z.string(), AppCatalogCacheEntryV1Schema),
 })
 
 interface AppCatalogCacheFile {
@@ -47,24 +66,63 @@ function emptyCache(): AppCatalogCacheFile {
   return { schemaVersion: CACHE_SCHEMA_VERSION, entries: {} }
 }
 
+function isValidCatalogSemVer(version: string): boolean {
+  return SEMVER_PATTERN.test(version.trim().replace(/^v(?=\d)/i, ''))
+}
+
+function trustedReleasesFromApps(
+  apps: CatalogApp[],
+): Record<string, AppReleaseSummary> {
+  return Object.fromEntries(apps.flatMap(app => (
+    app.deliveryMode === 'local_bundle'
+    && app.currentRelease
+    && isValidCatalogSemVer(app.currentRelease.version)
+      ? [[app.id, app.currentRelease] as const]
+      : []
+  )))
+}
+
+function migrateCacheV1(raw: unknown): AppCatalogCacheFile | null {
+  const parsed = AppCatalogCacheFileV1Schema.safeParse(raw)
+  if (!parsed.success) return null
+  return {
+    schemaVersion: CACHE_SCHEMA_VERSION,
+    entries: Object.fromEntries(Object.entries(parsed.data.entries).map(
+      ([key, entry]) => [key, {
+        ...entry,
+        trustedReleases: trustedReleasesFromApps(entry.apps),
+        warnings: entry.apps.flatMap(app => (
+          app.deliveryMode === 'local_bundle'
+          && app.currentRelease
+          && !isValidCatalogSemVer(app.currentRelease.version)
+            ? [{ code: 'invalid_semver' as const, catalogAppId: app.id }]
+            : []
+        )),
+      }],
+    )),
+  }
+}
+
 function readCache(): AppCatalogCacheFile {
   const path = cachePath()
   if (!existsSync(path)) return emptyCache()
   try {
-    const parsed = AppCatalogCacheFileSchema.safeParse(
-      JSON.parse(readFileSync(path, 'utf8')),
-    )
-    return parsed.success ? parsed.data : emptyCache()
+    const raw = JSON.parse(readFileSync(path, 'utf8'))
+    const parsed = AppCatalogCacheFileSchema.safeParse(raw)
+    return parsed.success
+      ? parsed.data
+      : migrateCacheV1(raw) ?? emptyCache()
   } catch {
     return emptyCache()
   }
 }
 
 function writeCache(cache: AppCatalogCacheFile): void {
+  const validated = AppCatalogCacheFileSchema.parse(cache)
   const path = cachePath()
   mkdirSync(dirname(path), { recursive: true })
   const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`
-  writeFileSync(tempPath, `${JSON.stringify(cache, null, 2)}\n`, 'utf8')
+  writeFileSync(tempPath, `${JSON.stringify(validated, null, 2)}\n`, 'utf8')
   renameSync(tempPath, path)
 }
 
@@ -84,22 +142,40 @@ export function saveAppCatalog(
   const cache = readCache()
   const previous = cache.entries[cacheKey(accountId, organizationId)]
   const visibleIds = new Set(catalog.apps.map(app => app.id))
+  const withdrawnCapacity = Math.max(0, MAX_CACHED_APPS - catalog.apps.length)
   const withdrawn = (previous?.apps ?? [])
     .filter(app => !visibleIds.has(app.id))
     .map((app): CatalogApp => ({ ...app, availability: 'withdrawn' }))
+    .slice(0, withdrawnCapacity)
+  const apps = [
+    ...catalog.apps.map((app): CatalogApp => ({
+      ...app,
+      availability: 'available',
+    })),
+    ...withdrawn,
+  ]
+  const retainedIds = new Set(apps
+    .filter(app => app.deliveryMode === 'local_bundle')
+    .map(app => app.id))
+  const trustedReleases = Object.fromEntries(Object.entries({
+    ...(previous?.trustedReleases ?? trustedReleasesFromApps(previous?.apps ?? [])),
+    ...trustedReleasesFromApps(catalog.apps),
+  }).filter(([appId]) => retainedIds.has(appId)))
   const entry: AppCatalogCacheEntry = {
     accountId,
     organizationId,
     authorizationStatus: 'authorized',
     appConfigVersion: catalog.appConfigVersion,
     syncedAt,
-    apps: [
-      ...catalog.apps.map((app): CatalogApp => ({
-        ...app,
-        availability: 'available',
-      })),
-      ...withdrawn,
-    ],
+    apps,
+    trustedReleases,
+    warnings: catalog.apps.flatMap(app => (
+      app.deliveryMode === 'local_bundle'
+      && app.currentRelease
+      && !isValidCatalogSemVer(app.currentRelease.version)
+        ? [{ code: 'invalid_semver' as const, catalogAppId: app.id }]
+        : []
+    )),
   }
   cache.entries[cacheKey(accountId, organizationId)] = entry
   writeCache(cache)

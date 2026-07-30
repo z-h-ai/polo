@@ -390,13 +390,15 @@ describe('local app main-process authorization boundary', () => {
 
   it('keeps trusted batch update metadata visible when either version is invalid', async () => {
     const getStatuses = handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES)!
-    const trustedRelease = { version: '1.1.0' }
+    const trustedRelease = {
+      ...catalog.apps[0]!.currentRelease!,
+      version: '1.1.0',
+    }
     scopedStatuses.mockImplementation(async scopes => scopes.map(item => ({
       appId: item.catalogAppId,
       scope: item,
-      status: 'update_available',
+      status: 'installed',
       currentVersion: '1.0.0',
-      availableRelease: trustedRelease,
     })))
     catalog.apps[0] = {
       ...catalog.apps[0]!,
@@ -405,9 +407,11 @@ describe('local app main-process authorization boundary', () => {
         version: '1.2.3.4',
       },
     }
+    catalog.trustedReleases = { '应用.App-ID': trustedRelease }
 
     await expect(getStatuses(context, { scopes: [scope()] })).resolves.toEqual([
       expect.objectContaining({
+        status: 'update_available',
         versionError: 'invalid_semver',
         availableRelease: trustedRelease,
       }),
@@ -417,14 +421,13 @@ describe('local app main-process authorization boundary', () => {
     scopedStatuses.mockImplementation(async scopes => scopes.map(item => ({
       appId: item.catalogAppId,
       scope: item,
-      status: 'update_available',
+      status: 'installed',
       currentVersion: 'release-one',
-      availableRelease: trustedRelease,
     })))
     await expect(getStatuses(context, { scopes: [scope()] })).resolves.toEqual([
       expect.objectContaining({
         versionError: 'invalid_semver',
-        availableRelease: trustedRelease,
+        availableRelease: catalog.apps[0]!.currentRelease,
       }),
     ])
     expect(scopedRegistry.setAvailableRelease).not.toHaveBeenCalled()

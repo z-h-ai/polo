@@ -8,11 +8,14 @@ import type {
 import {
   clearPendingOrganizationJoinToken,
   clearStoredActiveOrganizationId,
+  clearVerifiedOrganizationContext,
   createOrganizationContextKey,
   getPendingOrganizationJoinToken,
   getStoredActiveOrganizationId,
+  getVerifiedOrganizationContext,
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
+  setVerifiedOrganizationContext,
 } from '@/lib/organization-storage'
 import {
   emitAdminAuthFailure,
@@ -40,6 +43,21 @@ export interface AcceptJoinOutcome {
 interface OrganizationAccountScope {
   accountId: string
   generation: number
+}
+
+const TEMPORARY_ORGANIZATION_ERROR_CODES = new Set([
+  'FETCH_FAILED',
+  'NETWORK_ERROR',
+  'SERVER_ERROR',
+  'TIMEOUT',
+  'request_failed',
+])
+
+function isTemporaryOrganizationError(error: OrganizationFlowError): boolean {
+  return (
+    TEMPORARY_ORGANIZATION_ERROR_CODES.has(error.code)
+    || (typeof error.status === 'number' && error.status >= 500)
+  )
 }
 
 function resultError(result: {
@@ -113,6 +131,7 @@ export function useOrganizationContextState() {
     }
 
     setStoredActiveOrganizationId(accountId, organizationId)
+    setVerifiedOrganizationContext(accountId, summaries, organizationId)
     accountIdRef.current = accountId
     activeOrganizationIdRef.current = organizationId
     organizationScopeGenerationRef.current += 1
@@ -139,6 +158,12 @@ export function useOrganizationContextState() {
     if (!isCurrentAccountScope(scope)) return null
     if (!result.success) throw resultError(result)
     setOrganizationSummaries(result.organizations)
+    setVerifiedOrganizationContext(
+      scope.accountId,
+      result.organizations,
+      activeOrganizationIdRef.current
+        ?? getStoredActiveOrganizationId(scope.accountId),
+    )
     return result.organizations
   }, [isCurrentAccountScope])
 
@@ -237,7 +262,25 @@ export function useOrganizationContextState() {
       return 'select'
     } catch (caught) {
       if (!isCurrentAccountScope(scope)) return null
-      setError(caughtError(caught))
+      const nextError = caughtError(caught)
+      if (nextError.authFailureHandled) {
+        clearStoredActiveOrganizationId(accountId)
+        clearVerifiedOrganizationContext(accountId)
+      } else if (isTemporaryOrganizationError(nextError)) {
+        const cached = getVerifiedOrganizationContext(accountId)
+        const active = cached?.activeOrganizationId
+          ? cached.organizationSummaries.find(organization => (
+              organization.id === cached.activeOrganizationId
+              && organization.membership.status === 'active'
+            ))
+          : undefined
+        if (cached && active && isCurrentAccountScope(scope)) {
+          setOrganizationSummaries(cached.organizationSummaries)
+          activateOrganization(accountId, cached.organizationSummaries, active.id)
+          return 'ready'
+        }
+      }
+      setError(nextError)
       setFlowState('loading')
       throw caught
     }
@@ -418,14 +461,25 @@ export function useOrganizationContextState() {
 
     const result = await window.electronAPI.organizationList()
     if (!isCurrentScope()) return result.success ? result.organizations : []
-    if (!result.success) throw resultError(result)
+    if (!result.success) {
+      const nextError = resultError(result)
+      if (nextError.authFailureHandled) {
+        clearStoredActiveOrganizationId(requestAccountId)
+        clearVerifiedOrganizationContext(requestAccountId)
+      }
+      throw nextError
+    }
     const summaries = result.organizations
 
     setOrganizationSummaries(summaries)
-    if (!requestOrganizationId) return summaries
+    if (!requestOrganizationId) {
+      setVerifiedOrganizationContext(requestAccountId, summaries, null)
+      return summaries
+    }
     const active = summaries.find(item => item.id === requestOrganizationId)
     if (!active) {
       clearStoredActiveOrganizationId(requestAccountId)
+      setVerifiedOrganizationContext(requestAccountId, summaries, null)
       activeOrganizationIdRef.current = null
       organizationScopeGenerationRef.current += 1
       setActiveOrganizationId(null)
@@ -433,6 +487,7 @@ export function useOrganizationContextState() {
       setFlowState(summaries.length === 0 ? 'create' : 'select')
       return summaries
     }
+    setVerifiedOrganizationContext(requestAccountId, summaries, active.id)
     setOrganizationMembershipRole(active.membership.role)
     return summaries
   }, [])
@@ -442,7 +497,10 @@ export function useOrganizationContextState() {
     options?: { preservePendingJoinToken?: boolean },
   ) => {
     const targetAccountId = accountId ?? accountIdRef.current
-    if (targetAccountId) clearStoredActiveOrganizationId(targetAccountId)
+    if (targetAccountId) {
+      clearStoredActiveOrganizationId(targetAccountId)
+      clearVerifiedOrganizationContext(targetAccountId)
+    }
     const preservedJoinToken = options?.preservePendingJoinToken
       ? pendingJoinTokenRef.current ?? getPendingOrganizationJoinToken()
       : null

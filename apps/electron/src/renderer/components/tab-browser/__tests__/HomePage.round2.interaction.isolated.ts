@@ -1,0 +1,122 @@
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test'
+import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { createElement } from 'react'
+import { I18nextProvider } from 'react-i18next'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
+import {
+  BUILTIN_APP_DEFINITIONS,
+} from '../../../../shared/tab-browser-types'
+
+GlobalRegistrator.register()
+setupI18n()
+
+const openApp = jest.fn()
+const removeApp = jest.fn(async () => {})
+
+mock.module('@/context/TabShellContext', () => ({
+  useTabShell: () => ({
+    installedApps: BUILTIN_APP_DEFINITIONS,
+    openApp,
+    removeApp,
+  }),
+}))
+
+mock.module('@/hooks/useAppCatalog', () => ({
+  useAppCatalog: () => ({
+    organization: null,
+    state: {
+      catalog: null,
+      loading: false,
+      refreshing: false,
+      warningCode: null,
+      errorCode: null,
+      accessMode: null,
+      statuses: {},
+      host: null,
+    },
+    sync: async () => {},
+    install: async () => {},
+    start: async () => ({
+      appId: 'unused',
+      version: '1.0.0',
+      url: 'http://127.0.0.1:1',
+      port: 1,
+    }),
+    stop: async () => {},
+    uninstall: async () => {},
+    cancelInstall: async () => {},
+    getLogs: async () => '',
+    getStatus: () => undefined,
+    scopeKeyForApp: () => 'unused',
+  }),
+}))
+
+const { cleanup, fireEvent, render, screen } = await import('@testing-library/react')
+const { HomePage } = await import('../HomePage')
+const {
+  catalogStateMessage,
+  homeAppOperationErrorText,
+} = await import('@/lib/home-app-errors')
+
+beforeEach(async () => {
+  localStorage.clear()
+  openApp.mockClear()
+  removeApp.mockClear()
+  await i18n.changeLanguage('en')
+})
+
+afterEach(() => {
+  cleanup()
+})
+
+describe('HomePage round-two regressions', () => {
+  it('shows a labeled built-in launcher for a signed-out fresh or cleared profile', () => {
+    localStorage.setItem('polo-home-recent-apps', JSON.stringify([{
+      id: 'old-app',
+      kind: 'external',
+      openedAt: 1,
+    }]))
+    localStorage.clear()
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    expect(screen.getByTestId('builtin-app-launcher')).toBeTruthy()
+    expect(screen.getByText('Built-in apps')).toBeTruthy()
+    expect(screen.getByText('Pro Buddy')).toBeTruthy()
+    expect(screen.getByText('Kanban')).toBeTruthy()
+    expect(screen.getByText('AirDrop')).toBeTruthy()
+
+    fireEvent.click(screen.getByText('Pro Buddy'))
+    expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
+  })
+
+  it('maps operation and catalog codes through the active non-English locale', async () => {
+    await i18n.changeLanguage('zh-Hans')
+    const secret = 'backend stack detail must stay hidden'
+
+    expect(homeAppOperationErrorText(
+      i18n.t.bind(i18n),
+      { code: 'START_FAILED', message: secret },
+      'open',
+    )).toBe('无法打开应用。')
+    expect(homeAppOperationErrorText(
+      i18n.t.bind(i18n),
+      { code: 'UNINSTALL_FAILED', message: secret },
+      'uninstall',
+    )).toBe('无法卸载应用。')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'NETWORK_ERROR',
+      'warning',
+    )).toContain('离线')
+    expect(catalogStateMessage(
+      i18n.t.bind(i18n),
+      'INVALID_SEMVER',
+      'warning',
+    )).not.toContain(secret)
+  })
+})

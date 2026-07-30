@@ -197,6 +197,16 @@ export interface AppCatalogCacheEntry extends AppCatalogResponse {
   organizationId: string;
   authorizationStatus: 'authorized' | 'denied';
   syncedAt: number;
+  /**
+   * Last releases whose version strings passed the client SemVer contract.
+   * This is deliberately separate from the latest catalog payload so a bad
+   * server version cannot erase a previously actionable update.
+   */
+  trustedReleases?: Record<string, AppReleaseSummary>;
+  warnings?: Array<{
+    code: 'invalid_semver';
+    catalogAppId: string;
+  }>;
 }
 
 export type AppCatalogSyncResult =
@@ -206,6 +216,7 @@ export type AppCatalogSyncResult =
       source: 'network' | 'cache';
       refreshed: boolean;
       accessMode: 'online' | 'offline' | 'denied';
+      warningCode?: string;
       warning?: string;
     }
   | {

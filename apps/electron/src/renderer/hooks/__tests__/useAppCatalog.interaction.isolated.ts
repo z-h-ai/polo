@@ -407,6 +407,46 @@ describe('useAppCatalog scoped async state', () => {
     expect(Object.keys(result.current.state.statuses)).toHaveLength(2)
   })
 
+  it('opens a prepared app from a restricted offline catalog without enabling install', async () => {
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
+      ...syncResult('organization-a', 'offline'),
+      source: 'cache',
+      refreshed: false,
+      accessMode: 'offline',
+      warningCode: 'NETWORK_ERROR',
+    }))
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'installed',
+      currentVersion: '1.0.0',
+    })))
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.accessMode).toBe('offline')
+      expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
+        .toBe('installed')
+    })
+    const catalogApp = result.current.state.catalog!.apps[0]!
+
+    let started!: LocalAppStartResult
+    await act(async () => {
+      started = await result.current.start(catalogApp)
+    })
+    expect(started).toMatchObject({
+      url: 'http://127.0.0.1:9876',
+    })
+    expect(startLocalApp).toHaveBeenCalledWith(expect.objectContaining({
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'shared-app-id',
+    }))
+    await expect(result.current.install(catalogApp)).rejects.toThrow()
+    expect(installLocalApp).not.toHaveBeenCalled()
+  })
+
   it('uses one batch status RPC and no per-app release RPC for large catalogs', async () => {
     for (const count of [1_000, 1_001, 10_000]) {
       const apps = Array.from(

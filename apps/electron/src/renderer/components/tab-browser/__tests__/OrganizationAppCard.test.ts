@@ -53,4 +53,33 @@ describe('OrganizationAppCard invalid version state', () => {
       .toBe('homeApps.status.invalidVersion')
     expect(status.availableRelease?.version).toBe('1.1.0')
   })
+
+  it('prioritizes an available update while a previous version is running', () => {
+    const status: LocalAppRuntimeStatus = {
+      appId: app.id,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+      availableRelease: { version: '2.0.0' },
+    }
+
+    expect(primaryActionFor(app, status, true, false)).toBe('update')
+    expect(primaryActionFor(app, status, true, true)).toBe('open')
+    expect(statusText(translate, app, status, true))
+      .toBe('homeApps.status.updateAvailable')
+  })
+
+  it('does not expose a raw runtime error message for a broken app', () => {
+    const status: LocalAppRuntimeStatus = {
+      appId: app.id,
+      status: 'broken',
+      error: {
+        code: 'START_FAILED',
+        message: 'secret backend stack detail',
+      },
+    }
+
+    expect(statusText(translate, app, status, true))
+      .toBe('homeApps.errors.openGeneric')
+  })
 })
