@@ -83,6 +83,7 @@ let listOrganizationsAdmin: (accessToken: string) => Promise<unknown> =
   async () => ({ organizations: [] })
 let tokensExpired = false
 let denyCatalogCacheError: Error | null = null
+let saveCatalogError: Error | null = null
 let catalog = createCatalog()
 const temporaryRoots: string[] = []
 
@@ -211,6 +212,7 @@ mock.module('@polo-ai/shared/admin', () => ({
       apps: AppCatalogCacheEntry['apps']
     },
   ) => {
+    if (saveCatalogError) throw saveCatalogError
     const visibleIds = new Set(response.apps.map(app => app.id))
     const withdrawnApps = [
       ...(catalog.withdrawnApps ?? []).filter(app => !visibleIds.has(app.id)),
@@ -332,6 +334,11 @@ function registerProductionHandlers(
       organizationId: string,
       catalogAppIds: readonly string[],
     ) => Promise<void>
+    onAdminCatalogAppsAuthorized?: (
+      accountId: string,
+      organizationId: string,
+      catalogAppIds: readonly string[],
+    ) => void
   } = {},
 ) {
   const handlers = new Map<string, HandlerFn>()
@@ -385,6 +392,17 @@ function registerProductionHandlers(
         organizationId: string,
         catalogAppIds: readonly string[],
       ) => runtimeRegistry!.stopApps(catalogAppIds.map(catalogAppId => ({
+        kind: 'catalog',
+        accountId,
+        organizationId,
+        catalogAppId,
+      })))),
+    onAdminCatalogAppsAuthorized: options.onAdminCatalogAppsAuthorized
+      ?? ((
+        accountId: string,
+        organizationId: string,
+        catalogAppIds: readonly string[],
+      ) => runtimeRegistry!.authorizeApps(catalogAppIds.map(catalogAppId => ({
         kind: 'catalog',
         accountId,
         organizationId,
@@ -451,6 +469,7 @@ afterEach(async () => {
   listOrganizationsAdmin = async () => ({ organizations: [] })
   tokensExpired = false
   denyCatalogCacheError = null
+  saveCatalogError = null
   catalog = createCatalog()
   await Promise.all(temporaryRoots.splice(0).map(root =>
     rm(root, { recursive: true, force: true })))
@@ -814,6 +833,51 @@ describe('Admin session and scoped local app production wiring', () => {
     })
     await processStopped.promise
     expect(calls).toEqual(['start', 'stop'])
+  })
+
+  it('keeps a withdrawn App denied when the replacement Catalog cache write fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-app-withdrawn-save-failure-'))
+    temporaryRoots.push(root)
+    let managerFactoryCalls = 0
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => {
+        managerFactoryCalls += 1
+        return new LocalAppRuntimeManager(options)
+      },
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    saveCatalogError = new Error('disk full')
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [],
+    })
+    const { handlers, context } = registerProductionHandlers(root)
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toEqual({
+        success: false,
+        errorCode: 'UNKNOWN_ERROR',
+        message: 'Admin request failed',
+      })
+    expect(catalog.appConfigVersion).toBe('catalog-v1')
+    expect(catalog.apps).toHaveLength(1)
+
+    for (const channel of [
+      RPC_CHANNELS.localApps.START,
+      RPC_CHANNELS.localApps.RESTART,
+    ]) {
+      await expect(handlers.get(channel)!(context, scope))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+    await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL)!(
+      context,
+      installRequest(),
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(managerFactoryCalls).toBe(0)
   })
 
   it('keeps an entered start valid when a successful refresh retains that app', async () => {

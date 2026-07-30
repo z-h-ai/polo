@@ -1135,6 +1135,13 @@ export function registerAdminHandlers(
               Date.now(),
               retainedWithdrawnAppIds,
             )
+            deps.onAdminCatalogAppsAuthorized?.(
+              accountId,
+              organizationId.data,
+              result.apps
+                .filter(app => app.deliveryMode === 'local_bundle')
+                .map(app => app.id),
+            )
             setAppCatalogAccessMode(accountId, organizationId.data, 'online')
             return {
               success: true as const,
@@ -2002,7 +2009,8 @@ function isSessionEndingAuthFailure(error: unknown): boolean {
 
 function isTemporaryAdminFailure(error: unknown): boolean {
   return error instanceof AdminError && (
-    error.errorCode === 'NETWORK_ERROR'
+    error.errorCode === 'TIMEOUT'
+    || error.errorCode === 'NETWORK_ERROR'
     || error.errorCode === 'SERVER_ERROR'
     || (typeof error.status === 'number' && error.status >= 500)
   )

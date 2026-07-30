@@ -65,6 +65,7 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'NOT_FOUND',
   'VALIDATION_ERROR',
   'SERVER_ERROR',
+  'TIMEOUT',
   'NETWORK_ERROR',
   'UNKNOWN_ERROR',
   'phone_auth_disabled',
@@ -116,6 +117,7 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   NOT_FOUND: 'Admin resource was not found',
   VALIDATION_ERROR: 'Admin request was rejected',
   SERVER_ERROR: 'Admin service is temporarily unavailable',
+  TIMEOUT: 'Admin request timed out',
   NETWORK_ERROR: 'Failed to reach admin server',
   UNKNOWN_ERROR: 'Admin request failed',
   phone_auth_disabled: 'Phone authentication is unavailable',
@@ -140,6 +142,7 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
+export const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 15_000;
 
 export function getSafeAdminErrorMessage(
   errorCode: AdminErrorCode,
@@ -159,14 +162,30 @@ export interface AdminClientTokenStore {
 export class AdminClient {
   private readonly adminUrl: string;
   private readonly tokenStore?: AdminClientTokenStore;
+  private readonly requestTimeoutMs: number;
 
-  constructor(adminUrl: string, options?: { tokenStore?: AdminClientTokenStore }) {
+  constructor(adminUrl: string, options?: {
+    tokenStore?: AdminClientTokenStore;
+    requestTimeoutMs?: number;
+  }) {
     const normalized = adminUrl.trim().replace(/\/+$/, '');
     if (!normalized) {
       throw new AdminError('Admin URL is required', 'VALIDATION_ERROR');
     }
+    const requestTimeoutMs = options?.requestTimeoutMs
+      ?? DEFAULT_ADMIN_REQUEST_TIMEOUT_MS;
+    if (
+      !Number.isSafeInteger(requestTimeoutMs)
+      || requestTimeoutMs <= 0
+    ) {
+      throw new AdminError(
+        'Admin request timeout is invalid',
+        'VALIDATION_ERROR',
+      );
+    }
     this.adminUrl = normalized;
     this.tokenStore = options?.tokenStore;
+    this.requestTimeoutMs = requestTimeoutMs;
   }
 
   async login(identifier: string, password: string): Promise<AdminLoginResponse> {
@@ -446,18 +465,45 @@ export class AdminClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    let response: Response;
-    try {
-      response = await fetch(`${this.adminUrl}${path}`, {
-        method: options.method,
-        headers,
-        body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-      });
-    } catch (error) {
-      throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
-    }
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutError = new AdminError(
+      'Admin request timed out',
+      'TIMEOUT',
+    );
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort(timeoutError);
+        reject(timeoutError);
+      }, this.requestTimeoutMs);
+    });
 
-    const data = await this.readJson(response);
+    let response: Response;
+    let data: unknown;
+    try {
+      ({ response, data } = await Promise.race([
+        (async () => {
+          const fetchedResponse = await fetch(`${this.adminUrl}${path}`, {
+            method: options.method,
+            headers,
+            body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+            signal: controller.signal,
+          });
+          return {
+            response: fetchedResponse,
+            data: await this.readJson(fetchedResponse),
+          };
+        })(),
+        timeoutPromise,
+      ]));
+    } catch (error) {
+      if (timedOut || error === timeoutError) throw timeoutError;
+      throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
 
     if (response.status === 304 && options.allowNotModified) {
       return undefined as T;

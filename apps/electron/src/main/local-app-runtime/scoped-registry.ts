@@ -24,6 +24,7 @@ const SCOPE_SCHEMA_VERSION = 1
 const MAX_SCOPE_FIELD_LENGTH = 512
 const STOP_ACCOUNT_CONCURRENCY = 8
 const STATUS_READ_CONCURRENCY = 8
+export const PERSISTED_SCOPE_READ_CONCURRENCY = 8
 export const MAX_CATALOG_STATUS_SCOPES = 10_000
 
 export type CatalogLocalAppScope = Extract<LocalAppScope, { kind: 'catalog' }>
@@ -39,6 +40,8 @@ export interface ScopedLocalAppRuntimeRegistryOptions {
   bunPath?: string
   logger?: LocalAppRuntimeLogger
   managerFactory?: (options: LocalAppRuntimeManagerOptions) => LocalAppRuntimeManager
+  /** Test/embedding seam; production reads UTF-8 scope records from disk. */
+  scopeRecordReader?: (path: string) => Promise<string>
 }
 
 export interface ScopedCatalogInstallRequest {
@@ -127,6 +130,7 @@ export class ScopedLocalAppRuntimeRegistry {
   private readonly managerFactory: (
     options: LocalAppRuntimeManagerOptions,
   ) => LocalAppRuntimeManager
+  private readonly scopeRecordReader: (path: string) => Promise<string>
   private readonly managers = new Map<string, LocalAppRuntimeManager>()
   private readonly managerScopes = new Map<string, CatalogLocalAppScope>()
   private readonly managerPromises = new Map<
@@ -162,6 +166,8 @@ export class ScopedLocalAppRuntimeRegistry {
     this.logger = options.logger
     this.managerFactory = options.managerFactory
       ?? (managerOptions => new LocalAppRuntimeManager(managerOptions))
+    this.scopeRecordReader = options.scopeRecordReader
+      ?? (path => readFile(path, 'utf8'))
   }
 
   async install(
@@ -336,10 +342,10 @@ export class ScopedLocalAppRuntimeRegistry {
       organizationId,
       'organizationId',
     )
-    const scopes = (await this.readPersistedScopes()).filter(scope => (
-      scope.accountId === safeAccountId
-      && scope.organizationId === safeOrganizationId
-    ))
+    const scopes = await this.readPersistedScopes({
+      accountId: safeAccountId,
+      organizationId: safeOrganizationId,
+    })
     const retained = new Set<string>()
     for (
       let offset = 0;
@@ -483,6 +489,33 @@ export class ScopedLocalAppRuntimeRegistry {
     return Promise.all(safeScopes.map(scope => this.stopApp(scope))).then(() => {})
   }
 
+  authorizeApps(scopes: CatalogLocalAppScope[]): void {
+    const safeScopes = scopes.map(validateCatalogLocalAppScope)
+    for (const scope of safeScopes) {
+      const appKey = createCatalogLocalAppScopeKey(scope)
+      const lifecycleGeneration = this.getAppLifecycleGeneration(appKey)
+      const cleanup = this.stopAppPromises.get(appKey)
+      if (!cleanup) {
+        this.deniedApps.delete(appKey)
+        continue
+      }
+      void cleanup.then(() => {
+        // A cache commit may re-authorize an App while its prior withdrawal
+        // cleanup is still running. Release only after that cleanup succeeds,
+        // and only if no later withdrawal advanced the App lifecycle again.
+        if (
+          this.getAppLifecycleGeneration(appKey) === lifecycleGeneration
+          && !this.stopAppPromises.has(appKey)
+        ) {
+          this.deniedApps.delete(appKey)
+        }
+      }, () => {
+        // Failed cleanup retains the deny gate. A later successful Catalog
+        // sync may retry authorization after cleanup recovery.
+      })
+    }
+  }
+
   private stopApp(rawScope: CatalogLocalAppScope): Promise<void> {
     const scope = validateCatalogLocalAppScope(rawScope)
     const appKey = createCatalogLocalAppScopeKey(scope)
@@ -490,12 +523,12 @@ export class ScopedLocalAppRuntimeRegistry {
     // app fence and advance its non-reusable generation synchronously, before
     // any manager/filesystem cleanup can yield.
     this.deniedApps.add(appKey)
-    const existingStop = this.stopAppPromises.get(appKey)
-    if (existingStop) return existingStop
     this.appLifecycleGenerations.set(
       appKey,
       this.getAppLifecycleGeneration(appKey) + 1,
     )
+    const existingStop = this.stopAppPromises.get(appKey)
+    if (existingStop) return existingStop
     const stopPromise = this.performStopScopes(
       scope.accountId,
       scope.organizationId,
@@ -503,10 +536,6 @@ export class ScopedLocalAppRuntimeRegistry {
     ).finally(() => {
       if (this.stopAppPromises.get(appKey) === stopPromise) {
         this.stopAppPromises.delete(appKey)
-        // The Catalog cache is the durable authorization gate after cleanup.
-        // Releasing this transient fence lets a later re-published App use the
-        // already-advanced generation without reusing old operation results.
-        this.deniedApps.delete(appKey)
       }
     })
     this.stopAppPromises.set(appKey, stopPromise)
@@ -584,7 +613,11 @@ export class ScopedLocalAppRuntimeRegistry {
     const scopesByKey = new Map<string, CatalogLocalAppScope>()
     for (const scope of [
       ...this.managerScopes.values(),
-      ...await this.readPersistedScopes(),
+      ...await this.readPersistedScopes({
+        accountId: safeAccountId,
+        organizationId: safeOrganizationId,
+        catalogAppId: safeCatalogAppId,
+      }),
     ]) {
       scopesByKey.set(createCatalogLocalAppScopeKey(scope), scope)
     }
@@ -907,7 +940,11 @@ export class ScopedLocalAppRuntimeRegistry {
     }
   }
 
-  private async readPersistedScopes(): Promise<CatalogLocalAppScope[]> {
+  private async readPersistedScopes(filter: {
+    accountId?: string
+    organizationId?: string
+    catalogAppId?: string
+  } = {}): Promise<CatalogLocalAppScope[]> {
     let entries
     try {
       entries = await readdir(this.scopesDir, { withFileTypes: true })
@@ -915,15 +952,43 @@ export class ScopedLocalAppRuntimeRegistry {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
       throw error
     }
-    const scopes = await Promise.all(entries
-      .filter(entry => entry.isDirectory())
-      .map(entry => this.readScopeRecord(join(this.scopesDir, entry.name, 'scope.json'))))
+    const directories = entries.filter(entry => entry.isDirectory())
+    const scopes = new Array<CatalogLocalAppScope | null>(directories.length)
+    let nextIndex = 0
+    // Scope directories are tuple hashes, so scope.json is the earliest place
+    // account/organization identity can be filtered. Bound those reads before
+    // any matching scope is allowed to trigger metadata or manager I/O.
+    const workers = Array.from({
+      length: Math.min(PERSISTED_SCOPE_READ_CONCURRENCY, directories.length),
+    }, async () => {
+      while (nextIndex < directories.length) {
+        const index = nextIndex++
+        const scope = await this.readScopeRecord(join(
+          this.scopesDir,
+          directories[index]!.name,
+          'scope.json',
+        ))
+        scopes[index] = scope
+          && (filter.accountId === undefined || scope.accountId === filter.accountId)
+          && (
+            filter.organizationId === undefined
+            || scope.organizationId === filter.organizationId
+          )
+          && (
+            filter.catalogAppId === undefined
+            || scope.catalogAppId === filter.catalogAppId
+          )
+          ? scope
+          : null
+      }
+    })
+    await Promise.all(workers)
     return scopes.filter((scope): scope is CatalogLocalAppScope => scope !== null)
   }
 
   private async readScopeRecord(path: string): Promise<CatalogLocalAppScope | null> {
     try {
-      const raw = JSON.parse(await readFile(path, 'utf8')) as Partial<PersistedScope>
+      const raw = JSON.parse(await this.scopeRecordReader(path)) as Partial<PersistedScope>
       if (raw.schemaVersion !== SCOPE_SCHEMA_VERSION) return null
       return validateCatalogLocalAppScope(raw.scope)
     } catch {

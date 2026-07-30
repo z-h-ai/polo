@@ -2539,44 +2539,48 @@ describe('registerAdminHandlers', () => {
     })
   })
 
-  it('keeps the last app catalog when a non-auth refresh fails', async () => {
-    const organizationId = '11111111-1111-4111-8111-111111111111'
-    managerState.tokens = {
-      accessToken: 'access-token',
-      refreshToken: 'refresh-token',
-      expiresAt: Date.now() + 3600_000,
-      userId: 'user-1',
-      username: 'admin',
-    }
-    const cached = {
-      accountId: 'user-1',
-      organizationId,
-      authorizationStatus: 'authorized',
-      appConfigVersion: 'apps-v1',
-      syncedAt: 50,
-      apps: [],
-    }
-    appCatalogCache.set(`user-1:${organizationId}`, cached)
-    adminClientBehavior.getAppCatalog = async () => {
-      throw new TestAdminError('offline', 'NETWORK_ERROR')
-    }
-    const { syncAppCatalog } = createHarness()
+  it('keeps the last app catalog when a network request fails or times out', async () => {
+    for (const errorCode of ['NETWORK_ERROR', 'TIMEOUT']) {
+      const organizationId = `11111111-1111-4111-8111-11111111111${
+        errorCode === 'TIMEOUT' ? '2' : '1'
+      }`
+      managerState.tokens = {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: Date.now() + 3600_000,
+        userId: 'user-1',
+        username: 'admin',
+      }
+      const cached = {
+        accountId: 'user-1',
+        organizationId,
+        authorizationStatus: 'authorized',
+        appConfigVersion: 'apps-v1',
+        syncedAt: 50,
+        apps: [],
+      }
+      appCatalogCache.set(`user-1:${organizationId}`, cached)
+      adminClientBehavior.getAppCatalog = async () => {
+        throw new TestAdminError('offline', errorCode)
+      }
+      const { syncAppCatalog } = createHarness()
 
-    const result = await syncAppCatalog(
-      { clientId: 'client-1', workspaceId: null, webContentsId: null },
-      organizationId,
-      { force: true },
-    )
+      const result = await syncAppCatalog(
+        { clientId: 'client-1', workspaceId: null, webContentsId: null },
+        organizationId,
+        { force: true },
+      )
 
-    expect(result).toEqual({
-      success: true,
-      catalog: cached,
-      source: 'cache',
-      refreshed: false,
-      accessMode: 'offline',
-      warningCode: 'NETWORK_ERROR',
-      warning: 'Admin request failed',
-    })
+      expect(result).toEqual({
+        success: true,
+        catalog: cached,
+        source: 'cache',
+        refreshed: false,
+        accessMode: 'offline',
+        warningCode: errorCode,
+        warning: 'Admin request failed',
+      })
+    }
   })
 
   it('returns an auth failure and marks cached apps unavailable after a cached 403', async () => {

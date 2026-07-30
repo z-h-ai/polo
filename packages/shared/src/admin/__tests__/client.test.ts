@@ -521,6 +521,66 @@ describe('AdminClient', () => {
     });
   });
 
+  it('times out both a hanging fetch and a hanging response body', async () => {
+    for (const phase of ['fetch', 'body'] as const) {
+      let capturedSignal: AbortSignal | undefined;
+      let abortCount = 0;
+      const hangUntilAbort = (signal: AbortSignal) =>
+        new Promise<never>((_resolve, reject) => {
+          const onAbort = () => {
+            abortCount += 1;
+            signal.removeEventListener('abort', onAbort);
+            reject(signal.reason);
+          };
+          signal.addEventListener('abort', onAbort);
+        });
+      globalThis.fetch = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        capturedSignal = init?.signal as AbortSignal;
+        if (phase === 'fetch') return hangUntilAbort(capturedSignal);
+        return {
+          ok: true,
+          status: 200,
+          text: () => hangUntilAbort(capturedSignal!),
+        } as unknown as Response;
+      }) as typeof globalThis.fetch;
+
+      const client = new AdminClient('https://admin.example.com', {
+        requestTimeoutMs: 10,
+      });
+      await expect(client.getAuthConfig()).rejects.toMatchObject({
+        errorCode: 'TIMEOUT',
+        message: 'Admin request timed out',
+      });
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(abortCount).toBe(1);
+    }
+  });
+
+  it('clears the request deadline after the response body is consumed', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      capturedSignal = init?.signal as AbortSignal;
+      return new Response(JSON.stringify({ phoneAuthEnabled: true }), {
+        status: 200,
+      });
+    }) as typeof globalThis.fetch;
+    const client = new AdminClient('https://admin.example.com', {
+      requestTimeoutMs: 10,
+    });
+
+    await expect(client.getAuthConfig()).resolves.toEqual({
+      phoneAuthEnabled: true,
+    });
+    await Bun.sleep(20);
+    expect(capturedSignal?.aborted).toBe(false);
+  });
+
   it('drops retryAfter values outside the stable numeric range', async () => {
     for (const retryAfter of [-1, 0, 86_401, '60', { seconds: 60 }]) {
       mockJsonFetch({

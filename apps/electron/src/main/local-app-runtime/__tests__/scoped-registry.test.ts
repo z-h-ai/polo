@@ -19,6 +19,7 @@ import { LocalAppRuntimeError } from '../runtime-error'
 import {
   createCatalogLocalAppScopeKey,
   createCatalogRuntimeAppId,
+  PERSISTED_SCOPE_READ_CONCURRENCY,
   ScopedLocalAppRuntimeRegistry,
   type CatalogLocalAppScope,
 } from '../scoped-registry'
@@ -158,6 +159,80 @@ describe('scoped local app runtime registry', () => {
       'account-a',
       'organization-1',
     )).resolves.toEqual(new Set(['installed-app']))
+  })
+
+  it('bounds a 10,000-scope scan and materializes only the target account and organization', async () => {
+    const scopesDir = join(rootDir, 'catalog-scopes')
+    await mkdir(scopesDir, { recursive: true })
+    const scopeRecords = new Map<string, string>()
+    const allScopes = Array.from({ length: 10_000 }, (_, index) => ({
+      ...scope(index % 1_000 === 0 ? 'account-a' : 'account-b'),
+      organizationId: index % 1_000 === 0
+        ? 'organization-1'
+        : 'organization-2',
+      catalogAppId: `app-${index}`,
+    }))
+    for (let offset = 0; offset < allScopes.length; offset += 128) {
+      await Promise.all(allScopes.slice(offset, offset + 128).map(async catalogScope => {
+        const scopeDir = join(
+          scopesDir,
+          createCatalogLocalAppScopeKey(catalogScope),
+        )
+        await mkdir(scopeDir)
+        scopeRecords.set(
+          join(scopeDir, 'scope.json'),
+          JSON.stringify({ schemaVersion: 1, scope: catalogScope }),
+        )
+      }))
+    }
+    for (const catalogScope of [allScopes[0]!, allScopes[1]!]) {
+      const appDir = join(
+        scopesDir,
+        createCatalogLocalAppScopeKey(catalogScope),
+        'apps',
+        createCatalogRuntimeAppId(catalogScope),
+      )
+      await mkdir(appDir, { recursive: true })
+      await writeFile(join(appDir, 'metadata.json'), '{}')
+    }
+
+    let activeReads = 0
+    let maxActiveReads = 0
+    let readCount = 0
+    let managerCount = 0
+    class TrackingManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus> {
+        return { appId, status: 'installed', currentVersion: '1.0.0' }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      scopeRecordReader: async path => {
+        readCount += 1
+        activeReads += 1
+        maxActiveReads = Math.max(maxActiveReads, activeReads)
+        try {
+          await Promise.resolve()
+          const record = scopeRecords.get(path)
+          if (record === undefined) throw new Error('ENOENT')
+          return record
+        } finally {
+          activeReads -= 1
+        }
+      },
+      managerFactory: options => {
+        managerCount += 1
+        return new TrackingManager(options)
+      },
+    })
+
+    await expect(registry.getRetainedCatalogAppIds(
+      'account-a',
+      'organization-1',
+    )).resolves.toEqual(new Set(['app-0']))
+    expect(maxActiveReads).toBeLessThanOrEqual(PERSISTED_SCOPE_READ_CONCURRENCY)
+    expect(readCount).toBe(10_010)
+    expect(managerCount).toBe(1)
   })
 
   it('loads one existing manager for duplicate scopes in a concurrent batch', async () => {
@@ -428,6 +503,11 @@ describe('scoped local app runtime registry', () => {
       code: 'NOT_AUTHORIZED',
     })
     await cleanup
+    await expect(registry.getRuntimeStatus(withdrawnScope))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    registry.authorizeApps([withdrawnScope])
+    await expect(registry.getRuntimeStatus(withdrawnScope))
+      .resolves.toMatchObject({ appId: withdrawnScope.catalogAppId })
     expect(stopped).toEqual([withdrawnRuntimeId])
   })
 

@@ -341,6 +341,7 @@ export type AdminErrorCode =
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
   | 'SERVER_ERROR'
+  | 'TIMEOUT'
   | 'NETWORK_ERROR'
   | 'UNKNOWN_ERROR'
   | 'idempotency_conflict'

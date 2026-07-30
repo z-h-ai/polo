@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { type ChildProcess, type spawn as spawnProcess } from 'child_process'
 import { createHash } from 'crypto'
 import { EventEmitter } from 'events'
+import { watch } from 'fs'
 import { createServer, type Server } from 'http'
 import {
   chmod,
@@ -151,7 +152,12 @@ function requestFor(
 
 function makeManager(options: Pick<
   LocalAppRuntimeManagerOptions,
-  'uvPath' | 'bunPath' | 'baseEnvironment' | 'portAllocator' | 'onInstallProgress'
+  | 'uvPath'
+  | 'bunPath'
+  | 'baseEnvironment'
+  | 'portAllocator'
+  | 'onInstallProgress'
+  | 'onManagedProcessStarted'
 > = {}): LocalAppRuntimeManager {
   manager = new LocalAppRuntimeManager({
     rootDir: join(testRoot, 'runtime'),
@@ -322,6 +328,48 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function waitForJsonFile<T>(path: string): Promise<T> {
+  return new Promise<T>((resolveFile, rejectFile) => {
+    const directory = join(path, '..')
+    const filename = path.slice(directory.length + 1)
+    let settled = false
+    let reading = false
+    let readRequested = false
+    const watcher = watch(directory)
+    const settle = (error?: unknown, value?: T) => {
+      if (settled) return
+      settled = true
+      watcher.close()
+      if (error) rejectFile(error)
+      else resolveFile(value!)
+    }
+    const read = async () => {
+      if (settled) return
+      if (reading) {
+        readRequested = true
+        return
+      }
+      reading = true
+      try {
+        settle(undefined, JSON.parse(await readFile(path, 'utf8')) as T)
+      } catch {
+        // The initial probe may run before the producer writes the file.
+      } finally {
+        reading = false
+        if (readRequested) {
+          readRequested = false
+          void read()
+        }
+      }
+    }
+    watcher.on('change', (_event, changed) => {
+      if (changed === null || changed.toString() === filename) void read()
+    })
+    watcher.once('error', settle)
+    void read()
+  })
+}
+
 async function getFreeLocalPort(): Promise<number> {
   const server = createServer()
   await new Promise<void>((resolveListen, rejectListen) => {
@@ -392,19 +440,25 @@ async function launchHangingDependencyInstall(appId: string): Promise<{
   )
   const archive = await archiveBundle(bundle, appId)
   const url = await serveArchive(archive)
-  const runtime = makeManager({ bunPath: fakeBunPath })
+  const dataDir = join(testRoot, `runtime/apps/${appId}/data`)
+  await mkdir(dataDir, { recursive: true })
+  const pidFile = join(dataDir, 'installer-pids.json')
+  const pidsWritten = waitForJsonFile<{ root: number; child: number }>(pidFile)
+  let dependencyStarted!: () => void
+  const dependencyStart = new Promise<void>(resolve => {
+    dependencyStarted = resolve
+  })
+  const runtime = makeManager({
+    bunPath: fakeBunPath,
+    onManagedProcessStarted: (startedAppId, kind) => {
+      if (startedAppId === appId && kind === 'dependency-preparation') {
+        dependencyStarted()
+      }
+    },
+  })
   const install = runtime.install(requestFor(appId, '1.0.0', url, archive))
-  const pidFile = join(testRoot, `runtime/apps/${appId}/data/installer-pids.json`)
-  let pids: { root: number; child: number } | undefined
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    try {
-      pids = JSON.parse(await readFile(pidFile, 'utf8')) as { root: number; child: number }
-      break
-    } catch {
-      await Bun.sleep(10)
-    }
-  }
-  if (!pids) throw new Error(`dependency installer for ${appId} did not start`)
+  await dependencyStart
+  const pids = await pidsWritten
   return { runtime, install, pids }
 }
 
@@ -1395,28 +1449,35 @@ package = false
     )
     const archive = await archiveBundle(bundle, 'install-tree')
     const url = await serveArchive(archive)
-    const runtime = makeManager({ bunPath: fakeBunPath })
-    const install = runtime.install(requestFor('demo.install-tree', '1.0.0', url, archive))
-    const pidFile = join(
+    const dataDir = join(
       testRoot,
-      'runtime/apps/demo.install-tree/data/installer-pids.json',
+      'runtime/apps/demo.install-tree/data',
     )
-    let pids: { root: number; child: number } | undefined
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      try {
-        pids = JSON.parse(await readFile(pidFile, 'utf8')) as { root: number; child: number }
-        break
-      } catch {
-        await Bun.sleep(10)
-      }
-    }
-    expect(pids?.root).toBeGreaterThan(0)
-    expect(pids?.child).toBeGreaterThan(0)
+    await mkdir(dataDir, { recursive: true })
+    const pidFile = join(dataDir, 'installer-pids.json')
+    const pidsWritten = waitForJsonFile<{ root: number; child: number }>(pidFile)
+    let dependencyStarted!: () => void
+    const dependencyStart = new Promise<void>(resolve => {
+      dependencyStarted = resolve
+    })
+    const runtime = makeManager({
+      bunPath: fakeBunPath,
+      onManagedProcessStarted: (appId, kind) => {
+        if (appId === 'demo.install-tree' && kind === 'dependency-preparation') {
+          dependencyStarted()
+        }
+      },
+    })
+    const install = runtime.install(requestFor('demo.install-tree', '1.0.0', url, archive))
+    await dependencyStart
+    const pids = await pidsWritten
+    expect(pids.root).toBeGreaterThan(0)
+    expect(pids.child).toBeGreaterThan(0)
 
     expect(runtime.cancelInstall('demo.install-tree')).toBe(true)
     await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
-    expect(isProcessAlive(pids!.root)).toBe(false)
-    expect(isProcessAlive(pids!.child)).toBe(false)
+    expect(isProcessAlive(pids.root)).toBe(false)
+    expect(isProcessAlive(pids.child)).toBe(false)
   })
 
   it('blocks shutdown on retained dependency cleanup handles and succeeds after retry recovery', async () => {

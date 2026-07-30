@@ -59,6 +59,15 @@ export interface HandlerDeps<
     catalogAppIds: readonly string[],
   ) => Promise<void>
   /**
+   * Releases exact App lifecycle deny gates only after a successful Catalog
+   * cache commit explicitly includes those Apps again.
+   */
+  onAdminCatalogAppsAuthorized?: (
+    accountId: string,
+    organizationId: string,
+    catalogAppIds: readonly string[],
+  ) => void
+  /**
    * Returns Catalog business ids that still have local installation or
    * runtime data and therefore must survive withdrawn tombstone pruning.
    */

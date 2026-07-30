@@ -63,6 +63,7 @@ export {
   createCatalogLocalAppScopeKey,
   createCatalogRuntimeAppId,
   MAX_CATALOG_STATUS_SCOPES,
+  PERSISTED_SCOPE_READ_CONCURRENCY,
   ScopedLocalAppRuntimeRegistry,
   validateCatalogLocalAppScope,
 } from './scoped-registry'

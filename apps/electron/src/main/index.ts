@@ -780,6 +780,18 @@ app.whenReady().then(async () => {
                 catalogAppId,
               })),
             ),
+            onAdminCatalogAppsAuthorized: (
+              accountId: string,
+              organizationId: string,
+              catalogAppIds: readonly string[],
+            ) => getScopedLocalAppRuntimeRegistry().authorizeApps(
+              catalogAppIds.map(catalogAppId => ({
+                kind: 'catalog' as const,
+                accountId,
+                organizationId,
+                catalogAppId,
+              })),
+            ),
             getRetainedCatalogAppIds: (
               accountId: string,
               organizationId: string,

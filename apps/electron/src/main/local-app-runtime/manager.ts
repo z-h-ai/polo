@@ -216,6 +216,12 @@ export interface LocalAppRuntimeManagerOptions {
     appId: string,
     progress: LocalAppInstallProgress,
   ) => void
+  /** Test/embedding seam fired after a process is lifecycle-tracked. */
+  onManagedProcessStarted?: (
+    appId: string,
+    kind: 'dependency-preparation' | 'runtime',
+    pid: number | undefined,
+  ) => void
 }
 
 const noopLogger: LocalAppRuntimeLogger = {
@@ -327,6 +333,8 @@ export class LocalAppRuntimeManager {
   private readonly windowsJobObjectOwnerFactory: () => Promise<WindowsJobObjectOwner>
   private readonly windowsProcessTreeOwnerFactory: (rootPid: number) => WindowsProcessTreeOwner
   private readonly onInstallProgress?: LocalAppRuntimeManagerOptions['onInstallProgress']
+  private readonly onManagedProcessStarted?:
+    LocalAppRuntimeManagerOptions['onManagedProcessStarted']
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly managedProcesses = new Map<string, ManagedProcessOperation>()
@@ -368,6 +376,7 @@ export class LocalAppRuntimeManager {
     this.windowsProcessTreeOwnerFactory = options.windowsProcessTreeOwnerFactory
       ?? createWindowsProcessTreeOwner
     this.onInstallProgress = options.onInstallProgress
+    this.onManagedProcessStarted = options.onManagedProcessStarted
   }
 
   initialize(): Promise<void> {
@@ -2304,6 +2313,7 @@ export class LocalAppRuntimeManager {
       processTreeOwnerAssigned,
     }
     this.managedProcesses.set(operation.id, operation)
+    this.onManagedProcessStarted?.(appId, kind, child.pid)
     return operation
   }
 
