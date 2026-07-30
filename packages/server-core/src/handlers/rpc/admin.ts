@@ -79,6 +79,11 @@ interface AdminSessionSnapshot {
   tokens: StoredAdminTokens
 }
 
+interface AdminSessionEndingTransition {
+  session: AdminSessionSnapshot
+  cleanup: Promise<void>
+}
+
 interface AdminRequestContext {
   session: AdminSessionSnapshot
 }
@@ -116,6 +121,16 @@ class AdminSessionChangedError extends Error {
   }
 }
 
+/**
+ * Serializes trusted Admin session transitions. The session generation, login
+ * attempt, and ending snapshot are advanced only by code running under
+ * `runExclusive`; an ending generation therefore closes every older commit
+ * before the lock is released. Host cleanup is started while that transition
+ * is locked, but its slow promise stays outside the mutation tail so a new
+ * login is not blocked. Cleanup is single-flight per account until settlement,
+ * and the recorded generation keeps an older finalizer from deleting a newer
+ * cleanup entry.
+ */
 class AdminSessionCoordinator {
   private generation = 0
   private mutationTail: Promise<void> = Promise.resolve()
@@ -238,7 +253,8 @@ class AdminSessionCoordinator {
   async beginEnding(
     manager: CredentialManager,
     expected: AdminSessionSnapshot,
-  ): Promise<AdminSessionSnapshot | null> {
+    beginAccountCleanup: (accountId: string) => void | Promise<void>,
+  ): Promise<AdminSessionEndingTransition | null> {
     return this.runExclusive(async () => {
       const current = await manager.getAdminTokens()
       if (!this.matches(current, expected)) return null
@@ -246,7 +262,15 @@ class AdminSessionCoordinator {
       const ending = this.createSnapshot(current!)
       this.endingSession = ending
       this.closeAuthorizationForEnding(current!.userId)
-      return ending
+      const cleanup = this.getOrStartAccountCleanup(
+        current!.userId,
+        ending.generation,
+        () => beginAccountCleanup(current!.userId),
+      )
+      // The caller awaits and reports this promise after any remote side
+      // effect. Observe it now so a fast rejection cannot become unhandled.
+      void cleanup.catch(() => {})
+      return { session: ending, cleanup }
     })
   }
 
@@ -1408,10 +1432,15 @@ async function endAdminSession(
   beforeDelete?: () => void | Promise<void>,
   whileEnding?: () => void | Promise<void>,
 ): Promise<boolean> {
-  const ending = await sessions.beginEnding(manager, expected)
-  if (!ending) return false
+  const transition = await sessions.beginEnding(
+    manager,
+    expected,
+    accountId => deps?.onAdminSessionEnding?.(accountId),
+  )
+  if (!transition) return false
+  const { session: ending, cleanup } = transition
 
-  // Authorization is already closed and the ending generation is visible.
+  // Catalog authorization and the host lifecycle fence are already active.
   // Slow remote/process cleanup stays outside the lock so a replacement login
   // can proceed; final token deletion is guarded by the ending snapshot CAS.
   try {
@@ -1423,11 +1452,7 @@ async function endAdminSession(
     )
   }
   try {
-    await sessions.getOrStartAccountCleanup(
-      expected.tokens.userId,
-      ending.generation,
-      () => deps?.onAdminSessionEnding?.(expected.tokens.userId),
-    )
+    await cleanup
   } catch (error) {
     deps?.platform.logger.warn(
       '[Admin] local app cleanup failed while ending the session; continuing fail-closed cleanup:',

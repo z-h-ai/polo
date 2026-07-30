@@ -28,8 +28,10 @@ export interface HandlerDeps<
   oauthFlowStore: TOAuthFlowStore
   messagingRegistry?: IMessagingGatewayRegistry
   /**
-   * Host-owned cleanup invoked while the trusted Admin identity is still
-   * available and before credentials are deleted.
+   * Host-owned session-ending hook invoked inside the trusted transition lock.
+   * It must synchronously fence new and in-flight lifecycle result commits,
+   * then return the promise for slow stop/cancel cleanup. The promise is awaited
+   * outside the lock and before credentials are deleted.
    */
   onAdminSessionEnding?: (accountId: string) => Promise<void>
   /**

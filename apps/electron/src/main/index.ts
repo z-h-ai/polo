@@ -756,9 +756,8 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
-            onAdminSessionEnding: async (accountId: string) => {
-              await getScopedLocalAppRuntimeRegistry().stopAccount(accountId)
-            },
+            onAdminSessionEnding: (accountId: string) =>
+              getScopedLocalAppRuntimeRegistry().stopAccount(accountId),
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },

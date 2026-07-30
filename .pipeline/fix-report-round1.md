@@ -1,84 +1,54 @@
-# POL-51 Reviewer 第 1 轮修复报告
+# POL-51 第 1 轮 Review 修复报告
 
-## 逐条问题处理结果
+## 每条 issue 的处理结果
 
-### 1. 过期 token 刷新失败的离线白名单
+### 1. Logout 慢远端请求窗口内未建立本地生命周期 fence
 
-- 已修复。`ensureValidTokens` 现在只允许 `NETWORK_ERROR`、`SERVER_ERROR` 和 HTTP 5xx 等明确临时错误沿用最近验证身份进入受限离线模式。
-- HTTP 400、`VALIDATION_ERROR`、未知 4xx 及其他未归类刷新异常均结束当前可信 Admin 会话、清理凭据并 fail closed，不再携带旧身份返回 offline。
-- 新增 HTTP 400、`VALIDATION_ERROR`、未知 422 回归覆盖，同时保留既有网络失败离线启动测试。
+已修复。
 
-### 2. Catalog NOT_FOUND 后的旧目录与 remote_url 授权
+- `AdminSessionCoordinator.beginEnding()` 现在会在同一会话转换锁内依次推进 ending generation、关闭 Catalog 授权，并立即调用 `onAdminSessionEnding` 建立本地 App 生命周期 fence。
+- `stopAccount(accountId)` 返回的慢停止／取消 Promise 仍在锁外等待，不阻塞新账号登录；远端 logout 与本地清理并行进行，最终凭据删除继续受 ending snapshot CAS 保护。
+- Electron 生产接线直接返回 `ScopedLocalAppRuntimeRegistry.stopAccount()` Promise，确保调用 hook 时同步执行 registry 的账号 gate 与 lifecycle generation 推进。
+- 新增真实 `registerAdminHandlers + registerLocalAppHandlers + ScopedLocalAppRuntimeRegistry` 确定性回归测试：公开 START RPC 已进入且远端 logout 挂起时，迟到的 localhost 启动结果返回 `NOT_AUTHORIZED`，并由同一账号清理链调用 `stop` 回收产生的进程。
 
-- 已修复。renderer 收到 `NOT_FOUND` 或其他明确失权结果后立即清除旧 Catalog、运行状态与警告，并提交 `accessMode = denied` 投影。
-- 新增 `local-apps:resolveRemoteUrl` 强类型 RPC。组织远程 App 打开前，主进程会用当前可信账号、Catalog 缓存、授权状态、App 可见性和交付类型重新校验，并只返回缓存中的可信 URL。
-- renderer 不再直接用旧 `remoteUrl` 打开 WebView；组织/账号切换后的迟到解析结果仍受 context generation 校验。
-- 覆盖“先成功缓存、后 NOT_FOUND”、旧 remote card 点击不打开 WebView，以及主进程 denied 后拒绝 URL 解析。
+### 2. AdminSessionCoordinator 缺少并发不变量 why 注释
 
-### 3. 批量运行状态的部分失败
+已修复。
 
-- 已修复。状态读取按 10,000 项逐批提交成功结果；单批失败不再丢弃其他批次，也不再构造 `not_installed`。
-- 失败 scope 保留上次可信状态；从未成功读取的 scope 记录为“状态不可用”，卡片禁用安装/打开主操作，避免把未知状态误判为未安装。
-- 增加可见的状态读取失败提示和重试入口；完整重试成功后清除失败 scope。
-- 覆盖第二批失败、第一批成功、失败批次保留旧状态、未知状态不合成 `not_installed`、重试恢复。
-
-### 4. 最大目录渲染性能
-
-- 已修复。首页仅纳入当前可见 App，以及确有可信本地运行/安装状态的 withdrawn Bundle App。
-- 组织应用采用每段 60 张卡片的渐进加载，首屏不再一次渲染约 20,000 张复杂卡片。
-- 覆盖 `10,000 visible + 10,000 withdrawn`：首屏 60 张、仅保留有本地数据的 withdrawn App、加载更多后 120 张。
-
-### 5. SemVer 实现统一建议
-
-- 本轮未统一。当前三处实现位于缓存迁移/可信 Release 保留、主进程授权运行态派生和 renderer 展示层，直接抽取会扩大本轮安全修复的迁移与依赖风险。
-- 既有 SemVer 2.0、前导 `v`、prerelease、无效版本可见性测试继续保留；建议后续独立重构为 shared 纯函数并做三层替换。
+- 增加类级注释，说明 session generation、login attempt、ending snapshot 只在 `runExclusive` 转换中推进。
+- 说明 ending generation 如何在释放锁前淘汰旧提交、慢 cleanup 为什么必须留在锁外，以及账号 cleanup Promise 的 single-flight／generation 去重边界。
+- 同步加强 `HandlerDeps.onAdminSessionEnding` 契约注释，明确 hook 必须先同步建立 fence，再返回慢清理 Promise。
 
 ## 关键文件
 
 - `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-- `apps/electron/src/main/handlers/local-apps.ts`
-- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
-- `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
-- `apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
-- `packages/shared/src/protocol/local-apps.ts`
-- `packages/shared/src/protocol/channels.ts`
-- `packages/shared/src/protocol/routing.ts`
-- `apps/electron/src/shared/types.ts`
-- `apps/electron/src/transport/channel-map.ts`
-- `packages/shared/src/i18n/locales/*.json`
+- `packages/server-core/src/handlers/handler-deps.ts`
+- `apps/electron/src/main/index.ts`
+- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+- `.pipeline/fix-report-round1.md`
 
-## 自测结果
+## 自测命令与结果
 
+- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+  - 结果：1 pass，0 fail。
 - `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 44 pass，0 fail。
+  - 结果：50 pass，0 fail。
+- `bun test apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
+  - 结果：13 pass，0 fail。
 - `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-  - 9 pass，0 fail。
-- `bun test ./apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-  - 11 pass，0 fail。
-- `bun test ./apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
-  - 5 pass，0 fail。
-- `bun test ./apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.offline-start.interaction.isolated.ts`
-  - 1 pass，0 fail。
-- 协议路由、handler 注册、channel map、`OrganizationAppCard` 联合回归
-  - 23 pass，0 fail。
+  - 结果：17 pass，0 fail。
 - `bun run typecheck:all`
-  - 通过。
-- `bun run lint:i18n:parity`
-  - 通过，6 个非英文 locale 与英文各 1706 keys。
-- `bun run lint:i18n:sorted`
-  - 通过。
-- `bun run lint:i18n:coverage`
-  - 通过。
-- 变更文件定向 ESLint
-  - 0 error；3 个既有测试 `localStorage` 规则 warning。
+  - 结果：通过。
+- `cd apps/electron && bunx eslint src/main/index.ts src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+  - 结果：通过，0 error。
+- `bun run electron:build:main`
+  - 结果：主进程构建并校验通过。
+- `bun run test`
+  - 最终结果：全量非 isolated 测试 4792 pass、19 skip、0 fail；随后全部 isolated 测试通过，包含本轮新增生产接线竞态测试。
+  - 说明：首次全量运行出现两个与本次改动无关的时序型失败（依赖准备进程树 PID 探测、session watcher 通知）；两项定向重跑均通过，第二次完整全量运行无失败。
 - `git diff --check`
-  - 通过。
+  - 结果：通过。
 
 ## 遗留问题
 
-- SemVer 三份实现尚未统一，原因见第 5 项；不影响本轮阻断问题闭环。
-- 无其他已知阻断问题。
+无本轮遗留问题。
