@@ -335,7 +335,14 @@ export interface TerminalIntegrationStatus {
     path: string
   }
   launcherPath: string
+  launcherTarget?: string
   profilePath?: string
+  managedProfiles?: string[]
+  shellCheck?: {
+    status: 'ok' | 'timeout' | 'failed'
+    timeoutMs: number
+    outputTruncated?: boolean
+  }
 }
 
 export type TerminalIntegrationOperation = 'status' | 'install' | 'uninstall'

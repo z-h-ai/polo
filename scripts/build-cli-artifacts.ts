@@ -66,6 +66,7 @@ if (!serverBuild.success) {
 
 const cliPath = join(cliDir, 'polo-cli.js')
 const serverPath = join(serverDir, 'polo-server.js')
+const cliPackagePath = join(cliDir, 'package.json')
 if (process.platform !== 'win32') {
   chmodSync(cliPath, 0o755)
   chmodSync(serverPath, 0o755)
@@ -75,6 +76,24 @@ function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
+const sourceCliPackage = JSON.parse(
+  readFileSync(join(root, 'apps', 'cli', 'package.json'), 'utf8'),
+) as { name?: string; license?: string }
+const cliPackage = {
+  name: sourceCliPackage.name ?? '@polo-ai/cli',
+  version: versions.cli,
+  type: 'module',
+  main: './polo-cli.js',
+  bin: {
+    polo: './polo-cli.js',
+    'polo-ai': './polo-cli.js',
+  },
+  license: sourceCliPackage.license
+    ?? JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).license
+    ?? 'Apache-2.0',
+}
+writeFileSync(cliPackagePath, `${JSON.stringify(cliPackage, null, 2)}\n`, 'utf8')
+
 const manifest = {
   schemaVersion: 1,
   version: versions.app,
@@ -82,6 +101,7 @@ const manifest = {
   generatedAt: new Date().toISOString(),
   artifacts: {
     cli: { path: 'dist/cli/polo-cli.js', sha256: sha256(cliPath) },
+    cliPackage: { path: 'dist/cli/package.json', sha256: sha256(cliPackagePath) },
     server: { path: 'dist/server/polo-server.js', sha256: sha256(serverPath) },
   },
 }

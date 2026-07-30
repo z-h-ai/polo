@@ -30,6 +30,9 @@ try {
     & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
 
     $state = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
+    Assert-True ($state.schemaVersion -eq 2) "Polo did not write the SHA-256 ownership state schema."
+    Assert-True ($state.files.Count -eq 2) "Polo did not record both managed launchers."
+    Assert-True ([bool]$state.files[0].sha256) "Polo did not record a managed launcher SHA-256."
     Assert-True (-not $state.pathEntryAddedByPolo) "Polo incorrectly claimed a pre-existing PATH entry."
     $launcher = Get-Content (Join-Path $binDir "polo.cmd") -Raw
     Assert-True ($launcher -match [Regex]::Escape("resources\vendor\bun\bun.exe")) "Launcher does not use bundled Bun."
@@ -41,6 +44,25 @@ try {
     $afterUninstall = (Get-Content $userPathFile -Raw).Trim()
     Assert-True ($afterUninstall -eq $originalPath) "Uninstall removed or changed the user's pre-existing PATH entry."
     Assert-True (-not (Test-Path (Join-Path $binDir "polo.cmd"))) "Managed launcher was not removed."
+
+    # A modified managed file is no longer owned. Upgrade must stop, and
+    # uninstall must preserve both the file and PATH/state evidence.
+    Set-Content -Path $userPathFile -Value "C:\User Tools" -Encoding ASCII
+    & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
+    $managedLauncher = Join-Path $binDir "polo.cmd"
+    Add-Content -Path $managedLauncher -Value "rem user modification"
+    $upgradeStopped = $false
+    try {
+        & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
+    } catch {
+        $upgradeStopped = $true
+    }
+    Assert-True $upgradeStopped "Upgrade replaced a launcher whose SHA-256 no longer matched state."
+
+    & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+    Assert-True (Test-Path $managedLauncher) "Uninstall deleted a modified launcher."
+    Assert-True (Test-Path (Join-Path $binDir "terminal-integration.json")) "Uninstall deleted ownership state after a conflict."
+    Remove-Item -Recurse -Force $binDir
 
     # Upgrade from the old install-app.ps1 launcher. That installer added the
     # same bin directory to PATH but had no ownership state file. The exact
@@ -54,6 +76,7 @@ try {
     & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
 
     $migratedState = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
+    Assert-True ($migratedState.schemaVersion -eq 2) "Legacy launcher migration did not create hash state."
     Assert-True $migratedState.pathEntryAddedByPolo "Polo did not claim its legacy PATH entry during upgrade."
 
     & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile

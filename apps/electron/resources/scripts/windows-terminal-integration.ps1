@@ -38,8 +38,28 @@ function Write-AtomicUtf8([string]$Path, [string]$Content) {
     }
 }
 
-function Is-Managed([string]$Path, [string]$Pattern) {
-    return (Test-Path $Path) -and ((Get-Content $Path -Raw) -match $Pattern)
+function Get-Sha256([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Normalize-LineEndings([string]$Content) {
+    return $Content.Replace("`r`n", "`n")
+}
+
+function Test-ExactContent([string]$Path, [string[]]$AllowedContents) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+    $actual = Normalize-LineEndings ([IO.File]::ReadAllText($Path))
+    foreach ($allowed in $AllowedContents) {
+        if ($actual -ceq (Normalize-LineEndings $allowed)) {
+            return $true
+        }
+    }
+    return $false
 }
 
 function Get-UserPath {
@@ -72,7 +92,7 @@ function Read-State {
     }
     try {
         $state = Get-Content $stateFile -Raw | ConvertFrom-Json
-        if ($state.schemaVersion -ne 1) {
+        if ($state.schemaVersion -ne 1 -and $state.schemaVersion -ne 2) {
             return $null
         }
         return $state
@@ -81,13 +101,42 @@ function Read-State {
     }
 }
 
+function Get-StateFileRecord($State, [string]$Path) {
+    if (-not $State -or $State.schemaVersion -ne 2 -or -not $State.files) {
+        return $null
+    }
+    return $State.files | Where-Object {
+        $_.path -and $_.path.TrimEnd("\") -ieq $Path.TrimEnd("\")
+    } | Select-Object -First 1
+}
+
+function Test-StateOwnedFile($State, [string]$Path) {
+    $record = Get-StateFileRecord $State $Path
+    if (-not $record -or -not $record.sha256) {
+        return $false
+    }
+    $actualHash = Get-Sha256 $Path
+    return $actualHash -and $actualHash -ceq ([string]$record.sha256).ToLowerInvariant()
+}
+
 function Write-State([bool]$PathEntryAddedByPolo) {
+    $files = @()
+    foreach ($managedFile in @($launcher, $legacyLauncher)) {
+        $hash = Get-Sha256 $managedFile
+        if ($hash) {
+            $files += @{
+                path = $managedFile
+                sha256 = $hash
+            }
+        }
+    }
     $state = @{
-        schemaVersion = 1
+        schemaVersion = 2
         pathEntryAddedByPolo = $PathEntryAddedByPolo
         binDir = $BinDir
+        files = $files
         updatedAt = [DateTime]::UtcNow.ToString("o")
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Depth 4
     Write-AtomicUtf8 $stateFile $state
 }
 
@@ -99,9 +148,8 @@ function Test-LegacyPoloLauncher {
         # POO-14 replaces the pre-unified launcher created by install-app.ps1.
         # Match that exact two-line file so an unrelated polo-ai.cmd can never
         # transfer ownership of a user-created PATH entry to Polo.
-        $actual = ((Get-Content $legacyLauncher -Raw) -replace "`r`n", "`n").Trim()
-        $expected = "@echo off`nstart `"`" `"$exePath`" %*"
-        return $actual -ieq $expected
+        $expected = "@echo off`r`nstart `"`" `"$exePath`" %*"
+        return (Test-ExactContent $legacyLauncher @($expected, "$expected`r`n"))
     } catch {
         return $false
     }
@@ -138,24 +186,49 @@ exit /b %ERRORLEVEL%
 "@
 }
 
-function Install-LauncherFiles([bool]$CheckCommandConflict) {
+function Get-LegacyShimContent {
+    return "@echo off`r`necho Warning: 'polo-ai' is deprecated; use 'polo' instead. 1>&2`r`ncall `"$launcher`" %*`r`nexit /b %ERRORLEVEL%"
+}
+
+function Get-HistoricalLauncherAllowlist([string]$Path) {
+    if ($Path.TrimEnd("\") -ieq $launcher.TrimEnd("\")) {
+        $content = Get-LauncherContent
+        return @($content, "$content`r`n")
+    }
+    if ($Path.TrimEnd("\") -ieq $legacyLauncher.TrimEnd("\")) {
+        $shim = Get-LegacyShimContent
+        $oldGui = "@echo off`r`nstart `"`" `"$exePath`" %*"
+        return @($shim, "$shim`r`n", $oldGui, "$oldGui`r`n")
+    }
+    return @()
+}
+
+function Assert-FileOwnedForReplacement($State, [string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    if (Test-StateOwnedFile $State $Path) {
+        return
+    }
+    if (Test-ExactContent $Path (Get-HistoricalLauncherAllowlist $Path)) {
+        return
+    }
+    throw "Polo cannot replace $Path because it is modified or user-owned. Restore the managed file or remove it manually, then retry."
+}
+
+function Install-LauncherFiles([bool]$CheckCommandConflict, $PreviousState) {
     if ($CheckCommandConflict) {
         $existing = Get-Command polo -ErrorAction SilentlyContinue
         if ($existing -and $existing.Source.TrimEnd("\") -ine $launcher.TrimEnd("\")) {
             throw "Another command named polo already exists at $($existing.Source). Polo did not overwrite it."
         }
     }
-    if ((Test-Path $launcher) -and -not (Is-Managed $launcher "managed by Polo AI")) {
-        throw "Another file already exists at $launcher. Polo did not overwrite it."
-    }
+    Assert-FileOwnedForReplacement $PreviousState $launcher
+    Assert-FileOwnedForReplacement $PreviousState $legacyLauncher
 
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     Write-AtomicUtf8 $launcher (Get-LauncherContent)
-
-    if (-not (Test-Path $legacyLauncher) -or (Is-Managed $legacyLauncher "Polo AI|managed by Polo AI|deprecated")) {
-        $legacy = "@echo off`r`necho Warning: 'polo-ai' is deprecated; use 'polo' instead. 1>&2`r`ncall `"$launcher`" %*`r`nexit /b %ERRORLEVEL%"
-        Write-AtomicUtf8 $legacyLauncher $legacy
-    }
+    Write-AtomicUtf8 $legacyLauncher (Get-LegacyShimContent)
 }
 
 if ($Mode -eq "Validate") {
@@ -166,7 +239,7 @@ if ($Mode -eq "Validate") {
         $launcher = Join-Path $BinDir "polo.cmd"
         $legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
         $stateFile = Join-Path $BinDir "terminal-integration.json"
-        Install-LauncherFiles $false
+        Install-LauncherFiles $false $null
         $actualContent = Get-Content $launcher -Raw
         if ($actualContent -match "--polo-cli" -or
             $actualContent -notmatch [Regex]::Escape($bunPath) -or
@@ -195,7 +268,7 @@ if ($Mode -eq "Install") {
         -and $pathEntryPresent `
         -and (Test-LegacyPoloLauncher)
 
-    Install-LauncherFiles (-not $SkipCommandConflict)
+    Install-LauncherFiles (-not $SkipCommandConflict) $previousState
 
     $pathEntryOwned = [bool](
         ($previousState -and $previousState.pathEntryAddedByPolo) `
@@ -215,21 +288,35 @@ if ($Mode -eq "Install") {
 }
 
 $state = Read-State
-if (Is-Managed $launcher "managed by Polo AI") {
-    Remove-Item -Path $launcher -Force
-}
-if (Is-Managed $legacyLauncher "deprecated; use 'polo'") {
-    Remove-Item -Path $legacyLauncher -Force
+$ownershipConflict = $false
+foreach ($managedFile in @($launcher, $legacyLauncher)) {
+    if (-not (Test-Path -LiteralPath $managedFile)) {
+        continue
+    }
+    $owned = Test-StateOwnedFile $state $managedFile
+    if (-not $state) {
+        $owned = Test-ExactContent $managedFile (Get-HistoricalLauncherAllowlist $managedFile)
+    }
+    if ($owned) {
+        Remove-Item -LiteralPath $managedFile -Force
+    } else {
+        $ownershipConflict = $true
+        Write-Warning "Polo left modified or user-owned file unchanged: $managedFile"
+    }
 }
 
-if ($state -and $state.pathEntryAddedByPolo) {
+if (-not $ownershipConflict -and $state -and $state.pathEntryAddedByPolo) {
     $userPath = Get-UserPath
     $remaining = @($userPath -split ";" | Where-Object {
         $_ -and $_.Trim().TrimEnd("\") -ine $BinDir.TrimEnd("\")
     })
     Set-UserPath ($remaining -join ";")
 }
-Remove-Item $stateFile -Force -ErrorAction SilentlyContinue
+if (-not $ownershipConflict) {
+    Remove-Item $stateFile -Force -ErrorAction SilentlyContinue
+} else {
+    Write-Warning "Polo terminal state was preserved because managed files no longer match their recorded SHA-256."
+}
 
 if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir -Force | Select-Object -First 1)) {
     Remove-Item $BinDir -Force

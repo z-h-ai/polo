@@ -62,6 +62,8 @@
     "electron:build:cli": "bun run scripts/build-cli-artifacts.ts",
     "electron:validate:cli": "bun run scripts/validate-cli-artifacts.ts",
     "electron:validate:cli:runtime": "bun run scripts/validate-cli-runtime.ts",
+    "electron:validate:artifacts:unix": "bash apps/electron/scripts/validate-final-artifacts.sh",
+    "electron:validate:artifacts:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File apps/electron/scripts/validate-final-artifacts.ps1",
     "build:wa-worker": "bun run scripts/build-wa-worker.ts",
     "electron:build:assets": "cd apps/electron && bun scripts/copy-assets.ts",
     "electron:build": "bun run electron:build:cli && bun run electron:build:main && bun run electron:build:preload && bun run electron:build:renderer && bun run electron:build:resources && bun run electron:build:assets && bun run electron:validate:cli",

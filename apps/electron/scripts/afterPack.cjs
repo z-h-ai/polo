@@ -30,6 +30,7 @@ function validatePackagedCli(context) {
   const cli = path.join(appDir, 'dist', 'cli', 'polo-cli.js');
   const server = path.join(appDir, 'dist', 'server', 'polo-server.js');
   const manifestPath = path.join(appDir, 'dist', 'cli', 'artifact-manifest.json');
+  const cliPackagePath = path.join(appDir, 'dist', 'cli', 'package.json');
   const wrapper = path.join(appDir, 'resources', 'bin', isWindows ? 'polo.cmd' : 'polo');
   const windowsInstallerScript = path.join(
     appDir,
@@ -39,7 +40,7 @@ function validatePackagedCli(context) {
   );
   const bun = path.join(resourcesDir, 'vendor', 'bun', isWindows ? 'bun.exe' : 'bun');
 
-  const requiredArtifacts = [cli, server, manifestPath, wrapper, bun];
+  const requiredArtifacts = [cli, server, manifestPath, cliPackagePath, wrapper, bun];
   if (isWindows) requiredArtifacts.push(windowsInstallerScript);
   for (const required of requiredArtifacts) {
     if (!fs.existsSync(required)) {
@@ -55,9 +56,31 @@ function validatePackagedCli(context) {
   const sha256 = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   if (
     manifest.artifacts?.cli?.sha256 !== sha256(cli)
+    || manifest.artifacts?.cliPackage?.sha256 !== sha256(cliPackagePath)
     || manifest.artifacts?.server?.sha256 !== sha256(server)
   ) {
-    throw new Error('POO-14 unpacked CLI/server checksums do not match the artifact manifest');
+    throw new Error('POO-14 unpacked CLI metadata/server checksums do not match the artifact manifest');
+  }
+  if (
+    manifest.artifacts?.cliPackage?.path !== 'dist/cli/package.json'
+    || manifest.artifacts?.cli?.path !== 'dist/cli/polo-cli.js'
+    || manifest.artifacts?.server?.path !== 'dist/server/polo-server.js'
+  ) {
+    throw new Error('POO-14 unpacked artifact manifest contains unexpected paths');
+  }
+  const cliPackage = JSON.parse(fs.readFileSync(cliPackagePath, 'utf8'));
+  const allowedPackageKeys = ['name', 'version', 'type', 'main', 'bin', 'license'];
+  if (
+    cliPackage.name !== '@polo-ai/cli'
+    || cliPackage.version !== appVersion
+    || cliPackage.type !== 'module'
+    || cliPackage.main !== './polo-cli.js'
+    || cliPackage.bin?.polo !== './polo-cli.js'
+    || cliPackage.bin?.['polo-ai'] !== './polo-cli.js'
+    || cliPackage.license !== 'Apache-2.0'
+    || Object.keys(cliPackage).some((key) => !allowedPackageKeys.includes(key))
+  ) {
+    throw new Error('POO-14 unpacked sanitized CLI package metadata is invalid');
   }
 
   const archNames = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };

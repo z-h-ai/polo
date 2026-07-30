@@ -2,15 +2,18 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type {
   TerminalIntegrationErrorCode,
@@ -18,9 +21,11 @@ import type {
   TerminalIntegrationOperation,
 } from '../shared/types'
 
-const LAUNCHER_MARKER = '# Polo CLI launcher (managed by Polo AI)'
 const BLOCK_START = '# >>> Polo CLI >>>'
 const BLOCK_END = '# <<< Polo CLI <<<'
+const STATE_SCHEMA_VERSION = 2
+const SHELL_TIMEOUT_MS = 7_000
+const SHELL_OUTPUT_LIMIT = 16 * 1024
 
 class MalformedTerminalProfileError extends Error {}
 
@@ -70,7 +75,14 @@ export interface TerminalIntegrationStatus {
     path: string
   }
   launcherPath: string
+  launcherTarget?: string
   profilePath?: string
+  managedProfiles?: string[]
+  shellCheck?: {
+    status: 'ok' | 'timeout' | 'failed'
+    timeoutMs: number
+    outputTruncated?: boolean
+  }
 }
 
 export interface TerminalIntegrationOptions {
@@ -82,19 +94,42 @@ export interface TerminalIntegrationOptions {
   appVersion: string
   commandLookup?: () => string | null
   commandValidator?: () => { ok: boolean; output?: string }
+  shellTimeoutMs?: number
+  shellOutputLimit?: number
+  shellRunner?: (
+    shell: string,
+    command: string,
+    limits: { timeoutMs: number; outputLimit: number },
+  ) => {
+    status: 'ok' | 'timeout' | 'failed'
+    output?: string
+    outputTruncated?: boolean
+  }
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\"'\"'")}'`
+interface TerminalIntegrationState {
+  schemaVersion: number
+  launcherPath?: string
+  launcherTarget?: string
+  profilePath?: string
+  activeProfile?: string
+  profiles?: string[]
+  updatedAt?: string
 }
 
 function getLauncherPath(options: TerminalIntegrationOptions): string {
   return join(options.homeDir ?? homedir(), '.local', 'bin', 'polo')
 }
 
-function getProfile(options: TerminalIntegrationOptions): { path: string; block: string } {
+function getPackagedLauncherTarget(options: TerminalIntegrationOptions): string {
+  return join(options.resourcesPath, 'app', 'resources', 'bin', 'polo')
+}
+
+function profileForShell(
+  options: TerminalIntegrationOptions,
+  shell = options.shell ?? process.env.SHELL ?? '/bin/zsh',
+): { path: string; block: string } {
   const home = options.homeDir ?? homedir()
-  const shell = options.shell ?? process.env.SHELL ?? '/bin/zsh'
   if (shell.endsWith('/fish')) {
     return {
       path: join(home, '.config', 'fish', 'conf.d', 'polo.fish'),
@@ -113,7 +148,9 @@ function getProfile(options: TerminalIntegrationOptions): { path: string; block:
   }
 }
 
-function managedLauncherContent(options: TerminalIntegrationOptions): string {
+function legacyManagedLauncherContent(options: TerminalIntegrationOptions): string {
+  const shellQuote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`
+  const marker = '# Polo CLI launcher (managed by Polo AI)'
   const appRoot = join(options.resourcesPath, 'app')
   const bun = join(options.resourcesPath, 'vendor', 'bun', 'bun')
   const cli = join(appRoot, 'dist', 'cli', 'polo-cli.js')
@@ -121,7 +158,7 @@ function managedLauncherContent(options: TerminalIntegrationOptions): string {
   const desktopApp = join(options.resourcesPath, '..', '..')
 
   return `#!/bin/sh
-${LAUNCHER_MARKER}
+${marker}
 export POLO_AI_BUN=${shellQuote(bun)}
 export POLO_AI_SERVER_ENTRY=${shellQuote(server)}
 export POLO_AI_APP_ROOT=${shellQuote(appRoot)}
@@ -133,12 +170,50 @@ exec ${shellQuote(bun)} run ${shellQuote(cli)} "$@"
 `
 }
 
+function statePath(options: TerminalIntegrationOptions): string {
+  return join(options.homeDir ?? homedir(), '.polo-ai', 'terminal-integration.json')
+}
+
+function readState(options: TerminalIntegrationOptions): TerminalIntegrationState | null {
+  try {
+    const state = JSON.parse(read(statePath(options))) as TerminalIntegrationState
+    if (state.schemaVersion !== 1 && state.schemaVersion !== STATE_SCHEMA_VERSION) return null
+    return state
+  } catch {
+    return null
+  }
+}
+
+function safeProfilePaths(
+  options: TerminalIntegrationOptions,
+  state = readState(options),
+): string[] {
+  const home = options.homeDir ?? homedir()
+  const known = [
+    join(home, '.zprofile'),
+    join(home, '.bash_profile'),
+    join(home, '.config', 'fish', 'conf.d', 'polo.fish'),
+  ]
+  const stateProfiles = [
+    state?.activeProfile,
+    state?.profilePath,
+    ...(state?.profiles ?? []),
+  ].filter((path): path is string => Boolean(path))
+  const allowed = new Set(known)
+  return [...new Set([...known, ...stateProfiles.filter(path => allowed.has(path))])]
+}
+
 function read(path: string): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
-function isManagedLauncher(content: string): boolean {
-  return content.startsWith(`#!/bin/sh\n${LAUNCHER_MARKER}\n`)
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function isExecutable(path: string): boolean {
@@ -157,11 +232,80 @@ function writeAtomic(path: string, content: string, mode?: number): void {
   if (mode !== undefined) chmodSync(path, mode)
 }
 
+function replaceSymlinkAtomic(path: string, target: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const temp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`
+  symlinkSync(target, temp)
+  try {
+    renameSync(temp, path)
+  } finally {
+    rmSync(temp, { force: true })
+  }
+}
+
 function backup(path: string): string | undefined {
   if (!existsSync(path)) return undefined
   const backupPath = `${path}.polo-backup-${Date.now()}`
   copyFileSync(path, backupPath)
   return backupPath
+}
+
+function writeState(
+  options: TerminalIntegrationOptions,
+  launcherTarget: string,
+  profiles: string[],
+  activeProfile: string,
+): void {
+  writeAtomic(
+    statePath(options),
+    `${JSON.stringify({
+      schemaVersion: STATE_SCHEMA_VERSION,
+      launcherPath: getLauncherPath(options),
+      launcherTarget,
+      activeProfile,
+      profiles: [...new Set(profiles)],
+      updatedAt: new Date().toISOString(),
+    }, null, 2)}\n`,
+    0o600,
+  )
+}
+
+function resolveSymlinkTarget(path: string): string | null {
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return null
+    const target = readlinkSync(path)
+    return resolve(dirname(path), target)
+  } catch {
+    return null
+  }
+}
+
+function isLegacyManagedLauncher(path: string, options: TerminalIntegrationOptions): boolean {
+  try {
+    return !lstatSync(path).isSymbolicLink()
+      && read(path) === legacyManagedLauncherContent(options)
+  } catch {
+    return false
+  }
+}
+
+function isOwnedLauncher(
+  path: string,
+  target: string,
+  state: TerminalIntegrationState | null,
+  options: TerminalIntegrationOptions,
+): boolean {
+  if (!pathExists(path)) return false
+  const resolvedTarget = resolveSymlinkTarget(path)
+  if (resolvedTarget === target) return true
+  if (
+    resolvedTarget
+    && state?.launcherPath === path
+    && state.launcherTarget === resolvedTarget
+  ) {
+    return true
+  }
+  return isLegacyManagedLauncher(path, options)
 }
 
 function existingMode(path: string, fallback: number): number {
@@ -190,25 +334,111 @@ function replaceManagedBlock(content: string, block: string | null): string {
   return without ? `${without}\n\n${block}\n` : `${block}\n`
 }
 
-function lookupCommand(options: TerminalIntegrationOptions): string | null {
-  if (options.commandLookup) return options.commandLookup()
-  const shell = options.shell ?? process.env.SHELL ?? '/bin/zsh'
-  const result = spawnSync(shell, ['-lic', 'command -v polo 2>/dev/null || true'], {
-    encoding: 'utf8',
-    env: process.env,
-  })
-  const output = result.stdout?.trim()
-  return output || null
+interface ShellCommandResult {
+  status: 'ok' | 'timeout' | 'failed'
+  output: string
+  outputTruncated?: boolean
 }
 
-function validateCommand(options: TerminalIntegrationOptions): boolean {
-  if (options.commandValidator) return options.commandValidator().ok
+function runLoginShell(
+  options: TerminalIntegrationOptions,
+  command: string,
+): ShellCommandResult {
   const shell = options.shell ?? process.env.SHELL ?? '/bin/zsh'
-  const result = spawnSync(shell, ['-lic', 'command -v polo && polo --version'], {
+  const timeoutMs = options.shellTimeoutMs ?? SHELL_TIMEOUT_MS
+  const outputLimit = options.shellOutputLimit ?? SHELL_OUTPUT_LIMIT
+  if (options.shellRunner) {
+    const result = options.shellRunner(shell, command, { timeoutMs, outputLimit })
+    return {
+      status: result.status,
+      output: (result.output ?? '').slice(0, outputLimit),
+      outputTruncated: result.outputTruncated
+        || (result.output?.length ?? 0) > outputLimit,
+    }
+  }
+  const result = spawnSync(shell, ['-lic', command], {
     encoding: 'utf8',
     env: process.env,
+    timeout: timeoutMs,
+    maxBuffer: outputLimit,
+    killSignal: 'SIGKILL',
   })
-  return result.status === 0 && result.stdout.includes(options.appVersion)
+  const rawOutput = `${result.stdout ?? ''}${result.stderr ?? ''}`
+  const output = rawOutput.slice(0, outputLimit)
+  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code
+  if (errorCode === 'ETIMEDOUT') {
+    return { status: 'timeout', output, outputTruncated: rawOutput.length > outputLimit }
+  }
+  if (result.status !== 0 || result.error) {
+    return { status: 'failed', output, outputTruncated: rawOutput.length > outputLimit }
+  }
+  return { status: 'ok', output, outputTruncated: rawOutput.length > outputLimit }
+}
+
+function lookupAndValidateCommand(options: TerminalIntegrationOptions): {
+  found: string | null
+  valid: boolean
+  shellCheck: NonNullable<TerminalIntegrationStatus['shellCheck']>
+} {
+  const timeoutMs = options.shellTimeoutMs ?? SHELL_TIMEOUT_MS
+  if (options.commandLookup) {
+    const found = options.commandLookup()
+    const validation = options.commandValidator?.() ?? { ok: false }
+    return {
+      found,
+      valid: validation.ok,
+      shellCheck: { status: validation.ok ? 'ok' : 'failed', timeoutMs },
+    }
+  }
+
+  const lookup = runLoginShell(
+    options,
+    'polo_command="$(command -v polo 2>/dev/null || true)"; '
+      + 'printf \'__POLO_COMMAND__%s\\n\' "$polo_command"',
+  )
+  if (lookup.status !== 'ok') {
+    return {
+      found: null,
+      valid: false,
+      shellCheck: {
+        status: lookup.status,
+        timeoutMs,
+        ...(lookup.outputTruncated ? { outputTruncated: true } : {}),
+      },
+    }
+  }
+  const found = lookup.output
+    .split(/\r?\n/)
+    .find(line => line.startsWith('__POLO_COMMAND__'))
+    ?.slice('__POLO_COMMAND__'.length)
+    || null
+  if (!found) {
+    return {
+      found: null,
+      valid: false,
+      shellCheck: {
+        status: 'ok',
+        timeoutMs,
+        ...(lookup.outputTruncated ? { outputTruncated: true } : {}),
+      },
+    }
+  }
+  const validation = runLoginShell(
+    options,
+    'polo_version="$(polo --version)" && '
+      + 'printf \'__POLO_VERSION__%s\\n\' "$polo_version"',
+  )
+  return {
+    found,
+    valid: validation.status === 'ok'
+      && validation.output.split(/\r?\n/)
+        .some(line => line === `__POLO_VERSION__${options.appVersion}`),
+    shellCheck: {
+      status: validation.status,
+      timeoutMs,
+      ...(validation.outputTruncated ? { outputTruncated: true } : {}),
+    },
+  }
 }
 
 export function getTerminalIntegrationStatus(
@@ -226,41 +456,62 @@ export function getTerminalIntegrationStatus(
     }
   }
 
-  const profile = getProfile(options)
-  const launcher = read(launcherPath)
-  const profileContent = read(profile.path)
-  const installed = isManagedLauncher(launcher)
-  const launcherCurrent = launcher === managedLauncherContent(options)
+  const state = readState(options)
+  const profile = profileForShell(options)
+  const profilePaths = safeProfilePaths(options, state)
+  const launcherTarget = getPackagedLauncherTarget(options)
+  const resolvedTarget = resolveSymlinkTarget(launcherPath)
+  const installed = isOwnedLauncher(launcherPath, launcherTarget, state, options)
+  const launcherCurrent = resolvedTarget === launcherTarget
+  const launcherExecutable = launcherCurrent && isExecutable(launcherPath)
   let blockReady = false
-  let malformedProfile = false
-  try {
-    const range = getManagedBlockRange(profileContent)
-    blockReady = range !== null
-      && profileContent.slice(range.start, range.end) === profile.block
-  } catch {
-    malformedProfile = true
+  let malformedProfile: string | null = null
+  let staleManagedProfile = false
+  const managedProfiles: string[] = []
+  for (const path of profilePaths) {
+    try {
+      const content = read(path)
+      const range = getManagedBlockRange(content)
+      if (!range) continue
+      managedProfiles.push(path)
+      const exactBlock = content.slice(range.start, range.end)
+      if (path === profile.path) {
+        blockReady = exactBlock === profile.block
+      } else {
+        staleManagedProfile = true
+      }
+    } catch {
+      malformedProfile = path
+      break
+    }
   }
-  const found = lookupCommand(options)
-  const launcherExecutable = installed && isExecutable(launcherPath)
+  const command = lookupAndValidateCommand(options)
+  const found = command.found
+  const launcherExists = pathExists(launcherPath)
   const conflict = malformedProfile
-    ? { code: 'profile_conflict' as const, path: profile.path }
-    : launcher && !installed
+    ? { code: 'profile_conflict' as const, path: malformedProfile }
+    : launcherExists && !installed
       ? { code: 'launcher_conflict' as const, path: launcherPath }
       : found && found !== launcherPath
         ? { code: 'command_conflict' as const, path: found }
         : undefined
   const pathReady = blockReady
+    && !staleManagedProfile
     && found === launcherPath
     && launcherExecutable
-    && validateCommand(options)
+    && command.valid
 
   return {
     supported: true,
     installed,
     pathReady,
     needsRepair: installed
-      ? !blockReady || !launcherCurrent || !launcherExecutable || !pathReady
-      : existsSync(launcherPath) || malformedProfile,
+      ? !blockReady
+        || staleManagedProfile
+        || !launcherCurrent
+        || !launcherExecutable
+        || !pathReady
+      : launcherExists || Boolean(malformedProfile),
     conflict,
     statusCode: conflict?.code
       ?? (installed && pathReady
@@ -270,7 +521,10 @@ export function getTerminalIntegrationStatus(
           : 'not_installed'),
     statusParams: conflict ? { path: conflict.path } : undefined,
     launcherPath,
+    launcherTarget,
     profilePath: profile.path,
+    managedProfiles,
+    shellCheck: command.shellCheck,
   }
 }
 
@@ -281,27 +535,39 @@ export function installTerminalIntegration(
     throw new TerminalIntegrationOperationError('unsupported_platform')
   }
 
-  const profile = getProfile(options)
+  const profile = profileForShell(options)
   try {
     const currentStatus = getTerminalIntegrationStatus(options)
     if (currentStatus.conflict) return currentStatus
 
     const launcherPath = getLauncherPath(options)
-    const existingLauncher = read(launcherPath)
-
-    const currentProfile = read(profile.path)
-    const nextProfile = replaceManagedBlock(currentProfile, profile.block)
-    if (nextProfile !== currentProfile) {
-      const profileMode = existingMode(profile.path, 0o600)
-      backup(profile.path)
-      writeAtomic(profile.path, nextProfile, profileMode)
+    const launcherTarget = getPackagedLauncherTarget(options)
+    if (!existsSync(launcherTarget) || !isExecutable(launcherTarget)) {
+      throw new Error(`Packaged launcher is missing or not executable: ${launcherTarget}`)
     }
 
-    const content = managedLauncherContent(options)
-    if (content !== existingLauncher || !isExecutable(launcherPath)) {
-      if (existingLauncher && content !== existingLauncher) backup(launcherPath)
-      writeAtomic(launcherPath, content, 0o755)
+    const state = readState(options)
+    const profiles = safeProfilePaths(options, state)
+    for (const path of profiles) {
+      const current = read(path)
+      const block = path === profile.path ? profile.block : null
+      const next = replaceManagedBlock(current, block)
+      if (next === current) continue
+      const profileMode = existingMode(path, 0o600)
+      backup(path)
+      writeAtomic(path, next, profileMode)
     }
+
+    if (pathExists(launcherPath)) {
+      if (!isOwnedLauncher(launcherPath, launcherTarget, state, options)) {
+        return getTerminalIntegrationStatus(options)
+      }
+      if (!lstatSync(launcherPath).isSymbolicLink()) backup(launcherPath)
+    }
+    if (resolveSymlinkTarget(launcherPath) !== launcherTarget) {
+      replaceSymlinkAtomic(launcherPath, launcherTarget)
+    }
+    writeState(options, launcherTarget, [profile.path], profile.path)
 
     return getTerminalIntegrationStatus(options)
   } catch (error) {
@@ -328,21 +594,24 @@ export function uninstallTerminalIntegration(
     throw new TerminalIntegrationOperationError('unsupported_platform')
   }
 
-  const profile = getProfile(options)
+  const profile = profileForShell(options)
   try {
     const launcherPath = getLauncherPath(options)
-    const launcher = read(launcherPath)
-    if (isManagedLauncher(launcher)) {
+    const state = readState(options)
+    const launcherTarget = getPackagedLauncherTarget(options)
+    if (isOwnedLauncher(launcherPath, launcherTarget, state, options)) {
       rmSync(launcherPath)
     }
 
-    const currentProfile = read(profile.path)
-    const nextProfile = replaceManagedBlock(currentProfile, null)
-    if (nextProfile !== currentProfile) {
-      const profileMode = existingMode(profile.path, 0o600)
-      backup(profile.path)
-      writeAtomic(profile.path, nextProfile, profileMode)
+    for (const path of safeProfilePaths(options, state)) {
+      const current = read(path)
+      const next = replaceManagedBlock(current, null)
+      if (next === current) continue
+      const profileMode = existingMode(path, 0o600)
+      backup(path)
+      writeAtomic(path, next, profileMode)
     }
+    rmSync(statePath(options), { force: true })
 
     return getTerminalIntegrationStatus(options)
   } catch (error) {

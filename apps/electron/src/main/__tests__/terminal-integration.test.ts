@@ -2,14 +2,16 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   getTerminalIntegrationStatus,
   installTerminalIntegration,
@@ -29,9 +31,12 @@ function setup(shell = '/bin/zsh'): TerminalIntegrationOptions {
   mkdirSync(join(resources, 'vendor', 'bun'), { recursive: true })
   mkdirSync(join(resources, 'app', 'dist', 'cli'), { recursive: true })
   mkdirSync(join(resources, 'app', 'dist', 'server'), { recursive: true })
+  mkdirSync(join(resources, 'app', 'resources', 'bin'), { recursive: true })
   writeFileSync(join(resources, 'vendor', 'bun', 'bun'), '')
   writeFileSync(join(resources, 'app', 'dist', 'cli', 'polo-cli.js'), '')
   writeFileSync(join(resources, 'app', 'dist', 'server', 'polo-server.js'), '')
+  const packagedLauncher = join(resources, 'app', 'resources', 'bin', 'polo')
+  writeFileSync(packagedLauncher, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
   const launcherPath = join(home, '.local', 'bin', 'polo')
   return {
     platform: 'darwin',
@@ -61,6 +66,10 @@ describe('macOS terminal integration', () => {
     expect(readFileSync(profile, 'utf8')).toBe(firstProfile)
     expect(readFileSync(second.launcherPath, 'utf8')).toBe(firstLauncher)
     expect(firstProfile.match(/# >>> Polo CLI >>>/g)?.length).toBe(1)
+    expect(lstatSync(second.launcherPath).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(second.launcherPath)).toBe(
+      join(options.resourcesPath, 'app', 'resources', 'bin', 'polo'),
+    )
     expect(second.installed).toBe(true)
     expect(second.pathReady).toBe(true)
   })
@@ -94,6 +103,29 @@ describe('macOS terminal integration', () => {
     expect(status.needsRepair).toBe(false)
   })
 
+  it('repairs a managed symlink after the app bundle moves', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const movedRoot = join(dirname(dirname(dirname(options.resourcesPath))), 'Polo Moved.app')
+    const movedResources = join(movedRoot, 'Contents', 'Resources')
+    mkdirSync(join(movedResources, 'app', 'resources', 'bin'), { recursive: true })
+    const movedLauncher = join(movedResources, 'app', 'resources', 'bin', 'polo')
+    writeFileSync(movedLauncher, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    rmSync(dirname(dirname(options.resourcesPath)), { recursive: true, force: true })
+    const movedOptions = {
+      ...options,
+      resourcesPath: movedResources,
+    }
+
+    const beforeRepair = getTerminalIntegrationStatus(movedOptions)
+    expect(beforeRepair.installed).toBe(true)
+    expect(beforeRepair.needsRepair).toBe(true)
+
+    const repaired = installTerminalIntegration(movedOptions)
+    expect(repaired.pathReady).toBe(true)
+    expect(readlinkSync(installed.launcherPath)).toBe(movedLauncher)
+  })
+
   it('requires the managed launcher to remain executable', () => {
     const options = setup()
     const installed = installTerminalIntegration(options)
@@ -104,6 +136,7 @@ describe('macOS terminal integration', () => {
     expect(status.pathReady).toBe(false)
     expect(status.needsRepair).toBe(true)
 
+    chmodSync(installed.launcherTarget!, 0o755)
     const repaired = installTerminalIntegration(options)
     expect(repaired.pathReady).toBe(true)
     expect(repaired.needsRepair).toBe(false)
@@ -169,6 +202,60 @@ describe('macOS terminal integration', () => {
     expect(readFileSync(profile, 'utf8')).toContain('export EDITOR=nano')
     expect(readFileSync(profile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
     expect(status.installed).toBe(false)
+  })
+
+  it('repairs and uninstalls profiles left by a previous default shell', () => {
+    const zshOptions = setup('/bin/zsh')
+    const installed = installTerminalIntegration(zshOptions)
+    const zprofile = installed.profilePath!
+    const bashOptions = { ...zshOptions, shell: '/bin/bash' }
+
+    const repaired = installTerminalIntegration(bashOptions)
+    const bashProfile = repaired.profilePath!
+    expect(bashProfile).toEndWith('.bash_profile')
+    expect(readFileSync(zprofile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
+    expect(readFileSync(bashProfile, 'utf8')).toContain('# >>> Polo CLI >>>')
+
+    uninstallTerminalIntegration({ ...bashOptions, shell: '/opt/homebrew/bin/fish' })
+    expect(readFileSync(bashProfile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
+    expect(existsSync(repaired.launcherPath)).toBe(false)
+  })
+
+  it('reports a bounded structured timeout from login-shell detection', () => {
+    const options = setup()
+    options.commandLookup = undefined
+    options.commandValidator = undefined
+    options.shellTimeoutMs = 5_000
+    options.shellOutputLimit = 32
+    options.shellRunner = (_shell, _command, limits) => ({
+      status: 'timeout',
+      output: 'x'.repeat(limits.outputLimit + 10),
+    })
+
+    const status = getTerminalIntegrationStatus(options)
+    expect(status.shellCheck).toEqual({
+      status: 'timeout',
+      timeoutMs: 5_000,
+      outputTruncated: true,
+    })
+    expect(status.pathReady).toBe(false)
+  })
+
+  it('kills a real login-shell probe at the configured timeout', () => {
+    const options = setup()
+    const slowShell = join(options.homeDir!, 'slow-shell')
+    mkdirSync(options.homeDir!, { recursive: true })
+    writeFileSync(slowShell, '#!/bin/sh\nsleep 5\n', { mode: 0o755 })
+    options.shell = slowShell
+    options.commandLookup = undefined
+    options.commandValidator = undefined
+    options.shellTimeoutMs = 50
+
+    const startedAt = Date.now()
+    const status = getTerminalIntegrationStatus(options)
+    expect(Date.now() - startedAt).toBeLessThan(1_000)
+    expect(status.shellCheck?.status).toBe('timeout')
+    expect(status.pathReady).toBe(false)
   })
 
   it('reports command-name conflicts', () => {

@@ -7,6 +7,7 @@ const electronDir = join(root, 'apps', 'electron')
 const cliPath = join(electronDir, 'dist', 'cli', 'polo-cli.js')
 const serverPath = join(electronDir, 'dist', 'server', 'polo-server.js')
 const manifestPath = join(electronDir, 'dist', 'cli', 'artifact-manifest.json')
+const cliPackagePath = join(electronDir, 'dist', 'cli', 'package.json')
 const unixWrapper = join(electronDir, 'resources', 'bin', 'polo')
 const windowsWrapper = join(electronDir, 'resources', 'bin', 'polo.cmd')
 const windowsInstaller = join(electronDir, 'resources', 'scripts', 'windows-terminal-integration.ps1')
@@ -16,6 +17,7 @@ for (const path of [
   cliPath,
   serverPath,
   manifestPath,
+  cliPackagePath,
   unixWrapper,
   windowsWrapper,
   windowsInstaller,
@@ -41,6 +43,7 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
   version?: string
   artifacts?: {
     cli?: { path?: string; sha256?: string }
+    cliPackage?: { path?: string; sha256?: string }
     server?: { path?: string; sha256?: string }
   }
 }
@@ -49,6 +52,7 @@ if (manifest.version !== versions[0].version) {
 }
 if (
   manifest.artifacts?.cli?.path !== 'dist/cli/polo-cli.js'
+  || manifest.artifacts?.cliPackage?.path !== 'dist/cli/package.json'
   || manifest.artifacts?.server?.path !== 'dist/server/polo-server.js'
 ) {
   throw new Error('Artifact manifest contains unexpected paths')
@@ -57,9 +61,31 @@ const sha256 = (path: string) =>
   createHash('sha256').update(readFileSync(path)).digest('hex')
 if (
   manifest.artifacts.cli.sha256 !== sha256(cliPath)
+  || manifest.artifacts.cliPackage.sha256 !== sha256(cliPackagePath)
   || manifest.artifacts.server.sha256 !== sha256(serverPath)
 ) {
   throw new Error('Artifact manifest checksums do not match the CLI/server bundles')
+}
+
+const cliPackage = JSON.parse(readFileSync(cliPackagePath, 'utf8')) as Record<string, unknown>
+const expectedPackage = {
+  name: '@polo-ai/cli',
+  version: versions[0].version,
+  type: 'module',
+  main: './polo-cli.js',
+  bin: {
+    polo: './polo-cli.js',
+    'polo-ai': './polo-cli.js',
+  },
+  license: 'Apache-2.0',
+}
+if (JSON.stringify(cliPackage) !== JSON.stringify(expectedPackage)) {
+  throw new Error(
+    `Sanitized CLI package metadata is invalid: ${JSON.stringify(cliPackage)}`,
+  )
+}
+if ('dependencies' in cliPackage || 'devDependencies' in cliPackage || 'peerDependencies' in cliPackage) {
+  throw new Error('Sanitized CLI package metadata must not contain dependency fields')
 }
 
 const wrapper = readFileSync(unixWrapper, 'utf8')
