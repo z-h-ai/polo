@@ -310,6 +310,10 @@ describe('Creator Skill workspace installer', () => {
       expect(update.success).toBe(true)
       const backups = await listCreatorSkillBackups(root)
       expect(backups).toHaveLength(1)
+      expect(backups[0]).toMatchObject({
+        operation: 'modified_update',
+        version: '1.0.0',
+      })
       expect(await readFile(join(
         root,
         'skill-backups',
@@ -577,7 +581,7 @@ describe('Creator Skill workspace installer', () => {
     }
   })
 
-  it('detaches instead of deleting writes from every safe-uninstall window', async () => {
+  it('moves a clean uninstall into a safety snapshot and preserves every late-write window', async () => {
     const cases = [
       {
         operationId: '21212121-2121-4121-8121-212121212121',
@@ -645,12 +649,30 @@ describe('Creator Skill workspace installer', () => {
             },
           })
 
-          expect(result).toMatchObject({ success: true, detached: true })
+          expect(result).toMatchObject({
+            success: true,
+            backupPath: expect.any(String),
+          })
         } finally {
           await oldFileHandle.close()
         }
 
-        expect(await readFile(oldFilePath, 'utf8')).toContain(marker)
+        expect(await access(oldFilePath).then(() => true, () => false)).toBe(false)
+        const backups = await listCreatorSkillBackups(root)
+        expect(backups).toHaveLength(1)
+        expect(backups[0]).toMatchObject({
+          slug: 'install-test',
+          operation: 'clean_uninstall_snapshot',
+          version: '1.0.0',
+        })
+        expect(await readFile(join(
+          root,
+          'skill-backups',
+          backups[0]!.slug,
+          backups[0]!.backupId,
+          'references',
+          'version.txt',
+        ), 'utf8')).toContain(marker)
         expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
         expect(await access(join(
           root,
@@ -659,6 +681,80 @@ describe('Creator Skill workspace installer', () => {
         )).then(() => true, () => false)).toBe(false)
       })
     }
+  })
+
+  it('retains a distinct safety snapshot for consecutive clean upgrades', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const second = await packageGrant(root, '2.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_UPDATE,
+        grant: second.grant,
+        replaceExisting: true,
+      }, { fetch: responseFetch(second.bytes) })).success).toBe(true)
+
+      const third = await packageGrant(root, '3.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '26262626-2626-4626-8626-262626262626',
+        grant: third.grant,
+        replaceExisting: true,
+      }, { fetch: responseFetch(third.bytes) })).success).toBe(true)
+
+      const backups = await listCreatorSkillBackups(root)
+      expect(backups).toHaveLength(2)
+      expect(backups.map(item => item.operation)).toEqual([
+        'update_safety_snapshot',
+        'update_safety_snapshot',
+      ])
+      expect(backups.map(item => item.version).sort()).toEqual(['1.0.0', '2.0.0'])
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'references', 'version.txt'),
+        'utf8',
+      )).toBe('3.0.0')
+    })
+  })
+
+  it('rolls a clean uninstall back if it fails after the Ledger checkpoint', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const result = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '27272727-2727-4727-8727-272727272727',
+        slug: 'install-test',
+      }, {
+        onJournalPersisted: state => {
+          if (state === 'ledger_committed') {
+            throw new Error('fault after uninstall ledger checkpoint')
+          }
+        },
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_uninstall_failed',
+      })
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'references', 'version.txt'),
+        'utf8',
+      )).toBe('1.0.0')
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect(await listCreatorSkillBackups(root)).toHaveLength(0)
+    })
   })
 
   it('rejects backup deletion through a symlink ancestor outside the workspace', async () => {

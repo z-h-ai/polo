@@ -281,7 +281,7 @@ export const CreatorSkillSafetyRpcInputSchema = z.object({
 
 export const CreatorSkillInstallRpcInputSchema = z.object({
   workspaceId: entityId,
-  workingDirectory: z.string().max(32_768).optional(),
+  sessionId: entityId,
   operationId: CreatorSkillOperationIdSchema,
   grant: CreatorSkillDownloadGrantSchema,
   replaceExisting: z.boolean().optional(),

@@ -140,6 +140,26 @@ describe("i18n locale parity", () => {
     }
   });
 
+  it("does not ship English placeholders for representative Creator Skill UI copy", () => {
+    const translatedKeys = [
+      "creatorSkills.artifact.chooseType",
+      "creatorSkills.backups.description",
+      "creatorSkills.backups.operation.clean_uninstall_snapshot",
+      "creatorSkills.safety.stale",
+      "creatorSkills.version.chooseZip",
+      "skillInfo.requestedToolsDesc",
+    ];
+    for (const key of translatedKeys) {
+      for (const [lang, translations] of otherLangs) {
+        expect(translations[key], `${lang} is missing ${key}`).toBeTruthy();
+        expect(
+          translations[key],
+          `${lang} still uses the English placeholder for ${key}`,
+        ).not.toBe(en[key]);
+      }
+    }
+  });
+
   // Plural form completeness — check every locale including EN
   for (const [lang, translations] of Object.entries(locales)) {
     it(`${lang} plural forms are complete (_one has _other and vice versa)`, () => {

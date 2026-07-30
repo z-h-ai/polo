@@ -44,10 +44,16 @@ import type { CreatorSkillOperationProgress, LoadedSkill } from '../../shared/ty
 interface SkillInfoPageProps {
   skillSlug: string
   workspaceId: string
+  sessionId?: string
   workingDirectory?: string
 }
 
-export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory }: SkillInfoPageProps) {
+export default function SkillInfoPage({
+  skillSlug,
+  workspaceId,
+  sessionId,
+  workingDirectory,
+}: SkillInfoPageProps) {
   const { t } = useTranslation()
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
   const [loading, setLoading] = useState(true)
@@ -221,7 +227,8 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   }, [availableVersion, creatorInstallation, t, workspaceId])
 
   const handleUpdateCreatorSkill = useCallback(async () => {
-    if (!creatorInstallation || !availableVersion) return
+    const installSessionId = sessionId
+    if (!creatorInstallation || !availableVersion || !installSessionId) return
     setUpdatingCreatorSkill(true)
     try {
       const grant = await window.electronAPI.creatorSkillGetDownloadGrant({
@@ -243,7 +250,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         setUpdateProgress(null)
         return window.electronAPI.creatorSkillInstall({
           workspaceId,
-          ...(workingDirectory ? { workingDirectory } : {}),
+          sessionId: installSessionId,
           operationId,
           grant: {
             artifactId: grant.artifactId,
@@ -288,7 +295,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
       setUpdatingCreatorSkill(false)
       setUpdateOperationId(null)
     }
-  }, [availableVersion, creatorInstallation, t, workspaceId, workingDirectory])
+  }, [availableVersion, creatorInstallation, sessionId, t, workspaceId])
 
   // Handle open in finder
   const handleOpenInFinder = useCallback(async () => {
@@ -432,7 +439,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
               </span>
               <button
                 type="button"
-                disabled={updatingCreatorSkill}
+                disabled={updatingCreatorSkill || !sessionId}
                 className="rounded-md bg-accent px-2.5 py-1 text-accent-foreground disabled:opacity-50"
                 onClick={() => { void handleUpdateCreatorSkill() }}
               >

@@ -80,6 +80,7 @@ export function MainContentPanel({
     onReplayAutomation,
     automationTestResults,
     getAutomationHistory,
+    activeSessionId,
     activeSessionWorkingDirectory,
   } = useAppShellContext()
 
@@ -298,6 +299,7 @@ export function MainContentPanel({
           <SkillInfoPage
             skillSlug={navState.details.skillSlug}
             workspaceId={activeWorkspaceId || ''}
+            sessionId={activeSessionId}
             workingDirectory={activeSessionWorkingDirectory}
           />
         </Panel>

@@ -31,6 +31,7 @@ import {
 import {
   HARD_SKILL_ARCHIVE_POLICY,
   type CreatorSkillBackup,
+  type CreatorSkillBackupOperation,
   type CreatorSkillConflictDetails,
   type CreatorSkillInstallConflict,
   type CreatorSkillInstallInput,
@@ -45,6 +46,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const SKILL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const BACKUP_NAME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/
 const MAX_JOURNAL_BYTES = 5 * 1024 * 1024
+const MAX_BACKUP_METADATA_BYTES = 16 * 1024
 const processQueues = new Map<string, Promise<void>>()
 const cancellationControllers = new Map<string, AbortController>()
 
@@ -67,6 +69,18 @@ interface CreatorSkillJournal {
   oldLedger: string | null
   state: CreatorSkillJournalState
   preserveBackupPath?: string
+  backupOperation?: CreatorSkillBackupOperation
+  backupVersion?: string
+  backupCreatedAt?: string
+}
+
+interface CreatorSkillBackupMetadata {
+  schemaVersion: 1
+  slug: string
+  backupId: string
+  operation: CreatorSkillBackupOperation
+  createdAt: string
+  version?: string
 }
 
 export interface CreatorSkillInstallerDependencies {
@@ -258,6 +272,125 @@ async function resolveCreatorSkillBackupTarget(args: {
   }
 }
 
+function backupMetadataPath(targetPath: string): string {
+  return `${targetPath}.metadata.json`
+}
+
+function isBackupOperation(value: unknown): value is CreatorSkillBackupOperation {
+  return value === 'modified_update'
+    || value === 'update_safety_snapshot'
+    || value === 'clean_uninstall_snapshot'
+}
+
+function parseBackupMetadata(
+  raw: unknown,
+  expected: { slug: string; backupId: string },
+): CreatorSkillBackupMetadata {
+  if (!raw || typeof raw !== 'object') {
+    throw invalidBackupPath('Creator Skill backup metadata is invalid')
+  }
+  const metadata = raw as Partial<CreatorSkillBackupMetadata>
+  if (
+    metadata.schemaVersion !== 1
+    || metadata.slug !== expected.slug
+    || metadata.backupId !== expected.backupId
+    || !isBackupOperation(metadata.operation)
+    || typeof metadata.createdAt !== 'string'
+    || Number.isNaN(Date.parse(metadata.createdAt))
+    || (metadata.version !== undefined
+      && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(metadata.version))
+  ) {
+    throw invalidBackupPath('Creator Skill backup metadata is invalid')
+  }
+  return metadata as CreatorSkillBackupMetadata
+}
+
+async function readBackupMetadata(args: {
+  targetPath: string
+  slug: string
+  backupId: string
+}): Promise<CreatorSkillBackupMetadata | null> {
+  const metadataPath = backupMetadataPath(args.targetPath)
+  assertChildPath(dirname(args.targetPath), metadataPath, 'Creator Skill backup metadata')
+  const metadataStats = await lstatIfPresent(metadataPath)
+  if (!metadataStats) return null
+  if (
+    metadataStats.isSymbolicLink()
+    || !metadataStats.isFile()
+    || metadataStats.size > MAX_BACKUP_METADATA_BYTES
+  ) {
+    throw invalidBackupPath('Creator Skill backup metadata must be a small regular file')
+  }
+  try {
+    return parseBackupMetadata(
+      JSON.parse(await readFile(metadataPath, 'utf8')) as unknown,
+      { slug: args.slug, backupId: args.backupId },
+    )
+  } catch (error) {
+    if (
+      error
+      && typeof error === 'object'
+      && (error as { code?: string }).code === 'invalid_backup_path'
+    ) {
+      throw error
+    }
+    throw invalidBackupPath('Creator Skill backup metadata is invalid JSON')
+  }
+}
+
+async function writeBackupMetadata(
+  targetPath: string,
+  metadata: CreatorSkillBackupMetadata,
+): Promise<void> {
+  const metadataPath = backupMetadataPath(targetPath)
+  assertChildPath(dirname(targetPath), metadataPath, 'Creator Skill backup metadata')
+  const existing = await readBackupMetadata({
+    targetPath,
+    slug: metadata.slug,
+    backupId: metadata.backupId,
+  })
+  if (existing) {
+    if (JSON.stringify(existing) !== JSON.stringify(metadata)) {
+      throw invalidBackupPath('Creator Skill backup metadata conflicts with the operation journal')
+    }
+    return
+  }
+  const tempPath = `${metadataPath}.${randomUUID()}.tmp`
+  await writeFile(tempPath, `${JSON.stringify(metadata, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+    flag: 'wx',
+  })
+  try {
+    await rename(tempPath, metadataPath)
+  } catch (error) {
+    await rm(tempPath, { force: true })
+    throw error
+  }
+}
+
+async function allocateCreatorSkillBackupTarget(
+  workspaceRoot: string,
+  slug: string,
+): Promise<Awaited<ReturnType<typeof resolveCreatorSkillBackupTarget>>> {
+  const now = Date.now()
+  for (let offset = 0; offset < 1_000; offset += 1) {
+    const target = await resolveCreatorSkillBackupTarget({
+      workspaceRoot,
+      slug,
+      backupId: creatorSkillBackupTimestamp(new Date(now + offset)),
+      createAncestors: true,
+    })
+    if (
+      !target.targetExists
+      && !await lstatIfPresent(backupMetadataPath(target.targetPath))
+    ) {
+      return target
+    }
+  }
+  throw invalidBackupPath('Unable to allocate a unique Creator Skill backup identity')
+}
+
 async function ensureOperationRoot(workspaceRoot: string): Promise<{
   workspaceRoot: string
   operationRoot: string
@@ -307,6 +440,11 @@ function validateJournalShape(
   journal: CreatorSkillJournal,
   expectedOperationId: string,
 ): void {
+  const hasAnyBackupMetadata = (
+    journal.backupOperation !== undefined
+    || journal.backupVersion !== undefined
+    || journal.backupCreatedAt !== undefined
+  )
   if (
     !journal
     || journal.schemaVersion !== 1
@@ -325,8 +463,30 @@ function validateJournalShape(
       .includes(journal.state)
     || (journal.oldLedger !== null && typeof journal.oldLedger !== 'string')
     || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES
+    || (hasAnyBackupMetadata && (
+      !isBackupOperation(journal.backupOperation)
+      || typeof journal.backupCreatedAt !== 'string'
+      || Number.isNaN(Date.parse(journal.backupCreatedAt))
+      || (journal.backupVersion !== undefined
+        && !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(journal.backupVersion))
+    ))
   ) {
     throw invalidOperationPath('Creator Skill recovery journal is invalid')
+  }
+}
+
+function backupMetadataFromJournal(
+  journal: CreatorSkillJournal,
+  preserveBackupPath: string,
+): CreatorSkillBackupMetadata | null {
+  if (!journal.backupOperation || !journal.backupCreatedAt) return null
+  return {
+    schemaVersion: 1,
+    slug: journal.slug,
+    backupId: basename(preserveBackupPath),
+    operation: journal.backupOperation,
+    createdAt: journal.backupCreatedAt,
+    ...(journal.backupVersion ? { version: journal.backupVersion } : {}),
   }
 }
 
@@ -652,7 +812,6 @@ async function inspectConflicts(
   if (projectPath && await exists(projectPath)) {
     throw Object.assign(new Error('A project-level Skill with this slug has priority'), {
       code: 'project_skill_conflict',
-      path: projectPath,
     })
   }
   const ledger = await readCreatorSkillsLedger(workspaceRoot)
@@ -801,7 +960,23 @@ async function rollbackJournal(
     await mkdir(dirname(paths.targetPath), { recursive: true })
     await rename(recoverableBackupPath, paths.targetPath)
   }
+  if (paths.preserveBackupPath) {
+    await rm(backupMetadataPath(paths.preserveBackupPath), { force: true })
+  }
   await restoreLedgerSnapshot(workspaceRoot, journal.oldLedger)
+  await rm(operationPath, { recursive: true, force: true })
+}
+
+async function finalizeCommittedJournal(
+  workspaceRoot: string,
+  operationPath: string,
+  journal: CreatorSkillJournal,
+): Promise<void> {
+  const paths = await deriveJournalPaths(workspaceRoot, operationPath, journal)
+  if (paths.preserveBackupPath && await exists(paths.preserveBackupPath)) {
+    const metadata = backupMetadataFromJournal(journal, paths.preserveBackupPath)
+    if (metadata) await writeBackupMetadata(paths.preserveBackupPath, metadata)
+  }
   await rm(operationPath, { recursive: true, force: true })
 }
 
@@ -931,12 +1106,22 @@ export async function installCreatorSkill(
       // this to directories that were already known to be modified would leave
       // post-rename writes vulnerable to silent deletion.
       let preserveBackupPath = preCommitTargetIdentity.kind !== 'missing'
-        ? (await resolveCreatorSkillBackupTarget({
-            workspaceRoot: canonicalWorkspace,
-            slug: input.grant.slug,
-            backupId: creatorSkillBackupTimestamp(),
-            createAncestors: true,
-          })).targetPath
+        ? (await allocateCreatorSkillBackupTarget(
+            canonicalWorkspace,
+            input.grant.slug,
+          )).targetPath
+        : undefined
+      let backupOperation: CreatorSkillBackupOperation | undefined = preserveBackupPath
+        ? (
+            conflictState.localModified
+            || changedDuringPreparation
+            || isTargetLocallyModified(preCommitTargetIdentity, conflictState.existing)
+          )
+          ? 'modified_update'
+          : 'update_safety_snapshot'
+        : undefined
+      const backupCreatedAt = preserveBackupPath
+        ? inferBackupCreatedAt(preserveBackupPath)
         : undefined
       journal = {
         schemaVersion: 1,
@@ -949,6 +1134,11 @@ export async function installCreatorSkill(
         oldLedger,
         state: 'prepared',
         ...(preserveBackupPath ? { preserveBackupPath } : {}),
+        ...(backupOperation ? { backupOperation } : {}),
+        ...(conflictState.existing?.version
+          ? { backupVersion: conflictState.existing.version }
+          : {}),
+        ...(backupCreatedAt ? { backupCreatedAt } : {}),
       }
       const journalPath = join(operationPath, 'journal.json')
       await persistJournal(journalPath, journal, dependencies)
@@ -973,18 +1163,12 @@ export async function installCreatorSkill(
         conflictState.existing,
       )
       if (
-        !preserveBackupPath
-        && capturedTargetIdentity.kind !== 'missing'
-        && input.backupLocalChanges
+        preserveBackupPath
+        && backupOperation !== 'modified_update'
         && (capturedLocalModified || changedDuringPreparation || changedAtRename)
       ) {
-        preserveBackupPath = (await resolveCreatorSkillBackupTarget({
-          workspaceRoot: canonicalWorkspace,
-          slug: input.grant.slug,
-          backupId: creatorSkillBackupTimestamp(),
-          createAncestors: true,
-        })).targetPath
-        journal.preserveBackupPath = preserveBackupPath
+        backupOperation = 'modified_update'
+        journal.backupOperation = backupOperation
         await persistJournal(journalPath, journal, dependencies)
       }
       journal.state = 'old_backed_up'
@@ -1036,6 +1220,10 @@ export async function installCreatorSkill(
         ...(backupPath ? { backupPath } : {}),
       }
       await dependencies.onJournalPersisted?.(journal.state)
+      if (preserveBackupPath) {
+        const metadata = backupMetadataFromJournal(journal, preserveBackupPath)
+        if (metadata) await writeBackupMetadata(preserveBackupPath, metadata)
+      }
       if (!committedJournalDurable) {
         // This filesystem cannot prove that the committed rename reached stable
         // storage. Keep the journal and rollback backup for startup recovery;
@@ -1161,12 +1349,35 @@ export async function uninstallCreatorSkill(args: {
           operationId: args.operationId,
         }
       }
-      const detachInsteadOfDeleting = !args.forceDeleteModified
+
+      // A normal uninstall only detaches content that was already modified at
+      // the manifest scan boundary. A clean directory is renamed away from the
+      // Skill loading path into a permanent safety snapshot. Writes arriving
+      // after the scan keep targeting that same inode and are therefore
+      // retained by the snapshot instead of silently disappearing.
+      if (
+        !args.forceDeleteModified
+        && installed
+        && isTargetLocallyModified(targetIdentity, installed)
+      ) {
+        await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
+        return {
+          success: true,
+          operationId: args.operationId,
+          detached: true,
+        }
+      }
 
       operationPath = resolvedOperation.operationPath
       await rm(operationPath, { recursive: true, force: true })
       await mkdir(operationPath, { recursive: true, mode: 0o700 })
       const transactionBackupPath = join(operationPath, 'backup')
+      const preserveBackupPath = !args.forceDeleteModified
+        ? (await allocateCreatorSkillBackupTarget(
+            canonicalWorkspace,
+            args.slug,
+          )).targetPath
+        : undefined
       journal = {
         schemaVersion: 1,
         operationId: args.operationId,
@@ -1177,36 +1388,44 @@ export async function uninstallCreatorSkill(args: {
         ledgerPath: resolve(canonicalWorkspace, 'creator-skills.json'),
         oldLedger: await readLedgerSnapshot(canonicalWorkspace),
         state: 'prepared',
+        ...(preserveBackupPath ? {
+          preserveBackupPath,
+          backupOperation: 'clean_uninstall_snapshot',
+          backupVersion: installed?.version,
+          backupCreatedAt: inferBackupCreatedAt(preserveBackupPath),
+        } : {}),
       }
       const journalPath = join(operationPath, 'journal.json')
       await persistJournal(journalPath, journal, dependencies)
       if (await exists(targetPath)) await rename(targetPath, transactionBackupPath)
+      await assertCanonicalPathWhenPresent(
+        transactionBackupPath,
+        'Creator Skill uninstall snapshot',
+      )
       journal.state = 'old_backed_up'
       await persistJournal(journalPath, journal, dependencies)
       await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
       journal.state = 'ledger_committed'
       await persistJournal(journalPath, journal, dependencies)
 
-      if (detachInsteadOfDeleting) {
-        // There is no portable way to prove that an editor no longer holds an
-        // open descriptor to the renamed directory. Make the non-destructive
-        // uninstall path explicit in the journal, then restore that same inode
-        // as a regular workspace Skill before committing the Ledger detach.
-        journal.state = 'detaching'
-        const detachCheckpointDurable = await persistJournal(
-          journalPath,
-          journal,
-          dependencies,
-        )
-        if (!detachCheckpointDurable) {
-          throw Object.assign(
-            new Error('Creator Skill detach checkpoint is not durable'),
-            { code: 'creator_skill_uninstall_failed' },
-          )
-        }
-        if (await exists(transactionBackupPath)) {
-          await rename(transactionBackupPath, targetPath)
-        }
+      let backupPath: string | undefined
+      if (preserveBackupPath && await exists(transactionBackupPath)) {
+        await withBackupManagementLock(canonicalWorkspace, async () => {
+          const backupTarget = await resolveCreatorSkillBackupTarget({
+            workspaceRoot: canonicalWorkspace,
+            slug: args.slug,
+            backupId: basename(preserveBackupPath),
+            createAncestors: true,
+          })
+          if (
+            backupTarget.targetPath !== preserveBackupPath
+            || backupTarget.targetExists
+          ) {
+            throw invalidBackupPath('Creator Skill backup target is unsafe or already exists')
+          }
+          await rename(transactionBackupPath, preserveBackupPath)
+        })
+        backupPath = preserveBackupPath
       }
 
       journal.state = 'committed'
@@ -1218,11 +1437,15 @@ export async function uninstallCreatorSkill(args: {
       committedResult = {
         success: true,
         operationId: args.operationId,
-        ...(detachInsteadOfDeleting ? { detached: true } : {}),
+        ...(backupPath ? { backupPath } : {}),
       }
       await dependencies.onJournalPersisted?.(journal.state)
+      if (preserveBackupPath) {
+        const metadata = backupMetadataFromJournal(journal, preserveBackupPath)
+        if (metadata) await writeBackupMetadata(preserveBackupPath, metadata)
+      }
       if (!committedJournalDurable) return committedResult
-      if (!detachInsteadOfDeleting) {
+      if (!preserveBackupPath) {
         await rm(transactionBackupPath, { recursive: true, force: true })
         await dependencies.onCleanupStep?.('transaction_backup_removed')
       }
@@ -1286,7 +1509,7 @@ export async function recoverCreatorSkillOperations(workspaceRoot: string): Prom
       ) as CreatorSkillJournal
       await deriveJournalPaths(canonicalWorkspace, operationPath, journal)
       if (journal.state === 'committed') {
-        await rm(operationPath, { recursive: true, force: true })
+        await finalizeCommittedJournal(canonicalWorkspace, operationPath, journal)
       } else {
         await rollbackJournal(canonicalWorkspace, operationPath, journal)
       }
@@ -1354,12 +1577,18 @@ export async function listCreatorSkillBackups(
         slug: slugEntry.name,
         backupId: version.name,
       })
+      const metadata = await readBackupMetadata({
+        targetPath: resolved.targetPath,
+        slug: slugEntry.name,
+        backupId: version.name,
+      })
       backups.push({
         backupId: version.name,
         slug: slugEntry.name,
-        createdAt: inferBackupCreatedAt(resolved.targetPath),
+        createdAt: metadata?.createdAt ?? inferBackupCreatedAt(resolved.targetPath),
         sizeBytes: await directorySize(resolved.targetPath),
-        operation: 'update',
+        operation: metadata?.operation ?? 'update_safety_snapshot',
+        ...(metadata?.version ? { version: metadata.version } : {}),
       })
     }
   }
@@ -1381,6 +1610,7 @@ export async function deleteCreatorSkillBackups(
         })
         if (!target.targetExists) continue
         await rm(target.targetPath, { recursive: true, force: true })
+        await rm(backupMetadataPath(target.targetPath), { force: true })
       }
       return backups.length
     }
@@ -1391,6 +1621,7 @@ export async function deleteCreatorSkillBackups(
     })
     if (!target.targetExists) return 0
     await rm(target.targetPath, { recursive: true, force: true })
+    await rm(backupMetadataPath(target.targetPath), { force: true })
     return 1
   })
 }
@@ -1441,15 +1672,7 @@ export async function copyCreatorSkillBackupForTesting(
   workspaceRoot: string,
   slug: string,
 ): Promise<string> {
-  const target = await resolveCreatorSkillBackupTarget({
-    workspaceRoot,
-    slug,
-    backupId: creatorSkillBackupTimestamp(),
-    createAncestors: true,
-  })
-  if (target.targetExists) {
-    throw invalidBackupPath('Creator Skill backup target already exists')
-  }
+  const target = await allocateCreatorSkillBackupTarget(workspaceRoot, slug)
   await cp(source, target.targetPath, { recursive: true, errorOnExist: true })
   return target.targetPath
 }

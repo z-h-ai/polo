@@ -596,9 +596,12 @@ export default function WorkspaceSettingsPage() {
                       label={backup.slug}
                       description={[
                         t(`creatorSkills.backups.operation.${backup.operation}`),
+                        backup.version
+                          ? t('creatorSkills.backups.version', { version: backup.version })
+                          : null,
                         new Date(backup.createdAt).toLocaleString(),
                         formatBackupSize(backup.sizeBytes),
-                      ].join(' · ')}
+                      ].filter(Boolean).join(' · ')}
                       action={
                         <button
                           type="button"

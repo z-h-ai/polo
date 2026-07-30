@@ -159,6 +159,7 @@ describe('Creator Skill boundary schemas', () => {
   it('requires UUID operation identifiers at the renderer RPC boundary', () => {
     const base = {
       workspaceId: 'workspace-id',
+      sessionId: 'session-id',
       grant: {
         artifactId: 'artifact-id',
         organizationId: 'organization-id',
@@ -179,6 +180,11 @@ describe('Creator Skill boundary schemas', () => {
     expect(CreatorSkillInstallRpcInputSchema.safeParse({
       ...base,
       operationId: '../outside',
+    }).success).toBe(false)
+    expect(CreatorSkillInstallRpcInputSchema.safeParse({
+      ...base,
+      operationId: '11111111-1111-4111-8111-111111111111',
+      workingDirectory: '/renderer-controlled/project',
     }).success).toBe(false)
   })
 })

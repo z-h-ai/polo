@@ -248,7 +248,7 @@ import type {
   CreatorSkillDownloadGrant,
   CreatorSkillInstallConflict,
   CreatorSkillInstallIdentity,
-  CreatorSkillInstallInput,
+  CreatorSkillInstallRpcInput,
   CreatorSkillOperationProgress,
   CreatorSkillOperationResult,
   CreatorSkillSafetyStatus,
@@ -265,7 +265,7 @@ export type {
   CreatorSkillDownloadGrant,
   CreatorSkillInstallConflict,
   CreatorSkillInstallIdentity,
-  CreatorSkillInstallInput,
+  CreatorSkillInstallRpcInput,
   CreatorSkillOperationProgress,
   CreatorSkillOperationResult,
   CreatorSkillSafetyStatus,
@@ -677,7 +677,7 @@ export interface ElectronAPI {
       }
     | { success: false; errorCode: string }
   >
-  creatorSkillInstall(input: CreatorSkillInstallInput): Promise<CreatorSkillOperationResult>
+  creatorSkillInstall(input: CreatorSkillInstallRpcInput): Promise<CreatorSkillOperationResult>
   creatorSkillCancel(operationId: string): Promise<{ success: boolean }>
   creatorSkillUninstall(input: {
     workspaceId: string

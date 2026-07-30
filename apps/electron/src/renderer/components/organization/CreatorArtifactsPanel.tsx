@@ -37,7 +37,6 @@ import type {
   CreatorArtifact,
   CreatorArtifactDetail,
   CreatorArtifactVersion,
-  CreatorSkillInstallInput,
   CreatorSkillOperationProgress,
   SkillValidationIssue,
 } from '../../../shared/types'
@@ -46,7 +45,7 @@ interface CreatorArtifactsPanelProps {
   organizationId: string
   canManage: boolean
   workspaceId: string | null
-  workingDirectory?: string
+  sessionId: string | null
 }
 
 type ActionState =
@@ -77,7 +76,7 @@ export function CreatorArtifactsPanel({
   organizationId,
   canManage,
   workspaceId,
-  workingDirectory,
+  sessionId,
 }: CreatorArtifactsPanelProps) {
   const { t } = useTranslation()
   const [enabled, setEnabled] = useState<boolean | null>(null)
@@ -117,6 +116,11 @@ export function CreatorArtifactsPanel({
   const requestGeneration = useRef(0)
   const detailRequestGeneration = useRef(0)
   const referenceRequestGeneration = useRef(0)
+  const detailInFlightRef = useRef<{
+    key: string
+    generation: number
+    request: Promise<void>
+  } | null>(null)
   const selectedIdRef = useRef(selectedId)
   const organizationIdRef = useRef(organizationId)
   const detailArtifactIdRef = useRef(detail?.artifact.id ?? null)
@@ -171,85 +175,101 @@ export function CreatorArtifactsPanel({
     }
   }, [canManage, organizationId, t])
 
-  const loadDetail = useCallback(async (artifactId: string) => {
+  const loadDetail = useCallback((artifactId: string): Promise<void> => {
     const requestedOrganizationId = organizationId
     if (
       organizationIdRef.current !== requestedOrganizationId
       || selectedIdRef.current !== artifactId
-    ) return
+    ) return Promise.resolve()
+    const requestKey = `${requestedOrganizationId}\0${artifactId}`
+    const existing = detailInFlightRef.current
+    if (
+      existing?.key === requestKey
+      && existing.generation === detailRequestGeneration.current
+    ) return existing.request
+
     const generation = ++detailRequestGeneration.current
-    referenceRequestGeneration.current += 1
-    setReferencePreview(null)
-    setReferenceLoading(null)
-    const isCurrentRequest = () => (
-      generation === detailRequestGeneration.current
-      && organizationIdRef.current === requestedOrganizationId
-      && selectedIdRef.current === artifactId
-    )
-    setDetailLoading(true)
-    setDetail(current => current?.artifact.id === artifactId ? current : null)
-    setError(null)
-    try {
-      const result = await window.electronAPI.creatorArtifactGet({
-        organizationId: requestedOrganizationId,
-        artifactId,
-      })
-      if (!isCurrentRequest()) return
-      if (!result.success) {
-        setDetail(null)
-        setError(resultMessage(t, result))
-        return
-      }
-      if (
-        result.artifact.id !== artifactId
-        || result.artifact.organizationId !== requestedOrganizationId
-      ) {
+    const request = (async () => {
+      referenceRequestGeneration.current += 1
+      setReferencePreview(null)
+      setReferenceLoading(null)
+      const isCurrentRequest = () => (
+        generation === detailRequestGeneration.current
+        && organizationIdRef.current === requestedOrganizationId
+        && selectedIdRef.current === artifactId
+      )
+      setDetailLoading(true)
+      setDetail(current => current?.artifact.id === artifactId ? current : null)
+      setError(null)
+      try {
+        const result = await window.electronAPI.creatorArtifactGet({
+          organizationId: requestedOrganizationId,
+          artifactId,
+        })
+        if (!isCurrentRequest()) return
+        if (!result.success) {
+          setDetail(null)
+          setError(resultMessage(t, result))
+          return
+        }
+        if (
+          result.artifact.id !== artifactId
+          || result.artifact.organizationId !== requestedOrganizationId
+        ) {
+          setDetail(null)
+          setError(t('creatorSkills.errors.unknown'))
+          return
+        }
+        setDetail({
+          artifact: result.artifact,
+          versions: result.versions,
+          selectedVersion: result.selectedVersion,
+          skillContent: result.skillContent,
+          fileTree: result.fileTree,
+          reference: result.reference,
+        })
+        setVersionDetails({})
+        const published = result.versions
+          .filter(item => item.status === 'published')
+          .sort((left, right) => right.version.localeCompare(left.version))
+        setInstallVersion(current => (
+          published.some(item => item.version === current)
+            ? current
+            : result.artifact.latestPublishedVersion ?? published[0]?.version ?? ''
+        ))
+        const draft = result.versions.find(item => (
+          item.status !== 'published'
+          && item.status !== 'revoked'
+          && item.status !== 'expired'
+        ))
+        setDraftVersionId(draft?.id ?? null)
+        setIssues(draft?.validationIssues ?? [])
+        setVersion('1.0.0')
+        setChangelog(
+          result.versions.length === 0
+            ? t('creatorSkills.version.initialChangelog')
+            : '',
+        )
+      } catch (caught) {
+        if (!isCurrentRequest()) return
+        emitAdminAuthFailure(
+          caught && typeof caught === 'object'
+            ? caught as { code?: string; errorCode?: string; status?: number }
+            : {},
+        )
         setDetail(null)
         setError(t('creatorSkills.errors.unknown'))
-        return
+      } finally {
+        if (isCurrentRequest()) setDetailLoading(false)
       }
-      setDetail({
-        artifact: result.artifact,
-        versions: result.versions,
-        selectedVersion: result.selectedVersion,
-        skillContent: result.skillContent,
-        fileTree: result.fileTree,
-        reference: result.reference,
-      })
-      setVersionDetails({})
-      const published = result.versions
-        .filter(item => item.status === 'published')
-        .sort((left, right) => right.version.localeCompare(left.version))
-      setInstallVersion(current => (
-        published.some(item => item.version === current)
-          ? current
-          : result.artifact.latestPublishedVersion ?? published[0]?.version ?? ''
-      ))
-      const draft = result.versions.find(item => (
-        item.status !== 'published'
-        && item.status !== 'revoked'
-        && item.status !== 'expired'
-      ))
-      setDraftVersionId(draft?.id ?? null)
-      setIssues(draft?.validationIssues ?? [])
-      setVersion('1.0.0')
-      setChangelog(
-        result.versions.length === 0
-          ? t('creatorSkills.version.initialChangelog')
-          : '',
-      )
-    } catch (caught) {
-      if (!isCurrentRequest()) return
-      emitAdminAuthFailure(
-        caught && typeof caught === 'object'
-          ? caught as { code?: string; errorCode?: string; status?: number }
-          : {},
-      )
-      setDetail(null)
-      setError(t('creatorSkills.errors.unknown'))
-    } finally {
-      if (isCurrentRequest()) setDetailLoading(false)
-    }
+    })()
+    detailInFlightRef.current = { key: requestKey, generation, request }
+    void request.finally(() => {
+      if (detailInFlightRef.current?.request === request) {
+        detailInFlightRef.current = null
+      }
+    })
+    return request
   }, [organizationId, t])
 
   useEffect(() => {
@@ -347,17 +367,31 @@ export function CreatorArtifactsPanel({
     })
   }, [operationId])
 
-  useEffect(() => {
-    const validating = detail?.versions.find(item => (
+  const pollingArtifactId = detail?.versions.some(item => (
       item.id === draftVersionId
       && (item.status === 'uploaded' || item.status === 'validating')
     ))
-    if (!validating || !detail) return
-    const timer = window.setInterval(() => {
-      void loadDetail(detail.artifact.id)
-    }, 2_000)
-    return () => window.clearInterval(timer)
-  }, [detail, draftVersionId, loadDetail])
+    ? detail.artifact.id
+    : null
+
+  useEffect(() => {
+    if (!pollingArtifactId) return
+    let active = true
+    let timer: number | undefined
+    const schedule = () => {
+      timer = window.setTimeout(() => {
+        if (!active) return
+        void loadDetail(pollingArtifactId).finally(() => {
+          if (active) schedule()
+        })
+      }, 2_000)
+    }
+    schedule()
+    return () => {
+      active = false
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [loadDetail, pollingArtifactId])
 
   const selectedVersion = useMemo(
     () => {
@@ -524,10 +558,15 @@ export function CreatorArtifactsPanel({
     }
   }
 
-  const install = async (confirmations?: Partial<CreatorSkillInstallInput>) => {
+  const install = async (confirmations?: {
+    replaceExisting?: boolean
+    confirmGlobalOverride?: boolean
+    backupLocalChanges?: boolean
+  }) => {
     if (
       !detail
       || !workspaceId
+      || !sessionId
       || !selectedVersion
       || !selectedVersionDetail
       || !target?.writable
@@ -549,7 +588,7 @@ export function CreatorArtifactsPanel({
       }
       const result = await window.electronAPI.creatorSkillInstall({
         workspaceId,
-        ...(workingDirectory ? { workingDirectory } : {}),
+        sessionId,
         operationId: nextOperationId,
         grant: {
           artifactId: grant.artifactId,
@@ -963,6 +1002,7 @@ export function CreatorArtifactsPanel({
                     disabled={
                       action !== null
                       || !workspaceId
+                      || !sessionId
                       || !target?.writable
                       || !selectedVersionDetail
                     }

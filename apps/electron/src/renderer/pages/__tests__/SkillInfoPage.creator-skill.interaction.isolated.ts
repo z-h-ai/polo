@@ -99,6 +99,7 @@ const skill = {
 let safetyResponse: () => Promise<Record<string, unknown>>
 let deleteSkillResponse: () => Promise<Record<string, unknown>>
 let uninstallInputs: Array<Record<string, unknown>>
+let installInputs: Array<Record<string, unknown>>
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
@@ -108,6 +109,7 @@ beforeEach(async () => {
   })
   deleteSkillResponse = async () => ({ managed: true, detached: true })
   uninstallInputs = []
+  installInputs = []
   window.confirm = mock(() => false)
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
@@ -118,6 +120,32 @@ beforeEach(async () => {
       creatorSkillGetSafetyStatus: () => safetyResponse(),
       creatorSkillUpdateSafetyStatus: async () => ({ success: true as const }),
       creatorSkillIgnoreVersion: async () => ({ success: true as const }),
+      creatorSkillGetDownloadGrant: async (input: { version: string }) => ({
+        success: true as const,
+        artifactId: installation.artifactId,
+        organizationId: installation.organizationId,
+        slug: installation.slug,
+        version: input.version,
+        url: 'https://download.example.test/review-skill.zip',
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        archiveChecksum: 'c'.repeat(64),
+        contentDigest: 'd'.repeat(64),
+        manifest: [],
+        validationPolicy: {
+          version: '1',
+          maxArchiveBytes: 20 * 1024 * 1024,
+          maxFileCount: 200,
+          maxFileBytes: 5 * 1024 * 1024,
+          maxExpandedBytes: 50 * 1024 * 1024,
+        },
+      }),
+      creatorSkillInstall: async (input: Record<string, unknown>) => {
+        installInputs.push(input)
+        return {
+          success: true as const,
+          operationId: input.operationId,
+        }
+      },
       creatorSkillCancel: async () => ({ success: true as const }),
       deleteSkill: () => deleteSkillResponse(),
       creatorSkillUninstall: async (input: Record<string, unknown>) => {
@@ -147,6 +175,7 @@ function renderPage() {
       createElement(SkillInfoPage, {
         skillSlug: skill.slug,
         workspaceId: 'workspace-one',
+        sessionId: 'session-one',
       }),
     ),
   ))
@@ -187,5 +216,31 @@ describe('SkillInfoPage Creator Skill interactions', () => {
         forceDeleteModified: true,
       })
     })
+  })
+
+  it('offers and executes an explicit safe rollback for a revoked newer version', async () => {
+    safetyResponse = async () => ({
+      success: true as const,
+      artifactId: installation.artifactId,
+      version: installation.version,
+      archiveChecksum: installation.archiveChecksum,
+      status: 'revoked',
+      safeVersion: '0.9.0',
+    })
+    renderPage()
+
+    expect(await screen.findByText('Safe rollback to version 0.9.0 is available')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Roll back' }))
+
+    await waitFor(() => expect(installInputs).toHaveLength(1))
+    expect(installInputs[0]).toMatchObject({
+      workspaceId: 'workspace-one',
+      sessionId: 'session-one',
+      grant: {
+        artifactId: installation.artifactId,
+        version: '0.9.0',
+      },
+    })
+    expect(installInputs[0]).not.toHaveProperty('workingDirectory')
   })
 })

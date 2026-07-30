@@ -36,6 +36,9 @@ await mkdir(workspaceOne.rootPath)
 await mkdir(workspaceTwo.rootPath)
 await mkdir(workspaceCaseCollision.rootPath)
 let workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
+const sessionId = 'session-one'
+let sessionWorkspaceId = workspaceOne.id
+let sessionWorkingDirectory: string | undefined
 
 const [{
   RPC_CHANNELS,
@@ -66,6 +69,15 @@ const server: RpcServer = {
 const deps = {
   sessionManager: {
     getWorkspaces: () => workspaceOrder,
+    getSession: async (requestedSessionId: string) => (
+      requestedSessionId === sessionId
+        ? {
+            id: sessionId,
+            workspaceId: sessionWorkspaceId,
+            workingDirectory: sessionWorkingDirectory,
+          }
+        : null
+    ),
   },
   oauthFlowStore: {},
   platform: {
@@ -101,6 +113,7 @@ const ctx: RequestContext = {
 
 const installInput = {
   workspaceId: workspaceOne.id,
+  sessionId,
   operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   grant: {
     artifactId: 'artifact-one',
@@ -245,6 +258,72 @@ describe('Creator Skill workspace RPC boundary', () => {
       expect(uninstallResult).not.toHaveProperty('message')
     } finally {
       await chmod(workspaceOne.rootPath, 0o755)
+    }
+  })
+
+  it('derives the project directory from the bound session and rejects renderer paths', async () => {
+    const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!
+    const projectDirectory = join(workspaceOne.rootPath, 'project')
+    await mkdir(
+      join(projectDirectory, '.agents', 'skills', installInput.grant.slug),
+      { recursive: true },
+    )
+    sessionWorkingDirectory = projectDirectory
+    try {
+      const conflict = await install(ctx, installInput)
+      expect(conflict).toMatchObject({
+        success: false,
+        errorCode: 'project_skill_conflict',
+      })
+      expect(conflict).not.toHaveProperty('path')
+      expect(conflict).not.toHaveProperty('message', projectDirectory)
+
+      const rendererPath = await install(ctx, {
+        ...installInput,
+        workingDirectory: projectDirectory,
+      })
+      expect(rendererPath).toMatchObject({
+        success: false,
+        errorCode: 'VALIDATION_ERROR',
+      })
+    } finally {
+      sessionWorkingDirectory = undefined
+    }
+  })
+
+  it('rejects existing and missing session directories outside the workspace boundary', async () => {
+    const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!
+    const outsideExisting = join(temporaryRoot, 'outside-project')
+    await mkdir(outsideExisting)
+    for (const [index, outsidePath] of [
+      outsideExisting,
+      join(temporaryRoot, 'outside-missing', 'project'),
+    ].entries()) {
+      sessionWorkingDirectory = outsidePath
+      const result = await install(ctx, {
+        ...installInput,
+        operationId: `dddddddd-dddd-4ddd-8dd${index}-ddddddddddd${index}`,
+      })
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'workspace_context_mismatch',
+      })
+      expect(result).not.toHaveProperty('path')
+      expect(JSON.stringify(result)).not.toContain(outsidePath)
+    }
+    sessionWorkingDirectory = undefined
+
+    sessionWorkspaceId = workspaceTwo.id
+    try {
+      expect(await install(ctx, {
+        ...installInput,
+        operationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      })).toMatchObject({
+        success: false,
+        errorCode: 'workspace_context_mismatch',
+      })
+    } finally {
+      sessionWorkspaceId = workspaceOne.id
     }
   })
 

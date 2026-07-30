@@ -72,6 +72,8 @@ export interface AppShellContextType {
   skills?: LoadedSkill[]
   /** Working directory of the active session — needed for project-level skill resolution */
   activeSessionWorkingDirectory?: string
+  /** Active session used to bind workspace-scoped Creator Skill mutations. */
+  activeSessionId?: string
   /** All label configs (tree) for label menu and badge display */
   labels?: import('@polo-ai/shared/labels').LabelConfig[]
   /** Callback when session labels change */

@@ -223,12 +223,18 @@ export interface CreatorSkillConflictDetails {
 
 export interface CreatorSkillInstallInput {
   workspaceId: string
+  /** Server-derived project directory; never accepted from renderer RPC input. */
   workingDirectory?: string
   operationId: string
   grant: CreatorSkillDownloadGrant
   replaceExisting?: boolean
   confirmGlobalOverride?: boolean
   backupLocalChanges?: boolean
+}
+
+export interface CreatorSkillInstallRpcInput
+  extends Omit<CreatorSkillInstallInput, 'workingDirectory'> {
+  sessionId: string
 }
 
 export type CreatorSkillOperationResult =
@@ -252,10 +258,16 @@ export type CreatorSkillOperationResult =
       retryable: boolean
     }
 
+export type CreatorSkillBackupOperation =
+  | 'modified_update'
+  | 'update_safety_snapshot'
+  | 'clean_uninstall_snapshot'
+
 export interface CreatorSkillBackup {
   backupId: string
   slug: string
   createdAt: string
   sizeBytes: number
-  operation: 'update'
+  operation: CreatorSkillBackupOperation
+  version?: string
 }

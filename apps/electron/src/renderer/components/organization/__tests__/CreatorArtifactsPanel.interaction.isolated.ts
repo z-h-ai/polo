@@ -161,6 +161,7 @@ function panelTree(
       organizationId: panelOrganizationId,
       canManage,
       workspaceId,
+      sessionId: workspaceId ? 'session-one' : null,
     }),
   )
 }
@@ -174,6 +175,97 @@ function renderPanel(
 }
 
 describe('CreatorArtifactsPanel', () => {
+  it('polls validation details single-flight after each delayed response settles', async () => {
+    const initialDetail = deferred<Record<string, unknown>>()
+    const slowPoll = deferred<Record<string, unknown>>()
+    let requestCount = 0
+    const validatingVersion = {
+      id: 'version-draft',
+      artifactId: skill.id,
+      version: '2.0.0',
+      status: 'validating' as const,
+      uploadGeneration: 1,
+      createdAt: '2026-07-30T00:00:00.000Z',
+    }
+    detailArtifact = {
+      ...skill,
+      latestPublishedVersion: '',
+    }
+    detailVersions = [validatingVersion]
+    detailResponse = () => {
+      requestCount += 1
+      if (requestCount === 1) return initialDetail.promise
+      if (requestCount === 2) return slowPoll.promise
+      return {
+        success: true as const,
+        artifact: detailArtifact,
+        versions: requestCount >= 3
+          ? [{ ...validatingVersion, status: 'validated' as const }]
+          : [validatingVersion],
+      }
+    }
+
+    renderPanel(true, 'workspace-one')
+    fireEvent.click(await screen.findByText('Review Skill'))
+    await waitFor(() => expect(requestCount).toBe(1))
+
+    const scheduled: Array<() => void> = []
+    const originalSetTimeout = window.setTimeout
+    const originalClearTimeout = window.clearTimeout
+    window.setTimeout = ((handler: TimerHandler) => {
+      if (typeof handler !== 'function') throw new Error('Unexpected string timer')
+      scheduled.push(handler as () => void)
+      return scheduled.length
+    }) as typeof window.setTimeout
+    window.clearTimeout = (() => {}) as typeof window.clearTimeout
+    try {
+      await act(async () => {
+        initialDetail.resolve({
+          success: true as const,
+          artifact: detailArtifact,
+          versions: [validatingVersion],
+        })
+        await initialDetail.promise
+        for (let index = 0; index < 4; index += 1) await Promise.resolve()
+      })
+      expect(scheduled).toHaveLength(1)
+
+      await act(async () => {
+        scheduled.shift()?.()
+        await Promise.resolve()
+      })
+      expect(requestCount).toBe(2)
+      expect(scheduled).toHaveLength(0)
+
+      // A response slower than any nominal interval cannot create another
+      // request because no successor timer exists until this one settles.
+      await act(async () => {
+        for (let index = 0; index < 8; index += 1) await Promise.resolve()
+      })
+      expect(requestCount).toBe(2)
+
+      await act(async () => {
+        slowPoll.resolve({
+          success: true as const,
+          artifact: detailArtifact,
+          versions: [validatingVersion],
+        })
+        await slowPoll.promise
+        for (let index = 0; index < 4; index += 1) await Promise.resolve()
+      })
+      expect(scheduled).toHaveLength(1)
+
+      await act(async () => {
+        scheduled.shift()?.()
+        for (let index = 0; index < 4; index += 1) await Promise.resolve()
+      })
+      expect(requestCount).toBe(3)
+    } finally {
+      window.setTimeout = originalSetTimeout
+      window.clearTimeout = originalClearTimeout
+    }
+  })
+
   it('requests an aggregate catalog and renders Web App and Skill type badges', async () => {
     renderPanel(false)
 
@@ -580,6 +672,62 @@ describe('CreatorArtifactsPanel', () => {
     await waitFor(() => {
       expect(within(detailPanel).getByRole('heading', { name: 'Second Skill' })).toBeTruthy()
       expect(within(detailPanel).queryByRole('heading', { name: 'Review Skill' })).toBeNull()
+    })
+  })
+
+  it('starts a fresh detail request when returning to an artifact with a stale request in flight', async () => {
+    const secondSkill = {
+      ...skill,
+      id: 'skill-two',
+      slug: 'second-skill',
+      name: 'Second Skill',
+    }
+    artifactListResponse = () => ({
+      success: true as const,
+      artifacts: [skill, secondSkill],
+    })
+    const staleDetail = deferred<Record<string, unknown>>()
+    const currentDetail = deferred<Record<string, unknown>>()
+    let firstSkillRequests = 0
+    detailResponse = input => {
+      if (input.artifactId === secondSkill.id) {
+        return {
+          success: true,
+          artifact: secondSkill,
+          versions: [],
+        }
+      }
+      firstSkillRequests += 1
+      return firstSkillRequests === 1 ? staleDetail.promise : currentDetail.promise
+    }
+
+    renderPanel(false)
+    await waitFor(() => expect(firstSkillRequests).toBe(1))
+    fireEvent.click(screen.getByText('Second Skill').closest('button')!)
+    expect(await screen.findByRole('heading', { name: 'Second Skill' })).toBeTruthy()
+    fireEvent.click(screen.getByText('Review Skill').closest('button')!)
+    await waitFor(() => expect(firstSkillRequests).toBe(2))
+
+    await act(async () => {
+      currentDetail.resolve({
+        success: true,
+        artifact: skill,
+        versions: [],
+      })
+    })
+    const detailPanel = screen.getByTestId('creator-artifact-detail')
+    expect(within(detailPanel).getByRole('heading', { name: 'Review Skill' })).toBeTruthy()
+
+    await act(async () => {
+      staleDetail.resolve({
+        success: true,
+        artifact: { ...skill, name: 'Stale Review Skill' },
+        versions: [],
+      })
+    })
+    await waitFor(() => {
+      expect(within(detailPanel).getByRole('heading', { name: 'Review Skill' })).toBeTruthy()
+      expect(within(detailPanel).queryByText('Stale Review Skill')).toBeNull()
     })
   })
 

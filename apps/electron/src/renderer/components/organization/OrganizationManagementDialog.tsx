@@ -49,7 +49,7 @@ interface OrganizationManagementDialogProps {
   onOpenChange: (open: boolean) => void
   onOrganizationsChanged: () => Promise<unknown>
   workspaceId?: string | null
-  workingDirectory?: string
+  sessionId?: string | null
 }
 
 interface GeneratedLink {
@@ -72,7 +72,7 @@ export function OrganizationManagementDialog({
   onOpenChange,
   onOrganizationsChanged,
   workspaceId,
-  workingDirectory,
+  sessionId,
 }: OrganizationManagementDialogProps) {
   const { t } = useTranslation()
   const organization = useOrganizationContext()
@@ -374,7 +374,7 @@ export function OrganizationManagementDialog({
                 organizationId={active.id}
                 canManage={canManage}
                 workspaceId={workspaceId ?? null}
-                workingDirectory={workingDirectory}
+                sessionId={sessionId ?? null}
               />
             </TabsContent>
           ) : null}

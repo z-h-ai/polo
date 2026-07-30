@@ -1,6 +1,6 @@
-import { join } from 'path'
+import { basename, dirname, join, resolve, sep } from 'path'
 import { constants as fsConstants, existsSync, readdirSync, statSync } from 'fs'
-import { access } from 'node:fs/promises'
+import { access, realpath, stat } from 'node:fs/promises'
 import { RPC_CHANNELS, type SkillFile } from '@polo-ai/shared/protocol'
 import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import {
@@ -79,6 +79,51 @@ function workspaceMutationError(
     stage: 'prepare' as const,
     diagnostic: JSON.stringify({ errorCode, stage: 'prepare' }),
     retryable: false,
+  }
+}
+
+async function canonicalizePotentialPath(path: string): Promise<string> {
+  let existingAncestor = resolve(path)
+  const missingSegments: string[] = []
+  while (!existsSync(existingAncestor)) {
+    const parent = dirname(existingAncestor)
+    if (parent === existingAncestor) throw new Error('Path has no existing ancestor')
+    missingSegments.unshift(basename(existingAncestor))
+    existingAncestor = parent
+  }
+  return resolve(await realpath(existingAncestor), ...missingSegments)
+}
+
+async function deriveSessionWorkingDirectory(
+  deps: HandlerDeps,
+  workspace: { id: string; rootPath: string },
+  sessionId: string,
+): Promise<string | undefined> {
+  const session = await deps.sessionManager.getSession(sessionId)
+  if (!session || session.workspaceId !== workspace.id) {
+    throw Object.assign(new Error('Session does not belong to the current workspace'), {
+      code: 'workspace_context_mismatch',
+    })
+  }
+  if (!session.workingDirectory) return undefined
+
+  try {
+    const workspaceRoot = await realpath(resolve(workspace.rootPath))
+    const workingDirectory = await canonicalizePotentialPath(session.workingDirectory)
+    if (
+      workingDirectory !== workspaceRoot
+      && !workingDirectory.startsWith(`${workspaceRoot}${sep}`)
+    ) {
+      throw new Error('Session working directory is outside the workspace')
+    }
+    if (existsSync(workingDirectory) && !(await stat(workingDirectory)).isDirectory()) {
+      throw new Error('Session working directory is not a directory')
+    }
+    return workingDirectory
+  } catch {
+    throw Object.assign(new Error('Session working directory is not workspace-scoped'), {
+      code: 'workspace_context_mismatch',
+    })
   }
 }
 
@@ -325,7 +370,21 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       return workspaceMutationError(input.data.operationId, 'workspace_read_only')
     }
     await ensureRecovered(workspace.rootPath)
-    const result = await installCreatorSkill(workspace.rootPath, input.data, {
+    let workingDirectory: string | undefined
+    try {
+      workingDirectory = await deriveSessionWorkingDirectory(
+        deps,
+        workspace,
+        input.data.sessionId,
+      )
+    } catch {
+      return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
+    }
+    const { sessionId: _sessionId, ...installInput } = input.data
+    const result = await installCreatorSkill(workspace.rootPath, {
+      ...installInput,
+      ...(workingDirectory ? { workingDirectory } : {}),
+    }, {
       onProgress: progress => pushTyped(
         server,
         RPC_CHANNELS.creatorSkills.PROGRESS,
