@@ -67,7 +67,7 @@ export const SetAdminPasswordResponseSchema = z.object({
   success: z.literal(true),
 })
 
-const organizationId = nonBlankString(512)
+const entityId = nonBlankString(512)
 const organizationDate = z.string().datetime({ offset: true })
 
 export const OrganizationTypeSchema = z.enum(['enterprise_workspace', 'creator_space'])
@@ -83,7 +83,7 @@ export const OrganizationJoinStatusSchema = z.enum([
 ])
 
 export const OrganizationSchema = z.object({
-  id: organizationId,
+  id: entityId,
   type: OrganizationTypeSchema,
   name: nonBlankString(128),
   purpose: nonBlankString(512),
@@ -94,9 +94,9 @@ export const OrganizationSchema = z.object({
 })
 
 export const OrganizationMembershipSchema = z.object({
-  id: organizationId,
-  organizationId: organizationId.optional(),
-  userId: organizationId.optional(),
+  id: entityId,
+  organizationId: entityId.optional(),
+  userId: entityId.optional(),
   role: OrganizationRoleSchema,
   status: OrganizationMembershipStatusSchema,
   joinedAt: organizationDate.optional(),
@@ -129,21 +129,21 @@ export const OrganizationJoinPreviewSchema = z.object({
 
 export const AcceptOrganizationJoinResponseSchema = z.object({
   membership: OrganizationMembershipSchema.extend({
-    organizationId,
-    userId: organizationId,
+    organizationId: entityId,
+    userId: entityId,
   }),
   replayed: z.boolean(),
 })
 
 export const ListOrganizationMembersResponseSchema = z.object({
   members: z.array(z.object({
-    id: organizationId,
+    id: entityId,
     role: OrganizationRoleSchema,
     status: z.enum(['active', 'suspended']),
     joinedAt: organizationDate,
     updatedAt: organizationDate,
     user: z.object({
-      id: organizationId,
+      id: entityId,
       username: nonBlankString(512),
       displayName: z.string().max(2_048).nullable(),
       phone: z.string().max(32).nullable().optional(),
@@ -152,7 +152,7 @@ export const ListOrganizationMembersResponseSchema = z.object({
 })
 
 export const OrganizationInvitationSchema = z.object({
-  id: organizationId,
+  id: entityId,
   targetPhone: z.string().max(32).nullable(),
   status: nonBlankString(64),
   effectiveStatus: z.enum(['active', 'cancelled', 'expired', 'exhausted']),
@@ -161,7 +161,7 @@ export const OrganizationInvitationSchema = z.object({
   expiresAt: organizationDate,
   cancelledAt: organizationDate.nullable().optional(),
   createdAt: organizationDate,
-  createdByUserId: organizationId.optional(),
+  createdByUserId: entityId.optional(),
 })
 
 export const ListOrganizationInvitationsResponseSchema = z.object({
@@ -174,7 +174,7 @@ export const CreateOrganizationInvitationResponseSchema = z.object({
 })
 
 export const OrganizationJoinLinkSchema = z.object({
-  id: organizationId,
+  id: entityId,
   status: nonBlankString(64),
   effectiveStatus: OrganizationJoinStatusSchema.optional(),
   maxUses: z.number().int().min(1).nullable(),
@@ -195,7 +195,7 @@ export const OrganizationMemberMutationResponseSchema = z.object({
 
 export const OrganizationInvitationMutationResponseSchema = z.object({
   invitation: z.object({
-    id: organizationId,
+    id: entityId,
     status: nonBlankString(64),
     cancelledAt: organizationDate.nullable(),
   }),
@@ -203,7 +203,7 @@ export const OrganizationInvitationMutationResponseSchema = z.object({
 
 export const OrganizationJoinLinkMutationResponseSchema = z.object({
   joinLink: z.object({
-    id: organizationId,
+    id: entityId,
     status: nonBlankString(64),
     revokedAt: organizationDate.nullable(),
   }),
