@@ -13,6 +13,7 @@ import {
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import {
   normalizeLocalAppPermissions,
+  projectLocalAppStatusForCatalogAccess,
   RPC_CHANNELS,
 } from '@polo-ai/shared/protocol'
 import type {
@@ -67,6 +68,35 @@ interface CatalogAppReference {
   app: CatalogApp
   appConfigVersion: string
   accessMode: 'online' | 'offline' | 'denied'
+  canAccessDeliveryMetadata: boolean
+}
+
+function isCatalogAppLifecycleAuthorized(
+  scope: CatalogLocalAppScope,
+): boolean {
+  try {
+    // Withdrawal establishes this in-memory fence before cache persistence or
+    // slow runtime cleanup, so a stale authorized cache cannot leak a Release.
+    getScopedLocalAppRuntimeRegistry().assertAppAuthorized(scope)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function canAccessCatalogDeliveryMetadata(
+  scope: CatalogLocalAppScope,
+): boolean {
+  const catalog = getCachedAppCatalog(scope.accountId, scope.organizationId)
+  const app = catalog
+    ? getAppCatalogApps(catalog).find(candidate => candidate.id === scope.catalogAppId)
+    : undefined
+  return Boolean(
+    catalog?.authorizationStatus === 'authorized'
+    && getAppCatalogAccessMode(scope.accountId, scope.organizationId) !== 'denied'
+    && app?.availability === 'available'
+    && isCatalogAppLifecycleAuthorized(scope),
+  )
 }
 
 async function requireCatalogAppReference(
@@ -84,7 +114,12 @@ async function requireCatalogAppReference(
       'This organization app is not present in the current account cache',
     )
   }
-  return { app, appConfigVersion: catalog.appConfigVersion, accessMode }
+  return {
+    app,
+    appConfigVersion: catalog.appConfigVersion,
+    accessMode,
+    canAccessDeliveryMetadata: canAccessCatalogDeliveryMetadata(scope),
+  }
 }
 
 async function requireCatalogDataAccess(
@@ -124,14 +159,19 @@ async function requireAuthorizedCatalogEntry(
 async function requireAuthorizedCatalogApp(
   scope: CatalogLocalAppScope,
 ): Promise<CatalogAppReference> {
-  const { app, appConfigVersion, accessMode } = await requireAuthorizedCatalogEntry(scope)
+  const {
+    app,
+    appConfigVersion,
+    accessMode,
+    canAccessDeliveryMetadata,
+  } = await requireAuthorizedCatalogEntry(scope)
   if (app.deliveryMode !== 'local_bundle') {
     throw new LocalAppRuntimeError(
       'INVALID_REQUEST',
       'Remote URL apps cannot use the local bundle runtime',
     )
   }
-  return { app, appConfigVersion, accessMode }
+  return { app, appConfigVersion, accessMode, canAccessDeliveryMetadata }
 }
 
 async function withCatalogScope<T>(
@@ -145,17 +185,20 @@ async function withCatalogScope<T>(
 
 async function withCatalogManagementScope<T>(
   rawReference: unknown,
-  catalogOperation: (scope: CatalogLocalAppScope) => Promise<T>,
+  catalogOperation: (
+    scope: CatalogLocalAppScope,
+    reference: CatalogAppReference,
+  ) => Promise<T>,
 ): Promise<T> {
   const reference = requireRendererCatalogScope(rawReference)
-  const { app } = await requireCatalogAppReference(reference)
-  if (app.deliveryMode !== 'local_bundle') {
+  const catalogReference = await requireCatalogAppReference(reference)
+  if (catalogReference.app.deliveryMode !== 'local_bundle') {
     throw new LocalAppRuntimeError(
       'INVALID_REQUEST',
       'Remote URL apps do not have local runtime data',
     )
   }
-  return catalogOperation(reference)
+  return catalogOperation(reference, catalogReference)
 }
 
 function hostPlatform(): 'darwin' | 'win32' | 'linux' {
@@ -393,7 +436,12 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   server.handle(RPC_CHANNELS.localApps.STOP, (_ctx, reference: unknown) =>
     withCatalogManagementScope(
       reference,
-      scope => getScopedLocalAppRuntimeRegistry().stop(scope),
+      async (scope, catalogReference) =>
+        projectLocalAppStatusForCatalogAccess(
+          await getScopedLocalAppRuntimeRegistry().stop(scope),
+          catalogReference.canAccessDeliveryMetadata
+            && canAccessCatalogDeliveryMetadata(scope),
+        ),
     ))
 
   server.handle(RPC_CHANNELS.localApps.RESTART, (_ctx, reference: unknown) =>
@@ -457,7 +505,18 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
     (_ctx, reference: unknown) => withCatalogManagementScope(
       reference,
-      scope => getScopedLocalAppRuntimeRegistry().getInstalledApps(scope),
+      async (scope, catalogReference) => {
+        const statuses = await getScopedLocalAppRuntimeRegistry()
+          .getInstalledApps(scope)
+        const canAccessDeliveryMetadata = (
+          catalogReference.canAccessDeliveryMetadata
+          && canAccessCatalogDeliveryMetadata(scope)
+        )
+        return statuses.map(status => projectLocalAppStatusForCatalogAccess(
+          status,
+          canAccessDeliveryMetadata,
+        ))
+      },
     ),
   )
 
@@ -465,7 +524,12 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
     (_ctx, reference: unknown) => withCatalogManagementScope(
       reference,
-      scope => getScopedLocalAppRuntimeRegistry().getRuntimeStatus(scope),
+      async (scope, catalogReference) =>
+        projectLocalAppStatusForCatalogAccess(
+          await getScopedLocalAppRuntimeRegistry().getRuntimeStatus(scope),
+          catalogReference.canAccessDeliveryMetadata
+            && canAccessCatalogDeliveryMetadata(scope),
+        ),
     ),
   )
 
@@ -517,11 +581,29 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       }
       const statuses = await getScopedLocalAppRuntimeRegistry()
         .getRuntimeStatuses(scopes)
-      return statuses.map((status, index) => deriveCatalogReleaseStatus(
-        status,
-        localApps.get(scopes[index]!.catalogAppId)!,
-        catalog.trustedReleases?.[scopes[index]!.catalogAppId],
-      ))
+      const catalogCanAccessDeliveryMetadata = (
+        catalog.authorizationStatus === 'authorized'
+        && getAppCatalogAccessMode(first.accountId, first.organizationId) !== 'denied'
+      )
+      return statuses.map((status, index) => {
+        const app = localApps.get(scopes[index]!.catalogAppId)!
+        const canAccessDeliveryMetadata = (
+          catalogCanAccessDeliveryMetadata
+          && app.availability === 'available'
+          && isCatalogAppLifecycleAuthorized(scopes[index]!)
+        )
+        const derived = canAccessDeliveryMetadata
+          ? deriveCatalogReleaseStatus(
+              status,
+              app,
+              catalog.trustedReleases?.[scopes[index]!.catalogAppId],
+            )
+          : status
+        return projectLocalAppStatusForCatalogAccess(
+          derived,
+          canAccessDeliveryMetadata,
+        )
+      })
     },
   )
 

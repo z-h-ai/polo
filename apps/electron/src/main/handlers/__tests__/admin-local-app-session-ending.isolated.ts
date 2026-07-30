@@ -78,7 +78,7 @@ let getAppCatalogAdmin: (
   accessToken: string,
   organizationId: string,
   appConfigVersion?: string,
-) => Promise<unknown> = async () => ({ notModified: true })
+) => Promise<unknown> = defaultGetAppCatalogAdmin
 let listOrganizationsAdmin: (accessToken: string) => Promise<unknown> =
   async () => ({ organizations: [] })
 let tokensExpired = false
@@ -111,6 +111,20 @@ function createCatalog(): AppCatalogCacheEntry {
       },
     }],
   }
+}
+
+async function defaultGetAppCatalogAdmin(
+  _accessToken: string,
+  _organizationId: string,
+  appConfigVersion?: string,
+): Promise<unknown> {
+  return appConfigVersion === undefined
+    ? {
+        notModified: false,
+        appConfigVersion: catalog.appConfigVersion,
+        apps: catalog.apps,
+      }
+    : { notModified: true }
 }
 
 class TestAdminError extends Error {
@@ -490,7 +504,7 @@ afterEach(async () => {
     },
     configVersion: 'catalog-v1',
   })
-  getAppCatalogAdmin = async () => ({ notModified: true })
+  getAppCatalogAdmin = defaultGetAppCatalogAdmin
   listOrganizationsAdmin = async () => ({ organizations: [] })
   tokensExpired = false
   denyCatalogCacheError = null
@@ -534,9 +548,15 @@ describe('Admin session and scoped local app production wiring', () => {
       getAppCatalogAdmin = async (
         _accessToken,
         requestedOrganizationId,
+        requestedVersion,
       ) => {
         expect(requestedOrganizationId).toBe(organizationId)
-        return { notModified: true }
+        expect(requestedVersion).toBeUndefined()
+        return {
+          notModified: false,
+          appConfigVersion: catalog.appConfigVersion,
+          apps: catalog.apps,
+        }
       }
 
       await expect(sync(context, organizationId, { force: true }))

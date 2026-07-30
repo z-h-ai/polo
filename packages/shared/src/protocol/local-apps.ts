@@ -203,6 +203,22 @@ export interface LocalAppInstalledApp {
   availableRelease?: LocalAppAvailableRelease
 }
 
+/**
+ * Renderer-facing status projection used after Catalog access is denied or an
+ * individual App is withdrawn. Runtime state remains manageable, but release
+ * delivery metadata must not cross the IPC boundary.
+ */
+export function projectLocalAppStatusForCatalogAccess<
+  T extends LocalAppRuntimeStatus | LocalAppInstalledApp,
+>(
+  status: T,
+  canAccessDeliveryMetadata: boolean,
+): T {
+  if (canAccessDeliveryMetadata || !status.availableRelease) return status
+  const { availableRelease: _availableRelease, ...projected } = status
+  return projected as T
+}
+
 export interface LocalAppStartResult {
   appId: string
   scope?: LocalAppScope

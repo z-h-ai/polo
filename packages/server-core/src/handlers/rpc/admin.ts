@@ -24,6 +24,7 @@ import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
 } from '@polo-ai/shared/admin/authorization'
+import { createOrganizationContextKey } from '@polo-ai/shared/admin/context-key'
 import {
   AdminLoginRpcInputSchema,
   CatalogOrganizationIdRpcInputSchema,
@@ -389,8 +390,19 @@ export function registerAdminHandlers(
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
-  const appCatalogScopeKey = (accountId: string, organizationId: string) =>
-    `${accountId}\0${organizationId}`
+  // Keep tuple members structured for account-wide authorization changes.
+  // Entity IDs may contain every delimiter used by older prefix encodings.
+  const appCatalogScopeByKey = new Map<string, {
+    accountId: string
+    organizationId: string
+  }>()
+  const appCatalogScopeKey = (accountId: string, organizationId: string) => {
+    const scopeKey = createOrganizationContextKey(accountId, organizationId)
+    if (!appCatalogScopeByKey.has(scopeKey)) {
+      appCatalogScopeByKey.set(scopeKey, { accountId, organizationId })
+    }
+    return scopeKey
+  }
   const currentAppCatalogAuthorizationEpoch = (scopeKey: string) =>
     appCatalogAuthorizationEpochByScope.get(scopeKey) ?? 0
   const advanceAppCatalogAuthorizationEpoch = (scopeKey: string) => {
@@ -400,9 +412,11 @@ export function registerAdminHandlers(
     )
   }
   const closeCatalogAuthorizationForAccount = (accountId: string) => {
-    const scopePrefix = `${accountId}\0`
-    for (const scopeKey of appCatalogAuthorizationEpochByScope.keys()) {
-      if (scopeKey.startsWith(scopePrefix)) {
+    for (const [scopeKey, scope] of appCatalogScopeByKey) {
+      if (
+        scope.accountId === accountId
+        && appCatalogAuthorizationEpochByScope.has(scopeKey)
+      ) {
         advanceAppCatalogAuthorizationEpoch(scopeKey)
       }
     }
@@ -420,10 +434,12 @@ export function registerAdminHandlers(
     const organizationIds = new Set(
       listCachedAppCatalogs(accountId).map(cached => cached.organizationId),
     )
-    const scopePrefix = `${accountId}\0`
-    for (const scopeKey of appCatalogAuthorizationEpochByScope.keys()) {
-      if (scopeKey.startsWith(scopePrefix)) {
-        organizationIds.add(scopeKey.slice(scopePrefix.length))
+    for (const [scopeKey, scope] of appCatalogScopeByKey) {
+      if (
+        scope.accountId === accountId
+        && appCatalogAuthorizationEpochByScope.has(scopeKey)
+      ) {
+        organizationIds.add(scope.organizationId)
       }
     }
     return organizationIds
@@ -1076,18 +1092,42 @@ export function registerAdminHandlers(
           sessions,
           requestContext,
         )
-        let result = await client.getAppCatalog(
+        const requestedAppConfigVersion = (
+          !force && cached?.authorizationStatus === 'authorized'
+        )
+          ? cached.appConfigVersion
+          : undefined
+        const result = await client.getAppCatalog(
           tokenResult.tokens.accessToken,
           organizationId.data,
-          force || cached?.authorizationStatus === 'denied'
-            ? undefined
-            : cached?.appConfigVersion,
+          requestedAppConfigVersion,
         )
-        if (result.notModified && !cached) {
-          result = await client.getAppCatalog(
-            requestContext.session.tokens.accessToken,
-            organizationId.data,
+        if (result.notModified && requestedAppConfigVersion === undefined) {
+          const rejected = await sessions.mutateIfCurrent(
+            manager,
+            requestContext.session,
+            async (): Promise<AppCatalogSyncResult> => {
+              if (!isCurrentCatalogSync()) return supersededCatalogResult()
+              const deniedCatalog = denyCatalogScope(
+                accountId,
+                organizationId.data,
+              )
+              return {
+                success: false,
+                errorCode: 'SERVER_ERROR',
+                message: 'Admin returned not modified for a full Catalog request',
+                ...(deniedCatalog
+                  ? {
+                      catalog: deniedCatalog,
+                      accessMode: 'denied' as const,
+                    }
+                  : {}),
+              }
+            },
           )
+          return rejected.applied
+            ? rejected.value!
+            : staleAdminSessionResult()
         }
         if (
           !result.notModified

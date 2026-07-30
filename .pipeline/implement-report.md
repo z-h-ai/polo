@@ -2,39 +2,40 @@
 
 ## 变更摘要
 
-- 拆分 Catalog 组织上下文 RPC 与组织管理 RPC 的 ID 校验：Catalog 接受非空、最长 512 字符且可包含冒号和 Unicode 的 Admin 实体 ID；既有组织管理写接口继续保持 UUID 约束。
-- 新增共享的 denied Catalog 投影类型与严格 schema。明确失权及 `denied + NETWORK_ERROR` 返回只保留卡片、完整 scope 和本地数据管理所需字段，不再暴露 `remoteUrl`、Release 下载地址、checksum、权限或 trusted releases。
-- 分离持久化可信 Catalog 与 renderer denied 投影：内部缓存仍保留后续授权恢复所需的可信元数据，所有 IPC 返回在边界统一去能力化。
-- 补充 production wiring、主进程、renderer hook 与 HomePage 回归测试，覆盖复杂组织 ID、冷启动 denied hydration，以及日志、STOP、UNINSTALL 可达但 INSTALL、UPDATE、START、RESTART 不可构造的闭环。
+- 在 shared 层新增统一的账号／组织上下文 key：使用可逆 JSON tuple 编码，renderer、Catalog access mode 与 server-core 共用同一实现；server-core 同时保留结构化 scope 元组，账号级授权关闭与离线切换不再解析字符串前缀，避免 NUL、冒号、Unicode 和长 ID 造成碰撞或串号。
+- 新增共享的 Local App 状态去能力化投影，并统一应用于 `GET_INSTALLED_APPS`、`GET_RUNTIME_STATUS`、`GET_RUNTIME_STATUSES` 和 `STOP`。denied 或 withdrawn App 仍保留真实本地状态及 STOP、UNINSTALL 管理闭环，但 IPC 不再返回 `availableRelease` 中的下载地址、checksum、包大小、平台或架构；App 撤下的内存 lifecycle fence 在新 Catalog 落盘前也会立即关闭状态元数据。
+- 收紧 Catalog 304 契约：仅“authorized 缓存 + 非 force + 实际携带 appConfigVersion”的请求可以接受 `notModified`。denied、无缓存或 force full-fetch 收到异常 304 时立即 fail closed，保持 denied access mode，并只向 renderer 返回清洗后的 denied Catalog。
+- 补充共享层、server-core 与 Electron production-wiring 回归测试，覆盖碰撞型实体 ID、三类状态 RPC 的交付元数据清洗、denied cache 异常 304、force refresh 异常 304，以及 full-fetch 测试桩的真实协议行为。
 
 ## 关键文件列表
 
-- `packages/shared/src/admin/schemas.ts`
-- `packages/shared/src/admin/types.ts`
-- `packages/shared/src/admin/authorization-failure.ts`
-- `packages/shared/src/admin/app-catalog-cache.ts`
+- `packages/shared/src/admin/context-key.ts`
+- `packages/shared/src/admin/__tests__/context-key.test.ts`
+- `packages/shared/src/admin/app-catalog-access.ts`
+- `packages/shared/src/admin/__tests__/app-catalog-access.test.ts`
+- `packages/shared/src/admin/index.ts`
+- `packages/shared/package.json`
+- `packages/shared/src/protocol/local-apps.ts`
+- `packages/shared/src/protocol/__tests__/local-apps.test.ts`
 - `packages/server-core/src/handlers/rpc/admin.ts`
-- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
-- `packages/shared/src/admin/__tests__/schemas.test.ts`
-- `packages/shared/src/admin/__tests__/authorization-failure.test.ts`
 - `packages/server-core/src/handlers/rpc/admin.isolated.ts`
+- `apps/electron/src/main/handlers/local-apps.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
 - `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-- `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-- `apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
+- `apps/electron/src/renderer/lib/organization-storage.ts`
 
 ## 自测结果
 
-- `bun run test`：通过；标准测试 4,819 passed、19 skipped、0 failed，随后全部 `*.isolated.ts` 测试通过。
-- `bun run validate:ci`：通过；包含全仓 TypeScript、shared/doc-tools 测试、6 个 locale 的 1,706 keys parity、排序与 coverage 检查。
-- `bun run lint:electron`：通过；0 errors，保留仓库既有 131 warnings。
+- `bun run test`：通过；标准测试 4,824 passed、19 skipped、0 failed，随后全仓全部 `*.isolated.ts` 测试通过。
+- `bun run validate:ci`：通过；包含全仓 TypeScript、shared/doc-tools 测试，以及 6 个 locale、每个 1,706 keys 的 parity、sorted 和 coverage 检查。
+- `cd apps/electron && bun run lint`：通过；0 errors，保留仓库既有 131 warnings。
 - `bun run electron:build:main`：通过。
-- `bun run electron:build:renderer`：通过；仅有既有 chunk size 提示。
+- `bun run electron:build:renderer`：通过；仅输出既有 chunk size 提示。
 - 定向回归：
-  - shared Catalog schema / denied projection / cache：21 passed。
-  - server-core Admin production handler：55 passed。
-  - Electron Admin session/local-app production wiring：20 passed。
-  - renderer `useAppCatalog`：28 passed。
-  - renderer `HomePage`：12 passed。
+  - shared context key、Catalog access mode 与 Local App 状态投影：6 passed。
+  - server-core Admin handler：57 passed、317 assertions。
+  - Electron Admin session/local-app production wiring：20 passed、150 assertions。
+  - Electron Local Apps IPC 授权边界：20 passed、129 assertions。
 - `git diff --check`：通过。
 
 ## 遗留问题

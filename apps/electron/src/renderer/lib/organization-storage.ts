@@ -1,4 +1,7 @@
 import { ListOrganizationsResponseSchema } from '@polo-ai/shared/admin/schemas'
+import {
+  createOrganizationContextKey as createSharedOrganizationContextKey,
+} from '@polo-ai/shared/admin/context-key'
 import type { OrganizationSummary } from '@polo-ai/shared/admin'
 
 const ACTIVE_ORGANIZATION_PREFIX = 'polo-active-organization:'
@@ -243,9 +246,7 @@ export function createOrganizationContextKey(
   accountId: string,
   organizationId: string,
 ): string {
-  // Admin entity IDs may contain colons and Unicode. JSON tuple encoding keeps
-  // account/organization boundaries unambiguous for every renderer fence.
-  return JSON.stringify([accountId, organizationId])
+  return createSharedOrganizationContextKey(accountId, organizationId)
 }
 
 export function createOrganizationScopedStorageKey(

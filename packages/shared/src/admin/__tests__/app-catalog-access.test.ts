@@ -43,4 +43,19 @@ describe('app catalog account access gate', () => {
       'offline',
     )
   })
+
+  it('isolates delimiter-colliding account and organization tuples', () => {
+    const first = ['account', 'organization\0suffix'] as const
+    const second = ['account\0organization', 'suffix'] as const
+    const unicode = ['账号:一', `组织:${'界'.repeat(500)}`] as const
+
+    setAppCatalogAccessMode(...first, 'online')
+    setAppCatalogAccessMode(...second, 'offline')
+    setAppCatalogAccessMode(...unicode, 'online')
+    denyAppCatalogAccessForAccount(first[0])
+
+    expect(getAppCatalogAccessMode(...first)).toBe('denied')
+    expect(getAppCatalogAccessMode(...second)).toBe('offline')
+    expect(getAppCatalogAccessMode(...unicode)).toBe('online')
+  })
 })

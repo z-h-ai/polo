@@ -2271,6 +2271,7 @@ describe('registerAdminHandlers', () => {
     appCatalogCache.set(`user-1:${organizationId}`, {
       accountId: 'user-1',
       organizationId,
+      authorizationStatus: 'authorized',
       appConfigVersion: 'apps-v1',
       syncedAt: 50,
       apps: [],
@@ -2315,6 +2316,152 @@ describe('registerAdminHandlers', () => {
       'user-1',
       organizationId,
     )
+  })
+
+  it('keeps denied Catalog delivery capabilities closed after an unexpected 304', async () => {
+    const organizationId = 'organization:denied\0snapshot'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'denied',
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [{
+        id: 'remote-app',
+        organizationId,
+        name: 'Private remote app',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://private.example.com/app',
+        sortOrder: 0,
+        availability: 'unavailable',
+      }, {
+        id: 'bundle-app',
+        organizationId,
+        name: 'Private bundle app',
+        description: '',
+        deliveryMode: 'local_bundle',
+        currentRelease: {
+          version: '2.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://private.example.com/app.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+        permissions: ['filesystem'],
+        sortOrder: 1,
+        availability: 'unavailable',
+      }],
+      trustedReleases: {
+        'bundle-app': {
+          version: '2.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://private.example.com/app.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+      },
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'denied')
+    adminClientBehavior.getAppCatalog = async (
+      _accessToken,
+      requestedOrganizationId,
+      requestedVersion,
+    ) => {
+      expect(requestedOrganizationId).toBe(organizationId)
+      expect(requestedVersion).toBeUndefined()
+      return { notModified: true }
+    }
+    const { syncAppCatalog } = createHarness()
+
+    const result = await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      {},
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'SERVER_ERROR',
+      accessMode: 'denied',
+      catalog: {
+        authorizationStatus: 'denied',
+        apps: [
+          { id: 'remote-app', availability: 'unavailable' },
+          { id: 'bundle-app', availability: 'unavailable' },
+        ],
+      },
+    })
+    expect(result.catalog).not.toHaveProperty('trustedReleases')
+    expect(result.catalog.apps[0]).not.toHaveProperty('remoteUrl')
+    expect(result.catalog.apps[1]).not.toHaveProperty('currentRelease')
+    expect(result.catalog.apps[1]).not.toHaveProperty('permissions')
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(adminClientCalls.filter(call => call.method === 'getAppCatalog'))
+      .toHaveLength(1)
+  })
+
+  it('fails closed when a forced full Catalog request unexpectedly returns 304', async () => {
+    const organizationId = 'organization-force-refresh'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [{
+        id: 'private-app',
+        organizationId,
+        name: 'Private app',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://private.example.com',
+        sortOrder: 0,
+        availability: 'available',
+      }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    adminClientBehavior.getAppCatalog = async (
+      _accessToken,
+      _requestedOrganizationId,
+      requestedVersion,
+    ) => {
+      expect(requestedVersion).toBeUndefined()
+      return { notModified: true }
+    }
+    const { syncAppCatalog } = createHarness()
+
+    const result = await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      { force: true },
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'SERVER_ERROR',
+      accessMode: 'denied',
+      catalog: {
+        authorizationStatus: 'denied',
+        apps: [{ id: 'private-app', availability: 'unavailable' }],
+      },
+    })
+    expect(result.catalog.apps[0]).not.toHaveProperty('remoteUrl')
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
   })
 
   it('rejects reuse of a Catalog id with a different delivery mode', async () => {

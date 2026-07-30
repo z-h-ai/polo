@@ -1,14 +1,15 @@
+import { createOrganizationContextKey } from './context-key.ts'
+
 export type AppCatalogAccessMode = 'online' | 'offline' | 'denied'
 
-const accessModes = new Map<string, AppCatalogAccessMode>()
-const deniedAccounts = new Set<string>()
-
-function createAppCatalogAccessKey(
-  accountId: string,
-  organizationId: string,
-): string {
-  return JSON.stringify([accountId, organizationId])
+interface AppCatalogAccessEntry {
+  accountId: string
+  organizationId: string
+  mode: AppCatalogAccessMode
 }
+
+const accessModes = new Map<string, AppCatalogAccessEntry>()
+const deniedAccounts = new Set<string>()
 
 /**
  * Process-local authorization freshness. It intentionally starts offline on
@@ -22,8 +23,8 @@ export function getAppCatalogAccessMode(
   if (deniedAccounts.has(accountId)) return 'denied'
 
   return accessModes.get(
-    createAppCatalogAccessKey(accountId, organizationId),
-  ) ?? 'offline'
+    createOrganizationContextKey(accountId, organizationId),
+  )?.mode ?? 'offline'
 }
 
 export function setAppCatalogAccessMode(
@@ -31,7 +32,11 @@ export function setAppCatalogAccessMode(
   organizationId: string,
   mode: AppCatalogAccessMode,
 ): void {
-  accessModes.set(createAppCatalogAccessKey(accountId, organizationId), mode)
+  accessModes.set(createOrganizationContextKey(accountId, organizationId), {
+    accountId,
+    organizationId,
+    mode,
+  })
 }
 
 export function denyAppCatalogAccessForAccount(accountId: string): void {
@@ -40,12 +45,12 @@ export function denyAppCatalogAccessForAccount(accountId: string): void {
   // of catalog persistence and scope discovery.
   deniedAccounts.add(accountId)
 
-  for (const [entryKey] of accessModes) {
-    try {
-      const [entryAccountId] = JSON.parse(entryKey) as [string, string]
-      if (entryAccountId === accountId) accessModes.set(entryKey, 'denied')
-    } catch {
-      accessModes.delete(entryKey)
+  for (const [entryKey, entry] of accessModes) {
+    if (entry.accountId === accountId) {
+      accessModes.set(entryKey, {
+        ...entry,
+        mode: 'denied',
+      })
     }
   }
 }
