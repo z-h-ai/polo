@@ -195,7 +195,10 @@ mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: TestAdminClient,
   AdminError: TestAdminError,
   getSafeAdminErrorMessage: () => 'Admin request failed',
-  getAppCatalogApps: (entry: AppCatalogCacheEntry) => entry.apps,
+  getAppCatalogApps: (entry: AppCatalogCacheEntry) => [
+    ...entry.apps,
+    ...(entry.withdrawnApps ?? []),
+  ],
   getCachedAppCatalog: (
     accountId: string,
     organizationId: string,
@@ -211,15 +214,25 @@ mock.module('@polo-ai/shared/admin', () => ({
       appConfigVersion: string
       apps: AppCatalogCacheEntry['apps']
     },
+    _syncedAt?: number,
+    retainedWithdrawnAppIds: ReadonlySet<string> = new Set(),
   ) => {
     if (saveCatalogError) throw saveCatalogError
     const visibleIds = new Set(response.apps.map(app => app.id))
-    const withdrawnApps = [
+    const withdrawnById = new Map([
       ...(catalog.withdrawnApps ?? []).filter(app => !visibleIds.has(app.id)),
       ...catalog.apps
         .filter(app => !visibleIds.has(app.id))
         .map(app => ({ ...app, availability: 'withdrawn' as const })),
-    ]
+    ].map(app => [app.id, app]))
+    const withdrawnCandidates = [...withdrawnById.values()]
+    const retained = withdrawnCandidates.filter(app =>
+      retainedWithdrawnAppIds.has(app.id))
+    const retainedIds = new Set(retained.map(app => app.id))
+    const withdrawnApps = [
+      ...retained,
+      ...withdrawnCandidates.filter(app => !retainedIds.has(app.id)),
+    ].slice(0, 10_000)
     catalog = {
       ...catalog,
       accountId,
@@ -341,6 +354,10 @@ function registerProductionHandlers(
       organizationId: string,
       catalogAppIds: readonly string[],
     ) => void
+    getRetainedCatalogAppIds?: (
+      accountId: string,
+      organizationId: string,
+    ) => Promise<ReadonlySet<string>>
   } = {},
 ) {
   const handlers = new Map<string, HandlerFn>()
@@ -410,6 +427,12 @@ function registerProductionHandlers(
         organizationId,
         catalogAppId,
       })))),
+    getRetainedCatalogAppIds: options.getRetainedCatalogAppIds
+      ?? ((accountId: string, organizationId: string) =>
+        runtimeRegistry!.getRetainedCatalogAppIds(
+          accountId,
+          organizationId,
+        )),
     onAdminSessionStarted: (accountId: string) =>
       runtimeRegistry!.resumeAccount(accountId),
   } satisfies HandlerDeps
@@ -1067,6 +1090,7 @@ describe('Admin session and scoped local app production wiring', () => {
 
   it('fences an entered start when a successful Catalog refresh withdraws that app', async () => {
     const startEntered = createDeferred<void>()
+    const withdrawalFenced = createDeferred<void>()
     const finishStart = createDeferred<LocalAppStartResult>()
     const processStopped = createDeferred<void>()
     const calls: string[] = []
@@ -1096,21 +1120,35 @@ describe('Admin session and scoped local app production wiring', () => {
       appConfigVersion: 'catalog-v2',
       apps: [],
     })
-    const { handlers, context } = registerProductionHandlers(root)
+    const { handlers, context } = registerProductionHandlers(root, {
+      onAdminCatalogAppsWithdrawn: (
+        accountId,
+        organizationId,
+        catalogAppIds,
+      ) => {
+        const cleanup = runtimeRegistry!.stopApps(
+          catalogAppIds.map(catalogAppId => ({
+            kind: 'catalog',
+            accountId,
+            organizationId,
+            catalogAppId,
+          })),
+        )
+        withdrawalFenced.resolve()
+        return cleanup
+      },
+    })
     const start = handlers.get(RPC_CHANNELS.localApps.START)!
     const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
 
     const pendingStart = start(context, scope)
     await startEntered.promise
-    await expect(sync(context, scope.organizationId, { force: true }))
-      .resolves.toMatchObject({
-        success: true,
-        catalog: {
-          appConfigVersion: 'catalog-v2',
-          apps: [],
-          withdrawnApps: [{ id: scope.catalogAppId }],
-        },
-      })
+    const pendingSync = sync(
+      context,
+      scope.organizationId,
+      { force: true },
+    )
+    await withdrawalFenced.promise
 
     finishStart.resolve({
       appId: createCatalogRuntimeAppId(scope),
@@ -1120,6 +1158,14 @@ describe('Admin session and scoped local app production wiring', () => {
     })
     await expect(pendingStart).rejects.toMatchObject({
       code: 'NOT_AUTHORIZED',
+    })
+    await expect(pendingSync).resolves.toMatchObject({
+      success: true,
+      catalog: {
+        appConfigVersion: 'catalog-v2',
+        apps: [],
+        withdrawnApps: [{ id: scope.catalogAppId }],
+      },
     })
     await processStopped.promise
     expect(calls).toEqual(['start', 'stop'])
@@ -1575,6 +1621,153 @@ describe('Admin session and scoped local app production wiring', () => {
       'cancel-install',
       'stop',
     ])
+  })
+
+  it('rechecks retained state after fencing an install completed after the first scan', async () => {
+    const initialScanReached = createDeferred<void>()
+    const releaseInitialScan = createDeferred<void>()
+    const installEntered = createDeferred<void>()
+    const finishInstall = createDeferred<LocalAppInstalledApp>()
+    let runtimeStatus: LocalAppRuntimeStatus = {
+      appId: createCatalogRuntimeAppId(scope),
+      status: 'installing',
+    }
+    const calls: string[] = []
+    class RetainedBoundaryManager extends LocalAppRuntimeManager {
+      override install(): Promise<LocalAppInstalledApp> {
+        calls.push('install')
+        installEntered.resolve()
+        return finishInstall.promise.then(installed => {
+          runtimeStatus = {
+            appId: installed.appId,
+            status: 'installed',
+            currentVersion: installed.currentVersion,
+          }
+          return installed
+        })
+      }
+
+      override async getRuntimeStatus(): Promise<LocalAppRuntimeStatus> {
+        return runtimeStatus
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        runtimeStatus = {
+          appId,
+          status: 'stopped',
+          currentVersion: '1.0.0',
+        }
+        return runtimeStatus
+      }
+
+      override async uninstall(): Promise<void> {
+        calls.push('uninstall')
+        runtimeStatus = {
+          appId: createCatalogRuntimeAppId(scope),
+          status: 'not_installed',
+        }
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-app-retained-boundary-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new RetainedBoundaryManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    catalog = {
+      ...createCatalog(),
+      withdrawnApps: Array.from({ length: 10_000 }, (_, index) => ({
+        id: `old-tombstone-${index}`,
+        organizationId: scope.organizationId,
+        name: `Old tombstone ${index}`,
+        description: '',
+        deliveryMode: 'local_bundle' as const,
+        availability: 'withdrawn' as const,
+        sortOrder: index + 1,
+      })),
+    }
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [],
+    })
+    let retainedScans = 0
+    const { handlers, context } = registerProductionHandlers(root, {
+      getRetainedCatalogAppIds: async (accountId, organizationId) => {
+        retainedScans += 1
+        if (retainedScans === 1) {
+          initialScanReached.resolve()
+          await releaseInitialScan.promise
+          return new Set()
+        }
+        return runtimeRegistry!.getRetainedCatalogAppIds(
+          accountId,
+          organizationId,
+        )
+      },
+    })
+    const pendingInstall = handlers.get(RPC_CHANNELS.localApps.INSTALL)!(
+      context,
+      installRequest(),
+    )
+    await installEntered.promise
+    const pendingSync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!(
+      context,
+      scope.organizationId,
+      { force: true },
+    )
+    await initialScanReached.promise
+
+    finishInstall.resolve({
+      appId: createCatalogRuntimeAppId(scope),
+      currentVersion: '1.0.0',
+      versions: ['1.0.0'],
+      runtime: 'static',
+      status: 'installed',
+      installedAt: 1,
+    })
+    await expect(pendingInstall).resolves.toMatchObject({
+      appId: scope.catalogAppId,
+      currentVersion: '1.0.0',
+    })
+    releaseInitialScan.resolve()
+
+    const syncResult = await pendingSync
+    expect(syncResult).toMatchObject({
+      success: true,
+      catalog: {
+        appConfigVersion: 'catalog-v2',
+        apps: [],
+      },
+    })
+    expect(syncResult.catalog?.withdrawnApps?.[0]).toMatchObject({
+      id: scope.catalogAppId,
+      availability: 'withdrawn',
+    })
+    expect(retainedScans).toBe(2)
+    expect(catalog.withdrawnApps).toHaveLength(10_000)
+    expect(catalog.withdrawnApps?.[0]).toMatchObject({
+      id: scope.catalogAppId,
+      availability: 'withdrawn',
+    })
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS)!(
+      context,
+      scope,
+    )).resolves.toMatchObject({
+      status: 'stopped',
+      currentVersion: '1.0.0',
+    })
+    await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(context, scope))
+      .resolves.toMatchObject({ status: 'stopped' })
+    await expect(handlers.get(RPC_CHANNELS.localApps.UNINSTALL)!(
+      context,
+      scope,
+      { preserveData: true },
+    )).resolves.toBeUndefined()
+    expect(calls).toEqual(['install', 'stop', 'stop', 'uninstall'])
   })
 
   it('cancels an entered install when Catalog returns NOT_FOUND', async () => {

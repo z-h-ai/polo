@@ -487,6 +487,23 @@ export class ScopedLocalAppRuntimeRegistry {
     )
   }
 
+  async getFailureRecoveryLogs(
+    scope: CatalogLocalAppScope,
+    options?: { tail?: number },
+  ): Promise<string> {
+    return this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        return manager.getFailureRecoveryLogs(
+          createCatalogRuntimeAppId(safeScope),
+          options,
+        )
+      },
+    )
+  }
+
   async stopAccount(accountId: string): Promise<void> {
     const safeAccountId = validateScopeField(accountId, 'accountId')
     this.sessionEndingAccounts.add(safeAccountId)

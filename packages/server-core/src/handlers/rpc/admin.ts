@@ -1088,18 +1088,12 @@ export function registerAdminHandlers(
             'SERVER_ERROR',
           )
         }
-        const retainedWithdrawnAppIds = result.notModified
-          ? new Set<string>()
-          : await deps.getRetainedCatalogAppIds?.(
-              accountId,
-              organizationId.data,
-            ) ?? new Set<string>()
-        const committed = await sessions.mutateIfCurrent(
-          manager,
-          requestContext.session,
-          async (): Promise<AppCatalogSyncResult> => {
-            if (!isCurrentCatalogSync()) return supersededCatalogResult()
-            if (result.notModified) {
+        if (result.notModified) {
+          const committed = await sessions.mutateIfCurrent(
+            manager,
+            requestContext.session,
+            async (): Promise<AppCatalogSyncResult> => {
+              if (!isCurrentCatalogSync()) return supersededCatalogResult()
               if (!cached) {
                 throw new AdminError(
                   'Admin returned not modified without a local app catalog',
@@ -1117,22 +1111,62 @@ export function registerAdminHandlers(
                   ? { warningCode: 'INVALID_SEMVER' }
                   : {}),
               }
-            }
+            },
+          )
+          return committed.applied
+            ? committed.value!
+            : staleAdminSessionResult()
+        }
+
+        const updatedCatalog = result
+        const preliminaryRetainedAppIds =
+          await deps.getRetainedCatalogAppIds?.(
+            accountId,
+            organizationId.data,
+          ) ?? new Set<string>()
+        const findDeliveryModeConflict = (
+          currentCatalog: AppCatalogCacheEntry | null,
+        ) => {
+          const currentAppsById = new Map(
+            [
+              ...(currentCatalog?.withdrawnApps ?? []),
+              ...(currentCatalog?.apps ?? []),
+            ].map(app => [app.id, app]),
+          )
+          return updatedCatalog.apps.find(app => {
+            const currentApp = currentAppsById.get(app.id)
+            return currentApp
+              && currentApp.deliveryMode !== app.deliveryMode
+          })
+        }
+        const getWithdrawnAppIds = (
+          currentCatalog: AppCatalogCacheEntry | null,
+        ) => {
+          const nextAvailableAppIds = new Set(
+            updatedCatalog.apps.map(app => app.id),
+          )
+          return (currentCatalog?.apps ?? [])
+            .filter(app => (
+              (
+                app.availability === undefined
+                || app.availability === 'available'
+              )
+              && !nextAvailableAppIds.has(app.id)
+            ))
+            .map(app => app.id)
+        }
+        const preparation = await sessions.mutateIfCurrent(
+          manager,
+          requestContext.session,
+          async () => {
+            if (!isCurrentCatalogSync()) return null
             const currentCatalog = getCachedAppCatalog(
               accountId,
               organizationId.data,
             )
-            const currentAppsById = new Map(
-              [
-                ...(currentCatalog?.withdrawnApps ?? []),
-                ...(currentCatalog?.apps ?? []),
-              ].map(app => [app.id, app]),
+            const deliveryModeConflict = findDeliveryModeConflict(
+              currentCatalog,
             )
-            const deliveryModeConflict = result.apps.find(app => {
-              const currentApp = currentAppsById.get(app.id)
-              return currentApp
-                && currentApp.deliveryMode !== app.deliveryMode
-            })
             if (deliveryModeConflict) {
               // deliveryMode determines whether this identity is resolved as a
               // remote URL or bound to a scoped local runtime. Reusing the same
@@ -1144,45 +1178,85 @@ export function registerAdminHandlers(
                 'SERVER_ERROR',
               )
             }
-            const nextAvailableAppIds = new Set(result.apps.map(app => app.id))
-            const withdrawnAppIds = (currentCatalog?.apps ?? [])
-              .filter(app => (
-                (
-                  app.availability === undefined
-                  || app.availability === 'available'
-                )
-                && !nextAvailableAppIds.has(app.id)
-              ))
-              .map(app => app.id)
+            const withdrawnAppIds = getWithdrawnAppIds(currentCatalog)
+            let cleanup: Promise<void> | undefined
             if (withdrawnAppIds.length > 0) {
               // This host callback must advance every exact app lifecycle
-              // generation synchronously for local and remote Apps. Cache
-              // commit follows only after that fence exists, so neither an
-              // already-entered manager result nor an old cached remote URL
-              // can race the new withdrawn authorization truth.
-              const cleanup = deps.onAdminCatalogAppsWithdrawn?.(
+              // generation synchronously for local and remote Apps. The slow
+              // cleanup is awaited outside the session lock; a final retained
+              // state scan and a second sync/session CAS precede cache commit.
+              cleanup = deps.onAdminCatalogAppsWithdrawn?.(
                 accountId,
                 organizationId.data,
                 withdrawnAppIds,
               )
-              void cleanup?.catch(error => {
-                log?.warn(
-                  '[Admin] withdrawn Catalog app cleanup failed:',
-                  error instanceof Error ? error.message : String(error),
-                )
-              })
+              void cleanup?.catch(() => {})
+            }
+            return { withdrawnAppIds, cleanup }
+          },
+        )
+        if (!preparation.applied) return staleAdminSessionResult()
+        if (!preparation.value) return supersededCatalogResult()
+        const preparedCommit = preparation.value
+        if (preparedCommit.cleanup) {
+          try {
+            await preparedCommit.cleanup
+          } catch (error) {
+            log?.warn(
+              '[Admin] withdrawn Catalog app cleanup failed:',
+              error instanceof Error ? error.message : String(error),
+            )
+            throw new AdminError(
+              'Failed to quiesce withdrawn Catalog app lifecycle operations',
+              'SERVER_ERROR',
+            )
+          }
+        }
+        const finalRetainedAppIds = await deps.getRetainedCatalogAppIds?.(
+          accountId,
+          organizationId.data,
+        ) ?? new Set<string>()
+        const retainedWithdrawnAppIds = new Set([
+          ...preliminaryRetainedAppIds,
+          ...finalRetainedAppIds,
+        ])
+        const committed = await sessions.mutateIfCurrent(
+          manager,
+          requestContext.session,
+          async (): Promise<AppCatalogSyncResult> => {
+            if (!isCurrentCatalogSync()) return supersededCatalogResult()
+            const currentCatalog = getCachedAppCatalog(
+              accountId,
+              organizationId.data,
+            )
+            const deliveryModeConflict = findDeliveryModeConflict(
+              currentCatalog,
+            )
+            if (deliveryModeConflict) {
+              throw new AdminError(
+                `Catalog app ${deliveryModeConflict.id} changed delivery mode`,
+                'SERVER_ERROR',
+              )
+            }
+            const finalWithdrawnAppIds = getWithdrawnAppIds(currentCatalog)
+            const fencedAppIds = new Set(preparedCommit.withdrawnAppIds)
+            if (finalWithdrawnAppIds.some(appId => !fencedAppIds.has(appId))) {
+              throw new AdminError(
+                'Catalog changed after withdrawn app lifecycle preparation',
+                'SERVER_ERROR',
+              )
             }
             const savedCatalog = saveAppCatalog(
               accountId,
               organizationId.data,
-              result,
+              updatedCatalog,
               Date.now(),
               retainedWithdrawnAppIds,
             )
             deps.onAdminCatalogAppsAuthorized?.(
               accountId,
               organizationId.data,
-              result.apps.map(app => app.id),
+              updatedCatalog.apps.map(app => app.id),
             )
             setAppCatalogAccessMode(accountId, organizationId.data, 'online')
             return {

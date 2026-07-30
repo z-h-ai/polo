@@ -29,6 +29,7 @@ import type {
   LocalAppArchitecture,
   LocalAppInstallRequest,
   LocalAppPlatform,
+  LocalAppRuntimeStatus,
   PoloAppManifest,
 } from '@polo-ai/shared/protocol'
 import {
@@ -557,6 +558,66 @@ describe('LocalAppRuntimeManager', () => {
     const logs = await runtime.getLogs('demo.static')
     expect(logs).toContain('Installed 1.0.0')
     expect(logs).toContain('Healthy at')
+  })
+
+  it('does not return a deferred failure log snapshot after restart recovers', async () => {
+    const appId = 'demo.failure-recovery-logs'
+    const bundleDir = await writeBundle(
+      appId,
+      '1.0.0',
+      {},
+      { 'dist/index.html': 'recovered' },
+    )
+    const archive = await archiveBundle(bundleDir, 'failure-recovery-logs')
+    const url = await serveArchive(archive)
+    let logsEntered!: () => void
+    const entered = new Promise<void>(resolve => {
+      logsEntered = resolve
+    })
+    let releaseLogs!: () => void
+    const release = new Promise<void>(resolve => {
+      releaseLogs = resolve
+    })
+    class DeferredLogManager extends LocalAppRuntimeManager {
+      override async getLogs(): Promise<string> {
+        logsEntered()
+        await release
+        return 'sensitive output written after recovery'
+      }
+    }
+    const runtime = new DeferredLogManager({
+      rootDir: join(testRoot, 'runtime'),
+      platform,
+      arch: architecture,
+      fetch: stableFetch,
+    })
+    manager = runtime
+    await runtime.install(requestFor(appId, '1.0.0', url, archive))
+    const internals = runtime as unknown as {
+      statuses: Map<string, LocalAppRuntimeStatus>
+    }
+    internals.statuses.set(appId, {
+      appId,
+      status: 'broken',
+      currentVersion: '1.0.0',
+      error: {
+        code: 'START_FAILED',
+        message: 'health check failed',
+      },
+    })
+
+    const pendingLogs = runtime.getFailureRecoveryLogs(appId, { tail: 20 })
+    await entered
+    await expect(runtime.restart(appId)).resolves.toMatchObject({
+      appId,
+      version: '1.0.0',
+    })
+    expect((await runtime.getRuntimeStatus(appId)).status).toBe('running')
+
+    releaseLogs()
+    await expect(pendingLogs).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
   })
 
   it('serializes stop against an in-flight start and leaves no running process', async () => {

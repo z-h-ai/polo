@@ -347,6 +347,7 @@ export class LocalAppRuntimeManager {
     status: 'downloading' | 'installing'
     progress: LocalAppInstallProgress
   }>()
+  private readonly runtimeStateGenerations = new Map<string, number>()
   private readonly logWriters = new Map<string, BoundedLogWriter>()
   private initializationPromise?: Promise<void>
   private shutdownPromise?: Promise<void>
@@ -748,6 +749,46 @@ export class LocalAppRuntimeManager {
     return this.getLogWriter(safeAppId).readTail(tail)
   }
 
+  async getFailureRecoveryLogs(
+    appId: string,
+    options: LocalAppLogsOptions = {},
+  ): Promise<string> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    const capturedGeneration = this.getRuntimeStateGeneration(safeAppId)
+    const assertStableBrokenState = async (): Promise<void> => {
+      if (
+        this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs are only available for failure recovery',
+        )
+      }
+      const status = await this.getRuntimeStatus(safeAppId)
+      if (
+        status.status !== 'broken'
+        || this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs are only available for failure recovery',
+        )
+      }
+    }
+
+    await assertStableBrokenState()
+    const logs = await this.getLogs(safeAppId, options)
+    // The snapshot is held in main-process memory until the same generation
+    // and broken state are revalidated. A concurrent restart therefore cannot
+    // make post-recovery output observable through the renderer RPC.
+    await assertStableBrokenState()
+    return logs
+  }
+
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     if (this.shutdownPromise) return this.shutdownPromise
@@ -898,6 +939,10 @@ export class LocalAppRuntimeManager {
   }
 
   private enqueueLifecycle<T>(appId: string, operation: () => Promise<T>): Promise<T> {
+    this.runtimeStateGenerations.set(
+      appId,
+      this.getRuntimeStateGeneration(appId) + 1,
+    )
     const previous = this.lifecycleQueues.get(appId) ?? Promise.resolve()
     const result = previous.catch(() => {}).then(operation)
     const tracked: TrackedLifecycleOperation = { appId, promise: result }
@@ -912,6 +957,10 @@ export class LocalAppRuntimeManager {
       if (this.lifecycleQueues.get(appId) === tail) this.lifecycleQueues.delete(appId)
     })
     return result
+  }
+
+  private getRuntimeStateGeneration(appId: string): number {
+    return this.runtimeStateGenerations.get(appId) ?? 0
   }
 
   private async performStop(appId: string): Promise<LocalAppRuntimeStatus> {

@@ -549,17 +549,8 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     (_ctx, reference: unknown, options?: LocalAppLogsOptions) =>
       withCatalogManagementScope(
         reference,
-        async scope => {
-          const registry = getScopedLocalAppRuntimeRegistry()
-          const status = await registry.getRuntimeStatus(scope)
-          if (status.status !== 'broken') {
-            throw new LocalAppRuntimeError(
-              'NOT_AUTHORIZED',
-              'Organization app logs are only available for failure recovery',
-            )
-          }
-          return registry.getLogs(scope, options)
-        },
+        scope => getScopedLocalAppRuntimeRegistry()
+          .getFailureRecoveryLogs(scope, options),
       ),
   )
 }

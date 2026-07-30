@@ -58,6 +58,18 @@ const scopedRuntimeStatus = mock(async (
   scope,
   status: 'not_installed',
 }))
+const scopedFailureRecoveryLogs = mock(async (
+  scope: CatalogLocalAppScope,
+  _options?: { tail?: number },
+) => {
+  const status = await scopedRuntimeStatus(scope)
+  if (status.status !== 'broken') {
+    throw Object.assign(new Error('Logs require a broken runtime'), {
+      code: 'NOT_AUTHORIZED',
+    })
+  }
+  return ''
+})
 const isInstalledAndReady = mock(async () => true)
 const assertAppAuthorized = mock(() => {
   if (appAccessDenied) {
@@ -88,6 +100,7 @@ const scopedRegistry = {
   getRuntimeStatus: scopedRuntimeStatus,
   getRuntimeStatuses: scopedStatuses,
   getLogs: mock(async () => ''),
+  getFailureRecoveryLogs: scopedFailureRecoveryLogs,
   isInstalledAndReady,
 }
 
@@ -217,6 +230,7 @@ describe('local app main-process authorization boundary', () => {
       scopedRuntimeStatus,
       scopedRegistry.setAvailableRelease,
       scopedRegistry.getLogs,
+      scopedFailureRecoveryLogs,
     ]) {
       handlerMock.mockClear()
     }
@@ -717,6 +731,10 @@ describe('local app main-process authorization boundary', () => {
     )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
 
     expect(scopedRegistry.stop).toHaveBeenCalledWith(deniedScope)
+    expect(scopedFailureRecoveryLogs).toHaveBeenCalledWith(
+      deniedScope,
+      undefined,
+    )
     expect(scopedRegistry.getLogs).not.toHaveBeenCalled()
     expect(scopedRegistry.uninstall).toHaveBeenCalledWith(
       deniedScope,
@@ -768,8 +786,12 @@ describe('local app main-process authorization boundary', () => {
       },
     })
     await expect(getLogs(context, scope(), { tail: 20 })).resolves.toBe('')
-    expect(scopedRegistry.getLogs).toHaveBeenCalledTimes(1)
-    expect(scopedRegistry.getLogs).toHaveBeenCalledWith(scope(), { tail: 20 })
+    expect(scopedFailureRecoveryLogs).toHaveBeenCalledTimes(5)
+    expect(scopedFailureRecoveryLogs).toHaveBeenLastCalledWith(
+      scope(),
+      { tail: 20 },
+    )
+    expect(scopedRegistry.getLogs).not.toHaveBeenCalled()
   })
 
   it('retains a full-directory tombstone with status access but rejects launch', async () => {

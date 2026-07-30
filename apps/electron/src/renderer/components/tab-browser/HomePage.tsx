@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -169,6 +169,8 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const [logsTarget, setLogsTarget] = useState<CatalogApp | null>(null)
   const [logs, setLogs] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
+  const logsRequestGenerationRef = useRef(0)
+  const logsTargetScopeKeyRef = useRef<string | null>(null)
   const [organizationAppLimit, setOrganizationAppLimit] = useState(
     ORGANIZATION_APP_PAGE_SIZE,
   )
@@ -204,6 +206,16 @@ export function HomePage({ onAddApp }: HomePageProps) {
     catalog.organization?.organizationContextKey,
     catalog.state.catalog?.appConfigVersion,
   ])
+  useEffect(() => {
+    // Logs are scoped to the exact account/organization/App tuple. Advancing
+    // this independent request generation prevents an older organization
+    // context from publishing into a later dialog.
+    logsRequestGenerationRef.current += 1
+    logsTargetScopeKeyRef.current = null
+    setLogsTarget(null)
+    setLogs('')
+    setLogsLoading(false)
+  }, [catalog.organization?.organizationContextKey])
   const activeOrganization = catalog.organization?.organizationSummaries.find(
     item => item.id === catalog.organization?.activeOrganizationId,
   )
@@ -335,15 +347,26 @@ export function HomePage({ onAddApp }: HomePageProps) {
   }
 
   const showLogs = async (app: CatalogApp) => {
+    const scopeKey = catalog.scopeKeyForApp(app)
+    const requestGeneration = logsRequestGenerationRef.current + 1
+    logsRequestGenerationRef.current = requestGeneration
+    logsTargetScopeKeyRef.current = scopeKey
+    const isCurrentRequest = () => (
+      logsRequestGenerationRef.current === requestGeneration
+      && logsTargetScopeKeyRef.current === scopeKey
+    )
     setLogsTarget(app)
     setLogs('')
     setLogsLoading(true)
     try {
-      setLogs(await catalog.getLogs(app))
+      const nextLogs = await catalog.getLogs(app)
+      if (isCurrentRequest()) setLogs(nextLogs)
     } catch (error) {
-      setLogs(homeAppOperationErrorText(t, error, 'logs'))
+      if (isCurrentRequest()) {
+        setLogs(homeAppOperationErrorText(t, error, 'logs'))
+      }
     } finally {
-      setLogsLoading(false)
+      if (isCurrentRequest()) setLogsLoading(false)
     }
   }
 
@@ -728,7 +751,13 @@ export function HomePage({ onAddApp }: HomePageProps) {
       </Dialog>
 
       <Dialog open={Boolean(logsTarget)} onOpenChange={(open) => {
-        if (!open) setLogsTarget(null)
+        if (!open) {
+          logsRequestGenerationRef.current += 1
+          logsTargetScopeKeyRef.current = null
+          setLogsTarget(null)
+          setLogs('')
+          setLogsLoading(false)
+        }
       }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>

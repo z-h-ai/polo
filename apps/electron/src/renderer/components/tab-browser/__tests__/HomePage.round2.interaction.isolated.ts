@@ -21,6 +21,16 @@ const removeApp = jest.fn(async () => {})
 let appCatalogHook: any
 let installedApps = [...BUILTIN_APP_DEFINITIONS]
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 function signedOutCatalogHook() {
   return {
     organization: null,
@@ -71,6 +81,7 @@ mock.module('@/hooks/useAppCatalog', () => ({
 }))
 
 const {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -556,6 +567,129 @@ describe('HomePage round-two regressions', () => {
     await waitFor(() => {
       expect(stop).toHaveBeenCalledWith(deniedApp)
     })
+  })
+
+  it('keeps deferred log results isolated by full App scope and request generation', async () => {
+    const appA: CatalogApp = {
+      id: 'broken-app-a',
+      organizationId: 'organization-a',
+      name: 'Broken App A',
+      description: '',
+      deliveryMode: 'local_bundle',
+      sortOrder: 0,
+      availability: 'available',
+    }
+    const appB: CatalogApp = {
+      ...appA,
+      id: 'broken-app-b',
+      name: 'Broken App B',
+      sortOrder: 1,
+    }
+    const catalog: AppCatalogCacheEntry = {
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      appConfigVersion: 'logs-race',
+      authorizationStatus: 'authorized',
+      apps: [appA, appB],
+      syncedAt: 1,
+    }
+    const scopeKeyForApp = (app: CatalogApp) => createLocalAppScopeKey({
+      kind: 'catalog',
+      accountId: catalog.accountId,
+      organizationId: catalog.organizationId,
+      catalogAppId: app.id,
+    })
+    const statuses = Object.fromEntries([appA, appB].map(app => [
+      scopeKeyForApp(app),
+      {
+        appId: app.id,
+        scope: {
+          kind: 'catalog' as const,
+          accountId: catalog.accountId,
+          organizationId: catalog.organizationId,
+          catalogAppId: app.id,
+        },
+        status: 'broken' as const,
+        currentVersion: '1.0.0',
+        error: {
+          code: 'START_FAILED',
+          message: 'health check failed',
+        },
+      },
+    ]))
+    const appALogs = createDeferred<string>()
+    const appBLogs = createDeferred<string>()
+    const getLogs = jest.fn((app: CatalogApp) => (
+      app.id === appA.id ? appALogs.promise : appBLogs.promise
+    ))
+    appCatalogHook = {
+      ...signedOutCatalogHook(),
+      organization: {
+        accountId: catalog.accountId,
+        activeOrganizationId: catalog.organizationId,
+        organizationContextKey: 'account-a:organization-a',
+        organizationSummaries: [{
+          id: catalog.organizationId,
+          type: 'enterprise',
+          name: 'Organization A',
+        }],
+      },
+      state: {
+        ...signedOutCatalogHook().state,
+        catalog,
+        accessMode: 'online',
+        statuses,
+      },
+      getStatus: (app: CatalogApp) => statuses[scopeKeyForApp(app)],
+      scopeKeyForApp,
+      getLogs,
+    }
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    fireEvent.pointerDown(
+      screen.getByLabelText('More actions for Broken App A'),
+      { button: 0, ctrlKey: false },
+    )
+    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
+    fireEvent.click(screen.getByText('View logs'))
+    expect(screen.getByText('Broken App A logs')).toBeTruthy()
+    expect(screen.getByText('Loading logs…')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() => {
+      expect(screen.queryByText('Broken App A logs')).toBeNull()
+    })
+    fireEvent.pointerDown(
+      screen.getByLabelText('More actions for Broken App B'),
+      { button: 0, ctrlKey: false },
+    )
+    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
+    fireEvent.click(screen.getByText('View logs'))
+    expect(screen.getByText('Broken App B logs')).toBeTruthy()
+    expect(screen.getByText('Loading logs…')).toBeTruthy()
+
+    await act(async () => {
+      appALogs.resolve('stale App A logs')
+      await appALogs.promise
+    })
+    expect(screen.queryByText('stale App A logs')).toBeNull()
+    expect(screen.getByText('Loading logs…')).toBeTruthy()
+
+    await act(async () => {
+      appBLogs.resolve('current App B logs')
+      await appBLogs.promise
+    })
+    await waitFor(() => {
+      expect(screen.getByText('current App B logs')).toBeTruthy()
+    })
+    expect(screen.queryByText('stale App A logs')).toBeNull()
+    expect(getLogs).toHaveBeenNthCalledWith(1, appA)
+    expect(getLogs).toHaveBeenNthCalledWith(2, appB)
   })
 
   it('segments a maximum catalog and excludes withdrawn apps without local data', () => {
