@@ -471,7 +471,13 @@ describe('LocalAppRuntimeManager', () => {
   })
 
   it('accepts the full business app id contract independently of the runtime path id', async () => {
-    for (const businessAppId of ['App.ID', '应用-甲', 'x'.repeat(512)]) {
+    for (const businessAppId of [
+      'App.ID',
+      '应用-甲',
+      'business\0app',
+      '\0'.repeat(512),
+      'x'.repeat(512),
+    ]) {
       expect(validatePoloAppManifest({
         schemaVersion: 1,
         appId: businessAppId,
@@ -484,7 +490,7 @@ describe('LocalAppRuntimeManager', () => {
       }, { platform, arch: architecture }).appId).toBe(businessAppId)
     }
 
-    const businessAppId = '应用.App-ID'
+    const businessAppId = '\0'.repeat(512)
     const runtimeAppId = `catalog-${'a'.repeat(64)}`
     const bundleDir = await writeBundle(
       'bundle-source',

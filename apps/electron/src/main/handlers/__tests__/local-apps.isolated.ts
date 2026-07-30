@@ -697,7 +697,26 @@ describe('local app main-process authorization boundary', () => {
       status: 'running',
       currentVersion: '1.0.0',
       runningVersion: '1.0.0',
+      url: 'http://127.0.0.1:9876',
+      port: 9876,
+      pid: 1234,
+      installationStatus: 'downloading',
+      progress: {
+        phase: 'downloading',
+        bytesDownloaded: 10,
+        sizeBytes: 42,
+        percent: 23,
+      },
       availableRelease: privateRelease,
+      error: {
+        code: 'START_FAILED',
+        message: 'health check failed',
+        details: {
+          url: 'http://127.0.0.1:9876',
+          pid: 1234,
+          secret: 'private',
+        },
+      },
     })))
     scopedRuntimeStatus.mockImplementation(async item => ({
       appId: item.catalogAppId,
@@ -705,6 +724,15 @@ describe('local app main-process authorization boundary', () => {
       status: 'running',
       currentVersion: '1.0.0',
       runningVersion: '1.0.0',
+      url: 'http://127.0.0.1:9876',
+      port: 9876,
+      pid: 1234,
+      progress: {
+        phase: 'downloading',
+        bytesDownloaded: 10,
+        sizeBytes: 42,
+        percent: 23,
+      },
       availableRelease: privateRelease,
     }))
     scopedInstalledApps.mockImplementationOnce(async () => [{
@@ -736,20 +764,43 @@ describe('local app main-process authorization boundary', () => {
       appId: deniedScope.catalogAppId,
       status: 'running',
     }])
-    expect(batchStatuses[0]).not.toHaveProperty('availableRelease')
+    expect(batchStatuses[0]).toEqual({
+      appId: deniedScope.catalogAppId,
+      scope: deniedScope,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+      error: {
+        code: 'START_FAILED',
+        message: 'health check failed',
+      },
+    })
     const runtimeStatus = await handlers.get(
       RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
     )!(
       context,
       deniedScope,
     ) as LocalAppRuntimeStatus
-    expect(runtimeStatus).toMatchObject({ appId: deniedScope.catalogAppId })
-    expect(runtimeStatus).not.toHaveProperty('availableRelease')
+    expect(runtimeStatus).toEqual({
+      appId: deniedScope.catalogAppId,
+      scope: deniedScope,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+    })
     const installedApps = await handlers.get(
       RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
     )!(context, deniedScope) as Array<Record<string, unknown>>
     expect(installedApps).toHaveLength(1)
-    expect(installedApps[0]).not.toHaveProperty('availableRelease')
+    expect(installedApps[0]).toEqual({
+      appId: deniedScope.catalogAppId,
+      scope: deniedScope,
+      currentVersion: '1.0.0',
+      versions: ['1.0.0'],
+      runtime: 'static',
+      status: 'update_available',
+      installedAt: 1,
+    })
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       deniedScope,
@@ -758,8 +809,12 @@ describe('local app main-process authorization boundary', () => {
       context,
       deniedScope,
     ) as LocalAppRuntimeStatus
-    expect(stopped).toMatchObject({ status: 'stopped' })
-    expect(stopped).not.toHaveProperty('availableRelease')
+    expect(stopped).toEqual({
+      appId: deniedScope.catalogAppId,
+      scope: deniedScope,
+      status: 'stopped',
+      currentVersion: '1.0.0',
+    })
     await expect(handlers.get(RPC_CHANNELS.localApps.UNINSTALL)!(
       context,
       deniedScope,
@@ -798,7 +853,7 @@ describe('local app main-process authorization boundary', () => {
     expect(scopedInstall).not.toHaveBeenCalled()
   })
 
-  it('redacts a batch status after the App withdrawal fence precedes cache commit', async () => {
+  it('redacts a running batch status after the App withdrawal fence precedes cache commit', async () => {
     const privateRelease = {
       version: '2.0.0',
       downloadUrl: 'https://private.example.com/app.zip',
@@ -823,15 +878,41 @@ describe('local app main-process authorization boundary', () => {
     releaseStatus.resolve([{
       appId: scope().catalogAppId,
       scope: scope(),
-      status: 'update_available',
+      status: 'running',
       currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+      url: 'http://127.0.0.1:9876',
+      port: 9876,
+      pid: 1234,
+      installationStatus: 'installing',
+      progress: {
+        phase: 'preparing',
+        bytesDownloaded: 42,
+        sizeBytes: 42,
+        percent: 100,
+      },
       availableRelease: privateRelease,
+      error: {
+        code: 'START_FAILED',
+        message: 'failure',
+        details: { secret: 'private' },
+      },
     }])
 
     const [status] = await batch
     expect(catalog.authorizationStatus).toBe('authorized')
     expect(catalog.apps[0]?.availability).toBe('available')
-    expect(status).not.toHaveProperty('availableRelease')
+    expect(status).toEqual({
+      appId: scope().catalogAppId,
+      scope: scope(),
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+      error: {
+        code: 'START_FAILED',
+        message: 'failure',
+      },
+    })
   })
 
   it('allows logs only for a trusted broken runtime status', async () => {

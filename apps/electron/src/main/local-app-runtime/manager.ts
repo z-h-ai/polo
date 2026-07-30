@@ -23,6 +23,7 @@ import { createServer as createNetServer } from 'net'
 import { arch as hostArch, platform as hostPlatform } from 'os'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { spawn, type ChildProcess } from 'child_process'
+import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
 import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@polo-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
@@ -296,19 +297,14 @@ function validateRequestIdentifier(value: unknown, field: 'appId' | 'version'): 
 }
 
 function validateManifestBusinessAppId(value: unknown): string {
-  if (
-    typeof value !== 'string'
-    || value.length === 0
-    || value.length > 512
-    || value.includes('\0')
-    || value.trim().length === 0
-  ) {
+  const parsed = AdminEntityIdSchema.safeParse(value)
+  if (!parsed.success) {
     throw new LocalAppRuntimeError(
       'INVALID_REQUEST',
       'expectedManifestAppId is invalid',
     )
   }
-  return value
+  return parsed.data
 }
 
 function delay(milliseconds: number): Promise<void> {

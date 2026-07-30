@@ -1,4 +1,5 @@
 import { isAbsolute, normalize, sep } from 'path'
+import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
 import type {
   LocalAppArchitecture,
   LocalAppPlatform,
@@ -47,6 +48,16 @@ function requireStringArray(value: unknown, field: string, allowEmpty = false): 
     return invalid(`polo-app.json field "${field}" has too many items`)
   }
   return value.map((item, index) => requireString(item, `${field}[${index}]`))
+}
+
+function requireBusinessAppId(value: unknown): string {
+  const parsed = AdminEntityIdSchema.safeParse(value)
+  if (!parsed.success) {
+    return invalid(
+      'polo-app.json field "appId" must satisfy the Admin entity ID contract',
+    )
+  }
+  return parsed.data
 }
 
 /**
@@ -114,9 +125,9 @@ export function validatePoloAppManifest(
   }
 
   // This is a business entity id, not a filesystem component. Catalog ids may
-  // contain uppercase or Unicode and follow Admin's 512-character contract.
-  const appId = requireString(raw.appId, 'appId', { maxLength: 512 })
-  if (appId.trim().length === 0) invalid('polo-app.json appId must not be blank')
+  // contain NUL, uppercase, or Unicode and follow Admin's 512-character
+  // contract. Runtime ids and paths remain subject to their stricter rules.
+  const appId = requireBusinessAppId(raw.appId)
 
   const version = requireString(raw.version, 'version', { maxLength: 128 })
   if (!VERSION_PATTERN.test(version) || version === '.' || version === '..') {

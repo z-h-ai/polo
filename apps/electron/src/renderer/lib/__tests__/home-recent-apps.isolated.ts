@@ -80,6 +80,31 @@ describe('config-backed Home recent Apps', () => {
       .toEqual([{ id: 'app-b', kind: 'organization', openedAt: 3 }])
   })
 
+  it('passes maximum NUL scope identities through the renderer RPC intact', async () => {
+    const entityId = '\0'.repeat(512)
+    const contextKey = createHomeRecentContextKey(
+      JSON.stringify([entityId, entityId]),
+    )
+    const recentAppId = JSON.stringify([
+      'catalog',
+      entityId,
+      entityId,
+      entityId,
+    ])
+    const recent = {
+      id: recentAppId,
+      kind: 'organization' as const,
+      openedAt: 7,
+    }
+
+    expect(contextKey).toHaveLength(6_154)
+    expect(recentAppId).toHaveLength(9_236)
+    await saveHomeRecentApps(contextKey, [recent])
+    expect(setHomeRecentApps).toHaveBeenCalledWith(contextKey, [recent])
+    expect(await loadHomeRecentApps(contextKey)).toEqual([recent])
+    expect(getHomeRecentApps).toHaveBeenCalledWith(contextKey)
+  })
+
   it('migrates the legacy localStorage value once after a durable write', async () => {
     const organizationContext = createHomeRecentContextKey(
       JSON.stringify(['legacy-account', 'legacy-organization']),

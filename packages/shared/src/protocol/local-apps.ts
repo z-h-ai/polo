@@ -203,10 +203,35 @@ export interface LocalAppInstalledApp {
   availableRelease?: LocalAppAvailableRelease
 }
 
+export interface LocalAppRestrictedRuntimeStatus {
+  appId: string
+  scope?: LocalAppScope
+  status: LocalAppLifecycleStatus
+  currentVersion?: string
+  runningVersion?: string
+  previousVersion?: string
+  versionError?: 'invalid_semver'
+  error?: Omit<LocalAppErrorPayload, 'details'>
+}
+
+export interface LocalAppRestrictedInstalledApp {
+  appId: string
+  scope?: LocalAppScope
+  name?: string
+  currentVersion: string
+  previousVersion?: string
+  versions: string[]
+  runtime: LocalAppRuntimeKind
+  status: LocalAppLifecycleStatus
+  installedAt: number
+}
+
 /**
  * Renderer-facing status projection used after Catalog access is denied or an
- * individual App is withdrawn. Runtime state remains manageable, but release
- * delivery metadata must not cross the IPC boundary.
+ * individual App is withdrawn. The explicit allowlists keep local data
+ * management possible while withholding delivery and live-process
+ * capabilities such as localhost URLs, ports, PIDs, install progress, and
+ * arbitrary error details.
  */
 export function projectLocalAppStatusForCatalogAccess<
   T extends LocalAppRuntimeStatus | LocalAppInstalledApp,
@@ -214,8 +239,48 @@ export function projectLocalAppStatusForCatalogAccess<
   status: T,
   canAccessDeliveryMetadata: boolean,
 ): T {
-  if (canAccessDeliveryMetadata || !status.availableRelease) return status
-  const { availableRelease: _availableRelease, ...projected } = status
+  if (canAccessDeliveryMetadata) return status
+
+  if ('versions' in status && 'runtime' in status && 'installedAt' in status) {
+    const projected: LocalAppRestrictedInstalledApp = {
+      appId: status.appId,
+      ...(status.scope ? { scope: status.scope } : {}),
+      ...(status.name ? { name: status.name } : {}),
+      currentVersion: status.currentVersion,
+      ...(status.previousVersion
+        ? { previousVersion: status.previousVersion }
+        : {}),
+      versions: [...status.versions],
+      runtime: status.runtime,
+      status: status.status,
+      installedAt: status.installedAt,
+    }
+    return projected as T
+  }
+
+  const projected: LocalAppRestrictedRuntimeStatus = {
+    appId: status.appId,
+    ...(status.scope ? { scope: status.scope } : {}),
+    status: status.status,
+    ...(status.currentVersion
+      ? { currentVersion: status.currentVersion }
+      : {}),
+    ...(status.runningVersion
+      ? { runningVersion: status.runningVersion }
+      : {}),
+    ...(status.previousVersion
+      ? { previousVersion: status.previousVersion }
+      : {}),
+    ...(status.versionError ? { versionError: status.versionError } : {}),
+    ...(status.error
+      ? {
+          error: {
+            code: status.error.code,
+            message: status.error.message,
+          },
+        }
+      : {}),
+  }
   return projected as T
 }
 

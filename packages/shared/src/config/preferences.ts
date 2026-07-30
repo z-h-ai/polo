@@ -5,6 +5,10 @@ import { CONFIG_DIR } from './paths.ts';
 import { readJsonFileSync } from '../utils/files.ts';
 import { i18n } from '../i18n/index.ts';
 import { LOCALE_REGISTRY, type LanguageCode } from '../i18n/registry.ts';
+import {
+  MAX_HOME_RECENT_APP_ID_LENGTH,
+  MAX_HOME_RECENT_CONTEXT_KEY_LENGTH,
+} from './home-recent-limits.ts';
 
 export interface UserLocation {
   city?: string;
@@ -61,7 +65,7 @@ function sanitizeHomeRecentApps(
       app
       && typeof app.id === 'string'
       && app.id.length > 0
-      && app.id.length <= 2_048
+      && app.id.length <= MAX_HOME_RECENT_APP_ID_LENGTH
       && ['builtin', 'external', 'organization'].includes(app.kind)
       && Number.isFinite(app.openedAt)
       && app.openedAt >= 0
@@ -119,7 +123,7 @@ export function setHomeRecentApps(
   contextKey: string,
   apps: readonly HomeRecentAppPreference[],
 ): HomeRecentAppPreference[] {
-  if (!contextKey || contextKey.length > 4_096) {
+  if (!contextKey || contextKey.length > MAX_HOME_RECENT_CONTEXT_KEY_LENGTH) {
     throw new Error('Home recent Apps context is invalid');
   }
   const current = loadPreferences();

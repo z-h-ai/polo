@@ -62,6 +62,14 @@ interface AppCatalogCacheFile {
   entries: Record<string, AppCatalogCacheEntry>
 }
 
+interface ValidatedProcessCache {
+  path: string
+  value: AppCatalogCacheFile
+}
+
+let validatedProcessCache: ValidatedProcessCache | null = null
+let cacheDiskReadCount = 0
+
 function cachePath(): string {
   const configDir = process.env.POLO_AI_CONFIG_DIR || CONFIG_DIR
   return join(configDir, 'admin-app-catalog.json')
@@ -153,16 +161,28 @@ function migrateLegacyCache(raw: unknown): AppCatalogCacheFile | null {
 
 function readCache(): AppCatalogCacheFile {
   const path = cachePath()
-  if (!existsSync(path)) return emptyCache()
+  if (validatedProcessCache?.path === path) {
+    return validatedProcessCache.value
+  }
+
+  cacheDiskReadCount += 1
+  let value = emptyCache()
+  if (!existsSync(path)) {
+    validatedProcessCache = { path, value }
+    return value
+  }
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8'))
     const parsed = AppCatalogCacheFileSchema.safeParse(raw)
-    return parsed.success
+    const candidate = parsed.success
       ? parsed.data
       : migrateLegacyCache(raw) ?? emptyCache()
+    value = AppCatalogCacheFileSchema.parse(candidate)
   } catch {
-    return emptyCache()
+    value = emptyCache()
   }
+  validatedProcessCache = { path, value }
+  return value
 }
 
 function writeCache(cache: AppCatalogCacheFile): void {
@@ -172,6 +192,9 @@ function writeCache(cache: AppCatalogCacheFile): void {
   const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`
   writeFileSync(tempPath, `${JSON.stringify(validated, null, 2)}\n`, 'utf8')
   renameSync(tempPath, path)
+  // Publish only after the atomic rename succeeds, so failed persistence never
+  // poisons the process cache with state that was not durably committed.
+  validatedProcessCache = { path, value: validated }
 }
 
 export function getCachedAppCatalog(
@@ -243,8 +266,13 @@ export function saveAppCatalog(
         : []
     )),
   }
-  cache.entries[cacheKey(accountId, organizationId)] = entry
-  writeCache(cache)
+  writeCache({
+    ...cache,
+    entries: {
+      ...cache.entries,
+      [cacheKey(accountId, organizationId)]: entry,
+    },
+  })
   return entry
 }
 
@@ -257,8 +285,13 @@ export function denyCachedAppCatalogAuthorization(
   const previous = cache.entries[key]
   if (!previous) return null
   const entry = markCachedAppCatalogAccessDenied(previous)
-  cache.entries[key] = entry
-  writeCache(cache)
+  writeCache({
+    ...cache,
+    entries: {
+      ...cache.entries,
+      [key]: entry,
+    },
+  })
   return entry
 }
 
@@ -266,14 +299,15 @@ export function denyCachedAppCatalogAuthorizationForAccount(
   accountId: string,
 ): AppCatalogCacheEntry[] {
   const cache = readCache()
+  const entries = { ...cache.entries }
   const denied: AppCatalogCacheEntry[] = []
   for (const [key, previous] of Object.entries(cache.entries)) {
     if (previous.accountId !== accountId) continue
     const entry = markCachedAppCatalogAccessDenied(previous)
-    cache.entries[key] = entry
+    entries[key] = entry
     denied.push(entry)
   }
-  if (denied.length > 0) writeCache(cache)
+  if (denied.length > 0) writeCache({ ...cache, entries })
   return denied
 }
 
@@ -284,4 +318,17 @@ export function listCachedAppCatalogs(accountId: string): AppCatalogCacheEntry[]
 
 export function getAppCatalogCachePath(): string {
   return cachePath()
+}
+
+/** Test seam for asserting that renderer busy polling stays off disk. */
+export function resetAppCatalogMemoryCacheForTests(): void {
+  validatedProcessCache = null
+  cacheDiskReadCount = 0
+}
+
+/** Test-only diagnostics intentionally not re-exported from the Admin facade. */
+export function getAppCatalogCacheDiagnosticsForTests(): {
+  diskReads: number
+} {
+  return { diskReads: cacheDiskReadCount }
 }

@@ -1,4 +1,7 @@
-import type { HomeRecentAppPreference } from '@polo-ai/shared/config'
+import {
+  MAX_HOME_RECENT_APP_ID_LENGTH,
+  type HomeRecentAppPreference,
+} from '@polo-ai/shared/config'
 import {
   get as getLocalStorage,
   KEYS,
@@ -18,6 +21,7 @@ function sanitizeRecentApps(value: unknown): HomeRecentAppPreference[] {
       && typeof item === 'object'
       && typeof item.id === 'string'
       && item.id.length > 0
+      && item.id.length <= MAX_HOME_RECENT_APP_ID_LENGTH
       && ['builtin', 'external', 'organization'].includes(item.kind)
       && typeof item.openedAt === 'number'
       && Number.isFinite(item.openedAt)

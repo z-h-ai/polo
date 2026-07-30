@@ -1,57 +1,66 @@
-# POL-51 第 1 轮修复报告
+# POL-51 第 1 轮 Review 修复报告
 
-## 变更摘要
+## 每个 issue 的处理结果
 
-本轮已修复 Reviewer 指出的 Catalog 异常 `304 Not Modified` 授权回退漏洞：
+### 1. Catalog business appId 的 NUL 支持
 
-1. 非强制 Catalog 同步只有在持久化缓存仍为 `authorized`，且当前进程内 access mode 不为 `denied` 时，才携带 `appConfigVersion` 发起条件请求。
-2. 收到 304 后，在 session CAS 内重新读取当前 Catalog 缓存与进程内 access mode，并同时校验：
-   - 请求不是 force refresh；
-   - 请求实际携带了 `appConfigVersion`；
-   - 当前缓存仍为 `authorized`；
-   - 当前缓存版本与已发送版本严格一致；
-   - 当前进程内 access mode 未进入 `denied`。
-3. 任一条件不满足时保持 fail closed：建立/维持 denied gate，返回稳定的 `SERVER_ERROR` 和去能力化 denied Catalog 投影，不恢复 online，也不泄露 `remoteUrl`、Release 下载字段或 `trustedReleases`。
-4. 增加确定性 production-wiring 回归测试，覆盖“明确失权后 denied 缓存持久化因 disk full 失败，旧 authorized 缓存仍存在，随后服务端异常返回 304”的完整链路。
-5. 增加 handler 级竞态测试，覆盖条件请求已经发出后、304 返回前进程内 access mode 转为 denied 的场景。
+- 已修复。
+- `polo-app.json.appId` 与安装请求的 `expectedManifestAppId` 统一复用 shared `AdminEntityIdSchema`。
+- business appId 继续与 manifest 严格相等比较；runtime appId、版本、入口和路径仍使用原有文件系统／运行时安全约束。
+- 新增真实 Bundle 安装回归，使用 512 个 NUL 字符的合法 Catalog appId 完成下载、解压、manifest 校验和安装。
 
-## Review 阻断问题修复结果
+### 2. 最近使用持久化的最坏情况长度
 
-- **问题：旧 authorized 缓存可能在 denied 持久化失败后通过 304 重新开放授权**
-  - 结果：已修复。
-  - 条件请求资格现在同时受持久化授权状态和进程内 denied gate 约束。
-  - 304 提交前会在可信 session CAS 内重新校验缓存、版本和 gate。
-  - 异常 304 只返回清洗后的 denied 投影，授权状态保持 denied。
+- 已修复。
+- 增加统一的最坏情况边界：
+  - v2 account/organization context key：6,154 字符。
+  - 完整 Catalog scope recent id：9,236 字符。
+- preferences 写入、读取清洗、配置 Zod 校验和 renderer 清洗复用相同边界。
+- 新增 512 字符 NUL account/organization/catalogAppId 的 renderer RPC 透传测试，以及跨新进程的真实 preferences reload 测试。
+
+### 3. denied / withdrawn 状态投影去能力化
+
+- 已修复。
+- 增加 shared 严格 allowlist DTO，并由单项状态、批量状态、已安装列表和 STOP 响应共同复用。
+- denied / withdrawn 投影移除 `url`、`port`、`pid`、`installationStatus`、`progress`、`availableRelease` 和 `error.details`；保留完整 scope、安全版本／状态信息及日志、STOP、UNINSTALL 管理所需字段。
+- 新增 running App 慢状态读取与 App withdrawal fence 并发回归，确认旧响应不会泄露 localhost 或进程能力。
+
+### 4. Catalog busy polling 热路径磁盘与 Zod 开销
+
+- 已修复。
+- Catalog cache 首次从磁盘读取后保留进程内已验证快照；相同配置路径的状态查询直接读取内存。
+- `saveAppCatalog` 和 denied transition 在原子 rename 成功后才发布新内存快照；写入失败不会污染进程内已提交状态。
+- 所有 cache 更新改为不可变构造，避免失败写入提前修改当前快照。
+- 新增 10,000 App、连续 100 次状态读取回归，断言磁盘读取计数不增长，不再重复 read/JSON parse/Zod validate。
 
 ## 关键文件
 
-- `packages/server-core/src/handlers/rpc/admin.ts`
-  - 收紧条件请求资格。
-  - 合并并强化 304 提交时的授权复核与 fail-closed 响应。
-- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 新增 304 返回前 access mode 被 deny 的竞态回归测试。
-- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-  - 新增 NOT_FOUND、denied 缓存写入 disk full、随后异常 304 的 production-wiring 回归测试。
+- `apps/electron/src/main/local-app-runtime/manager.ts`
+- `apps/electron/src/main/local-app-runtime/manifest.ts`
+- `apps/electron/src/main/local-app-runtime/__tests__/manager.test.ts`
+- `packages/shared/src/config/home-recent-limits.ts`
+- `packages/shared/src/config/preferences.ts`
+- `packages/shared/src/config/validators.ts`
+- `apps/electron/src/renderer/lib/home-recent-apps.ts`
+- `packages/shared/src/protocol/local-apps.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+- `packages/shared/src/admin/app-catalog-cache.ts`
+- `packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
 
-## 自测结果
+## 实际运行的测试及结果
 
-- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 通过：58 pass，0 fail，321 expect。
-- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-  - 通过：21 pass，0 fail，163 expect。
-- `cd packages/server-core && bun run typecheck`
-  - 通过。
-- `cd apps/electron && bun run typecheck`
-  - 通过。
 - `bun run test`
-  - 通过：项目标准测试与逐文件 isolated 测试全部退出码 0；新增 production-wiring 测试包含在全量复跑中。
-- `bun run validate:ci`
-  - 通过：全包 typecheck、shared/doc smoke tests、6 个 locale 的 parity/sorted/coverage 检查全部通过。
-- `bun run electron:build:main`
-  - 通过：Electron main process 构建完成并通过产物校验。
-- `git diff --check`
-  - 通过。
+  - 常规测试：4,828 passed，19 skipped，0 failed（369 files）。
+  - 20 个 isolated 测试文件：304 passed，0 failed。
+- `bun run typecheck:shared`：通过。
+- `bun run typecheck:electron`：通过。
+- `cd packages/server-core && bun run tsc --noEmit`：通过。
+- 变更文件 ESLint：
+  - shared：0 error，0 warning。
+  - Electron：0 error；2 个既有 localStorage 迁移测试 warning，无新增 lint error。
+- `git diff --check`：通过。
 
 ## 遗留问题
 
-本轮 Review 阻断项范围内无遗留问题。
+- 本轮 4 项 blocking issue 均已修复，无功能性遗留问题。
+- 全量测试中的 19 项 skip 为既有平台／外部 E2E 条件跳过；与本轮变更无关。

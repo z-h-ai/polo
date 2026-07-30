@@ -11,8 +11,10 @@ import { tmpdir } from 'node:os'
 import {
   denyCachedAppCatalogAuthorization,
   denyCachedAppCatalogAuthorizationForAccount,
+  getAppCatalogCacheDiagnosticsForTests,
   getAppCatalogApps,
   getCachedAppCatalog,
+  resetAppCatalogMemoryCacheForTests,
   saveAppCatalog,
 } from '../app-catalog-cache.ts'
 import type { CatalogApp } from '../types.ts'
@@ -54,6 +56,7 @@ beforeEach(() => {
   previousConfigDir = process.env.POLO_AI_CONFIG_DIR
   configDir = mkdtempSync(join(tmpdir(), 'polo-app-catalog-'))
   process.env.POLO_AI_CONFIG_DIR = configDir
+  resetAppCatalogMemoryCacheForTests()
 })
 
 afterEach(() => {
@@ -222,6 +225,24 @@ describe('app catalog cache', () => {
     expect(getAppCatalogApps(denied!)).toHaveLength(10_001)
     expect(getCachedAppCatalog('account-a', 'organization-1'))
       .toMatchObject({ authorizationStatus: 'denied' })
+  })
+
+  it('serves repeated 10,000-item busy reads from validated process memory', () => {
+    const apps = Array.from({ length: 10_000 }, (_, index) =>
+      bundleApp(`busy-app-${index}`, '1.0.0'))
+    saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'busy-v1',
+      apps,
+    })
+    const readsAfterCommit = getAppCatalogCacheDiagnosticsForTests().diskReads
+
+    for (let index = 0; index < 100; index += 1) {
+      expect(getCachedAppCatalog('account-a', 'organization-1')?.apps)
+        .toHaveLength(10_000)
+    }
+
+    expect(getAppCatalogCacheDiagnosticsForTests().diskReads)
+      .toBe(readsAfterCommit)
   })
 
   it('prioritizes an installed tombstone when a full cache gains a newly withdrawn app', () => {

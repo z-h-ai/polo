@@ -20,6 +20,10 @@ import { safeJsonParse, readJsonFileSync } from '../utils/files.ts';
 import { EntityColorSchema } from '../colors/validate.ts';
 import { THINKING_LEVEL_IDS } from '../agent/thinking-levels.ts';
 import { isValidProviderAuthCombination } from './llm-connections.ts';
+import {
+  MAX_HOME_RECENT_APP_ID_LENGTH,
+  MAX_HOME_RECENT_CONTEXT_KEY_LENGTH,
+} from './home-recent-limits.ts';
 
 // ============================================================
 // Config Directory
@@ -130,20 +134,35 @@ const LocationSchema = z.object({
   country: z.string().optional(),
 });
 
+const HomeRecentAppsByContextSchema = z.record(
+  z.string(),
+  z.array(z.object({
+    id: z.string().min(1).max(MAX_HOME_RECENT_APP_ID_LENGTH),
+    kind: z.enum(['builtin', 'external', 'organization']),
+    openedAt: z.number().finite().min(0),
+  })).max(6),
+).superRefine((contexts, context) => {
+  for (const contextKey of Object.keys(contexts)) {
+    if (
+      contextKey.length === 0
+      || contextKey.length > MAX_HOME_RECENT_CONTEXT_KEY_LENGTH
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Home recent Apps context key is invalid',
+        path: [contextKey],
+      });
+    }
+  }
+});
+
 export const UserPreferencesSchema = z.object({
   name: z.string().optional(),
   timezone: z.string().optional(),  // TODO: Could validate against IANA timezone list
   location: LocationSchema.optional(),
   language: z.string().optional(),
   notes: z.string().optional(),
-  homeRecentApps: z.record(
-    z.string(),
-    z.array(z.object({
-      id: z.string().min(1).max(2_048),
-      kind: z.enum(['builtin', 'external', 'organization']),
-      openedAt: z.number().finite().min(0),
-    })).max(6),
-  ).optional(),
+  homeRecentApps: HomeRecentAppsByContextSchema.optional(),
   updatedAt: z.number().int().min(0).optional(),
 });
 
