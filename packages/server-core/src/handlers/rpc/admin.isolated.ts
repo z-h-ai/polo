@@ -2086,7 +2086,17 @@ describe('registerAdminHandlers', () => {
       apps: [{
         id: 'retained-app',
         organizationId,
+        name: 'Retained app',
+        description: '',
         deliveryMode: 'local_bundle',
+        currentRelease: {
+          version: '1.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://private.example.com/retained.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+        sortOrder: 0,
         availability: 'available',
       }],
     })
@@ -2598,7 +2608,11 @@ describe('registerAdminHandlers', () => {
       apps: [{
         id: 'cached-app',
         organizationId,
+        name: 'Cached app',
+        description: '',
         deliveryMode: 'remote_url',
+        remoteUrl: 'https://private.example.com/cached',
+        sortOrder: 0,
         availability: 'available',
       }],
     })
@@ -2724,7 +2738,32 @@ describe('registerAdminHandlers', () => {
         remoteUrl: 'https://private.example.com',
         sortOrder: 1,
         availability: 'available',
+      }, {
+        id: 'bundle-app',
+        organizationId,
+        name: 'Private bundle',
+        description: '',
+        deliveryMode: 'local_bundle',
+        currentRelease: {
+          version: '1.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://private.example.com/bundle.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+        permissions: ['filesystem'],
+        sortOrder: 2,
+        availability: 'available',
       }],
+      trustedReleases: {
+        'bundle-app': {
+          version: '1.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://private.example.com/bundle.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+      },
     })
     appCatalogAccess.set(`user-1:${organizationId}`, 'online')
     adminClientBehavior.getAppCatalog = async () => {
@@ -2745,12 +2784,30 @@ describe('registerAdminHandlers', () => {
       accessMode: 'denied',
       catalog: {
         authorizationStatus: 'denied',
-        apps: [{ availability: 'unavailable' }],
+        apps: [
+          { id: 'app-1', availability: 'unavailable' },
+          { id: 'bundle-app', availability: 'unavailable' },
+        ],
       },
     })
+    expect(result.catalog).not.toHaveProperty('trustedReleases')
+    expect(result.catalog.apps[0]).not.toHaveProperty('remoteUrl')
+    expect(result.catalog.apps[1]).not.toHaveProperty('currentRelease')
+    expect(result.catalog.apps[1]).not.toHaveProperty('permissions')
     expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
       authorizationStatus: 'denied',
-      apps: [{ availability: 'unavailable' }],
+      apps: [
+        {
+          availability: 'unavailable',
+          remoteUrl: 'https://private.example.com',
+        },
+        {
+          availability: 'unavailable',
+          currentRelease: {
+            downloadUrl: 'https://private.example.com/bundle.zip',
+          },
+        },
+      ],
     })
     expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
     expect(adminSessionEnding).not.toHaveBeenCalled()
@@ -2950,7 +3007,11 @@ describe('registerAdminHandlers', () => {
         apps: [{
           id: 'private-app',
           organizationId,
+          name: 'Private app',
+          description: '',
           deliveryMode: 'remote_url',
+          remoteUrl: 'https://private.example.com',
+          sortOrder: 0,
           availability: 'available',
         }],
       })
@@ -3002,7 +3063,17 @@ describe('registerAdminHandlers', () => {
       apps: [{
         id: 'retained-app',
         organizationId,
+        name: 'Retained app',
+        description: '',
         deliveryMode: 'local_bundle',
+        currentRelease: {
+          version: '1.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://private.example.com/retained.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+        sortOrder: 0,
         availability: 'unavailable',
       }],
     })
@@ -3046,10 +3117,22 @@ describe('registerAdminHandlers', () => {
         accountId: 'user-1',
         organizationId,
         authorizationStatus: 'authorized',
+        appConfigVersion: 'apps-v1',
+        syncedAt: 50,
         apps: [{
           id: 'private-app',
           organizationId,
+          name: 'Private app',
+          description: '',
           deliveryMode: 'local_bundle',
+          currentRelease: {
+            version: '1.0.0',
+            runtime: 'static',
+            downloadUrl: 'https://private.example.com/app.zip',
+            checksum: 'a'.repeat(64),
+            sizeBytes: 42,
+          },
+          sortOrder: 0,
           availability: 'available',
         }],
       })

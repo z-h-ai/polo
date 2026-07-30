@@ -202,11 +202,11 @@ mock.module('@polo-ai/shared/admin', () => ({
   getCachedAppCatalog: (
     accountId: string,
     organizationId: string,
-  ) => accountId === scope.accountId && organizationId === scope.organizationId
+  ) => accountId === catalog.accountId && organizationId === catalog.organizationId
     ? catalog
     : null,
   listCachedAppCatalogs: (accountId: string) =>
-    accountId === scope.accountId ? [catalog] : [],
+    accountId === catalog.accountId ? [catalog] : [],
   saveAppCatalog: (
     accountId: string,
     organizationId: string,
@@ -501,6 +501,59 @@ afterEach(async () => {
 })
 
 describe('Admin session and scoped local app production wiring', () => {
+  it('accepts full organization entity ids through Catalog sync and batch status', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-catalog-entity-id-'))
+    temporaryRoots.push(root)
+    let managerFactoryCalls = 0
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: () => {
+        managerFactoryCalls += 1
+        throw new Error('status reads must not materialize a runtime manager')
+      },
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    const { handlers, context } = registerProductionHandlers(root)
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+    const getStatuses = handlers.get(
+      RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES,
+    )!
+
+    for (const organizationId of [
+      'tenant:creator-space',
+      '组织：研发圈',
+      `org:${'x'.repeat(508)}`,
+    ]) {
+      const entityScope = { ...scope, organizationId }
+      catalog = {
+        ...createCatalog(),
+        organizationId,
+        apps: createCatalog().apps.map(app => ({ ...app, organizationId })),
+      }
+      getAppCatalogAdmin = async (
+        _accessToken,
+        requestedOrganizationId,
+      ) => {
+        expect(requestedOrganizationId).toBe(organizationId)
+        return { notModified: true }
+      }
+
+      await expect(sync(context, organizationId, { force: true }))
+        .resolves.toMatchObject({
+          success: true,
+          catalog: { organizationId },
+        })
+      await expect(getStatuses(context, { scopes: [entityScope] }))
+        .resolves.toEqual([expect.objectContaining({
+          appId: scope.catalogAppId,
+          scope: entityScope,
+          status: 'not_installed',
+        })])
+    }
+    expect(managerFactoryCalls).toBe(0)
+  })
+
   it('denies cold cached scopes while session cleanup and denied-cache persistence are pending', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-admin-cold-cache-ending-'))
     temporaryRoots.push(root)
@@ -682,11 +735,12 @@ describe('Admin session and scoped local app production wiring', () => {
       throw new TestAdminError('network unavailable', 'NETWORK_ERROR')
     }
 
-    await expect(handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!(
+    const result = await handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!(
       context,
       scope.organizationId,
       { force: true },
-    )).resolves.toMatchObject({
+    )
+    expect(result).toMatchObject({
       success: false,
       errorCode: 'NETWORK_ERROR',
       accessMode: 'denied',
@@ -698,6 +752,9 @@ describe('Admin session and scoped local app production wiring', () => {
         }],
       },
     })
+    expect(result.catalog).not.toHaveProperty('trustedReleases')
+    expect(result.catalog.apps[0]).not.toHaveProperty('currentRelease')
+    expect(result.catalog.apps[0]).not.toHaveProperty('permissions')
     expect(accessMode).toBe('denied')
     expect(tokens).toMatchObject({ userId: scope.accountId })
     await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL)!(

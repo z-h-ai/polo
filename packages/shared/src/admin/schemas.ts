@@ -71,7 +71,8 @@ export const SetAdminPasswordResponseSchema = z.object({
   success: z.literal(true),
 })
 
-const entityId = nonBlankString(512)
+export const AdminEntityIdSchema = nonBlankString(512)
+const entityId = AdminEntityIdSchema
 const organizationDate = z.string().datetime({ offset: true })
 
 export const OrganizationTypeSchema = z.enum(['enterprise_workspace', 'creator_space'])
@@ -170,6 +171,34 @@ export const AppCatalogResponseSchema = z.object({
     appIds.add(app.id)
   })
 })
+
+/**
+ * Fail-closed Catalog projection exposed outside the trusted main process.
+ *
+ * The allowlist intentionally excludes every delivery capability, including
+ * remoteUrl, currentRelease, permissions, and trusted release metadata.
+ */
+export const DeniedCatalogAppSchema = z.object({
+  id: entityId,
+  organizationId: entityId,
+  name: nonBlankString(256),
+  description: z.string().max(4_096),
+  iconUrl: httpUrl.optional(),
+  creatorName: z.string().max(512).optional(),
+  deliveryMode: z.enum(['remote_url', 'local_bundle']),
+  sortOrder: z.number().int(),
+  availability: z.literal('unavailable'),
+}).strict()
+
+export const DeniedAppCatalogSnapshotSchema = z.object({
+  accountId: entityId,
+  organizationId: entityId,
+  appConfigVersion: nonBlankString(512),
+  authorizationStatus: z.literal('denied'),
+  syncedAt: z.number().int().min(0),
+  apps: z.array(DeniedCatalogAppSchema).max(10_000),
+  withdrawnApps: z.array(DeniedCatalogAppSchema).max(10_000).optional(),
+}).strict()
 
 export const CreateOrganizationResponseSchema = z.object({
   organization: OrganizationSchema,
@@ -290,6 +319,7 @@ export const SetAdminPasswordRpcInputSchema = z.object({
 })
 
 export const OrganizationIdRpcInputSchema = z.string().uuid()
+export const CatalogOrganizationIdRpcInputSchema = AdminEntityIdSchema
 export const OrganizationJoinTokenRpcInputSchema = z.string().min(20).max(256)
 export const CreateOrganizationRpcInputSchema = z.object({
   type: OrganizationTypeSchema,

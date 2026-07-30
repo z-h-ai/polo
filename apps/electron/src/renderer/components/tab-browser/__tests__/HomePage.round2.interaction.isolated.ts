@@ -3,7 +3,11 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
-import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import type {
+  AppCatalogCacheEntry,
+  CatalogApp,
+  DeniedAppCatalogSnapshot,
+} from '@polo-ai/shared/admin'
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 import {
   BUILTIN_APP_DEFINITIONS,
@@ -475,23 +479,16 @@ describe('HomePage round-two regressions', () => {
   })
 
   it('keeps an installed app manageable from a denied NETWORK_ERROR cold snapshot', async () => {
-    const deniedApp: CatalogApp = {
+    const deniedApp = {
       id: 'denied-installed',
       organizationId: 'organization-a',
       name: 'Denied Installed',
       description: '',
-      deliveryMode: 'local_bundle',
-      currentRelease: {
-        version: '2.0.0',
-        runtime: 'static',
-        downloadUrl: 'https://example.com/app.zip',
-        checksum: 'a'.repeat(64),
-        sizeBytes: 1024,
-      },
+      deliveryMode: 'local_bundle' as const,
       sortOrder: 0,
-      availability: 'unavailable',
+      availability: 'unavailable' as const,
     }
-    const catalog: AppCatalogCacheEntry = {
+    const catalog: DeniedAppCatalogSnapshot = {
       accountId: 'account-a',
       organizationId: 'organization-a',
       appConfigVersion: 'denied',

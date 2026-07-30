@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 import {
   AppCatalogResponseSchema,
+  CatalogOrganizationIdRpcInputSchema,
+  DeniedAppCatalogSnapshotSchema,
   isValidMainlandChinaPhone,
   MainlandChinaPhoneSchema,
+  OrganizationIdRpcInputSchema,
   SendPhoneAuthCodeRpcInputSchema,
   VerifyPhoneAuthCodeRpcInputSchema,
 } from '../schemas'
@@ -104,4 +107,71 @@ describe('AppCatalogResponseSchema identity constraints', () => {
       }
     })
   }
+})
+
+describe('Catalog organization entity id RPC contract', () => {
+  it('accepts colon, Unicode, and 512-character ids without widening UUID-only writes', () => {
+    const entityIds = [
+      'tenant:creator-space',
+      '组织：研发圈',
+      `org:${'x'.repeat(508)}`,
+    ]
+    for (const organizationId of entityIds) {
+      expect(organizationId.length).toBeLessThanOrEqual(512)
+      expect(CatalogOrganizationIdRpcInputSchema.safeParse(organizationId).success)
+        .toBe(true)
+    }
+    expect(CatalogOrganizationIdRpcInputSchema.safeParse(' '.repeat(32)).success)
+      .toBe(false)
+    expect(CatalogOrganizationIdRpcInputSchema.safeParse('x'.repeat(513)).success)
+      .toBe(false)
+
+    expect(OrganizationIdRpcInputSchema.safeParse('tenant:creator-space').success)
+      .toBe(false)
+    expect(OrganizationIdRpcInputSchema.safeParse(
+      '11111111-1111-4111-8111-111111111111',
+    ).success).toBe(true)
+  })
+
+  it('strictly rejects delivery capability fields in denied snapshots', () => {
+    const deniedApp = {
+      id: 'remote-app',
+      organizationId: '组织：研发圈',
+      name: 'Remote',
+      description: '',
+      deliveryMode: 'remote_url',
+      sortOrder: 0,
+      availability: 'unavailable',
+    }
+    expect(DeniedAppCatalogSnapshotSchema.safeParse({
+      accountId: 'account-a',
+      organizationId: deniedApp.organizationId,
+      appConfigVersion: 'v1',
+      authorizationStatus: 'denied',
+      syncedAt: 1,
+      apps: [deniedApp],
+    }).success).toBe(true)
+    for (const capability of [
+      { remoteUrl: 'https://private.example.com' },
+      {
+        currentRelease: {
+          version: '1.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://private.example.com/bundle.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 1,
+        },
+      },
+      { permissions: ['filesystem'] },
+    ]) {
+      expect(DeniedAppCatalogSnapshotSchema.safeParse({
+        accountId: 'account-a',
+        organizationId: deniedApp.organizationId,
+        appConfigVersion: 'v1',
+        authorizationStatus: 'denied',
+        syncedAt: 1,
+        apps: [{ ...deniedApp, ...capability }],
+      }).success).toBe(false)
+    }
+  })
 })

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { i18n } from '@polo-ai/shared/i18n'
-import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import type {
+  AppCatalogCacheEntry,
+  CatalogApp,
+  DeniedAppCatalogSnapshot,
+} from '@polo-ai/shared/admin'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -160,7 +164,7 @@ function isCatalogAccessDenied(
 
 export function markCatalogAccessDenied(
   catalog: AppCatalogCacheEntry,
-): AppCatalogCacheEntry {
+): DeniedAppCatalogSnapshot {
   return markAppCatalogAccessDenied(catalog)
 }
 

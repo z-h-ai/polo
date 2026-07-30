@@ -1,4 +1,10 @@
-import type { AppCatalogCacheEntry } from './types.ts'
+import { DeniedAppCatalogSnapshotSchema } from './schemas.ts'
+import type {
+  AppCatalogCacheEntry,
+  CatalogApp,
+  DeniedAppCatalogSnapshot,
+  DeniedCatalogApp,
+} from './types.ts'
 
 export interface AdminAuthorizationErrorLike {
   code?: string
@@ -59,17 +65,27 @@ export function classifyAdminAuthorizationFailure(
 
 export function markAppCatalogAccessDenied(
   catalog: AppCatalogCacheEntry,
-): AppCatalogCacheEntry {
-  return {
-    ...catalog,
+): DeniedAppCatalogSnapshot {
+  const projectApp = (app: CatalogApp): DeniedCatalogApp => ({
+    id: app.id,
+    organizationId: app.organizationId,
+    name: app.name,
+    description: app.description,
+    ...(app.iconUrl ? { iconUrl: app.iconUrl } : {}),
+    ...(app.creatorName ? { creatorName: app.creatorName } : {}),
+    deliveryMode: app.deliveryMode,
+    sortOrder: app.sortOrder,
+    availability: 'unavailable',
+  })
+  return DeniedAppCatalogSnapshotSchema.parse({
+    accountId: catalog.accountId,
+    organizationId: catalog.organizationId,
+    appConfigVersion: catalog.appConfigVersion,
     authorizationStatus: 'denied',
-    apps: catalog.apps.map(app => ({
-      ...app,
-      availability: 'unavailable',
-    })),
-    withdrawnApps: (catalog.withdrawnApps ?? []).map(app => ({
-      ...app,
-      availability: 'unavailable',
-    })),
-  }
+    syncedAt: catalog.syncedAt,
+    apps: catalog.apps.map(projectApp),
+    ...(catalog.withdrawnApps
+      ? { withdrawnApps: catalog.withdrawnApps.map(projectApp) }
+      : {}),
+  })
 }

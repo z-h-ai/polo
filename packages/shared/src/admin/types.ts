@@ -214,6 +214,37 @@ export interface AppCatalogCacheEntry extends AppCatalogResponse {
   }>;
 }
 
+export interface DeniedCatalogApp extends Pick<
+  CatalogApp,
+  | 'id'
+  | 'organizationId'
+  | 'name'
+  | 'description'
+  | 'iconUrl'
+  | 'creatorName'
+  | 'deliveryMode'
+  | 'sortOrder'
+> {
+  availability: 'unavailable';
+}
+
+/**
+ * Renderer-safe representation of a denied Catalog.
+ *
+ * Delivery URLs, release checksums, permissions, and trusted release metadata
+ * are deliberately absent while the scope remains available for status,
+ * logs, stop, and uninstall operations.
+ */
+export interface DeniedAppCatalogSnapshot {
+  accountId: string;
+  organizationId: string;
+  appConfigVersion: string;
+  authorizationStatus: 'denied';
+  syncedAt: number;
+  apps: DeniedCatalogApp[];
+  withdrawnApps?: DeniedCatalogApp[];
+}
+
 export type AppCatalogSyncResult =
   | {
       success: true;
@@ -233,7 +264,7 @@ export type AppCatalogSyncResult =
        * Explicit Catalog scope denial may return the sanitized last trusted
        * cache so a fresh renderer can expose local data-management actions.
        */
-      catalog?: AppCatalogCacheEntry;
+      catalog?: DeniedAppCatalogSnapshot;
       accessMode?: 'denied';
     };
 

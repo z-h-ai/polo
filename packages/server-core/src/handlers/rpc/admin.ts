@@ -18,6 +18,7 @@ import {
   type AdminLoginResponse,
   type AdminRefreshResponse,
   type AdminUser,
+  type DeniedAppCatalogSnapshot,
 } from '@polo-ai/shared/admin'
 import {
   classifyAdminAuthorizationFailure,
@@ -25,6 +26,7 @@ import {
 } from '@polo-ai/shared/admin/authorization'
 import {
   AdminLoginRpcInputSchema,
+  CatalogOrganizationIdRpcInputSchema,
   CreateOrganizationInvitationRpcInputSchema,
   CreateOrganizationJoinLinkRpcInputSchema,
   CreateOrganizationRpcInputSchema,
@@ -436,7 +438,7 @@ export function registerAdminHandlers(
   const denyCatalogScope = (
     accountId: string,
     organizationId: string,
-  ): AppCatalogCacheEntry | null => {
+  ): DeniedAppCatalogSnapshot | null => {
     const scopeKey = appCatalogScopeKey(accountId, organizationId)
     // The in-memory epoch and gate are the security boundary. Persistence is
     // recovery metadata and must never keep a previously-online process open
@@ -462,8 +464,15 @@ export function registerAdminHandlers(
     }
     const cached = getCachedAppCatalog(accountId, organizationId)
     try {
-      return denyCachedAppCatalogAuthorization(accountId, organizationId)
-        ?? (cached ? markAppCatalogAccessDenied(cached) : null)
+      const deniedCache = denyCachedAppCatalogAuthorization(
+        accountId,
+        organizationId,
+      )
+      return deniedCache
+        ? markAppCatalogAccessDenied(deniedCache)
+        : cached
+          ? markAppCatalogAccessDenied(cached)
+          : null
     } catch (error) {
       log?.warn(
         '[Admin] failed to persist denied Catalog cache:',
@@ -939,7 +948,8 @@ export function registerAdminHandlers(
       rawOrganizationId: unknown,
       rawOptions?: unknown,
     ): Promise<AppCatalogSyncResult> => {
-      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      const organizationId =
+        CatalogOrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
       if (!organizationId.success) {
         return {
           success: false,

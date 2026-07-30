@@ -3,6 +3,7 @@ import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
 } from '../authorization-failure.ts'
+import { DeniedAppCatalogSnapshotSchema } from '../schemas.ts'
 
 describe('Admin authorization failure classification', () => {
   it('gives HTTP 401 priority over every Catalog body code', () => {
@@ -73,20 +74,57 @@ describe('Admin authorization failure classification', () => {
         name: 'Retained',
         description: '',
         deliveryMode: 'local_bundle' as const,
+        currentRelease: {
+          version: '1.0.0',
+          runtime: 'static' as const,
+          downloadUrl: 'https://private.example.com/bundle.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+        permissions: ['filesystem'],
         sortOrder: 1,
         availability: 'withdrawn' as const,
       }],
+      trustedReleases: {
+        'retained-app': {
+          version: '1.0.0',
+          runtime: 'static' as const,
+          downloadUrl: 'https://private.example.com/bundle.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 42,
+        },
+      },
     }
 
-    expect(markAppCatalogAccessDenied(catalog)).toMatchObject({
+    const denied = markAppCatalogAccessDenied(catalog)
+    expect(denied).toMatchObject({
       authorizationStatus: 'denied',
       apps: [{ availability: 'unavailable' }],
       withdrawnApps: [{ availability: 'unavailable' }],
     })
+    expect(DeniedAppCatalogSnapshotSchema.safeParse(denied).success).toBe(true)
+    expect(denied).not.toHaveProperty('trustedReleases')
+    expect(denied).not.toHaveProperty('warnings')
+    expect(denied.apps[0]).not.toHaveProperty('remoteUrl')
+    expect(denied.withdrawnApps?.[0]).not.toHaveProperty('currentRelease')
+    expect(denied.withdrawnApps?.[0]).not.toHaveProperty('permissions')
     expect(catalog).toMatchObject({
       authorizationStatus: 'authorized',
-      apps: [{ availability: 'available' }],
-      withdrawnApps: [{ availability: 'withdrawn' }],
+      apps: [{
+        availability: 'available',
+        remoteUrl: 'https://example.com',
+      }],
+      withdrawnApps: [{
+        availability: 'withdrawn',
+        currentRelease: {
+          downloadUrl: 'https://private.example.com/bundle.zip',
+        },
+      }],
+      trustedReleases: {
+        'retained-app': {
+          checksum: 'a'.repeat(64),
+        },
+      },
     })
   })
 })

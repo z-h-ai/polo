@@ -11,6 +11,7 @@ import type {
   AppCatalogCacheEntry,
   AppCatalogSyncResult,
   CatalogApp,
+  DeniedAppCatalogSnapshot,
 } from '@polo-ai/shared/admin'
 import type {
   CatalogLocalAppScope,
@@ -329,13 +330,21 @@ describe('useAppCatalog scoped async state', () => {
         'organization-a',
         `retained-${errorCode.toLowerCase()}`,
       )
-      const deniedCatalog: AppCatalogCacheEntry = {
-        ...catalog('organization-a', 'denied-catalog', [localApp]),
+      const deniedCatalog: DeniedAppCatalogSnapshot = {
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        appConfigVersion: 'denied-catalog',
         authorizationStatus: 'denied',
         apps: [{
-          ...localApp,
+          id: localApp.id,
+          organizationId: localApp.organizationId,
+          name: localApp.name,
+          description: localApp.description,
+          deliveryMode: localApp.deliveryMode,
+          sortOrder: localApp.sortOrder,
           availability: 'unavailable',
         }],
+        syncedAt: 1,
       }
       syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
         success: false,
@@ -365,6 +374,8 @@ describe('useAppCatalog scoped async state', () => {
 
       const retainedApp = result.current.state.catalog!.apps[0]!
       expect(retainedApp.availability).toBe('unavailable')
+      expect(retainedApp).not.toHaveProperty('currentRelease')
+      expect(retainedApp).not.toHaveProperty('permissions')
       expect(result.current.state.accessMode).toBe('denied')
       expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
       expect(getRuntimeStatuses).toHaveBeenCalledWith({

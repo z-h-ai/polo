@@ -14,7 +14,6 @@ import type {
   CatalogApp,
 } from './types.ts'
 import { isValidCatalogSemVer } from './semver.ts'
-import { markAppCatalogAccessDenied } from './authorization-failure.ts'
 
 const CACHE_SCHEMA_VERSION = 3
 const MAX_CACHED_APPS = 10_000
@@ -86,6 +85,23 @@ function trustedReleasesFromApps(
       ? [[app.id, app.currentRelease] as const]
       : []
   )))
+}
+
+function markCachedAppCatalogAccessDenied(
+  catalog: AppCatalogCacheEntry,
+): AppCatalogCacheEntry {
+  return {
+    ...catalog,
+    authorizationStatus: 'denied',
+    apps: catalog.apps.map(app => ({
+      ...app,
+      availability: 'unavailable',
+    })),
+    withdrawnApps: (catalog.withdrawnApps ?? []).map(app => ({
+      ...app,
+      availability: 'unavailable',
+    })),
+  }
 }
 
 function migrateLegacyCache(raw: unknown): AppCatalogCacheFile | null {
@@ -240,7 +256,7 @@ export function denyCachedAppCatalogAuthorization(
   const key = cacheKey(accountId, organizationId)
   const previous = cache.entries[key]
   if (!previous) return null
-  const entry = markAppCatalogAccessDenied(previous)
+  const entry = markCachedAppCatalogAccessDenied(previous)
   cache.entries[key] = entry
   writeCache(cache)
   return entry
@@ -253,7 +269,7 @@ export function denyCachedAppCatalogAuthorizationForAccount(
   const denied: AppCatalogCacheEntry[] = []
   for (const [key, previous] of Object.entries(cache.entries)) {
     if (previous.accountId !== accountId) continue
-    const entry = markAppCatalogAccessDenied(previous)
+    const entry = markCachedAppCatalogAccessDenied(previous)
     cache.entries[key] = entry
     denied.push(entry)
   }
