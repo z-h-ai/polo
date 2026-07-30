@@ -128,10 +128,16 @@ import {
   getTerminalIntegrationStatus,
   installTerminalIntegration,
   setTerminalSetupDismissed,
+  toTerminalIntegrationErrorPayload,
   uninstallTerminalIntegration,
   type TerminalIntegrationOptions,
 } from './terminal-integration'
 import { runTerminalOnboarding } from './terminal-onboarding'
+import { TERMINAL_INTEGRATION_ERROR_KEYS } from '../shared/terminal-integration'
+import type {
+  TerminalIntegrationOperation,
+  TerminalIntegrationResult,
+} from '../shared/types'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -268,6 +274,21 @@ function terminalIntegrationOptions(): TerminalIntegrationOptions {
     resourcesPath: process.resourcesPath,
     appExecutable: process.execPath,
     appVersion: app.getVersion(),
+  }
+}
+
+function terminalIntegrationIpcResult(
+  operation: TerminalIntegrationOperation,
+  run: () => ReturnType<typeof getTerminalIntegrationStatus>,
+): TerminalIntegrationResult {
+  try {
+    return { success: true, status: run() }
+  } catch (error) {
+    mainLog.error(`[terminal-integration] ${operation} failed`, error)
+    return {
+      success: false,
+      ...toTerminalIntegrationErrorPayload(error, operation),
+    }
   }
 }
 
@@ -695,17 +716,20 @@ app.whenReady().then(async () => {
       return { canceled: result.canceled, filePaths: result.filePaths }
     })
     ipcMain.handle('terminal-integration:get-status', () =>
-      getTerminalIntegrationStatus(terminalIntegrationOptions()))
-    ipcMain.handle('terminal-integration:install', () => {
-      const result = installTerminalIntegration(terminalIntegrationOptions())
-      setTerminalSetupDismissed(terminalIntegrationOptions(), false)
-      return result
-    })
-    ipcMain.handle('terminal-integration:uninstall', () => {
-      const result = uninstallTerminalIntegration(terminalIntegrationOptions())
-      setTerminalSetupDismissed(terminalIntegrationOptions(), true)
-      return result
-    })
+      terminalIntegrationIpcResult('status', () =>
+        getTerminalIntegrationStatus(terminalIntegrationOptions())))
+    ipcMain.handle('terminal-integration:install', () =>
+      terminalIntegrationIpcResult('install', () => {
+        const result = installTerminalIntegration(terminalIntegrationOptions())
+        setTerminalSetupDismissed(terminalIntegrationOptions(), false)
+        return result
+      }))
+    ipcMain.handle('terminal-integration:uninstall', () =>
+      terminalIntegrationIpcResult('uninstall', () => {
+        const result = uninstallTerminalIntegration(terminalIntegrationOptions())
+        setTerminalSetupDismissed(terminalIntegrationOptions(), true)
+        return result
+      }))
 
     if (!isClientOnly) {
       // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)
@@ -1212,6 +1236,14 @@ app.whenReady().then(async () => {
           terminalOptions,
           copy: setupCopy,
           showMessageBox: (options) => dialog.showMessageBox(win, options),
+          formatError: error => i18n.t(
+            TERMINAL_INTEGRATION_ERROR_KEYS[error.errorCode],
+            error.errorParams,
+          ),
+          logError: error => mainLog.error(
+            '[terminal-integration] onboarding install failed',
+            error,
+          ),
         })
       }
     }

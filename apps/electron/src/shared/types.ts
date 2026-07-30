@@ -338,6 +338,28 @@ export interface TerminalIntegrationStatus {
   profilePath?: string
 }
 
+export type TerminalIntegrationOperation = 'status' | 'install' | 'uninstall'
+
+export type TerminalIntegrationErrorCode =
+  | 'unsupported_platform'
+  | 'profile_malformed'
+  | 'status_failed'
+  | 'install_failed'
+  | 'uninstall_failed'
+  | 'ipc_failed'
+
+export interface TerminalIntegrationErrorPayload {
+  errorCode: TerminalIntegrationErrorCode
+  errorParams?: {
+    path?: string
+    operation?: TerminalIntegrationOperation
+  }
+}
+
+export type TerminalIntegrationResult =
+  | { success: true; status: TerminalIntegrationStatus }
+  | ({ success: false } & TerminalIntegrationErrorPayload)
+
 export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
@@ -367,9 +389,9 @@ export interface ElectronAPI {
   // App lifecycle
   relaunchApp(): Promise<void>
   removeWorkspace(workspaceId: string): Promise<boolean>
-  getTerminalIntegrationStatus(): Promise<TerminalIntegrationStatus>
-  installTerminalIntegration(): Promise<TerminalIntegrationStatus>
-  uninstallTerminalIntegration(): Promise<TerminalIntegrationStatus>
+  getTerminalIntegrationStatus(): Promise<TerminalIntegrationResult>
+  installTerminalIntegration(): Promise<TerminalIntegrationResult>
+  uninstallTerminalIntegration(): Promise<TerminalIntegrationResult>
   invokeOnServer(url: string, token: string, channel: string, ...args: any[]): Promise<any>
 
   // Remote session transfer (main-process orchestrated, supports chunked upload)

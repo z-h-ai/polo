@@ -13,6 +13,8 @@ import { join } from 'node:path'
 import {
   getTerminalIntegrationStatus,
   installTerminalIntegration,
+  TerminalIntegrationOperationError,
+  toTerminalIntegrationErrorPayload,
   uninstallTerminalIntegration,
   type TerminalIntegrationOptions,
 } from '../terminal-integration'
@@ -192,5 +194,44 @@ describe('macOS terminal integration', () => {
       code: 'profile_conflict',
       path: profile,
     })
+  })
+
+  it('exposes a safe structured code for unsupported platform errors', () => {
+    const options = { ...setup(), platform: 'linux' as const }
+    let thrown: unknown
+    try {
+      installTerminalIntegration(options)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(TerminalIntegrationOperationError)
+    expect(toTerminalIntegrationErrorPayload(thrown, 'install')).toEqual({
+      errorCode: 'unsupported_platform',
+    })
+  })
+
+  it('maps malformed uninstall profiles to a safe path parameter', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const malformed = '# <<< Polo CLI <<<\n# >>> Polo CLI >>>\n'
+    writeFileSync(installed.profilePath!, malformed)
+
+    let thrown: unknown
+    try {
+      uninstallTerminalIntegration(options)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(TerminalIntegrationOperationError)
+    expect(toTerminalIntegrationErrorPayload(thrown, 'uninstall')).toEqual({
+      errorCode: 'profile_malformed',
+      errorParams: {
+        path: installed.profilePath,
+        operation: 'uninstall',
+      },
+    })
+    expect(readFileSync(installed.profilePath!, 'utf8')).toBe(malformed)
   })
 })

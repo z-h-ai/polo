@@ -12,6 +12,7 @@ import { Buffer } from 'node:buffer'
 import {
   getFileType,
   getMimeType,
+  getProcessInstanceFingerprint,
   readFileAttachment,
   withCrossProcessFileLockSync,
 } from '../files'
@@ -126,12 +127,33 @@ describe('cross-process file transaction lock', () => {
     const lockDir = join(dir, '.credentials.transaction.lock')
     mkdirSync(lockDir)
     writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+      schemaVersion: 1,
       pid: 2_147_483_647,
       nonce: 'abandoned-owner',
+      processStartFingerprint: 'dead-process-instance',
       createdAt: Date.now() - 60_000,
     }))
 
     expect(withCrossProcessFileLockSync(lockDir, () => 'recovered')).toBe('recovered')
+    expect(existsSync(lockDir)).toBe(false)
+  })
+
+  test('recovers a stale owner when its PID was reused by another process instance', () => {
+    const dir = makeTmp()
+    const lockDir = join(dir, '.config.transaction.lock')
+    const currentFingerprint = getProcessInstanceFingerprint()
+    expect(currentFingerprint).toBeTruthy()
+    mkdirSync(lockDir)
+    writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+      schemaVersion: 1,
+      pid: process.pid,
+      nonce: 'previous-process-with-reused-pid',
+      processStartFingerprint: `${currentFingerprint}-previous-instance`,
+      createdAt: Date.now() - 60_000,
+    }))
+
+    expect(withCrossProcessFileLockSync(lockDir, () => 'pid-reuse-recovered'))
+      .toBe('pid-reuse-recovered')
     expect(existsSync(lockDir)).toBe(false)
   })
 })

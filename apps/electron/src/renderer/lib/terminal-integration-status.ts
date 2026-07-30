@@ -1,5 +1,9 @@
 import type { TFunction } from 'i18next'
-import type { TerminalIntegrationStatus } from '../../shared/types'
+import type {
+  TerminalIntegrationErrorPayload,
+  TerminalIntegrationStatus,
+} from '../../shared/types'
+import { TERMINAL_INTEGRATION_ERROR_KEYS } from '../../shared/terminal-integration'
 
 const STATUS_KEYS: Record<TerminalIntegrationStatus['statusCode'], string> = {
   command_conflict: 'settings.terminalFeatures.status.commandConflict',
@@ -16,4 +20,14 @@ export function getTerminalIntegrationStatusMessage(
   t: TFunction,
 ): string {
   return t(STATUS_KEYS[status.statusCode], status.statusParams)
+}
+
+export function getTerminalIntegrationErrorMessage(
+  error: TerminalIntegrationErrorPayload,
+  t: TFunction,
+): string {
+  return t(
+    TERMINAL_INTEGRATION_ERROR_KEYS[error.errorCode],
+    error.errorParams,
+  )
 }

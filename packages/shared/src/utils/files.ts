@@ -6,6 +6,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -15,7 +16,7 @@ import {
 } from 'fs';
 import { randomUUID } from 'crypto';
 import { extname, basename, dirname, resolve, join, relative } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { tmpdir } from 'os';
 
 /**
@@ -82,16 +83,19 @@ export function atomicWriteFileSync(
 }
 
 interface FileLockOwner {
+  schemaVersion: 1;
   pid: number;
   nonce: string;
+  processStartFingerprint: string;
   createdAt: number;
 }
 
 const LOCK_OWNER_FILE = 'owner.json';
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 15_000;
-const INCOMPLETE_LOCK_GRACE_MS = 2_000;
+const INVALID_LOCK_GRACE_MS = 60_000;
 const syncWaitBuffer = new Int32Array(new SharedArrayBuffer(4));
+let currentProcessFingerprint: string | null | undefined;
 
 function sleepSync(milliseconds: number): void {
   Atomics.wait(syncWaitBuffer, 0, 0, milliseconds);
@@ -107,66 +111,305 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+function resolveProcessStartFingerprint(
+  pid: number,
+  platform: NodeJS.Platform,
+): string | null {
+  try {
+    if (platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const commandEnd = stat.lastIndexOf(')');
+      if (commandEnd < 0) return null;
+      // Fields after the process name start at proc field 3. starttime is
+      // field 22, therefore index 19 in this suffix.
+      const fields = stat.slice(commandEnd + 1).trim().split(/\s+/);
+      const startTicks = fields[19];
+      if (!startTicks) return null;
+      let bootId = 'unknown-boot';
+      try {
+        bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      } catch {
+        // startTicks is still unique for a PID within the current boot.
+      }
+      return `linux:${bootId}:${startTicks}`;
+    }
+
+    if (platform === 'darwin') {
+      const started = execFileSync(
+        '/bin/ps',
+        ['-o', 'lstart=', '-p', String(pid)],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, LC_ALL: 'C' },
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 1_000,
+        },
+      ).trim();
+      return started ? `darwin:${started}` : null;
+    }
+
+    if (platform === 'win32') {
+      const command = [
+        `$process = Get-Process -Id ${pid} -ErrorAction Stop`,
+        '$process.StartTime.ToUniversalTime().Ticks',
+      ].join('; ');
+      const started = execFileSync(
+        'powershell.exe',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
+        {
+          encoding: 'utf8',
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 2_000,
+        },
+      ).trim();
+      return started ? `win32:${started}` : null;
+    }
+
+    const started = execFileSync(
+      'ps',
+      ['-o', 'lstart=', '-p', String(pid)],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, LC_ALL: 'C' },
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 1_000,
+      },
+    ).trim();
+    return started ? `${platform}:${started}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return an OS-backed identity for one process instance, not merely its PID.
+ * This is used to distinguish a live lock owner from a later process that
+ * reused the same PID.
+ */
+export function getProcessInstanceFingerprint(
+  pid = process.pid,
+  platform = process.platform,
+): string | null {
+  if (pid === process.pid && platform === process.platform) {
+    if (currentProcessFingerprint === undefined) {
+      currentProcessFingerprint = resolveProcessStartFingerprint(pid, platform);
+    }
+    return currentProcessFingerprint;
+  }
+  return resolveProcessStartFingerprint(pid, platform);
+}
+
+function createLockOwner(): FileLockOwner {
+  const processStartFingerprint = getProcessInstanceFingerprint();
+  if (!processStartFingerprint) {
+    throw new Error(
+      `Cannot determine process start fingerprint for file locking on ${process.platform}`,
+    );
+  }
+  return {
+    schemaVersion: 1,
+    pid: process.pid,
+    nonce: randomUUID(),
+    processStartFingerprint,
+    createdAt: Date.now(),
+  };
+}
+
 function readLockOwner(lockDir: string): FileLockOwner | null {
   try {
     const value = readJsonFileSync<Partial<FileLockOwner>>(
       join(lockDir, LOCK_OWNER_FILE),
     );
     if (
-      Number.isInteger(value.pid)
+      value.schemaVersion === 1
+      && Number.isInteger(value.pid)
       && typeof value.nonce === 'string'
+      && typeof value.processStartFingerprint === 'string'
       && typeof value.createdAt === 'number'
     ) {
       return value as FileLockOwner;
     }
   } catch {
-    // A process can be between mkdir and writing owner.json.
+    // Invalid owners are handled conservatively below.
   }
   return null;
 }
 
-function recoverAbandonedLock(lockDir: string): boolean {
-  let observedOwner: FileLockOwner | null = null;
-  let ageMs = 0;
-  try {
-    observedOwner = readLockOwner(lockDir);
-    ageMs = Date.now() - statSync(lockDir).mtimeMs;
-  } catch {
-    return true;
-  }
+function lockOwnerIsActive(owner: FileLockOwner): boolean {
+  if (!processIsAlive(owner.pid)) return false;
+  const actualFingerprint = getProcessInstanceFingerprint(owner.pid);
+  // If the OS denied the instance query, prefer availability loss over
+  // deleting a lock that may still be live.
+  return actualFingerprint === null
+    || actualFingerprint === owner.processStartFingerprint;
+}
 
-  if (observedOwner ? processIsAlive(observedOwner.pid) : ageMs < INCOMPLETE_LOCK_GRACE_MS) {
+function ownerDirectoryIsActive(path: string): boolean {
+  const owner = readLockOwner(path);
+  if (owner) return lockOwnerIsActive(owner);
+  try {
+    return Date.now() - statSync(path).mtimeMs < INVALID_LOCK_GRACE_MS;
+  } catch {
     return false;
   }
+}
 
-  const quarantine = `${lockDir}.stale.${process.pid}.${randomUUID()}`;
+function ownersMatch(
+  left: FileLockOwner | null,
+  right: FileLockOwner | null,
+): boolean {
+  return left !== null
+    && right !== null
+    && left.pid === right.pid
+    && left.nonce === right.nonce
+    && left.processStartFingerprint === right.processStartFingerprint;
+}
+
+function releaseOwnedDirectory(path: string, owner: FileLockOwner): void {
+  if (ownersMatch(readLockOwner(path), owner)) {
+    rmSync(path, { recursive: true, force: true });
+  }
+}
+
+function prepareOwnedDirectory(finalPath: string, owner: FileLockOwner): string {
+  const preparedPath = join(
+    dirname(finalPath),
+    `.${basename(finalPath)}.pending.${owner.pid}.${owner.nonce}`,
+  );
+  rmSync(preparedPath, { recursive: true, force: true });
+  mkdirSync(preparedPath, { mode: 0o700 });
   try {
-    renameSync(lockDir, quarantine);
-  } catch {
-    return true;
+    atomicWriteFileSync(
+      join(preparedPath, LOCK_OWNER_FILE),
+      JSON.stringify(owner),
+      0o600,
+    );
+    return preparedPath;
+  } catch (error) {
+    rmSync(preparedPath, { recursive: true, force: true });
+    throw error;
   }
+}
 
-  // The rename is atomic. Verify that the quarantined directory is still the
-  // abandoned owner we inspected before removing it.
-  const quarantinedOwner = readLockOwner(quarantine);
-  if (
-    observedOwner
-    && (
-      quarantinedOwner?.pid !== observedOwner.pid
-      || quarantinedOwner?.nonce !== observedOwner.nonce
-    )
-  ) {
-    try {
-      if (!existsSync(lockDir)) renameSync(quarantine, lockDir);
-    } catch {
-      // A different contender now owns the canonical path. Leave the
-      // quarantine in place rather than deleting an owner we did not inspect.
+function publishOwnedDirectory(preparedPath: string, finalPath: string): boolean {
+  try {
+    renameSync(preparedPath, finalPath);
+    return true;
+  } catch (error) {
+    if (existsSync(finalPath)) {
+      rmSync(preparedPath, { recursive: true, force: true });
+      return false;
     }
-    return true;
+    rmSync(preparedPath, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function recoveryClaimPrefix(lockDir: string): string {
+  return `${basename(lockDir)}.recovery.`;
+}
+
+function listRecoveryClaims(lockDir: string): string[] {
+  const parent = dirname(lockDir);
+  const prefix = recoveryClaimPrefix(lockDir);
+  try {
+    return readdirSync(parent)
+      .filter(name => name.startsWith(prefix))
+      .map(name => join(parent, name));
+  } catch {
+    return [];
+  }
+}
+
+function cleanupRecoveryClaims(lockDir: string): boolean {
+  let activeClaimFound = false;
+  for (const claimPath of listRecoveryClaims(lockDir)) {
+    if (ownerDirectoryIsActive(claimPath)) {
+      activeClaimFound = true;
+    } else {
+      // Recovery claims are nonce-qualified and never reused, so removing a
+      // dead claim cannot delete a later recovery owner.
+      rmSync(claimPath, { recursive: true, force: true });
+    }
+  }
+  return activeClaimFound;
+}
+
+function cleanupAbandonedPreparedDirectories(lockDir: string): void {
+  const parent = dirname(lockDir);
+  const prefix = `.${basename(lockDir)}.pending.`;
+  let names: string[];
+  try {
+    names = readdirSync(parent);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const preparedPath = join(parent, name);
+    if (!ownerDirectoryIsActive(preparedPath)) {
+      rmSync(preparedPath, { recursive: true, force: true });
+    }
+  }
+}
+
+/** @internal Deterministic pause points used only by multi-process tests. */
+export interface CrossProcessFileLockTestHooks {
+  beforePublish?: (preparedPath: string) => void;
+  afterRecoveryClaimPublished?: (claimPath: string) => void;
+}
+
+function recoverAbandonedLock(
+  lockDir: string,
+  hooks?: CrossProcessFileLockTestHooks,
+): boolean {
+  const recoveryOwner = createLockOwner();
+  const claimPath = `${lockDir}.recovery.${recoveryOwner.pid}.${recoveryOwner.nonce}`;
+  const preparedClaim = prepareOwnedDirectory(claimPath, recoveryOwner);
+  if (!publishOwnedDirectory(preparedClaim, claimPath)) {
+    throw new Error(`Recovery claim unexpectedly already exists: ${claimPath}`);
   }
 
-  rmSync(quarantine, { recursive: true, force: true });
-  return true;
+  try {
+    // The claim is visible before this observation. Normal contenders check
+    // claims both before and after publishing, so no new owner can enter while
+    // this stale snapshot is being moved.
+    const observedOwner = readLockOwner(lockDir);
+    if (observedOwner ? lockOwnerIsActive(observedOwner) : ownerDirectoryIsActive(lockDir)) {
+      return false;
+    }
+    if (!existsSync(lockDir)) return true;
+    hooks?.afterRecoveryClaimPublished?.(claimPath);
+
+    const quarantine = `${lockDir}.stale.${recoveryOwner.pid}.${recoveryOwner.nonce}`;
+    try {
+      renameSync(lockDir, quarantine);
+    } catch {
+      return true;
+    }
+
+    const quarantinedOwner = readLockOwner(quarantine);
+    if (
+      (observedOwner !== null && !ownersMatch(observedOwner, quarantinedOwner))
+      || (observedOwner === null && quarantinedOwner !== null)
+    ) {
+      // This can only be produced by an older implementation that does not
+      // honor recovery claims. Preserve it instead of deleting an owner that
+      // was not inspected.
+      try {
+        if (!existsSync(lockDir)) renameSync(quarantine, lockDir);
+      } catch {
+        // Leave the quarantine for manual recovery rather than deleting it.
+      }
+      return false;
+    }
+
+    rmSync(quarantine, { recursive: true, force: true });
+    return true;
+  } finally {
+    releaseOwnedDirectory(claimPath, recoveryOwner);
+  }
 }
 
 /**
@@ -178,49 +421,43 @@ export function withCrossProcessFileLockSync<T>(
   lockDir: string,
   operation: () => T,
   timeoutMs = LOCK_TIMEOUT_MS,
+  hooks?: CrossProcessFileLockTestHooks,
 ): T {
   mkdirSync(dirname(lockDir), { recursive: true, mode: 0o700 });
-  const owner: FileLockOwner = {
-    pid: process.pid,
-    nonce: randomUUID(),
-    createdAt: Date.now(),
-  };
+  const owner = createLockOwner();
   const deadline = Date.now() + timeoutMs;
 
   while (true) {
-    try {
-      mkdirSync(lockDir, { mode: 0o700 });
-      atomicWriteFileSync(
-        join(lockDir, LOCK_OWNER_FILE),
-        JSON.stringify(owner),
-        0o600,
-      );
-      break;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'EEXIST') {
-        // mkdir succeeded but owner metadata failed.
-        const currentOwner = readLockOwner(lockDir);
-        if (!currentOwner || currentOwner.nonce === owner.nonce) {
-          rmSync(lockDir, { recursive: true, force: true });
+    cleanupAbandonedPreparedDirectories(lockDir);
+    if (!cleanupRecoveryClaims(lockDir)) {
+      const preparedPath = prepareOwnedDirectory(lockDir, owner);
+      try {
+        hooks?.beforePublish?.(preparedPath);
+        if (!cleanupRecoveryClaims(lockDir)) {
+          if (publishOwnedDirectory(preparedPath, lockDir)) {
+            // Close the scan→publish race: if a recovery claim appeared after
+            // our pre-publish scan, withdraw before entering the critical
+            // section. A recoverer will see this live owner and leave it alone.
+            if (!cleanupRecoveryClaims(lockDir)) break;
+            releaseOwnedDirectory(lockDir, owner);
+          } else {
+            recoverAbandonedLock(lockDir, hooks);
+          }
         }
-        throw error;
+      } finally {
+        rmSync(preparedPath, { recursive: true, force: true });
       }
-      recoverAbandonedLock(lockDir);
-      if (Date.now() >= deadline) {
-        throw new Error(`Timed out waiting for file transaction lock: ${lockDir}`);
-      }
-      sleepSync(LOCK_RETRY_MS);
     }
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for file transaction lock: ${lockDir}`);
+    }
+    sleepSync(LOCK_RETRY_MS);
   }
 
   try {
     return operation();
   } finally {
-    const currentOwner = readLockOwner(lockDir);
-    if (currentOwner?.nonce === owner.nonce) {
-      rmSync(lockDir, { recursive: true, force: true });
-    }
+    releaseOwnedDirectory(lockDir, owner);
   }
 }
 

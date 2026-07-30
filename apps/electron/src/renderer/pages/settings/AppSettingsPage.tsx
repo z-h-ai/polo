@@ -21,7 +21,12 @@ import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { routes } from '@/lib/navigate'
 import { Spinner } from '@polo-ai/ui'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
-import type { NetworkProxySettings, TerminalIntegrationStatus } from '../../../shared/types'
+import type {
+  NetworkProxySettings,
+  TerminalIntegrationErrorPayload,
+  TerminalIntegrationOperation,
+  TerminalIntegrationStatus,
+} from '../../../shared/types'
 
 import {
   SettingsSection,
@@ -32,7 +37,10 @@ import {
   SettingsInput,
 } from '@/components/settings'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
-import { getTerminalIntegrationStatusMessage } from '@/lib/terminal-integration-status'
+import {
+  getTerminalIntegrationErrorMessage,
+  getTerminalIntegrationStatusMessage,
+} from '@/lib/terminal-integration-status'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -117,7 +125,7 @@ export default function AppSettingsPage() {
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
   const [terminalStatus, setTerminalStatus] = useState<TerminalIntegrationStatus | null>(null)
   const [terminalBusy, setTerminalBusy] = useState(false)
-  const [terminalError, setTerminalError] = useState<string | null>(null)
+  const [terminalError, setTerminalError] = useState<TerminalIntegrationErrorPayload | null>(null)
 
   const handleCheckForUpdates = useCallback(async () => {
     setIsCheckingForUpdates(true)
@@ -156,20 +164,41 @@ export default function AppSettingsPage() {
   useEffect(() => {
     if (!isElectron) return
     void window.electronAPI.getTerminalIntegrationStatus()
-      .then(setTerminalStatus)
-      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)))
+      .then((result) => {
+        if (result.success) {
+          setTerminalStatus(result.status)
+          setTerminalError(null)
+        } else {
+          setTerminalError(result)
+        }
+      })
+      .catch((error) => {
+        console.error('[terminal-integration] status IPC failed', error)
+        setTerminalError({
+          errorCode: 'ipc_failed',
+          errorParams: { operation: 'status' },
+        })
+      })
   }, [isElectron])
 
   const handleTerminalAction = useCallback(async (action: 'install' | 'uninstall') => {
     setTerminalBusy(true)
     setTerminalError(null)
     try {
-      const status = action === 'uninstall'
+      const result = action === 'uninstall'
         ? await window.electronAPI.uninstallTerminalIntegration()
         : await window.electronAPI.installTerminalIntegration()
-      setTerminalStatus(status)
+      if (result.success) {
+        setTerminalStatus(result.status)
+      } else {
+        setTerminalError(result)
+      }
     } catch (error) {
-      setTerminalError(error instanceof Error ? error.message : String(error))
+      console.error(`[terminal-integration] ${action} IPC failed`, error)
+      setTerminalError({
+        errorCode: 'ipc_failed',
+        errorParams: { operation: action as TerminalIntegrationOperation },
+      })
     } finally {
       setTerminalBusy(false)
     }
@@ -345,7 +374,8 @@ export default function AppSettingsPage() {
                         ? t("settings.terminalFeatures.installed")
                         : t("settings.terminalFeatures.notInstalled")}
                       description={terminalError
-                        ?? getTerminalIntegrationStatusMessage(terminalStatus, t)}
+                        ? getTerminalIntegrationErrorMessage(terminalError, t)
+                        : getTerminalIntegrationStatusMessage(terminalStatus, t)}
                     >
                       <div className="flex items-center gap-2">
                         {terminalStatus.installed && (

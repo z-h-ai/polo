@@ -3,10 +3,12 @@ import {
   getTerminalIntegrationStatus,
   installTerminalIntegration,
   setTerminalSetupDismissed,
+  toTerminalIntegrationErrorPayload,
   wasTerminalSetupDismissed,
   type TerminalIntegrationOptions,
   type TerminalIntegrationStatus,
 } from './terminal-integration'
+import type { TerminalIntegrationErrorPayload } from '../shared/types'
 
 export interface TerminalSetupCopy {
   conflictTitle: string
@@ -40,6 +42,8 @@ export interface TerminalOnboardingOptions {
   terminalOptions: TerminalIntegrationOptions
   copy: TerminalSetupCopy
   showMessageBox: (options: MessageBoxOptions) => Promise<{ response: number }>
+  formatError: (error: TerminalIntegrationErrorPayload) => string
+  logError?: (error: unknown) => void
   dependencies?: TerminalOnboardingDependencies
 }
 
@@ -58,6 +62,8 @@ export async function runTerminalOnboarding({
   terminalOptions,
   copy,
   showMessageBox,
+  formatError,
+  logError = error => console.error('[terminal-integration] onboarding failed', error),
   dependencies,
 }: TerminalOnboardingOptions): Promise<TerminalIntegrationStatus> {
   const getStatus = dependencies?.getStatus ?? getTerminalIntegrationStatus
@@ -107,11 +113,12 @@ export async function runTerminalOnboarding({
   }
 
   while (true) {
-    let failure: string | undefined
+    let failure: TerminalIntegrationErrorPayload | undefined
     try {
       status = install(terminalOptions)
     } catch (error) {
-      failure = error instanceof Error ? error.message : String(error)
+      logError(error)
+      failure = toTerminalIntegrationErrorPayload(error, 'install')
       status = getStatus(terminalOptions)
     }
 
@@ -131,7 +138,11 @@ export async function runTerminalOnboarding({
       type: 'error',
       title: copy.failedTitle,
       message: copy.failedMessage,
-      detail: `${failure ?? status.conflict?.path ?? copy.failedMessage}\n\n${copy.skippedDetail}`,
+      detail: `${
+        failure
+          ? formatError(failure)
+          : status.conflict?.path ?? copy.failedMessage
+      }\n\n${copy.skippedDetail}`,
       buttons: [copy.retry, copy.notNow],
       defaultId: 0,
       cancelId: 1,

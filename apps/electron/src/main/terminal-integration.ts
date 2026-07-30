@@ -12,10 +12,44 @@ import {
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import type {
+  TerminalIntegrationErrorCode,
+  TerminalIntegrationErrorPayload,
+  TerminalIntegrationOperation,
+} from '../shared/types'
 
 const LAUNCHER_MARKER = '# Polo CLI launcher (managed by Polo AI)'
 const BLOCK_START = '# >>> Polo CLI >>>'
 const BLOCK_END = '# <<< Polo CLI <<<'
+
+class MalformedTerminalProfileError extends Error {}
+
+export class TerminalIntegrationOperationError extends Error {
+  constructor(
+    readonly errorCode: TerminalIntegrationErrorCode,
+    readonly errorParams?: TerminalIntegrationErrorPayload['errorParams'],
+    options?: { cause?: unknown },
+  ) {
+    super(`Terminal integration failed with ${errorCode}`, options)
+    this.name = 'TerminalIntegrationOperationError'
+  }
+}
+
+export function toTerminalIntegrationErrorPayload(
+  error: unknown,
+  operation: TerminalIntegrationOperation,
+): TerminalIntegrationErrorPayload {
+  if (error instanceof TerminalIntegrationOperationError) {
+    return {
+      errorCode: error.errorCode,
+      ...(error.errorParams ? { errorParams: error.errorParams } : {}),
+    }
+  }
+  return {
+    errorCode: `${operation}_failed`,
+    errorParams: { operation },
+  }
+}
 
 export interface TerminalIntegrationStatus {
   supported: boolean
@@ -141,7 +175,7 @@ function getManagedBlockRange(content: string): { start: number; end: number } |
   const start = content.indexOf(BLOCK_START)
   const endMarker = content.indexOf(BLOCK_END)
   if (starts !== 1 || ends !== 1 || start < 0 || endMarker < start) {
-    throw new Error('Polo terminal configuration markers are malformed; the file was not changed.')
+    throw new MalformedTerminalProfileError()
   }
   return { start, end: endMarker + BLOCK_END.length }
 }
@@ -244,56 +278,88 @@ export function installTerminalIntegration(
   options: TerminalIntegrationOptions,
 ): TerminalIntegrationStatus {
   if ((options.platform ?? process.platform) !== 'darwin') {
-    throw new Error('In-app terminal setup is currently available on macOS only')
+    throw new TerminalIntegrationOperationError('unsupported_platform')
   }
-
-  const currentStatus = getTerminalIntegrationStatus(options)
-  if (currentStatus.conflict) return currentStatus
-
-  const launcherPath = getLauncherPath(options)
-  const existingLauncher = read(launcherPath)
 
   const profile = getProfile(options)
-  const currentProfile = read(profile.path)
-  const nextProfile = replaceManagedBlock(currentProfile, profile.block)
-  if (nextProfile !== currentProfile) {
-    const profileMode = existingMode(profile.path, 0o600)
-    backup(profile.path)
-    writeAtomic(profile.path, nextProfile, profileMode)
-  }
+  try {
+    const currentStatus = getTerminalIntegrationStatus(options)
+    if (currentStatus.conflict) return currentStatus
 
-  const content = managedLauncherContent(options)
-  if (content !== existingLauncher || !isExecutable(launcherPath)) {
-    if (existingLauncher && content !== existingLauncher) backup(launcherPath)
-    writeAtomic(launcherPath, content, 0o755)
-  }
+    const launcherPath = getLauncherPath(options)
+    const existingLauncher = read(launcherPath)
 
-  return getTerminalIntegrationStatus(options)
+    const currentProfile = read(profile.path)
+    const nextProfile = replaceManagedBlock(currentProfile, profile.block)
+    if (nextProfile !== currentProfile) {
+      const profileMode = existingMode(profile.path, 0o600)
+      backup(profile.path)
+      writeAtomic(profile.path, nextProfile, profileMode)
+    }
+
+    const content = managedLauncherContent(options)
+    if (content !== existingLauncher || !isExecutable(launcherPath)) {
+      if (existingLauncher && content !== existingLauncher) backup(launcherPath)
+      writeAtomic(launcherPath, content, 0o755)
+    }
+
+    return getTerminalIntegrationStatus(options)
+  } catch (error) {
+    if (error instanceof TerminalIntegrationOperationError) throw error
+    if (error instanceof MalformedTerminalProfileError) {
+      throw new TerminalIntegrationOperationError(
+        'profile_malformed',
+        { path: profile.path, operation: 'install' },
+        { cause: error },
+      )
+    }
+    throw new TerminalIntegrationOperationError(
+      'install_failed',
+      { operation: 'install' },
+      { cause: error },
+    )
+  }
 }
 
 export function uninstallTerminalIntegration(
   options: TerminalIntegrationOptions,
 ): TerminalIntegrationStatus {
   if ((options.platform ?? process.platform) !== 'darwin') {
-    throw new Error('In-app terminal setup is currently available on macOS only')
-  }
-
-  const launcherPath = getLauncherPath(options)
-  const launcher = read(launcherPath)
-  if (isManagedLauncher(launcher)) {
-    rmSync(launcherPath)
+    throw new TerminalIntegrationOperationError('unsupported_platform')
   }
 
   const profile = getProfile(options)
-  const currentProfile = read(profile.path)
-  const nextProfile = replaceManagedBlock(currentProfile, null)
-  if (nextProfile !== currentProfile) {
-    const profileMode = existingMode(profile.path, 0o600)
-    backup(profile.path)
-    writeAtomic(profile.path, nextProfile, profileMode)
-  }
+  try {
+    const launcherPath = getLauncherPath(options)
+    const launcher = read(launcherPath)
+    if (isManagedLauncher(launcher)) {
+      rmSync(launcherPath)
+    }
 
-  return getTerminalIntegrationStatus(options)
+    const currentProfile = read(profile.path)
+    const nextProfile = replaceManagedBlock(currentProfile, null)
+    if (nextProfile !== currentProfile) {
+      const profileMode = existingMode(profile.path, 0o600)
+      backup(profile.path)
+      writeAtomic(profile.path, nextProfile, profileMode)
+    }
+
+    return getTerminalIntegrationStatus(options)
+  } catch (error) {
+    if (error instanceof TerminalIntegrationOperationError) throw error
+    if (error instanceof MalformedTerminalProfileError) {
+      throw new TerminalIntegrationOperationError(
+        'profile_malformed',
+        { path: profile.path, operation: 'uninstall' },
+        { cause: error },
+      )
+    }
+    throw new TerminalIntegrationOperationError(
+      'uninstall_failed',
+      { operation: 'uninstall' },
+      { cause: error },
+    )
+  }
 }
 
 function promptStatePath(options: TerminalIntegrationOptions): string {

@@ -37,6 +37,9 @@ const copy: TerminalSetupCopy = {
   done: 'Done',
 }
 
+const formatError = (error: { errorCode: string; errorParams?: { path?: string } }) =>
+  `Localized ${error.errorCode}${error.errorParams?.path ? `: ${error.errorParams.path}` : ''}`
+
 function status(overrides?: Partial<TerminalIntegrationStatus>): TerminalIntegrationStatus {
   return {
     supported: true,
@@ -56,6 +59,7 @@ describe('terminal onboarding', () => {
     const result = await runTerminalOnboarding({
       terminalOptions,
       copy,
+      formatError,
       showMessageBox: async () => {
         dialogs++
         return { response: 0 }
@@ -81,6 +85,7 @@ describe('terminal onboarding', () => {
     const result = await runTerminalOnboarding({
       terminalOptions,
       copy,
+      formatError,
       showMessageBox: async (options) => {
         dialogs.push(options)
         return { response: dialogs.length === 1 ? 0 : 1 }
@@ -119,6 +124,7 @@ describe('terminal onboarding', () => {
     const result = await runTerminalOnboarding({
       terminalOptions,
       copy,
+      formatError,
       showMessageBox: async (options) => {
         dialogs.push(options)
         if (options.title === 'Complete') return { response: 0 }
@@ -160,6 +166,7 @@ describe('terminal onboarding', () => {
     const result = await runTerminalOnboarding({
       terminalOptions,
       copy,
+      formatError,
       showMessageBox: async (options) => {
         dialogs.push(options)
         return { response: 1 }
@@ -182,5 +189,33 @@ describe('terminal onboarding', () => {
     expect(dismissed).toBe(false)
     expect(dialogs[0]?.buttons).toEqual(['Retry', 'OK'])
     expect(dialogs[0]?.detail).toContain('Open Settings')
+  })
+
+  it('shows only a localized structured error and logs the raw diagnostic', async () => {
+    const dialogs: MessageBoxOptions[] = []
+    const logged: unknown[] = []
+    const diagnostic = new Error('sensitive raw filesystem diagnostic')
+
+    await runTerminalOnboarding({
+      terminalOptions,
+      copy,
+      formatError,
+      logError: error => logged.push(error),
+      showMessageBox: async (options) => {
+        dialogs.push(options)
+        return { response: dialogs.length === 1 ? 0 : 1 }
+      },
+      dependencies: {
+        getStatus: () => status(),
+        install: () => {
+          throw diagnostic
+        },
+        wasDismissed: () => false,
+      },
+    })
+
+    expect(logged).toEqual([diagnostic])
+    expect(dialogs[1]?.detail).toContain('Localized install_failed')
+    expect(dialogs[1]?.detail).not.toContain('sensitive raw filesystem diagnostic')
   })
 })
