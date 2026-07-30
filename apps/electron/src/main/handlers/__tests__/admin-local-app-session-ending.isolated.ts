@@ -1149,6 +1149,97 @@ describe('Admin session and scoped local app production wiring', () => {
     expect(catalog.apps[1]).toHaveProperty('remoteUrl')
   })
 
+  it('keeps every delivery capability closed after denied persistence and transport failures', async () => {
+    for (const errorCode of ['NETWORK_ERROR', 'TIMEOUT']) {
+      catalog = {
+        ...createCatalog(),
+        apps: [
+          ...createCatalog().apps,
+          {
+            id: 'remote-app',
+            organizationId: scope.organizationId,
+            name: 'Private Remote App',
+            description: '',
+            deliveryMode: 'remote_url' as const,
+            remoteUrl: 'https://private.example.com/app',
+            availability: 'available' as const,
+            sortOrder: 1,
+          },
+        ],
+      }
+      getAppCatalogAdmin = defaultGetAppCatalogAdmin
+      denyCatalogCacheError = null
+      const {
+        handlers,
+        context,
+        managerFactoryCalls,
+      } = await createAuthorizationHarness()
+      const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+      const remoteScope = {
+        ...scope,
+        catalogAppId: 'remote-app',
+      }
+
+      await expect(sync(context, scope.organizationId, { force: true }))
+        .resolves.toMatchObject({ success: true, accessMode: 'online' })
+      denyCatalogCacheError = new Error('disk full')
+      getAppCatalogAdmin = async () => {
+        throw new TestAdminError('membership removed', 'FORBIDDEN', {
+          status: 403,
+        })
+      }
+      await expect(sync(context, scope.organizationId, { force: true }))
+        .resolves.toMatchObject({
+          success: false,
+          errorCode: 'FORBIDDEN',
+          accessMode: 'denied',
+        })
+      expect(catalog.authorizationStatus).toBe('authorized')
+      expect(accessMode).toBe('denied')
+
+      getAppCatalogAdmin = async () => {
+        throw new TestAdminError('transport unavailable', errorCode)
+      }
+      const fallback = await sync(
+        context,
+        scope.organizationId,
+        { force: true },
+      )
+
+      expect(fallback).toMatchObject({
+        success: false,
+        errorCode,
+        accessMode: 'denied',
+        catalog: {
+          authorizationStatus: 'denied',
+          apps: [
+            { id: scope.catalogAppId, availability: 'unavailable' },
+            { id: 'remote-app', availability: 'unavailable' },
+          ],
+        },
+      })
+      expect(fallback.catalog).not.toHaveProperty('trustedReleases')
+      expect(fallback.catalog.apps[0]).not.toHaveProperty('currentRelease')
+      expect(fallback.catalog.apps[1]).not.toHaveProperty('remoteUrl')
+      await expect(handlers.get(RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL)!(
+        context,
+        remoteScope,
+      )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+      await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL)!(
+        context,
+        installRequest(),
+      )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+      for (const channel of [
+        RPC_CHANNELS.localApps.START,
+        RPC_CHANNELS.localApps.RESTART,
+      ]) {
+        await expect(handlers.get(channel)!(context, scope))
+          .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+      }
+      expect(managerFactoryCalls()).toBe(0)
+    }
+  })
+
   it('denies lifecycle access when membership-removal cache persistence fails', async () => {
     const {
       handlers,
