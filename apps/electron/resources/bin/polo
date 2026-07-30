@@ -1,0 +1,54 @@
+#!/bin/sh
+# Polo CLI launcher (managed by Polo AI)
+
+SOURCE=$0
+while [ -h "$SOURCE" ]; do
+  SOURCE_DIR=$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$SOURCE_DIR/$SOURCE" ;;
+  esac
+done
+
+BIN_DIR=$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)
+APP_ROOT=$(CDPATH= cd -- "$BIN_DIR/../.." && pwd)
+
+if [ -x "$APP_ROOT/vendor/bun/bun" ]; then
+  RESOURCES_ROOT="$APP_ROOT"
+else
+  RESOURCES_ROOT=$(CDPATH= cd -- "$APP_ROOT/.." && pwd)
+fi
+
+BUN="$RESOURCES_ROOT/vendor/bun/bun"
+CLI="$APP_ROOT/dist/cli/polo-cli.js"
+SERVER="$APP_ROOT/dist/server/polo-server.js"
+
+if [ ! -x "$BUN" ]; then
+  echo "Error: Polo's bundled runtime is missing. Reinstall Polo." >&2
+  exit 1
+fi
+if [ ! -f "$CLI" ] || [ ! -f "$SERVER" ]; then
+  echo "Error: Polo terminal files are missing. Reinstall Polo." >&2
+  exit 1
+fi
+
+export POLO_AI_BUN="$BUN"
+export POLO_AI_SERVER_ENTRY="$SERVER"
+export POLO_AI_APP_ROOT="$APP_ROOT"
+export POLO_AI_RESOURCES_PATH="$APP_ROOT/resources"
+export POLO_AI_BUNDLED_ASSETS_ROOT="$APP_ROOT"
+export POLO_AI_IS_PACKAGED=true
+
+case "$(uname -s)" in
+  Darwin)
+    export POLO_AI_DESKTOP_APP="$RESOURCES_ROOT/../.."
+    ;;
+  Linux)
+    if [ -n "$APPIMAGE" ]; then
+      export POLO_AI_APPIMAGE="$APPIMAGE"
+    fi
+    ;;
+esac
+
+exec "$BUN" run "$CLI" "$@"

@@ -21,7 +21,7 @@ import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { routes } from '@/lib/navigate'
 import { Spinner } from '@polo-ai/ui'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
-import type { NetworkProxySettings } from '../../../shared/types'
+import type { NetworkProxySettings, TerminalIntegrationStatus } from '../../../shared/types'
 
 import {
   SettingsSection,
@@ -114,6 +114,9 @@ export default function AppSettingsPage() {
   const isElectron = window.electronAPI.getRuntimeEnvironment() === 'electron'
   const updateChecker = useUpdateChecker()
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
+  const [terminalStatus, setTerminalStatus] = useState<TerminalIntegrationStatus | null>(null)
+  const [terminalBusy, setTerminalBusy] = useState(false)
+  const [terminalError, setTerminalError] = useState<string | null>(null)
 
   const handleCheckForUpdates = useCallback(async () => {
     setIsCheckingForUpdates(true)
@@ -147,6 +150,28 @@ export default function AppSettingsPage() {
 
   useEffect(() => {
     loadSettings()
+  }, [])
+
+  useEffect(() => {
+    if (!isElectron) return
+    void window.electronAPI.getTerminalIntegrationStatus()
+      .then(setTerminalStatus)
+      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)))
+  }, [isElectron])
+
+  const handleTerminalAction = useCallback(async (action: 'install' | 'uninstall') => {
+    setTerminalBusy(true)
+    setTerminalError(null)
+    try {
+      const status = action === 'uninstall'
+        ? await window.electronAPI.uninstallTerminalIntegration()
+        : await window.electronAPI.installTerminalIntegration()
+      setTerminalStatus(status)
+    } catch (error) {
+      setTerminalError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setTerminalBusy(false)
+    }
   }, [])
 
   const handleNotificationsEnabledChange = useCallback(async (enabled: boolean) => {
@@ -307,6 +332,48 @@ export default function AppSettingsPage() {
                   )}
                 </SettingsCard>
               </SettingsSection>
+
+              {isElectron && terminalStatus?.supported && (
+                <SettingsSection
+                  title={t("settings.terminalFeatures.title")}
+                  description={t("settings.terminalFeatures.description")}
+                >
+                  <SettingsCard>
+                    <SettingsRow
+                      label={terminalStatus.installed
+                        ? t("settings.terminalFeatures.installed")
+                        : t("settings.terminalFeatures.notInstalled")}
+                      description={terminalError
+                        ?? terminalStatus.message
+                        ?? t("settings.terminalFeatures.newTerminalHint")}
+                    >
+                      <div className="flex items-center gap-2">
+                        {terminalStatus.installed && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={terminalBusy}
+                            onClick={() => void handleTerminalAction('uninstall')}
+                          >
+                            {t("settings.terminalFeatures.uninstall")}
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          disabled={terminalBusy || !!terminalStatus.conflict}
+                          onClick={() => void handleTerminalAction('install')}
+                        >
+                          {terminalBusy
+                            ? t("common.loading")
+                            : terminalStatus.installed
+                              ? t("settings.terminalFeatures.repair")
+                              : t("settings.terminalFeatures.install")}
+                        </Button>
+                      </div>
+                    </SettingsRow>
+                  </SettingsCard>
+                </SettingsSection>
+              )}
 
               {/* About */}
               <SettingsSection title={t("settings.about.title")}>

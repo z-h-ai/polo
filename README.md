@@ -247,29 +247,33 @@ docker run -d \
 
 ## CLI Client
 
-A terminal client that connects to a running Polo AI server over WebSocket (`ws://` or `wss://`). Use it for scripting, CI/CD pipelines, server validation, or when you prefer the command line.
+A terminal client bundled with every Polo desktop release. It reuses a running
+desktop App automatically, or starts the packaged headless server for `polo run`.
+The installed command does not require Node, npm, Bun, or a source checkout.
 
 ### Installation
 
-```bash
-# From the monorepo (requires Bun)
-bun run apps/cli/src/index.ts --help
+- macOS: launch Polo once and choose **Complete Now** when asked to complete
+  setup. The same actions are available later under **Settings → Polo terminal
+  features**.
+- Linux and Windows: the app installer creates `polo` and adds its managed
+  directory to the user PATH.
+- Source development: `bun run apps/cli/src/index.ts --help`.
 
-# Or add to your PATH
-alias polo-ai="bun run $(pwd)/apps/cli/src/index.ts"
-```
+`polo-ai` remains a deprecated compatibility shim until Polo 1.0.
+The desktop settings page and platform uninstaller remove only Polo-managed
+launchers and PATH entries. The standalone macOS/Linux cleanup script is
+`scripts/uninstall-app.sh`.
 
 ### Connection
 
-The CLI reads connection details from flags or environment variables:
+For local desktop use, the CLI reads the private runtime file written by the
+running App and validates its PID, loopback URL, permissions, health, and major
+version. No port or token copy is needed. Explicit remote connection flags still
+take precedence:
 
 ```bash
-# Via environment (set once)
-export POLO_AI_SERVER_URL=ws://127.0.0.1:9100
-export POLO_AI_SERVER_TOKEN=<your-token>
-
-# Or via flags
-polo-ai --url ws://127.0.0.1:9100 --token <token> ping
+polo --url ws://127.0.0.1:9100 --token <token> ping
 ```
 
 For TLS connections (`wss://`), use `--tls-ca <path>` for self-signed certificates.
@@ -278,6 +282,7 @@ For TLS connections (`wss://`), use `--tls-ca <path>` for self-signed certificat
 
 | Command | Description |
 |---------|-------------|
+| `app` | Start or focus the desktop App |
 | `ping` | Verify connectivity (clientId + latency) |
 | `health` | Check credential store health |
 | `versions` | Show server runtime versions |
@@ -315,33 +320,36 @@ The `run` command is fully self-contained — it spawns a headless server, creat
 ### Examples
 
 ```bash
-# Quick connectivity check
-polo-ai ping
+# Start or focus the desktop app
+polo app
+
+# Quick connectivity check (auto-discovers a running App)
+polo ping
 
 # List sessions (human-readable)
-polo-ai sessions
+polo sessions
 
 # Send a message and stream the AI response
-polo-ai send abc-123 "What files are in the current directory?"
+polo send abc-123 "What files are in the current directory?"
 
 # Pipe input
-echo "Summarize this" | polo-ai send abc-123
+echo "Summarize this" | polo send abc-123
 
 # JSON output for scripting
-polo-ai --json workspaces | jq '.[].name'
+polo --json workspaces | jq '.[].name'
 
 # Self-contained run (spawns its own server)
-polo-ai run "Summarize the README"
-polo-ai run --workspace-dir ./my-project --source github "List open PRs"
+polo run "Summarize the README"
+polo run --workspace-dir ./my-project --source github "List open PRs"
 
 # Multi-provider support
-polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-polo-ai run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
+polo run --provider openai --model gpt-4o "Summarize this repo"
+GOOGLE_API_KEY=... polo run --provider google --model gemini-2.0-flash "Hello"
+polo run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
 
 # Validate the server (auto-spawns if no --url)
-polo-ai --validate-server
-polo-ai --validate-server --url ws://127.0.0.1:9100 --token <token>
+polo --validate-server
+polo --validate-server --url ws://127.0.0.1:9100 --token <token>
 ```
 
 ## Architecture

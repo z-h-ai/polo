@@ -4,12 +4,15 @@
   "license": "Apache-2.0",
   "description": "Terminal client for Polo AI server",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "../../apps/electron/dist/cli/polo-cli.js",
   "bin": {
-    "polo-ai": "src/index.ts"
+    "polo": "../../apps/electron/dist/cli/polo-cli.js",
+    "polo-ai": "../../apps/electron/dist/cli/polo-cli.js"
   },
   "scripts": {
     "start": "bun run src/index.ts",
+    "build": "bun run ../../scripts/build-cli-artifacts.ts",
+    "pack": "bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun test src/"
   },

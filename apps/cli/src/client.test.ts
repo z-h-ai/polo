@@ -22,6 +22,7 @@ function createMockServer(opts?: {
   rejectAuth?: boolean
   noAck?: boolean
   tls?: { cert: string; key: string }
+  serverVersion?: string
 }): MockServer {
   let lastMsg: MessageEnvelope | null = null
   const clients = new Set<any>()
@@ -58,6 +59,7 @@ function createMockServer(opts?: {
             type: 'handshake_ack',
             clientId: 'test-client-001',
             protocolVersion: '1.0',
+            serverVersion: opts?.serverVersion,
           }
           ws.send(serializeEnvelope(ack))
           return
@@ -193,6 +195,28 @@ describe('CliRpcClient', () => {
     server = createMockServer({ rejectAuth: true })
     const client = new CliRpcClient(server.url, { token: 'bad-token' })
     await expect(client.connect()).rejects.toThrow('Invalid token')
+    client.destroy()
+  })
+
+  it('accepts a compatible server major version', async () => {
+    server = createMockServer({ serverVersion: '1.8.0' })
+    const client = new CliRpcClient(server.url, { expectedServerVersion: '1.2.0' })
+    await client.connect()
+    expect(client.serverVersion).toBe('1.8.0')
+    client.destroy()
+  })
+
+  it('rejects an incompatible server major version', async () => {
+    server = createMockServer({ serverVersion: '2.0.0' })
+    const client = new CliRpcClient(server.url, { expectedServerVersion: '1.9.0' })
+    await expect(client.connect()).rejects.toThrow('not compatible')
+    client.destroy()
+  })
+
+  it('rejects a server that omits its version during validation', async () => {
+    server = createMockServer()
+    const client = new CliRpcClient(server.url, { expectedServerVersion: '1.9.0' })
+    await expect(client.connect()).rejects.toThrow('did not report a version')
     client.destroy()
   })
 

@@ -316,6 +316,17 @@ export type OrganizationRpcResult<T extends object> =
   | ({ success: true } & T)
   | ({ success: false } & AdminRpcErrorPayload)
 
+export interface TerminalIntegrationStatus {
+  supported: boolean
+  installed: boolean
+  pathReady: boolean
+  needsRepair: boolean
+  conflict?: string
+  launcherPath: string
+  profilePath?: string
+  message: string
+}
+
 export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
@@ -345,6 +356,9 @@ export interface ElectronAPI {
   // App lifecycle
   relaunchApp(): Promise<void>
   removeWorkspace(workspaceId: string): Promise<boolean>
+  getTerminalIntegrationStatus(): Promise<TerminalIntegrationStatus>
+  installTerminalIntegration(): Promise<TerminalIntegrationStatus>
+  uninstallTerminalIntegration(): Promise<TerminalIntegrationStatus>
   invokeOnServer(url: string, token: string, channel: string, ...args: any[]): Promise<any>
 
   // Remote session transfer (main-process orchestrated, supports chunked upload)

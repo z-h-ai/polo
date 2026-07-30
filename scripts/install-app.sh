@@ -18,6 +18,76 @@ success() { printf "%b\n" "${GREEN}>${NC} $1"; }
 warn() { printf "%b\n" "${YELLOW}!${NC} $1"; }
 error() { printf "%b\n" "${RED}x${NC} $1"; exit 1; }
 
+PATH_BLOCK_START="# >>> Polo CLI >>>"
+PATH_BLOCK_END="# <<< Polo CLI <<<"
+
+configure_managed_path() {
+    local shell_name
+    local profile_path
+    local path_line
+    local start_count
+    local end_count
+    local profile_tmp
+    local profile_mode=""
+
+    shell_name="${SHELL##*/}"
+    case "$shell_name" in
+        fish)
+            profile_path="$HOME/.config/fish/conf.d/polo.fish"
+            path_line='fish_add_path -g "$HOME/.local/bin"'
+            ;;
+        zsh)
+            profile_path="$HOME/.zprofile"
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
+            ;;
+        *)
+            profile_path="$HOME/.profile"
+            path_line='export PATH="$HOME/.local/bin:$PATH"'
+            ;;
+    esac
+
+    mkdir -p "$(dirname "$profile_path")"
+    if [ ! -e "$profile_path" ]; then
+        : > "$profile_path"
+        chmod 600 "$profile_path"
+    fi
+
+    start_count=$(grep -Fxc "$PATH_BLOCK_START" "$profile_path" 2>/dev/null || true)
+    end_count=$(grep -Fxc "$PATH_BLOCK_END" "$profile_path" 2>/dev/null || true)
+    if [ "$start_count" -ne "$end_count" ] || [ "$start_count" -gt 1 ]; then
+        error "Malformed Polo PATH block in $profile_path. It was not changed."
+    fi
+    if [ "$start_count" -eq 1 ] && ! awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
+        $0 == start { start_line = NR }
+        $0 == end { end_line = NR }
+        END { exit !(start_line && end_line && start_line < end_line) }
+    ' "$profile_path"; then
+        error "Malformed Polo PATH block in $profile_path. It was not changed."
+    fi
+
+    profile_tmp="$(dirname "$profile_path")/.polo-profile.$$"
+    profile_mode=$(stat -c '%a' "$profile_path" 2>/dev/null || true)
+    awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
+        $0 == start { managed = 1; next }
+        $0 == end { managed = 0; next }
+        !managed { print }
+    ' "$profile_path" > "$profile_tmp"
+    {
+        printf "%s\n" "$PATH_BLOCK_START"
+        printf "%s\n" "$path_line"
+        printf "%s\n" "$PATH_BLOCK_END"
+    } >> "$profile_tmp"
+
+    if ! cmp -s "$profile_path" "$profile_tmp"; then
+        cp "$profile_path" "$profile_path.polo-backup-$(date +%s)"
+        mv -f "$profile_tmp" "$profile_path"
+        [ -n "$profile_mode" ] && chmod "$profile_mode" "$profile_path"
+        info "Configured terminal command in $profile_path"
+    else
+        rm -f "$profile_tmp"
+    fi
+}
+
 # Detect OS
 OS="$(uname -s)"
 case "$OS" in
@@ -316,7 +386,8 @@ else
 
     # New paths
     APP_DIR="$HOME/.polo-ai/app"
-    WRAPPER_PATH="$INSTALL_DIR/polo-ai"
+    WRAPPER_PATH="$INSTALL_DIR/polo"
+    LEGACY_WRAPPER_PATH="$INSTALL_DIR/polo-ai"
     APPIMAGE_INSTALL_PATH="$APP_DIR/Polo-AI-x64.AppImage"
 
     # Kill the app if it's running
@@ -339,10 +410,18 @@ else
     chmod +x "$APPIMAGE_INSTALL_PATH"
 
     # Create wrapper script
+    existing_polo=$(command -v polo 2>/dev/null || true)
+    if [ -n "$existing_polo" ] && [ "$existing_polo" != "$WRAPPER_PATH" ]; then
+        error "Another command named 'polo' already exists at $existing_polo. It was not changed."
+    fi
+    if [ -e "$WRAPPER_PATH" ] && ! grep -q "managed by Polo AI" "$WRAPPER_PATH" 2>/dev/null; then
+        error "Another file already exists at $WRAPPER_PATH. It was not changed."
+    fi
     info "Creating launcher at $WRAPPER_PATH..."
-    cat > "$WRAPPER_PATH" << 'WRAPPER_EOF'
+    WRAPPER_TMP="$WRAPPER_PATH.tmp.$$"
+    cat > "$WRAPPER_TMP" << 'WRAPPER_EOF'
 #!/bin/bash
-# Polo AI launcher - handles Linux-specific AppImage issues
+# Polo CLI launcher (managed by Polo AI)
 
 APPIMAGE_PATH="$HOME/.polo-ai/app/Polo-AI-x64.AppImage"
 ELECTRON_CACHE="$HOME/.config/@polo-ai"
@@ -371,11 +450,34 @@ done
 # Set APPIMAGE for auto-update
 export APPIMAGE="$APPIMAGE_PATH"
 
-# Launch with --no-sandbox (AppImage extracts to /tmp, losing SUID on chrome-sandbox)
-exec "$APPIMAGE_PATH" --no-sandbox "$@"
+# `polo app` starts the GUI. Other commands enter the packaged CLI through
+# Electron's no-window bridge.
+if [ "${1:-}" = "app" ]; then
+    shift
+    exec "$APPIMAGE_PATH" --no-sandbox "$@"
+fi
+
+exec "$APPIMAGE_PATH" --no-sandbox --polo-cli "$@"
 WRAPPER_EOF
 
-    chmod +x "$WRAPPER_PATH"
+    chmod +x "$WRAPPER_TMP"
+    mv -f "$WRAPPER_TMP" "$WRAPPER_PATH"
+
+    # Keep the previous command as a managed compatibility shim through Polo 1.0.
+    if [ ! -e "$LEGACY_WRAPPER_PATH" ] || grep -q "Polo AI launcher\\|managed by Polo AI\\|deprecated; use 'polo'" "$LEGACY_WRAPPER_PATH" 2>/dev/null; then
+        LEGACY_TMP="$LEGACY_WRAPPER_PATH.tmp.$$"
+        cat > "$LEGACY_TMP" << 'LEGACY_EOF'
+#!/bin/sh
+echo "Warning: 'polo-ai' is deprecated; use 'polo' instead." >&2
+exec "$HOME/.local/bin/polo" "$@"
+LEGACY_EOF
+        chmod +x "$LEGACY_TMP"
+        mv -f "$LEGACY_TMP" "$LEGACY_WRAPPER_PATH"
+    else
+        warn "Existing non-Polo command left unchanged: $LEGACY_WRAPPER_PATH"
+    fi
+
+    configure_managed_path
 
     # Migrate old installation
     OLD_APPIMAGE="$INSTALL_DIR/Polo-AI-x64.AppImage"
@@ -389,10 +491,10 @@ WRAPPER_EOF
     printf "%b\n" "  AppImage: ${BOLD}$APPIMAGE_INSTALL_PATH${NC}"
     printf "%b\n" "  Launcher: ${BOLD}$WRAPPER_PATH${NC}"
     echo ""
-    printf "%b\n" "  Run with: ${BOLD}polo-ai${NC}"
+    printf "%b\n" "  App: ${BOLD}polo app${NC}"
+    printf "%b\n" "  Terminal: ${BOLD}polo --help${NC}"
     echo ""
-    printf "%b\n" "  Add to PATH if needed:"
-    printf "%b\n" "    ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"
+    printf "%b\n" "  Open a new terminal if ${BOLD}polo${NC} is not visible yet."
     echo ""
 
     # FUSE check

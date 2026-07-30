@@ -1,4 +1,4 @@
 #!/bin/sh
-ENTRY="${POLO_AI_COMMANDS_ENTRY:-$POLO_AI_CLI_ENTRY}"
-export POLO_AI_CLI_JSON_ONLY="${POLO_AI_CLI_JSON_ONLY:-1}"
-exec "${POLO_AI_BUN:-bun}" run "$ENTRY" "$@"
+# Compatibility shim. Planned removal: Polo 1.0.
+echo "Warning: 'polo-ai' is deprecated; use 'polo' instead." >&2
+exec "$(dirname "$0")/polo" "$@"

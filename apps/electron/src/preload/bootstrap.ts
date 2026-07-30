@@ -434,6 +434,9 @@ Object.assign(api, buildAdminPreloadApi(client, {
 // App lifecycle — direct IPC (not WS RPC) since it restarts the server itself
 ;(api as ElectronAPI).relaunchApp = () => ipcRenderer.invoke('app:relaunch')
 ;(api as ElectronAPI).removeWorkspace = (workspaceId: string) => ipcRenderer.invoke('workspace:remove', workspaceId)
+;(api as ElectronAPI).getTerminalIntegrationStatus = () => ipcRenderer.invoke('terminal-integration:get-status')
+;(api as ElectronAPI).installTerminalIntegration = () => ipcRenderer.invoke('terminal-integration:install')
+;(api as ElectronAPI).uninstallTerminalIntegration = () => ipcRenderer.invoke('terminal-integration:uninstall')
 ;(api as ElectronAPI).invokeOnServer = (url: string, token: string, channel: string, ...args: any[]) =>
   ipcRenderer.invoke('server:invokeOnServer', url, token, channel, ...args)
 ;(api as ElectronAPI).transferSessionToWorkspace = (sessionId: string, targetWorkspaceId: string, sessionIndex?: number, sessionCount?: number) =>

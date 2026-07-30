@@ -10,6 +10,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Unified Polo terminal command** — Desktop releases now include a version-matched CLI, packaged headless server, and Bun runtime behind the cross-platform `polo` command. The CLI discovers a running App securely, `polo run` works without a source checkout, and macOS can install, repair, or remove terminal support from the App. (POO-14)
+
 ## Bug Fixes
 
 ## Breaking Changes

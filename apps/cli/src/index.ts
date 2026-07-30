@@ -8,7 +8,9 @@
  */
 
 import { resolve } from 'path'
+import { readElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
 import { CliRpcClient } from './client.ts'
+import { version as cliVersion } from '../package.json'
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -199,6 +201,59 @@ function out(data: unknown, jsonMode: boolean): void {
 
 function err(msg: string): void {
   process.stderr.write(`Error: ${msg}\n`)
+}
+
+async function cmdApp(): Promise<void> {
+  const desktopExecutable = process.env.POLO_AI_DESKTOP_EXECUTABLE
+  const desktopApp = process.env.POLO_AI_DESKTOP_APP
+  const appImage = process.env.APPIMAGE || process.env.POLO_AI_APPIMAGE
+
+  let command: string[]
+  if (process.platform === 'darwin') {
+    command = desktopApp
+      ? ['open', desktopApp]
+      : ['open', '-a', 'Polo AI']
+  } else if (process.platform === 'win32' && desktopExecutable) {
+    command = [desktopExecutable]
+  } else if (process.platform === 'linux' && appImage) {
+    command = [appImage]
+  } else {
+    throw new Error(
+      'Polo App location is unavailable. Reinstall Polo terminal support from Settings → Polo terminal features.',
+    )
+  }
+
+  if (process.platform === 'darwin') {
+    const result = Bun.spawnSync(command, {
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'pipe',
+    })
+    if (result.exitCode !== 0) {
+      throw new Error(`Unable to launch Polo App: ${result.stderr.toString().trim()}`)
+    }
+    return
+  }
+
+  const child = Bun.spawn(command, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  child.unref()
+}
+
+function applyRuntimeDiscovery(args: CliArgs): void {
+  if (args.url) return
+
+  const result = readElectronRuntimeDiscovery({
+    expectedVersion: cliVersion,
+    cleanupStale: true,
+  })
+  if (result.status === 'available') {
+    args.url = result.record.url
+    args.token = result.record.token
+    return
+  }
+  if (result.status === 'incompatible' || result.status === 'invalid') {
+    throw new Error(result.reason)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -505,6 +560,7 @@ async function spawnLocalServer(args: CliArgs, opts?: { quiet?: boolean }): Prom
   const client = new CliRpcClient(server.url, {
     token: server.token,
     requestTimeout: args.timeout,
+    expectedServerVersion: cliVersion,
   })
   return { client, stop: server.stop }
 }
@@ -726,6 +782,7 @@ async function cmdValidate(args: CliArgs): Promise<void> {
       token: args.token || undefined,
       requestTimeout: validateArgs.timeout,
       connectTimeout: validateArgs.timeout,
+      expectedServerVersion: cliVersion,
     })
   } else {
     server = await spawnLocalServer(validateArgs, { quiet: !args.verbose })
@@ -1891,9 +1948,9 @@ export async function runValidation(
 // ---------------------------------------------------------------------------
 
 function printHelp(): void {
-  process.stdout.write(`polo-ai — Terminal client for Polo AI server
+  process.stdout.write(`polo — Polo AI from your terminal
 
-Usage: polo-ai [options] <command> [args...]
+Usage: polo [options] <command> [args...]
 
 Connection:
   --url <ws[s]://...>    Server URL (default: $POLO_AI_SERVER_URL)
@@ -1911,6 +1968,7 @@ LLM Configuration (for 'run' command):
   --base-url <url>       Custom API endpoint (or $LLM_BASE_URL)
 
 Commands:
+  app                    Start or focus the Polo desktop app
   run <message>          Spawn server, send message, stream response, exit
                          --workspace-dir <path>  Use directory as workspace (creates if needed)
                          --source <slug>     Enable source (repeatable)
@@ -1936,21 +1994,17 @@ Commands:
                          --verbose, -v       Show server stderr output
 
 Examples:
-  polo-ai run "What files are in the current directory?"
-  polo-ai run --source craft-kb "Summarize today's daily note"
-  polo-ai run --workspace-dir .github/agents --source craft-public "Read the doc"
-  polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-  OPENAI_API_KEY=sk-... polo-ai run --provider openai "Hello"
-  GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... polo-ai run --provider deepseek --model deepseek-v4-flash "Hello"
-  echo "Analyze this code" | polo-ai run
-  polo-ai ping
-  polo-ai sessions
-  polo-ai send abc-123 "What files are in the current directory?"
-  echo "Summarize this" | polo-ai send abc-123
-  polo-ai --validate-server
-  polo-ai invoke system:homeDir
-  polo-ai --json workspaces | jq '.[].name'
+  polo app
+  polo run "What files are in the current directory?"
+  polo run --source craft-kb "Summarize today's daily note"
+  polo run --workspace-dir .github/agents --source craft-public "Read the doc"
+  polo run --provider openai --model gpt-4o "Summarize this repo"
+  OPENAI_API_KEY=sk-... polo run --provider openai "Hello"
+  echo "Analyze this code" | polo run
+  polo ping
+  polo sessions
+  polo send abc-123 "What files are in the current directory?"
+  polo --validate-server
 `)
 }
 
@@ -1972,8 +2026,12 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   }
 
   if (args.command === 'version') {
-    const pkg = await import('../package.json')
-    out(pkg.version ?? pkg.default?.version ?? 'unknown', false)
+    out(cliVersion, false)
+    return
+  }
+
+  if (args.command === 'app') {
+    await cmdApp()
     return
   }
 
@@ -1989,9 +2047,16 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     return
   }
 
-  // All other commands need a server URL
+  // Explicit --url/--token wins. Otherwise discover the private local
+  // Electron endpoint written by the running desktop app.
+  applyRuntimeDiscovery(args)
+
+  // All other commands need a server URL.
   if (!args.url) {
-    err('No server URL. Use --url <ws://...> or set $POLO_AI_SERVER_URL')
+    err(
+      'Polo App is not running. Start it with `polo app`, '
+      + 'or use --url/--token to connect to a remote server.',
+    )
     process.exit(1)
   }
 
@@ -2000,6 +2065,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     workspaceId: args.workspace,
     requestTimeout: args.timeout,
     connectTimeout: args.timeout,
+    expectedServerVersion: cliVersion,
   })
 
   try {

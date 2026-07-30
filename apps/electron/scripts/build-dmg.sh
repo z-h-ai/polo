@@ -208,7 +208,7 @@ done
 # 6. Build Electron app
 echo "Building Electron app..."
 cd "$ROOT_DIR"
-bun run electron:build
+POLO_AI_REQUIRE_BUNDLED_RUNTIME=1 bun run electron:build
 
 # 7. Package with electron-builder
 echo "Packaging app with electron-builder..."

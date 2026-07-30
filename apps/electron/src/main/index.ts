@@ -5,6 +5,7 @@ loadShellEnv()
 
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
+import { spawnSync } from 'child_process'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
 
@@ -111,9 +112,21 @@ import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-cor
 import { hasLocalAppRuntimeManager, shutdownLocalAppRuntime } from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
+  removeElectronRuntimeDiscovery,
+  writeElectronRuntimeDiscovery,
+} from '@polo-ai/shared/runtime-discovery'
+import {
   BeforeQuitCleanupCoordinator,
   canQuitAfterLocalAppShutdown,
 } from './local-app-runtime/quit-guard'
+import {
+  getTerminalIntegrationStatus,
+  installTerminalIntegration,
+  setTerminalSetupDismissed,
+  uninstallTerminalIntegration,
+  wasTerminalSetupDismissed,
+  type TerminalIntegrationOptions,
+} from './terminal-integration'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -165,11 +178,18 @@ if (isDebugMode) {
 
   process.env.POLO_AI_SCRIPTS = scriptsDir
   process.env.POLO_AI_COMMANDS_ENTRY = app.isPackaged
-    ? join(app.getAppPath(), 'apps', 'cli', 'src', 'index.ts')
+    ? join(app.getAppPath(), 'dist', 'cli', 'polo-cli.js')
     : join(process.cwd(), 'apps', 'cli', 'src', 'index.ts')
   process.env.POLO_AI_CLI_ENTRY = app.isPackaged
-    ? join(app.getAppPath(), 'apps', 'cli', 'src', 'index.ts')
+    ? join(app.getAppPath(), 'dist', 'cli', 'polo-cli.js')
     : join(process.cwd(), 'apps', 'cli', 'src', 'index.ts')
+  process.env.POLO_AI_SERVER_ENTRY = app.isPackaged
+    ? join(app.getAppPath(), 'dist', 'server', 'polo-server.js')
+    : join(process.cwd(), 'packages', 'server', 'src', 'index.ts')
+  process.env.POLO_AI_DESKTOP_EXECUTABLE = process.execPath
+  if (process.platform === 'darwin') {
+    process.env.POLO_AI_DESKTOP_APP = join(process.resourcesPath, '..', '..')
+  }
   process.env.POLO_AI_COMMANDS_DOC_PATH = app.isPackaged
     ? join(resourcesBase, 'resources', 'docs', 'polo-ai.md')
     : join(process.cwd(), 'apps', 'electron', 'resources', 'docs', 'polo-ai.md')
@@ -190,6 +210,24 @@ if (isDebugMode) {
   if (isDebugMode) {
     mainLog.info('CLI tools configured:', { uvBinary: process.env.POLO_AI_UV, binDir, scriptsDir, bundledUvExists })
   }
+}
+
+// Windows and AppImage launchers enter here for terminal commands. Run the
+// packaged CLI with the embedded Bun runtime without initializing any windows.
+const poloCliArgIndex = process.argv.indexOf('--polo-cli')
+if (poloCliArgIndex >= 0) {
+  const bun = process.env.POLO_AI_BUN
+  const entry = process.env.POLO_AI_CLI_ENTRY
+  if (!bun || !entry || !existsSync(bun) || !existsSync(entry)) {
+    process.stderr.write('Error: Polo terminal files are missing. Reinstall Polo.\n')
+    process.exit(1)
+  }
+  const result = spawnSync(bun, ['run', entry, ...process.argv.slice(poloCliArgIndex + 1)], {
+    stdio: 'inherit',
+    env: process.env,
+    cwd: process.cwd(),
+  })
+  process.exit(result.status ?? 1)
 }
 
 // Register Pi model resolver so llm-connections.ts can resolve Pi models
@@ -218,6 +256,67 @@ const ADMIN_REAUTH_REQUIRED_CHANNEL = 'admin:reauthRequired'
 // through createMessagingBootstrap — do not construct MessagingGatewayRegistry
 // directly.
 let messagingHandle: MessagingBootstrapHandle | null = null
+
+function terminalIntegrationOptions(): TerminalIntegrationOptions {
+  return {
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+    appExecutable: process.execPath,
+    appVersion: app.getVersion(),
+  }
+}
+
+function terminalSetupCopy() {
+  if (app.getLocale().toLowerCase().startsWith('zh')) {
+    return {
+      conflictTitle: 'Polo 设置需要处理',
+      conflictMessage: '已存在名为 polo 的终端命令。',
+      conflictDetail:
+        'Polo 没有覆盖这个命令。请先移除或重命名它，然后前往“设置 → Polo 终端功能”完成设置。',
+      setupTitle: '完成 Polo 设置',
+      setupDetail:
+        '为了让 Polo 能在你的项目中正常工作，需要完成一次终端功能配置。'
+        + '配置完成后，你可以从任意项目中启动 Polo，并使用完整的 AI 工作能力。\n\n'
+        + '只需设置一次，之后会自动保持更新。',
+      completeNow: '立即完成',
+      notNow: '暂不设置',
+      completeTitle: 'Polo 设置已完成',
+      completeMessage: 'Polo 设置已完成。',
+      newTerminal: '请新开一个终端窗口，然后使用 polo 命令。',
+      failedTitle: '无法完成 Polo 设置',
+      failedMessage: 'Polo 没有更改你已有的终端命令。',
+      skippedTitle: '部分 Polo 功能尚未就绪',
+      skippedMessage: '项目操作和终端功能暂时不可用。',
+      skippedDetail: '你可以稍后前往“设置 → Polo 终端功能”完成设置。',
+      ok: '好',
+      done: '完成',
+    }
+  }
+  return {
+    conflictTitle: 'Polo Setup Needs Your Attention',
+    conflictMessage: 'Another terminal command named polo already exists.',
+    conflictDetail:
+      'Polo did not overwrite it. Remove or rename that command, then use '
+      + 'Settings → Polo terminal features to complete setup.',
+    setupTitle: 'Complete Polo Setup',
+    setupDetail:
+      'Polo needs a one-time terminal feature setup to work fully in your projects. '
+      + 'After setup, you can start Polo from any project and use its complete AI capabilities.\n\n'
+      + 'Set it up once and Polo will keep it updated.',
+    completeNow: 'Complete Now',
+    notNow: 'Not Now',
+    completeTitle: 'Polo Setup Complete',
+    completeMessage: 'Polo setup is complete.',
+    newTerminal: 'Open a new Terminal window before using the polo command.',
+    failedTitle: 'Polo Setup Could Not Be Completed',
+    failedMessage: 'Polo did not change your existing terminal command.',
+    skippedTitle: 'Some Polo Features Are Not Ready',
+    skippedMessage: 'Project and terminal features will remain unavailable.',
+    skippedDetail: 'You can complete setup later in Settings → Polo terminal features.',
+    ok: 'OK',
+    done: 'Done',
+  }
+}
 
 async function validateAdminSessionAfterResume(args: {
   protocol: 'ws' | 'wss'
@@ -608,6 +707,18 @@ app.whenReady().then(async () => {
       const result = await dialog.showOpenDialog(win, spec)
       return { canceled: result.canceled, filePaths: result.filePaths }
     })
+    ipcMain.handle('terminal-integration:get-status', () =>
+      getTerminalIntegrationStatus(terminalIntegrationOptions()))
+    ipcMain.handle('terminal-integration:install', () => {
+      const result = installTerminalIntegration(terminalIntegrationOptions())
+      setTerminalSetupDismissed(terminalIntegrationOptions(), false)
+      return result
+    })
+    ipcMain.handle('terminal-integration:uninstall', () => {
+      const result = uninstallTerminalIntegration(terminalIntegrationOptions())
+      setTerminalSetupDismissed(terminalIntegrationOptions(), true)
+      return result
+    })
 
     if (!isClientOnly) {
       // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)
@@ -785,6 +896,25 @@ app.whenReady().then(async () => {
           cleanupSessionFileWatchForClient(clientId)
         },
       })
+
+      try {
+        const discoveryPath = writeElectronRuntimeDiscovery({
+          pid: process.pid,
+          url: `${instance.protocol}://127.0.0.1:${instance.port}`,
+          token: instance.token,
+          version: app.getVersion(),
+        })
+        mainLog.info('[runtime-discovery] Local Electron endpoint published', {
+          path: discoveryPath,
+          pid: process.pid,
+          version: app.getVersion(),
+        })
+      } catch (error) {
+        mainLog.error(
+          '[runtime-discovery] Failed to publish local endpoint:',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
 
       // Capture module-level references for before-quit cleanup and deep-link handlers
       sessionManager = instance.sessionManager
@@ -1086,6 +1216,81 @@ app.whenReady().then(async () => {
     // In headless mode the server runs without any UI — skip window creation.
     if (!isHeadless) {
       await createInitialWindows()
+
+      if (app.isPackaged && process.platform === 'darwin') {
+        const terminalOptions = terminalIntegrationOptions()
+        const setupCopy = terminalSetupCopy()
+        let terminalStatus = getTerminalIntegrationStatus(terminalOptions)
+        if (terminalStatus.installed && terminalStatus.needsRepair && !terminalStatus.conflict) {
+          try {
+            terminalStatus = installTerminalIntegration(terminalOptions)
+            mainLog.info('[terminal-integration] Updated the managed Polo launcher')
+          } catch (error) {
+            mainLog.warn(
+              '[terminal-integration] Automatic launcher update failed:',
+              error instanceof Error ? error.message : String(error),
+            )
+          }
+        }
+        if (
+          (!terminalStatus.installed || terminalStatus.needsRepair)
+          && !wasTerminalSetupDismissed(terminalOptions)
+        ) {
+          const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+          if (terminalStatus.conflict) {
+            await dialog.showMessageBox(win, {
+              type: 'warning',
+              title: setupCopy.conflictTitle,
+              message: setupCopy.conflictMessage,
+              detail:
+                `${terminalStatus.conflict}\n\n`
+                + setupCopy.conflictDetail,
+              buttons: [setupCopy.ok],
+            })
+            setTerminalSetupDismissed(terminalOptions, true)
+          } else {
+            const choice = await dialog.showMessageBox(win, {
+              type: 'info',
+              title: setupCopy.setupTitle,
+              message: setupCopy.setupTitle,
+              detail: setupCopy.setupDetail,
+              buttons: [setupCopy.completeNow, setupCopy.notNow],
+              defaultId: 0,
+              cancelId: 1,
+              noLink: true,
+            })
+            if (choice.response === 0) {
+              try {
+                installTerminalIntegration(terminalOptions)
+                await dialog.showMessageBox(win, {
+                  type: 'info',
+                  title: setupCopy.completeTitle,
+                  message: setupCopy.completeMessage,
+                  detail: setupCopy.newTerminal,
+                  buttons: [setupCopy.done],
+                })
+              } catch (error) {
+                await dialog.showMessageBox(win, {
+                  type: 'error',
+                  title: setupCopy.failedTitle,
+                  message: setupCopy.failedMessage,
+                  detail: error instanceof Error ? error.message : String(error),
+                  buttons: [setupCopy.ok],
+                })
+              }
+            } else {
+              setTerminalSetupDismissed(terminalOptions, true)
+              await dialog.showMessageBox(win, {
+                type: 'warning',
+                title: setupCopy.skippedTitle,
+                message: setupCopy.skippedMessage,
+                detail: setupCopy.skippedDetail,
+                buttons: [setupCopy.ok],
+              })
+            }
+          }
+        }
+      }
     }
 
     // Run credential health check at startup to detect issues early
@@ -1302,6 +1507,7 @@ app.on('before-quit', (event) => {
       // Release the server lock file so the next launch doesn't see a stale PID.
       // This must happen regardless of the exit path (normal quit or update quit).
       releaseServerLock()
+      removeElectronRuntimeDiscovery({ expectedPid: process.pid })
     }
 
     return true
@@ -1334,4 +1540,9 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   mainLog.error('Unhandled rejection at:', promise, 'reason:', reason)
   Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)))
+})
+
+// Last-resort synchronous cleanup for initialization failures and forced exits.
+process.on('exit', () => {
+  removeElectronRuntimeDiscovery({ expectedPid: process.pid })
 })

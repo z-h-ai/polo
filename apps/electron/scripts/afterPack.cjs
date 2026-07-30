@@ -17,8 +17,86 @@
 
 const path = require('path');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
+const { createHash } = require('crypto');
+
+function validatePackagedCli(context) {
+  const isMac = context.electronPlatformName === 'darwin';
+  const isWindows = context.electronPlatformName === 'win32';
+  const resourcesDir = isMac
+    ? path.join(context.appOutDir, 'Polo AI.app', 'Contents', 'Resources')
+    : path.join(context.appOutDir, 'resources');
+  const appDir = path.join(resourcesDir, 'app');
+  const cli = path.join(appDir, 'dist', 'cli', 'polo-cli.js');
+  const server = path.join(appDir, 'dist', 'server', 'polo-server.js');
+  const manifestPath = path.join(appDir, 'dist', 'cli', 'artifact-manifest.json');
+  const wrapper = path.join(appDir, 'resources', 'bin', isWindows ? 'polo.cmd' : 'polo');
+  const bun = path.join(resourcesDir, 'vendor', 'bun', isWindows ? 'bun.exe' : 'bun');
+
+  for (const required of [cli, server, manifestPath, wrapper, bun]) {
+    if (!fs.existsSync(required)) {
+      throw new Error(`POO-14 unpacked CLI validation failed; missing: ${required}`);
+    }
+  }
+
+  const appVersion = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8')).version;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  if (manifest.version !== appVersion) {
+    throw new Error(`POO-14 unpacked CLI/App version mismatch: ${manifest.version} vs ${appVersion}`);
+  }
+  const sha256 = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  if (
+    manifest.artifacts?.cli?.sha256 !== sha256(cli)
+    || manifest.artifacts?.server?.sha256 !== sha256(server)
+  ) {
+    throw new Error('POO-14 unpacked CLI/server checksums do not match the artifact manifest');
+  }
+
+  const archNames = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
+  const expectedArch = archNames[context.arch];
+  const runtimeArch = spawnSync(bun, ['-e', 'process.stdout.write(process.arch)'], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  if (
+    runtimeArch.status !== 0
+    || (expectedArch && expectedArch !== 'universal' && runtimeArch.stdout.trim() !== expectedArch)
+  ) {
+    throw new Error(
+      `POO-14 bundled runtime architecture mismatch: expected ${expectedArch}, `
+      + `got ${runtimeArch.stdout.trim() || runtimeArch.stderr}`,
+    );
+  }
+
+  const directCheck = spawnSync(bun, ['run', cli, '--version'], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  if (directCheck.status !== 0 || directCheck.stdout.trim() !== appVersion) {
+    throw new Error(
+      `POO-14 unpacked CLI execution failed: ${directCheck.stderr || directCheck.stdout}`,
+    );
+  }
+
+  const wrapperCheck = isWindows
+    ? spawnSync(
+        process.env.ComSpec || 'cmd.exe',
+        ['/d', '/s', '/c', `"${wrapper}" --version`],
+        { encoding: 'utf8', timeout: 30_000 },
+      )
+    : spawnSync(wrapper, ['--version'], { encoding: 'utf8', timeout: 30_000 });
+  if (wrapperCheck.status !== 0 || wrapperCheck.stdout.trim() !== appVersion) {
+    throw new Error(
+      `POO-14 unpacked launcher execution failed: ${wrapperCheck.stderr || wrapperCheck.stdout}`,
+    );
+  }
+
+  console.log(`Packaged Polo terminal artifacts validated (${appVersion})`);
+}
 
 module.exports = async function afterPack(context) {
+  validatePackagedCli(context);
+
   // Only process macOS builds
   if (context.electronPlatformName !== 'darwin') {
     console.log('Skipping Liquid Glass icon (not macOS)');

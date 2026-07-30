@@ -244,6 +244,15 @@ foreach ($dep in @("interceptor-common.ts", "feature-flags.ts", "interceptor-req
 # 6. Build Electron app
 Write-Host "Building Electron app..."
 
+# Build the self-contained CLI and headless server artifacts first.
+Push-Location $RootDir
+try {
+    bun run electron:build:cli
+    if ($LASTEXITCODE -ne 0) { throw "CLI artifact build failed" }
+} finally {
+    Pop-Location
+}
+
 # Build main process with OAuth credentials
 Write-Host "  Building main process..."
 $MainArgs = @(
@@ -319,6 +328,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Asset copy failed" }
     Write-Host "  Assets copied" -ForegroundColor Green
 } finally {
+    Pop-Location
+}
+
+Push-Location $RootDir
+try {
+    $env:POLO_AI_REQUIRE_BUNDLED_RUNTIME = "1"
+    bun run electron:validate:cli
+    if ($LASTEXITCODE -ne 0) { throw "CLI artifact validation failed" }
+} finally {
+    Remove-Item Env:POLO_AI_REQUIRE_BUNDLED_RUNTIME -ErrorAction SilentlyContinue
     Pop-Location
 }
 

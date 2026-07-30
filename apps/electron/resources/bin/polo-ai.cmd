@@ -1,7 +1,4 @@
 @echo off
-set "POLO_AI_BUN_BIN=%POLO_AI_BUN%"
-if "%POLO_AI_BUN_BIN%"=="" set "POLO_AI_BUN_BIN=bun"
-set "POLO_AI_COMMANDS_BIN=%POLO_AI_COMMANDS_ENTRY%"
-if "%POLO_AI_COMMANDS_BIN%"=="" set "POLO_AI_COMMANDS_BIN=%POLO_AI_CLI_ENTRY%"
-if "%POLO_AI_CLI_JSON_ONLY%"=="" set "POLO_AI_CLI_JSON_ONLY=1"
-"%POLO_AI_BUN_BIN%" run "%POLO_AI_COMMANDS_BIN%" %*
+echo Warning: 'polo-ai' is deprecated; use 'polo' instead. 1>&2
+call "%~dp0polo.cmd" %*
+exit /b %ERRORLEVEL%
