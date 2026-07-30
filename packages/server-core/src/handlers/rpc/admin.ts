@@ -439,6 +439,23 @@ export function registerAdminHandlers(
     advanceAppCatalogAuthorizationEpoch(scopeKey)
     setAppCatalogAccessMode(accountId, organizationId, 'denied')
     try {
+      const cleanup = deps.onAdminCatalogScopeDenied?.(
+        accountId,
+        organizationId,
+      )
+      void cleanup?.catch(error => {
+        log?.warn(
+          '[Admin] organization local app cleanup failed after Catalog denial:',
+          error instanceof Error ? error.message : String(error),
+        )
+      })
+    } catch (error) {
+      log?.warn(
+        '[Admin] failed to establish organization local app lifecycle fence:',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+    try {
       denyCachedAppCatalogAuthorization(accountId, organizationId)
     } catch (error) {
       log?.warn(

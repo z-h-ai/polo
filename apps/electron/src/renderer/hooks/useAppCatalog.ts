@@ -258,6 +258,7 @@ export function useAppCatalog() {
   const operationsRef = useRef(new Map<string, Promise<unknown>>())
   const cancellationOperationsRef = useRef(new Map<string, Promise<void>>())
   const lifecycleActionGenerationRef = useRef(new Map<string, number>())
+  const statusReadGenerationRef = useRef(new Map<string, number>())
   const busyStatusPollerRef = useRef<BusyStatusPoller | null>(null)
 
   const isCurrentSnapshot = useCallback((snapshot: ContextSnapshot): boolean => (
@@ -350,6 +351,15 @@ export function useAppCatalog() {
 
     const scopes = selectedApps.map(app => scopeForCatalogApp(catalog, app))
     const requestedScopeKeys = new Set(scopes.map(createLocalAppScopeKey))
+    // Every source of runtime status (full sync, lifecycle finally, and busy
+    // polling) shares this per-scope generation. A newer read permanently
+    // fences an older snapshot even when their batches or sources differ.
+    const statusReadGenerations = new Map<string, number>()
+    for (const scopeKey of requestedScopeKeys) {
+      const next = (statusReadGenerationRef.current.get(scopeKey) ?? 0) + 1
+      statusReadGenerationRef.current.set(scopeKey, next)
+      statusReadGenerations.set(scopeKey, next)
+    }
     const successfulStatuses = new Map<string, LocalAppRuntimeStatus>()
     const failedScopeKeys = new Set<string>()
     for (let offset = 0; offset < scopes.length; offset += CATALOG_RUNTIME_STATUS_LIMIT) {
@@ -383,13 +393,28 @@ export function useAppCatalog() {
       if (!isCurrentSnapshot(snapshot) || (commitGuard && !commitGuard())) {
         return current
       }
+      const latestRequestedScopeKeys = new Set([...requestedScopeKeys]
+        .filter(scopeKey => (
+          statusReadGenerationRef.current.get(scopeKey)
+          === statusReadGenerations.get(scopeKey)
+        )))
+      if (latestRequestedScopeKeys.size === 0) return current
       const nextStatuses: Record<string, LocalAppRuntimeStatus> = (
-        refreshMode === 'merge' ? { ...current.statuses } : {}
+        refreshMode === 'merge'
+          ? { ...current.statuses }
+          : Object.fromEntries([...requestedScopeKeys]
+            .filter(scopeKey => !latestRequestedScopeKeys.has(scopeKey))
+            .flatMap(scopeKey => {
+              const status = current.statuses[scopeKey]
+              return status ? [[scopeKey, status]] : []
+            }))
       )
       for (const [scopeKey, status] of successfulStatuses) {
+        if (!latestRequestedScopeKeys.has(scopeKey)) continue
         nextStatuses[scopeKey] = status
       }
       for (const scopeKey of failedScopeKeys) {
+        if (!latestRequestedScopeKeys.has(scopeKey)) continue
         const previousStatus = current.statuses[scopeKey]
         if (previousStatus) {
           // A later 10,000-item chunk may fail after earlier chunks succeeded.
@@ -399,18 +424,30 @@ export function useAppCatalog() {
         }
       }
       const nextStatusErrorScopeKeys: Record<string, true> = (
-        refreshMode === 'merge' ? { ...current.statusErrorScopeKeys } : {}
+        refreshMode === 'merge'
+          ? { ...current.statusErrorScopeKeys }
+          : Object.fromEntries([...requestedScopeKeys]
+            .filter(scopeKey => !latestRequestedScopeKeys.has(scopeKey))
+            .flatMap(scopeKey => (
+              current.statusErrorScopeKeys[scopeKey]
+                ? [[scopeKey, true as const]]
+                : []
+            )))
       )
       const nextStatusLoadingScopeKeys = {
         ...current.statusLoadingScopeKeys,
       }
       for (const scopeKey of requestedScopeKeys) {
-        delete nextStatusLoadingScopeKeys[scopeKey]
+        if (latestRequestedScopeKeys.has(scopeKey)) {
+          delete nextStatusLoadingScopeKeys[scopeKey]
+        }
       }
       for (const scopeKey of successfulStatuses.keys()) {
+        if (!latestRequestedScopeKeys.has(scopeKey)) continue
         delete nextStatusErrorScopeKeys[scopeKey]
       }
       for (const scopeKey of failedScopeKeys) {
+        if (!latestRequestedScopeKeys.has(scopeKey)) continue
         nextStatusErrorScopeKeys[scopeKey] = true
       }
       const hasStatusErrors = Object.keys(nextStatusErrorScopeKeys).length > 0
@@ -607,6 +644,7 @@ export function useAppCatalog() {
     operationsRef.current.clear()
     cancellationOperationsRef.current.clear()
     lifecycleActionGenerationRef.current.clear()
+    statusReadGenerationRef.current.clear()
     catalogRef.current = null
     setState(current => ({
       ...current,
@@ -729,16 +767,21 @@ export function useAppCatalog() {
     return next
   }, [])
 
+  const isCurrentLifecycleAction = useCallback((
+    scopeKey: string,
+    generation: number,
+  ) => (
+    (lifecycleActionGenerationRef.current.get(scopeKey) ?? 0) === generation
+  ), [])
+
   const requireCurrentLifecycleAction = useCallback((
     scopeKey: string,
     generation: number,
   ) => {
-    if (
-      (lifecycleActionGenerationRef.current.get(scopeKey) ?? 0) !== generation
-    ) {
+    if (!isCurrentLifecycleAction(scopeKey, generation)) {
       throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
-  }, [])
+  }, [isCurrentLifecycleAction])
 
   const install = useCallback((
     app: CatalogApp,
@@ -840,21 +883,28 @@ export function useAppCatalog() {
           },
         },
       }))
+      let result: LocalAppStartResult | undefined
       try {
-        const result = await window.electronAPI.localApps.start(scope)
+        result = await window.electronAPI.localApps.start(scope)
         requireCurrent(snapshot)
         // STOP/UNINSTALL are newer user intent for this exact scope. A late
         // START may refresh diagnostics, but its URL must not escape to HomePage.
         requireCurrentLifecycleAction(scopeKey, lifecycleActionGeneration)
-        return result
       } finally {
-        if (isCurrentSnapshot(snapshot)) {
+        if (
+          isCurrentSnapshot(snapshot)
+          && isCurrentLifecycleAction(scopeKey, lifecycleActionGeneration)
+        ) {
           await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
         }
       }
+      requireCurrent(snapshot)
+      requireCurrentLifecycleAction(scopeKey, lifecycleActionGeneration)
+      return result!
     })
   }, [
     currentSnapshotForApp,
+    isCurrentLifecycleAction,
     isCurrentSnapshot,
     refreshRuntimeStatuses,
     requireCurrent,

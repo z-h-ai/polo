@@ -32,6 +32,17 @@ describe('OrganizationAppCard invalid version state', () => {
       .toBe('unavailable')
   })
 
+  it('does not offer a retry for a broken app while offline', () => {
+    const status: LocalAppRuntimeStatus = {
+      appId: app.id,
+      status: 'broken',
+      currentVersion: '1.0.0',
+    }
+
+    expect(primaryActionFor(app, status, true, true)).toBe('unavailable')
+    expect(primaryActionFor(app, status, true, false)).toBe('retry')
+  })
+
   it('blocks a fresh install and shows the invalid version warning', () => {
     const status: LocalAppRuntimeStatus = {
       appId: app.id,

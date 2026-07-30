@@ -9,6 +9,7 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type {
   CatalogLocalAppScope,
   LocalAppCatalogInstallRequest,
+  LocalAppInstalledApp,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
@@ -293,6 +294,10 @@ function registerProductionHandlers(
   root: string,
   options: {
     onAdminSessionEnding?: (accountId: string) => Promise<void>
+    onAdminCatalogScopeDenied?: (
+      accountId: string,
+      organizationId: string,
+    ) => Promise<void>
   } = {},
 ) {
   const handlers = new Map<string, HandlerFn>()
@@ -337,6 +342,9 @@ function registerProductionHandlers(
     },
     onAdminSessionEnding: options.onAdminSessionEnding
       ?? ((accountId: string) => runtimeRegistry!.stopAccount(accountId)),
+    onAdminCatalogScopeDenied: options.onAdminCatalogScopeDenied
+      ?? ((accountId: string, organizationId: string) =>
+        runtimeRegistry!.stopOrganization(accountId, organizationId)),
     onAdminSessionStarted: (accountId: string) =>
       runtimeRegistry!.resumeAccount(accountId),
   } satisfies HandlerDeps
@@ -647,5 +655,126 @@ describe('Admin session and scoped local app production wiring', () => {
       code: 'NOT_AUTHORIZED',
     })
     expect(managerFactoryCalls()).toBe(0)
+  })
+
+  it('fences an entered start when organization listing removes membership', async () => {
+    const startEntered = createDeferred<void>()
+    const finishStart = createDeferred<LocalAppStartResult>()
+    const processStopped = createDeferred<void>()
+    const calls: string[] = []
+    class DeferredStartManager extends LocalAppRuntimeManager {
+      override start(appId: string): Promise<LocalAppStartResult> {
+        calls.push('start')
+        startEntered.resolve()
+        return finishStart.promise
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        processStopped.resolve()
+        return { appId, status: 'stopped' }
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-org-removal-start-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new DeferredStartManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    listOrganizationsAdmin = async () => ({ organizations: [] })
+    const { handlers, context } = registerProductionHandlers(root)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const listOrganizations = handlers.get(
+      RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
+    )!
+
+    const pendingStart = start(context, scope)
+    await startEntered.promise
+    await expect(listOrganizations(context)).resolves.toMatchObject({
+      success: true,
+      organizations: [],
+    })
+    expect(accessMode as 'online' | 'offline' | 'denied' | null).toBe('denied')
+
+    finishStart.resolve({
+      appId: createCatalogRuntimeAppId(scope),
+      version: '1.0.0',
+      url: 'http://127.0.0.1:4671',
+      port: 4671,
+    })
+    await expect(pendingStart).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    await processStopped.promise
+    expect(calls).toEqual(['start', 'stop'])
+  })
+
+  it('cancels an entered install when Catalog returns NOT_FOUND', async () => {
+    const installEntered = createDeferred<void>()
+    const finishInstall = createDeferred<LocalAppInstalledApp>()
+    const processStopped = createDeferred<void>()
+    const calls: string[] = []
+    class DeferredInstallManager extends LocalAppRuntimeManager {
+      override install(): Promise<LocalAppInstalledApp> {
+        calls.push('install')
+        installEntered.resolve()
+        return finishInstall.promise
+      }
+
+      override cancelInstall(): boolean {
+        calls.push('cancel-install')
+        finishInstall.reject(new LocalAppRuntimeError(
+          'INSTALL_CANCELLED',
+          'Catalog authorization was withdrawn',
+        ))
+        return true
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        processStopped.resolve()
+        return { appId, status: 'stopped' }
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-org-not-found-install-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new DeferredInstallManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    const { handlers, context } = registerProductionHandlers(root)
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+
+    const pendingInstall = install(context, installRequest())
+    const installOutcome = pendingInstall.then(
+      () => ({ success: true as const }),
+      (error: unknown) => ({ success: false as const, error }),
+    )
+    await installEntered.promise
+    getAppCatalogAdmin = async () => {
+      throw new TestAdminError('organization unavailable', 'NOT_FOUND', {
+        status: 404,
+      })
+    }
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: false, errorCode: 'NOT_FOUND' })
+    expect(accessMode as 'online' | 'offline' | 'denied' | null).toBe('denied')
+
+    await expect(installOutcome).resolves.toMatchObject({
+      success: false,
+      error: { code: 'NOT_AUTHORIZED' },
+    })
+    await processStopped.promise
+    expect(calls).toEqual([
+      'install',
+      'cancel-install',
+      'cancel-install',
+      'stop',
+    ])
   })
 })

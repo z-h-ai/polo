@@ -308,9 +308,60 @@ describe('scoped local app runtime registry', () => {
       'INSTALL_CANCELLED',
       'controlled cancellation cleanup complete',
     ))
-    await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
+    await expect(install).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     await cleanup
     expect(cleanupFinished).toBe(true)
+  })
+
+  it('fences one organization before its in-flight start can commit', async () => {
+    const organizationScope = scope('account-a')
+    let resolveStart!: (value: LocalAppStartResult) => void
+    let startEntered!: () => void
+    const started = new Promise<void>(resolve => {
+      startEntered = resolve
+    })
+    const calls: string[] = []
+    class TrackingManager extends LocalAppRuntimeManager {
+      override start(appId: string): Promise<LocalAppStartResult> {
+        calls.push('start')
+        startEntered()
+        return new Promise(resolve => {
+          resolveStart = resolve
+        })
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        return { appId, status: 'stopped' }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new TrackingManager(options),
+    })
+    const pendingStart = registry.start(organizationScope)
+    await started
+
+    const cleanup = registry.stopOrganization(
+      organizationScope.accountId,
+      organizationScope.organizationId,
+    )
+    await expect(registry.start({
+      ...organizationScope,
+      catalogAppId: 'new-app',
+    })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    resolveStart({
+      appId: createCatalogRuntimeAppId(organizationScope),
+      version: '1.0.0',
+      url: 'http://127.0.0.1:3457',
+      port: 3457,
+    })
+    await expect(pendingStart).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    await cleanup
+    expect(calls).toEqual(['start', 'stop'])
   })
 
   it('rejects an in-flight start after logout and deduplicates account cleanup', async () => {

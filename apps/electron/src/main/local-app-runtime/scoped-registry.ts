@@ -101,6 +101,13 @@ function scopesEqual(left: CatalogLocalAppScope, right: CatalogLocalAppScope): b
     && left.catalogAppId === right.catalogAppId
 }
 
+function createOrganizationLifecycleKey(
+  accountId: string,
+  organizationId: string,
+): string {
+  return JSON.stringify([accountId, organizationId])
+}
+
 function attachScope<T extends { appId: string }>(
   value: T,
   scope: CatalogLocalAppScope,
@@ -127,12 +134,19 @@ export class ScopedLocalAppRuntimeRegistry {
     Promise<LocalAppRuntimeManager | null>
   >()
   private readonly sessionEndingAccounts = new Set<string>()
+  private readonly deniedOrganizations = new Set<string>()
   private readonly accountLifecycleGenerations = new Map<string, number>()
+  private readonly organizationLifecycleGenerations = new Map<string, number>()
   private readonly accountOperations = new Map<
     string,
     Map<Promise<unknown>, CatalogLocalAppScope>
   >()
+  private readonly organizationOperations = new Map<
+    string,
+    Map<Promise<unknown>, CatalogLocalAppScope>
+  >()
   private readonly stopAccountPromises = new Map<string, Promise<void>>()
+  private readonly stopOrganizationPromises = new Map<string, Promise<void>>()
 
   constructor(options: ScopedLocalAppRuntimeRegistryOptions) {
     this.scopesDir = join(resolve(options.rootDir), 'catalog-scopes')
@@ -409,13 +423,51 @@ export class ScopedLocalAppRuntimeRegistry {
       safeAccountId,
       this.getAccountLifecycleGeneration(safeAccountId) + 1,
     )
-    const stopPromise = this.performStopAccount(safeAccountId)
+    const stopPromise = this.performStopScopes(safeAccountId)
       .finally(() => {
         if (this.stopAccountPromises.get(safeAccountId) === stopPromise) {
           this.stopAccountPromises.delete(safeAccountId)
         }
       })
     this.stopAccountPromises.set(safeAccountId, stopPromise)
+    return stopPromise
+  }
+
+  async stopOrganization(
+    accountId: string,
+    organizationId: string,
+  ): Promise<void> {
+    const safeAccountId = validateScopeField(accountId, 'accountId')
+    const safeOrganizationId = validateScopeField(
+      organizationId,
+      'organizationId',
+    )
+    const organizationKey = createOrganizationLifecycleKey(
+      safeAccountId,
+      safeOrganizationId,
+    )
+    // Establish the organization fence and advance its non-reusable
+    // generation before any manager, filesystem, or operation await.
+    this.deniedOrganizations.add(organizationKey)
+    const existingStop = this.stopOrganizationPromises.get(organizationKey)
+    if (existingStop) return existingStop
+    this.organizationLifecycleGenerations.set(
+      organizationKey,
+      this.getOrganizationLifecycleGeneration(organizationKey) + 1,
+    )
+    const stopPromise = this.performStopScopes(
+      safeAccountId,
+      safeOrganizationId,
+    ).finally(() => {
+      if (this.stopOrganizationPromises.get(organizationKey) === stopPromise) {
+        this.stopOrganizationPromises.delete(organizationKey)
+        // Catalog access remains denied in the main-process authorization
+        // gate. Once cleanup is quiescent, a later fresh authorized sync may
+        // safely enter with the already-advanced organization generation.
+        this.deniedOrganizations.delete(organizationKey)
+      }
+    })
+    this.stopOrganizationPromises.set(organizationKey, stopPromise)
     return stopPromise
   }
 
@@ -434,13 +486,18 @@ export class ScopedLocalAppRuntimeRegistry {
     )
   }
 
-  private async performStopAccount(safeAccountId: string): Promise<void> {
-    const trackedOperations = [
-      ...(this.accountOperations.get(safeAccountId)?.keys() ?? []),
-    ]
-    const trackedScopes = [
-      ...(this.accountOperations.get(safeAccountId)?.values() ?? []),
-    ]
+  private async performStopScopes(
+    safeAccountId: string,
+    safeOrganizationId?: string,
+  ): Promise<void> {
+    const organizationKey = safeOrganizationId === undefined
+      ? null
+      : createOrganizationLifecycleKey(safeAccountId, safeOrganizationId)
+    const tracked = organizationKey
+      ? this.organizationOperations.get(organizationKey)
+      : this.accountOperations.get(safeAccountId)
+    const trackedOperations = [...(tracked?.keys() ?? [])]
+    const trackedScopes = [...(tracked?.values() ?? [])]
     const failures: string[] = []
 
     for (const scope of trackedScopes) {
@@ -479,7 +536,13 @@ export class ScopedLocalAppRuntimeRegistry {
       scopesByKey.set(createCatalogLocalAppScopeKey(scope), scope)
     }
     const scopes = [...scopesByKey.values()]
-      .filter(scope => scope.accountId === safeAccountId)
+      .filter(scope => (
+        scope.accountId === safeAccountId
+        && (
+          safeOrganizationId === undefined
+          || scope.organizationId === safeOrganizationId
+        )
+      ))
     for (let index = 0; index < scopes.length; index += STOP_ACCOUNT_CONCURRENCY) {
       const results = await Promise.allSettled(
         scopes.slice(index, index + STOP_ACCOUNT_CONCURRENCY)
@@ -515,8 +578,28 @@ export class ScopedLocalAppRuntimeRegistry {
     }
   }
 
+  private assertOrganizationSessionActive(
+    accountId: string,
+    organizationId: string,
+  ): void {
+    if (
+      this.deniedOrganizations.has(
+        createOrganizationLifecycleKey(accountId, organizationId),
+      )
+    ) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'The organization authorization for this local app is ending',
+      )
+    }
+  }
+
   private getAccountLifecycleGeneration(accountId: string): number {
     return this.accountLifecycleGenerations.get(accountId) ?? 0
+  }
+
+  private getOrganizationLifecycleGeneration(organizationKey: string): number {
+    return this.organizationLifecycleGenerations.get(organizationKey) ?? 0
   }
 
   private runTrackedScopeOperation<T>(
@@ -525,6 +608,10 @@ export class ScopedLocalAppRuntimeRegistry {
   ): Promise<T> {
     const scope = validateCatalogLocalAppScope(rawScope)
     this.assertAccountSessionActive(scope.accountId)
+    this.assertOrganizationSessionActive(
+      scope.accountId,
+      scope.organizationId,
+    )
     return this.runTrackedScopesOperation([scope], () => operation(scope))
   }
 
@@ -533,40 +620,79 @@ export class ScopedLocalAppRuntimeRegistry {
     operation: () => Promise<T>,
   ): Promise<T> {
     const accounts = new Map<string, CatalogLocalAppScope>()
-    const lifecycleGenerations = new Map<string, number>()
+    const accountLifecycleGenerations = new Map<string, number>()
+    const organizations = new Map<string, CatalogLocalAppScope>()
+    const organizationLifecycleGenerations = new Map<string, number>()
     for (const scope of scopes) {
       this.assertAccountSessionActive(scope.accountId)
+      this.assertOrganizationSessionActive(
+        scope.accountId,
+        scope.organizationId,
+      )
       if (!accounts.has(scope.accountId)) accounts.set(scope.accountId, scope)
-      lifecycleGenerations.set(
+      accountLifecycleGenerations.set(
         scope.accountId,
         this.getAccountLifecycleGeneration(scope.accountId),
       )
+      const organizationKey = createOrganizationLifecycleKey(
+        scope.accountId,
+        scope.organizationId,
+      )
+      if (!organizations.has(organizationKey)) {
+        organizations.set(organizationKey, scope)
+      }
+      organizationLifecycleGenerations.set(
+        organizationKey,
+        this.getOrganizationLifecycleGeneration(organizationKey),
+      )
+    }
+    const assertCapturedLifecycleIsCurrent = () => {
+      for (const accountId of accounts.keys()) {
+        this.assertAccountSessionActive(accountId)
+        if (
+          this.getAccountLifecycleGeneration(accountId)
+          !== accountLifecycleGenerations.get(accountId)
+        ) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'The Admin session changed during the local app operation',
+          )
+        }
+      }
+      for (const [organizationKey, scope] of organizations) {
+        this.assertOrganizationSessionActive(
+          scope.accountId,
+          scope.organizationId,
+        )
+        if (
+          this.getOrganizationLifecycleGeneration(organizationKey)
+          !== organizationLifecycleGenerations.get(organizationKey)
+        ) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'The organization authorization changed during the local app operation',
+          )
+        }
+      }
     }
     let trackedPromise!: Promise<T>
     trackedPromise = Promise.resolve()
       .then(() => {
-        for (const accountId of accounts.keys()) {
-          this.assertAccountSessionActive(accountId)
-        }
+        assertCapturedLifecycleIsCurrent()
         return operation()
       })
       .then(result => {
         // Entry authorization is insufficient: logout may begin while a
-        // manager call is pending. The captured lifecycle generation makes
-        // that late result permanently stale even if the account later resumes.
-        for (const accountId of accounts.keys()) {
-          this.assertAccountSessionActive(accountId)
-          if (
-            this.getAccountLifecycleGeneration(accountId)
-            !== lifecycleGenerations.get(accountId)
-          ) {
-            throw new LocalAppRuntimeError(
-              'NOT_AUTHORIZED',
-              'The Admin session changed during the local app operation',
-            )
-          }
-        }
+        // manager call is pending. Account and organization generations make
+        // late results permanently stale even after either fence is released.
+        assertCapturedLifecycleIsCurrent()
         return result
+      }, error => {
+        // Cancellation caused by a newly established authorization fence is
+        // exposed uniformly as NOT_AUTHORIZED, not as an install/runtime
+        // implementation detail.
+        assertCapturedLifecycleIsCurrent()
+        throw error
       })
       .finally(() => {
         for (const accountId of accounts.keys()) {
@@ -574,12 +700,25 @@ export class ScopedLocalAppRuntimeRegistry {
           operations?.delete(trackedPromise)
           if (operations?.size === 0) this.accountOperations.delete(accountId)
         }
+        for (const organizationKey of organizations.keys()) {
+          const operations = this.organizationOperations.get(organizationKey)
+          operations?.delete(trackedPromise)
+          if (operations?.size === 0) {
+            this.organizationOperations.delete(organizationKey)
+          }
+        }
       })
     for (const [accountId, scope] of accounts) {
       const operations = this.accountOperations.get(accountId)
         ?? new Map<Promise<unknown>, CatalogLocalAppScope>()
       operations.set(trackedPromise, scope)
       this.accountOperations.set(accountId, operations)
+    }
+    for (const [organizationKey, scope] of organizations) {
+      const operations = this.organizationOperations.get(organizationKey)
+        ?? new Map<Promise<unknown>, CatalogLocalAppScope>()
+      operations.set(trackedPromise, scope)
+      this.organizationOperations.set(organizationKey, operations)
     }
     return trackedPromise
   }

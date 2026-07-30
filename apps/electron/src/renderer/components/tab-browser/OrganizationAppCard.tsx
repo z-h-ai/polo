@@ -55,6 +55,7 @@ export function primaryActionFor(
   }
   if (status.installationStatus) return 'cancel'
   if (status.status === 'downloading' || status.status === 'installing') return 'cancel'
+  if (offline && status.status === 'broken') return 'unavailable'
   if (status.versionError === 'invalid_semver') return 'open'
   if (status.availableRelease) return offline ? 'open' : 'update'
   if (status.status === 'update_available') return offline ? 'open' : 'update'
@@ -123,7 +124,20 @@ export function statusText(
 }
 
 function actionLabel(t: TFunction, action: CatalogPrimaryAction): string {
-  return t(`homeApps.actions.${action}`)
+  switch (action) {
+    case 'cancel':
+      return t('common.cancel')
+    case 'open':
+      return t('common.open')
+    case 'retry':
+      return t('common.retry')
+    case 'unavailable':
+      return t('common.unavailable')
+    case 'install':
+      return t('homeApps.actions.install')
+    case 'update':
+      return t('homeApps.actions.update')
+  }
 }
 
 function AppArtwork({ app }: { app: CatalogApp }) {
@@ -257,7 +271,7 @@ export function OrganizationAppCard({
               onClick={() => onPrimaryAction(app, 'open')}
               data-testid={`organization-app-open-${app.id}`}
             >
-              {t('homeApps.actions.open')}
+              {t('common.open')}
             </Button>
           )}
           <Button

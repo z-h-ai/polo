@@ -578,6 +578,80 @@ describe('useAppCatalog scoped async state', () => {
     expect(stopLocalApp).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps STOP status when older full and START-finally reads resolve later', async () => {
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
+        .toBe('not_installed')
+    })
+
+    const fullRead = deferred<LocalAppRuntimeStatus[]>()
+    const startFinallyRead = deferred<LocalAppRuntimeStatus[]>()
+    const stopFinallyRead = deferred<LocalAppRuntimeStatus[]>()
+    const statusReads = [fullRead, startFinallyRead, stopFinallyRead]
+    let readIndex = 0
+    getRuntimeStatuses = mock(() => statusReads[readIndex++]!.promise)
+
+    let pendingSync!: Promise<void>
+    act(() => {
+      pendingSync = result.current.sync(true)
+    })
+    await waitFor(() => {
+      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
+    })
+    const catalogApp = result.current.state.catalog!.apps[0]!
+    const runtimeScope = result.current.scopeForApp(catalogApp)
+    const runningStatus: LocalAppRuntimeStatus = {
+      appId: catalogApp.id,
+      scope: runtimeScope,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+    }
+    const stoppedStatus: LocalAppRuntimeStatus = {
+      appId: catalogApp.id,
+      scope: runtimeScope,
+      status: 'stopped',
+      currentVersion: '1.0.0',
+    }
+
+    let startOutcome!: Promise<'fulfilled' | 'rejected'>
+    act(() => {
+      startOutcome = result.current.start(catalogApp).then(
+        () => 'fulfilled',
+        () => 'rejected',
+      )
+    })
+    await waitFor(() => {
+      expect(getRuntimeStatuses).toHaveBeenCalledTimes(2)
+    })
+
+    let pendingStop!: Promise<void>
+    act(() => {
+      pendingStop = result.current.stop(catalogApp)
+    })
+    await waitFor(() => {
+      expect(getRuntimeStatuses).toHaveBeenCalledTimes(3)
+    })
+    await act(async () => {
+      stopFinallyRead.resolve([stoppedStatus])
+      await pendingStop
+    })
+    expect(result.current.getStatus(catalogApp)?.status).toBe('stopped')
+
+    await act(async () => {
+      startFinallyRead.resolve([runningStatus])
+      expect(await startOutcome).toBe('rejected')
+    })
+    await act(async () => {
+      fullRead.resolve([runningStatus])
+      await pendingSync
+    })
+
+    expect(getRuntimeStatuses).toHaveBeenCalledTimes(3)
+    expect(result.current.getStatus(catalogApp)?.status).toBe('stopped')
+  })
+
   it('cancels an in-flight install through an independent cancellation channel', async () => {
     const pendingInstall = deferred<void>()
     installLocalApp = mock(() => pendingInstall.promise)

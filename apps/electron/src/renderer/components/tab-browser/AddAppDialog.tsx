@@ -89,7 +89,7 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor="tab-app-name">
-              {t('homeApps.addExternal.name')}
+              {t('common.name')}
             </label>
             <input
               id="tab-app-name"
@@ -102,7 +102,7 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor="tab-app-url">
-              {t('homeApps.addExternal.url')}
+              {t('common.url')}
             </label>
             <input
               id="tab-app-url"
@@ -147,7 +147,7 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
           </div>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
-              {t('homeApps.actions.cancel')}
+              {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={!isValid}>
               {t('homeApps.addExternal.submit')}

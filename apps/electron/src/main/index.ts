@@ -761,6 +761,13 @@ app.whenReady().then(async () => {
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
+            onAdminCatalogScopeDenied: (
+              accountId: string,
+              organizationId: string,
+            ) => getScopedLocalAppRuntimeRegistry().stopOrganization(
+              accountId,
+              organizationId,
+            ),
             getRetainedCatalogAppIds: (
               accountId: string,
               organizationId: string,

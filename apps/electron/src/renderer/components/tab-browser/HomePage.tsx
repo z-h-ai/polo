@@ -662,7 +662,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
           )}
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => setInstallTarget(null)}>
-              {t('homeApps.actions.cancel')}
+              {t('common.cancel')}
             </Button>
             <Button type="button" onClick={() => { void confirmInstall() }}>
               {installTargetApp && catalog.getStatus(installTargetApp)?.availableRelease
@@ -708,7 +708,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
           </label>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => setUninstallTarget(null)}>
-              {t('homeApps.actions.cancel')}
+              {t('common.cancel')}
             </Button>
             <Button type="button" variant="destructive" onClick={() => { void confirmUninstall() }}>
               {t('homeApps.actions.uninstall')}

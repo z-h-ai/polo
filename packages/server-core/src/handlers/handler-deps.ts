@@ -40,6 +40,15 @@ export interface HandlerDeps<
    */
   onAdminSessionStarted?: (accountId: string) => Promise<void> | void
   /**
+   * Host-owned organization authorization fence. Invocation must synchronously
+   * invalidate in-flight lifecycle commits before returning the slow
+   * organization-scoped stop/cancel cleanup promise.
+   */
+  onAdminCatalogScopeDenied?: (
+    accountId: string,
+    organizationId: string,
+  ) => Promise<void>
+  /**
    * Returns Catalog business ids that still have local installation or
    * runtime data and therefore must survive withdrawn tombstone pruning.
    */
