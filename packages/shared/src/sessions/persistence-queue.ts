@@ -1,7 +1,8 @@
-import { writeFile, rename, unlink } from 'fs/promises'
+import { chmod, writeFile, rename, unlink } from 'fs/promises'
 import { dirname } from 'path'
 import type { StoredSession, SessionHeader } from './types.js'
 import { getSessionFilePath, ensureSessionsDir, ensureSessionDir } from './storage.js'
+import { getSessionStorage } from './session-storage.js'
 import { toPortablePath } from '../utils/paths.js'
 import { createSessionHeader, makeSessionPathPortable, readSessionHeader } from './jsonl.js'
 import { debug } from '../utils/debug.js'
@@ -61,6 +62,7 @@ class SessionPersistenceQueue {
   private writeInProgress = new Map<string, Promise<void>>()
   private lastWrittenHeaderSignature = new Map<string, string>()
   private debounceMs: number
+  private writeErrors = new Map<string, unknown>()
 
   constructor(debounceMs = 500) {
     this.debounceMs = debounceMs
@@ -77,7 +79,10 @@ class SessionPersistenceQueue {
     }
 
     const timer = setTimeout(() => {
-      void this.write(session.id)
+      // Preserve the error for flush()/flushAll(), where lifecycle callers can
+      // fail cleanup deterministically, without creating an unhandled rejection
+      // from the debounce callback itself.
+      void this.write(session.id).catch(() => {})
     }, this.debounceMs)
 
     this.pending.set(session.id, { data: session, timer })
@@ -155,13 +160,22 @@ class SessionPersistenceQueue {
       this.lastWrittenHeaderSignature.set(sessionId, finalSignature)
 
       const tmpFile = filePath + '.tmp'
-      await writeFile(tmpFile, lines.join('\n') + '\n', 'utf-8')
+      const privateFile = getSessionStorage().owner === 'cli'
+      await writeFile(tmpFile, lines.join('\n') + '\n', {
+        encoding: 'utf-8',
+        ...(privateFile ? { mode: 0o600 } : {}),
+      })
+      if (privateFile && process.platform !== 'win32') await chmod(tmpFile, 0o600)
       // On Windows, rename fails if target exists. Delete first for cross-platform compatibility.
       try { await unlink(filePath) } catch { /* ignore if doesn't exist */ }
       await rename(tmpFile, filePath)
+      if (privateFile && process.platform !== 'win32') await chmod(filePath, 0o600)
+      this.writeErrors.delete(sessionId)
       debug(`[PersistenceQueue] Wrote session ${sessionId}`)
     } catch (error) {
+      this.writeErrors.set(sessionId, error)
       console.error(`[PersistenceQueue] Failed to write session ${sessionId}:`, error)
+      throw error
     }
   }
 
@@ -191,6 +205,8 @@ class SessionPersistenceQueue {
         this.writeInProgress.delete(sessionId)
       }
     }
+    const error = this.writeErrors.get(sessionId)
+    if (error) throw error
   }
 
   /**
@@ -212,6 +228,10 @@ class SessionPersistenceQueue {
   async flushAll(): Promise<void> {
     const sessionIds = [...this.pending.keys()]
     await Promise.all(sessionIds.map(id => this.flush(id)))
+    if (this.writeErrors.size > 0) {
+      const first = this.writeErrors.values().next().value
+      throw first instanceof Error ? first : new Error(String(first))
+    }
   }
 
   /**

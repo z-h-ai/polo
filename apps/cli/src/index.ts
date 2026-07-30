@@ -9,6 +9,12 @@
 
 import { resolve } from 'path'
 import { CliRpcClient } from './client.ts'
+import {
+  UsageError,
+  findExecutionCommandIndex,
+  parseExecutionArgs,
+} from './execution-parser.ts'
+import { runExecutionCommand } from './one-shot.ts'
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -1959,6 +1965,17 @@ Examples:
 // ---------------------------------------------------------------------------
 
 export async function main(argv: string[] = process.argv): Promise<void> {
+  if (findExecutionCommandIndex(argv) >= 0) {
+    try {
+      const exitCode = await runExecutionCommand(parseExecutionArgs(argv))
+      process.exit(exitCode)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      process.stderr.write(`Error: ${message}\n`)
+      process.exit(error instanceof UsageError ? 2 : 1)
+    }
+  }
+
   const args = parseArgs(argv)
 
   // Set custom CA before any WS connections

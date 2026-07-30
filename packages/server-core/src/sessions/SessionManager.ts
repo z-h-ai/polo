@@ -71,6 +71,8 @@ import {
   type SessionStatus,
   type SessionHeader,
   pickSessionFields,
+  setSessionStorage,
+  type SessionStorage,
 } from '@polo-ai/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@polo-ai/shared/config'
@@ -760,6 +762,7 @@ type AgentInstance = AgentBackend
 
 interface ManagedSession {
   id: string
+  origin?: 'cli-run' | 'cli-exec'
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
@@ -1100,6 +1103,8 @@ interface PendingDelta {
 }
 
 export class SessionManager implements ISessionManager {
+  private readonly runtimeProfile: 'default' | 'cli-one-shot'
+  private readonly runtimeWorkspace?: Workspace
   private sessions: Map<string, ManagedSession> = new Map()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
@@ -1147,6 +1152,32 @@ export class SessionManager implements ISessionManager {
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
+
+  constructor(options?: {
+    profile?: 'default' | 'cli-one-shot'
+    sessionStorage?: SessionStorage
+    workspace?: Workspace
+  }) {
+    this.runtimeProfile = options?.profile ?? 'default'
+    this.runtimeWorkspace = options?.workspace
+    if (options?.sessionStorage) {
+      setSessionStorage(options.sessionStorage)
+    }
+  }
+
+  private getRuntimeWorkspaces(): Workspace[] {
+    return this.runtimeWorkspace ? [this.runtimeWorkspace] : getWorkspaces()
+  }
+
+  private resolveRuntimeWorkspace(nameOrId: string): Workspace | null {
+    if (this.runtimeWorkspace) {
+      return this.runtimeWorkspace.id === nameOrId
+        || this.runtimeWorkspace.name.toLowerCase() === nameOrId.toLowerCase()
+        ? this.runtimeWorkspace
+        : null
+    }
+    return getWorkspaceByNameOrId(nameOrId)
+  }
 
   /**
    * Optional binder installed by the messaging-gateway bootstrap. When set,
@@ -1237,6 +1268,7 @@ export class SessionManager implements ISessionManager {
    * 3. `null` when there's neither a local BPM nor an RPC server.
    */
   getBrowserPaneManagerForSession(sid: string): IBrowserPaneManager | null {
+    if (this.runtimeProfile === 'cli-one-shot') return null
     if (this.browserPaneManager) return this.browserPaneManager
     if (!this.rpcServer) return null
 
@@ -1798,15 +1830,13 @@ export class SessionManager implements ISessionManager {
 
   async initialize(): Promise<void> {
     try {
-      // Backfill missing `models` arrays on existing LLM connections
-      migrateLegacyLlmConnectionsConfig()
-
-      // Fix defaultLlmConnection if it points to a non-existent connection
-      migrateOrphanedDefaultConnections()
-
-      // Migrate legacy credentials to LLM connection format (one-time migration)
-      // This ensures credentials saved before LLM connections are available via the new system
-      await migrateLegacyCredentials()
+      if (this.runtimeProfile === 'default') {
+        // The desktop/headless host owns shared config migrations. A CLI
+        // execution consumes a snapshot and must not mutate shared defaults.
+        migrateLegacyLlmConnectionsConfig()
+        migrateOrphanedDefaultConnections()
+        await migrateLegacyCredentials()
+      }
 
       // Set up authentication environment variables (critical for SDK to work)
       await this.reinitializeAuth()
@@ -1815,9 +1845,11 @@ export class SessionManager implements ISessionManager {
       // the scheduler and event handlers start at boot — not lazily on first
       // client connect. This is critical for headless servers where no UI may
       // ever connect, yet scheduled/event-driven automations must still fire.
-      const workspaces = getWorkspaces()
-      for (const workspace of workspaces) {
-        this.setupConfigWatcher(workspace.rootPath, workspace.id)
+      const workspaces = this.getRuntimeWorkspaces()
+      if (this.runtimeProfile === 'default') {
+        for (const workspace of workspaces) {
+          this.setupConfigWatcher(workspace.rootPath, workspace.id)
+        }
       }
 
       // Load existing sessions from disk
@@ -1834,7 +1866,7 @@ export class SessionManager implements ISessionManager {
   // Load all existing sessions from disk into memory (metadata only - messages are lazy-loaded)
   private loadSessionsFromDisk(): void {
     try {
-      const workspaces = getWorkspaces()
+      const workspaces = this.getRuntimeWorkspaces()
       let totalSessions = 0
 
       // Iterate over each workspace and load its sessions
@@ -2215,11 +2247,11 @@ export class SessionManager implements ISessionManager {
   }
 
   getWorkspaces(): Workspace[] {
-    return getWorkspaces()
+    return this.getRuntimeWorkspaces()
   }
 
   getWorkspacesInfo(): WorkspaceInfo[] {
-    return getWorkspaces().map(({ rootPath, createdAt, ...info }) => info)
+    return this.getRuntimeWorkspaces().map(({ rootPath, createdAt, ...info }) => info)
   }
 
   getActiveSessionCount(workspaceId?: string): number {
@@ -2232,7 +2264,7 @@ export class SessionManager implements ISessionManager {
   }
 
   getWorkspaceAutomationSummary(workspaceId: string): { automationCount: number; schedulerRunning: boolean } {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
+    const workspace = this.resolveRuntimeWorkspace(workspaceId)
     if (!workspace) return { automationCount: 0, schedulerRunning: false }
 
     const automationSystem = this.automationSystems.get(workspace.rootPath)
@@ -2307,7 +2339,7 @@ export class SessionManager implements ISessionManager {
     const byWorkspace: Record<string, number> = {}
     const hasUnreadByWorkspace: Record<string, boolean> = {}
 
-    for (const workspace of getWorkspaces()) {
+    for (const workspace of this.getRuntimeWorkspaces()) {
       byWorkspace[workspace.id] = 0
       hasUnreadByWorkspace[workspace.id] = false
     }
@@ -2459,7 +2491,7 @@ export class SessionManager implements ISessionManager {
   }
 
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
+    const workspace = this.resolveRuntimeWorkspace(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
@@ -2724,6 +2756,7 @@ export class SessionManager implements ISessionManager {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
+      origin: options?.origin,
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
@@ -3452,7 +3485,7 @@ export class SessionManager implements ISessionManager {
         hasLocalBpm: !!this.browserPaneManager,
         hasRpcServer: !!this.rpcServer,
       })
-      if (this.browserPaneManager || this.rpcServer) {
+      if (this.runtimeProfile === 'default' && (this.browserPaneManager || this.rpcServer)) {
         const sid = managed.id
         const bpm = this.getBrowserPaneManagerForSession(sid)
         if (!bpm) {
@@ -4012,6 +4045,8 @@ export class SessionManager implements ISessionManager {
           thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
           labels: request.labels ?? managed.labels,
           workingDirectory: request.workingDirectory,
+          hidden: managed.hidden,
+          origin: managed.origin,
         })
 
         // Build FileAttachment[] from paths (if any)
@@ -6095,6 +6130,20 @@ export class SessionManager implements ISessionManager {
     // The event loop will drain remaining events and call onProcessingStopped when done.
   }
 
+  /** Cancel every active turn owned by this runtime and wait for it to drain. */
+  async cancelAllProcessing(): Promise<void> {
+    const active = [...this.sessions.values()].filter(session => session.isProcessing)
+    await Promise.all(active.map(session => this.cancelProcessing(session.id, true)))
+
+    const deadline = Date.now() + 10_000
+    while (active.some(session => session.isProcessing)) {
+      if (Date.now() >= deadline) {
+        throw new Error('Timed out waiting for CLI sessions to stop')
+      }
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+  }
+
   /**
    * Attempt auth retry: refresh token, destroy agent, resend last message.
    * Shared by both typed_error and plain error auth-retry paths.
@@ -7845,7 +7894,7 @@ export class SessionManager implements ISessionManager {
       throw new Error('Invalid session bundle')
     }
 
-    const workspace = getWorkspaceByNameOrId(workspaceId)
+    const workspace = this.resolveRuntimeWorkspace(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
     }

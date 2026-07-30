@@ -5,6 +5,7 @@ import type { StoredAttachment } from '@polo-ai/core/types'
 import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import { perf } from '@polo-ai/shared/utils'
 import { isValidThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/thinking-levels'
+import { getSessionStorage } from '@polo-ai/shared/sessions'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
@@ -412,9 +413,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     }
 
     const { searchSessions } = await import('@polo-ai/server-core/services')
-    const { getWorkspaceSessionsPath } = await import('@polo-ai/shared/workspaces')
-
-    const sessionsDir = getWorkspaceSessionsPath(workspace.rootPath)
+    const sessionsDir = getSessionStorage().getSessionsRoot(workspace.rootPath)
     log.debug(`SEARCH_SESSIONS: Searching "${query}" in ${sessionsDir}`)
 
     const results = await searchSessions(query, sessionsDir, {

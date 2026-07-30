@@ -22,7 +22,12 @@
  *   const apiKey = await manager.getApiKeyForAgent(wsId, agentId, apiName);
  */
 
-export { CredentialManager, getCredentialManager } from './manager.ts';
+export {
+  CredentialManager,
+  getCredentialManager,
+  setInvocationCredential,
+  clearInvocationCredentials,
+} from './manager.ts';
 export type { CredentialId, CredentialType, StoredCredential } from './types.ts';
 export { credentialIdToAccount, accountToCredentialId, SOURCE_CREDENTIAL_TYPES, VALID_CREDENTIAL_TYPES } from './types.ts';
 export type { CredentialBackend } from './backends/types.ts';

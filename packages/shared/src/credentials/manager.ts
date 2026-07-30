@@ -11,6 +11,25 @@ import type { LlmAuthType, LlmProviderType } from '../config/llm-connections.ts'
 import { SecureStorageBackend } from './backends/secure-storage.ts';
 import { debug } from '../utils/debug.ts';
 
+const invocationCredentials = new Map<string, StoredCredential>();
+
+function invocationCredentialKey(id: CredentialId): string {
+  return JSON.stringify(id);
+}
+
+/**
+ * Process-local, read-only credential overlay used by a CLI execution runtime.
+ * OAuth refreshes still go through the normal shared backend; only credentials
+ * explicitly supplied for this invocation are served from this map.
+ */
+export function setInvocationCredential(id: CredentialId, credential: StoredCredential): void {
+  invocationCredentials.set(invocationCredentialKey(id), { ...credential });
+}
+
+export function clearInvocationCredentials(): void {
+  invocationCredentials.clear();
+}
+
 export class CredentialManager {
   private backends: CredentialBackend[] = [];
   private writeBackend: CredentialBackend | null = null;
@@ -109,6 +128,8 @@ export class CredentialManager {
    * Automatically initializes if needed.
    */
   async get(id: CredentialId): Promise<StoredCredential | null> {
+    const invocation = invocationCredentials.get(invocationCredentialKey(id));
+    if (invocation) return { ...invocation };
     await this.ensureInitialized();
 
     for (const backend of this.backends) {

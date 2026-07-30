@@ -23,6 +23,15 @@ export type {
 // Field constants
 export { SESSION_PERSISTENT_FIELDS } from './types.ts';
 
+export type { SessionStorage, SessionStorageOwner } from './session-storage.ts';
+export {
+  WorkspaceSessionStorage,
+  RootedSessionStorage,
+  setSessionStorage,
+  getSessionStorage,
+  resetSessionStorage,
+} from './session-storage.ts';
+
 // Storage functions
 export {
   // Directory utilities
@@ -32,6 +41,8 @@ export {
   getSessionFilePath,
   getSessionAttachmentsPath,
   getSessionPlansPath,
+  getSessionDataPath,
+  getSessionDownloadsPath,
   ensureAttachmentsDir,
   // ID generation
   generateSessionId,
@@ -123,5 +134,3 @@ export {
   validateBundle,
   MAX_BUNDLE_SIZE_BYTES,
 } from './bundle.ts';
-
-

@@ -29,7 +29,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
-  'name', 'isFlagged', 'sessionStatus', 'labels', 'hidden',
+  'name', 'isFlagged', 'sessionStatus', 'labels', 'hidden', 'origin',
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
@@ -162,6 +162,8 @@ export interface SessionConfig {
   };
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
+  /** Host experience that owns this session. */
+  origin?: 'cli-run' | 'cli-exec';
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */
@@ -221,6 +223,8 @@ export interface SessionHeader {
   workspaceRootPath: string;
   /** Optional user-defined name */
   name?: string;
+  /** Host experience that owns this session. */
+  origin?: 'cli-run' | 'cli-exec';
   createdAt: number;
   lastUsedAt: number;
   /** Timestamp of last meaningful message — persisted separately from lastUsedAt for stable date grouping across restarts. */

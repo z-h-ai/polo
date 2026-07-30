@@ -147,6 +147,15 @@ export function listSkillSlugs(workspaceRootPath: string): string[] {
 // Session State Helpers
 // ============================================================
 
+let sessionFilePathResolver = (workspacePath: string, sessionId: string) =>
+  join(workspacePath, 'sessions', sessionId, 'session.jsonl');
+
+export function setSessionFilePathResolver(
+  resolver: (workspacePath: string, sessionId: string) => string,
+): void {
+  sessionFilePathResolver = resolver;
+}
+
 /**
  * Read the session's workingDirectory from the persisted session.jsonl header.
  * Returns undefined if the session file doesn't exist, can't be parsed,
@@ -157,7 +166,7 @@ export function resolveSessionWorkingDirectory(
   sessionId: string
 ): string | undefined {
   try {
-    const sessionFile = join(workspacePath, 'sessions', sessionId, 'session.jsonl');
+    const sessionFile = sessionFilePathResolver(workspacePath, sessionId);
     if (!existsSync(sessionFile)) return undefined;
     // Read first line only (header) — 8KB buffer is plenty
     const fd = openSync(sessionFile, 'r');

@@ -161,6 +161,8 @@ mock.module('./server-spawner.ts', () => ({
     return {
       url: mockWsServer.url,
       token: mockWsServer.token,
+      pid: process.pid,
+      startedAt: Date.now(),
       stop: async () => {},
     }
   },

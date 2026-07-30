@@ -23,10 +23,8 @@ import {
   unlinkSync,
 } from 'fs';
 import { join, basename } from 'path';
-import { getWorkspaceSessionsPath } from '../workspaces/storage.ts';
 import { generateUniqueSessionId } from './slug-generator.ts';
 import { toPortablePath, expandPath } from '../utils/paths.ts';
-import { sanitizeSessionId } from './validation.ts';
 import { perf } from '../utils/perf.ts';
 import type {
   SessionConfig,
@@ -42,6 +40,7 @@ import { debug } from '../utils/debug.ts';
 import { getStatusCategory } from '../statuses/storage.ts';
 import { readSessionHeader, readSessionJsonl } from './jsonl.ts';
 import { sessionPersistenceQueue } from './persistence-queue.ts';
+import { getSessionStorage } from './session-storage.ts';
 
 // Re-export types for convenience
 export type { SessionConfig } from './types.ts';
@@ -54,11 +53,7 @@ export type { SessionConfig } from './types.ts';
  * Ensure sessions directory exists for a workspace
  */
 export function ensureSessionsDir(workspaceRootPath: string): string {
-  const dir = getWorkspaceSessionsPath(workspaceRootPath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  return dir;
+  return getSessionStorage().ensureSessionsRoot(workspaceRootPath);
 }
 
 /**
@@ -68,50 +63,21 @@ export function ensureSessionsDir(workspaceRootPath: string): string {
  * Callers should still validate sessionId before calling this function.
  */
 export function getSessionPath(workspaceRootPath: string, sessionId: string): string {
-  // Defense-in-depth: strip any path components from sessionId
-  const safeSessionId = sanitizeSessionId(sessionId);
-  return join(getWorkspaceSessionsPath(workspaceRootPath), safeSessionId);
+  return getSessionStorage().getSessionPath(workspaceRootPath, sessionId);
 }
 
 /**
  * Get path to a session's JSONL file (inside session folder)
  */
 export function getSessionFilePath(workspaceRootPath: string, sessionId: string): string {
-  return join(getSessionPath(workspaceRootPath, sessionId), 'session.jsonl');
+  return getSessionStorage().getSessionFilePath(workspaceRootPath, sessionId);
 }
 
 /**
  * Ensure session directory exists with all subdirectories
  */
 export function ensureSessionDir(workspaceRootPath: string, sessionId: string): string {
-  const sessionDir = getSessionPath(workspaceRootPath, sessionId);
-  if (!existsSync(sessionDir)) {
-    mkdirSync(sessionDir, { recursive: true });
-  }
-  // Also create plans, attachments, long_responses, and downloads directories
-  const plansDir = join(sessionDir, 'plans');
-  if (!existsSync(plansDir)) {
-    mkdirSync(plansDir, { recursive: true });
-  }
-  const attachmentsDir = join(sessionDir, 'attachments');
-  if (!existsSync(attachmentsDir)) {
-    mkdirSync(attachmentsDir, { recursive: true });
-  }
-  const longResponsesDir = join(sessionDir, 'long_responses');
-  if (!existsSync(longResponsesDir)) {
-    mkdirSync(longResponsesDir, { recursive: true });
-  }
-  // Data directory for transform_data tool output (JSON files for datatable/spreadsheet)
-  const dataDir = join(sessionDir, 'data');
-  if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true });
-  }
-  // Downloads directory for binary files from API responses (PDFs, images, etc.)
-  const downloadsDir = join(sessionDir, 'downloads');
-  if (!existsSync(downloadsDir)) {
-    mkdirSync(downloadsDir, { recursive: true });
-  }
-  return sessionDir;
+  return getSessionStorage().ensureSession(workspaceRootPath, sessionId);
 }
 
 /**
@@ -150,7 +116,7 @@ export function getSessionDownloadsPath(workspaceRootPath: string, sessionId: st
  * Get existing session IDs for collision detection
  */
 function getExistingSessionIds(workspaceRootPath: string): Set<string> {
-  const sessionsDir = getWorkspaceSessionsPath(workspaceRootPath);
+  const sessionsDir = getSessionStorage().getSessionsRoot(workspaceRootPath);
   if (!existsSync(sessionsDir)) {
     return new Set();
   }
@@ -184,6 +150,7 @@ export async function createSession(
     model?: string;
     llmConnection?: string;
     hidden?: boolean;
+    origin?: 'cli-run' | 'cli-exec';
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
     isFlagged?: boolean;
@@ -215,6 +182,7 @@ export async function createSession(
     model: options?.model,
     llmConnection: options?.llmConnection,
     hidden: options?.hidden,
+    origin: options?.origin,
     sessionStatus: options?.sessionStatus,
     labels: options?.labels,
     isFlagged: options?.isFlagged,
@@ -342,7 +310,7 @@ export function loadSession(workspaceRootPath: string, sessionId: string): Store
  */
 export function listSessions(workspaceRootPath: string): SessionMetadata[] {
   const span = perf.span('session.listSessions');
-  const sessionsDir = getWorkspaceSessionsPath(workspaceRootPath);
+  const sessionsDir = getSessionStorage().getSessionsRoot(workspaceRootPath);
   if (!existsSync(sessionsDir)) {
     span.end();
     return [];

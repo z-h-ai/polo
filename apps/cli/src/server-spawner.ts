@@ -15,6 +15,8 @@ import type { Subprocess } from 'bun'
 export interface SpawnedServer {
   url: string
   token: string
+  pid: number
+  startedAt: number
   stop: () => Promise<void>
 }
 
@@ -56,6 +58,7 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   const serverEntry = opts?.serverEntry ?? findServerEntry()
   const startupTimeout = opts?.startupTimeout ?? 30_000
   const token = crypto.randomUUID()
+  const startedAt = Date.now()
 
   // Strip CLAUDECODE to avoid the Claude Agent SDK's nesting guard rejecting
   // subprocess launches when the CLI is invoked from within a Claude Code session.
@@ -112,12 +115,23 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
         // Once we have the URL, the server is ready
         if (url) {
           clearTimeout(timer)
+          let stopPromise: Promise<void> | null = null
           resolve({
             url,
             token,
+            pid: proc.pid,
+            startedAt,
             stop: async () => {
-              proc.kill('SIGTERM')
-              await proc.exited
+              if (!stopPromise) {
+                stopPromise = (async () => {
+                  if (proc.exitCode === null) proc.kill('SIGTERM')
+                  const exitCode = await proc.exited
+                  if (exitCode !== 0) {
+                    throw new Error(`CLI runtime cleanup failed (exit ${exitCode})`)
+                  }
+                })()
+              }
+              await stopPromise
             },
           })
           return

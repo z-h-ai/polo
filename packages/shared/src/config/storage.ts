@@ -241,7 +241,12 @@ export function ensureConfigDir(): void {
   configDirInitialized = true;
 }
 
-export function loadStoredConfig(): StoredConfig | null {
+/**
+ * Read config without migrations, repairs, directory creation, or writes.
+ * One-shot CLI processes use this to take an invocation snapshot without
+ * mutating the Electron-owned configuration.
+ */
+export function loadStoredConfigReadonly(): StoredConfig | null {
   try {
     if (!existsSync(CONFIG_FILE)) {
       return null;
@@ -265,8 +270,20 @@ export function loadStoredConfig(): StoredConfig | null {
       config.activeWorkspaceId = config.workspaces[0]?.id || null;
     }
 
-    // Ensure workspace folder structure exists for all workspaces.
-    // Failures here are non-fatal — the workspace will be re-created on next access.
+    return config;
+  } catch (error) {
+    debug('[config] loadStoredConfigReadonly failed:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+export function loadStoredConfig(): StoredConfig | null {
+  const config = loadStoredConfigReadonly();
+  if (!config) return null;
+
+  try {
+    // Electron startup keeps its existing repair behavior. Read-only callers
+    // explicitly use loadStoredConfigReadonly() and never reach this block.
     for (const workspace of config.workspaces) {
       if (!isValidWorkspace(workspace.rootPath)) {
         try {
@@ -279,9 +296,9 @@ export function loadStoredConfig(): StoredConfig | null {
 
     return config;
   } catch (error) {
-    debug('[config] loadStoredConfig failed:', error instanceof Error ? error.message : error);
-    return null;
+    debug('[config] workspace repair failed:', error instanceof Error ? error.message : error);
   }
+  return config;
 }
 
 // Legacy credential helpers removed - use connection-aware credential lookup instead:
@@ -2614,11 +2631,32 @@ export async function migrateLegacyCredentials(): Promise<void> {
  * Call migrateLegacyLlmConnectionsConfig() on app startup to handle migration.
  */
 export function getLlmConnections(): LlmConnection[] {
-  const config = loadStoredConfig();
-  if (!config) return [];
+  if (invocationLlmConnections.length > 0) {
+    return invocationLlmConnections.map(connection => ({ ...connection }));
+  }
+  const config = loadStoredConfigReadonly();
+  const stored = config?.llmConnections || [];
+  return stored;
+}
 
-  // Return empty array if not migrated yet - caller should call migration on startup
-  return config.llmConnections || [];
+let invocationLlmConnections: LlmConnection[] = [];
+let invocationDefaultLlmConnection: string | null = null;
+
+/**
+ * Installs process-local connection overrides for a one-shot CLI runtime.
+ * These values are intentionally never passed to saveConfig().
+ */
+export function setInvocationLlmConnections(
+  connections: LlmConnection[],
+  defaultSlug?: string,
+): void {
+  invocationLlmConnections = connections.map(connection => ({ ...connection }));
+  invocationDefaultLlmConnection = defaultSlug ?? connections[0]?.slug ?? null;
+}
+
+export function clearInvocationLlmConnections(): void {
+  invocationLlmConnections = [];
+  invocationDefaultLlmConnection = null;
 }
 
 /**
@@ -2811,7 +2849,8 @@ export function deleteLlmConnection(slug: string): boolean {
  * @returns Default connection slug, or null if no connections exist
  */
 export function getDefaultLlmConnection(): string | null {
-  const config = loadStoredConfig();
+  if (invocationDefaultLlmConnection) return invocationDefaultLlmConnection;
+  const config = loadStoredConfigReadonly();
   if (!config) return null;
 
   // If no connections, return null
