@@ -28,12 +28,34 @@ export interface ElectronRuntimeDiscovery {
   startedAt: string
 }
 
+export type RuntimeDiscoveryErrorCode =
+  | 'directory_owner'
+  | 'directory_permissions'
+  | 'file_owner'
+  | 'file_permissions'
+  | 'invalid_json'
+  | 'unsafe_schema'
+  | 'process_unavailable'
+  | 'version_incompatible'
+
+export interface RuntimeDiscoveryErrorParams {
+  pid?: number
+  cliVersion?: string
+  appVersion?: string
+}
+
+interface RuntimeDiscoveryFailure {
+  path: string
+  errorCode: RuntimeDiscoveryErrorCode
+  errorParams?: RuntimeDiscoveryErrorParams
+}
+
 export type RuntimeDiscoveryResult =
   | { status: 'available'; record: ElectronRuntimeDiscovery; path: string }
   | { status: 'missing'; path: string }
-  | { status: 'stale'; path: string; reason: string }
-  | { status: 'invalid'; path: string; reason: string }
-  | { status: 'incompatible'; path: string; reason: string; record: ElectronRuntimeDiscovery }
+  | ({ status: 'stale' } & RuntimeDiscoveryFailure)
+  | ({ status: 'invalid' } & RuntimeDiscoveryFailure)
+  | ({ status: 'incompatible'; record: ElectronRuntimeDiscovery } & RuntimeDiscoveryFailure)
 
 export function getElectronRuntimeDiscoveryPath(options?: {
   platform?: NodeJS.Platform
@@ -374,16 +396,16 @@ export function readElectronRuntimeDiscovery(options?: {
     const stats = statSync(path)
     const directoryStats = statSync(dirname(path))
     if (directoryStats.uid !== process.getuid()) {
-      return { status: 'invalid', path, reason: 'Runtime directory is not owned by the current user' }
+      return { status: 'invalid', path, errorCode: 'directory_owner' }
     }
     if ((directoryStats.mode & 0o077) !== 0) {
-      return { status: 'invalid', path, reason: 'Runtime directory permissions must be 0700' }
+      return { status: 'invalid', path, errorCode: 'directory_permissions' }
     }
     if (stats.uid !== process.getuid()) {
-      return { status: 'invalid', path, reason: 'Runtime file is not owned by the current user' }
+      return { status: 'invalid', path, errorCode: 'file_owner' }
     }
     if ((stats.mode & 0o077) !== 0) {
-      return { status: 'invalid', path, reason: 'Runtime file permissions must be 0600' }
+      return { status: 'invalid', path, errorCode: 'file_permissions' }
     }
   }
 
@@ -391,11 +413,11 @@ export function readElectronRuntimeDiscovery(options?: {
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'))
   } catch {
-    return { status: 'invalid', path, reason: 'Runtime file is not valid JSON' }
+    return { status: 'invalid', path, errorCode: 'invalid_json' }
   }
 
   if (!isRecord(parsed)) {
-    return { status: 'invalid', path, reason: 'Runtime file has an unsupported or unsafe schema' }
+    return { status: 'invalid', path, errorCode: 'unsafe_schema' }
   }
 
   if (!isProcessAliveAndOwned(parsed.pid, parsed.startedAt, {
@@ -408,7 +430,8 @@ export function readElectronRuntimeDiscovery(options?: {
     return {
       status: 'stale',
       path,
-      reason: `Electron process ${parsed.pid} is not running or is owned by another user`,
+      errorCode: 'process_unavailable',
+      errorParams: { pid: parsed.pid },
     }
   }
 
@@ -417,7 +440,11 @@ export function readElectronRuntimeDiscovery(options?: {
       status: 'incompatible',
       path,
       record: parsed,
-      reason: `Polo CLI ${options.expectedVersion} is not compatible with Polo App ${parsed.version}`,
+      errorCode: 'version_incompatible',
+      errorParams: {
+        cliVersion: options.expectedVersion,
+        appVersion: parsed.version,
+      },
     }
   }
 

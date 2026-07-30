@@ -51,6 +51,7 @@ jobs:
       PREVIOUS_RELEASE_TAG: ${{ inputs.previous_release_tag || vars.POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG }}
       POLO_AI_ARTIFACT_VALIDATION_MODE: full
       POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ matrix.previous_name }}
+      POLO_AI_PREVIOUS_INSTALL_SCRIPT: ${{ github.workspace }}/previous/install-app.sh
 
     steps:
       - name: Checkout
@@ -90,9 +91,16 @@ jobs:
             apps/electron/vendor \
             apps/electron/node_modules/@anthropic-ai \
             apps/electron/node_modules/@vscode \
-            apps/electron/packages
+            apps/electron/packages \
+            apps/electron/resources/bin/darwin-arm64 \
+            apps/electron/resources/bin/darwin-x64 \
+            apps/electron/resources/bin/linux-arm64 \
+            apps/electron/resources/bin/linux-x64 \
+            apps/electron/resources/bin/win32-arm64 \
+            apps/electron/resources/bin/win32-x64
           bun test scripts/__tests__/prepare-platform-runtime.test.ts
           test ! -e apps/electron/vendor/bun
+          test -z "$(find apps/electron/resources/bin -maxdepth 2 -type f -name 'uv*' -print -quit)"
 
       - name: Download fixed previous Unix artifact
         if: matrix.platform != 'windows'
@@ -105,6 +113,12 @@ jobs:
             --pattern "${{ matrix.previous_name }}" \
             --dir previous
           test -f "$POLO_AI_PREVIOUS_ARTIFACT"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/${GITHUB_REPOSITORY}/contents/scripts/install-app.sh?ref=${PREVIOUS_RELEASE_TAG}" \
+            > "$POLO_AI_PREVIOUS_INSTALL_SCRIPT"
+          test -s "$POLO_AI_PREVIOUS_INSTALL_SCRIPT"
+          chmod +x "$POLO_AI_PREVIOUS_INSTALL_SCRIPT"
 
       - name: Download fixed previous Windows artifact
         if: matrix.platform == 'windows'

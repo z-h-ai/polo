@@ -12,9 +12,18 @@ import {
   readElectronRuntimeDiscovery,
   removeElectronRuntimeDiscovery,
   type ElectronRuntimeDiscovery,
+  type RuntimeDiscoveryErrorCode,
+  type RuntimeDiscoveryErrorParams,
 } from '@polo-ai/shared/runtime-discovery'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { CliRpcClient } from './client.ts'
 import { version as cliVersion } from '../package.json'
+
+setupI18n()
+const cliLocale = process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG
+if (cliLocale) {
+  void i18n.changeLanguage(cliLocale.split('.')[0]?.replace('_', '-'))
+}
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -263,14 +272,9 @@ async function cmdApp(): Promise<void> {
 
   let command: string[]
   if (process.platform === 'darwin') {
-    const directExecutable = desktopApp
-      ? join(desktopApp, 'Contents', 'MacOS', 'Polo AI')
-      : undefined
-    command = process.env.POLO_AI_E2E_DIRECT_APP === '1' && directExecutable
-      ? [directExecutable]
-      : desktopApp
-        ? ['open', desktopApp]
-        : ['open', '-a', 'Polo AI']
+    command = desktopApp
+      ? ['open', desktopApp]
+      : ['open', '-a', 'Polo AI']
   } else if (process.platform === 'win32' && desktopExecutable) {
     command = [desktopExecutable]
   } else if (process.platform === 'linux' && appImage) {
@@ -302,6 +306,13 @@ interface AppliedRuntimeDiscovery {
   record: ElectronRuntimeDiscovery
 }
 
+function runtimeDiscoveryError(
+  code: RuntimeDiscoveryErrorCode,
+  params?: RuntimeDiscoveryErrorParams,
+): string {
+  return i18n.t(`cli.runtimeDiscovery.error.${code}`, params)
+}
+
 function applyRuntimeDiscovery(args: CliArgs): AppliedRuntimeDiscovery | undefined {
   if (args.explicitUrl && !args.url) {
     throw new Error('--url requires a non-empty server URL')
@@ -321,7 +332,7 @@ function applyRuntimeDiscovery(args: CliArgs): AppliedRuntimeDiscovery | undefin
     return { path: result.path, record: result.record }
   }
   if (result.status === 'incompatible' || result.status === 'invalid') {
-    throw new Error(result.reason)
+    throw new Error(runtimeDiscoveryError(result.errorCode, result.errorParams))
   }
   return undefined
 }

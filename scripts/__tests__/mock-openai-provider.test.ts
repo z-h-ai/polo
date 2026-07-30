@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -79,5 +86,32 @@ describe('artifact E2E mock provider', () => {
     expect(body).toContain('artifact run completed')
     expect(body).toContain('data: [DONE]')
     expect(readFileSync(log, 'utf8')).toContain('"sawHello":true')
+  })
+
+  it('rejects a final-component symlink without modifying its outside target', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'polo mock provider symlink root '))
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'polo mock provider outside '))
+    roots.push(root, outsideRoot)
+    const outsideState = join(outsideRoot, 'outside-state.json')
+    const state = join(root, 'state.json')
+    const log = join(root, 'requests.jsonl')
+    writeFileSync(outsideState, 'user-owned\n')
+    symlinkSync(outsideState, state)
+
+    const child = Bun.spawn([process.execPath, 'run', fixture], {
+      env: {
+        POLO_AI_ARTIFACT_E2E_FIXTURE: '1',
+        POLO_AI_ARTIFACT_E2E_ROOT: root,
+        POLO_AI_E2E_MOCK_STATE: state,
+        POLO_AI_E2E_MOCK_LOG: log,
+        POLO_AI_E2E_MOCK_TOKEN: 'polo-artifact-e2e-token-for-symlink-test',
+      },
+      stdout: 'ignore',
+      stderr: 'pipe',
+    })
+    processes.push(child)
+
+    expect(await child.exited).not.toBe(0)
+    expect(readFileSync(outsideState, 'utf8')).toBe('user-owned\n')
   })
 })

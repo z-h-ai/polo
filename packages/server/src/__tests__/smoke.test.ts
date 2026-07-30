@@ -32,6 +32,7 @@ interface SpawnTestServerOptions {
   extraEnv?: Record<string, string>
   command?: string[]
   startupTimeoutMs?: number
+  startupReadyStderr?: string
   traceFile?: string
 }
 
@@ -122,6 +123,10 @@ async function spawnTestServer(options: SpawnTestServerOptions = {}): Promise<Sp
   let url = ''
   let cleaned = false
   let cleanupPromise: Promise<number> | null = null
+  let resolveStartupReady!: () => void
+  const startupReadyPromise = new Promise<void>((resolve) => {
+    resolveStartupReady = resolve
+  })
 
   const stderrPump = (async () => {
     const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader()
@@ -130,6 +135,12 @@ async function spawnTestServer(options: SpawnTestServerOptions = {}): Promise<Sp
       const { done, value } = await reader.read()
       if (done) break
       stderr += decoder.decode(value, { stream: true })
+      if (
+        options.startupReadyStderr
+        && stderr.includes(options.startupReadyStderr)
+      ) {
+        resolveStartupReady()
+      }
     }
     stderr += decoder.decode()
   })()
@@ -216,11 +227,6 @@ async function spawnTestServer(options: SpawnTestServerOptions = {}): Promise<Sp
 
   const startupTimeoutMs = options.startupTimeoutMs ?? STARTUP_TIMEOUT
   let timer: ReturnType<typeof setTimeout> | undefined
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`Server did not start within ${startupTimeoutMs}ms`))
-    }, startupTimeoutMs)
-  })
   const earlyExitPromise = proc.exited.then((exitCode) => {
     if (!url) {
       throw new Error(`Server exited before printing POLO_AI_SERVER_URL (exit=${exitCode})`)
@@ -229,6 +235,22 @@ async function spawnTestServer(options: SpawnTestServerOptions = {}): Promise<Sp
   })
 
   try {
+    if (options.startupReadyStderr) {
+      await Promise.race([
+        startupReadyPromise,
+        earlyExitPromise,
+        Bun.sleep(STARTUP_TIMEOUT).then(() => {
+          throw new Error(
+            `Server did not publish startup marker within ${STARTUP_TIMEOUT}ms`,
+          )
+        }),
+      ])
+    }
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Server did not start within ${startupTimeoutMs}ms`))
+      }, startupTimeoutMs)
+    })
     await Promise.race([urlPromise, timeoutPromise, earlyExitPromise])
     if (timer) clearTimeout(timer)
   } catch (error) {
@@ -314,8 +336,8 @@ describe('headless server smoke test', () => {
 
   it('cleans a server that times out before publishing its URL', async () => {
     const stallScript = [
-      'console.error("smoke-stall-marker")',
       'process.on("SIGTERM", () => process.exit(0))',
+      'console.error("smoke-stall-marker")',
       'setInterval(() => {}, 1000)',
     ].join(';')
 
@@ -323,6 +345,10 @@ describe('headless server smoke test', () => {
       spawnTestServer({
         command: [process.execPath, '-e', stallScript],
         startupTimeoutMs: 100,
+        // Start the intentionally short timeout only after the child confirms
+        // its signal handler is installed. A busy full-suite runner can take
+        // longer than 100 ms merely to schedule a freshly spawned process.
+        startupReadyStderr: 'smoke-stall-marker',
       }),
     ).rejects.toThrow(/did not start.*finalExit=0.*smoke-stall-marker/i)
   }, TEST_TIMEOUT)

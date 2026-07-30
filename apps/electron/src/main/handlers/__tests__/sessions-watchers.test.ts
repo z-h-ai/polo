@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { randomUUID } from 'crypto'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -13,9 +14,26 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function triggerUntil(
+  trigger: () => void,
+  predicate: () => boolean,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  let attempt = 0
+  while (!predicate() && Date.now() < deadline) {
+    trigger()
+    attempt += 1
+    await wait(150)
+  }
+  expect(predicate(), `watch event missing after ${attempt} file updates`).toBe(true)
+}
+
 describe('sessions file watchers', () => {
   const handlers = new Map<string, HandlerFn>()
   const pushed: Array<{ channel: string; target: any; args: any[] }> = []
+  const clientA = `sessions-watchers-a-${randomUUID()}`
+  const clientB = `sessions-watchers-b-${randomUUID()}`
 
   let tempRoot = ''
   let sessionDirA = ''
@@ -84,8 +102,8 @@ describe('sessions file watchers', () => {
   })
 
   afterEach(() => {
-    cleanupSessionFileWatchForClient('client-a')
-    cleanupSessionFileWatchForClient('client-b')
+    cleanupSessionFileWatchForClient(clientA)
+    cleanupSessionFileWatchForClient(clientB)
     if (tempRoot) {
       rmSync(tempRoot, { recursive: true, force: true })
     }
@@ -97,29 +115,44 @@ describe('sessions file watchers', () => {
     expect(watch).toBeTruthy()
     expect(unwatch).toBeTruthy()
 
-    await watch!({ clientId: 'client-a' }, 'session-a')
-    await watch!({ clientId: 'client-b' }, 'session-b')
+    await watch!({ clientId: clientA }, 'session-a')
+    await watch!({ clientId: clientB }, 'session-b')
     await wait(50)
 
-    writeFileSync(join(sessionDirA, 'a.txt'), `a-${Date.now()}`)
-    writeFileSync(join(sessionDirB, 'b.txt'), `b-${Date.now()}`)
-    await wait(300)
+    await triggerUntil(
+      () => {
+        writeFileSync(join(sessionDirA, 'a.txt'), `a-${Date.now()}`)
+        writeFileSync(join(sessionDirB, 'b.txt'), `b-${Date.now()}`)
+      },
+      () => (
+        pushed.some((evt) => evt.target?.clientId === clientA)
+        && pushed.some((evt) => evt.target?.clientId === clientB)
+      ),
+    )
 
-    const aEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-a')
-    const bEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-b')
+    const aEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === clientA)
+    const bEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === clientB)
 
     expect(aEvents.some((evt) => evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED && evt.args[0] === 'session-a')).toBe(true)
     expect(bEvents.some((evt) => evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED && evt.args[0] === 'session-b')).toBe(true)
 
     pushed.length = 0
-    await unwatch!({ clientId: 'client-a' })
+    await unwatch!({ clientId: clientA })
 
-    writeFileSync(join(sessionDirA, 'a.txt'), `a2-${Date.now()}`)
-    writeFileSync(join(sessionDirB, 'b.txt'), `b2-${Date.now()}`)
-    await wait(300)
+    await triggerUntil(
+      () => {
+        writeFileSync(join(sessionDirA, 'a.txt'), `a2-${Date.now()}`)
+        writeFileSync(join(sessionDirB, 'b.txt'), `b2-${Date.now()}`)
+      },
+      () => pushed.some((evt) => (
+        evt.target?.clientId === clientB
+        && evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED
+        && evt.args[0] === 'session-b'
+      )),
+    )
 
-    const aEventsAfter = pushed.filter((evt) => evt.target?.clientId === 'client-a')
-    const bEventsAfter = pushed.filter((evt) => evt.target?.clientId === 'client-b')
+    const aEventsAfter = pushed.filter((evt) => evt.target?.clientId === clientA)
+    const bEventsAfter = pushed.filter((evt) => evt.target?.clientId === clientB)
 
     expect(aEventsAfter.length).toBe(0)
     expect(bEventsAfter.some((evt) => evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED && evt.args[0] === 'session-b')).toBe(true)
@@ -129,10 +162,10 @@ describe('sessions file watchers', () => {
     const watch = handlers.get(RPC_CHANNELS.sessions.WATCH_FILES)
     expect(watch).toBeTruthy()
 
-    await watch!({ clientId: 'client-a' }, 'session-a')
+    await watch!({ clientId: clientA }, 'session-a')
     await wait(50)
 
-    cleanupSessionFileWatchForClient('client-a')
+    cleanupSessionFileWatchForClient(clientA)
     pushed.length = 0
 
     writeFileSync(join(sessionDirA, 'after-cleanup.txt'), `x-${Date.now()}`)

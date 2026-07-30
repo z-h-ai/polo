@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { $ } from 'bun'
+import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   copyFileSync,
@@ -20,6 +21,9 @@ import {
   copySDK,
   copySessionServer,
   downloadBun,
+  downloadUv,
+  getPlatformKey,
+  verifyUvBinaryArchitecture,
   verifySDKCopy,
   type Arch,
   type BuildConfig,
@@ -32,6 +36,7 @@ export interface PreparePlatformRuntimeOptions {
   rootDir: string
   electronDir: string
   bunSource?: string
+  uvSource?: string
 }
 
 function sdkPackageName(platform: Platform, arch: Arch): string {
@@ -89,6 +94,47 @@ async function stageBun(
   if (config.platform !== 'win32') chmodSync(destination, 0o755)
 }
 
+export async function stageUvRuntime(
+  config: BuildConfig,
+  uvSource?: string,
+): Promise<string> {
+  const binaryName = config.platform === 'win32' ? 'uv.exe' : 'uv'
+  const destination = join(
+    config.electronDir,
+    'resources',
+    'bin',
+    getPlatformKey(config.platform, config.arch),
+    binaryName,
+  )
+  if (uvSource) {
+    if (!existsSync(uvSource)) {
+      throw new Error(`uv fixture/source does not exist: ${uvSource}`)
+    }
+    mkdirSync(dirname(destination), { recursive: true })
+    copyFileSync(uvSource, destination)
+    if (config.platform !== 'win32') chmodSync(destination, 0o755)
+  } else {
+    await downloadUv(config)
+  }
+  verifyUvBinaryArchitecture(destination, config.platform, config.arch)
+
+  if (
+    !uvSource
+    && config.platform === process.platform
+    && config.arch === process.arch
+  ) {
+    const output = execFileSync(destination, ['--version'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 64 * 1024,
+    }).trim()
+    if (!/^uv \d+\.\d+\.\d+/.test(output)) {
+      throw new Error(`Unexpected uv version output: ${output}`)
+    }
+  }
+  return destination
+}
+
 export async function preparePlatformRuntime(
   options: PreparePlatformRuntimeOptions,
 ): Promise<void> {
@@ -104,6 +150,7 @@ export async function preparePlatformRuntime(
 
   await ensureSdkBinaryPackage(options)
   await stageBun(config, options.bunSource)
+  const uvPath = await stageUvRuntime(config, options.uvSource)
   copySDK(config)
   verifySDKCopy(config)
   copyRipgrep(config)
@@ -112,6 +159,7 @@ export async function preparePlatformRuntime(
   const bunName = options.platform === 'win32' ? 'bun.exe' : 'bun'
   const required = [
     join(config.electronDir, 'vendor', 'bun', bunName),
+    uvPath,
     join(config.electronDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk'),
     join(config.electronDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-binary'),
     join(config.electronDir, 'node_modules', '@vscode', 'ripgrep'),
@@ -123,7 +171,7 @@ export async function preparePlatformRuntime(
 }
 
 export function stagePlatformRuntimeHelpers(
-  options: Omit<PreparePlatformRuntimeOptions, 'bunSource'>,
+  options: Omit<PreparePlatformRuntimeOptions, 'bunSource' | 'uvSource'>,
 ): void {
   const config: BuildConfig = {
     platform: options.platform,

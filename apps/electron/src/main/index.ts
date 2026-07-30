@@ -236,7 +236,7 @@ if (poloCliArgIndex >= 0) {
   const bun = process.env.POLO_AI_BUN
   const entry = process.env.POLO_AI_CLI_ENTRY
   if (!bun || !entry || !existsSync(bun) || !existsSync(entry)) {
-    process.stderr.write('Error: Polo terminal files are missing. Reinstall Polo.\n')
+    process.stderr.write(`Error: ${i18n.t('cli.terminalFilesMissing')}\n`)
     process.exit(1)
   }
   const result = spawnSync(bun, ['run', entry, ...process.argv.slice(poloCliArgIndex + 1)], {

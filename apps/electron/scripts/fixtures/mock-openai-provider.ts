@@ -1,6 +1,14 @@
 #!/usr/bin/env bun
 
-import { appendFileSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  realpathSync,
+  writeSync,
+} from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 function requireFixturePath(name: string, fixtureRoot: string): string {
@@ -12,7 +20,31 @@ function requireFixturePath(name: string, fixtureRoot: string): string {
   if (rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`${name} must stay inside POLO_AI_ARTIFACT_E2E_ROOT`)
   }
+  try {
+    if (lstatSync(canonical).isSymbolicLink()) {
+      throw new Error(`${name} must not be a symbolic link`)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
   return canonical
+}
+
+function writeFixtureFile(path: string, data: string, append = false): void {
+  const noFollow = 'O_NOFOLLOW' in constants ? constants.O_NOFOLLOW : 0
+  const flags = constants.O_WRONLY
+    | constants.O_CREAT
+    | (append ? constants.O_APPEND : constants.O_TRUNC)
+    | noFollow
+  const descriptor = openSync(path, flags, 0o600)
+  try {
+    if (!fstatSync(descriptor).isFile()) {
+      throw new Error(`Fixture output must be a regular file: ${path}`)
+    }
+    writeSync(descriptor, data)
+  } finally {
+    closeSync(descriptor)
+  }
 }
 
 if (process.env.POLO_AI_ARTIFACT_E2E_FIXTURE !== '1') {
@@ -57,13 +89,13 @@ const server = Bun.serve({
     if (!prompt.includes('hello')) {
       return Response.json({ error: { message: 'fixture expected hello prompt' } }, { status: 400 })
     }
-    appendFileSync(logPath, JSON.stringify({
+    writeFixtureFile(logPath, JSON.stringify({
       at: new Date().toISOString(),
       path: url.pathname,
       model: body.model,
       stream: body.stream === true,
       sawHello: true,
-    }) + '\n')
+    }) + '\n', true)
 
     const response = {
       id: 'chatcmpl-polo-artifact-e2e',
@@ -123,13 +155,13 @@ const server = Bun.serve({
   },
 })
 
-writeFileSync(statePath, JSON.stringify({
+writeFixtureFile(statePath, JSON.stringify({
   schemaVersion: 1,
   pid: process.pid,
   host: '127.0.0.1',
   port: server.port,
   baseUrl: `http://127.0.0.1:${server.port}/v1`,
-}) + '\n', { mode: 0o600 })
+}) + '\n')
 
 const stop = () => {
   server.stop(true)

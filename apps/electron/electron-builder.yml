@@ -57,7 +57,9 @@ files:
   - resources/bin/darwin-arm64/**/*
   - resources/bin/darwin-x64/**/*
   - resources/bin/win32-x64/**/*
+  - resources/bin/win32-arm64/**/*
   - resources/bin/linux-x64/**/*
+  - resources/bin/linux-arm64/**/*
   # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
   # Bun is copied to Resources/vendor below so terminal launchers can resolve

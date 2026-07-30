@@ -7,14 +7,18 @@ RELEASE_DIR="$ELECTRON_DIR/release"
 ARCH="$(uname -m)"
 MODE="${POLO_AI_ARTIFACT_VALIDATION_MODE:-smoke}"
 PREVIOUS_ARTIFACT="${POLO_AI_PREVIOUS_ARTIFACT:-}"
+PREVIOUS_INSTALL_SCRIPT="${POLO_AI_PREVIOUS_INSTALL_SCRIPT:-}"
 INSTALL_SCRIPT="${POLO_AI_INSTALL_SCRIPT:-$ELECTRON_DIR/../../scripts/install-app.sh}"
 UNINSTALL_SCRIPT="${POLO_AI_UNINSTALL_SCRIPT:-$ELECTRON_DIR/../../scripts/uninstall-app.sh}"
 HOST_BUN="$(command -v bun || true)"
+SYSTEM_NAME="$(uname -s)"
 CURRENT_ARTIFACT=""
 CURRENT_VERSION=""
 PREVIOUS_VERSION=""
 VALIDATED_VERSION=""
 MOCK_PID=""
+MAC_LAUNCH_ENV_CONFIGURED=false
+MAC_INSTALLED_APP=""
 
 case "$ARCH" in
   arm64|aarch64) ARCH="arm64" ;;
@@ -46,6 +50,10 @@ if [ "$MODE" = "full" ]; then
       exit 1
     fi
   done
+  if [ -z "$PREVIOUS_INSTALL_SCRIPT" ] || [ ! -f "$PREVIOUS_INSTALL_SCRIPT" ]; then
+    echo "Full Unix validation requires POLO_AI_PREVIOUS_INSTALL_SCRIPT from the fixed previous release tag" >&2
+    exit 1
+  fi
 fi
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/polo-final-artifact.XXXXXX")"
@@ -55,6 +63,12 @@ APP_ROOTS=()
 CURRENT_RESOURCE_ROOTS=()
 cleanup() {
   local mount_point
+  if [ "$MAC_LAUNCH_ENV_CONFIGURED" = "true" ]; then
+    launchctl unsetenv POLO_AI_RUNTIME_DISCOVERY_FILE 2>/dev/null || true
+  fi
+  if [ -n "$MAC_INSTALLED_APP" ]; then
+    rm -rf "$MAC_INSTALLED_APP"
+  fi
   if [ -n "$MOCK_PID" ]; then
     kill "$MOCK_PID" 2>/dev/null || true
     wait "$MOCK_PID" 2>/dev/null || true
@@ -76,9 +90,17 @@ validate_app_bundle() {
   local wrapper="$app_root/resources/bin/polo"
   local manifest="$app_root/dist/cli/artifact-manifest.json"
   local cli_package="$app_root/dist/cli/package.json"
+  local platform_key
+  case "$SYSTEM_NAME" in
+    Darwin) platform_key="darwin-$ARCH" ;;
+    Linux) platform_key="linux-$ARCH" ;;
+    *) echo "Unsupported current artifact platform: $SYSTEM_NAME" >&2; return 1 ;;
+  esac
+  local uv="$app_root/resources/bin/$platform_key/uv"
 
   for required in \
     "$bun" \
+    "$uv" \
     "$wrapper" \
     "$app_root/dist/cli/polo-cli.js" \
     "$app_root/dist/server/polo-server.js" \
@@ -89,6 +111,13 @@ validate_app_bundle() {
       return 1
     fi
   done
+  if [ ! -x "$uv" ]; then
+    echo "$label uv runtime is not executable: $uv" >&2
+    return 1
+  fi
+  local uv_version
+  uv_version="$(cd "$TEMP_ROOT/clean-cwd" && "$uv" --version)"
+  printf '%s\n' "$uv_version" | grep -E '^uv [0-9]+\.[0-9]+\.[0-9]+' >/dev/null
   if [ "$require_run_helpers" = "true" ]; then
     for required in \
       "$app_root/resources/pi-agent-server/index.js" \
@@ -154,6 +183,56 @@ validate_app_bundle() {
     echo "✓ $label final-container CLI smoke passed ($expected_version)"
   fi
   VALIDATED_VERSION="$expected_version"
+}
+
+validate_legacy_app_bundle() {
+  local label="$1"
+  local resources_root="$2"
+  local app_root="$resources_root/app"
+  local package_json="$app_root/package.json"
+  local legacy_wrapper="$app_root/resources/bin/polo-ai"
+
+  if [ -z "$HOST_BUN" ] || [ ! -x "$HOST_BUN" ]; then
+    echo "Legacy artifact preflight requires the build runner's Bun" >&2
+    return 1
+  fi
+  for required in \
+    "$package_json" \
+    "$app_root/dist/main.cjs" \
+    "$legacy_wrapper"; do
+    if [ ! -e "$required" ]; then
+      echo "$label is not a supported pre-POO-14 Electron layout: $required" >&2
+      return 1
+    fi
+  done
+  if [ -e "$app_root/dist/cli/artifact-manifest.json" ]; then
+    echo "$label unexpectedly contains the current POO-14 artifact manifest" >&2
+    return 1
+  fi
+  case "$SYSTEM_NAME" in
+    Darwin)
+      test -x "$resources_root/../MacOS/Polo AI" || {
+        echo "$label does not contain the legacy macOS executable" >&2
+        return 1
+      }
+      ;;
+    Linux)
+      test -x "$resources_root/../AppRun" || {
+        echo "$label does not contain the legacy AppImage entrypoint" >&2
+        return 1
+      }
+      ;;
+  esac
+
+  local platform
+  [ "$SYSTEM_NAME" = "Darwin" ] && platform="darwin" || platform="linux"
+  VALIDATED_VERSION="$(
+    cd "$TEMP_ROOT/clean-cwd"
+    "$HOST_BUN" run "$ELECTRON_DIR/../../scripts/validate-legacy-electron-layout.ts" \
+      --app-root "$app_root" \
+      --platform "$platform"
+  )"
+  echo "✓ $label legacy container contract passed ($VALIDATED_VERSION)"
 }
 
 validate_macos() {
@@ -227,11 +306,9 @@ preflight_previous_artifact() {
       *) echo "macOS full validation requires a previous ZIP artifact" >&2; return 1 ;;
     esac
     ditto -x -k "$PREVIOUS_ARTIFACT" "$previous_root"
-    validate_app_bundle \
+    validate_legacy_app_bundle \
       "previous ZIP preflight" \
-      "$previous_root/Polo AI.app/Contents/Resources" \
-      false \
-      false
+      "$previous_root/Polo AI.app/Contents/Resources"
   else
     case "$PREVIOUS_ARTIFACT" in
       *.AppImage) ;;
@@ -244,11 +321,9 @@ preflight_previous_artifact() {
       cd "$previous_root"
       "$previous_copy" --appimage-extract >/dev/null
     )
-    validate_app_bundle \
+    validate_legacy_app_bundle \
       "previous AppImage preflight" \
-      "$previous_root/squashfs-root/resources" \
-      false \
-      false
+      "$previous_root/squashfs-root/resources"
   fi
 
   PREVIOUS_VERSION="$VALIDATED_VERSION"
@@ -272,6 +347,87 @@ read_installed_version() {
   "$resources_root/vendor/bun/bun" -e \
     'process.stdout.write(JSON.parse(await Bun.file(process.argv[1]).text()).version)' \
     "$resources_root/app/dist/cli/package.json"
+}
+
+read_installed_legacy_version() {
+  local resources_root="$1"
+  "$HOST_BUN" -e \
+    'process.stdout.write(JSON.parse(await Bun.file(process.argv[1]).text()).version)' \
+    "$resources_root/app/package.json"
+}
+
+read_installed_legacy_version_from_appimage() {
+  local appimage="$1"
+  local extract_root="$TEMP_ROOT/installed-legacy-appimage"
+  rm -rf "$extract_root"
+  mkdir -p "$extract_root"
+  (
+    cd "$extract_root"
+    "$appimage" --appimage-extract >/dev/null
+  )
+  read_installed_legacy_version "$extract_root/squashfs-root/resources"
+}
+
+run_previous_release_installer() {
+  local test_home="$1"
+  local artifact="$2"
+  local shim_dir="$TEMP_ROOT/legacy installer shim"
+  local manifest="$shim_dir/manifest.yml"
+  local curl_shim="$shim_dir/curl"
+  local host_arch
+  local checksum
+  local filename
+
+  case "$(uname -m)" in
+    arm64|aarch64) host_arch="arm64" ;;
+    x86_64|amd64) host_arch="x64" ;;
+    *) echo "Unsupported legacy installer host architecture" >&2; return 1 ;;
+  esac
+  if [ "$SYSTEM_NAME" = "Darwin" ]; then
+    checksum="$(shasum -a 512 "$artifact" | cut -d' ' -f1 | xxd -r -p | base64)"
+  else
+    checksum="$(sha512sum "$artifact" | cut -d' ' -f1 | xxd -r -p | base64 | tr -d '\n')"
+  fi
+  filename="$(basename "$artifact")"
+
+  mkdir -p "$shim_dir"
+  cat > "$manifest" <<EOF
+version: $PREVIOUS_VERSION
+files:
+  - url: $filename
+    sha512: $checksum
+    arch: $host_arch
+EOF
+  cat > "$curl_shim" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+output=""
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) output="$2"; shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+if [[ "$url" == *.yml ]]; then
+  if [ -n "$output" ]; then
+    cp "$POLO_AI_LEGACY_MANIFEST" "$output"
+  else
+    cat "$POLO_AI_LEGACY_MANIFEST"
+  fi
+else
+  test -n "$output"
+  cp "$POLO_AI_LEGACY_ARTIFACT" "$output"
+fi
+EOF
+  chmod +x "$curl_shim"
+
+  HOME="$test_home" \
+    PATH="$shim_dir:/usr/bin:/bin:/usr/sbin:/sbin" \
+    POLO_AI_LEGACY_MANIFEST="$manifest" \
+    POLO_AI_LEGACY_ARTIFACT="$artifact" \
+    bash "$PREVIOUS_INSTALL_SCRIPT"
 }
 
 wait_for_discovery() {
@@ -427,30 +583,27 @@ test_macos_command_conflict() {
 
 run_macos_full_e2e() {
   local test_home="$TEMP_ROOT/用户 home"
-  local install_root="$TEMP_ROOT/Applications with spaces"
+  local install_root="/Applications"
   local installed_app="$install_root/Polo AI.app"
   local executable="$installed_app/Contents/MacOS/Polo AI"
   local resources_root="$installed_app/Contents/Resources"
   local launcher="$test_home/.local/bin/polo"
   local runtime_file="$test_home/.polo-ai/runtime/electron.json"
-  local previous_install="$TEMP_ROOT/install-previous.zip"
   local current_install="$TEMP_ROOT/install-current.zip"
   mkdir -p "$test_home" "$install_root" "$TEMP_ROOT/tmp"
-  cp "$PREVIOUS_ARTIFACT" "$previous_install"
   cp "$CURRENT_ARTIFACT" "$current_install"
+  if [ -e "$installed_app" ]; then
+    echo "macOS full E2E requires a clean runner without $installed_app" >&2
+    return 1
+  fi
+  MAC_INSTALLED_APP="$installed_app"
 
-  HOME="$test_home" SHELL=/bin/zsh \
-    POLO_AI_INSTALL_ARTIFACT="$previous_install" \
-    POLO_AI_INSTALL_DIR="$install_root" \
-    bash "$INSTALL_SCRIPT"
+  run_previous_release_installer "$test_home" "$PREVIOUS_ARTIFACT"
   local previous_version
-  previous_version=$(read_installed_version "$resources_root")
+  previous_version=$(read_installed_legacy_version "$resources_root")
   test "$previous_version" = "$PREVIOUS_VERSION"
-
-  HOME="$test_home" SHELL=/bin/zsh POLO_AI_TERMINAL_HOME="$test_home" \
-    "$executable" --polo-terminal-integration install >/dev/null
-  run_fresh_shell /bin/zsh "$test_home" \
-    "test \"\$(command -v polo)\" = '$launcher' && test \"\$(polo --version)\" = '$previous_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
+  test -x "$resources_root/app/resources/bin/polo-ai"
+  test ! -e "$launcher"
   HOME="$test_home" SHELL=/bin/zsh \
     POLO_AI_INSTALL_ARTIFACT="$current_install" \
     POLO_AI_INSTALL_DIR="$install_root" \
@@ -461,7 +614,7 @@ run_macos_full_e2e() {
   test "$current_version" = "$CURRENT_VERSION"
 
   HOME="$test_home" SHELL=/bin/zsh POLO_AI_TERMINAL_HOME="$test_home" \
-    "$executable" --polo-terminal-integration repair >/dev/null
+    "$executable" --polo-terminal-integration install >/dev/null
   test "$(readlink "$launcher")" = \
     "$resources_root/app/resources/bin/polo"
   run_fresh_shell /bin/zsh "$test_home" \
@@ -469,16 +622,29 @@ run_macos_full_e2e() {
   run_packaged_headless_lifecycle /bin/zsh "$test_home"
   test_macos_command_conflict "$installed_app"
 
-  run_fresh_shell /bin/zsh "$test_home" \
-    "POLO_AI_E2E_DIRECT_APP=1 POLO_AI_RUNTIME_DISCOVERY_FILE='$runtime_file' polo app"
+  launchctl setenv POLO_AI_RUNTIME_DISCOVERY_FILE "$runtime_file"
+  MAC_LAUNCH_ENV_CONFIGURED=true
+  run_fresh_shell /bin/zsh "$test_home" "polo app"
   wait_for_discovery "$runtime_file"
+  local initial_app_pid
+  initial_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$runtime_file" | head -1)
+  test -n "$initial_app_pid"
+  run_fresh_shell /bin/zsh "$test_home" "polo app"
+  sleep 2
+  local focused_app_pid
+  focused_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$runtime_file" | head -1)
+  test "$focused_app_pid" = "$initial_app_pid"
+  kill -0 "$focused_app_pid"
   run_fresh_shell /bin/zsh "$test_home" \
     "POLO_AI_RUNTIME_DISCOVERY_FILE='$runtime_file' polo sessions >/dev/null"
   stop_discovered_app "$runtime_file"
+  launchctl unsetenv POLO_AI_RUNTIME_DISCOVERY_FILE
+  MAC_LAUNCH_ENV_CONFIGURED=false
 
   HOME="$test_home" SHELL=/bin/zsh POLO_AI_TERMINAL_HOME="$test_home" \
     "$executable" --polo-terminal-integration uninstall >/dev/null
   rm -rf "$installed_app"
+  MAC_INSTALLED_APP=""
   if [ -e "$launcher" ] \
     || grep -R -F '# >>> Polo CLI >>>' \
       "$test_home/.zprofile" "$test_home/.bash_profile" \
@@ -515,10 +681,8 @@ run_linux_full_e2e() {
   local launcher="$test_home/.local/bin/polo"
   local installed_app="$test_home/.polo-ai/app/Polo-AI-x64.AppImage"
   local runtime_file="$test_home/.polo-ai/runtime/electron.json"
-  local previous_install="$TEMP_ROOT/install-previous.AppImage"
   local current_install="$TEMP_ROOT/install-current.AppImage"
   mkdir -p "$test_home" "$TEMP_ROOT/tmp"
-  cp "$PREVIOUS_ARTIFACT" "$previous_install"
   cp "$current_artifact" "$current_install"
   if [ -z "${DISPLAY:-}" ]; then
     echo "Linux full E2E requires a runner-provided DISPLAY (use xvfb-run -a)" >&2
@@ -532,14 +696,12 @@ run_linux_full_e2e() {
   run_fresh_shell /bin/bash "$test_home" \
     "test \"\$DISPLAY\" = '$expected_display'"
 
-  HOME="$test_home" SHELL=/bin/bash \
-    POLO_AI_INSTALL_ARTIFACT="$previous_install" \
-    bash "$INSTALL_SCRIPT"
+  run_previous_release_installer "$test_home" "$PREVIOUS_ARTIFACT"
   local previous_version
-  previous_version=$(HOME="$test_home" "$launcher" --version)
+  previous_version=$(read_installed_legacy_version_from_appimage "$test_home/.polo-ai/app/Polo-AI-x64.AppImage")
   test "$previous_version" = "$PREVIOUS_VERSION"
-  run_fresh_shell /bin/bash "$test_home" \
-    "test \"\$(command -v polo)\" = '$launcher' && test \"\$(polo --version)\" = '$previous_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
+  test ! -e "$launcher"
+  test -x "$test_home/.local/bin/polo-ai"
   HOME="$test_home" SHELL=/bin/bash \
     POLO_AI_INSTALL_ARTIFACT="$current_install" \
     bash "$INSTALL_SCRIPT"
@@ -548,7 +710,7 @@ run_linux_full_e2e() {
   assert_versions_differ "$previous_version" "$current_version"
   test "$current_version" = "$CURRENT_VERSION"
   run_fresh_shell /bin/bash "$test_home" \
-    "test \"\$(polo --version)\" = '$current_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
+    "test \"\$(polo --version)\" = '$current_version' && test \"\$(polo-ai --version 2>/dev/null)\" = '$current_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
   run_packaged_headless_lifecycle /bin/bash "$test_home"
   test_linux_command_conflict "$current_artifact"
 
@@ -570,7 +732,6 @@ run_linux_full_e2e() {
   echo "✓ Linux real install/AppImage/discovery/cross-version upgrade/uninstall E2E passed"
 }
 
-SYSTEM_NAME="$(uname -s)"
 case "$SYSTEM_NAME" in
   Darwin) validate_macos ;;
   Linux) validate_linux ;;

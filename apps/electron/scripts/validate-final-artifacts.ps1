@@ -64,6 +64,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $metadataPath = Join-Path $appRoot "dist\cli\package.json"
     $cliPath = Join-Path $appRoot "dist\cli\polo-cli.js"
     $serverPath = Join-Path $appRoot "dist\server\polo-server.js"
+    $uvPath = Join-Path $appRoot "resources\bin\win32-$Arch\uv.exe"
     $piServerPath = Join-Path $appRoot "resources\pi-agent-server\index.js"
     $sessionServerPath = Join-Path $appRoot "resources\session-mcp-server\index.js"
 
@@ -74,10 +75,15 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
         $metadataPath,
         $cliPath,
         $serverPath
+        $uvPath
     )) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Installed NSIS container is missing $required"
         }
+    }
+    $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $uvOutput -notmatch '^uv \d+\.\d+\.\d+') {
+        throw "Installed NSIS uv runtime smoke failed: $uvOutput"
     }
     if ($RequireRunHelpers) {
         foreach ($required in @($piServerPath, $sessionServerPath)) {
@@ -285,16 +291,11 @@ function Expand-SevenZipArchive([string]$Archive, [string]$Destination) {
     }
 }
 
-function Get-NsisArtifactVersion([string]$Artifact, [string]$Label) {
+function Expand-NsisPayload([string]$Artifact, [string]$Label) {
     $extractRoot = Join-Path $testRoot "preflight-$Label"
     Expand-SevenZipArchive $Artifact $extractRoot
 
     for ($depth = 0; $depth -lt 2; $depth++) {
-        $metadata = Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
-            -Filter "package.json" -ErrorAction SilentlyContinue | Where-Object {
-                $_.FullName -match '[\\/]dist[\\/]cli[\\/]package\.json$'
-            } | Select-Object -First 1
-        if ($metadata) { break }
         $nested = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
             -Filter "*.7z" -ErrorAction SilentlyContinue)
         foreach ($archive in $nested) {
@@ -304,6 +305,15 @@ function Get-NsisArtifactVersion([string]$Artifact, [string]$Label) {
             }
         }
     }
+    return $extractRoot
+}
+
+function Get-CurrentNsisArtifactVersion([string]$Artifact, [string]$Label) {
+    $extractRoot = Expand-NsisPayload $Artifact $Label
+    $metadata = Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
+        -Filter "package.json" -ErrorAction SilentlyContinue | Where-Object {
+            $_.FullName -match '[\\/]dist[\\/]cli[\\/]package\.json$'
+        } | Select-Object -First 1
     if (-not $metadata) {
         throw "$Label NSIS artifact does not contain dist\cli\package.json"
     }
@@ -344,7 +354,71 @@ function Get-NsisArtifactVersion([string]$Artifact, [string]$Label) {
             throw "$Label NSIS manifest checksum failed for $($entry.Name)"
         }
     }
+    $uvPath = Join-Path $appRoot "resources\bin\win32-$Arch\uv.exe"
+    if (-not (Test-Path -LiteralPath $uvPath -PathType Leaf)) {
+        throw "$Label NSIS artifact does not contain the packaged uv runtime"
+    }
+    $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $uvOutput -notmatch '^uv \d+\.\d+\.\d+') {
+        throw "$Label NSIS uv runtime smoke failed: $uvOutput"
+    }
     return [string]$metadataJson.version
+}
+
+function Get-LegacyNsisArtifactVersion([string]$Artifact, [string]$Label) {
+    $extractRoot = Expand-NsisPayload $Artifact "legacy-$Label"
+    $electronMetadata = $null
+    $metadataJson = $null
+    foreach ($candidate in @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
+        -Filter "package.json" -ErrorAction SilentlyContinue)) {
+        try {
+            $parsed = Get-Content -LiteralPath $candidate.FullName -Raw | ConvertFrom-Json
+            if ($parsed.name -ceq "@polo-ai/electron" -and $parsed.main -ceq "dist/main.cjs") {
+                $electronMetadata = $candidate
+                $metadataJson = $parsed
+                break
+            }
+        } catch {
+            # Ignore unrelated package metadata in the extracted installer.
+        }
+    }
+    if (-not $electronMetadata -or -not $metadataJson.version) {
+        throw "$Label NSIS artifact does not contain legacy Electron package metadata"
+    }
+    $appRoot = Split-Path -Parent $electronMetadata.FullName
+    if (-not (Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
+        -Filter "Polo AI.exe" -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        throw "$Label NSIS artifact does not contain Polo AI.exe"
+    }
+    $rootDir = Split-Path -Parent (Split-Path -Parent $ElectronDir)
+    $legacyValidator = Join-Path $rootDir "scripts\validate-legacy-electron-layout.ts"
+    $hostBun = (Get-Command bun.exe -ErrorAction Stop).Source
+    $version = (& $hostBun run $legacyValidator --app-root $appRoot --platform win32 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label NSIS legacy layout validation failed: $version"
+    }
+    Write-Host "$Label legacy NSIS container contract passed ($version)"
+    return $version
+}
+
+function Test-LegacyInstalledContainer {
+    $appRoot = Join-Path $installDir "resources\app"
+    $metadataPath = Join-Path $appRoot "package.json"
+    foreach ($required in @(
+        (Join-Path $installDir "Polo AI.exe"),
+        $metadataPath,
+        (Join-Path $appRoot "dist\main.cjs"),
+        (Join-Path $appRoot "resources\bin\polo-ai.cmd")
+    )) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Installed previous NSIS is not a supported legacy container: $required"
+        }
+    }
+    $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+    if ($metadata.name -cne "@polo-ai/electron" -or $metadata.main -cne "dist/main.cjs") {
+        throw "Installed previous NSIS Electron metadata is invalid"
+    }
+    return [string]$metadata.version
 }
 
 function Invoke-PackagedRunLifecycle {
@@ -455,23 +529,30 @@ function Test-FullLifecycle {
     $runtimeFile = Join-Path $testLocalAppData "Polo AI\runtime\electron.json"
 
     Invoke-Installer $PreviousArtifact
-    $installedPreviousVersion = Test-InstalledContainer $false
+    $installedPreviousVersion = Test-LegacyInstalledContainer
     if ($installedPreviousVersion -cne $previousVersion) {
         throw "Installed previous version differs from preflight metadata"
     }
-    Assert-ManagedPathPresent
-    if ((Invoke-FreshShell "polo --version") -cne $installedPreviousVersion) {
-        throw "Fresh shell did not resolve the previous installed Polo version"
+    $legacyLauncher = Join-Path $testLocalAppData "Polo AI\bin\polo-ai.cmd"
+    if (-not (Test-Path -LiteralPath $legacyLauncher -PathType Leaf)) {
+        throw "Previous NSIS did not install its legacy polo-ai launcher"
     }
-    Invoke-FreshShell "polo --help | findstr /C:`"Usage: polo `" >nul" | Out-Null
+    $legacyBinDir = Split-Path -Parent $legacyLauncher
+    $legacyPathMatches = @(Get-UserPathEntries | Where-Object { $_ -ieq $legacyBinDir })
+    if ($legacyPathMatches.Count -ne 1) {
+        throw "Previous NSIS did not install its legacy terminal PATH entry exactly once"
+    }
 
-    $originalLauncherContent = Get-Content -LiteralPath $launcher -Raw
-    Add-Content -LiteralPath $launcher -Value "rem user modification"
+    $originalLegacyContent = Get-Content -LiteralPath $legacyLauncher -Raw
+    Add-Content -LiteralPath $legacyLauncher -Value "rem user modification"
     Invoke-Installer
-    if ((Get-Content -LiteralPath $launcher -Raw) -notmatch "rem user modification") {
-        throw "NSIS upgrade overwrote a modified launcher"
+    if ((Get-Content -LiteralPath $legacyLauncher -Raw) -notmatch "rem user modification") {
+        throw "NSIS upgrade overwrote a modified legacy launcher"
     }
-    [IO.File]::WriteAllText($launcher, $originalLauncherContent)
+    if (Test-Path -LiteralPath $launcher) {
+        throw "NSIS upgrade installed polo despite a modified legacy ownership conflict"
+    }
+    [IO.File]::WriteAllText($legacyLauncher, $originalLegacyContent)
 
     Invoke-Installer
     $installedCurrentVersion = Test-InstalledContainer
@@ -512,10 +593,10 @@ function Test-FullLifecycle {
 
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 if ($Mode -eq "Full") {
-    $previousVersion = Get-NsisArtifactVersion $PreviousArtifact "previous"
-    $currentVersion = Get-NsisArtifactVersion $installer "current"
+    $previousVersion = Get-LegacyNsisArtifactVersion $PreviousArtifact "previous"
+    $currentVersion = Get-CurrentNsisArtifactVersion $installer "current"
     if (-not $previousVersion -or -not $currentVersion) {
-        throw "Unable to read previous/current sanitized CLI versions"
+        throw "Unable to read legacy previous/current strict versions"
     }
     if ($previousVersion -ceq $currentVersion) {
         throw "Previous artifact version must differ from current artifact ($currentVersion)"

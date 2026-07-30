@@ -70,7 +70,7 @@ describe('Electron runtime discovery', () => {
 
     const result = readElectronRuntimeDiscovery({ path })
     expect(result.status).toBe('invalid')
-    expect(result.status === 'invalid' ? result.reason : '').toContain('0700')
+    expect(result.status === 'invalid' ? result.errorCode : '').toBe('directory_permissions')
   })
 
   it('cleans a stale runtime file', () => {
@@ -109,7 +109,8 @@ describe('Electron runtime discovery', () => {
     expect(checkedProcesses[0]?.pid).toBe(process.pid)
     expect(Date.parse(checkedProcesses[0]?.startedAt ?? '')).not.toBeNaN()
     expect(result.status).toBe('stale')
-    expect(result.status === 'stale' ? result.reason : '').toContain('another user')
+    expect(result.status === 'stale' ? result.errorCode : '').toBe('process_unavailable')
+    expect(result.status === 'stale' ? result.errorParams?.pid : 0).toBe(process.pid)
   })
 
   it('rejects a live same-user PID whose creation time is newer than the runtime record', () => {

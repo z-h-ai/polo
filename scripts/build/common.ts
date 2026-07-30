@@ -11,6 +11,7 @@ import {
   copyFileSync,
   cpSync,
   lstatSync,
+  readFileSync,
   readdirSync,
 } from 'fs';
 import { join, dirname } from 'path';
@@ -87,6 +88,64 @@ export function getUvDownloadName(platform: Platform, arch: Arch): string {
   if (platform === 'win32' && arch === 'x64') return 'uv-x86_64-pc-windows-msvc.zip';
 
   throw new Error(`Unsupported uv target: ${platform}-${arch}`);
+}
+
+/**
+ * Validate an extracted uv executable without running a foreign-platform binary.
+ * The release runner subsequently executes `uv --version` for its native target.
+ */
+export function verifyUvBinaryArchitecture(
+  binaryPath: string,
+  platform: Platform,
+  arch: Arch,
+): void {
+  const bytes = readFileSync(binaryPath);
+  let machine: number;
+
+  if (platform === 'darwin') {
+    if (bytes.length < 8 || bytes.readUInt32LE(0) !== 0xfeedfacf) {
+      throw new Error(`uv binary is not a 64-bit Mach-O executable: ${binaryPath}`);
+    }
+    machine = bytes.readUInt32LE(4);
+    const expected = arch === 'arm64' ? 0x0100000c : 0x01000007;
+    if (machine !== expected) {
+      throw new Error(`uv Mach-O architecture mismatch for ${platform}-${arch}: 0x${machine.toString(16)}`);
+    }
+    return;
+  }
+
+  if (platform === 'linux') {
+    if (
+      bytes.length < 20
+      || bytes[0] !== 0x7f
+      || bytes.subarray(1, 4).toString('ascii') !== 'ELF'
+      || bytes[5] !== 1
+    ) {
+      throw new Error(`uv binary is not a little-endian ELF executable: ${binaryPath}`);
+    }
+    machine = bytes.readUInt16LE(18);
+    const expected = arch === 'arm64' ? 183 : 62;
+    if (machine !== expected) {
+      throw new Error(`uv ELF architecture mismatch for ${platform}-${arch}: ${machine}`);
+    }
+    return;
+  }
+
+  if (bytes.length < 0x40 || bytes.subarray(0, 2).toString('ascii') !== 'MZ') {
+    throw new Error(`uv binary is not a PE executable: ${binaryPath}`);
+  }
+  const peOffset = bytes.readUInt32LE(0x3c);
+  if (
+    peOffset + 6 > bytes.length
+    || bytes.subarray(peOffset, peOffset + 4).toString('binary') !== 'PE\u0000\u0000'
+  ) {
+    throw new Error(`uv binary has an invalid PE header: ${binaryPath}`);
+  }
+  machine = bytes.readUInt16LE(peOffset + 4);
+  const expected = arch === 'arm64' ? 0xaa64 : 0x8664;
+  if (machine !== expected) {
+    throw new Error(`uv PE architecture mismatch for ${platform}-${arch}: 0x${machine.toString(16)}`);
+  }
 }
 
 /**
@@ -205,6 +264,7 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
 
   // Skip when already provisioned
   if (existsSync(targetPath)) {
+    verifyUvBinaryArchitecture(targetPath, platform, arch);
     console.log(`uv already present at ${targetPath}`);
     return;
   }
@@ -261,6 +321,7 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
     if (platform !== 'win32') {
       await $`chmod +x ${targetPath}`.quiet();
     }
+    verifyUvBinaryArchitecture(targetPath, platform, arch);
 
     console.log(`  uv installed to ${targetPath} ✓`);
   } finally {

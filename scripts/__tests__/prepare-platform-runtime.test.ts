@@ -11,10 +11,31 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   preparePlatformRuntime,
+  stageUvRuntime,
   stagePlatformRuntimeHelpers,
 } from '../prepare-platform-runtime'
+import type { Arch, BuildConfig, Platform } from '../build/common'
 
 const roots: string[] = []
+
+function writeUvFixture(path: string, platform: Platform, arch: Arch): void {
+  const bytes = Buffer.alloc(256)
+  if (platform === 'darwin') {
+    bytes.writeUInt32LE(0xfeedfacf, 0)
+    bytes.writeUInt32LE(arch === 'arm64' ? 0x0100000c : 0x01000007, 4)
+  } else if (platform === 'linux') {
+    bytes[0] = 0x7f
+    bytes.write('ELF', 1, 'ascii')
+    bytes[5] = 1
+    bytes.writeUInt16LE(arch === 'arm64' ? 183 : 62, 18)
+  } else {
+    bytes.write('MZ', 0, 'ascii')
+    bytes.writeUInt32LE(0x80, 0x3c)
+    bytes.write('PE\u0000\u0000', 0x80, 'binary')
+    bytes.writeUInt16LE(arch === 'arm64' ? 0xaa64 : 0x8664, 0x84)
+  }
+  writeFileSync(path, bytes)
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
@@ -37,6 +58,7 @@ describe('preparePlatformRuntime', () => {
     const piServer = join(root, 'packages', 'pi-agent-server', 'src')
     const koffi = join(modules, 'koffi')
     const bunFixture = join(root, 'fixture bun')
+    const uvFixture = join(root, 'fixture uv')
 
     mkdirSync(sdkCore, { recursive: true })
     mkdirSync(sdkBinary, { recursive: true })
@@ -71,6 +93,7 @@ describe('preparePlatformRuntime', () => {
       writeFileSync(join(shared, file), 'export {}\n')
     }
     writeFileSync(bunFixture, '#!/bin/sh\n')
+    writeUvFixture(uvFixture, 'darwin', 'x64')
 
     expect(existsSync(join(electronDir, 'vendor'))).toBe(false)
     await preparePlatformRuntime({
@@ -79,6 +102,7 @@ describe('preparePlatformRuntime', () => {
       rootDir: root,
       electronDir,
       bunSource: bunFixture,
+      uvSource: uvFixture,
     })
     stagePlatformRuntimeHelpers({
       platform: 'darwin',
@@ -89,6 +113,7 @@ describe('preparePlatformRuntime', () => {
 
     for (const path of [
       join(electronDir, 'vendor', 'bun', 'bun'),
+      join(electronDir, 'resources', 'bin', 'darwin-x64', 'uv'),
       join(electronDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs'),
       join(electronDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-binary', 'claude'),
       join(electronDir, 'node_modules', '@vscode', 'ripgrep', 'bin', 'rg'),
@@ -98,5 +123,51 @@ describe('preparePlatformRuntime', () => {
     ]) {
       expect(existsSync(path)).toBe(true)
     }
+  })
+
+  it('stages and architecture-checks uv for every supported target', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'polo uv runtime targets '))
+    roots.push(root)
+    const targets: Array<[Platform, Arch]> = [
+      ['darwin', 'x64'],
+      ['darwin', 'arm64'],
+      ['linux', 'x64'],
+      ['linux', 'arm64'],
+      ['win32', 'x64'],
+      ['win32', 'arm64'],
+    ]
+
+    for (const [platform, arch] of targets) {
+      const electronDir = join(root, `${platform}-${arch}`)
+      const fixture = join(root, `fixture-${platform}-${arch}`)
+      writeUvFixture(fixture, platform, arch)
+      const config: BuildConfig = {
+        platform,
+        arch,
+        upload: false,
+        uploadLatest: false,
+        uploadScript: false,
+        rootDir: root,
+        electronDir,
+      }
+      const staged = await stageUvRuntime(config, fixture)
+      expect(existsSync(staged)).toBe(true)
+    }
+  })
+
+  it('rejects a uv binary for the wrong architecture', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'polo uv wrong arch '))
+    roots.push(root)
+    const fixture = join(root, 'uv')
+    writeUvFixture(fixture, 'linux', 'arm64')
+    await expect(stageUvRuntime({
+      platform: 'linux',
+      arch: 'x64',
+      upload: false,
+      uploadLatest: false,
+      uploadScript: false,
+      rootDir: root,
+      electronDir: join(root, 'electron'),
+    }, fixture)).rejects.toThrow('architecture mismatch')
   })
 })
