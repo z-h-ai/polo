@@ -14,6 +14,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Terminal packaging and upgrade safety** — Keep the macOS command attached to the current App bundle across moves and upgrades, preserve modified or user-owned Windows launchers, bound shell readiness checks, and gate releases on CLI smoke tests from final DMG, ZIP, NSIS, and AppImage containers. (POO-14) (`7a5f553`)
+- **Terminal packaging and upgrade safety** — Keep the macOS command attached to the current App bundle across moves and upgrades, preserve modified or user-owned Windows launchers, bound shell readiness checks, gate normal builds on final-container smoke tests, and run fixed-previous-version install, discovery, upgrade, and uninstall checks in the three-platform release/nightly workflow. (POO-14) (`7a5f553`, `233ada3`, `b4c14f9`)
 
 ## Breaking Changes
