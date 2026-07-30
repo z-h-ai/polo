@@ -1,6 +1,7 @@
 import {
   AdminClient,
   AdminError,
+  denyCachedAppCatalogAuthorization,
   getCachedAppCatalog,
   getSafeAdminErrorMessage,
   saveAppCatalog,
@@ -377,7 +378,9 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         let result = await client.getAppCatalog(
           tokenResult.tokens.accessToken,
           organizationId.data,
-          force ? undefined : cached?.appConfigVersion,
+          force || cached?.authorizationStatus === 'denied'
+            ? undefined
+            : cached?.appConfigVersion,
         )
         if (result.notModified && !cached) {
           result = await client.getAppCatalog(
@@ -416,8 +419,24 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
           refreshed: true,
         }
       } catch (error) {
+        const adminError = toAdminRpcError(error)
+        if (cached && isCatalogAuthorizationFailure(error)) {
+          const deniedCatalog = denyCachedAppCatalogAuthorization(
+            accountId,
+            organizationId.data,
+          )
+          if (deniedCatalog && !isAuthFailure(error)) {
+            log?.warn('[Admin] app catalog authorization denied:', adminError.message)
+            return {
+              success: true,
+              catalog: deniedCatalog,
+              source: 'cache',
+              refreshed: false,
+              warning: adminError.message,
+            }
+          }
+        }
         if (cached && !isAuthFailure(error)) {
-          const adminError = toAdminRpcError(error)
           log?.warn('[Admin] app catalog refresh failed; using cache:', adminError.message)
           return {
             success: true,
@@ -427,7 +446,6 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
             warning: adminError.message,
           }
         }
-        const adminError = toAdminRpcError(error)
         log?.warn('[Admin] app catalog sync failed:', adminError.message)
         return { success: false, ...adminError }
       }
@@ -865,6 +883,15 @@ function isAuthFailure(error: unknown): boolean {
     error.errorCode === 'INVALID_TOKEN' ||
     error.errorCode === 'TOKEN_REVOKED' ||
     error.errorCode === 'TOKEN_EXPIRED'
+  )
+}
+
+function isCatalogAuthorizationFailure(error: unknown): boolean {
+  return error instanceof AdminError && (
+    error.errorCode === 'FORBIDDEN'
+    || error.errorCode === 'ACCOUNT_DISABLED'
+    || error.errorCode === 'NOT_FOUND'
+    || error.status === 403
   )
 }
 

@@ -259,6 +259,21 @@ mock.module('@polo-ai/shared/admin', () => ({
   AdminError: TestAdminError,
   getCachedAppCatalog: (accountId: string, organizationId: string) =>
     appCatalogCache.get(`${accountId}:${organizationId}`) ?? null,
+  denyCachedAppCatalogAuthorization: (accountId: string, organizationId: string) => {
+    const key = `${accountId}:${organizationId}`
+    const cached = appCatalogCache.get(key)
+    if (!cached) return null
+    const denied = {
+      ...cached,
+      authorizationStatus: 'denied',
+      apps: cached.apps.map((app: Record<string, unknown>) => ({
+        ...app,
+        availability: 'unavailable',
+      })),
+    }
+    appCatalogCache.set(key, denied)
+    return denied
+  },
   saveAppCatalog: (
     accountId: string,
     organizationId: string,
@@ -268,6 +283,7 @@ mock.module('@polo-ai/shared/admin', () => ({
       ...catalog,
       accountId,
       organizationId,
+      authorizationStatus: 'authorized',
       syncedAt: 100,
     }
     appCatalogCache.set(`${accountId}:${organizationId}`, entry)
@@ -1425,6 +1441,58 @@ describe('registerAdminHandlers', () => {
       source: 'cache',
       refreshed: false,
       warning: 'Admin request failed',
+    })
+  })
+
+  it('marks cached apps unavailable after an explicit catalog authorization failure', async () => {
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [{
+        id: 'app-1',
+        organizationId,
+        name: 'Private app',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://private.example.com',
+        sortOrder: 1,
+        availability: 'available',
+      }],
+    })
+    adminClientBehavior.getAppCatalog = async () => {
+      throw new TestAdminError('membership removed', 'FORBIDDEN', { status: 403 })
+    }
+    const { syncAppCatalog } = createHarness()
+
+    const result = await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      { force: true },
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      source: 'cache',
+      refreshed: false,
+      catalog: {
+        authorizationStatus: 'denied',
+        apps: [{ id: 'app-1', availability: 'unavailable' }],
+      },
+    })
+    expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
+      authorizationStatus: 'denied',
+      apps: [{ availability: 'unavailable' }],
     })
   })
 

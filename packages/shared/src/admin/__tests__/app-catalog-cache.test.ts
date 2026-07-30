@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  denyCachedAppCatalogAuthorization,
   getCachedAppCatalog,
   saveAppCatalog,
 } from '../app-catalog-cache.ts'
@@ -51,6 +52,7 @@ describe('app catalog cache', () => {
     expect(getCachedAppCatalog('account-a', 'organization-1')).toMatchObject({
       accountId: 'account-a',
       organizationId: 'organization-1',
+      authorizationStatus: 'authorized',
       appConfigVersion: 'v1',
       syncedAt: 100,
     })
@@ -71,6 +73,32 @@ describe('app catalog cache', () => {
       { ...remoteApp('app-a'), availability: 'available' },
       { ...remoteApp('app-b'), availability: 'withdrawn' },
     ])
+  })
+
+  it('fails closed after explicit authorization loss and recovers only after a successful sync', () => {
+    saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'v1',
+      apps: [remoteApp('app-a')],
+    }, 100)
+
+    expect(denyCachedAppCatalogAuthorization('account-a', 'organization-1'))
+      .toMatchObject({
+        authorizationStatus: 'denied',
+        apps: [{ id: 'app-a', availability: 'unavailable' }],
+      })
+    expect(getCachedAppCatalog('account-a', 'organization-1'))
+      .toMatchObject({
+        authorizationStatus: 'denied',
+        apps: [{ id: 'app-a', availability: 'unavailable' }],
+      })
+
+    expect(saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'v2',
+      apps: [remoteApp('app-a')],
+    }, 200)).toMatchObject({
+      authorizationStatus: 'authorized',
+      apps: [{ id: 'app-a', availability: 'available' }],
+    })
   })
 
   it('ignores a damaged cache and safely starts over', () => {

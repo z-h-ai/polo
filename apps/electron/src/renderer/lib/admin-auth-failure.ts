@@ -12,6 +12,7 @@ export interface NormalizedAdminError {
 export const ADMIN_AUTH_FAILURE_EVENT = 'polo:admin-auth-failure'
 
 const ADMIN_AUTH_FAILURE_CODES = new Set([
+  'ACCOUNT_DISABLED',
   'TOKEN_REVOKED',
   'UNAUTHORIZED',
   'INVALID_TOKEN',

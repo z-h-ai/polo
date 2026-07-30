@@ -17,9 +17,10 @@ const CACHE_SCHEMA_VERSION = 1
 const AppCatalogCacheEntrySchema = AppCatalogResponseSchema.extend({
   accountId: z.string().min(1).max(512),
   organizationId: z.string().min(1).max(512),
+  authorizationStatus: z.enum(['authorized', 'denied']).default('authorized'),
   syncedAt: z.number().int().min(0),
   apps: z.array(CatalogAppSchema.and(z.object({
-    availability: z.enum(['available', 'withdrawn']).optional(),
+    availability: z.enum(['available', 'withdrawn', 'unavailable']).optional(),
   }))).max(10_000),
 })
 
@@ -89,6 +90,7 @@ export function saveAppCatalog(
   const entry: AppCatalogCacheEntry = {
     accountId,
     organizationId,
+    authorizationStatus: 'authorized',
     appConfigVersion: catalog.appConfigVersion,
     syncedAt,
     apps: [
@@ -100,6 +102,27 @@ export function saveAppCatalog(
     ],
   }
   cache.entries[cacheKey(accountId, organizationId)] = entry
+  writeCache(cache)
+  return entry
+}
+
+export function denyCachedAppCatalogAuthorization(
+  accountId: string,
+  organizationId: string,
+): AppCatalogCacheEntry | null {
+  const cache = readCache()
+  const key = cacheKey(accountId, organizationId)
+  const previous = cache.entries[key]
+  if (!previous) return null
+  const entry: AppCatalogCacheEntry = {
+    ...previous,
+    authorizationStatus: 'denied',
+    apps: previous.apps.map(app => ({
+      ...app,
+      availability: 'unavailable',
+    })),
+  }
+  cache.entries[key] = entry
   writeCache(cache)
   return entry
 }

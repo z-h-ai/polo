@@ -14,6 +14,28 @@ export type LocalAppLifecycleStatus =
   | 'broken'
   | 'update_available'
 
+/**
+ * Persistence and runtime identity for a local app.
+ *
+ * Legacy callers remain isolated in the original appId namespace. Catalog
+ * callers must provide the complete account/organization/app tuple so one
+ * device can safely retain installations for multiple signed-in accounts.
+ */
+export type LocalAppScope =
+  | {
+      kind: 'legacy'
+      appId: string
+    }
+  | {
+      kind: 'catalog'
+      accountId: string
+      organizationId: string
+      catalogAppId: string
+    }
+
+/** Existing string references are the explicit legacy compatibility path. */
+export type LocalAppReference = string | LocalAppScope
+
 /** Hard ceiling enforced by the runtime manager for one complete installation. */
 export const LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS = 20 * 60_000
 
@@ -47,6 +69,7 @@ export interface PoloAppManifest {
 
 export interface LocalAppInstallRequest {
   appId: string
+  scope?: LocalAppScope
   version: string
   downloadUrl: string
   checksum: string
@@ -77,6 +100,7 @@ export interface LocalAppInstallProgress {
 
 export interface LocalAppRuntimeStatus {
   appId: string
+  scope?: LocalAppScope
   status: LocalAppLifecycleStatus
   currentVersion?: string
   runningVersion?: string
@@ -93,6 +117,7 @@ export interface LocalAppRuntimeStatus {
 
 export interface LocalAppInstalledApp {
   appId: string
+  scope?: LocalAppScope
   name?: string
   currentVersion: string
   previousVersion?: string
@@ -105,6 +130,7 @@ export interface LocalAppInstalledApp {
 
 export interface LocalAppStartResult {
   appId: string
+  scope?: LocalAppScope
   version: string
   url: string
   port: number
@@ -133,6 +159,7 @@ export type LocalAppErrorCode =
   | 'UNSAFE_ARCHIVE'
   | 'RUNTIME_UNAVAILABLE'
   | 'DEPENDENCY_INSTALL_FAILED'
+  | 'NOT_AUTHORIZED'
   | 'NOT_INSTALLED'
   | 'START_FAILED'
   | 'START_TIMEOUT'

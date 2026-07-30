@@ -141,6 +141,7 @@ const EXPECTED_CHANNELS: string[] = [
   'local-apps:setAvailableRelease',
   'local-apps:start',
   'local-apps:stop',
+  'local-apps:stopAccount',
   'local-apps:uninstall',
   'logo:getUrl',
   'menu:copy',

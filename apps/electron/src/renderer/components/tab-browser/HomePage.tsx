@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { CatalogApp } from '@polo-ai/shared/admin'
 import { AppIcon } from './AppIcon'
@@ -58,8 +60,10 @@ function writeRecentApps(apps: RecentApp[]): void {
   setLocalStorage(KEYS.homeRecentApps, apps.slice(0, MAX_RECENT_APPS))
 }
 
-function formatBytes(sizeBytes: number): string {
-  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return 'Unknown size'
+function formatBytes(t: TFunction, sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return t('homeApps.install.unknownSize')
+  }
   const units = ['B', 'KB', 'MB', 'GB']
   let size = sizeBytes
   let unit = 0
@@ -70,9 +74,13 @@ function formatBytes(sizeBytes: number): string {
   return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`
 }
 
-function catalogTabDefinition(app: CatalogApp, url: string): AppDefinition {
+function catalogTabDefinition(
+  accountId: string,
+  app: CatalogApp,
+  url: string,
+): AppDefinition {
   return {
-    id: `organization:${app.organizationId}:${app.id}`,
+    id: `organization:${accountId}:${app.organizationId}:${app.id}`,
     name: app.name,
     url,
     iconUrl: app.iconUrl,
@@ -82,7 +90,12 @@ function catalogTabDefinition(app: CatalogApp, url: string): AppDefinition {
   }
 }
 
+function catalogRecentId(accountId: string, app: CatalogApp): string {
+  return `${accountId}:${app.organizationId}:${app.id}`
+}
+
 function AddExternalAppTile({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation()
   return (
     <button
       type="button"
@@ -94,13 +107,14 @@ function AddExternalAppTile({ onClick }: { onClick: () => void }) {
         <Icons.Plus className="h-8 w-8 text-foreground/55 group-hover:text-accent" strokeWidth={1.5} />
       </span>
       <span className="min-h-9 max-w-[112px] text-sm font-medium leading-[18px] text-foreground/70 group-hover:text-foreground">
-        Add external app
+        {t('homeApps.addExternal.title')}
       </span>
     </button>
   )
 }
 
 export function HomePage({ onAddApp }: HomePageProps) {
+  const { t } = useTranslation()
   const { installedApps, openApp, removeApp } = useTabShell()
   const catalog = useAppCatalog()
   const [recentApps, setRecentApps] = useState(readRecentApps)
@@ -150,22 +164,28 @@ export function HomePage({ onAddApp }: HomePageProps) {
   }
 
   const openCatalogApp = async (app: CatalogApp) => {
-    if (app.availability === 'withdrawn') {
-      toast.error('This app is no longer available from your organization.')
+    if (app.availability !== 'available') {
+      toast.error(t('homeApps.errors.unavailable'))
       return
     }
     try {
+      const accountId = catalog.state.catalog?.accountId
+      if (!accountId) throw new Error(t('homeApps.errors.staleContext'))
       if (app.deliveryMode === 'remote_url') {
-        if (!app.remoteUrl) throw new Error('The organization did not provide an app URL.')
-        openApp(catalogTabDefinition(app, app.remoteUrl))
+        if (!app.remoteUrl) throw new Error(t('homeApps.errors.missingUrl'))
+        openApp(catalogTabDefinition(accountId, app, app.remoteUrl))
       } else {
         const result = await catalog.start(app)
-        openApp(catalogTabDefinition(app, result.url))
+        openApp(catalogTabDefinition(accountId, app, result.url))
       }
-      recordRecent(app.id, 'organization')
+      recordRecent(catalogRecentId(accountId, app), 'organization')
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not open the app.'
-      toast.error(`Could not open ${app.name}`, { description: message })
+      const message = error instanceof Error
+        ? error.message
+        : t('homeApps.errors.openGeneric')
+      toast.error(t('homeApps.errors.openTitle', { name: app.name }), {
+        description: message,
+      })
     }
   }
 
@@ -179,10 +199,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
     }
     if (action === 'cancel') {
       try {
-        await catalog.cancelInstall(app.id)
-        toast.success(`Cancelled installation of ${app.name}`)
+        await catalog.cancelInstall(app)
+        toast.success(t('homeApps.toast.installCancelled', { name: app.name }))
       } catch (error) {
-        toast.error('Could not cancel installation', {
+        toast.error(t('homeApps.errors.cancelInstall'), {
           description: error instanceof Error ? error.message : undefined,
         })
       }
@@ -206,21 +226,25 @@ export function HomePage({ onAddApp }: HomePageProps) {
     setInstallTarget(null)
     try {
       await catalog.install(app)
-      toast.success(`${app.name} is ready to open`)
+      toast.success(t('homeApps.toast.installed', { name: app.name }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Installation failed.'
+      const message = error instanceof Error
+        ? error.message
+        : t('homeApps.errors.installGeneric')
       if (!/cancel/i.test(message)) {
-        toast.error(`Could not install ${app.name}`, { description: message })
+        toast.error(t('homeApps.errors.installTitle', { name: app.name }), {
+          description: message,
+        })
       }
     }
   }
 
   const handleStop = async (app: CatalogApp) => {
     try {
-      await catalog.stop(app.id)
-      toast.success(`${app.name} stopped`)
+      await catalog.stop(app)
+      toast.success(t('homeApps.toast.stopped', { name: app.name }))
     } catch (error) {
-      toast.error(`Could not stop ${app.name}`, {
+      toast.error(t('homeApps.errors.stopTitle', { name: app.name }), {
         description: error instanceof Error ? error.message : undefined,
       })
     }
@@ -231,10 +255,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
     if (!app) return
     setUninstallTarget(null)
     try {
-      await catalog.uninstall(app.id, preserveData)
-      toast.success(`${app.name} was uninstalled`)
+      await catalog.uninstall(app, preserveData)
+      toast.success(t('homeApps.toast.uninstalled', { name: app.name }))
     } catch (error) {
-      toast.error(`Could not uninstall ${app.name}`, {
+      toast.error(t('homeApps.errors.uninstallTitle', { name: app.name }), {
         description: error instanceof Error ? error.message : undefined,
       })
     } finally {
@@ -247,9 +271,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
     setLogs('')
     setLogsLoading(true)
     try {
-      setLogs(await catalog.getLogs(app.id))
+      setLogs(await catalog.getLogs(app))
     } catch (error) {
-      setLogs(error instanceof Error ? error.message : 'Could not load logs.')
+      setLogs(error instanceof Error ? error.message : t('homeApps.errors.logsGeneric'))
     } finally {
       setLogsLoading(false)
     }
@@ -274,8 +298,13 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
     for (const item of recentApps) {
       if (item.kind === 'organization') {
-        const app = organizationApps.find(candidate => candidate.id === item.id)
-        if (!app || app.availability === 'withdrawn') continue
+        const accountId = catalog.state.catalog?.accountId
+        const app = accountId
+          ? organizationApps.find(candidate => (
+              catalogRecentId(accountId, candidate) === item.id
+            ))
+          : undefined
+        if (!app || app.availability !== 'available') continue
         const status = catalog.state.statuses[app.id]
         const url = app.remoteUrl || status?.url || 'http://127.0.0.1'
         const key = `organization:${app.id}`
@@ -283,7 +312,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
         seen.add(key)
         entries.push({
           key,
-          definition: catalogTabDefinition(app, url),
+          definition: catalogTabDefinition(accountId!, app, url),
           onOpen: () => { void openCatalogApp(app) },
         })
         continue
@@ -322,9 +351,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
         <section aria-labelledby="recent-apps-heading">
           <div className="mb-4 flex items-end justify-between gap-4">
             <div>
-              <h1 id="recent-apps-heading" className="text-lg font-semibold">Recently used</h1>
+              <h1 id="recent-apps-heading" className="text-lg font-semibold">
+                {t('homeApps.recent.title')}
+              </h1>
               <p className="mt-1 text-xs text-muted-foreground">
-                Jump back into your Polo apps and recent work.
+                {t('homeApps.recent.description')}
               </p>
             </div>
           </div>
@@ -344,12 +375,14 @@ export function HomePage({ onAddApp }: HomePageProps) {
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
                 <h2 id="organization-apps-heading" className="text-base font-semibold">
-                  {activeOrganization?.name || 'Current organization'} apps
+                  {t('homeApps.organization.title', {
+                    name: activeOrganization?.name || t('homeApps.organization.current'),
+                  })}
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {activeOrganization?.type === 'creator_space'
-                    ? 'Apps published for this creator space.'
-                    : 'Apps assigned to this enterprise workspace.'}
+                    ? t('homeApps.organization.creatorDescription')
+                    : t('homeApps.organization.enterpriseDescription')}
                 </p>
               </div>
               <Button
@@ -360,14 +393,16 @@ export function HomePage({ onAddApp }: HomePageProps) {
                 onClick={() => { void catalog.sync(true) }}
               >
                 <Icons.RefreshCw className={catalog.state.refreshing ? 'animate-spin' : ''} />
-                Refresh
+                {t('homeApps.actions.refresh')}
               </Button>
             </div>
 
             {catalog.state.warning && (
               <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                 <Icons.WifiOff className="size-4 shrink-0" />
-                Showing the last synced catalog. Refresh failed: {catalog.state.warning}
+                {t('homeApps.organization.cachedWarning', {
+                  error: catalog.state.warning,
+                })}
               </div>
             )}
 
@@ -378,7 +413,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
             ) : catalog.state.error && !catalog.state.catalog ? (
               <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-foreground/10 px-6 text-center">
                 <Icons.CloudOff className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">Could not load organization apps</p>
+                <p className="text-sm font-medium">
+                  {t('homeApps.organization.loadFailed')}
+                </p>
                 <p className="mt-1 max-w-md text-xs text-muted-foreground">{catalog.state.error}</p>
                 <Button
                   type="button"
@@ -387,17 +424,19 @@ export function HomePage({ onAddApp }: HomePageProps) {
                   className="mt-4"
                   onClick={() => { void catalog.sync(true) }}
                 >
-                  Try again
+                  {t('homeApps.actions.tryAgain')}
                 </Button>
               </div>
             ) : organizationApps.length === 0 ? (
               <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed border-foreground/15 px-6 text-center">
                 <Icons.LayoutGrid className="mb-3 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">No apps have been shared here yet</p>
+                <p className="text-sm font-medium">
+                  {t('homeApps.organization.empty')}
+                </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {activeOrganization?.type === 'creator_space'
-                    ? 'Published creator apps will appear in this space.'
-                    : 'Apps assigned by your organization will appear here.'}
+                    ? t('homeApps.organization.emptyCreator')
+                    : t('homeApps.organization.emptyEnterprise')}
                 </p>
               </div>
             ) : (
@@ -423,9 +462,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
         <section aria-labelledby="external-apps-heading">
           <div className="mb-4">
-            <h2 id="external-apps-heading" className="text-base font-semibold">External apps</h2>
+            <h2 id="external-apps-heading" className="text-base font-semibold">
+              {t('homeApps.external.title')}
+            </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Personal website shortcuts stored only on this device.
+              {t('homeApps.external.description')}
             </p>
           </div>
           <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
@@ -449,28 +490,38 @@ export function HomePage({ onAddApp }: HomePageProps) {
           <DialogHeader>
             <DialogTitle>
               {catalog.state.statuses[installTarget?.id ?? '']?.status === 'update_available'
-                ? `Update ${installTarget?.name ?? 'app'}`
-                : `Install ${installTarget?.name ?? 'app'}`}
+                ? t('homeApps.install.updateTitle', {
+                    name: installTarget?.name ?? t('homeApps.appFallback'),
+                  })
+                : t('homeApps.install.installTitle', {
+                    name: installTarget?.name ?? t('homeApps.appFallback'),
+                  })}
             </DialogTitle>
             <DialogDescription>
-              Polo will download this app and prepare it to run locally on this device.
+              {t('homeApps.install.description')}
             </DialogDescription>
           </DialogHeader>
           {installTarget?.currentRelease && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-lg bg-foreground/4 p-3">
                 <div>
-                  <p className="text-xs text-muted-foreground">Version</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('homeApps.install.version')}
+                  </p>
                   <p className="mt-1 font-medium">{installTarget.currentRelease.version}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Download size</p>
-                  <p className="mt-1 font-medium">{formatBytes(installTarget.currentRelease.sizeBytes)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('homeApps.install.downloadSize')}
+                  </p>
+                  <p className="mt-1 font-medium">
+                    {formatBytes(t, installTarget.currentRelease.sizeBytes)}
+                  </p>
                 </div>
               </div>
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Required permissions
+                  {t('homeApps.install.permissions')}
                 </p>
                 {installTarget.permissions?.length ? (
                   <ul className="mt-2 space-y-1.5">
@@ -482,19 +533,21 @@ export function HomePage({ onAddApp }: HomePageProps) {
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-2 text-muted-foreground">No additional permissions requested.</p>
+                  <p className="mt-2 text-muted-foreground">
+                    {t('homeApps.install.noPermissions')}
+                  </p>
                 )}
               </div>
             </div>
           )}
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => setInstallTarget(null)}>
-              Cancel
+              {t('homeApps.actions.cancel')}
             </Button>
             <Button type="button" onClick={() => { void confirmInstall() }}>
               {catalog.state.statuses[installTarget?.id ?? '']?.status === 'update_available'
-                ? 'Update'
-                : 'Install'}
+                ? t('homeApps.actions.update')
+                : t('homeApps.actions.install')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -508,9 +561,13 @@ export function HomePage({ onAddApp }: HomePageProps) {
       }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Uninstall {uninstallTarget?.name ?? 'app'}?</DialogTitle>
+            <DialogTitle>
+              {t('homeApps.uninstall.title', {
+                name: uninstallTarget?.name ?? t('homeApps.appFallback'),
+              })}
+            </DialogTitle>
             <DialogDescription>
-              The installed program will be removed from this device.
+              {t('homeApps.uninstall.description')}
             </DialogDescription>
           </DialogHeader>
           <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-foreground/10 p-3 text-sm">
@@ -521,18 +578,20 @@ export function HomePage({ onAddApp }: HomePageProps) {
               onChange={event => setPreserveData(event.target.checked)}
             />
             <span>
-              <span className="block font-medium">Keep app data</span>
+              <span className="block font-medium">
+                {t('homeApps.uninstall.keepData')}
+              </span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
-                Your settings and documents will be available if you reinstall later.
+                {t('homeApps.uninstall.keepDataDescription')}
               </span>
             </span>
           </label>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => setUninstallTarget(null)}>
-              Cancel
+              {t('homeApps.actions.cancel')}
             </Button>
             <Button type="button" variant="destructive" onClick={() => { void confirmUninstall() }}>
-              Uninstall
+              {t('homeApps.actions.uninstall')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -543,13 +602,19 @@ export function HomePage({ onAddApp }: HomePageProps) {
       }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{logsTarget?.name ?? 'App'} logs</DialogTitle>
+            <DialogTitle>
+              {t('homeApps.logs.title', {
+                name: logsTarget?.name ?? t('homeApps.appFallback'),
+              })}
+            </DialogTitle>
             <DialogDescription>
-              Recent local runtime output. Share this with your administrator if the app cannot start.
+              {t('homeApps.logs.description')}
             </DialogDescription>
           </DialogHeader>
           <pre className="max-h-[420px] min-h-40 overflow-auto rounded-lg bg-foreground/5 p-3 text-xs leading-relaxed">
-            {logsLoading ? 'Loading logs…' : logs || 'No logs are available yet.'}
+            {logsLoading
+              ? t('homeApps.logs.loading')
+              : logs || t('homeApps.logs.empty')}
           </pre>
         </DialogContent>
       </Dialog>

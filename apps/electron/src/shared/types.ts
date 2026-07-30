@@ -215,6 +215,7 @@ import type {
   LocalAppAvailableRelease,
   LocalAppInstallRequest,
   LocalAppInstalledApp,
+  LocalAppReference,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
   LocalAppLogsOptions,
@@ -493,18 +494,19 @@ export interface ElectronAPI {
       arch: 'arm64' | 'x64'
     }>
     install(request: LocalAppInstallRequest): Promise<LocalAppInstalledApp>
-    cancelInstall(appId: string): Promise<boolean>
-    start(appId: string): Promise<LocalAppStartResult>
-    stop(appId: string): Promise<LocalAppRuntimeStatus>
-    restart(appId: string): Promise<LocalAppStartResult>
-    uninstall(appId: string, options?: LocalAppUninstallOptions): Promise<void>
+    cancelInstall(app: LocalAppReference): Promise<boolean>
+    start(app: LocalAppReference): Promise<LocalAppStartResult>
+    stop(app: LocalAppReference): Promise<LocalAppRuntimeStatus>
+    restart(app: LocalAppReference): Promise<LocalAppStartResult>
+    uninstall(app: LocalAppReference, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
-      appId: string,
+      app: LocalAppReference,
       release: LocalAppAvailableRelease | null,
     ): Promise<LocalAppRuntimeStatus>
-    getInstalledApps(): Promise<LocalAppInstalledApp[]>
-    getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus>
-    getLogs(appId: string, options?: LocalAppLogsOptions): Promise<string>
+    getInstalledApps(scope?: LocalAppReference): Promise<LocalAppInstalledApp[]>
+    getRuntimeStatus(app: LocalAppReference): Promise<LocalAppRuntimeStatus>
+    getLogs(app: LocalAppReference, options?: LocalAppLogsOptions): Promise<string>
+    stopAccount(accountId: string): Promise<void>
   }
 
   // Auth

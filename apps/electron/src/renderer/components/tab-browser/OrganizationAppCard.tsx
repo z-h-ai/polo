@@ -1,4 +1,6 @@
 import * as Icons from 'lucide-react'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
 import type { CatalogApp } from '@polo-ai/shared/admin'
 import type { LocalAppRuntimeStatus } from '@polo-ai/shared/protocol'
 import { Button } from '@/components/ui/button'
@@ -37,7 +39,7 @@ function primaryActionFor(
   status: LocalAppRuntimeStatus | undefined,
   compatible: boolean,
 ): CatalogPrimaryAction {
-  if (app.availability === 'withdrawn' || !compatible) return 'unavailable'
+  if (app.availability !== 'available' || !compatible) return 'unavailable'
   if (app.deliveryMode === 'remote_url') return 'open'
   if (!status || status.status === 'not_installed') return 'install'
   if (status.installationStatus) return 'cancel'
@@ -48,48 +50,50 @@ function primaryActionFor(
 }
 
 function statusText(
+  t: TFunction,
   app: CatalogApp,
   status: LocalAppRuntimeStatus | undefined,
   compatible: boolean,
 ): string {
-  if (app.availability === 'withdrawn') return 'Removed by your organization'
-  if (!compatible) return 'Not available for this device'
-  if (app.deliveryMode === 'remote_url') return 'Opens securely in Polo'
-  if (!status || status.status === 'not_installed') return 'Not installed'
+  if (app.availability === 'withdrawn') return t('homeApps.status.withdrawn')
+  if (app.availability === 'unavailable') return t('homeApps.status.unauthorized')
+  if (!compatible) return t('homeApps.status.incompatible')
+  if (app.deliveryMode === 'remote_url') return t('homeApps.status.remote')
+  if (!status || status.status === 'not_installed') return t('homeApps.status.notInstalled')
   if (status.installationStatus) {
-    return status.installationStatus === 'downloading' ? 'Downloading update' : 'Installing update'
+    return status.installationStatus === 'downloading'
+      ? t('homeApps.status.downloadingUpdate')
+      : t('homeApps.status.installingUpdate')
   }
   switch (status.status) {
     case 'downloading':
-      return status.progress?.phase === 'verifying' ? 'Verifying download' : 'Downloading'
+      return status.progress?.phase === 'verifying'
+        ? t('homeApps.status.verifying')
+        : t('homeApps.status.downloading')
     case 'installing':
-      if (status.progress?.phase === 'extracting') return 'Installing'
-      if (status.progress?.phase === 'preparing') return 'Preparing app'
-      return 'Installing'
+      if (status.progress?.phase === 'preparing') return t('homeApps.status.preparing')
+      return t('homeApps.status.installing')
     case 'installed':
-      return 'Installed'
+      return t('homeApps.status.installed')
     case 'starting':
-      return 'Starting'
+      return t('homeApps.status.starting')
     case 'running':
-      return 'Running'
+      return t('homeApps.status.running')
     case 'stopped':
-      return 'Ready to open'
+      return t('homeApps.status.ready')
     case 'broken':
-      return status.error?.message || 'Could not start'
+      return status.error?.message || t('homeApps.status.startFailed')
     case 'update_available':
-      return `Update ${status.availableRelease?.version ?? ''} available`.trim()
+      return t('homeApps.status.updateAvailable', {
+        version: status.availableRelease?.version ?? '',
+      })
     default:
-      return 'Not installed'
+      return t('homeApps.status.notInstalled')
   }
 }
 
-const ACTION_LABELS: Record<CatalogPrimaryAction, string> = {
-  open: 'Open',
-  install: 'Install',
-  update: 'Update',
-  retry: 'Retry',
-  cancel: 'Cancel',
-  unavailable: 'Unavailable',
+function actionLabel(t: TFunction, action: CatalogPrimaryAction): string {
+  return t(`homeApps.actions.${action}`)
 }
 
 function AppArtwork({ app }: { app: CatalogApp }) {
@@ -115,6 +119,7 @@ export function OrganizationAppCard({
   onUninstall,
   onViewLogs,
 }: OrganizationAppCardProps) {
+  const { t } = useTranslation()
   const action = primaryActionFor(app, status, compatible)
   const busy = status?.status === 'starting'
   const installed = app.deliveryMode === 'local_bundle'
@@ -127,7 +132,7 @@ export function OrganizationAppCard({
     <article
       className={cn(
         'relative flex min-h-[176px] flex-col rounded-xl border border-foreground/10 bg-[var(--background-elevated)] p-4 shadow-xs transition-shadow hover:shadow-minimal',
-        app.availability === 'withdrawn' && 'opacity-65',
+        app.availability !== 'available' && 'opacity-65',
       )}
       data-testid={`organization-app-${app.id}`}
     >
@@ -136,7 +141,7 @@ export function OrganizationAppCard({
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-foreground">{app.name}</h3>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {app.creatorName || 'Your organization'}
+            {app.creatorName || t('homeApps.organizationSource')}
           </p>
         </div>
         {installed && (
@@ -147,7 +152,7 @@ export function OrganizationAppCard({
                 variant="ghost"
                 size="icon"
                 className="-mr-2 -mt-2 size-8"
-                aria-label={`More actions for ${app.name}`}
+                aria-label={t('homeApps.moreActions', { name: app.name })}
               >
                 <Icons.MoreHorizontal />
               </Button>
@@ -156,12 +161,12 @@ export function OrganizationAppCard({
               {(status?.status === 'running' || status?.status === 'starting') && (
                 <DropdownMenuItem onSelect={() => onStop(app)}>
                   <Icons.Square />
-                  Stop
+                  {t('homeApps.actions.stop')}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onSelect={() => onViewLogs(app)}>
                 <Icons.FileText />
-                View logs
+                {t('homeApps.actions.viewLogs')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -169,7 +174,7 @@ export function OrganizationAppCard({
                 onSelect={() => onUninstall(app)}
               >
                 <Icons.Trash2 />
-                Uninstall
+                {t('homeApps.actions.uninstall')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -177,7 +182,7 @@ export function OrganizationAppCard({
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-9 text-xs leading-[18px] text-foreground/65">
-        {app.description || 'No description provided.'}
+        {app.description || t('homeApps.noDescription')}
       </p>
 
       <div className="mt-auto flex items-end justify-between gap-3 pt-3">
@@ -186,7 +191,7 @@ export function OrganizationAppCard({
             'truncate text-[11px] text-muted-foreground',
             status?.status === 'broken' && 'text-destructive',
           )}>
-            {statusText(app, status, compatible)}
+            {statusText(t, app, status, compatible)}
           </p>
           {typeof progress === 'number' && (
             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-foreground/10">
@@ -206,7 +211,7 @@ export function OrganizationAppCard({
           data-testid={`organization-app-action-${app.id}`}
         >
           {busy && <Icons.LoaderCircle className="animate-spin" />}
-          {busy ? 'Starting' : ACTION_LABELS[action]}
+          {busy ? t('homeApps.status.starting') : actionLabel(t, action)}
         </Button>
       </div>
     </article>

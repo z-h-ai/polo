@@ -83,8 +83,10 @@ import {
 } from '@/context/OrganizationContext'
 import { useOrganizationContextState } from '@/hooks/useOrganizationContext'
 import {
+  emitAdminAuthFailure,
   getAdminErrorCode,
   isAdminAuthFailureResult,
+  normalizeAdminError,
   subscribeToAdminAuthFailures,
   type AdminErrorLike,
 } from '@/lib/admin-auth-failure'
@@ -164,17 +166,12 @@ function isQuotaExhaustedError(error: unknown): boolean {
     || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
 }
 
-async function stopSignedInAccountLocalApps(): Promise<void> {
+async function stopSignedInAccountLocalApps(
+  accountId: string | null | undefined,
+): Promise<void> {
+  if (!accountId) return
   try {
-    // Local bundles currently enter Polo exclusively through the signed-in
-    // organization catalog. Keep installations and data, but do not leave the
-    // previous account's processes running after its authorization disappears.
-    const installed = await window.electronAPI.localApps.getInstalledApps()
-    const statuses = await Promise.all(installed.map(app =>
-      window.electronAPI.localApps.getRuntimeStatus(app.appId)))
-    await Promise.allSettled(statuses
-      .filter(status => status.status === 'running' || status.status === 'starting')
-      .map(status => window.electronAPI.localApps.stop(status.appId)))
+    await window.electronAPI.localApps.stopAccount(accountId)
   } catch (error) {
     rendererLog.warn('[LocalApps] failed to stop apps while clearing admin account', {
       error: getErrorText(error),
@@ -852,7 +849,7 @@ export default function App() {
   }, [showAdminKicked])
 
   const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
-    void stopSignedInAccountLocalApps()
+    void stopSignedInAccountLocalApps(currentAdminUserIdRef.current)
     invalidateOrganizationDeepLinkNavigation()
     clearOrganizationAccount(currentAdminUserIdRef.current, {
       preservePendingJoinToken: true,
@@ -1562,7 +1559,7 @@ export default function App() {
     try {
       const validation = await window.electronAPI.adminValidate()
       if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
-        await stopSignedInAccountLocalApps()
+        await stopSignedInAccountLocalApps(currentAdminUser.userId)
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
         currentAdminUserIdRef.current = null
@@ -1576,7 +1573,7 @@ export default function App() {
         status: Number(readErrorField(error, 'status')),
         message: getErrorText(error),
       })) {
-        await stopSignedInAccountLocalApps()
+        await stopSignedInAccountLocalApps(currentAdminUser.userId)
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
         currentAdminUserIdRef.current = null
@@ -2089,7 +2086,7 @@ export default function App() {
   const executeReset = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
     try {
-      await stopSignedInAccountLocalApps()
+      await stopSignedInAccountLocalApps(currentAdminUser?.userId)
       await window.electronAPI.logout()
       invalidateOrganizationDeepLinkNavigation()
       // Reset all state
@@ -2127,7 +2124,7 @@ export default function App() {
   const handleAdminLogout = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
     try {
-      await stopSignedInAccountLocalApps()
+      await stopSignedInAccountLocalApps(currentAdminUser?.userId)
       await window.electronAPI.adminLogout()
     } finally {
       invalidateOrganizationDeepLinkNavigation()
@@ -2376,6 +2373,25 @@ export default function App() {
     organization.organizationMembershipRole,
     organization.organizationSummaries,
   ])
+  const startupCatalogOrganizationId = organizationContextValue?.activeOrganizationId
+  const startupCatalogContextKey = organizationContextValue?.organizationContextKey
+
+  useEffect(() => {
+    if (!startupCatalogOrganizationId) return
+    let cancelled = false
+    void window.electronAPI.adminSyncAppCatalog(
+      startupCatalogOrganizationId,
+    ).then((result) => {
+      if (!cancelled && !result.success) {
+        emitAdminAuthFailure(normalizeAdminError(result))
+      }
+    }).catch(() => {
+      // Home surfaces refresh failures and the server retains the last confirmed cache.
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [startupCatalogContextKey, startupCatalogOrganizationId])
 
   // Platform actions for @polo-ai/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change

@@ -180,7 +180,7 @@ export interface CatalogApp {
    * the lightweight metadata lets the client explain why an installed app can
    * no longer be launched without silently deleting it.
    */
-  availability?: 'available' | 'withdrawn';
+  availability?: 'available' | 'withdrawn' | 'unavailable';
 }
 
 export interface AppCatalogResponse {
@@ -195,6 +195,7 @@ export type AppCatalogFetchResult =
 export interface AppCatalogCacheEntry extends AppCatalogResponse {
   accountId: string;
   organizationId: string;
+  authorizationStatus: 'authorized' | 'denied';
   syncedAt: number;
 }
 
