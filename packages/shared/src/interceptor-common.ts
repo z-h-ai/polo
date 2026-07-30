@@ -9,7 +9,8 @@
  * - Config reading (richToolDescriptions, extendedPromptCache settings)
  */
 
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, appendFileSync, mkdirSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, appendFileSync, mkdirSync, statSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -192,11 +193,26 @@ function getStoredError(sessionDir?: string): LastApiError | null {
   }
 }
 
+function writePrivateSidecarSync(filePath: string, content: string): void {
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmpPath, content, { flag: 'wx', mode: 0o600 });
+    if (process.platform !== 'win32') chmodSync(tmpPath, 0o600);
+    renameSync(tmpPath, filePath);
+    if (process.platform !== 'win32') chmodSync(filePath, 0o600);
+  } catch (error) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {}
+    throw error;
+  }
+}
+
 export function setStoredError(error: LastApiError | null): void {
   const errorFile = getErrorFilePath();
   try {
     if (error) {
-      writeFileSync(errorFile, JSON.stringify(error));
+      writePrivateSidecarSync(errorFile, JSON.stringify(error));
       debugLog(`[setStoredError] Wrote error to file: ${error.status} ${error.message}`);
     } else {
       try {
@@ -295,9 +311,7 @@ function writeMetadataFile(allMetadata: Record<string, ToolMetadata>): void {
   const filePath = getMetadataFilePath();
   if (!filePath) return;
   try {
-    const tmpPath = filePath + '.tmp';
-    writeFileSync(tmpPath, JSON.stringify(allMetadata));
-    renameSync(tmpPath, filePath);
+    writePrivateSidecarSync(filePath, JSON.stringify(allMetadata));
   } catch (error) {
     // Keep non-throwing behavior, but log for diagnostics.
     debugLog(`[toolMetadataStore.write] Failed for file=${filePath}: ${error instanceof Error ? error.message : String(error)}`);

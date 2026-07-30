@@ -41,6 +41,7 @@ import {
   type ExecutionArgs,
 } from './execution-parser.ts'
 import { spawnServer, type SpawnedServer } from './server-spawner.ts'
+import { stderrErrorLine, stderrLabel, stripAnsi } from './terminal-output.ts'
 
 export interface ConfigurationScope {
   id: string
@@ -393,7 +394,9 @@ export async function waitForTurn(
     if (event.type === 'text_delta') {
       const delta = String(event.delta ?? '')
       finalMessage += delta
-      if (args.kind === 'run' && args.outputFormat !== 'stream-json') process.stdout.write(delta)
+      if (args.kind === 'run' && args.outputFormat !== 'stream-json') {
+        process.stdout.write(stripAnsi(delta))
+      }
       return
     }
     if (event.type === 'tool_start' && args.kind === 'run' && args.outputFormat !== 'stream-json') {
@@ -496,6 +499,14 @@ async function createOrResolveExecution(
 ): Promise<{ record: CliThreadRecord; scope: ConfigurationScope; workingDirectory: string }> {
   if (args.kind === 'resume') {
     const original = await resolveResumeRecord(args)
+    // Validate every user/config-derived path before creating an ephemeral
+    // clone. A failed workspace or -C override must not leave an ownerless
+    // temporary Thread behind.
+    const scope = await scopeFromThread(original, args.workspace)
+    const workingDirectory = await ensureDirectory(
+      args.workingDirectory || original.metadata.workingDirectory,
+      !!args.workingDirectory,
+    )
     let record = original
     if (args.ephemeral) {
       const sourceLease = await acquireCliThreadLease(original)
@@ -505,11 +516,6 @@ async function createOrResolveExecution(
         await sourceLease.release()
       }
     }
-    const scope = await scopeFromThread(original, args.workspace)
-    const workingDirectory = await ensureDirectory(
-      args.workingDirectory || original.metadata.workingDirectory,
-      !!args.workingDirectory,
-    )
     return { record, scope, workingDirectory }
   }
 
@@ -740,11 +746,14 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
   if (args.kind === 'run') {
     if (result.status === 'completed' && args.outputFormat !== 'stream-json') process.stdout.write('\n')
     if (result.status !== 'completed' && result.error) {
-      process.stderr.write(`Error: ${formatError(result.error, adapter)}\n`)
+      process.stderr.write(stderrErrorLine(formatError(result.error, adapter), args.color))
     }
     if (args.noCleanup) {
       if (record) {
-        process.stderr.write(`thread_id: ${record.metadata.threadId}\nthread_dir: ${record.directory}\n`)
+        process.stderr.write(
+          `${stderrLabel('thread_id:', args.color)} ${record.metadata.threadId}\n`
+          + `${stderrLabel('thread_dir:', args.color)} ${stripAnsi(record.directory)}\n`,
+        )
       }
     }
   } else if (protocolStarted) {
@@ -754,14 +763,20 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       adapter?.failed(result.error || `execution ${result.status}`, result.signal)
     }
   } else if (result.error) {
-    process.stderr.write(`Error: ${formatError(result.error, adapter)}\n`)
+    process.stderr.write(stderrErrorLine(formatError(result.error, adapter), args.color))
   }
 
   if (args.kind !== 'run' && !args.json && result.status === 'completed') {
-    process.stdout.write(`${result.finalMessage}\n`)
+    process.stdout.write(`${stripAnsi(result.finalMessage)}\n`)
   }
-  if (args.kind !== 'run' && !args.json && result.status !== 'completed' && result.error) {
-    process.stderr.write(`Error: ${formatError(result.error, adapter)}\n`)
+  if (
+    args.kind !== 'run'
+    && !args.json
+    && protocolStarted
+    && result.status !== 'completed'
+    && result.error
+  ) {
+    process.stderr.write(stderrErrorLine(formatError(result.error, adapter), args.color))
   }
 
   if (result.signal) return signalExitCode(result.signal)
@@ -836,7 +851,9 @@ async function listSessionsCommand(args: ExecutionArgs): Promise<number> {
   for (const record of records) {
     const metadata = record.metadata
     process.stdout.write(
-      `${metadata.threadId}\t${metadata.status || 'unknown'}\t${new Date(metadata.createdAt).toISOString()}\t${new Date(metadata.lastUsedAt).toISOString()}\t${metadata.workingDirectory}\n`,
+      stripAnsi(
+        `${metadata.threadId}\t${metadata.status || 'unknown'}\t${new Date(metadata.createdAt).toISOString()}\t${new Date(metadata.lastUsedAt).toISOString()}\t${metadata.workingDirectory}\n`,
+      ),
     )
   }
   return 0
@@ -845,7 +862,7 @@ async function listSessionsCommand(args: ExecutionArgs): Promise<number> {
 async function deleteSessionCommand(args: ExecutionArgs): Promise<number> {
   const record = args.threadId ? await locateCliThread(args.threadId) : null
   if (!record || record.metadata.origin !== 'cli-exec') {
-    process.stderr.write(`Error: CLI exec Thread not found: ${args.threadId}\n`)
+    process.stderr.write(stderrErrorLine(`CLI exec Thread not found: ${args.threadId}`, args.color))
     return 1
   }
   try {
@@ -854,7 +871,7 @@ async function deleteSessionCommand(args: ExecutionArgs): Promise<number> {
     else process.stdout.write(`${record.metadata.threadId}\n`)
     return 0
   } catch (error) {
-    process.stderr.write(`Error: ${formatError(error)}\n`)
+    process.stderr.write(stderrErrorLine(formatError(error), args.color))
     return 1
   }
 }

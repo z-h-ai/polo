@@ -6,7 +6,7 @@ import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@polo-ai/server-core/runtime'
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@polo-ai/shared/agent'
 import {
@@ -184,6 +184,8 @@ const PLAN_APPROVAL_MESSAGE = 'Plan approved, please execute.'
 
 const PI_TURN_ANCHORS_VERSION = 1
 const PI_TURN_ANCHORS_FILE = 'pi-turn-anchors.json'
+const PRIVATE_DIRECTORY_MODE = 0o700
+const PRIVATE_FILE_MODE = 0o600
 
 interface PiTurnAnchorsIndex {
   version: number
@@ -192,6 +194,28 @@ interface PiTurnAnchorsIndex {
 
 function getPiTurnAnchorsPath(sessionPath: string): string {
   return join(sessionPath, 'meta', PI_TURN_ANCHORS_FILE)
+}
+
+async function writePrivateSidecar(filePath: string, content: string): Promise<void> {
+  const parent = dirname(filePath)
+  await mkdir(parent, { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+  if (process.platform !== 'win32') await chmod(parent, PRIVATE_DIRECTORY_MODE)
+  const temp = join(parent, `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`)
+  const handle = await open(temp, 'wx', PRIVATE_FILE_MODE)
+  try {
+    await handle.writeFile(content, 'utf-8')
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+  try {
+    if (process.platform !== 'win32') await chmod(temp, PRIVATE_FILE_MODE)
+    await rename(temp, filePath)
+    if (process.platform !== 'win32') await chmod(filePath, PRIVATE_FILE_MODE)
+  } catch (error) {
+    await unlink(temp).catch(() => {})
+    throw error
+  }
 }
 
 export async function loadPiTurnAnchors(sessionPath: string): Promise<PiTurnAnchorsIndex> {
@@ -233,8 +257,7 @@ export async function savePiTurnAnchor(sessionPath: string, messageId: string, a
   index.anchors[messageId] = anchorId
 
   const filePath = getPiTurnAnchorsPath(sessionPath)
-  await mkdir(join(sessionPath, 'meta'), { recursive: true })
-  await writeFile(filePath, JSON.stringify(index), 'utf-8')
+  await writePrivateSidecar(filePath, JSON.stringify(index))
 }
 
 /**
@@ -262,11 +285,9 @@ export async function copyPiTurnAnchorsForBranch(
     }
   }
   if (Object.keys(filtered).length === 0) return
-  await mkdir(join(branchSessionPath, 'meta'), { recursive: true })
-  await writeFile(
+  await writePrivateSidecar(
     getPiTurnAnchorsPath(branchSessionPath),
     JSON.stringify({ version: PI_TURN_ANCHORS_VERSION, anchors: filtered }),
-    'utf-8',
   )
 }
 
@@ -345,8 +366,7 @@ async function saveClaudeTurnAnchor(
   }
 
   const filePath = getClaudeTurnAnchorsPath(sessionPath)
-  await mkdir(join(sessionPath, 'meta'), { recursive: true })
-  await writeFile(filePath, JSON.stringify(index), 'utf-8')
+  await writePrivateSidecar(filePath, JSON.stringify(index))
 }
 
 /**
@@ -3405,10 +3425,18 @@ export class SessionManager implements ISessionManager {
 
             // Write to session tmp directory (cleaned up with session)
             const sessionTmpDir = join(sessionPath, 'tmp')
-            await mkdir(sessionTmpDir, { recursive: true })
+            await mkdir(sessionTmpDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE })
+            if (this.sessionStorage.owner === 'cli' && process.platform !== 'win32') {
+              await chmod(sessionTmpDir, PRIVATE_DIRECTORY_MODE)
+            }
             const ext = result.format === 'jpeg' ? 'jpg' : 'png'
             const outPath = join(sessionTmpDir, `resized-${randomUUID()}.${ext}`)
-            await writeFile(outPath, result.buffer)
+            await writeFile(outPath, result.buffer, {
+              mode: this.sessionStorage.owner === 'cli' ? PRIVATE_FILE_MODE : undefined,
+            })
+            if (this.sessionStorage.owner === 'cli' && process.platform !== 'win32') {
+              await chmod(outPath, PRIVATE_FILE_MODE)
+            }
 
             sessionLog.info(`Image resized for Read: ${(buffer.length / 1024 / 1024).toFixed(1)}MB → ${(result.buffer.length / 1024 / 1024).toFixed(1)}MB (→ ${result.width}×${result.height})`)
             return outPath
@@ -5038,6 +5066,7 @@ export class SessionManager implements ISessionManager {
             createdAt: Date.now(),
             lastUsedAt: Date.now(),
           },
+          sessionStorage: this.sessionStorage,
           isHeadless: true,
         }, buildBackendHostRuntimeContext()) as AgentInstance
         await agent.postInit()
@@ -6820,6 +6849,7 @@ export class SessionManager implements ISessionManager {
             createdAt: Date.now(),
             lastUsedAt: Date.now(),
           },
+          sessionStorage: this.sessionStorage,
           isHeadless: true,
         }, buildBackendHostRuntimeContext()) as AgentInstance
         await agent.postInit()

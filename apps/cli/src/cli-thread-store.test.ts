@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -77,10 +77,10 @@ describe('CLI Thread store', () => {
     await next.release()
   })
 
-  it('does not treat a reused PID with the wrong birth identity as active', () => {
+  it('keeps a fresh lease active but rejects a reused PID after lease expiry', () => {
     const actualIdentity = getProcessBirthIdentity(process.pid)
     expect(actualIdentity).toBeTruthy()
-    expect(isOwnerActive({
+    const owner = {
       leaseId: crypto.randomUUID(),
       cliPid: process.pid,
       cliStartedAt: Date.now(),
@@ -88,13 +88,45 @@ describe('CLI Thread store', () => {
       serverPid: 0,
       serverStartedAt: 0,
       heartbeatAt: Date.now(),
-    })).toBe(false)
+    }
+    expect(isOwnerActive(owner)).toBe(true)
+    expect(isOwnerActive(
+      { ...owner, heartbeatAt: Date.now() - 60_000 },
+      Date.now(),
+    )).toBe(false)
   })
 
   it('deletes by atomically moving the whole Thread boundary', async () => {
     const record = await createExecThread()
     await deleteCliThread(record)
     expect(await locateCliThread(record.metadata.threadId)).toBeNull()
+  })
+
+  it('rejects deletion while a dead process still has a fresh lease heartbeat', async () => {
+    const record = await createExecThread()
+    await writeFile(record.ownerFile, JSON.stringify({
+      leaseId: crypto.randomUUID(),
+      cliPid: 2_147_483_647,
+      cliStartedAt: Date.now(),
+      cliProcessIdentity: 'missing-cli',
+      serverPid: 2_147_483_646,
+      serverStartedAt: Date.now(),
+      serverProcessIdentity: 'missing-runtime',
+      heartbeatAt: Date.now(),
+    }))
+
+    await expect(deleteCliThread(record)).rejects.toThrow('active')
+  })
+
+  it('rejects a symlink Thread target before moving or deleting it', async () => {
+    const record = await createExecThread()
+    const outside = join(root, 'outside-target')
+    await mkdir(outside)
+    await rm(record.directory, { recursive: true, force: true })
+    await symlink(outside, record.directory, 'dir')
+
+    await expect(deleteCliThread(record)).rejects.toThrow('symlink')
+    expect((await stat(outside)).isDirectory()).toBe(true)
   })
 
   it('only reclaims expired ephemeral Threads with dead owners', async () => {

@@ -23,10 +23,13 @@ export const TOOL_CREDENTIAL_ENV_VARS = [
   'NPM_TOKEN',
 ] as const;
 
+const TOOL_ENV_ALLOWLIST_PATTERN =
+  'PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_*|TERM|COLORTERM|TMPDIR|TMP|TEMP|SYSTEMROOT|WINDIR|COMSPEC|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR';
+
 /**
- * Prefix a Bash tool command with an environment scrub inside the model
- * subprocess. Returning a new input object lets the SDK execute the sanitized
- * command without putting invocation credentials in the runtime process.env.
+ * Prefix a Bash tool command with an allowlist scrub inside the model
+ * subprocess. The model runtime receives only a short-lived local capability;
+ * a shell tool must receive neither that capability nor unrelated host secrets.
  */
 export function sanitizeShellToolInput(
   toolName: string,
@@ -36,9 +39,15 @@ export function sanitizeShellToolInput(
   if (!enabled || toolName !== 'Bash' || typeof input.command !== 'string') return input;
   const marker = '# polo: invocation credential isolation';
   if (input.command.startsWith(marker)) return input;
-  const unset = `unset ${TOOL_CREDENTIAL_ENV_VARS.join(' ')} 2>/dev/null || true`;
+  const scrub = [
+    '_polo_env_names="$(env | sed \'s/=.*//\')"',
+    'for _polo_env_name in $_polo_env_names; do',
+    `  case "$_polo_env_name" in ${TOOL_ENV_ALLOWLIST_PATTERN}) ;; *) unset "$_polo_env_name" 2>/dev/null || true ;; esac`,
+    'done',
+    'unset _polo_env_names _polo_env_name 2>/dev/null || true',
+  ].join('\n');
   return {
     ...input,
-    command: `${marker}\n${unset}\n${input.command}`,
+    command: `${marker}\n${scrub}\n${input.command}`,
   };
 }

@@ -206,10 +206,20 @@ export async function createSessionWithStorage(
   ensureSessionsDir(workspaceRootPath, storage);
 
   const now = Date.now();
-  const sessionId = generateSessionId(workspaceRootPath, storage);
-
-  // Create session directory with all subdirectories (plans, attachments)
-  ensureSessionDir(workspaceRootPath, sessionId, storage);
+  let sessionId = '';
+  for (let attempt = 0; attempt < 20; attempt++) {
+    sessionId = generateSessionId(workspaceRootPath, storage);
+    try {
+      // Reserve the public session ID atomically. The old scan-then-recursive-
+      // mkdir sequence could let concurrent runtimes select and share one ID.
+      storage.reserveSession(workspaceRootPath, sessionId);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || attempt === 19) throw error;
+      sessionId = '';
+    }
+  }
+  if (!sessionId) throw new Error('Failed to reserve a unique session ID');
 
   // Set sdkCwd to initial working directory or session path - this never changes
   // The SDK stores session transcripts at ~/.claude/projects/{cwd-slugified}/
@@ -247,7 +257,12 @@ export async function createSessionWithStorage(
       costUsd: 0,
     },
   };
-  await saveSessionWithStorage(storedSession, storage);
+  try {
+    await saveSessionWithStorage(storedSession, storage);
+  } catch (error) {
+    storage.delete(workspaceRootPath, sessionId);
+    throw error;
+  }
 
   return session;
 }

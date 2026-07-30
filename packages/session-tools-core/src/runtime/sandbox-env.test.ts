@@ -24,7 +24,7 @@ describe('sandbox-env', () => {
 
     const sanitized = createSanitizedEnv(base);
 
-    expect(sanitized.SAFE_VAR).toBe('ok');
+    expect(sanitized.SAFE_VAR).toBeUndefined();
     for (const key of BLOCKED_ENV_VARS) {
       expect(sanitized[key]).toBeUndefined();
     }
@@ -42,7 +42,7 @@ describe('sandbox-env', () => {
       OPENAI_API_KEY: 'secret',
     });
 
-    expect(env.SAFE_VAR).toBe('ok');
+    expect(env.SAFE_VAR).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
 
     expect(env.TMPDIR).toBe(join(dataDir, '.tmp'));

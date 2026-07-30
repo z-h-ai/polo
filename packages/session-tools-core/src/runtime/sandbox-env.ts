@@ -32,13 +32,40 @@ export const BLOCKED_ENV_VARS = [
   'NPM_TOKEN',
 ] as const;
 
+export const TOOL_ENV_ALLOWLIST = new Set([
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  'TERM',
+  'COLORTERM',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'SYSTEMROOT',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'USERPROFILE',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+]);
+
 /**
- * Return a shallow-copied environment with sensitive variables removed.
+ * Build a tool environment from an explicit allowlist. A denylist cannot
+ * protect invocation credentials carried under new provider-specific names.
  */
 export function createSanitizedEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...baseEnv };
-  for (const key of BLOCKED_ENV_VARS) {
-    delete env[key];
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (value !== undefined && (TOOL_ENV_ALLOWLIST.has(key) || key.startsWith('LC_'))) {
+      env[key] = value;
+    }
   }
   return env;
 }

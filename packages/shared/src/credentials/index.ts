@@ -30,4 +30,10 @@ export {
 } from './manager.ts';
 export type { CredentialId, CredentialType, StoredCredential } from './types.ts';
 export { credentialIdToAccount, accountToCredentialId, SOURCE_CREDENTIAL_TYPES, VALID_CREDENTIAL_TYPES } from './types.ts';
+export {
+  startInvocationCredentialProxy,
+  type InvocationCredentialProxy,
+  type InvocationCredentialProxyOptions,
+  type InvocationCredentialProxyTarget,
+} from './invocation-credential-proxy.ts';
 export type { CredentialBackend } from './backends/types.ts';

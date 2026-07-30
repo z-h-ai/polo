@@ -1,3 +1,5 @@
+import { stripAnsi } from './terminal-output.ts'
+
 interface Usage {
   input_tokens: number
   cached_input_tokens: number
@@ -122,7 +124,7 @@ export class ExecEventAdapter {
   }
 
   redact(value: string): string {
-    let output = value
+    let output = stripAnsi(value)
     for (const secret of this.secrets) output = output.split(secret).join('[REDACTED]')
     output = output.replace(/Authorization\s*:\s*(?:Bearer|Basic)\s+\S+/gi, 'Authorization: [REDACTED]')
     output = output.replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')

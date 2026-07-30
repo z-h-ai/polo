@@ -15,6 +15,7 @@ import {
   parseExecutionArgs,
 } from './execution-parser.ts'
 import { runExecutionCommand } from './one-shot.ts'
+import { colorModeFromArgv, stderrErrorLine } from './terminal-output.ts'
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -1971,7 +1972,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       process.exit(exitCode)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      process.stderr.write(`Error: ${message}\n`)
+      process.stderr.write(stderrErrorLine(message, colorModeFromArgv(argv)))
       process.exit(error instanceof UsageError ? 2 : 1)
     }
   }

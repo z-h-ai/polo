@@ -6,7 +6,7 @@ describe('sanitizeShellToolInput', () => {
     if (process.platform === 'win32') return;
     const secret = 'tool-env-secret-123456';
     const input = sanitizeShellToolInput('Bash', {
-      command: 'printf %s \"$ANTHROPIC_API_KEY\"',
+      command: 'printf "%s|%s" "$ANTHROPIC_API_KEY" "$UNRELATED_HOST_SECRET"',
     });
     const proc = Bun.spawn(['bash', '-c', String(input.command)], {
       stdout: 'pipe',
@@ -14,6 +14,7 @@ describe('sanitizeShellToolInput', () => {
       env: {
         ...process.env,
         ANTHROPIC_API_KEY: secret,
+        UNRELATED_HOST_SECRET: 'must-not-reach-tool',
       },
     });
     const [exitCode, stdout] = await Promise.all([
@@ -22,7 +23,7 @@ describe('sanitizeShellToolInput', () => {
     ]);
 
     expect(exitCode).toBe(0);
-    expect(stdout).toBe('');
+    expect(stdout).toBe('|');
     expect(String(input.command)).not.toContain(secret);
   });
 

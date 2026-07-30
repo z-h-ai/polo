@@ -44,6 +44,20 @@ describe('RootedSessionStorage', () => {
     expect(second.getSessionPath('/ignored', 'same-id')).toBe(join(temp, 'second', 'sessions', 'same-id'))
   })
 
+  it('atomically reserves distinct session IDs under concurrent creation', async () => {
+    const temp = mkdtempSync(join(tmpdir(), 'polo-rooted-storage-concurrent-'))
+    tempDirs.push(temp)
+    const storage = new RootedSessionStorage(join(temp, 'sessions'))
+    const sessions = await Promise.all(
+      Array.from({ length: 24 }, () => storage.create('/ignored')),
+    )
+
+    expect(new Set(sessions.map(session => session.id)).size).toBe(sessions.length)
+    for (const session of sessions) {
+      expect(statSync(storage.getSessionPath('/ignored', session.id)).isDirectory()).toBe(true)
+    }
+  })
+
   it('redacts invocation credentials at the persistence boundary', () => {
     const temp = mkdtempSync(join(tmpdir(), 'polo-rooted-storage-redaction-'))
     tempDirs.push(temp)

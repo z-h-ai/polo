@@ -23,7 +23,11 @@ import {
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
 import { DEFAULT_MODEL, isClaudeModel, getDefaultSummarizationModel, getModelContextWindow } from '../config/models.ts';
-import { getCredentialManager } from '../credentials/index.ts';
+import {
+  getCredentialManager,
+  startInvocationCredentialProxy,
+  type InvocationCredentialProxy,
+} from '../credentials/index.ts';
 import { loadPreferences, formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import type { FileAttachment } from '../utils/files.ts';
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
@@ -494,6 +498,7 @@ export class ClaudeAgent extends BaseAgent {
   private lastStderrOutput: string[] = [];
   /** Pending steer message — injected via additionalContext on next PreToolUse */
   private pendingSteerMessage: string | null = null;
+  private invocationCredentialProxy: InvocationCredentialProxy | null = null;
 
   /**
    * Get the session ID for mode operations.
@@ -683,13 +688,47 @@ export class ClaudeAgent extends BaseAgent {
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
     }
 
-    // CLI credentials never enter the runtime's process.env. They are scoped to
-    // the model subprocess configuration; tool subprocesses use sanitized envs.
-    this.config.envOverrides = {
-      ...this.config.envOverrides,
-      ...result.envVars,
-    };
-    if (!invocationScoped) {
+    if (invocationScoped) {
+      const apiKey = result.envVars.ANTHROPIC_API_KEY;
+      const oauthToken = result.envVars.CLAUDE_CODE_OAUTH_TOKEN;
+      const credential = oauthToken || apiKey;
+      const upstreamBaseUrl =
+        result.envVars.ANTHROPIC_BASE_URL
+        || connection.baseUrl
+        || 'https://api.anthropic.com';
+      const upstreamHeaders: Record<string, string> = {};
+      if (credential && credential !== 'not-needed') {
+        if (oauthToken || connection.authType === 'bearer_token') {
+          upstreamHeaders.Authorization = `Bearer ${credential}`;
+        } else {
+          upstreamHeaders['x-api-key'] = credential;
+        }
+      }
+
+      await this.invocationCredentialProxy?.close();
+      this.invocationCredentialProxy = await startInvocationCredentialProxy({
+        upstreamBaseUrl,
+        headers: upstreamHeaders,
+      });
+
+      // The Claude subprocess receives only an invocation-scoped loopback URL
+      // and opaque capability. Real credentials remain in this runtime.
+      const nextOverrides = { ...this.config.envOverrides };
+      delete nextOverrides.ANTHROPIC_API_KEY;
+      delete nextOverrides.CLAUDE_CODE_OAUTH_TOKEN;
+      delete nextOverrides.ANTHROPIC_BASE_URL;
+      nextOverrides.ANTHROPIC_BASE_URL = this.invocationCredentialProxy.url;
+      if (oauthToken) {
+        nextOverrides.CLAUDE_CODE_OAUTH_TOKEN = this.invocationCredentialProxy.capability;
+      } else {
+        nextOverrides.ANTHROPIC_API_KEY = this.invocationCredentialProxy.capability;
+      }
+      this.config.envOverrides = nextOverrides;
+    } else {
+      this.config.envOverrides = {
+        ...this.config.envOverrides,
+        ...result.envVars,
+      };
       for (const [key, value] of Object.entries(result.envVars)) {
         process.env[key] = value;
       }
@@ -2698,6 +2737,9 @@ This is a branched conversation. All prior messages in this conversation are par
 
     // Clear session
     this.sessionId = null;
+    const credentialProxy = this.invocationCredentialProxy;
+    this.invocationCredentialProxy = null;
+    void credentialProxy?.close();
 
     // Base cleanup (stops config watcher, clears whitelists, resets source trackers)
     super.destroy();

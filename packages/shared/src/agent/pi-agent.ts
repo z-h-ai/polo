@@ -14,6 +14,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@polo-ai/core/types';
 import type { FileAttachment } from '../utils/files.ts';
@@ -34,6 +35,7 @@ import type { ThinkingLevel } from './thinking-levels.ts';
 
 // Import models from centralized registry
 import { getModelById } from '../config/models.ts';
+import { getPiProviderBaseUrl } from '../config/models-pi.ts';
 
 // BaseAgent provides common functionality
 import { BaseAgent } from './base-agent.ts';
@@ -49,6 +51,10 @@ import { getCoAuthorPreference } from '../config/preferences.ts';
 
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
+import {
+  startInvocationCredentialProxy,
+  type InvocationCredentialProxy,
+} from '../credentials/invocation-credential-proxy.ts';
 
 // ChatGPT OAuth token refresh (used when Pi routes ChatGPT auth)
 import { refreshChatGptTokens } from '../auth/chatgpt-oauth.ts';
@@ -165,6 +171,7 @@ export class PiAgent extends BaseAgent {
   private readline: ReadlineInterface | null = null;
   private subprocessReady: Promise<void> | null = null;
   private subprocessReadyResolve: (() => void) | null = null;
+  private invocationCredentialProxy: InvocationCredentialProxy | null = null;
 
   // Pi session ID (managed by subprocess, reported back)
   private piSessionId: string | null = null;
@@ -443,8 +450,12 @@ export class PiAgent extends BaseAgent {
       this.debug('Custom endpoint mode: no provider credential configured, sending empty API key');
     }
 
-    // Derive AWS env vars from the piAuth credential (single fetch, no race).
-    const awsEnv = this.buildAwsEnv(piAuth, runtime);
+    const invocationScoped = this.sessionStorage.owner === 'cli';
+    const proxyAuth = await this.configureInvocationCredentialProxy(piAuth, legacyApiKey, runtime);
+
+    // IAM material is never placed in a CLI model subprocess. Desktop keeps
+    // the existing provider-native environment behavior.
+    const awsEnv = invocationScoped ? {} : this.buildAwsEnv(piAuth, runtime);
 
     // Spawn the subprocess
     const child = spawn(nodePath, args, {
@@ -507,7 +518,7 @@ export class PiAgent extends BaseAgent {
     // Send init command (flat structure matching subprocess InboundMessage type)
     this.send({
       type: 'init',
-      apiKey: legacyApiKey || '',
+      apiKey: proxyAuth.apiKey,
       model: this._model,
       cwd,
       thinkingLevel: this._thinkingLevel,
@@ -520,7 +531,8 @@ export class PiAgent extends BaseAgent {
       providerType: this.config.providerType,
       authType: this.config.authType,
       workspaceId: this.config.workspace.id,
-      piAuth,
+      piAuth: proxyAuth.piAuth,
+      credentialProxy: proxyAuth.credentialProxy,
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
@@ -681,6 +693,124 @@ export class PiAgent extends BaseAgent {
     }
   }
 
+  private resolveInvocationProxyUpstream(
+    piAuth: Awaited<ReturnType<PiAgent['getPiAuth']>>,
+    runtime: ReturnType<typeof getBackendRuntime>,
+  ): string | undefined {
+    if (runtime.baseUrl?.trim()) return runtime.baseUrl.trim();
+    if (piAuth?.credential.type === 'oauth') {
+      const endpoint = piAuth.credential.access.match(/proxy-ep=([^;]+)/)?.[1];
+      if (endpoint) return `https://${endpoint.replace(/^proxy\./, 'api.')}`;
+    }
+    const provider = piAuth?.provider || runtime.piAuthProvider;
+    return provider ? getPiProviderBaseUrl(provider) : undefined;
+  }
+
+  private createInvocationCapability(
+    provider: string | undefined,
+    credential: string | undefined,
+  ): string | undefined {
+    if (provider !== 'openai-codex' || !credential) return undefined;
+    try {
+      const parts = credential.split('.');
+      if (parts.length !== 3) return undefined;
+      const payload = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf-8')) as {
+        'https://api.openai.com/auth'?: { chatgpt_account_id?: unknown };
+      };
+      const accountId = payload['https://api.openai.com/auth']?.chatgpt_account_id;
+      if (typeof accountId !== 'string' || !accountId) return undefined;
+      const encode = (value: unknown) =>
+        Buffer.from(JSON.stringify(value), 'utf-8').toString('base64url');
+      return [
+        encode({ alg: 'none', typ: 'JWT', polo: 'loopback-capability' }),
+        encode({
+          'https://api.openai.com/auth': { chatgpt_account_id: accountId },
+          jti: randomUUID(),
+        }),
+        randomBytes(32).toString('base64url'),
+      ].join('.');
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async configureInvocationCredentialProxy(
+    piAuth: Awaited<ReturnType<PiAgent['getPiAuth']>>,
+    legacyApiKey: string | null | undefined,
+    runtime: ReturnType<typeof getBackendRuntime>,
+  ): Promise<{
+    apiKey: string;
+    piAuth: Awaited<ReturnType<PiAgent['getPiAuth']>>;
+    credentialProxy?: { baseUrl: string; capability: string };
+  }> {
+    if (this.sessionStorage.owner !== 'cli') {
+      return { apiKey: legacyApiKey || '', piAuth };
+    }
+    if (piAuth?.credential.type === 'iam') {
+      throw new Error('CLI credential isolation does not support direct IAM model subprocess credentials');
+    }
+
+    const upstreamBaseUrl = this.resolveInvocationProxyUpstream(piAuth, runtime);
+    if (!upstreamBaseUrl) {
+      throw new Error(`Could not determine loopback credential proxy upstream for ${piAuth?.provider || 'Pi provider'}`);
+    }
+    const credential = piAuth?.credential.type === 'oauth'
+      ? piAuth.credential.access
+      : piAuth?.credential.type === 'api_key'
+        ? piAuth.credential.key
+        : legacyApiKey ?? undefined;
+    const provider = piAuth?.provider || runtime.piAuthProvider;
+    if (this.invocationCredentialProxy) {
+      this.invocationCredentialProxy.updateTarget({ upstreamBaseUrl, credential });
+    } else {
+      this.invocationCredentialProxy = await startInvocationCredentialProxy({
+        upstreamBaseUrl,
+        credential,
+      }, {
+        capability: this.createInvocationCapability(provider, credential),
+      });
+    }
+    const capability = this.invocationCredentialProxy.capability;
+    const childPiAuth = piAuth
+      ? {
+          provider: piAuth.provider,
+          credential: piAuth.credential.type === 'oauth'
+            ? {
+                type: 'oauth' as const,
+                access: capability,
+                refresh: capability,
+                // Parent runtime refreshes the real OAuth identity and rotates
+                // the proxy target. The child must never try to refresh using
+                // its opaque local capability, even for very long executions.
+                expires: Number.MAX_SAFE_INTEGER,
+              }
+            : { type: 'api_key' as const, key: capability },
+        }
+      : null;
+    return {
+      apiKey: capability,
+      piAuth: childPiAuth,
+      credentialProxy: {
+        baseUrl: this.invocationCredentialProxy.url,
+        capability,
+      },
+    };
+  }
+
+  private async pushCredentialUpdateToSubprocess(
+    piAuth: Awaited<ReturnType<PiAgent['getPiAuth']>>,
+  ): Promise<void> {
+    if (!piAuth || !this.subprocess) return;
+    const proxyAuth = await this.configureInvocationCredentialProxy(
+      piAuth,
+      undefined,
+      getBackendRuntime(this.config),
+    );
+    if (proxyAuth.piAuth) {
+      this.send({ type: 'token_update', piAuth: proxyAuth.piAuth });
+    }
+  }
+
   /**
    * Build AWS environment variables from piAuth credentials for the subprocess.
    *
@@ -737,7 +867,7 @@ export class PiAgent extends BaseAgent {
       if (this.subprocess) {
         const piAuth = await this.getPiAuth();
         if (piAuth) {
-          this.send({ type: 'token_update', piAuth });
+          await this.pushCredentialUpdateToSubprocess(piAuth);
           this.debug('Pushed credentials refreshed by sibling instance');
         }
       }
@@ -781,7 +911,7 @@ export class PiAgent extends BaseAgent {
         if (this.subprocess) {
           const piAuth = await this.getPiAuth();
           if (piAuth) {
-            this.send({ type: 'token_update', piAuth });
+            await this.pushCredentialUpdateToSubprocess(piAuth);
             this.debug('Pushed refreshed credentials to subprocess');
           }
         }
@@ -2167,6 +2297,13 @@ export class PiAgent extends BaseAgent {
     };
     this._model = update.model;
 
+    if (this.sessionStorage.owner === 'cli' && this.invocationCredentialProxy) {
+      const runtime = getBackendRuntime(this.config);
+      const piAuth = await this.getPiAuth();
+      const legacyApiKey = !piAuth && !runtime.customEndpoint ? await this.getApiKey() : undefined;
+      await this.configureInvocationCredentialProxy(piAuth, legacyApiKey, runtime);
+    }
+
     if (!this.subprocess) {
       this.debug(`Runtime config updated locally (no subprocess): ${previousModel} → ${update.model}`);
       return true;
@@ -2338,6 +2475,10 @@ export class PiAgent extends BaseAgent {
     this._sessionToolContext = null;
     // Pool clients are owned by the main process — don't close them here.
     this.killSubprocess();
+    const credentialProxy = this.invocationCredentialProxy;
+    this.invocationCredentialProxy = null;
+    void credentialProxy?.close();
+    super.destroy();
     this.debug('PiAgent destroyed');
   }
 
@@ -2350,6 +2491,10 @@ export class PiAgent extends BaseAgent {
 
     this._sessionToolContext = null;
     await this.killSubprocessGracefully();
+    const credentialProxy = this.invocationCredentialProxy;
+    this.invocationCredentialProxy = null;
+    await credentialProxy?.close();
+    super.destroy();
     this.debug('PiAgent disposed for restart');
   }
 

@@ -47,7 +47,6 @@ import {
   // Helpers
   loadSourceConfig as loadSourceConfigFromHelpers,
   errorResponse,
-  setSessionFilePathResolver,
 } from '@polo-ai/session-tools-core';
 
 // ============================================================
@@ -504,11 +503,6 @@ async function main() {
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.POLO_AI_LLM_CALLBACK_PORT,
   };
-  const sessionsRoot = dirname(dirname(plansFolderPath));
-  setSessionFilePathResolver((_workspacePath, requestedSessionId) =>
-    join(sessionsRoot, requestedSessionId, 'session.jsonl')
-  );
-
   // Create the Codex context
   const ctx = createCodexContext(config);
 

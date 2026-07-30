@@ -68,7 +68,6 @@ import {
 
 // Direct source imports from shared (bundled by bun build)
 import { handleLargeResponse, estimateTokens, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
-import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/storage.ts';
 import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
@@ -117,6 +116,7 @@ interface InitMessage {
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
+  credentialProxy?: { baseUrl: string; capability: string };
 }
 
 interface RuntimeConfigUpdateMessage {
@@ -374,6 +374,20 @@ function shouldPreferCustomEndpoint(): boolean {
   return Boolean(initConfig?.customEndpoint && initConfig?.baseUrl?.trim());
 }
 
+function resolveRuntimePiModel(
+  registry: PiModelRegistry,
+  modelId: string,
+  preferredProvider?: string,
+  preferCustomEndpoint?: boolean,
+): ReturnType<typeof resolvePiModel> {
+  const model = resolvePiModel(registry, modelId, preferredProvider, preferCustomEndpoint);
+  if (!model || !initConfig?.credentialProxy?.baseUrl) return model;
+  return {
+    ...model,
+    baseUrl: initConfig.credentialProxy.baseUrl,
+  };
+}
+
 /**
  * Expose the active Pi model API/provider/base URL to the interceptor process.
  * This gives the interceptor a robust routing hint (instead of brittle URL-only matching).
@@ -508,7 +522,12 @@ function createAuthenticatedRegistry(): {
       : [initConfig.model || 'default']
     ).map(normalizeCustomEndpointModelEntry);
     customEndpointModelIds = new Set();  // Reset on fresh registry creation
-    registerCustomEndpointModels(modelRegistry, api, initConfig.baseUrl!.trim(), modelEntries);
+    registerCustomEndpointModels(
+      modelRegistry,
+      api,
+      initConfig.credentialProxy?.baseUrl ?? initConfig.baseUrl!.trim(),
+      modelEntries,
+    );
   } else if (hasCustomEndpoint && !initConfig?.customEndpoint) {
     debugLog('Custom endpoint without protocol config — models may not resolve. Set customEndpoint.api for proper routing.');
   }
@@ -537,15 +556,15 @@ async function ensureSession(): Promise<AgentSession> {
   // are used without recreating the session.
   const searchProvider = {
     get name() {
-      return resolveSearchProvider(initConfig?.piAuth).name;
+      return resolveSearchProvider(initConfig?.piAuth, initConfig?.credentialProxy).name;
     },
     async search(query: string, count: number) {
-      return resolveSearchProvider(initConfig?.piAuth).search(query, count);
+      return resolveSearchProvider(initConfig?.piAuth, initConfig?.credentialProxy).search(query, count);
     },
   };
   const searchTool = createSearchTool(searchProvider);
   const webFetchTool = createWebFetchTool(() =>
-    initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null
+    initConfig?.sessionPath || null
   );
   const webTools = [searchTool, webFetchTool];
 
@@ -629,7 +648,7 @@ async function ensureSession(): Promise<AgentSession> {
   // Set model if specified
   if (initConfig.model) {
     try {
-      const piModel = resolvePiModel(modelRegistry, initConfig.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
+      const piModel = resolveRuntimePiModel(modelRegistry, initConfig.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
       if (piModel) {
         // Verify resolved model's provider is compatible with the authenticated provider.
         // Without this, a model that resolves to a different provider (e.g. azure-openai-responses
@@ -775,10 +794,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
     const modelContextWindow = piSession?.agent.state.model?.contextWindow;
     if (estimateTokens(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
       try {
-        const sessionPath = getSessionPath(
-          initConfig.workspaceRootPath,
-          initConfig.sessionId,
-        );
+        const sessionPath = initConfig.sessionPath;
 
         const largeResult = await handleLargeResponse({
           text: resultText,
@@ -909,7 +925,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
   if (initConfig.piAuth) {
     const authProvider = initConfig.piAuth.provider;
     const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
-    const resolved = resolvePiModel(modelRegistry, bareModel, authProvider, shouldPreferCustomEndpoint());
+    const resolved = resolveRuntimePiModel(modelRegistry, bareModel, authProvider, shouldPreferCustomEndpoint());
     const resolvedProvider = (resolved as any)?.provider;
     const isCompatible = resolvedProvider === authProvider || resolvedProvider === 'custom-endpoint';
     if (!resolved || !isCompatible || isDeniedMiniModelId(model, piAuthProvider)) {
@@ -932,7 +948,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     // fall back to its own internal default (which may require a provider
     // the user hasn't authenticated with, surfacing as a misleading
     // "No API key found for <provider>" error).
-    const piModel = resolvePiModel(modelRegistry, modelId, initConfig!.piAuth?.provider, shouldPreferCustomEndpoint());
+    const piModel = resolveRuntimePiModel(modelRegistry, modelId, initConfig!.piAuth?.provider, shouldPreferCustomEndpoint());
     if (!piModel) {
       throw new Error(
         `Could not resolve mini model "${modelId}" for provider "${initConfig!.piAuth?.provider ?? '(unknown)'}"`,
@@ -1054,7 +1070,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
       const retryModel = fallbackCandidates.find(candidate => {
         if (triedModels.has(candidate)) return false;
         try {
-          const resolved = resolvePiModel(modelRegistry, candidate, initConfig!.piAuth?.provider, shouldPreferCustomEndpoint());
+          const resolved = resolveRuntimePiModel(modelRegistry, candidate, initConfig!.piAuth?.provider, shouldPreferCustomEndpoint());
           if (!resolved) return false;
           if (initConfig!.piAuth) {
             const rp = (resolved as any).provider;
@@ -1079,9 +1095,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
 }
 
 async function preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQueryResult> {
-  const sessionPath = initConfig
-    ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId)
-    : undefined;
+  const sessionPath = initConfig?.sessionPath || undefined;
   const request = await buildCallLlmRequest(input, { backendName: 'Pi', sessionPath });
   return queryLlm(request);
 }
@@ -1260,9 +1274,9 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
 
   // Azure OpenAI requires a tenant-specific endpoint URL.
   // The Pi SDK (via Vercel AI SDK) reads AZURE_OPENAI_BASE_URL from env.
-  if (msg.piAuth?.provider === 'azure-openai-responses' && msg.baseUrl) {
-    process.env.AZURE_OPENAI_BASE_URL = msg.baseUrl;
-    debugLog(`Set AZURE_OPENAI_BASE_URL=${msg.baseUrl}`);
+  if (msg.piAuth?.provider === 'azure-openai-responses' && (msg.credentialProxy?.baseUrl || msg.baseUrl)) {
+    process.env.AZURE_OPENAI_BASE_URL = msg.credentialProxy?.baseUrl || msg.baseUrl!;
+    debugLog('Set AZURE_OPENAI_BASE_URL for active runtime endpoint');
   }
 
   // Start callback server for call_llm (idempotent — skips if already running)
@@ -1537,14 +1551,24 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
 
       customEndpointModelIds = new Set();
       customModelOverrides.clear();
-      registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), modelEntries);
+      registerCustomEndpointModels(
+        piModelRegistry,
+        initConfig.customEndpoint.api,
+        initConfig.credentialProxy?.baseUrl ?? initConfig.baseUrl.trim(),
+        modelEntries,
+      );
     }
 
     if (piSession && piModelRegistry) {
-      let piModel = resolvePiModel(piModelRegistry, msg.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
+      let piModel = resolveRuntimePiModel(piModelRegistry, msg.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
       if (!piModel && initConfig.baseUrl?.trim() && initConfig.customEndpoint) {
         const bareId = stripPiPrefix(msg.model);
-        registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), [{ id: bareId }]);
+        registerCustomEndpointModels(
+          piModelRegistry,
+          initConfig.customEndpoint.api,
+          initConfig.credentialProxy?.baseUrl ?? initConfig.baseUrl.trim(),
+          [{ id: bareId }],
+        );
         piModel = piModelRegistry.find('custom-endpoint', bareId) ?? undefined;
         debugLog(`[runtime_config] Dynamically registered custom endpoint model: ${bareId}`);
       }
@@ -1574,14 +1598,19 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
     debugLog(`[set_model] No active session or model registry, ignoring`);
     return;
   }
-  let piModel = resolvePiModel(piModelRegistry, msg.model, initConfig?.piAuth?.provider, shouldPreferCustomEndpoint());
+  let piModel = resolveRuntimePiModel(piModelRegistry, msg.model, initConfig?.piAuth?.provider, shouldPreferCustomEndpoint());
 
   // For custom endpoints, dynamically register unknown models so mid-session switching works.
   // Uses registerCustomEndpointModels which accumulates into the existing model set
   // (registerProvider replaces, so we track all IDs and re-register the full set).
   if (!piModel && initConfig?.baseUrl?.trim() && initConfig?.customEndpoint) {
     const bareId = stripPiPrefix(msg.model);
-    registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl!.trim(), [{ id: bareId }]);
+    registerCustomEndpointModels(
+      piModelRegistry,
+      initConfig.customEndpoint.api,
+      initConfig.credentialProxy?.baseUrl ?? initConfig.baseUrl!.trim(),
+      [{ id: bareId }],
+    );
     piModel = piModelRegistry.find('custom-endpoint', bareId) ?? undefined;
     debugLog(`[set_model] Dynamically registered custom endpoint model: ${bareId}`);
   }

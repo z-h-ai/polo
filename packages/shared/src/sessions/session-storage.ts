@@ -36,6 +36,7 @@ export interface SessionStorage {
   getMetaPath(workspaceRootPath: string, sessionId: string): string
   ensureSessionsRoot(workspaceRootPath: string): string
   ensureSession(workspaceRootPath: string, sessionId: string): string
+  reserveSession(workspaceRootPath: string, sessionId: string): string
   create(
     workspaceRootPath: string,
     options?: Parameters<typeof createSessionWithStorage>[2],
@@ -98,6 +99,19 @@ abstract class FilesystemSessionStorage implements SessionStorage {
   ensureSession(workspaceRootPath: string, sessionId: string): string {
     this.ensureSessionsRoot(workspaceRootPath)
     return ensureSessionTree(this.getSessionPath(workspaceRootPath, sessionId), this.owner)
+  }
+
+  reserveSession(workspaceRootPath: string, sessionId: string): string {
+    this.ensureSessionsRoot(workspaceRootPath)
+    const path = this.getSessionPath(workspaceRootPath, sessionId)
+    mkdirSync(path, {
+      recursive: false,
+      mode: this.owner === 'cli' ? 0o700 : undefined,
+    })
+    if (this.owner === 'cli' && process.platform !== 'win32') {
+      chmodSync(path, 0o700)
+    }
+    return ensureSessionTree(path, this.owner)
   }
 
   getAttachmentsPath(workspaceRootPath: string, sessionId: string): string {

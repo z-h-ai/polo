@@ -4,9 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CliRpcClient } from './client.ts'
 import type { CliThreadRecord } from './cli-thread-store.ts'
+import {
+  createCliThread,
+  listCliThreads,
+} from './cli-thread-store.ts'
 import { ExecEventAdapter, type InternalSessionEvent } from './exec-event-adapter.ts'
 import { parseExecutionArgs } from './execution-parser.ts'
-import { createConfigurationSnapshot, waitForTurn } from './one-shot.ts'
+import { createConfigurationSnapshot, runExecutionCommand, waitForTurn } from './one-shot.ts'
 
 const tempDirs: string[] = []
 
@@ -83,6 +87,38 @@ describe('one-shot execution internals', () => {
     expect(result.error?.message).toContain('provider rejected credential')
   })
 
+  it('retains the raw final message for -o while stdout sanitization stays separate', async () => {
+    let listener: ((value: unknown) => void) | undefined
+    const client = {
+      on(_channel: string, callback: (value: unknown) => void) {
+        listener = callback
+        return () => {
+          listener = undefined
+        }
+      },
+      async invoke() {
+        listener?.({
+          type: 'text_delta',
+          sessionId: 'session-1',
+          delta: '\u001B[31manswer\u001B[39m',
+        } satisfies InternalSessionEvent)
+        listener?.({ type: 'complete', sessionId: 'session-1' } satisfies InternalSessionEvent)
+      },
+    } as unknown as CliRpcClient
+    const args = parseExecutionArgs(['bun', 'index.ts', 'exec', 'hello'])
+
+    const result = await waitForTurn(
+      client,
+      'session-1',
+      'hello',
+      args,
+      new ExecEventAdapter({ json: false }),
+    )
+
+    expect(result.status).toBe('completed')
+    expect(result.finalMessage).toBe('\u001B[31manswer\u001B[39m')
+  })
+
   it('resolves resume connection in invocation-env, Thread, current-default order', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'polo-resume-connection-'))
     tempDirs.push(temp)
@@ -105,4 +141,37 @@ describe('one-shot execution internals', () => {
     expect(exitCode, stderr).toBe(0)
     expect(stdout).toBe('ok\n')
   }, 15_000)
+
+  it('validates resume --ephemeral before cloning the original Thread', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-resume-ephemeral-validation-'))
+    tempDirs.push(temp)
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = temp
+    try {
+      const original = await createCliThread({
+        origin: 'cli-exec',
+        configurationScopeId: 'global',
+        configurationWorkspacePath: join(temp, 'missing-scope'),
+        workingDirectory: temp,
+        persistence: 'persistent',
+      })
+      const args = parseExecutionArgs([
+        'bun',
+        'index.ts',
+        'exec',
+        'resume',
+        original.metadata.threadId,
+        '--ephemeral',
+        '--',
+        'continue',
+      ])
+
+      expect(await runExecutionCommand(args)).toBe(1)
+      const records = await listCliThreads()
+      expect(records.map(record => record.metadata.threadId)).toEqual([original.metadata.threadId])
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
+  })
 })

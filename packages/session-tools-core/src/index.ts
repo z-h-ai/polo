@@ -76,7 +76,6 @@ export {
   skillExists,
   skillMdExists,
   listSkillSlugs,
-  setSessionFilePathResolver,
   generateRequestId,
   // Multi-header credential helpers
   detectCredentialMode,

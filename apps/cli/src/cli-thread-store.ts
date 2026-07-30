@@ -1,9 +1,11 @@
 import {
   chmod,
   cp,
+  lstat,
   mkdir,
   open,
   readFile,
+  realpath,
   readdir,
   rename,
   rm,
@@ -104,9 +106,43 @@ function assertControlledPath(root: string, target: string): void {
   }
 }
 
+async function assertCanonicalControlledPath(root: string, target: string): Promise<void> {
+  const [rootInfo, targetInfo] = await Promise.all([lstat(root), lstat(target)])
+  if (rootInfo.isSymbolicLink() || targetInfo.isSymbolicLink()) {
+    throw new Error(`Refusing symlink inside controlled CLI root: ${target}`)
+  }
+  const [canonicalRoot, canonicalTarget] = await Promise.all([realpath(root), realpath(target)])
+  assertControlledPath(canonicalRoot, canonicalTarget)
+}
+
+async function unlinkControlledFile(root: string, target: string): Promise<void> {
+  try {
+    await assertCanonicalControlledPath(root, target)
+    const info = await lstat(target)
+    if (!info.isFile()) throw new Error(`Refusing to unlink non-file inside controlled CLI root: ${target}`)
+    await unlink(target)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
 async function ensurePrivateDir(path: string): Promise<void> {
   await mkdir(path, { recursive: true, mode: DIRECTORY_MODE })
   if (process.platform !== 'win32') await chmod(path, DIRECTORY_MODE)
+}
+
+async function makePrivateTree(path: string): Promise<void> {
+  const info = await lstat(path)
+  if (info.isSymbolicLink()) {
+    throw new Error(`Refusing symlink inside CLI Thread: ${path}`)
+  }
+  if (process.platform !== 'win32') {
+    await chmod(path, info.isDirectory() ? DIRECTORY_MODE : FILE_MODE)
+  }
+  if (!info.isDirectory()) return
+  for (const entry of await readdir(path)) {
+    await makePrivateTree(join(path, entry))
+  }
 }
 
 async function atomicWriteJson(path: string, value: unknown): Promise<void> {
@@ -165,43 +201,55 @@ export async function createCliThread(input: {
   }
 
   assertControlledPath(root, directory)
-  await ensurePrivateDir(join(directory, 'sessions'))
+  try {
+    await ensurePrivateDir(join(directory, 'sessions'))
 
-  const now = Date.now()
-  const metadata: CliThreadMetadata = {
-    version: 1,
-    threadId,
-    origin: input.origin,
-    configurationScopeId: scopeId,
-    configurationWorkspaceId: input.configurationWorkspaceId,
-    configurationWorkspacePath: resolve(input.configurationWorkspacePath),
-    workingDirectory: resolve(input.workingDirectory),
-    createdAt: now,
-    lastUsedAt: now,
-    persistence: input.persistence,
-    connection: input.connection,
+    const now = Date.now()
+    const metadata: CliThreadMetadata = {
+      version: 1,
+      threadId,
+      origin: input.origin,
+      configurationScopeId: scopeId,
+      configurationWorkspaceId: input.configurationWorkspaceId,
+      configurationWorkspacePath: resolve(input.configurationWorkspacePath),
+      workingDirectory: resolve(input.workingDirectory),
+      createdAt: now,
+      lastUsedAt: now,
+      persistence: input.persistence,
+      connection: input.connection,
+    }
+    await atomicWriteJson(join(directory, 'thread.json'), metadata)
+    return recordFor(directory, metadata)
+  } catch (error) {
+    await assertCanonicalControlledPath(root, directory)
+      .then(() => rm(directory, { recursive: true, force: true }))
+      .catch(() => {})
+    throw error
   }
-  await atomicWriteJson(join(directory, 'thread.json'), metadata)
-  return recordFor(directory, metadata)
 }
 
 export async function updateCliThread(
   record: CliThreadRecord,
   updates: Partial<Pick<CliThreadMetadata, 'mainSessionId' | 'status' | 'lastUsedAt' | 'workingDirectory' | 'configurationWorkspaceId' | 'configurationWorkspacePath' | 'connection'>>,
 ): Promise<void> {
+  await assertCanonicalControlledPath(getCliSessionsRoot(), record.directory)
   const metadata = await readJson<CliThreadMetadata>(join(record.directory, 'thread.json'))
   const next = { ...metadata, ...updates }
   await atomicWriteJson(join(record.directory, 'thread.json'), next)
   record.metadata = next
 }
 
-export function isOwnerActive(owner: CliThreadOwner, _now = Date.now()): boolean {
+export function isOwnerActive(owner: CliThreadOwner, now = Date.now()): boolean {
   const cliMatches = processIdentityMatches(owner.cliPid, owner.cliProcessIdentity)
   const serverMatches = processIdentityMatches(owner.serverPid, owner.serverProcessIdentity)
-  return cliMatches || serverMatches
+  const leaseIsFresh = Number.isFinite(owner.heartbeatAt)
+    && now - owner.heartbeatAt <= ACTIVE_LEASE_WINDOW_MS
+  return cliMatches || serverMatches || leaseIsFresh
 }
 
 export async function acquireCliThreadLease(record: CliThreadRecord): Promise<CliThreadLease> {
+  const root = getCliSessionsRoot()
+  await assertCanonicalControlledPath(root, record.directory)
   await ensurePrivateDir(record.directory)
   const ownerFile = record.ownerFile
   const now = Date.now()
@@ -223,6 +271,7 @@ export async function acquireCliThreadLease(record: CliThreadRecord): Promise<Cl
     await writeFile(ownerFile, JSON.stringify(owner, null, 2), { flag: 'wx', mode: FILE_MODE })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await assertCanonicalControlledPath(root, ownerFile)
     const previous = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
     if (previous && isOwnerActive(previous)) {
       throw new Error(`Thread ${record.metadata.threadId} is already active`)
@@ -231,9 +280,9 @@ export async function acquireCliThreadLease(record: CliThreadRecord): Promise<Cl
       await updateCliThread(record, { status: 'interrupted', lastUsedAt: Date.now() })
     }
     const staleOwner = join(record.directory, `.owner.stale.${crypto.randomUUID()}.json`)
-    await rename(ownerFile, staleOwner).catch(() => {})
+    await rename(ownerFile, staleOwner)
     await writeFile(ownerFile, JSON.stringify(owner, null, 2), { flag: 'wx', mode: FILE_MODE })
-    await unlink(staleOwner).catch(() => {})
+    await unlinkControlledFile(root, staleOwner)
   }
   if (process.platform !== 'win32') await chmod(ownerFile, FILE_MODE)
 
@@ -258,11 +307,10 @@ export async function acquireCliThreadLease(record: CliThreadRecord): Promise<Cl
     async release() {
       if (released) return
       released = true
+      if (existsSync(ownerFile)) await assertCanonicalControlledPath(root, ownerFile)
       const current = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
       if (current?.leaseId === owner.leaseId) {
-        await unlink(ownerFile).catch(error => {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        })
+        await unlinkControlledFile(root, ownerFile)
       }
     },
   }
@@ -277,7 +325,7 @@ export async function locateCliThread(threadId: string): Promise<CliThreadRecord
     const directory = join(root, scope.name, 'executions', threadId)
     const metadataPath = join(directory, 'thread.json')
     if (!existsSync(metadataPath)) continue
-    assertControlledPath(root, directory)
+    await assertCanonicalControlledPath(root, directory)
     const metadata = await readJson<CliThreadMetadata>(metadataPath)
     if (metadata.threadId !== threadId) throw new Error(`Corrupt Thread metadata: ${threadId}`)
     return recordFor(directory, metadata)
@@ -297,6 +345,7 @@ export async function listCliThreads(): Promise<CliThreadRecord[]> {
       if (!entry.isDirectory()) continue
       const directory = join(executionsRoot, entry.name)
       try {
+        await assertCanonicalControlledPath(root, directory)
         const metadata = await readJson<CliThreadMetadata>(join(directory, 'thread.json'))
         records.push(recordFor(directory, metadata))
       } catch {
@@ -308,6 +357,10 @@ export async function listCliThreads(): Promise<CliThreadRecord[]> {
 }
 
 export async function isCliThreadActive(record: CliThreadRecord): Promise<boolean> {
+  await assertCanonicalControlledPath(getCliSessionsRoot(), record.directory)
+  if (existsSync(record.ownerFile)) {
+    await assertCanonicalControlledPath(getCliSessionsRoot(), record.ownerFile)
+  }
   const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
   return owner ? isOwnerActive(owner) : false
 }
@@ -323,13 +376,16 @@ export async function cloneCliThreadEphemeral(source: CliThreadRecord): Promise<
     connection: source.metadata.connection,
   })
   try {
+    const root = getCliSessionsRoot()
+    await assertCanonicalControlledPath(root, source.sessionsRoot)
+    await assertCanonicalControlledPath(root, clone.sessionsRoot)
     await rm(clone.sessionsRoot, { recursive: true, force: true })
     await cp(source.sessionsRoot, clone.sessionsRoot, {
       recursive: true,
       force: false,
       errorOnExist: true,
     })
-    if (process.platform !== 'win32') await chmod(clone.sessionsRoot, DIRECTORY_MODE)
+    await makePrivateTree(clone.sessionsRoot)
     await updateCliThread(clone, { mainSessionId: source.metadata.mainSessionId })
     return clone
   } catch (error) {
@@ -343,20 +399,27 @@ export async function cloneCliThreadEphemeral(source: CliThreadRecord): Promise<
 async function moveThreadToTrash(record: CliThreadRecord): Promise<string> {
   const root = getCliSessionsRoot()
   assertControlledPath(root, record.directory)
+  await assertCanonicalControlledPath(root, record.directory)
   const trashRoot = join(root, 'trash')
   await ensurePrivateDir(trashRoot)
+  await assertCanonicalControlledPath(root, trashRoot)
   const target = join(trashRoot, `${record.metadata.threadId}.${crypto.randomUUID()}`)
   assertControlledPath(root, target)
   await rename(record.directory, target)
+  await assertCanonicalControlledPath(root, target)
   return target
 }
 
 export async function deleteCliThread(record: CliThreadRecord): Promise<void> {
+  const root = getCliSessionsRoot()
+  await assertCanonicalControlledPath(root, record.directory)
+  if (existsSync(record.ownerFile)) await assertCanonicalControlledPath(root, record.ownerFile)
   const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
   if (owner && isOwnerActive(owner)) {
     throw new Error(`Thread ${record.metadata.threadId} is active and cannot be deleted`)
   }
   const trash = await moveThreadToTrash(record)
+  await assertCanonicalControlledPath(getCliSessionsRoot(), trash)
   await rm(trash, { recursive: true, force: true })
 }
 
@@ -371,9 +434,10 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
     })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await assertCanonicalControlledPath(root, cleanerLock)
     const info = await stat(cleanerLock).catch(() => null)
     if (!info || now - info.mtimeMs <= 60_000) return 0
-    await unlink(cleanerLock).catch(() => {})
+    await unlinkControlledFile(root, cleanerLock)
     return cleanupStaleEphemeralThreads(now)
   }
 
@@ -390,11 +454,12 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
       if (now - owner.heartbeatAt <= STALE_EPHEMERAL_MS) continue
       const trash = await moveThreadToTrash(record).catch(() => null)
       if (!trash) continue
+      await assertCanonicalControlledPath(root, trash)
       await rm(trash, { recursive: true, force: true })
       cleaned++
     }
   } finally {
-    await unlink(cleanerLock).catch(() => {})
+    await unlinkControlledFile(root, cleanerLock)
   }
   return cleaned
 }
