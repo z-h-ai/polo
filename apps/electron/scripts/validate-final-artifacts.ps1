@@ -11,8 +11,16 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ElectronDir = Split-Path -Parent $ScriptDir
 $RootDir = Split-Path -Parent (Split-Path -Parent $ElectronDir)
 $uvLockPath = Join-Path $RootDir "scripts\uv-runtime-lock.json"
+$signingContract = Join-Path $RootDir "scripts\release-signing-contract.ts"
+$expectedPublisher = [string]$env:POLO_AI_RELEASE_WINDOWS_PUBLISHER
+$expectedThumbprint = [string]$env:POLO_AI_RELEASE_WINDOWS_THUMBPRINT
 if (-not $ReleaseDir) {
     $ReleaseDir = Join-Path $ElectronDir "release"
+}
+$signingAuditFile = if ($env:POLO_AI_RELEASE_SIGNING_AUDIT_FILE) {
+    $env:POLO_AI_RELEASE_SIGNING_AUDIT_FILE
+} else {
+    Join-Path $ReleaseDir "release-signing-audit-Windows.jsonl"
 }
 
 $installer = Join-Path $ReleaseDir "Polo-AI-$Arch.exe"
@@ -24,6 +32,23 @@ if ($Mode -eq "Full" -and (
     -not (Test-Path -LiteralPath $PreviousArtifact -PathType Leaf)
 )) {
     throw "Full validation requires -PreviousArtifact or POLO_AI_PREVIOUS_ARTIFACT"
+}
+if ($Mode -eq "Full") {
+    if (
+        [string]::IsNullOrWhiteSpace($expectedPublisher) -or
+        [string]::IsNullOrWhiteSpace($expectedThumbprint)
+    ) {
+        throw "Full Windows validation requires the release Publisher and certificate thumbprint"
+    }
+    if (-not (Test-Path -LiteralPath $signingContract -PathType Leaf)) {
+        throw "Full Windows validation requires the release signing contract validator"
+    }
+    $hostBun = (Get-Command bun.exe -ErrorAction Stop).Source
+    Set-Content -LiteralPath $signingAuditFile -Value "" -NoNewline
+    Write-Host "release-signing-contract platform=windows mode=full publisher=$expectedPublisher thumbprint=$expectedThumbprint audit=$signingAuditFile"
+} else {
+    $hostBun = $null
+    Write-Host "release-signing-contract platform=windows mode=smoke acceptance=development-only"
 }
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "polo-final-artifact-$PID-$([Guid]::NewGuid().ToString('N'))"
@@ -57,6 +82,35 @@ function Invoke-Uninstaller {
     }
 }
 
+function Assert-ReleaseAuthenticodeIdentity([string]$Path, [string]$Label) {
+    if ($Mode -ne "Full") {
+        return
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $publisher = if ($signature.SignerCertificate) {
+        [string]$signature.SignerCertificate.Subject
+    } else {
+        ""
+    }
+    $thumbprint = if ($signature.SignerCertificate) {
+        [string]$signature.SignerCertificate.Thumbprint
+    } else {
+        ""
+    }
+    $output = & $hostBun run $signingContract verify-windows `
+        --label $Label `
+        --expected-publisher $expectedPublisher `
+        --expected-thumbprint $expectedThumbprint `
+        --actual-publisher $publisher `
+        --actual-thumbprint $thumbprint `
+        --signature ([string]$signature.Status) `
+        --output $signingAuditFile 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label release signing identity validation failed: $($output -join "`n")"
+    }
+    $output | ForEach-Object { Write-Host $_ }
+}
+
 function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $resourcesRoot = Join-Path $installDir "resources"
     $appRoot = Join-Path $resourcesRoot "app"
@@ -68,6 +122,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $serverPath = Join-Path $appRoot "dist\server\polo-server.js"
     $uvPath = Join-Path $appRoot "resources\bin\win32-$Arch\uv.exe"
     $uvManifestPath = Join-Path $appRoot "resources\bin\win32-$Arch\runtime-manifest.json"
+    $installedExe = Join-Path $installDir "Polo AI.exe"
     $piServerPath = Join-Path $appRoot "resources\pi-agent-server\index.js"
     $sessionServerPath = Join-Path $appRoot "resources\session-mcp-server\index.js"
 
@@ -77,9 +132,10 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
         $manifestPath,
         $metadataPath,
         $cliPath,
-        $serverPath
-        $uvPath
-        $uvManifestPath
+        $serverPath,
+        $uvPath,
+        $uvManifestPath,
+        $installedExe,
         $uvLockPath
     )) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
@@ -109,6 +165,12 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
         if ($uvSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
             throw "Installed NSIS uv differs from the pinned bytes without a valid Authenticode signature"
         }
+    }
+    if ($Mode -eq "Full") {
+        Assert-ReleaseAuthenticodeIdentity $installedExe "installed-current-app"
+        Assert-ReleaseAuthenticodeIdentity $uvPath "installed-current-uv"
+    } else {
+        Write-Host "release-signing-result platform=windows label=installed-current mode=smoke acceptance=development-only"
     }
     $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
     $expectedUvOutput = "uv $($uvLock.version)"
@@ -417,6 +479,16 @@ function Get-CurrentNsisArtifactVersion([string]$Artifact, [string]$Label) {
         if ($uvSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
             throw "$Label NSIS uv differs from the pinned bytes without a valid Authenticode signature"
         }
+    }
+    if ($Mode -eq "Full") {
+        $payloadExe = Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
+            -Filter "Polo AI.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $payloadExe) {
+            throw "$Label NSIS artifact does not contain Polo AI.exe"
+        }
+        Assert-ReleaseAuthenticodeIdentity $Artifact "$Label-installer"
+        Assert-ReleaseAuthenticodeIdentity $payloadExe.FullName "$Label-app"
+        Assert-ReleaseAuthenticodeIdentity $uvPath "$Label-uv"
     }
     $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
     $expectedUvOutput = "uv $($uvLock.version)"

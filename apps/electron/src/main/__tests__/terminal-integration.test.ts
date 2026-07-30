@@ -8,6 +8,7 @@ import {
   readlinkSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -72,6 +73,17 @@ describe('macOS terminal integration', () => {
     )
     expect(second.installed).toBe(true)
     expect(second.pathReady).toBe(true)
+    expect(JSON.parse(readFileSync(
+      join(options.homeDir!, '.polo-ai', 'terminal-integration.json'),
+      'utf8',
+    ))).toMatchObject({
+      schemaVersion: 3,
+      owner: 'com.poloai.terminal-integration',
+      launcherFormat: 'managed-symlink-v1',
+      appVersion: '0.10.0',
+      launcherPath: second.launcherPath,
+      launcherTarget: second.launcherTarget,
+    })
   })
 
   it('backs up and preserves existing shell configuration', () => {
@@ -188,6 +200,110 @@ describe('macOS terminal integration', () => {
       path: launcher,
     })
     expect(readFileSync(launcher, 'utf8')).toContain('echo other')
+  })
+
+  it('does not own or uninstall a user-created symlink to the packaged target', () => {
+    const options = setup()
+    const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
+    const target = join(options.resourcesPath, 'app', 'resources', 'bin', 'polo')
+    mkdirSync(dirname(launcher), { recursive: true })
+    symlinkSync(target, launcher)
+
+    const before = getTerminalIntegrationStatus(options)
+    expect(before.installed).toBe(false)
+    expect(before.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
+
+    const after = uninstallTerminalIntegration(options)
+    expect(lstatSync(launcher).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(launcher)).toBe(target)
+    expect(after.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
+  })
+
+  it('preserves the launcher when ownership state is missing or corrupt', () => {
+    for (const stateContent of [null, '{broken json', '{"schemaVersion":2}']) {
+      const options = setup()
+      const installed = installTerminalIntegration(options)
+      const state = join(options.homeDir!, '.polo-ai', 'terminal-integration.json')
+      if (stateContent === null) {
+        rmSync(state)
+      } else {
+        writeFileSync(state, stateContent)
+      }
+
+      uninstallTerminalIntegration(options)
+      expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
+      if (stateContent !== null) {
+        expect(readFileSync(state, 'utf8')).toBe(stateContent)
+      }
+    }
+  })
+
+  it('preserves the launcher when the recorded ownership identity is tampered', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const statePath = join(options.homeDir!, '.polo-ai', 'terminal-integration.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>
+    writeFileSync(statePath, `${JSON.stringify({
+      ...state,
+      launcherIdentity: '0'.repeat(64),
+    })}\n`)
+
+    const status = uninstallTerminalIntegration(options)
+    expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
+    expect(status.conflict).toEqual({
+      code: 'launcher_conflict',
+      path: installed.launcherPath,
+    })
+    expect(existsSync(statePath)).toBe(true)
+  })
+
+  it('preserves a managed path whose symlink identity was replaced by the user', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const userTarget = join(options.homeDir!, 'user-polo')
+    writeFileSync(userTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    rmSync(installed.launcherPath)
+    symlinkSync(userTarget, installed.launcherPath)
+
+    uninstallTerminalIntegration(options)
+    expect(readlinkSync(installed.launcherPath)).toBe(userTarget)
+  })
+
+  it('migrates a verified historical ownership state during App path repair', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const statePath = join(options.homeDir!, '.polo-ai', 'terminal-integration.json')
+    writeFileSync(statePath, `${JSON.stringify({
+      schemaVersion: 2,
+      launcherPath: installed.launcherPath,
+      launcherTarget: installed.launcherTarget,
+      profilePath: installed.profilePath,
+      updatedAt: '2026-07-30T12:00:00.000Z',
+    })}\n`)
+
+    const movedResources = join(
+      dirname(dirname(dirname(options.resourcesPath))),
+      'Polo Historical Move.app',
+      'Contents',
+      'Resources',
+    )
+    const movedTarget = join(movedResources, 'app', 'resources', 'bin', 'polo')
+    mkdirSync(dirname(movedTarget), { recursive: true })
+    writeFileSync(movedTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const movedOptions = { ...options, resourcesPath: movedResources, appVersion: '0.11.0' }
+
+    const repaired = installTerminalIntegration(movedOptions)
+    expect(readlinkSync(repaired.launcherPath)).toBe(movedTarget)
+    expect(JSON.parse(readFileSync(statePath, 'utf8'))).toMatchObject({
+      schemaVersion: 3,
+      owner: 'com.poloai.terminal-integration',
+      launcherFormat: 'managed-symlink-v1',
+      appVersion: '0.11.0',
+      launcherTarget: movedTarget,
+    })
+
+    uninstallTerminalIntegration(movedOptions)
+    expect(existsSync(repaired.launcherPath)).toBe(false)
   })
 
   it('removes only Polo-managed content', () => {

@@ -19,6 +19,10 @@ VALIDATED_VERSION=""
 MOCK_PID=""
 MAC_LAUNCH_ENV_CONFIGURED=false
 MAC_INSTALLED_APP=""
+SIGNING_CONTRACT="$ELECTRON_DIR/../../scripts/release-signing-contract.ts"
+MACOS_TEAM_ID="${POLO_AI_RELEASE_MACOS_TEAM_ID:-}"
+MACOS_APP_REQUIREMENT="${POLO_AI_RELEASE_MACOS_APP_REQUIREMENT:-}"
+MACOS_UV_REQUIREMENT="${POLO_AI_RELEASE_MACOS_UV_REQUIREMENT:-}"
 
 case "$ARCH" in
   arm64|aarch64) ARCH="arm64" ;;
@@ -54,6 +58,31 @@ if [ "$MODE" = "full" ]; then
     echo "Full Unix validation requires POLO_AI_PREVIOUS_INSTALL_SCRIPT from the fixed previous release tag" >&2
     exit 1
   fi
+  if [ "$SYSTEM_NAME" = "Darwin" ]; then
+    for release_identity in \
+      "$MACOS_TEAM_ID" \
+      "$MACOS_APP_REQUIREMENT" \
+      "$MACOS_UV_REQUIREMENT"; do
+      if [ -z "$release_identity" ]; then
+        echo "Full macOS validation requires the release Team ID and App/uv designated requirements" >&2
+        exit 1
+      fi
+    done
+    if [ -z "$HOST_BUN" ] || [ ! -x "$HOST_BUN" ] || [ ! -f "$SIGNING_CONTRACT" ]; then
+      echo "Full macOS validation requires Bun and the release signing contract validator" >&2
+      exit 1
+    fi
+  fi
+fi
+
+SIGNING_AUDIT_FILE="${POLO_AI_RELEASE_SIGNING_AUDIT_FILE:-$RELEASE_DIR/release-signing-audit-${SYSTEM_NAME}.jsonl}"
+if [ "$MODE" = "full" ] && [ "$SYSTEM_NAME" = "Darwin" ]; then
+  : > "$SIGNING_AUDIT_FILE"
+  echo "release-signing-contract platform=macos mode=full team_id=$MACOS_TEAM_ID audit=$SIGNING_AUDIT_FILE"
+elif [ "$MODE" = "full" ]; then
+  echo "release-signing-contract platform=$SYSTEM_NAME mode=full signing=not-applicable"
+else
+  echo "release-signing-contract platform=$SYSTEM_NAME mode=smoke acceptance=development-only"
 fi
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/polo-final-artifact.XXXXXX")"
@@ -79,6 +108,61 @@ cleanup() {
   rm -rf "$TEMP_ROOT"
 }
 trap cleanup EXIT
+
+macos_team_id() {
+  codesign -dv --verbose=4 "$1" 2>&1 \
+    | sed -n 's/^TeamIdentifier=//p' \
+    | tail -1
+}
+
+macos_designated_requirement() {
+  codesign -dr - "$1" 2>&1 \
+    | sed -n 's/^designated => //p' \
+    | tail -1
+}
+
+validate_macos_release_identity() {
+  local label="$1"
+  local app_bundle="$2"
+  local uv="$3"
+  local app_signature=invalid
+  local uv_signature=invalid
+  local notarization=rejected
+  local stapling=invalid
+  local app_team_id
+  local uv_team_id
+  local app_requirement
+  local uv_requirement
+
+  if codesign --verify --strict --deep "$app_bundle"; then app_signature=valid; fi
+  if codesign --verify --strict "$uv"; then uv_signature=valid; fi
+  app_team_id="$(macos_team_id "$app_bundle")"
+  uv_team_id="$(macos_team_id "$uv")"
+  app_requirement="$(macos_designated_requirement "$app_bundle")"
+  uv_requirement="$(macos_designated_requirement "$uv")"
+  if spctl --assess --type execute --verbose=4 "$app_bundle" 2>&1 \
+    | grep -F 'source=Notarized Developer ID' >/dev/null; then
+    notarization=accepted
+  fi
+  if xcrun stapler validate "$app_bundle" >/dev/null 2>&1; then
+    stapling=valid
+  fi
+
+  "$HOST_BUN" run "$SIGNING_CONTRACT" verify-macos \
+    --label "$label" \
+    --expected-team-id "$MACOS_TEAM_ID" \
+    --expected-app-requirement "$MACOS_APP_REQUIREMENT" \
+    --expected-uv-requirement "$MACOS_UV_REQUIREMENT" \
+    --actual-app-team-id "$app_team_id" \
+    --actual-app-requirement "$app_requirement" \
+    --actual-uv-team-id "$uv_team_id" \
+    --actual-uv-requirement "$uv_requirement" \
+    --app-signature "$app_signature" \
+    --uv-signature "$uv_signature" \
+    --notarization "$notarization" \
+    --stapling "$stapling" \
+    --output "$SIGNING_AUDIT_FILE"
+}
 
 validate_app_bundle() {
   local label="$1"
@@ -201,10 +285,17 @@ validate_app_bundle() {
   ' "$app_root" "$platform_key" "$uv_lock"
   )
   if [ "$SYSTEM_NAME" = "Darwin" ]; then
-    # electron-builder re-signs nested Mach-O binaries after afterPack, which
-    # changes uv's on-disk hash. The manifest still pins the downloaded bytes;
-    # the final container must retain a valid nested signature.
-    codesign --verify --strict "$uv"
+    local app_bundle
+    app_bundle="$(dirname "$(dirname "$resources_root")")"
+    if [ "$MODE" = "full" ]; then
+      validate_macos_release_identity "$label" "$app_bundle" "$uv"
+    else
+      # Development smoke explicitly permits electron-builder's ad-hoc signing.
+      # It is never release acceptance and does not produce a signing audit.
+      codesign --verify --strict --deep "$app_bundle"
+      codesign --verify --strict "$uv"
+      echo "release-signing-result platform=macos label=$label mode=smoke acceptance=development-only"
+    fi
   fi
 
   local expected_version

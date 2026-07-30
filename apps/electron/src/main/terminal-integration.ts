@@ -15,6 +15,7 @@ import {
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import type {
   TerminalIntegrationErrorCode,
   TerminalIntegrationErrorPayload,
@@ -24,7 +25,9 @@ import type {
 
 const BLOCK_START = '# >>> Polo CLI >>>'
 const BLOCK_END = '# <<< Polo CLI <<<'
-const STATE_SCHEMA_VERSION = 2
+const STATE_SCHEMA_VERSION = 3
+const STATE_OWNER = 'com.poloai.terminal-integration'
+const LAUNCHER_FORMAT = 'managed-symlink-v1'
 const SHELL_TIMEOUT_MS = 7_000
 const SHELL_OUTPUT_LIMIT = 16 * 1024
 
@@ -83,8 +86,12 @@ export interface TerminalIntegrationOptions {
 
 interface TerminalIntegrationState {
   schemaVersion: number
+  owner?: string
+  launcherFormat?: string
+  appVersion?: string
   launcherPath?: string
   launcherTarget?: string
+  launcherIdentity?: string
   profilePath?: string
   activeProfile?: string
   profiles?: string[]
@@ -151,7 +158,33 @@ function statePath(options: TerminalIntegrationOptions): string {
 function readState(options: TerminalIntegrationOptions): TerminalIntegrationState | null {
   try {
     const state = JSON.parse(read(statePath(options))) as TerminalIntegrationState
-    if (state.schemaVersion !== 1 && state.schemaVersion !== STATE_SCHEMA_VERSION) return null
+    if (![1, 2, STATE_SCHEMA_VERSION].includes(state.schemaVersion)) return null
+    if ((state.schemaVersion === 1 || state.schemaVersion === 2) && (
+      !state.launcherPath
+      || !state.launcherTarget
+      || !state.updatedAt
+      || Number.isNaN(Date.parse(state.updatedAt))
+      || !(state.profilePath || state.activeProfile || state.profiles?.length)
+    )) {
+      return null
+    }
+    if (state.schemaVersion === STATE_SCHEMA_VERSION && (
+      state.owner !== STATE_OWNER
+      || state.launcherFormat !== LAUNCHER_FORMAT
+      || !state.appVersion
+      || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(state.appVersion)
+      || !state.launcherPath
+      || !state.launcherTarget
+      || !state.updatedAt
+      || Number.isNaN(Date.parse(state.updatedAt))
+      || state.launcherIdentity !== launcherIdentity(
+        state.launcherPath,
+        state.launcherTarget,
+        state.appVersion,
+      )
+    )) {
+      return null
+    }
     return state
   } catch {
     return null
@@ -234,14 +267,28 @@ function writeState(
     statePath(options),
     `${JSON.stringify({
       schemaVersion: STATE_SCHEMA_VERSION,
+      owner: STATE_OWNER,
+      launcherFormat: LAUNCHER_FORMAT,
+      appVersion: options.appVersion,
       launcherPath: getLauncherPath(options),
       launcherTarget,
+      launcherIdentity: launcherIdentity(
+        getLauncherPath(options),
+        launcherTarget,
+        options.appVersion,
+      ),
       activeProfile,
       profiles: [...new Set(profiles)],
       updatedAt: new Date().toISOString(),
     }, null, 2)}\n`,
     0o600,
   )
+}
+
+function launcherIdentity(path: string, target: string, appVersion: string): string {
+  return createHash('sha256')
+    .update(`${STATE_OWNER}\0${LAUNCHER_FORMAT}\0${appVersion}\0${path}\0${target}`)
+    .digest('hex')
 }
 
 function resolveSymlinkTarget(path: string): string | null {
@@ -265,19 +312,30 @@ function isLegacyManagedLauncher(path: string, options: TerminalIntegrationOptio
 
 function isOwnedLauncher(
   path: string,
-  target: string,
   state: TerminalIntegrationState | null,
   options: TerminalIntegrationOptions,
 ): boolean {
   if (!pathExists(path)) return false
   const resolvedTarget = resolveSymlinkTarget(path)
-  if (resolvedTarget === target) return true
   if (
     resolvedTarget
     && state?.launcherPath === path
     && state.launcherTarget === resolvedTarget
   ) {
-    return true
+    if (state.schemaVersion === STATE_SCHEMA_VERSION) {
+      return state.owner === STATE_OWNER
+        && state.launcherFormat === LAUNCHER_FORMAT
+        && Boolean(state.appVersion)
+        && state.launcherIdentity === launcherIdentity(
+          path,
+          resolvedTarget,
+          state.appVersion!,
+        )
+    }
+    // Schema 1/2 is a historical Polo state marker. Requiring both the exact
+    // recorded path and current symlink target permits a one-time migration
+    // without treating a target match alone as ownership.
+    return state.schemaVersion === 1 || state.schemaVersion === 2
   }
   return isLegacyManagedLauncher(path, options)
 }
@@ -435,7 +493,7 @@ export function getTerminalIntegrationStatus(
   const profilePaths = safeProfilePaths(options, state)
   const launcherTarget = getPackagedLauncherTarget(options)
   const resolvedTarget = resolveSymlinkTarget(launcherPath)
-  const installed = isOwnedLauncher(launcherPath, launcherTarget, state, options)
+  const installed = isOwnedLauncher(launcherPath, state, options)
   const launcherCurrent = resolvedTarget === launcherTarget
   const launcherExecutable = launcherCurrent && isExecutable(launcherPath)
   let blockReady = false
@@ -537,7 +595,7 @@ export function installTerminalIntegration(
     }
 
     if (pathExists(launcherPath)) {
-      if (!isOwnedLauncher(launcherPath, launcherTarget, state, options)) {
+      if (!isOwnedLauncher(launcherPath, state, options)) {
         return getTerminalIntegrationStatus(options)
       }
       if (!lstatSync(launcherPath).isSymbolicLink()) backup(launcherPath)
@@ -576,8 +634,7 @@ export function uninstallTerminalIntegration(
   try {
     const launcherPath = getLauncherPath(options)
     const state = readState(options)
-    const launcherTarget = getPackagedLauncherTarget(options)
-    if (isOwnedLauncher(launcherPath, launcherTarget, state, options)) {
+    if (isOwnedLauncher(launcherPath, state, options)) {
       rmSync(launcherPath)
     }
 
@@ -589,7 +646,7 @@ export function uninstallTerminalIntegration(
       backup(path)
       writeAtomic(path, next, profileMode)
     }
-    rmSync(statePath(options), { force: true })
+    if (state) rmSync(statePath(options), { force: true })
 
     return getTerminalIntegrationStatus(options)
   } catch (error) {

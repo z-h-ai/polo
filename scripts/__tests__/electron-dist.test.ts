@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { runElectronDist, type ElectronDistOptions } from '../electron-dist'
 import type { Arch, Platform } from '../build/common'
 
 describe('target-aware Electron release entry', () => {
+  it('keeps macOS notarization enabled except for explicit development smoke', () => {
+    const source = readFileSync(join(import.meta.dir, '..', 'electron-dist.ts'), 'utf8')
+    const builder = readFileSync(
+      join(import.meta.dir, '..', '..', 'apps', 'electron', 'electron-builder.yml'),
+      'utf8',
+    )
+    expect(builder).toContain('notarize: true')
+    expect(source).toContain("'--config.mac.notarize=false'")
+    expect(source).toContain("options.platform === 'darwin' && options.dev")
+  })
+
   it('always prepares the complete target runtime before build, helpers, and package', async () => {
     const calls: string[] = []
     const options: ElectronDistOptions = {

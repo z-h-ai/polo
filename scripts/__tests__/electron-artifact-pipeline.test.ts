@@ -45,7 +45,14 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('runtime-manifest.json')
     expect(validator).toContain('uv-runtime-lock.json')
     expect(validator).toContain('Pinned uv runtime manifest mismatch')
-    expect(validator).toContain('codesign --verify --strict "$uv"')
+    expect(validator).toContain('mode=smoke acceptance=development-only')
+    expect(validator).toContain('Full macOS validation requires the release Team ID')
+    expect(validator).toContain('validate_macos_release_identity')
+    expect(validator).toContain('codesign --verify --strict --deep "$app_bundle"')
+    expect(validator).toContain('spctl --assess --type execute')
+    expect(validator).toContain('xcrun stapler validate "$app_bundle"')
+    expect(validator).toContain('release-signing-contract.ts')
+    expect(validator).toContain('release-signing-audit-')
     expect(validator).toContain('polo --help')
     expect(validator).toContain('run_packaged_headless_lifecycle')
     expect(validator).toContain('--base-url')
@@ -90,6 +97,10 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('uv-runtime-lock.json')
     expect(validator).toContain('pinned uv runtime manifest')
     expect(validator).toContain('Get-AuthenticodeSignature -LiteralPath $uvPath')
+    expect(validator).toContain('Full Windows validation requires the release Publisher')
+    expect(validator).toContain('Assert-ReleaseAuthenticodeIdentity')
+    expect(validator).toContain('release-signing-contract.ts')
+    expect(validator).toContain('release-signing-audit-Windows.jsonl')
     expect(validator).toContain('polo sessions')
     expect(validator).toContain('rem user modification')
     expect(validator).toContain('Test-UserCommandConflict')
@@ -131,9 +142,19 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('verified-contract-${{ matrix.platform }}.json')
     expect(workflow).toContain('Previous release version must differ from current')
     expect(workflow).toContain('windows-terminal-integration.test.ps1')
-    expect(workflow).toContain('electron:dist:dev:mac')
-    expect(workflow).toContain('electron:dist:dev:win')
-    expect(workflow).toContain('electron:dist:dev:linux')
+    expect(workflow).toContain('POLO_AI_RELEASE_MACOS_TEAM_ID')
+    expect(workflow).toContain('POLO_AI_RELEASE_MACOS_APP_REQUIREMENT')
+    expect(workflow).toContain('POLO_AI_RELEASE_MACOS_UV_REQUIREMENT')
+    expect(workflow).toContain('POLO_AI_RELEASE_WINDOWS_PUBLISHER')
+    expect(workflow).toContain('POLO_AI_RELEASE_WINDOWS_THUMBPRINT')
+    expect(workflow).toContain('POLO_AI_MACOS_CSC_LINK')
+    expect(workflow).toContain('POLO_AI_WINDOWS_CSC_LINK')
+    expect(workflow).toContain('electron:dist:mac --arch=x64')
+    expect(workflow).toContain('electron:dist:win --arch=x64')
+    expect(workflow).toContain('electron:dist:linux --arch=x64')
+    expect(workflow).not.toContain('electron:dist:dev:mac --arch=x64')
+    expect(workflow).not.toContain('electron:dist:dev:win --arch=x64')
+    expect(workflow).not.toContain('electron:dist:dev:linux --arch=x64')
     expect(workflow).toContain('prepare-platform-runtime.test.ts')
     expect(workflow).toContain('test ! -e apps/electron/vendor/bun')
     expect(workflow).toContain("find apps/electron/resources/bin -maxdepth 2 -type f -name 'uv*'")
@@ -142,6 +163,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('full-validation-macos.log')
     expect(workflow).toContain('full-validation-windows.log')
     expect(workflow).toContain('full-validation-linux.log')
+    expect(workflow).toContain('release-signing-audit-Darwin.jsonl')
+    expect(workflow).toContain('release-signing-audit-Windows.jsonl')
     expect(workflow).toContain('previous_artifact_sha256=')
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('bun run validate:ci')
@@ -198,6 +221,9 @@ describe('Electron final artifact validation pipeline', () => {
     expect(unix.indexOf('preflight_previous_artifact "$SYSTEM_NAME"')).toBeLessThan(
       unix.lastIndexOf('run_macos_full_e2e'),
     )
+    expect(unix.indexOf('Full macOS validation requires the release Team ID')).toBeLessThan(
+      unix.indexOf('TEMP_ROOT="$(mktemp -d'),
+    )
     expect(unix.indexOf('preflight_previous_artifact "$SYSTEM_NAME"')).toBeLessThan(
       unix.lastIndexOf('run_current_container_smoke'),
     )
@@ -207,6 +233,9 @@ describe('Electron final artifact validation pipeline', () => {
     expect(unix).toContain('Linux full E2E requires a runner-provided DISPLAY')
     expect(windows.indexOf('Get-LegacyNsisArtifactVersion $PreviousArtifact')).toBeLessThan(
       windows.indexOf('$env:LOCALAPPDATA = $testLocalAppData'),
+    )
+    expect(windows.indexOf('Full Windows validation requires the release Publisher')).toBeLessThan(
+      windows.indexOf('$testRoot = Join-Path'),
     )
     expect(cli).not.toContain('POLO_AI_E2E_RUN_PROBE')
     expect(cli).not.toContain('POLO_AI_E2E_DIRECT_APP')

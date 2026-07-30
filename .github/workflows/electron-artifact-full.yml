@@ -59,6 +59,7 @@ jobs:
               apps/electron/release/Polo-AI-x64.zip
               apps/electron/release/full-validation-macos.txt
               apps/electron/release/full-validation-macos.log
+              apps/electron/release/release-signing-audit-Darwin.jsonl
           - platform: windows
             runner: windows-latest
             previous_name: Polo-AI-x64.exe
@@ -66,6 +67,7 @@ jobs:
               apps/electron/release/Polo-AI-x64.exe
               apps/electron/release/full-validation-windows.txt
               apps/electron/release/full-validation-windows.log
+              apps/electron/release/release-signing-audit-Windows.jsonl
           - platform: linux
             runner: ubuntu-latest
             previous_name: Polo-AI-x64.AppImage
@@ -83,6 +85,16 @@ jobs:
       POLO_AI_ARTIFACT_VALIDATION_MODE: full
       POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ matrix.previous_name }}
       POLO_AI_PREVIOUS_INSTALL_SCRIPT: ${{ github.workspace }}/previous/install-app.sh
+      POLO_AI_RELEASE_MACOS_TEAM_ID: ${{ vars.POLO_AI_RELEASE_MACOS_TEAM_ID }}
+      POLO_AI_RELEASE_MACOS_APP_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_APP_REQUIREMENT }}
+      POLO_AI_RELEASE_MACOS_UV_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_UV_REQUIREMENT }}
+      POLO_AI_RELEASE_WINDOWS_PUBLISHER: ${{ vars.POLO_AI_RELEASE_WINDOWS_PUBLISHER }}
+      POLO_AI_RELEASE_WINDOWS_THUMBPRINT: ${{ vars.POLO_AI_RELEASE_WINDOWS_THUMBPRINT }}
+      CSC_LINK: ${{ (matrix.platform == 'macos' && secrets.POLO_AI_MACOS_CSC_LINK) || (matrix.platform == 'windows' && secrets.POLO_AI_WINDOWS_CSC_LINK) || '' }}
+      CSC_KEY_PASSWORD: ${{ (matrix.platform == 'macos' && secrets.POLO_AI_MACOS_CSC_KEY_PASSWORD) || (matrix.platform == 'windows' && secrets.POLO_AI_WINDOWS_CSC_KEY_PASSWORD) || '' }}
+      APPLE_ID: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_TEAM_ID || '' }}
 
     steps:
       - name: Checkout
@@ -103,8 +115,35 @@ jobs:
             && [ -z "$EXPECTED_PREVIOUS_INSTALLER_SHA256" ]; then
             missing="$missing EXPECTED_PREVIOUS_INSTALLER_SHA256"
           fi
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            for name in \
+              POLO_AI_RELEASE_MACOS_TEAM_ID \
+              POLO_AI_RELEASE_MACOS_APP_REQUIREMENT \
+              POLO_AI_RELEASE_MACOS_UV_REQUIREMENT \
+              CSC_LINK \
+              CSC_KEY_PASSWORD \
+              APPLE_ID \
+              APPLE_APP_SPECIFIC_PASSWORD \
+              APPLE_TEAM_ID; do
+              if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+            done
+          fi
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            for name in \
+              POLO_AI_RELEASE_WINDOWS_PUBLISHER \
+              POLO_AI_RELEASE_WINDOWS_THUMBPRINT \
+              CSC_LINK \
+              CSC_KEY_PASSWORD; do
+              if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+            done
+          fi
           if [ -n "$missing" ]; then
             echo "::error::Missing immutable previous-release contract fields:$missing"
+            exit 1
+          fi
+          if [ "${{ matrix.platform }}" = "macos" ] \
+            && [ "$POLO_AI_RELEASE_MACOS_TEAM_ID" != "$APPLE_TEAM_ID" ]; then
+            echo "::error::Expected macOS Team ID differs from the notarization credential Team ID."
             exit 1
           fi
           case "$PREVIOUS_RELEASE_TAG" in
@@ -261,7 +300,7 @@ jobs:
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/full-validation-macos.log"
-          bun run electron:dist:dev:mac --arch=x64 2>&1 | tee "$log"
+          bun run electron:dist:mac --arch=x64 2>&1 | tee "$log"
           cp "$log" apps/electron/release/full-validation-macos.log
 
       - name: Build and run Windows full lifecycle gate
@@ -269,7 +308,7 @@ jobs:
         shell: pwsh
         run: |
           $log = Join-Path $env:RUNNER_TEMP "full-validation-windows.log"
-          bun run electron:dist:dev:win --arch=x64 2>&1 | Tee-Object -FilePath $log
+          bun run electron:dist:win --arch=x64 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
             throw "Windows full lifecycle gate failed with exit code $LASTEXITCODE"
           }
@@ -286,7 +325,7 @@ jobs:
             test -n "$DISPLAY"
             test "$DISPLAY" != ":0.0"
             export POLO_AI_E2E_EXPECTED_DISPLAY="$DISPLAY"
-            bun run electron:dist:dev:linux --arch=x64 2>&1 | tee "$1"
+            bun run electron:dist:linux --arch=x64 2>&1 | tee "$1"
           ' _ "$log"
           cp "$log" apps/electron/release/full-validation-linux.log
 
@@ -325,6 +364,9 @@ jobs:
             grep -F 'macos-focus-state ' \
               "apps/electron/release/full-validation-${{ matrix.platform }}.log" \
               || true
+            grep -F 'release-signing-' \
+              "apps/electron/release/full-validation-${{ matrix.platform }}.log" \
+              || true
           } > "$result"
 
       - name: Record Windows validation result
@@ -342,6 +384,7 @@ jobs:
             "previous_artifact_sha256=$env:EXPECTED_PREVIOUS_ARTIFACT_SHA256"
             "sha256=$($hash.Hash.ToLowerInvariant())  apps/electron/release/Polo-AI-x64.exe"
             (Get-Content "previous/verified-contract-windows.json" -Raw)
+            (Get-Content "apps/electron/release/release-signing-audit-Windows.jsonl" -Raw)
           ) | Set-Content apps/electron/release/full-validation-windows.txt
 
       - name: Upload blocking artifacts and validation result

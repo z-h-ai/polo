@@ -72,6 +72,9 @@ const defaultDependencies: ElectronDistDependencies = {
         'electron-builder.yml',
         targetFlag,
         `--${options.arch}`,
+        ...(options.platform === 'darwin' && options.dev
+          ? ['--config.mac.notarize=false']
+          : []),
       ],
       options.electronDir,
       env,

@@ -166,7 +166,7 @@ function Assert-PackagedArtifacts {
 function Get-LauncherContent {
     return @"
 @echo off
-chcp 65001 >nul
+chcp 65001 >nul 2>&1
 setlocal
 rem $marker
 set "POLO_AI_BUN=$bunPath"
@@ -177,6 +177,28 @@ set "POLO_AI_RESOURCES_PATH=$appRoot\resources"
 set "POLO_AI_BUNDLED_ASSETS_ROOT=$appRoot"
 set "POLO_AI_DESKTOP_EXECUTABLE=$exePath"
 set "POLO_AI_IS_PACKAGED=true"
+set "POLO_LOCALE=%POLO_AI_LOCALE%"
+if not defined POLO_LOCALE set "POLO_LOCALE=%LC_ALL%"
+if not defined POLO_LOCALE set "POLO_LOCALE=%LC_MESSAGES%"
+if not defined POLO_LOCALE set "POLO_LOCALE=%LANG%"
+set "POLO_MSG_RUNTIME=Error: Polo's bundled runtime is missing. Reinstall Polo."
+set "POLO_MSG_FILES=Error: Polo terminal files are missing. Reinstall Polo."
+if /I "%POLO_LOCALE:~0,2%"=="zh" (
+  set "POLO_MSG_RUNTIME=错误：Polo 内置运行时缺失。请重新安装 Polo。"
+  set "POLO_MSG_FILES=错误：Polo 终端文件缺失。请重新安装 Polo。"
+)
+if not exist "$bunPath" (
+  echo [POLO_E_BUNDLED_RUNTIME_MISSING] %POLO_MSG_RUNTIME% 1>&2
+  exit /b 1
+)
+if not exist "$cliPath" (
+  echo [POLO_E_TERMINAL_FILES_MISSING] %POLO_MSG_FILES% 1>&2
+  exit /b 1
+)
+if not exist "$serverPath" (
+  echo [POLO_E_TERMINAL_FILES_MISSING] %POLO_MSG_FILES% 1>&2
+  exit /b 1
+)
 if /I "%~1"=="app" (
   start "" "$exePath"
   exit /b 0
@@ -187,7 +209,20 @@ exit /b %ERRORLEVEL%
 }
 
 function Get-LegacyShimContent {
-    return "@echo off`r`necho Warning: 'polo-ai' is deprecated; use 'polo' instead. 1>&2`r`ncall `"$launcher`" %*`r`nexit /b %ERRORLEVEL%"
+    return @"
+@echo off
+chcp 65001 >nul 2>&1
+setlocal
+set "POLO_LOCALE=%POLO_AI_LOCALE%"
+if not defined POLO_LOCALE set "POLO_LOCALE=%LC_ALL%"
+if not defined POLO_LOCALE set "POLO_LOCALE=%LC_MESSAGES%"
+if not defined POLO_LOCALE set "POLO_LOCALE=%LANG%"
+set "POLO_MSG_DEPRECATED=Warning: 'polo-ai' is deprecated; use 'polo' instead."
+if /I "%POLO_LOCALE:~0,2%"=="zh" set "POLO_MSG_DEPRECATED=警告：“polo-ai”已弃用；请改用“polo”。"
+echo [POLO_W_DEPRECATED_COMMAND] %POLO_MSG_DEPRECATED% 1>&2
+call "$launcher" %*
+exit /b %ERRORLEVEL%
+"@
 }
 
 function Get-HistoricalLauncherAllowlist([string]$Path) {
@@ -197,8 +232,16 @@ function Get-HistoricalLauncherAllowlist([string]$Path) {
     }
     if ($Path.TrimEnd("\") -ieq $legacyLauncher.TrimEnd("\")) {
         $shim = Get-LegacyShimContent
+        $previousShim = "@echo off`r`necho Warning: 'polo-ai' is deprecated; use 'polo' instead. 1>&2`r`ncall `"$launcher`" %*`r`nexit /b %ERRORLEVEL%"
         $oldGui = "@echo off`r`nstart `"`" `"$exePath`" %*"
-        return @($shim, "$shim`r`n", $oldGui, "$oldGui`r`n")
+        return @(
+            $shim,
+            "$shim`r`n",
+            $previousShim,
+            "$previousShim`r`n",
+            $oldGui,
+            "$oldGui`r`n"
+        )
     }
     return @()
 }

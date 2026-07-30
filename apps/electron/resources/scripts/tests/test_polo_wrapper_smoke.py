@@ -91,6 +91,64 @@ exit "${POLO_WRAPPER_EXIT:-37}"
         record = json.loads(self.record.read_text(encoding="utf-8"))
         self.assertEqual(record["argv"], ["run", str(self.cli), "兼容", "space arg"])
 
+    def test_checked_in_wrapper_localizes_missing_runtime_with_fallback(self) -> None:
+        self.runtime.unlink()
+        for locale, expected in (
+            ("zh_CN.UTF-8", "Polo 内置运行时缺失"),
+            ("fr_FR.UTF-8", "Polo's bundled runtime is missing"),
+        ):
+            with self.subTest(locale=locale):
+                env = dict(os.environ)
+                env["POLO_AI_LOCALE"] = locale
+                result = subprocess.run(
+                    [str(self.bin / "polo"), "--version"],
+                    cwd=self.base,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("POLO_E_BUNDLED_RUNTIME_MISSING", result.stderr)
+                self.assertIn(expected, result.stderr)
+
+    def test_checked_in_wrapper_localizes_missing_terminal_files_with_fallback(self) -> None:
+        self.cli.unlink()
+        for locale, expected in (
+            ("zh-CN", "Polo 终端文件缺失"),
+            ("de_DE.UTF-8", "Polo terminal files are missing"),
+        ):
+            with self.subTest(locale=locale):
+                env = dict(os.environ)
+                env["POLO_AI_LOCALE"] = locale
+                result = subprocess.run(
+                    [str(self.bin / "polo"), "--version"],
+                    cwd=self.base,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("POLO_E_TERMINAL_FILES_MISSING", result.stderr)
+                self.assertIn(expected, result.stderr)
+
+    def test_compatibility_wrapper_localizes_deprecation_warning(self) -> None:
+        env = dict(os.environ)
+        env["POLO_WRAPPER_RECORD"] = str(self.record)
+        env["POLO_AI_LOCALE"] = "zh_CN.UTF-8"
+        result = subprocess.run(
+            [str(self.bin / "polo-ai"), "--version"],
+            cwd=self.base,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 37)
+        self.assertIn("POLO_W_DEPRECATED_COMMAND", result.stderr)
+        self.assertIn("已弃用", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
