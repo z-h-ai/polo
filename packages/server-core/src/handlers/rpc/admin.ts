@@ -73,21 +73,162 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 type StoredAdminTokens = NonNullable<Awaited<ReturnType<CredentialManager['getAdminTokens']>>>
+interface AdminSessionSnapshot {
+  generation: number
+  tokens: StoredAdminTokens
+}
+
+interface AdminRequestContext {
+  session: AdminSessionSnapshot
+}
+
 type TokenValidationResult =
-  | { tokens: StoredAdminTokens; accessMode: 'online' | 'offline'; warning?: string }
-  | { tokens: null; authError?: { errorCode: string; message: string; status?: number } }
+  | {
+      tokens: StoredAdminTokens
+      session: AdminSessionSnapshot
+      accessMode: 'online' | 'offline'
+      warning?: string
+    }
+  | {
+      tokens: null
+      stale?: boolean
+      authError?: { errorCode: string; message: string; status?: number }
+    }
+
+interface AdminSessionMutationResult<T> {
+  applied: boolean
+  value?: T
+}
+
+class AdminSessionChangedError extends Error {
+  constructor() {
+    super('Admin session changed while the request was in flight')
+    this.name = 'AdminSessionChangedError'
+  }
+}
+
+class AdminSessionCoordinator {
+  private generation = 0
+  private mutationTail: Promise<void> = Promise.resolve()
+  private loginAttempt = 0
+
+  async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.mutationTail
+    let release!: () => void
+    this.mutationTail = new Promise<void>(resolve => {
+      release = resolve
+    })
+    await previous
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+
+  async beginLoginAttempt(): Promise<number> {
+    return this.runExclusive(async () => {
+      this.loginAttempt += 1
+      return this.loginAttempt
+    })
+  }
+
+  isLatestLoginAttempt(attempt: number): boolean {
+    return attempt === this.loginAttempt
+  }
+
+  advanceGeneration(): void {
+    this.generation += 1
+  }
+
+  createSnapshot(tokens: StoredAdminTokens): AdminSessionSnapshot {
+    return {
+      generation: this.generation,
+      tokens: { ...tokens },
+    }
+  }
+
+  async capture(
+    manager: CredentialManager,
+  ): Promise<AdminSessionSnapshot | null> {
+    return this.runExclusive(async () => {
+      const tokens = await manager.getAdminTokens()
+      return tokens ? this.createSnapshot(tokens) : null
+    })
+  }
+
+  async isCurrent(
+    manager: CredentialManager,
+    expected: AdminSessionSnapshot,
+  ): Promise<boolean> {
+    return this.runExclusive(async () => {
+      const current = await manager.getAdminTokens()
+      return this.matches(current, expected)
+    })
+  }
+
+  async mutateIfCurrent<T>(
+    manager: CredentialManager,
+    expected: AdminSessionSnapshot,
+    operation: (current: StoredAdminTokens) => Promise<T>,
+  ): Promise<AdminSessionMutationResult<T>> {
+    return this.runExclusive(async () => {
+      const current = await manager.getAdminTokens()
+      if (!this.matches(current, expected)) return { applied: false }
+      return { applied: true, value: await operation(current!) }
+    })
+  }
+
+  private matches(
+    current: StoredAdminTokens | null,
+    expected: AdminSessionSnapshot,
+  ): boolean {
+    return Boolean(
+      current
+      && expected.generation === this.generation
+      && current.userId === expected.tokens.userId
+      && current.accessToken === expected.tokens.accessToken
+      && current.refreshToken === expected.tokens.refreshToken,
+    )
+  }
+}
+
+function staleAdminSessionResult(): {
+  success: false
+  errorCode: 'SESSION_CHANGED'
+  message: string
+} {
+  return {
+    success: false,
+    errorCode: 'SESSION_CHANGED',
+    message: 'Admin session changed',
+  }
+}
 
 export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
+  const sessions = new AdminSessionCoordinator()
   const callOrganization = async <T extends object>(
     operation: string,
     callback: (client: AdminClient, accessToken: string) => Promise<T>,
+    onCurrentSuccess?: (
+      result: T,
+      session: AdminSessionSnapshot,
+    ) => void | Promise<void>,
   ) => {
+    let requestContext: AdminRequestContext | null = null
+    let manager: CredentialManager | null = null
     try {
       const adminUrl = requireAdminUrl()
-      const manager = getCredentialManager()
-      const tokenResult = await ensureValidTokens(adminUrl, manager, deps)
+      manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(
+        adminUrl,
+        manager,
+        sessions,
+        deps,
+      )
       if (!tokenResult.tokens) {
+        if (tokenResult.stale) return staleAdminSessionResult()
         return {
           success: false as const,
           ...(tokenResult.authError ?? {
@@ -103,14 +244,38 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
           message: tokenResult.warning ?? 'Failed to reach admin server',
         }
       }
+      requestContext = { session: tokenResult.session }
       const result = await callback(
-        createAdminClient(adminUrl, manager),
+        createAuthenticatedAdminClient(
+          adminUrl,
+          manager,
+          sessions,
+          requestContext,
+        ),
         tokenResult.tokens.accessToken,
       )
+      const current = onCurrentSuccess
+        ? await sessions.mutateIfCurrent(
+            manager,
+            requestContext.session,
+            async () => onCurrentSuccess!(result, requestContext!.session),
+          ).then(applied => applied.applied)
+        : await sessions.isCurrent(manager, requestContext.session)
+      if (!current) return staleAdminSessionResult()
       return { success: true as const, ...result }
     } catch (error) {
+      if (error instanceof AdminSessionChangedError) {
+        return staleAdminSessionResult()
+      }
       if (isSessionEndingAuthFailure(error)) {
-        await endAdminSession(getCredentialManager(), deps)
+        if (!manager || !requestContext) return staleAdminSessionResult()
+        const ended = await endAdminSession(
+          manager,
+          deps,
+          sessions,
+          requestContext.session,
+        )
+        if (!ended) return staleAdminSessionResult()
       }
       const adminError = toAdminRpcError(error)
       log?.warn(`[Admin] ${operation} failed:`, adminError.message)
@@ -124,18 +289,24 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       return adminInputError('INVALID_CREDENTIALS')
     }
 
+    const loginAttempt = await sessions.beginLoginAttempt()
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
-      const client = createAdminClient(adminUrl, manager)
+      const client = createPublicAdminClient(adminUrl)
       const login = await client.login(input.data.identifier, input.data.password)
-      await completeAdminLogin({
+      const session = await completeAdminLogin({
         adminUrl,
         manager,
         login,
+        loginAttempt,
+        sessions,
         deps,
         onSyncFailure: error => logPostLoginSyncFailure(log, error),
       })
+      if (!session || !await sessions.isCurrent(manager, session)) {
+        return staleAdminSessionResult()
+      }
 
       return { success: true, user: login.user }
     } catch (error) {
@@ -147,7 +318,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   server.handle(RPC_CHANNELS.admin.GET_AUTH_CONFIG, async () => {
     try {
-      return await createAdminClient(requireAdminUrl(), getCredentialManager()).getAuthConfig()
+      return await createPublicAdminClient(requireAdminUrl()).getAuthConfig()
     } catch (error) {
       const adminError = toAdminRpcError(error)
       log?.warn('[Admin] getAuthConfig failed:', adminError.message)
@@ -157,9 +328,8 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   server.handle(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG, async () => {
     try {
-      const result = await createAdminClient(
+      const result = await createPublicAdminClient(
         requireAdminUrl(),
-        getCredentialManager(),
       ).getPhoneAuthChallengeConfig()
       return { success: true, ...result }
     } catch (error) {
@@ -180,7 +350,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
 
       try {
-        const result = await createAdminClient(requireAdminUrl(), getCredentialManager())
+        const result = await createPublicAdminClient(requireAdminUrl())
           .sendPhoneAuthCode(input.data)
         return { success: true, ...result }
       } catch (error) {
@@ -201,18 +371,24 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
           : 'verification_code_invalid')
       }
 
+      const loginAttempt = await sessions.beginLoginAttempt()
       try {
         const adminUrl = requireAdminUrl()
         const manager = getCredentialManager()
-        const login = await createAdminClient(adminUrl, manager)
+        const login = await createPublicAdminClient(adminUrl)
           .verifyPhoneAuthCode(input.data)
-        await completeAdminLogin({
+        const session = await completeAdminLogin({
           adminUrl,
           manager,
           login,
+          loginAttempt,
+          sessions,
           deps,
           onSyncFailure: error => logPostLoginSyncFailure(log, error),
         })
+        if (!session || !await sessions.isCurrent(manager, session)) {
+          return staleAdminSessionResult()
+        }
         return {
           success: true,
           user: login.user,
@@ -232,11 +408,19 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       return adminInputError('VALIDATION_ERROR')
     }
 
+    let requestContext: AdminRequestContext | null = null
+    let manager: CredentialManager | null = null
     try {
       const adminUrl = requireAdminUrl()
-      const manager = getCredentialManager()
-      const tokenResult = await ensureValidTokens(adminUrl, manager, deps)
+      manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(
+        adminUrl,
+        manager,
+        sessions,
+        deps,
+      )
       if (!tokenResult.tokens) {
+        if (tokenResult.stale) return staleAdminSessionResult()
         return {
           success: false,
           ...(tokenResult.authError ?? {
@@ -253,12 +437,31 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         }
       }
 
-      const result = await createAdminClient(adminUrl, manager)
+      requestContext = { session: tokenResult.session }
+      const result = await createAuthenticatedAdminClient(
+        adminUrl,
+        manager,
+        sessions,
+        requestContext,
+      )
         .setPassword(tokenResult.tokens.accessToken, input.data)
+      if (!await sessions.isCurrent(manager, requestContext.session)) {
+        return staleAdminSessionResult()
+      }
       return { success: result.success }
     } catch (error) {
+      if (error instanceof AdminSessionChangedError) {
+        return staleAdminSessionResult()
+      }
       if (isSessionEndingAuthFailure(error)) {
-        await endAdminSession(getCredentialManager(), deps)
+        if (!manager || !requestContext) return staleAdminSessionResult()
+        const ended = await endAdminSession(
+          manager,
+          deps,
+          sessions,
+          requestContext.session,
+        )
+        if (!ended) return staleAdminSessionResult()
       }
       const adminError = toAdminRpcError(error)
       log?.warn('[Admin] setPassword failed:', adminError.message)
@@ -273,8 +476,16 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
 
     const manager = getCredentialManager()
-    const tokenResult = await ensureValidTokens(adminUrl, manager, deps)
+    const tokenResult = await ensureValidTokens(
+      adminUrl,
+      manager,
+      sessions,
+      deps,
+    )
     if (!tokenResult.tokens) {
+      if (tokenResult.stale) {
+        return currentAdminValidationResult(manager, sessions)
+      }
       if (tokenResult.authError) {
         return { loggedIn: false, ...tokenResult.authError }
       }
@@ -289,21 +500,49 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
     }
 
+    const requestContext: AdminRequestContext = {
+      session: tokenResult.session,
+    }
     try {
-      const client = createAdminClient(adminUrl, manager)
+      const client = createAuthenticatedAdminClient(
+        adminUrl,
+        manager,
+        sessions,
+        requestContext,
+      )
       const validation = await client.validate(tokenResult.tokens.accessToken)
       if (!validation.valid) {
-        await endAdminSession(manager, deps)
+        const ended = await endAdminSession(
+          manager,
+          deps,
+          sessions,
+          requestContext.session,
+        )
+        if (!ended) return currentAdminValidationResult(manager, sessions)
         return { loggedIn: false }
       }
-      await persistVerifiedAdminUser(manager, tokenResult.tokens, validation.user)
+      const verifiedSession = await persistVerifiedAdminUser(
+        manager,
+        sessions,
+        requestContext.session,
+        validation.user,
+      )
+      if (!verifiedSession) {
+        return currentAdminValidationResult(manager, sessions)
+      }
+      requestContext.session = verifiedSession
 
       if (getAdminConfigVersion() !== validation.configVersion) {
-        await syncAdminConnections({
+        const synced = await syncAdminConnections({
           adminUrl,
           manager,
-          accessToken: tokenResult.tokens.accessToken,
+          sessions,
+          session: requestContext.session,
         })
+        requestContext.session = synced.session
+      }
+      if (!await sessions.isCurrent(manager, requestContext.session)) {
+        return currentAdminValidationResult(manager, sessions)
       }
 
       return {
@@ -312,14 +551,26 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         configVersion: validation.configVersion,
       }
     } catch (error) {
+      if (error instanceof AdminSessionChangedError) {
+        return currentAdminValidationResult(manager, sessions)
+      }
       if (isSessionEndingAuthFailure(error)) {
-        await endAdminSession(manager, deps)
+        const ended = await endAdminSession(
+          manager,
+          deps,
+          sessions,
+          requestContext.session,
+        )
+        if (!ended) return currentAdminValidationResult(manager, sessions)
         return { loggedIn: false, ...toAdminRpcError(error) }
       }
       if (isTemporaryAdminFailure(error)) {
+        if (!await sessions.isCurrent(manager, requestContext.session)) {
+          return currentAdminValidationResult(manager, sessions)
+        }
         return {
           loggedIn: true,
-          user: adminUserFromStoredTokens(tokenResult.tokens),
+          user: adminUserFromStoredTokens(requestContext.session.tokens),
           configVersion: getAdminConfigVersion() ?? 'offline',
           offline: true,
         }
@@ -331,19 +582,34 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.admin.LOGOUT, async () => {
     const adminUrl = getAdminUrl()
     const manager = getCredentialManager()
-    const tokens = await manager.getAdminTokens()
+    const session = await sessions.capture(manager)
+    if (!session) return { success: true }
+    const requestContext: AdminRequestContext = { session }
 
-    if (adminUrl && tokens?.accessToken) {
+    if (adminUrl) {
       try {
-        await createAdminClient(adminUrl, manager).logout(tokens.accessToken)
+        await createAuthenticatedAdminClient(
+          adminUrl,
+          manager,
+          sessions,
+          requestContext,
+        ).logout(session.tokens.accessToken)
       } catch (error) {
         log?.warn('[Admin] remote logout failed; clearing local state:', error instanceof Error ? error.message : String(error))
       }
     }
 
-    await endAdminSession(manager, deps)
-    await deleteAdminManagedConnections(manager)
-    setAdminConfigVersion(undefined)
+    const ended = await endAdminSession(
+      manager,
+      deps,
+      sessions,
+      requestContext.session,
+      async () => {
+        await deleteAdminManagedConnections(manager)
+        setAdminConfigVersion(undefined)
+      },
+    )
+    if (!ended) return staleAdminSessionResult()
 
     return { success: true }
   })
@@ -365,11 +631,16 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
-      const result = await syncAdminConnections({ adminUrl, manager, deps })
+      const { session: _session, ...result } = await syncAdminConnections({
+        adminUrl,
+        manager,
+        sessions,
+        deps,
+      })
       return { success: true, ...result }
     } catch (error) {
-      if (isSessionEndingAuthFailure(error)) {
-        await endAdminSession(getCredentialManager(), deps)
+      if (error instanceof AdminSessionChangedError) {
+        return staleAdminSessionResult()
       }
       const adminError = toAdminRpcError(error)
       log?.warn('[Admin] syncConnections failed:', adminError.message)
@@ -407,8 +678,14 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         }
       }
       const manager = getCredentialManager()
-      const tokenResult = await ensureValidTokens(adminUrl, manager, deps)
+      const tokenResult = await ensureValidTokens(
+        adminUrl,
+        manager,
+        sessions,
+        deps,
+      )
       if (!tokenResult.tokens) {
+        if (tokenResult.stale) return staleAdminSessionResult()
         return {
           success: false,
           ...(tokenResult.authError ?? {
@@ -419,6 +696,9 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
 
       const accountId = tokenResult.tokens.userId
+      const requestContext: AdminRequestContext = {
+        session: tokenResult.session,
+      }
       const cached = getCachedAppCatalog(accountId, organizationId.data)
       if (tokenResult.accessMode === 'offline') {
         setAppCatalogAccessMode(accountId, organizationId.data, 'offline')
@@ -440,7 +720,12 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         }
       }
       try {
-        const client = createAdminClient(adminUrl, manager)
+        const client = createAuthenticatedAdminClient(
+          adminUrl,
+          manager,
+          sessions,
+          requestContext,
+        )
         let result = await client.getAppCatalog(
           tokenResult.tokens.accessToken,
           organizationId.data,
@@ -450,72 +735,110 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         )
         if (result.notModified && !cached) {
           result = await client.getAppCatalog(
-            tokenResult.tokens.accessToken,
+            requestContext.session.tokens.accessToken,
             organizationId.data,
           )
         }
-        if (result.notModified) {
-          if (!cached) {
-            throw new AdminError(
-              'Admin returned not modified without a local app catalog',
-              'SERVER_ERROR',
-            )
-          }
-          setAppCatalogAccessMode(accountId, organizationId.data, 'online')
-          return {
-            success: true,
-            catalog: cached,
-            source: 'cache',
-            refreshed: false,
-            accessMode: 'online',
-            ...(cached.warnings?.length
-              ? { warningCode: 'INVALID_SEMVER' }
-              : {}),
-          }
-        }
-        if (result.apps.some(app => app.organizationId !== organizationId.data)) {
+        if (
+          !result.notModified
+          && result.apps.some(app => app.organizationId !== organizationId.data)
+        ) {
           throw new AdminError(
             'Admin app catalog contains an app from another organization',
             'SERVER_ERROR',
           )
         }
-        const savedCatalog = saveAppCatalog(
-          accountId,
-          organizationId.data,
-          result,
-        )
-        setAppCatalogAccessMode(accountId, organizationId.data, 'online')
-        return {
-          success: true,
-          catalog: savedCatalog,
-          source: 'network',
-          refreshed: true,
-          accessMode: 'online',
-          ...(savedCatalog.warnings?.length
-            ? { warningCode: 'INVALID_SEMVER' }
-            : {}),
-        }
-      } catch (error) {
-        const adminError = toAdminRpcError(error)
-        if (cached && isCatalogAuthorizationFailure(error)) {
-          const deniedCatalog = denyCachedAppCatalogAuthorization(
-            accountId,
-            organizationId.data,
-          )
-          setAppCatalogAccessMode(accountId, organizationId.data, 'denied')
-          if (deniedCatalog) {
-            if (isSessionEndingAuthFailure(error)) {
-              await endAdminSession(manager, deps)
+        const committed = await sessions.mutateIfCurrent(
+          manager,
+          requestContext.session,
+          async () => {
+            if (result.notModified) {
+              if (!cached) {
+                throw new AdminError(
+                  'Admin returned not modified without a local app catalog',
+                  'SERVER_ERROR',
+                )
+              }
+              setAppCatalogAccessMode(accountId, organizationId.data, 'online')
+              return {
+                success: true as const,
+                catalog: cached,
+                source: 'cache' as const,
+                refreshed: false,
+                accessMode: 'online' as const,
+                ...(cached.warnings?.length
+                  ? { warningCode: 'INVALID_SEMVER' }
+                  : {}),
+              }
             }
-            log?.warn('[Admin] app catalog authorization denied:', adminError.message)
-            return { success: false, ...adminError }
-          }
+            const savedCatalog = saveAppCatalog(
+              accountId,
+              organizationId.data,
+              result,
+            )
+            setAppCatalogAccessMode(accountId, organizationId.data, 'online')
+            return {
+              success: true as const,
+              catalog: savedCatalog,
+              source: 'network' as const,
+              refreshed: true,
+              accessMode: 'online' as const,
+              ...(savedCatalog.warnings?.length
+                ? { warningCode: 'INVALID_SEMVER' }
+                : {}),
+            }
+          },
+        )
+        return committed.applied
+          ? committed.value!
+          : staleAdminSessionResult()
+      } catch (error) {
+        if (error instanceof AdminSessionChangedError) {
+          return staleAdminSessionResult()
         }
+        const adminError = toAdminRpcError(error)
         if (isSessionEndingAuthFailure(error)) {
-          setAppCatalogAccessMode(accountId, organizationId.data, 'denied')
-          await endAdminSession(manager, deps)
+          const ended = await endAdminSession(
+            manager,
+            deps,
+            sessions,
+            requestContext.session,
+          )
+          if (!ended) return staleAdminSessionResult()
+          log?.warn('[Admin] app catalog authorization denied:', adminError.message)
+          return { success: false, ...adminError }
+        } else if (cached && isCatalogAuthorizationFailure(error)) {
+          const denied = await sessions.mutateIfCurrent(
+            manager,
+            requestContext.session,
+            async () => {
+              denyCachedAppCatalogAuthorization(
+                accountId,
+                organizationId.data,
+              )
+              setAppCatalogAccessMode(
+                accountId,
+                organizationId.data,
+                'denied',
+              )
+            },
+          )
+          if (!denied.applied) return staleAdminSessionResult()
+          log?.warn('[Admin] app catalog authorization denied:', adminError.message)
+          return { success: false, ...adminError }
         } else if (cached && isTemporaryAdminFailure(error)) {
-          setAppCatalogAccessMode(accountId, organizationId.data, 'offline')
+          const markedOffline = await sessions.mutateIfCurrent(
+            manager,
+            requestContext.session,
+            async () => {
+              setAppCatalogAccessMode(
+                accountId,
+                organizationId.data,
+                'offline',
+              )
+            },
+          )
+          if (!markedOffline.applied) return staleAdminSessionResult()
           log?.warn('[Admin] app catalog refresh failed; using cache:', adminError.message)
           return {
             success: true,
@@ -534,34 +857,30 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   )
 
   server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATIONS, async () => {
-    const result = await callOrganization(
+    return callOrganization(
       'listOrganizations',
       (client, accessToken) => client.listOrganizations(accessToken),
-    )
-    if (result.success) {
-      const tokens = await getCredentialManager().getAdminTokens()
-      if (tokens) {
+      async (result, session) => {
         const activeOrganizationIds = new Set(result.organizations
           .filter(organization => (
             organization.status !== 'suspended'
             && organization.membership.status === 'active'
           ))
           .map(organization => organization.id))
-        for (const cached of listCachedAppCatalogs(tokens.userId)) {
+        for (const cached of listCachedAppCatalogs(session.tokens.userId)) {
           if (activeOrganizationIds.has(cached.organizationId)) continue
           denyCachedAppCatalogAuthorization(
-            tokens.userId,
+            session.tokens.userId,
             cached.organizationId,
           )
           setAppCatalogAccessMode(
-            tokens.userId,
+            session.tokens.userId,
             cached.organizationId,
             'denied',
           )
         }
-      }
-    }
-    return result
+      },
+    )
   })
 
   server.handle(RPC_CHANNELS.admin.CREATE_ORGANIZATION, async (_ctx, rawInput: unknown) => {
@@ -575,7 +894,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     const token = OrganizationJoinTokenRpcInputSchema.safeParse(rawToken)
     if (!token.success) return adminInputError('VALIDATION_ERROR')
     try {
-      const result = await createAdminClient(requireAdminUrl(), getCredentialManager())
+      const result = await createPublicAdminClient(requireAdminUrl())
         .previewOrganizationJoin(token.data)
       return { success: true, ...result }
     } catch (error) {
@@ -709,14 +1028,32 @@ function requireAdminUrl(): string {
   return adminUrl
 }
 
-function createAdminClient(adminUrl: string, manager: CredentialManager): AdminClient {
+function createPublicAdminClient(adminUrl: string): AdminClient {
+  return new AdminClient(adminUrl)
+}
+
+function createAuthenticatedAdminClient(
+  adminUrl: string,
+  manager: CredentialManager,
+  sessions: AdminSessionCoordinator,
+  requestContext: AdminRequestContext,
+): AdminClient {
   return new AdminClient(adminUrl, {
     tokenStore: {
       async getRefreshToken() {
-        return (await manager.getAdminTokens())?.refreshToken ?? null
+        return await sessions.isCurrent(manager, requestContext.session)
+          ? requestContext.session.tokens.refreshToken
+          : null
       },
       async onTokensRefreshed(tokens) {
-        await persistRefreshedTokens(manager, tokens)
+        const refreshedSession = await persistRefreshedTokens(
+          manager,
+          sessions,
+          requestContext.session,
+          tokens,
+        )
+        if (!refreshedSession) throw new AdminSessionChangedError()
+        requestContext.session = refreshedSession
       },
     },
   })
@@ -732,102 +1069,151 @@ function adminUserFromStoredTokens(tokens: StoredAdminTokens): AdminUser {
   }
 }
 
+async function currentAdminValidationResult(
+  manager: CredentialManager,
+  sessions: AdminSessionCoordinator,
+) {
+  const current = await sessions.capture(manager)
+  if (!current) return { loggedIn: false as const }
+  return {
+    loggedIn: true as const,
+    user: adminUserFromStoredTokens(current.tokens),
+    configVersion: getAdminConfigVersion() ?? 'session-changed',
+  }
+}
+
 async function persistVerifiedAdminUser(
   manager: CredentialManager,
-  tokens: StoredAdminTokens,
+  sessions: AdminSessionCoordinator,
+  expected: AdminSessionSnapshot,
   user: AdminUser,
-): Promise<void> {
-  await manager.setAdminTokens({
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    expiresAt: tokens.expiresAt,
-    userId: user.id,
-    username: user.username,
-    displayName: user.displayName ?? undefined,
-    role: user.role,
-    groupIds: user.groupIds,
-  })
+): Promise<AdminSessionSnapshot | null> {
+  if (user.id !== expected.tokens.userId) {
+    throw new AdminError(
+      'Admin validation identity does not match the current session',
+      'INVALID_TOKEN',
+    )
+  }
+  const persisted = await sessions.mutateIfCurrent(
+    manager,
+    expected,
+    async current => {
+      const updated: StoredAdminTokens = {
+        accessToken: current.accessToken,
+        refreshToken: current.refreshToken,
+        expiresAt: current.expiresAt,
+        userId: user.id,
+        username: user.username,
+        displayName: user.displayName ?? undefined,
+        role: user.role,
+        groupIds: user.groupIds,
+      }
+      sessions.advanceGeneration()
+      await manager.setAdminTokens(updated)
+      return sessions.createSnapshot(updated)
+    },
+  )
+  return persisted.applied ? persisted.value! : null
 }
 
 async function endAdminSession(
   manager: CredentialManager,
-  deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>,
-): Promise<void> {
-  const tokens = await manager.getAdminTokens()
-  if (tokens) {
-    await deps?.onAdminSessionEnding?.(tokens.userId)
-    denyAppCatalogAccessForAccount(tokens.userId)
-    denyCachedAppCatalogAuthorizationForAccount(tokens.userId)
-  }
-  await manager.deleteAdminTokens()
+  deps: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'> | undefined,
+  sessions: AdminSessionCoordinator,
+  expected: AdminSessionSnapshot,
+  beforeDelete?: () => void | Promise<void>,
+): Promise<boolean> {
+  const ended = await sessions.mutateIfCurrent(
+    manager,
+    expected,
+    async () => {
+      sessions.advanceGeneration()
+      await deps?.onAdminSessionEnding?.(expected.tokens.userId)
+      denyAppCatalogAccessForAccount(expected.tokens.userId)
+      denyCachedAppCatalogAuthorizationForAccount(expected.tokens.userId)
+      await beforeDelete?.()
+      await manager.deleteAdminTokens()
+    },
+  )
+  return ended.applied
 }
 
 async function completeAdminLogin(args: {
   adminUrl: string
   manager: CredentialManager
   login: AdminLoginResponse
+  loginAttempt: number
+  sessions: AdminSessionCoordinator
   deps: Pick<
     HandlerDeps,
     'onAdminSessionEnding' | 'onAdminSessionStarted' | 'platform'
   >
   onSyncFailure: (error: unknown) => void
-}): Promise<void> {
-  const previousTokens = await args.manager.getAdminTokens()
-  const previousAdminConnectionSlugs = getAdminManagedConnectionSlugs()
-  const switchingAccounts = Boolean(
-    previousTokens && previousTokens.userId !== args.login.user.id,
-  )
+}): Promise<AdminSessionSnapshot | null> {
+  const replacement = await args.sessions.runExclusive(async () => {
+    if (!args.sessions.isLatestLoginAttempt(args.loginAttempt)) return null
 
-  if (previousTokens && switchingAccounts) {
-    // Cleanup is bound to the old trusted session. The new credentials are not
-    // persisted until that account's processes and managed state are revoked.
-    await args.deps.onAdminSessionEnding?.(previousTokens.userId)
-    await deleteAdminManagedConnections(
-      args.manager,
-      previousAdminConnectionSlugs,
+    const previousTokens = await args.manager.getAdminTokens()
+    const previousAdminConnectionSlugs = getAdminManagedConnectionSlugs()
+    const switchingAccounts = Boolean(
+      previousTokens && previousTokens.userId !== args.login.user.id,
     )
-    denyAppCatalogAccessForAccount(previousTokens.userId)
-    denyCachedAppCatalogAuthorizationForAccount(previousTokens.userId)
-    setAdminConfigVersion(undefined)
-  }
 
-  await args.deps.onAdminSessionStarted?.(args.login.user.id)
-  await args.manager.setAdminTokens({
-    accessToken: args.login.accessToken,
-    refreshToken: args.login.refreshToken,
-    expiresAt: expiresAtFromNow(args.login.expiresIn),
-    userId: args.login.user.id,
-    username: args.login.user.username,
-    displayName: args.login.user.displayName ?? undefined,
-    role: args.login.user.role,
-    groupIds: args.login.user.groupIds,
-  })
-
-  setAdminConfigVersion(undefined)
-
-  try {
-    if (!switchingAccounts) {
-      await deleteAdminManagedConnections(args.manager, previousAdminConnectionSlugs)
-    }
-    await syncAdminConnections({
-      adminUrl: args.adminUrl,
-      manager: args.manager,
-      accessToken: args.login.accessToken,
-    })
-  } catch (error) {
-    // Authentication has already succeeded and the one-time code may already
-    // be consumed. Keep the persisted session, but fail closed for model
-    // authorization so a previous account's managed connections cannot be used.
-    setAdminConfigVersion(undefined)
-    try {
+    // Advancing before the first cleanup await makes every older request
+    // stale for the full account-transition window.
+    args.sessions.advanceGeneration()
+    if (previousTokens && switchingAccounts) {
+      await args.deps.onAdminSessionEnding?.(previousTokens.userId)
       await deleteAdminManagedConnections(
         args.manager,
         previousAdminConnectionSlugs,
       )
-    } catch (cleanupError) {
-      args.onSyncFailure(cleanupError)
+      denyAppCatalogAccessForAccount(previousTokens.userId)
+      denyCachedAppCatalogAuthorizationForAccount(previousTokens.userId)
+      setAdminConfigVersion(undefined)
     }
+
+    const nextTokens: StoredAdminTokens = {
+      accessToken: args.login.accessToken,
+      refreshToken: args.login.refreshToken,
+      expiresAt: expiresAtFromNow(args.login.expiresIn),
+      userId: args.login.user.id,
+      username: args.login.user.username,
+      displayName: args.login.user.displayName ?? undefined,
+      role: args.login.user.role,
+      groupIds: args.login.user.groupIds,
+    }
+    await args.deps.onAdminSessionStarted?.(args.login.user.id)
+    await args.manager.setAdminTokens(nextTokens)
+    setAdminConfigVersion(undefined)
+
+    if (!switchingAccounts) {
+      await deleteAdminManagedConnections(
+        args.manager,
+        previousAdminConnectionSlugs,
+      )
+    }
+    return args.sessions.createSnapshot(nextTokens)
+  })
+  if (!replacement) return null
+
+  try {
+    const synced = await syncAdminConnections({
+      adminUrl: args.adminUrl,
+      manager: args.manager,
+      sessions: args.sessions,
+      session: replacement,
+    })
+    return synced.session
+  } catch (error) {
+    if (error instanceof AdminSessionChangedError) return null
+    // Authentication has already succeeded and the one-time code may already
+    // be consumed. Keep the persisted session, but fail closed for model
+    // authorization so a previous account's managed connections cannot be used.
     args.onSyncFailure(error)
+    return await args.sessions.isCurrent(args.manager, replacement)
+      ? replacement
+      : null
   }
 }
 
@@ -844,120 +1230,212 @@ function logPostLoginSyncFailure(
 async function ensureValidTokens(
   adminUrl: string,
   manager: CredentialManager,
+  sessions: AdminSessionCoordinator,
   deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>,
 ): Promise<TokenValidationResult> {
-  const tokens = await manager.getAdminTokens()
-  if (!tokens) return { tokens: null }
+  const initialSession = await sessions.capture(manager)
+  if (!initialSession) return { tokens: null }
+  const { tokens } = initialSession
 
   if (!manager.isExpired({
     value: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt: tokens.expiresAt,
   })) {
-    return { tokens, accessMode: 'online' }
+    return {
+      tokens,
+      session: initialSession,
+      accessMode: 'online',
+    }
   }
 
   try {
-    const refreshed = await createAdminClient(adminUrl, manager).refresh(tokens.refreshToken)
-    await persistRefreshedTokens(manager, refreshed)
+    const refreshed = await createPublicAdminClient(adminUrl)
+      .refresh(tokens.refreshToken)
+    const refreshedSession = await persistRefreshedTokens(
+      manager,
+      sessions,
+      initialSession,
+      refreshed,
+    )
+    if (!refreshedSession) return { tokens: null, stale: true }
     return {
-      tokens: {
-        ...tokens,
-        accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        expiresAt: expiresAtFromNow(refreshed.expiresIn),
-      },
+      tokens: refreshedSession.tokens,
+      session: refreshedSession,
       accessMode: 'online',
     }
   } catch (error) {
+    if (error instanceof AdminSessionChangedError) {
+      return { tokens: null, stale: true }
+    }
     if (isSessionEndingAuthFailure(error)) {
-      await endAdminSession(manager, deps)
+      const ended = await endAdminSession(
+        manager,
+        deps,
+        sessions,
+        initialSession,
+      )
+      if (!ended) return { tokens: null, stale: true }
       return {
         tokens: null,
         authError: toAdminRpcError(error),
       }
     }
     if (isTemporaryAdminFailure(error)) {
+      if (!await sessions.isCurrent(manager, initialSession)) {
+        return { tokens: null, stale: true }
+      }
       return {
         tokens,
+        session: initialSession,
         accessMode: 'offline',
         warning: toAdminRpcError(error).message,
       }
     }
+    if (!await sessions.isCurrent(manager, initialSession)) {
+      return { tokens: null, stale: true }
+    }
     return {
       tokens,
+      session: initialSession,
       accessMode: 'offline',
       warning: toAdminRpcError(error).message,
     }
   }
 }
 
-async function persistRefreshedTokens(manager: CredentialManager, refreshed: AdminRefreshResponse): Promise<void> {
-  const existing = await manager.getAdminTokens()
-  if (!existing) return
-
-  await manager.setAdminTokens({
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: expiresAtFromNow(refreshed.expiresIn),
-    userId: existing.userId,
-    username: existing.username,
-    displayName: existing.displayName,
-    role: existing.role,
-    groupIds: existing.groupIds,
-  })
+async function persistRefreshedTokens(
+  manager: CredentialManager,
+  sessions: AdminSessionCoordinator,
+  expected: AdminSessionSnapshot,
+  refreshed: AdminRefreshResponse,
+): Promise<AdminSessionSnapshot | null> {
+  const persisted = await sessions.mutateIfCurrent(
+    manager,
+    expected,
+    async existing => {
+      const updated: StoredAdminTokens = {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: expiresAtFromNow(refreshed.expiresIn),
+        userId: existing.userId,
+        username: existing.username,
+        displayName: existing.displayName,
+        role: existing.role,
+        groupIds: existing.groupIds,
+      }
+      sessions.advanceGeneration()
+      await manager.setAdminTokens(updated)
+      return sessions.createSnapshot(updated)
+    },
+  )
+  return persisted.applied ? persisted.value! : null
 }
 
 async function syncAdminConnections(args: {
   adminUrl: string
   manager: CredentialManager
-  accessToken?: string
+  sessions: AdminSessionCoordinator
+  session?: AdminSessionSnapshot
   deps?: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>
-}): Promise<{ configVersion: string; connectionCount: number; defaultConnection: string | null }> {
-  const tokens = args.accessToken
-    ? null
-    : await ensureValidTokens(args.adminUrl, args.manager, args.deps)
-  const accessToken = args.accessToken ?? tokens?.tokens?.accessToken
-  if (!accessToken) {
-    throw new AdminError('Admin session is not logged in', 'UNAUTHORIZED')
+}): Promise<{
+  configVersion: string
+  connectionCount: number
+  defaultConnection: string | null
+  session: AdminSessionSnapshot
+}> {
+  let session = args.session
+  if (!session) {
+    const tokens = await ensureValidTokens(
+      args.adminUrl,
+      args.manager,
+      args.sessions,
+      args.deps,
+    )
+    if (!tokens.tokens) {
+      if (tokens.stale) throw new AdminSessionChangedError()
+      throw new AdminError('Admin session is not logged in', 'UNAUTHORIZED')
+    }
+    if (tokens.accessMode === 'offline') {
+      throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR')
+    }
+    session = tokens.session
   }
-  if (tokens && 'accessMode' in tokens && tokens.accessMode === 'offline') {
-    throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR')
-  }
-
-  const connectionSlugsToRevoke = new Set(getAdminManagedConnectionSlugs())
+  const requestContext: AdminRequestContext = { session }
   try {
-    const client = createAdminClient(args.adminUrl, args.manager)
-    const response = await client.getLlmConnections(accessToken)
-    const incomingSlugs = new Set(response.connections.map(connection => connection.slug))
-    for (const slug of incomingSlugs) {
-      connectionSlugsToRevoke.add(slug)
-    }
+    const client = createAuthenticatedAdminClient(
+      args.adminUrl,
+      args.manager,
+      args.sessions,
+      requestContext,
+    )
+    const response = await client.getLlmConnections(
+      requestContext.session.tokens.accessToken,
+    )
+    const applied = await args.sessions.mutateIfCurrent(
+      args.manager,
+      requestContext.session,
+      async () => {
+        const incomingSlugs = new Set(
+          response.connections.map(connection => connection.slug),
+        )
+        for (const existing of getLlmConnections()) {
+          if (
+            existing.managedBy === 'admin'
+            && !incomingSlugs.has(existing.slug)
+          ) {
+            await deleteConnectionAndCredentials(args.manager, existing.slug)
+          }
+        }
 
-    for (const existing of getLlmConnections()) {
-      if (existing.managedBy === 'admin' && !incomingSlugs.has(existing.slug)) {
-        await deleteConnectionAndCredentials(args.manager, existing.slug)
-      }
-    }
+        for (const connection of response.connections) {
+          await upsertAdminConnection(
+            args.manager,
+            connection,
+            response.configVersion,
+            requestContext.session.tokens.accessToken,
+          )
+        }
 
-    for (const connection of response.connections) {
-      await upsertAdminConnection(args.manager, connection, response.configVersion, accessToken)
-    }
-
-    if (response.defaultConnection && getLlmConnections().some(connection => connection.slug === response.defaultConnection)) {
-      setDefaultLlmConnection(response.defaultConnection)
-    }
-
-    setAdminConfigVersion(response.configVersion)
-
+        if (
+          response.defaultConnection
+          && getLlmConnections().some(
+            connection => connection.slug === response.defaultConnection,
+          )
+        ) {
+          setDefaultLlmConnection(response.defaultConnection)
+        }
+        setAdminConfigVersion(response.configVersion)
+      },
+    )
+    if (!applied.applied) throw new AdminSessionChangedError()
     return {
       configVersion: response.configVersion,
       connectionCount: response.connections.length,
       defaultConnection: response.defaultConnection,
+      session: requestContext.session,
     }
   } catch (error) {
-    setAdminConfigVersion(undefined)
-    await deleteAdminManagedConnections(args.manager, connectionSlugsToRevoke)
+    if (error instanceof AdminSessionChangedError) throw error
+    if (isSessionEndingAuthFailure(error)) {
+      const ended = await endAdminSession(
+        args.manager,
+        args.deps,
+        args.sessions,
+        requestContext.session,
+      )
+      if (!ended) throw new AdminSessionChangedError()
+      throw error
+    }
+    const cleaned = await args.sessions.mutateIfCurrent(
+      args.manager,
+      requestContext.session,
+      async () => {
+        setAdminConfigVersion(undefined)
+        await deleteAdminManagedConnections(args.manager)
+      },
+    )
+    if (!cleaned.applied) throw new AdminSessionChangedError()
     throw error
   }
 }

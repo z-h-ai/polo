@@ -516,6 +516,16 @@ function encryptedApiKey(apiKey: string, accessToken = 'access-token'): TestEncr
   }
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 beforeEach(() => {
   loggerWarn.mockClear()
   adminSessionEnding.mockClear()
@@ -1126,6 +1136,285 @@ describe('registerAdminHandlers', () => {
     expect(appCatalogAccess.get('account-a:organization-1')).toBe('denied')
     expect(appCatalogCache.get('account-a:organization-1'))
       .toMatchObject({ authorizationStatus: 'denied' })
+  })
+
+  it('discards account A organization success after login switches to B', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    appCatalogAccess.set('account-b:organization-b', 'online')
+    appCatalogCache.set('account-b:organization-b', {
+      accountId: 'account-b',
+      organizationId: 'organization-b',
+      authorizationStatus: 'authorized',
+      apps: [],
+    })
+    const pendingOrganizations = createDeferred<any>()
+    const listStarted = createDeferred<void>()
+    adminClientBehavior.listOrganizations = async () => {
+      listStarted.resolve()
+      return pendingOrganizations.promise
+    }
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { listOrganizations, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const accountARequest = listOrganizations(context)
+    await listStarted.promise
+    expect(await login(context, 'account-b', 'secret')).toMatchObject({
+      success: true,
+      user: { id: 'account-b' },
+    })
+    pendingOrganizations.resolve({ organizations: [] })
+
+    expect(await accountARequest).toMatchObject({
+      success: false,
+      errorCode: 'SESSION_CHANGED',
+    })
+    expect(managerState.tokens).toMatchObject({
+      userId: 'account-b',
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+    })
+    expect(appCatalogAccess.get('account-b:organization-b')).toBe('online')
+    expect(appCatalogCache.get('account-b:organization-b')).toMatchObject({
+      authorizationStatus: 'authorized',
+    })
+    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
+    expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
+  })
+
+  it('does not let account A late 403 end account B', async () => {
+    const organizationA = '11111111-1111-4111-8111-111111111111'
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    appCatalogCache.set(`account-a:${organizationA}`, {
+      accountId: 'account-a',
+      organizationId: organizationA,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-a',
+      apps: [],
+    })
+    appCatalogAccess.set('account-b:organization-b', 'online')
+    appCatalogCache.set('account-b:organization-b', {
+      accountId: 'account-b',
+      organizationId: 'organization-b',
+      authorizationStatus: 'authorized',
+      apps: [],
+    })
+    const pendingCatalog = createDeferred<any>()
+    const catalogStarted = createDeferred<void>()
+    adminClientBehavior.getAppCatalog = async () => {
+      catalogStarted.resolve()
+      return pendingCatalog.promise
+    }
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { syncAppCatalog, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const accountARequest = syncAppCatalog(context, organizationA, {
+      force: true,
+    })
+    await catalogStarted.promise
+    expect(await login(context, 'account-b', 'secret')).toMatchObject({
+      success: true,
+      user: { id: 'account-b' },
+    })
+    pendingCatalog.reject(new TestAdminError(
+      'account A lost authorization',
+      'FORBIDDEN',
+      { status: 403 },
+    ))
+
+    expect(await accountARequest).toMatchObject({
+      success: false,
+      errorCode: 'SESSION_CHANGED',
+    })
+    expect(managerState.tokens).toMatchObject({
+      userId: 'account-b',
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+    })
+    expect(appCatalogAccess.get('account-b:organization-b')).toBe('online')
+    expect(appCatalogCache.get('account-b:organization-b')).toMatchObject({
+      authorizationStatus: 'authorized',
+    })
+    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
+    expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
+  })
+
+  it('does not apply account A late connection sync over account B config', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    const pendingAccountAConnections = createDeferred<any>()
+    const accountASyncStarted = createDeferred<void>()
+    adminClientBehavior.getLlmConnections = async accessToken => {
+      if (accessToken === 'account-a-token') {
+        accountASyncStarted.resolve()
+        return pendingAccountAConnections.promise
+      }
+      return {
+        configVersion: 'config-b',
+        connections: [adminConnection({
+          slug: 'account-b-admin',
+          name: 'Account B Admin',
+          apiKey: 'sk-account-b',
+        })],
+        defaultConnection: 'account-b-admin',
+      }
+    }
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { syncConnections, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const accountASync = syncConnections(context)
+    await accountASyncStarted.promise
+    expect(await login(context, 'account-b', 'secret')).toMatchObject({
+      success: true,
+      user: { id: 'account-b' },
+    })
+    pendingAccountAConnections.resolve({
+      configVersion: 'config-a-late',
+      connections: [adminConnection({
+        slug: 'account-a-admin',
+        name: 'Account A Admin',
+        apiKey: 'sk-account-a-late',
+      })],
+      defaultConnection: 'account-a-admin',
+    })
+
+    expect(await accountASync).toMatchObject({
+      success: false,
+      errorCode: 'SESSION_CHANGED',
+    })
+    expect(managerState.tokens).toMatchObject({
+      userId: 'account-b',
+      accessToken: 'account-b-token',
+    })
+    expect(configState.connections.map(connection => connection.slug)).toEqual([
+      'account-b-admin',
+    ])
+    expect(configState.adminConfigVersion).toBe('config-b')
+    expect(managerState.llmApiKeys.get('account-b-admin')).toBe('sk-account-b')
+    expect(managerState.llmApiKeys.has('account-a-admin')).toBe(false)
+  })
+
+  it('does not persist account A late refresh over account B identity', async () => {
+    managerState.tokens = {
+      accessToken: 'expired-account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() - 1,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    const pendingRefresh = createDeferred<any>()
+    const refreshStarted = createDeferred<void>()
+    adminClientBehavior.refresh = async () => {
+      refreshStarted.resolve()
+      return pendingRefresh.promise
+    }
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { validate, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const accountAValidation = validate(context)
+    await refreshStarted.promise
+    expect(await login(context, 'account-b', 'secret')).toMatchObject({
+      success: true,
+      user: { id: 'account-b' },
+    })
+    pendingRefresh.resolve({
+      accessToken: 'late-account-a-token',
+      refreshToken: 'late-account-a-refresh',
+      expiresIn: 3600,
+    })
+
+    expect(await accountAValidation).toMatchObject({
+      loggedIn: true,
+      user: { id: 'account-b' },
+    })
+    expect(managerState.tokens).toMatchObject({
+      userId: 'account-b',
+      username: 'account-b',
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+    })
+    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
+    expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
   })
 
   it('cleans the trusted old account before phone login replaces it', async () => {
