@@ -1,216 +1,222 @@
-# POO-14 Review 第 2 轮修复报告
+# POO-14 第 2 轮修复报告
 
-## 处理结果
+## 结果摘要
 
-### 1. clean runner 缺少平台 runtime 与 helper server
+本轮已完成 reviewer 指出的三项代码修复，并创建代码提交：
 
-已修复。
+- `80d3f3ff66edf4ebdd2fd30a69c4381dc27c352e` — `POO-14: 收紧发布签名与终端所有权`
 
-- 新增 `scripts/prepare-platform-runtime.ts`，统一准备并校验当前目标平台的：
-  - checksum-verified Bun runtime；
-  - Claude Agent SDK core 和目标平台 native binary alias；
-  - ripgrep；
-  - network interceptor 源文件；
-  - session MCP server、Pi agent server 及目标平台 koffi native binary。
-- `electron:dist:dev:mac|win|linux` 在 Electron build 前准备平台 runtime，在 build 后构建并 staging helper server，再执行显式架构的 electron-builder。
-- 修复 `buildMcpServers` 使用 shell 拼接路径的问题，改用参数数组执行 Bun；含空格和非 ASCII 的 clean fixture root 可真实构建 helper server。
-- full workflow 会先删除 Electron 下所有 ignored/generated runtime staging，再执行 clean runtime contract 测试；随后正式 build 必须从空 staging 重新生成全部依赖。
+macOS arm64 development DMG/ZIP 已从该代码提交重建，最终容器 smoke 通过。该产物明确为 ad-hoc、无 Team ID 的开发产物，只属于 development smoke，不计作 release/full acceptance。
 
-### 2. Linux full 使用错误的 AppImage 名称
+生产签名 secrets、可信且版本不同的 previous release 三平台产物以及 Windows/Linux 原生 runner 不在本机环境中，因此本报告不声称已完成 Windows/Linux 原生 full，也不声称已有真实 previous→current 三平台成功证据。正式 workflow 已把这些输入设为 fail-fast 的发布契约，仍需外部 release/nightly runner 产出可审计 full logs。
+
+## 逐 issue 处理结果
+
+### 1. release/full 签名身份验收
 
 已修复。
 
-- Unix validator 先解析实际存在的当前 AppImage：
-  - x64 builder hook 阶段支持 `Polo-AI-x86_64.AppImage`；
-  - arm64 支持 `Polo-AI-aarch64.AppImage`；
-  - 已规范化名称也支持 `Polo-AI-${ARCH}.AppImage`。
-- smoke 解析出的真实路径直接写入 `CURRENT_ARTIFACT`，full install/upgrade 不再重新硬编码查找 `Polo-AI-x64.AppImage`。
-- hook 验证成功后，workflow 才把 x86_64 产物规范化为上传契约中的 x64 名称。
+- 新增共享的 `scripts/release-signing-contract.ts`，把 release/full 身份检查与 development smoke 分离。
+- macOS full 必须由 CI 明确提供且不得为空：
+  - `POLO_AI_RELEASE_MACOS_TEAM_ID`
+  - `POLO_AI_RELEASE_MACOS_APP_REQUIREMENT`
+  - `POLO_AI_RELEASE_MACOS_UV_REQUIREMENT`
+- macOS full 对最终 DMG/ZIP 内的 App 与嵌套 `uv` 校验：
+  - `codesign --verify --strict`；
+  - App 与 `uv` 的 Team ID 均与契约完全一致；
+  - App 与 `uv` 的 designated requirement 均与契约完全一致；
+  - `spctl` 返回 `Notarized Developer ID`；
+  - `xcrun stapler validate` 通过。
+- Windows full 必须由 CI 明确提供且不得为空：
+  - `POLO_AI_RELEASE_WINDOWS_PUBLISHER`
+  - `POLO_AI_RELEASE_WINDOWS_THUMBPRINT`
+- Windows full 对当前 NSIS installer、解包 App、解包 `uv`、安装后 App 和安装后 `uv` 校验 Authenticode `Valid`、Publisher 完全匹配及 SHA-1 thumbprint 完全匹配。
+- macOS/Windows full 的预期身份、观察身份、签名/公证/stapling 状态与时间写入 JSONL audit；workflow 把 audit、commit SHA、artifact hash 与 full log 作为 blocking artifact 上传。
+- `.github/workflows/electron-artifact-full.yml` 已改用正式 `electron:dist:mac|win|linux`，不再用 dev dist 冒充 full；macOS notarization 在正式构建开启，只有显式 `--dev` 才关闭。
+- smoke 日志明确输出 `acceptance=development-only`；ad-hoc/unsigned 不会产生 release acceptance audit。
 
-### 3. Linux fresh shell 丢失动态 Xvfb 环境
+回归覆盖了：
 
-已修复。
+- 缺失 expected identity；
+- macOS ad-hoc/no-Team-ID；
+- 错误 Team ID、App requirement、`uv` requirement、公证和 stapling；
+- 正确 macOS identity；
+- 错误 Windows Publisher、thumbprint、signature status；
+- 正确 Windows identity；
+- JSONL audit 写入。
 
-- fresh login shell 显式保留 `DISPLAY`、`XAUTHORITY`、Wayland/XDG runtime 和 DBus 地址。
-- Linux full workflow 使用 `xvfb-run -a` 分配动态 display，设置 `POLO_AI_E2E_EXPECTED_DISPLAY`。
-- validator 会在安装或启动 App 前验证 fresh shell 接收到同一个动态 display；随后通过真实 AppImage 执行 `polo app`、等待 discovery、运行 `polo sessions` 并终止已发现的 App 进程。
-- fresh shell 先切换到隔离 HOME，避免 worktree 的 `bunfig.toml` preload 污染最终产物验收。
-
-### 4. Windows PATH 验收绕过 NSIS
-
-已修复。
-
-- 不再手工把 `$binDir` 拼入测试 PATH。
-- 安装后先读取真实 User PATH，要求受管 binDir 恰好出现一次。
-- fresh `cmd.exe` 只使用刷新后的 Machine PATH + User PATH，执行 `where polo`，并要求第一条结果严格等于受管 `polo.cmd`。
-- `--version`、`--help`、`app`、`run`、`sessions` 全部通过该 fresh 环境执行。
-- 卸载后要求 User PATH 精确恢复到测试前的原值，并从同样的 fresh 环境验证 `where polo` 已失败。
-- 用户同名命令冲突测试同时断言 launcher 内容、受管文件和 User PATH 均未被安装器修改。
-
-### 5. previous/current 版本比较发生在写操作之后
-
-已修复。
-
-- Unix full 首先只挂载/解包当前和 previous container，校验 sanitized CLI metadata、manifest path/checksum，并读取版本。
-- full preflight 阶段不执行 wrapper；缺失、不可解析或同版本时在 installer、launcher、profile、PATH 和 Polo 用户状态写入前退出。
-- 版本不同后才运行当前最终容器 `--version`/`--help` smoke，并进入安装/升级生命周期。
-- Windows 在设置测试 `LOCALAPPDATA` 和运行 NSIS 之前，通过 7-Zip 只读展开 previous/current NSIS，校验 metadata、manifest/checksum 和版本；安装后再做二次版本核对。
-- 本机用当前 ZIP 冒充 previous 执行 fail-fast 回归：按预期返回 `Previous artifact version must differ...`，隔离 HOME 中没有生成 `.local`、profile 或 `.polo-ai`。
-
-### 6. `polo run` probe 没有执行真实生命周期
+### 2. macOS launcher 所有权
 
 已修复。
 
-- 删除 CLI 中的 `POLO_AI_E2E_RUN_PROBE` handshake-only 分支。
-- 新增只允许在显式 artifact fixture gate 下启动、只绑定 `127.0.0.1`、路径限制在 fixture root 内且要求长 token 的确定性 OpenAI-compatible mock provider。
-- 三平台 full validator 使用普通生产 CLI 参数连接该 loopback provider，真实完成：
-  - workspace 注册；
-  - provider/model/credential 配置；
-  - temporary packaged server 启动；
-  - session 创建与消息任务；
-  - session 删除；
-  - server/runtime/端口清理。
-- validator 断言 mock 收到 `hello`、CLI 输出确定性回复、workspace 已持久化、session 目录不存在、`polo-run-server-*` 不残留且临时端口已关闭。
-- 实跑发现 headless turn 完成时 visual teardown 因无 desktop browser host 抛错，导致 session completion 被阻断；已将该 teardown 限定为无 host 时的安全 no-op，实际 browser tool 调用仍保持原有错误语义，并补单元测试。
+- ownership state 升级为 schema 3，记录固定 owner、launcher format、App version、launcher path、launcher target、更新时间及 SHA-256 launcher identity。
+- identity hash 绑定 owner、format、version、path 与 target；读取时同时校验版本格式、时间、字段完整性和 hash。
+- 同 target symlink 本身不再构成所有权。删除/替换必须满足：
+  - 当前路径与 state 中的 launcher path 完全一致；
+  - 当前 symlink 解出的 target 与 state 中的 target 完全一致；
+  - owner、format、version 与 identity 可验证。
+- 缺失、损坏、不完整或 identity 被篡改的 state 均不会授权删除 launcher，且会保留冲突现场。
+- schema 1/2 只作为历史 Polo state marker 迁移：要求有效时间、历史 profile marker 信息，以及当前 symlink 与历史 state 中 path/target 完全一致；迁移/修复后写为 schema 3。
+- 更早的无 state launcher 只接受严格完整内容匹配的 Polo 历史 managed launcher，不使用 substring 或仅 target 匹配。
+- App 移动后，已验证历史或当前 ownership 可修复到新 bundle target；正常安装、修复与卸载保持可用。
 
-### 7. 缺少直接 wrapper binary smoke
+回归覆盖了用户自建同 target symlink、state 缺失、坏 JSON、不完整旧 state、被篡改 identity、用户替换 target、App 路径移动、历史 state 迁移、正常安装/修复/卸载与 shell profile 清理。
 
-已修复。
-
-- 新增 POSIX `test_polo_wrapper_smoke.py`，直接执行 checked-in `polo` 和兼容 `polo-ai`。
-- 新增 Windows `windows-wrapper-smoke.test.ps1`，在 Windows runner 编译最小 fake `bun.exe` 后直接执行 `polo.cmd` 和 `polo-ai.cmd`。
-- 两套测试都使用含空格和非 ASCII 的 fixture root，校验参数、Bun/CLI/server/resources env、packaged 标志、compat warning 和退出码透传。
-- Windows 原生 wrapper smoke 已接入 full workflow；POSIX smoke 已接入 `test:doc-tools`。
-
-### 8. `TerminalIntegrationStatus` 重复定义
+### 3. packaged wrapper 本地化
 
 已修复。
 
-- `apps/electron/src/main/terminal-integration.ts` 直接导入并 re-export `apps/electron/src/shared/types.ts` 的共享类型，移除重复 interface。
-- 全量 typecheck 通过。
+- `polo`、`polo.cmd` 内置不依赖外部 runtime 的最小 locale table。
+- `polo-ai`、`polo-ai.cmd` 的弃用提示使用同样的最小 locale 判定。
+- 支持 `POLO_AI_LOCALE`、locale 环境变量中的 zh/zh-CN 变体；其他 locale 稳定回退英文。
+- runtime/CLI/server 缺失分别输出稳定错误码：
+  - `POLO_E_BUNDLED_RUNTIME_MISSING`
+  - `POLO_E_TERMINAL_FILES_MISSING`
+- compatibility warning 使用 `POLO_W_DEPRECATED_COMMAND`。
+- Windows installer 生成的 `polo.cmd`/compat shim 与 checked-in wrapper 保持同一契约。
+- wrapper 仍然自相对解析 App、Bun、CLI/server，不引入系统 Node/Bun 或外部 locale 文件依赖。
 
-## 正式 workflow 与关键文件
+POSIX 真实 wrapper smoke 使用含空格和非 ASCII 的 fixture root，验证了参数、环境、退出码、zh-CN 与 fallback。Windows 原生等价测试已写入正式 workflow，但本机没有 Windows/PowerShell，未声称原生执行。
 
-- `.github/workflows/electron-artifact-full.yml`
-- `scripts/prepare-platform-runtime.ts`
-- `scripts/build/common.ts`
-- `scripts/__tests__/prepare-platform-runtime.test.ts`
-- `scripts/__tests__/electron-artifact-pipeline.test.ts`
+## 关键文件
+
+- `scripts/release-signing-contract.ts`
+- `scripts/__tests__/release-signing-contract.test.ts`
 - `apps/electron/scripts/validate-final-artifacts.sh`
 - `apps/electron/scripts/validate-final-artifacts.ps1`
-- `apps/electron/scripts/fixtures/mock-openai-provider.ts`
-- `scripts/__tests__/mock-openai-provider.test.ts`
+- `.github/workflows/electron-artifact-full.yml`
+- `apps/electron/electron-builder.yml`
+- `scripts/electron-dist.ts`
+- `apps/electron/src/main/terminal-integration.ts`
+- `apps/electron/src/main/__tests__/terminal-integration.test.ts`
+- `apps/electron/resources/bin/polo`
+- `apps/electron/resources/bin/polo.cmd`
+- `apps/electron/resources/bin/polo-ai`
+- `apps/electron/resources/bin/polo-ai.cmd`
+- `apps/electron/resources/scripts/windows-terminal-integration.ps1`
 - `apps/electron/resources/scripts/tests/test_polo_wrapper_smoke.py`
 - `apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1`
-- `apps/cli/src/index.ts`
-- `packages/server-core/src/sessions/RemoteBrowserPaneManager.ts`
-- `apps/electron/src/main/terminal-integration.ts`
+- `scripts/__tests__/packaged-wrapper-i18n.test.ts`
+- `scripts/__tests__/electron-artifact-pipeline.test.ts`
+- `scripts/__tests__/electron-dist.test.ts`
 - `apps/electron/resources/release-notes/next.md`
 
-正式 release/nightly workflow 的输入契约保持为：
+## 自测命令与真实结果
 
-- 手动触发：必填 `previous_release_tag`。
-- release/nightly：仓库变量 `POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG`。
-- 每个平台从该固定 tag 下载对应 previous ZIP/NSIS/AppImage。
-- 三个平台均显式设置 `POLO_AI_ARTIFACT_VALIDATION_MODE=full` 和 `POLO_AI_PREVIOUS_ARTIFACT`。
-- 任一平台 build、原生测试、full validator 或 artifact upload 失败都会阻断 job。
+### 全量与静态门禁
 
-## 本机实际自测
+- `bun run test`
+  - 通过。
+  - 主套件：`4885 pass / 19 skip / 0 fail`，`4904 tests / 378 files`。
+  - 随后的全部 isolated suites 通过，包括 server concurrency、file-lock races、CLI server spawner 与 Electron isolated interaction suites。
+- `bun run typecheck:all`
+  - 通过。
+- `bun run lint:shared`
+  - 通过，`0 errors / 9 warnings`；warning 为仓库既有 unused eslint-disable。
+- `bun run lint:electron`
+  - 通过，`0 errors / 114 warnings`；warning 为仓库既有 hook/localStorage 等 warning。
+- `bun run lint:i18n:parity`
+  - 通过，`6 locales / 每个 1642 keys`。
+- `bun run lint:i18n:coverage`
+  - 通过。
+- `bun run lint:i18n:sorted`
+  - 通过。
+- `bun run test:doc-tools`
+  - 通过，`23 tests`。
+- `bun run electron:build`
+  - 通过；CLI、server、main、preload、renderer、resources 和 sanitized metadata/manifest 校验均成功。
+- `bun run electron:validate:cli:runtime`
+  - 通过；packaged CLI/server discovery、自相对 symlink launcher、空格与非 ASCII 路径验证成功。
 
-1. 全量测试
+### 针对性回归
 
-   ```bash
-   bun run test
-   ```
+执行：
 
-   结果：PASS，退出码 0；包含标准和 isolated suites。
+```text
+bun test scripts/__tests__/release-signing-contract.test.ts \
+  scripts/__tests__/packaged-wrapper-i18n.test.ts \
+  scripts/__tests__/electron-artifact-pipeline.test.ts \
+  scripts/__tests__/electron-dist.test.ts \
+  apps/electron/src/main/__tests__/terminal-integration.test.ts \
+  apps/electron/scripts/windows-terminal-integration.test.ts
+```
 
-2. reviewer 专项测试
+结果：`46 pass / 0 fail / 339 expect()`。
 
-   ```bash
-   bun test \
-     scripts/__tests__/electron-artifact-pipeline.test.ts \
-     scripts/__tests__/prepare-platform-runtime.test.ts \
-     scripts/__tests__/mock-openai-provider.test.ts \
-     packages/server-core/src/sessions/__tests__/RemoteBrowserPaneManager.test.ts
-   ```
+其他：
 
-   结果：PASS，19 tests passed，0 failed，137 expect calls。clean runtime fixture 的路径包含空格和中文，并真实调用 Bun build 生成两个 helper server。
+- `python3 -m unittest apps.electron.resources.scripts.tests.test_polo_wrapper_smoke`
+  - `4 tests` 通过。
+- `bash -n apps/electron/scripts/validate-final-artifacts.sh apps/electron/resources/bin/polo apps/electron/resources/bin/polo-ai`
+  - 通过。
+- Ruby `YAML.safe_load` 解析 `.github/workflows/electron-artifact-full.yml`
+  - 通过。
+- `git diff --check`
+  - 通过。
+- macOS full 在未提供 release identity 时的 fail-fast 复核
+  - 返回码 `1`；
+  - 输出：`Full macOS validation requires the release Team ID and App/uv designated requirements`；
+  - 发生于 mount/install/profile 等写操作之前。
 
-3. 全量类型检查
+## macOS arm64 development 最终产物证据
 
-   ```bash
-   bun run typecheck:all
-   ```
+构建命令：
 
-   结果：PASS，退出码 0。
+```text
+bun run electron:dist:dev:mac --arch=arm64
+```
 
-4. checked-in POSIX wrapper 与文档工具
+显式最终容器复核：
 
-   ```bash
-   bun run test:doc-tools
-   ```
+```text
+bun run electron:validate:artifacts:unix -- \
+  --mode smoke \
+  --release-dir apps/electron/release \
+  --arch arm64
+```
 
-   结果：PASS，20 tests passed，0 failed。
+结果：
 
-5. packaged CLI runtime
+- DMG final-container CLI smoke 通过，版本 `0.10.0`。
+- ZIP final-container CLI smoke 通过，版本 `0.10.0`。
+- 日志明确标记 `mode=smoke acceptance=development-only`。
 
-   ```bash
-   bun run electron:validate:cli:runtime
-   ```
+产物基于代码提交 `80d3f3ff66edf4ebdd2fd30a69c4381dc27c352e` 构建：
 
-   结果：PASS；packaged CLI/server discovery、受管 symlink 自相对解析、含空格和非 ASCII 路径均通过。
+- `apps/electron/release/Polo-AI-arm64.dmg`
+  - 时间：`2026-07-30T16:32:26-0700`
+  - 大小：`278466412` bytes
+  - SHA-256：`2783399c04dded29711e50227d85771b62b9cfbd5ad80d7b2cfb2ca6ca45ed38`
+- `apps/electron/release/Polo-AI-arm64.zip`
+  - 时间：`2026-07-30T16:32:54-0700`
+  - 大小：`268800640` bytes
+  - SHA-256：`a9929f7b70ebbdb00d29e792e0d60d724cd971af9ad5c4c1da27cbe32144e906`
 
-6. 平台 runtime 真实准备
+签名观察：
 
-   ```bash
-   bun run electron:prepare:runtime --platform=darwin --arch=x64
-   bun run electron:prepare:runtime --platform=darwin --arch=arm64
-   ```
+- App：`Signature=adhoc`、`TeamIdentifier=not set`。
+- 嵌套 `uv`：`Signature=adhoc`、`TeamIdentifier=not set`。
+- packaged `uv --version`：`uv 0.10.6 (a91bcf268 2026-02-24)`。
 
-   结果：PASS；两种架构均下载并校验 Bun checksum，x64 缺失的 SDK optional package 通过 fallback 准备成功，SDK native binary alias、ripgrep 和 interceptor 校验通过。
+以上签名只证明 development smoke 的容器和可执行性，不是生产签名、公证或 release acceptance。
 
-7. macOS 最终 DMG/ZIP build 与 container smoke
+## 残留检查
 
-   在提交 `7a7dd79` 状态重新执行 arm64 Electron build 和 electron-builder。结果：PASS，afterPack 校验、DMG 挂载 smoke、ZIP 解包 smoke 全部通过，CLI/App 版本为 `0.10.0`。
+- 未发现本 worktree 启动的 `electron-builder`、App、packaged server 或 mock provider 残留进程。
+- 未发现 Polo/Bun/Electron 相关监听端口。
+- 未发现 `polo-final-artifact.*`、`polo-run-server-*`、wrapper/terminal fixture 等临时目录残留。
+- 未发现 `~/.polo-ai/runtime/electron.json`。
+- 未发现残留 Polo DMG mount。
+- 当前仍运行的 Ultra-Coding runner/wait 进程属于本 implement session 编排基础设施，不是产品 App/server 残留。
 
-   构建完成时间：`2026-07-30T16:42:31Z`。
+## 未闭合的外部 release evidence
 
-   - DMG：`93621f0db6627065f4e4e4df443392eb8463be24a5760e00a1122a833da85770`
-   - ZIP：`da307cc4ddafc4a05b971fd3bdaa6bbda5c02320b21d16847cedc5191ff77df8`
+以下必须由带真实资产与 secrets 的正式 release/nightly 三平台 workflow 完成，本机没有条件伪造或替代：
 
-8. full 同版本只读 fail-fast
+- 可信、固定、版本不同且包含 macOS ZIP、Windows NSIS、Linux AppImage 与历史 Unix installer 的 pre-POO-14 release 输入；
+- Apple Developer ID、预期 Team ID/designated requirements、公证与 stapling 的真实 full 结果；
+- Windows 预期 Publisher/thumbprint、真实 Authenticode 签名及 Windows 原生安装/PATH/ownership/升级/卸载结果；
+- Linux 原生 AppImage 安装、Xvfb discovery、`polo app/run/sessions`、升级与卸载结果；
+- 三平台 previous→current full logs、audit JSONL、commit SHA 与 artifact SHA-256 上传证据。
 
-   使用上述最终 ZIP 同时作为 current 和 previous 运行 full validator。结果：按预期失败，错误为 previous/current 同版本；隔离 HOME 没有 installer、launcher、profile、PATH 或 `.polo-ai` 写入。
-
-9. Electron lint 与格式检查
-
-   ```bash
-   bun run lint:electron
-   git diff --check
-   bash -n apps/electron/scripts/validate-final-artifacts.sh
-   ```
-
-   结果：PASS。Electron lint 为 0 errors，保留 114 条仓库既有 warnings；diff 与 shell 语法检查通过。
-
-10. 真实 headless run 生命周期
-
-    本机以构建后的 CLI/packaged server 和受限 loopback fixture 执行 `polo run "hello"`。结果：确定性回复成功；workspace/provider/session 均实际创建，temporary server、session、runtime 和端口全部清理。该实跑同时发现并验证了 headless visual teardown 修复。
-
-## 对应平台 CI 执行、未在本机冒充的部分
-
-- Windows 原生 PowerShell ownership/wrapper 测试、NSIS previous→current 安装升级、真实 User PATH、discovery 和卸载：只能由 `windows-latest` full job 执行，本机未运行。
-- Linux AppImage previous→current 安装升级、动态 Xvfb、App discovery、sessions 和卸载：只能由 Ubuntu full job 执行，本机未运行。
-- macOS 固定 previous release→当前版本的完整跨版本升级：本机没有可用的不同版本 POO-14 previous ZIP，因此没有用当前产物冒充升级；由 macOS full job 下载固定 tag 产物执行。
-- 上述平台流程不是空开关：workflow 已显式下载 previous artifact、准备 GUI runner 环境、运行原生测试与 full validator，并把成功结果作为 artifact upload 前的 blocking gate。
-
-## 已知遗留
-
-- 本轮 8 个 reviewer issue 均已处理，无已知未完成代码项。
-- `bun run lint` 的聚合入口仍因仓库缺少既有的 `scripts/check-raw-sends.sh` 在第一步退出；本轮实际运行并通过与改动相关的 `lint:electron`、typecheck、全量测试和专项测试，未扩大范围补造该缺失脚本。
-- 最终 Windows/Linux/full cross-version 结果必须以对应 GitHub Actions runner 的实际运行记录为准；本报告没有把静态契约测试写成原生 E2E 已通过。
-
-## 提交
-
-- `cb18105 POO-14: 修复三平台完整产物验收`
-- `7a7dd79 POO-14: 更新第2轮修复发布说明`
+workflow 对上述字段和资产均 fail-fast，且 full job 使用正式 dist 入口并把验证结果作为 blocking upload gate。是否具备实际 secrets/历史 release assets 以及对应 runner 的成功记录，需由外部 CI/reviewer 核验；本报告不声称通过。
