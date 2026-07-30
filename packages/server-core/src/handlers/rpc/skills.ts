@@ -2,8 +2,32 @@ import { join } from 'path'
 import { existsSync, readdirSync, statSync } from 'fs'
 import { RPC_CHANNELS, type SkillFile } from '@polo-ai/shared/protocol'
 import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
-import type { RpcServer } from '@polo-ai/server-core/transport'
+import {
+  CLIENT_CREATOR_SKILL_COMMIT_CHECK,
+  pushTyped,
+  type RpcServer,
+} from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import {
+  CreatorSkillBackupRpcInputSchema,
+  CreatorSkillInstallRpcInputSchema,
+  CreatorSkillIgnoreVersionRpcInputSchema,
+  CreatorSkillStatusUpdateRpcInputSchema,
+  CreatorSkillUninstallRpcInputSchema,
+} from '@polo-ai/shared/creator-skills/schemas'
+import {
+  cancelCreatorSkillOperation,
+  deleteCreatorSkillBackups,
+  installCreatorSkill,
+  listCreatorSkillBackups,
+  recoverCreatorSkillOperations,
+  uninstallCreatorSkill,
+  updateCreatorSkillInstallationMetadata,
+} from '@polo-ai/shared/creator-skills/installer'
+import {
+  readCreatorSkillsLedger,
+} from '@polo-ai/shared/creator-skills/ledger'
+import type { LoadedSkill } from '@polo-ai/shared/skills'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
@@ -11,9 +35,72 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
   RPC_CHANNELS.skills.OPEN_FINDER,
+  RPC_CHANNELS.creatorSkills.GET_TARGET,
+  RPC_CHANNELS.creatorSkills.INSTALL,
+  RPC_CHANNELS.creatorSkills.CANCEL,
+  RPC_CHANNELS.creatorSkills.UNINSTALL,
+  RPC_CHANNELS.creatorSkills.LIST_BACKUPS,
+  RPC_CHANNELS.creatorSkills.DELETE_BACKUPS,
+  RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS,
+  RPC_CHANNELS.creatorSkills.IGNORE_VERSION,
 ] as const
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
+  const recoveryByWorkspaceRoot = new Map<string, Promise<void>>()
+  const ensureRecovered = (workspaceRoot: string): Promise<void> => {
+    const existing = recoveryByWorkspaceRoot.get(workspaceRoot)
+    if (existing) return existing
+    const recovery = recoverCreatorSkillOperations(workspaceRoot).then(() => {
+      return import('@polo-ai/shared/skills').then(({ invalidateSkillsCache }) => {
+        invalidateSkillsCache()
+      })
+    }).catch(error => {
+      deps.platform.logger?.error(
+        `CREATOR_SKILLS_RECOVERY: Failed for workspace ${workspaceRoot}:`,
+        error,
+      )
+      throw error
+    })
+    recoveryByWorkspaceRoot.set(workspaceRoot, recovery)
+    return recovery
+  }
+  // Some embedded/test hosts provide a deliberately narrow SessionManager
+  // facade. Recover known workspaces eagerly when enumeration is available;
+  // every handler still calls ensureRecovered before touching a workspace.
+  for (const workspace of deps.sessionManager.getWorkspaces?.() ?? []) {
+    void ensureRecovered(workspace.rootPath).catch(() => {})
+  }
+
+  const loadSkillsWithCreatorState = async (
+    workspaceRoot: string,
+    workingDirectory?: string,
+  ): Promise<LoadedSkill[]> => {
+    const [{ loadAllSkills }, ledger] = await Promise.all([
+      import('@polo-ai/shared/skills'),
+      readCreatorSkillsLedger(workspaceRoot),
+    ])
+    const installedBySlug = new Map(ledger.installed.map(item => [item.slug, item]))
+    return loadAllSkills(workspaceRoot, workingDirectory).map(skill => {
+      const installation = installedBySlug.get(skill.slug)
+      return installation && skill.source === 'workspace'
+        ? { ...skill, creatorInstallation: installation }
+        : skill
+    })
+  }
+
+  const broadcastSkillsChanged = async (workspaceId: string, workspaceRoot: string) => {
+    const { invalidateSkillsCache } = await import('@polo-ai/shared/skills')
+    invalidateSkillsCache()
+    const skills = await loadSkillsWithCreatorState(workspaceRoot)
+    pushTyped(
+      server,
+      RPC_CHANNELS.skills.CHANGED,
+      { to: 'workspace', workspaceId },
+      workspaceId,
+      skills,
+    )
+  }
+
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
     deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)
@@ -22,13 +109,13 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       deps.platform.logger?.error(`SKILLS_GET: Workspace not found: ${workspaceId}`)
       return []
     }
+    await ensureRecovered(workspace.rootPath)
     // Validate workingDirectory exists on this server — a thin client may pass
     // its local path which doesn't exist on the remote server's filesystem.
     const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)
       ? workingDirectory
       : undefined
-    const { loadAllSkills } = await import('@polo-ai/shared/skills')
-    const skills = loadAllSkills(workspace.rootPath, effectiveWorkingDir)
+    const skills = await loadSkillsWithCreatorState(workspace.rootPath, effectiveWorkingDir)
     deps.platform.logger?.info(`SKILLS_GET: Loaded ${skills.length} skills from ${workspace.rootPath}`)
     return skills
   })
@@ -86,10 +173,220 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.skills.DELETE, async (_ctx, workspaceId: string, skillSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
+    await ensureRecovered(workspace.rootPath)
 
-    const { deleteSkill } = await import('@polo-ai/shared/skills')
-    deleteSkill(workspace.rootPath, skillSlug)
+    const ledger = await readCreatorSkillsLedger(workspace.rootPath)
+    const managed = ledger.installed.some(item => item.slug === skillSlug)
+    let detached = false
+    if (managed) {
+      const result = await uninstallCreatorSkill({
+        workspaceRoot: workspace.rootPath,
+        workspaceId,
+        operationId: crypto.randomUUID(),
+        slug: skillSlug,
+      })
+      if (!result.success) throw Object.assign(new Error(result.message), {
+        code: result.errorCode,
+      })
+      detached = result.detached === true
+    } else {
+      const { deleteSkill } = await import('@polo-ai/shared/skills')
+      deleteSkill(workspace.rootPath, skillSlug)
+    }
+    await broadcastSkillsChanged(workspaceId, workspace.rootPath)
     deps.platform.logger?.info(`Deleted skill: ${skillSlug}`)
+    return { managed, detached }
+  })
+
+  server.handle(RPC_CHANNELS.creatorSkills.GET_TARGET, async (_ctx, rawInput: unknown) => {
+    const workspaceId = rawInput && typeof rawInput === 'object'
+      ? (rawInput as { workspaceId?: unknown }).workspaceId
+      : undefined
+    if (typeof workspaceId !== 'string') {
+      return { success: false, errorCode: 'VALIDATION_ERROR' }
+    }
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    return {
+      success: true,
+      workspaceId: workspace.id,
+      name: workspace.name,
+      path: workspace.rootPath,
+      writable: true,
+    }
+  })
+
+  server.handle(RPC_CHANNELS.creatorSkills.INSTALL, async (ctx, rawInput: unknown) => {
+    const input = CreatorSkillInstallRpcInputSchema.safeParse(rawInput)
+    if (!input.success) {
+      return {
+        success: false,
+        operationId: 'invalid',
+        errorCode: 'VALIDATION_ERROR',
+        stage: 'prepare',
+        message: 'Creator Skill install request is invalid',
+        diagnostic: JSON.stringify({ errorCode: 'VALIDATION_ERROR', stage: 'prepare' }),
+        retryable: false,
+      }
+    }
+    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    if (!workspace) {
+      return {
+        success: false,
+        operationId: input.data.operationId,
+        errorCode: 'workspace_not_found',
+        stage: 'prepare',
+        message: 'The active workspace is unavailable',
+        diagnostic: JSON.stringify({ errorCode: 'workspace_not_found', stage: 'prepare' }),
+        retryable: false,
+      }
+    }
+    await ensureRecovered(workspace.rootPath)
+    const result = await installCreatorSkill(workspace.rootPath, input.data, {
+      onProgress: progress => pushTyped(
+        server,
+        RPC_CHANNELS.creatorSkills.PROGRESS,
+        { to: 'client', clientId: ctx.clientId },
+        progress,
+      ),
+      assertCommitAllowed: async identity => {
+        const check = await server.invokeClient(
+          ctx.clientId,
+          CLIENT_CREATOR_SKILL_COMMIT_CHECK,
+          identity,
+        ) as {
+          success?: boolean
+          creatorSkillArtifacts?: boolean
+          status?: 'active' | 'revoked' | 'archived'
+          errorCode?: string
+        }
+        if (!check.success || check.creatorSkillArtifacts !== true) {
+          throw Object.assign(new Error('Creator Skill distribution is disabled'), {
+            code: check.errorCode ?? 'creator_skill_feature_disabled',
+          })
+        }
+        if (check.status !== 'active') {
+          throw Object.assign(new Error(
+            check.status === 'revoked'
+              ? 'This Creator Skill version has been revoked'
+              : 'This Creator Skill is archived',
+          ), {
+            code: check.status === 'revoked'
+              ? 'artifact_version_revoked'
+              : 'artifact_not_published',
+          })
+        }
+      },
+    })
+    if (result.success) {
+      await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+    }
+    return result
+  })
+
+  server.handle(RPC_CHANNELS.creatorSkills.CANCEL, async (_ctx, operationId: unknown) => ({
+    success: typeof operationId === 'string'
+      ? cancelCreatorSkillOperation(operationId)
+      : false,
+  }))
+
+  server.handle(RPC_CHANNELS.creatorSkills.UNINSTALL, async (_ctx, rawInput: unknown) => {
+    const input = CreatorSkillUninstallRpcInputSchema.safeParse(rawInput)
+    if (!input.success) {
+      return {
+        success: false,
+        operationId: 'invalid',
+        errorCode: 'VALIDATION_ERROR',
+        stage: 'prepare',
+        message: 'Creator Skill uninstall request is invalid',
+        diagnostic: JSON.stringify({ errorCode: 'VALIDATION_ERROR', stage: 'prepare' }),
+        retryable: false,
+      }
+    }
+    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    if (!workspace) {
+      return {
+        success: false,
+        operationId: input.data.operationId,
+        errorCode: 'workspace_not_found',
+        stage: 'prepare',
+        message: 'The active workspace is unavailable',
+        diagnostic: JSON.stringify({ errorCode: 'workspace_not_found', stage: 'prepare' }),
+        retryable: false,
+      }
+    }
+    await ensureRecovered(workspace.rootPath)
+    const result = await uninstallCreatorSkill({
+      workspaceRoot: workspace.rootPath,
+      ...input.data,
+    })
+    if (result.success) {
+      await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+    }
+    return result
+  })
+
+  server.handle(RPC_CHANNELS.creatorSkills.LIST_BACKUPS, async (_ctx, rawInput: unknown) => {
+    const input = CreatorSkillBackupRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    return {
+      success: true,
+      backups: await listCreatorSkillBackups(workspace.rootPath),
+    }
+  })
+
+  server.handle(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS, async (_ctx, rawInput: unknown) => {
+    const input = CreatorSkillBackupRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    return {
+      success: true,
+      deleted: await deleteCreatorSkillBackups(workspace.rootPath, input.data.path),
+    }
+  })
+
+  server.handle(RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS, async (_ctx, rawInput: unknown) => {
+    const input = CreatorSkillStatusUpdateRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    await ensureRecovered(workspace.rootPath)
+    const updated = await updateCreatorSkillInstallationMetadata({
+      workspaceRoot: workspace.rootPath,
+      artifactId: input.data.status.artifactId,
+      version: input.data.status.version,
+      archiveChecksum: input.data.status.archiveChecksum,
+      changes: {
+        lastKnownStatus: input.data.status.status,
+        lastCheckedAt: input.data.checkedAt,
+      },
+    })
+    if (!updated) return { success: false, errorCode: 'creator_skill_not_installed' }
+    await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+    return { success: true }
+  })
+
+  server.handle(RPC_CHANNELS.creatorSkills.IGNORE_VERSION, async (_ctx, rawInput: unknown) => {
+    const input = CreatorSkillIgnoreVersionRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    await ensureRecovered(workspace.rootPath)
+    const updated = await updateCreatorSkillInstallationMetadata({
+      workspaceRoot: workspace.rootPath,
+      artifactId: input.data.artifactId,
+      version: input.data.version,
+      archiveChecksum: input.data.archiveChecksum,
+      changes: {
+        ignoredVersion: input.data.ignoredVersion,
+      },
+    })
+    if (!updated) return { success: false, errorCode: 'creator_skill_not_installed' }
+    await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+    return { success: true }
   })
 
   // Open skill SKILL.md in editor

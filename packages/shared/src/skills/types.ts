@@ -56,4 +56,6 @@ export interface LoadedSkill {
   path: string;
   /** Where this skill was loaded from */
   source: SkillSource;
+  /** Creator Space provenance and last-known safety state, when managed. */
+  creatorInstallation?: import('../creator-skills/types.ts').InstalledCreatorSkill;
 }

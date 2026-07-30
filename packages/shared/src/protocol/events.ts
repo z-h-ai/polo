@@ -6,6 +6,7 @@
 import type { ThemeOverrides } from '../config/index'
 import type { LoadedSource } from '../sources/types'
 import type { LoadedSkill } from '../skills/types'
+import type { CreatorSkillOperationProgress } from '../creator-skills/types'
 import { RPC_CHANNELS } from './channels'
 import type {
   SessionEvent,
@@ -27,6 +28,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.statuses.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.automations.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.skills.CHANGED]: [workspaceId: string, skills: LoadedSkill[]]
+  [RPC_CHANNELS.creatorSkills.PROGRESS]: [progress: CreatorSkillOperationProgress]
   [RPC_CHANNELS.llmConnections.CHANGED]: []
   [RPC_CHANNELS.permissions.DEFAULTS_CHANGED]: [value: null]
 

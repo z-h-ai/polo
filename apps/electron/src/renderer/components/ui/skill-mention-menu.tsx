@@ -4,6 +4,7 @@
  */
 
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import type { LoadedSkill } from '../../../shared/types'
@@ -60,6 +61,7 @@ export function InlineSkillMention({
   workspaceId,
   className,
 }: InlineSkillMentionProps) {
+  const { t } = useTranslation()
   const menuRef = React.useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const filteredSkills = filterSkills(skills, filter)
@@ -150,7 +152,14 @@ export function InlineSkillMention({
                 <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{skill.metadata.name}</div>
+                <div className="flex items-center gap-1.5 font-medium">
+                  <span className="truncate">{skill.metadata.name}</span>
+                  {skill.creatorInstallation?.lastKnownStatus === 'revoked' ? (
+                    <span className="shrink-0 rounded bg-destructive/10 px-1 py-0.5 text-[9px] text-destructive">
+                      {t('creatorSkills.safety.revoked')}
+                    </span>
+                  ) : null}
+                </div>
                 {skill.metadata.description && (
                   <div className="text-[11px] text-foreground/50 truncate">
                     {skill.metadata.description}

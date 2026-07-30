@@ -360,7 +360,9 @@ export function InlineMentionMenu({
                     <span className="truncate block">{item.label}</span>
                   </div>
                   <span className={MENU_TYPE_BADGE}>
-                    {item.type === 'skill' ? t('common.skill') : t('common.source')}
+                    {item.type === 'skill' && item.skill?.creatorInstallation?.lastKnownStatus === 'revoked'
+                      ? t('creatorSkills.safety.revoked')
+                      : item.type === 'skill' ? t('common.skill') : t('common.source')}
                   </span>
                 </>
               )}

@@ -1025,6 +1025,10 @@ export default function App() {
 
   // Session selection state
   const [sessionSelection, setSession] = useSession()
+  const creatorSkillSessionMetadata = useAtomValue(sessionMetaMapAtom)
+  const creatorSkillWorkingDirectory = sessionSelection.selected
+    ? creatorSkillSessionMetadata.get(sessionSelection.selected)?.workingDirectory
+    : undefined
 
   // Notification system - shows native OS notifications and badge count
   const handleNavigateToSession = useCallback((sessionId: string) => {
@@ -2586,6 +2590,8 @@ export default function App() {
                 open={organizationManagementOpen}
                 onOpenChange={setOrganizationManagementOpen}
                 onOrganizationsChanged={organization.refreshOrganizations}
+                workspaceId={windowWorkspaceId}
+                workingDirectory={creatorSkillWorkingDirectory}
               />
             ) : null}
           </MaybeOrganizationProvider>

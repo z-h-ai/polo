@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Zap } from 'lucide-react'
+import { ShieldAlert, ShieldQuestion, Zap } from 'lucide-react'
 import { toast } from 'sonner'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { EntityPanel } from '@/components/ui/entity-panel'
@@ -12,6 +12,17 @@ import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
 import type { LoadedSkill } from '../../../shared/types'
+
+function isHigherStableVersion(candidate: string, current: string): boolean {
+  const left = candidate.split('.').map(Number)
+  const right = current.split('.').map(Number)
+  for (let index = 0; index < 3; index += 1) {
+    if ((left[index] ?? 0) !== (right[index] ?? 0)) {
+      return (left[index] ?? 0) > (right[index] ?? 0)
+    }
+  }
+  return false
+}
 
 export interface SkillsListPanelProps {
   skills: LoadedSkill[]
@@ -42,6 +53,74 @@ export function SkillsListPanel({
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
+  const safetyChecksInFlight = React.useRef(new Set<string>())
+  const [availableUpdates, setAvailableUpdates] = React.useState<Record<string, string>>({})
+
+  React.useEffect(() => {
+    if (!workspaceId) return
+    setAvailableUpdates(current => {
+      let changed = false
+      const next = { ...current }
+      for (const skill of skills) {
+        const candidate = next[skill.slug]
+        const installed = skill.creatorInstallation
+        if (
+          candidate
+          && (!installed
+            || candidate === installed.ignoredVersion
+            || !isHigherStableVersion(candidate, installed.version))
+        ) {
+          delete next[skill.slug]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+    const cutoff = Date.now() - 24 * 60 * 60 * 1_000
+    for (const skill of skills) {
+      const installed = skill.creatorInstallation
+      if (!installed) continue
+      const checkedAt = installed.lastCheckedAt
+        ? Date.parse(installed.lastCheckedAt)
+        : 0
+      const key = `${installed.artifactId}\0${installed.version}\0${installed.archiveChecksum}`
+      if (checkedAt >= cutoff || safetyChecksInFlight.current.has(key)) continue
+      safetyChecksInFlight.current.add(key)
+      void window.electronAPI.creatorSkillGetSafetyStatus({
+        artifactId: installed.artifactId,
+        version: installed.version,
+        archiveChecksum: installed.archiveChecksum,
+      }).then(result => {
+        if (!result.success) return
+        setAvailableUpdates(current => {
+          const next = { ...current }
+          if (
+            result.safeVersion
+            && isHigherStableVersion(result.safeVersion, installed.version)
+            && result.safeVersion !== installed.ignoredVersion
+          ) {
+            next[skill.slug] = result.safeVersion
+          } else {
+            delete next[skill.slug]
+          }
+          return next
+        })
+        return window.electronAPI.creatorSkillUpdateSafetyStatus({
+          workspaceId,
+          status: {
+            artifactId: result.artifactId,
+            version: result.version,
+            archiveChecksum: result.archiveChecksum,
+            status: result.status,
+            safeVersion: result.safeVersion,
+          },
+          checkedAt: new Date().toISOString(),
+        })
+      }).finally(() => {
+        safetyChecksInFlight.current.delete(key)
+      })
+    }
+  }, [skills, workspaceId])
 
   return (
     <>
@@ -83,6 +162,27 @@ export function SkillsListPanel({
                 {t('skillsList.projectBadge')}
               </span>
             )}
+            {skill.creatorInstallation?.lastKnownStatus === 'revoked' ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">
+                <ShieldAlert className="size-3" />
+                {t('creatorSkills.safety.revoked')}
+              </span>
+            ) : skill.creatorInstallation && (
+              !skill.creatorInstallation.lastCheckedAt
+              || Date.now() - Date.parse(skill.creatorInstallation.lastCheckedAt) > 24 * 60 * 60 * 1_000
+            ) ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700">
+                <ShieldQuestion className="size-3" />
+                {t('creatorSkills.safety.stale')}
+              </span>
+            ) : null}
+            {availableUpdates[skill.slug] ? (
+              <span className="inline-flex shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
+                {t('creatorSkills.update.available', {
+                  version: availableUpdates[skill.slug],
+                })}
+              </span>
+            ) : null}
             <span className="truncate">{skill.metadata.description}</span>
           </span>
         ),

@@ -33,6 +33,10 @@
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
     "./skills": "./src/skills/index.ts",
+    "./creator-skills": "./src/creator-skills/index.ts",
+    "./creator-skills/archive": "./src/creator-skills/archive.ts",
+    "./creator-skills/schemas": "./src/creator-skills/schemas.ts",
+    "./creator-skills/skill-content": "./src/creator-skills/skill-content.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",
@@ -76,9 +80,11 @@
     "filtrex": "^3.1.0",
     "glob": "^13.0.0",
     "date-fns": "^4.1.0",
+    "fflate": "^0.8.2",
     "i18next": "^26.0.3",
     "incr-regex-package": "^1.0.4",
     "shell-quote": "^1.8.3",
+    "yauzl": "^2.10.0",
     "@mariozechner/pi-agent-core": "0.73.1",
     "@mariozechner/pi-ai": "0.73.1",
     "@mariozechner/pi-coding-agent": "0.73.1"
@@ -90,6 +96,7 @@
   },
   "devDependencies": {
     "@types/shell-quote": "^1.7.5",
-    "@types/uuid": "^11.0.0"
+    "@types/uuid": "^11.0.0",
+    "@types/yauzl": "^2.10.3"
   }
 }

@@ -804,4 +804,122 @@ describe('AdminClient', () => {
     expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
       .toBe('Bearer organization-access-token');
   });
+
+  it('lists Creator Skills through the capability-filtered catalog boundary', async () => {
+    mockJsonFetch({
+      artifacts: [{
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        name: 'Review Helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+        serverStorageKey: 'must-not-leak',
+      }],
+      nextCursor: 'next',
+      internalPolicy: 'must-not-leak',
+    });
+    const client = new AdminClient('https://admin.example.com');
+
+    const result = await client.listCreatorArtifacts('creator-access-token', {
+      organizationId: 'organization-1',
+      type: 'skill',
+      includeDrafts: true,
+      cursor: 'current',
+    });
+
+    expect(result).toEqual({
+      artifacts: [{
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        name: 'Review Helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      }],
+      nextCursor: 'next',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/artifacts'
+      + '?type=skill&includeDrafts=true&cursor=current&capability=creatorSkillArtifacts',
+    );
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer creator-access-token');
+  });
+
+  it('binds Creator Artifact mutations to an idempotency key', async () => {
+    mockJsonFetch({
+      artifact: {
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        status: 'draft',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      },
+      replayed: false,
+    }, 201);
+    const client = new AdminClient('https://admin.example.com');
+
+    await client.createCreatorArtifact('creator-access-token', {
+      organizationId: 'organization-1',
+      type: 'skill',
+      slug: 'review-helper',
+      idempotencyKey: 'artifact-request-1',
+    });
+
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      type: 'skill',
+      slug: 'review-helper',
+    }));
+    expect(fetchCalls[0]!.init.headers).toMatchObject({
+      Authorization: 'Bearer creator-access-token',
+      'Idempotency-Key': 'artifact-request-1',
+    });
+  });
+
+  it('queries exact installed identities through the minimal batch safety endpoint', async () => {
+    mockJsonFetch({
+      statuses: [{
+        artifactId: 'artifact-1',
+        version: '1.0.0',
+        archiveChecksum: 'a'.repeat(64),
+        status: 'revoked',
+        safeVersion: '1.1.0',
+        internalReason: 'must-not-leak',
+      }],
+      organization: 'must-not-leak',
+    });
+    const client = new AdminClient('https://admin.example.com');
+    const input = {
+      artifactId: 'artifact-1',
+      version: '1.0.0',
+      archiveChecksum: 'a'.repeat(64),
+    };
+
+    expect(await client.getCreatorSkillSafetyStatus(
+      'creator-access-token',
+      input,
+    )).toEqual({
+      ...input,
+      status: 'revoked',
+      safeVersion: '1.1.0',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/installed-artifacts/status',
+    );
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      installations: [input],
+    }));
+  });
 });

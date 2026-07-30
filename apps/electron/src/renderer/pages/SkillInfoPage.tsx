@@ -2,14 +2,14 @@
  * SkillInfoPage
  *
  * Displays comprehensive skill details including metadata,
- * permission modes, and instructions.
+ * advisory metadata and instructions.
  * Uses the Info_ component system for consistent styling with SourceInfoPage.
  */
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useCallback } from 'react'
-import { Check, X, Minus } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { toast } from 'sonner'
 import { SkillMenu } from '@/components/app-shell/SkillMenu'
@@ -23,7 +23,7 @@ import {
   Info_Table,
   Info_Markdown,
 } from '@/components/info'
-import type { LoadedSkill } from '../../shared/types'
+import type { CreatorSkillOperationProgress, LoadedSkill } from '../../shared/types'
 
 interface SkillInfoPageProps {
   skillSlug: string
@@ -31,11 +31,25 @@ interface SkillInfoPageProps {
   workingDirectory?: string
 }
 
+function compareStableSemver(left: string, right: string): number {
+  const a = left.split('.').map(Number)
+  const b = right.split('.').map(Number)
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return 0
+}
+
 export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory }: SkillInfoPageProps) {
   const { t } = useTranslation()
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [availableVersion, setAvailableVersion] = useState<string | null>(null)
+  const [updatingCreatorSkill, setUpdatingCreatorSkill] = useState(false)
+  const [updateOperationId, setUpdateOperationId] = useState<string | null>(null)
+  const [updateProgress, setUpdateProgress] = useState<CreatorSkillOperationProgress | null>(null)
   const activeWorkspace = useActiveWorkspace()
   const canRevealLocally = !activeWorkspace?.remoteServer
 
@@ -69,19 +83,160 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     loadSkill()
 
     // Subscribe to skill changes
-    const unsubscribe = window.electronAPI.onSkillsChanged?.((changedWorkspaceId, skills) => {
+    const unsubscribe = window.electronAPI.onSkillsChanged?.((changedWorkspaceId) => {
       if (changedWorkspaceId !== workspaceId) return
-      const updated = skills.find((s) => s.slug === skillSlug)
-      if (updated) {
-        setSkill(updated)
-      }
+      void window.electronAPI.getSkills(workspaceId, workingDirectory).then(skills => {
+        if (!isMounted) return
+        const updated = skills.find((s) => s.slug === skillSlug)
+        if (updated) setSkill(updated)
+      }).catch(() => {
+        // Keep the currently displayed Skill if a remote refresh is transiently unavailable.
+      })
     })
 
     return () => {
       isMounted = false
       unsubscribe?.()
     }
-  }, [workspaceId, skillSlug, workingDirectory])
+  }, [workspaceId, skillSlug, workingDirectory, t])
+
+  const creatorInstallation = skill?.creatorInstallation
+  const creatorArtifactId = creatorInstallation?.artifactId
+  const creatorArchiveChecksum = creatorInstallation?.archiveChecksum
+  const creatorIgnoredVersion = creatorInstallation?.ignoredVersion
+  const creatorInstalledVersion = creatorInstallation?.version
+  useEffect(() => {
+    if (!creatorArtifactId || !creatorArchiveChecksum || !creatorInstalledVersion) {
+      setAvailableVersion(null)
+      return
+    }
+    let active = true
+    void window.electronAPI.creatorSkillGetSafetyStatus({
+      artifactId: creatorArtifactId,
+      version: creatorInstalledVersion,
+      archiveChecksum: creatorArchiveChecksum,
+    }).then(async result => {
+      if (!active || !result.success) return
+      await window.electronAPI.creatorSkillUpdateSafetyStatus({
+        workspaceId,
+        status: {
+          artifactId: result.artifactId,
+          version: result.version,
+          archiveChecksum: result.archiveChecksum,
+          status: result.status,
+          safeVersion: result.safeVersion,
+        },
+        checkedAt: new Date().toISOString(),
+      })
+      if (!active) return
+      const candidate = result.safeVersion
+      setAvailableVersion(
+        candidate
+        && compareStableSemver(candidate, creatorInstalledVersion) > 0
+        && candidate !== creatorIgnoredVersion
+          ? candidate
+          : null,
+      )
+    }).catch(() => {
+      if (active) setAvailableVersion(null)
+    })
+    return () => {
+      active = false
+    }
+  }, [
+    creatorArtifactId,
+    creatorArchiveChecksum,
+    creatorIgnoredVersion,
+    creatorInstalledVersion,
+    workspaceId,
+  ])
+
+  useEffect(() => window.electronAPI.onCreatorSkillProgress(progress => {
+    if (progress.operationId === updateOperationId) setUpdateProgress(progress)
+  }), [updateOperationId])
+
+  const handleIgnoreCreatorVersion = useCallback(async () => {
+    if (!creatorInstallation || !availableVersion) return
+    const result = await window.electronAPI.creatorSkillIgnoreVersion({
+      workspaceId,
+      artifactId: creatorInstallation.artifactId,
+      version: creatorInstallation.version,
+      archiveChecksum: creatorInstallation.archiveChecksum,
+      ignoredVersion: availableVersion,
+    })
+    if (result.success) setAvailableVersion(null)
+    else toast.error(t('creatorSkills.errors.unknown'))
+  }, [availableVersion, creatorInstallation, t, workspaceId])
+
+  const handleUpdateCreatorSkill = useCallback(async () => {
+    if (!creatorInstallation || !availableVersion) return
+    setUpdatingCreatorSkill(true)
+    try {
+      const grant = await window.electronAPI.creatorSkillGetDownloadGrant({
+        organizationId: creatorInstallation.organizationId,
+        artifactId: creatorInstallation.artifactId,
+        version: availableVersion,
+      })
+      if (!grant.success) {
+        toast.error(grant.message || t('creatorSkills.errors.unknown'))
+        return
+      }
+      const runInstall = (confirmations: {
+        replaceExisting?: boolean
+        confirmGlobalOverride?: boolean
+        backupLocalChanges?: boolean
+      } = {}) => {
+        const operationId = crypto.randomUUID()
+        setUpdateOperationId(operationId)
+        setUpdateProgress(null)
+        return window.electronAPI.creatorSkillInstall({
+          workspaceId,
+          ...(workingDirectory ? { workingDirectory } : {}),
+          operationId,
+          grant: {
+            artifactId: grant.artifactId,
+            organizationId: grant.organizationId,
+            slug: grant.slug,
+            version: grant.version,
+            url: grant.url,
+            expiresAt: grant.expiresAt,
+            archiveChecksum: grant.archiveChecksum,
+            contentDigest: grant.contentDigest,
+            manifest: grant.manifest,
+            validationPolicy: grant.validationPolicy,
+          },
+          ...confirmations,
+        })
+      }
+      let result = await runInstall()
+      if (!result.success && result.conflicts?.length) {
+        const accepted = window.confirm(t('creatorSkills.install.confirmConflict', {
+          conflicts: result.conflicts
+            .map(conflict => t(`creatorSkills.conflict.${conflict}`))
+            .join('\n'),
+        }))
+        if (!accepted) return
+        result = await runInstall({
+          replaceExisting: true,
+          confirmGlobalOverride: true,
+          backupLocalChanges: true,
+        })
+      }
+      if (!result.success) {
+        toast.error(result.message, { description: result.diagnostic })
+        return
+      }
+      setAvailableVersion(null)
+      toast.success(t('creatorSkills.update.success', { version: availableVersion }))
+    } catch (caught) {
+      toast.error(t('creatorSkills.errors.unknown'), {
+        description: caught instanceof Error ? caught.message : undefined,
+      })
+    } finally {
+      setUpdatingCreatorSkill(false)
+      setUpdateOperationId(null)
+    }
+  }, [availableVersion, creatorInstallation, t, workspaceId, workingDirectory])
 
   // Handle open in finder
   const handleOpenInFinder = useCallback(async () => {
@@ -102,15 +257,17 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
 
     try {
       if (skill.source !== 'workspace') return
-      await window.electronAPI.deleteSkill(workspaceId, skillSlug)
-      toast.success(t('skillInfo.deletedSkill', { name: skill.metadata.name }))
-      navigate(routes.view.skills())
+      const result = await window.electronAPI.deleteSkill(workspaceId, skillSlug)
+      toast.success(result.detached
+        ? t('creatorSkills.uninstall.detached')
+        : t('skillInfo.deletedSkill', { name: skill.metadata.name }))
+      if (!result.detached) navigate(routes.view.skills())
     } catch (err) {
       toast.error(t('skillInfo.failedToDelete'), {
         description: err instanceof Error ? err.message : undefined,
       })
     }
-  }, [skill, workspaceId, skillSlug])
+  }, [skill, workspaceId, skillSlug, t])
 
   // Handle opening in new window
   const handleOpenInNewWindow = useCallback(() => {
@@ -167,6 +324,61 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
 
       {skill && (
         <Info_Page.Content>
+          {skill.creatorInstallation?.lastKnownStatus === 'revoked' ? (
+            <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>{t('creatorSkills.safety.revoked')}</span>
+            </div>
+          ) : skill.creatorInstallation?.lastKnownStatus === 'archived' ? (
+            <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>{t('creatorSkills.safety.archived')}</span>
+            </div>
+          ) : skill.creatorInstallation && (
+            !skill.creatorInstallation.lastCheckedAt
+            || Date.now() - Date.parse(skill.creatorInstallation.lastCheckedAt) > 24 * 60 * 60 * 1_000
+          ) ? (
+            <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>{t('creatorSkills.safety.stale')}</span>
+            </div>
+          ) : null}
+          {availableVersion ? (
+            <div className="mx-4 mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-accent/20 bg-accent/5 px-3 py-2 text-sm">
+              <span className="mr-auto">
+                {t('creatorSkills.update.available', { version: availableVersion })}
+              </span>
+              <button
+                type="button"
+                disabled={updatingCreatorSkill}
+                className="rounded-md bg-accent px-2.5 py-1 text-accent-foreground disabled:opacity-50"
+                onClick={() => { void handleUpdateCreatorSkill() }}
+              >
+                {updatingCreatorSkill
+                  ? t(`creatorSkills.stage.${updateProgress?.stage ?? 'download'}`)
+                  : t('creatorSkills.update.action')}
+              </button>
+              {updateProgress?.cancellable && updateOperationId ? (
+                <button
+                  type="button"
+                  className="rounded-md px-2.5 py-1 text-muted-foreground hover:bg-foreground/5"
+                  onClick={() => {
+                    void window.electronAPI.creatorSkillCancel(updateOperationId)
+                  }}
+                >
+                  {t('common.cancel')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                disabled={updatingCreatorSkill}
+                className="rounded-md px-2.5 py-1 text-muted-foreground hover:bg-foreground/5"
+                onClick={() => { void handleIgnoreCreatorVersion() }}
+              >
+                {t('creatorSkills.update.ignore')}
+              </button>
+            </div>
+          ) : null}
           {/* Hero: Avatar, title, and description */}
           <Info_Page.Hero
             avatar={<SkillAvatar skill={skill} fluid workspaceId={workspaceId} />}
@@ -216,39 +428,22 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
             </Info_Table>
           </Info_Section>
 
-          {/* Permission Modes */}
+          {/* Advisory tool requests never grant or remember permission. */}
           {skill.metadata.alwaysAllow && skill.metadata.alwaysAllow.length > 0 && (
-            <Info_Section title={t('skillInfo.permissionModes')}>
+            <Info_Section title={t('skillInfo.requestedTools')}>
               <div className="space-y-2 px-4 py-3">
                 <p className="text-xs text-muted-foreground mb-3">
-                  {t('skillInfo.permissionModesDesc')}
+                  {t('skillInfo.requestedToolsDesc')}
                 </p>
-                <div className="rounded-[8px] border border-border/50 overflow-hidden">
-                  <table className="w-full text-sm">
-                    <tbody>
-                      <tr className="border-b border-border/30">
-                        <td className="px-3 py-2 font-medium text-muted-foreground w-[140px]">{t('skillInfo.explore')}</td>
-                        <td className="px-3 py-2 flex items-center gap-2">
-                          <X className="h-3.5 w-3.5 text-destructive shrink-0" />
-                          <span className="text-foreground/80">{t('skillInfo.exploreDesc')}</span>
-                        </td>
-                      </tr>
-                      <tr className="border-b border-border/30">
-                        <td className="px-3 py-2 font-medium text-muted-foreground">{t('skillInfo.askToEdit')}</td>
-                        <td className="px-3 py-2 flex items-center gap-2">
-                          <Check className="h-3.5 w-3.5 text-success shrink-0" />
-                          <span className="text-foreground/80">{t('skillInfo.askToEditDesc')}</span>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="px-3 py-2 font-medium text-muted-foreground">{t('skillInfo.auto')}</td>
-                        <td className="px-3 py-2 flex items-center gap-2">
-                          <Minus className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <span className="text-foreground/80">{t('skillInfo.autoDesc')}</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                <div className="flex flex-wrap gap-1.5">
+                  {skill.metadata.alwaysAllow.map(tool => (
+                    <code
+                      key={tool}
+                      className="rounded bg-foreground/5 px-2 py-1 text-xs text-foreground/80"
+                    >
+                      {tool}
+                    </code>
+                  ))}
                 </div>
               </div>
             </Info_Section>

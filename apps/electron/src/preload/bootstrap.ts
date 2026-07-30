@@ -32,6 +32,7 @@ import {
   CLIENT_CONFIRM_DIALOG,
   CLIENT_OPEN_FILE_DIALOG,
   CLIENT_BROWSER_INVOKE,
+  CLIENT_CREATOR_SKILL_COMMIT_CHECK,
   LOCAL_CLIENT_CAPABILITIES,
 } from '@polo-ai/server-core/transport'
 import type { ConfirmDialogSpec, FileDialogSpec, BrowserCapabilityRequest } from '@polo-ai/server-core/transport'
@@ -184,6 +185,41 @@ client.handleCapability(CLIENT_OPEN_FILE_DIALOG, async (spec: FileDialogSpec) =>
 // `apps/electron/src/main/browser-pane-manager.ts:registerCapabilityIpc()`.
 client.handleCapability(CLIENT_BROWSER_INVOKE, async (req: BrowserCapabilityRequest) => {
   return await ipcRenderer.invoke('__browser:invoke', req)
+})
+
+client.handleCapability(CLIENT_CREATOR_SKILL_COMMIT_CHECK, async (identity: {
+  artifactId: string
+  version: string
+  archiveChecksum: string
+}) => {
+  const capability = await client.invoke(
+    RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES,
+  ) as {
+    success?: boolean
+    creatorSkillArtifacts?: boolean
+    errorCode?: string
+  }
+  if (!capability.success || capability.creatorSkillArtifacts !== true) {
+    return {
+      success: false,
+      creatorSkillArtifacts: false,
+      errorCode: capability.errorCode ?? 'creator_skill_feature_disabled',
+    }
+  }
+  const safety = await client.invoke(
+    RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
+    identity,
+  ) as {
+    success?: boolean
+    status?: 'active' | 'revoked' | 'archived'
+    errorCode?: string
+  }
+  return {
+    success: safety.success === true,
+    creatorSkillArtifacts: true,
+    status: safety.status,
+    errorCode: safety.errorCode,
+  }
 })
 
 // ---------------------------------------------------------------------------

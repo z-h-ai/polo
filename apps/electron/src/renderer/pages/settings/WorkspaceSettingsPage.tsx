@@ -23,7 +23,12 @@ import { cn } from '@/lib/utils'
 import { routes } from '@/lib/navigate'
 import { Spinner } from '@polo-ai/ui'
 import { RenameDialog } from '@/components/ui/rename-dialog'
-import type { PermissionMode, WorkspaceSettings, LoadedSource } from '../../../shared/types'
+import type {
+  CreatorSkillBackup,
+  LoadedSource,
+  PermissionMode,
+  WorkspaceSettings,
+} from '../../../shared/types'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { PERMISSION_MODE_CONFIG } from '@polo-ai/shared/agent/mode-types'
@@ -66,6 +71,8 @@ export default function WorkspaceSettingsPage() {
   const [workingDirectory, setWorkingDirectory] = useState('')
   const [localMcpEnabled, setLocalMcpEnabled] = useState(true)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true)
+  const [creatorSkillBackups, setCreatorSkillBackups] = useState<CreatorSkillBackup[]>([])
+  const [isLoadingCreatorSkillBackups, setIsLoadingCreatorSkillBackups] = useState(false)
 
   // Default sources state
   const [availableSources, setAvailableSources] = useState<LoadedSource[]>([])
@@ -147,6 +154,29 @@ export default function WorkspaceSettingsPage() {
 
     loadWorkspaceSettings()
   }, [activeWorkspaceId])
+
+  const loadCreatorSkillBackups = useCallback(async () => {
+    if (!window.electronAPI || !activeWorkspaceId) {
+      setCreatorSkillBackups([])
+      return
+    }
+    setIsLoadingCreatorSkillBackups(true)
+    try {
+      const result = await window.electronAPI.creatorSkillListBackups({
+        workspaceId: activeWorkspaceId,
+      })
+      setCreatorSkillBackups(result.success ? result.backups : [])
+    } catch {
+      // Older server-core versions do not expose Creator Skill backup management.
+      setCreatorSkillBackups([])
+    } finally {
+      setIsLoadingCreatorSkillBackups(false)
+    }
+  }, [activeWorkspaceId])
+
+  useEffect(() => {
+    void loadCreatorSkillBackups()
+  }, [loadCreatorSkillBackups])
 
   // Subscribe to live source changes (additions/removals)
   useEffect(() => {
@@ -323,6 +353,35 @@ export default function WorkspaceSettingsPage() {
     },
     [enabledModes, updateWorkspaceSetting, t]
   )
+
+  const handleDeleteCreatorSkillBackups = useCallback(async (path?: string) => {
+    if (!window.electronAPI || !activeWorkspaceId) return
+    const confirmed = window.confirm(
+      t(path
+        ? 'creatorSkills.backups.confirmDelete'
+        : 'creatorSkills.backups.confirmDeleteAll'),
+    )
+    if (!confirmed) return
+    try {
+      const result = await window.electronAPI.creatorSkillDeleteBackups({
+        workspaceId: activeWorkspaceId,
+        ...(path ? { path } : {}),
+      })
+      if (!result.success) throw new Error(result.errorCode)
+      await loadCreatorSkillBackups()
+      toast.success(t('creatorSkills.backups.deleted', { count: result.deleted }))
+    } catch (error) {
+      toast.error(t('creatorSkills.errors.unknown'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [activeWorkspaceId, loadCreatorSkillBackups, t])
+
+  const formatBackupSize = useCallback((bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+  }, [])
 
   // Show empty state if no workspace is active
   if (!activeWorkspaceId) {
@@ -509,6 +568,56 @@ export default function WorkspaceSettingsPage() {
                 </SettingsCard>
               ) : (
                 <p className="text-sm text-muted-foreground">{t("settings.workspace.noSourcesConfigured")}</p>
+              )}
+            </SettingsSection>
+
+            {/* Creator Skill backups */}
+            <SettingsSection
+              title={t("creatorSkills.backups.title")}
+              description={t("creatorSkills.backups.description")}
+            >
+              {isLoadingCreatorSkillBackups ? (
+                <Spinner className="text-muted-foreground" />
+              ) : creatorSkillBackups.length > 0 ? (
+                <SettingsCard>
+                  {creatorSkillBackups.map((backup) => (
+                    <SettingsRow
+                      key={backup.path}
+                      label={backup.slug}
+                      description={[
+                        t(`creatorSkills.backups.operation.${backup.operation}`),
+                        new Date(backup.createdAt).toLocaleString(),
+                        formatBackupSize(backup.sizeBytes),
+                      ].join(' · ')}
+                      action={
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteCreatorSkillBackups(backup.path)}
+                          className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors text-destructive"
+                        >
+                          {t("creatorSkills.backups.delete")}
+                        </button>
+                      }
+                    />
+                  ))}
+                  <SettingsRow
+                    label={t("creatorSkills.backups.deleteAll")}
+                    description={t("creatorSkills.backups.deleteAllDescription")}
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteCreatorSkillBackups()}
+                        className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors text-destructive"
+                      >
+                        {t("creatorSkills.backups.deleteAll")}
+                      </button>
+                    }
+                  />
+                </SettingsCard>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("creatorSkills.backups.empty")}
+                </p>
               )}
             </SettingsSection>
 

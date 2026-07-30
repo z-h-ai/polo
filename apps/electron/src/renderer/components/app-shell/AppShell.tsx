@@ -908,15 +908,6 @@ function AppShellContent({
     return cleanup
   }, [activeWorkspaceId])
 
-  // Subscribe to live skill updates (when skills are added/removed dynamically)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onSkillsChanged((workspaceId, updatedSkills) => {
-      if (workspaceId !== activeWorkspaceId) return
-      setSkills(updatedSkills || [])
-    })
-    return cleanup
-  }, [activeWorkspaceId])
-
   // Handle session source selection changes
   const handleSessionSourcesChange = React.useCallback(async (sessionId: string, sourceSlugs: string[]) => {
     try {
@@ -1282,6 +1273,22 @@ function AppShellContent({
   const activeSessionWorkingDirectory = session.selected
     ? sessionMetaMap.get(session.selected)?.workingDirectory
     : undefined
+  // A change event is only an invalidation signal. Re-read the complete list
+  // using the active session directory so project-level Skills keep priority.
+  React.useEffect(() => {
+    const cleanup = window.electronAPI.onSkillsChanged((workspaceId) => {
+      if (workspaceId !== activeWorkspaceId) return
+      window.electronAPI.getSkills(
+        activeWorkspaceId,
+        activeSessionWorkingDirectory,
+      ).then(loaded => {
+        setSkills(loaded || [])
+      }).catch(err => {
+        console.error('[Chat] Failed to refresh skills:', err)
+      })
+    })
+    return cleanup
+  }, [activeWorkspaceId, activeSessionWorkingDirectory])
   React.useEffect(() => {
     if (!activeWorkspaceId) return
     window.electronAPI.getSkills(activeWorkspaceId, activeSessionWorkingDirectory).then((loaded) => {
@@ -1882,8 +1889,10 @@ function AppShellContent({
   const handleDeleteSkill = useCallback(async (skillSlug: string) => {
     if (!activeWorkspace) return
     try {
-      await window.electronAPI.deleteSkill(activeWorkspace.id, skillSlug)
-      toast.success(t('toast.deletedSkill', { slug: skillSlug }))
+      const result = await window.electronAPI.deleteSkill(activeWorkspace.id, skillSlug)
+      toast.success(result.detached
+        ? t('creatorSkills.uninstall.detached')
+        : t('toast.deletedSkill', { slug: skillSlug }))
     } catch (error) {
       console.error('[Chat] Failed to delete skill:', error)
       toast.error(t('toast.failedToDeleteSkill'))
