@@ -226,11 +226,16 @@ describe('local app main-process authorization boundary', () => {
       getCachedAppCatalog,
       getAppCatalogAccessMode,
       scopedInstall,
+      scopedRegistry.cancelInstall,
       scopedStart,
+      scopedRegistry.stop,
+      scopedRegistry.uninstall,
       scopedStatuses,
       isInstalledAndReady,
+      scopedRegistry.getInstalledApps,
       scopedRegistry.getRuntimeStatus,
       scopedRegistry.setAvailableRelease,
+      scopedRegistry.getLogs,
     ]) {
       handlerMock.mockClear()
     }
@@ -388,6 +393,32 @@ describe('local app main-process authorization boundary', () => {
     expect(scopedRegistry.setAvailableRelease).not.toHaveBeenCalled()
   })
 
+  it('keeps large numeric SemVer identifiers valid and ordered in main', async () => {
+    const setAvailableRelease = handlers.get(
+      RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+    )!
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      currentRelease: {
+        ...catalog.apps[0]!.currentRelease!,
+        version: '90071992547409931234567890.0.0',
+      },
+    }
+    scopedRegistry.getRuntimeStatus.mockResolvedValueOnce({
+      appId: '应用.App-ID',
+      scope: scope(),
+      status: 'installed',
+      currentVersion: '9007199254740993123456789.0.0',
+    })
+
+    await setAvailableRelease(context, scope(), null)
+
+    expect(scopedRegistry.setAvailableRelease).toHaveBeenCalledWith(
+      scope(),
+      catalog.apps[0]!.currentRelease,
+    )
+  })
+
   it('fails closed for missing scope, remote apps, and missing releases', async () => {
     const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
     await expect(install(context, {
@@ -437,6 +468,61 @@ describe('local app main-process authorization boundary', () => {
     catalog.authorizationStatus = 'denied'
     await expect(resolveRemoteUrl(context, scope()))
       .rejects.toThrow('no longer authorized')
+  })
+
+  it('fails every public Catalog app RPC while session-ending access is denied', async () => {
+    accessMode = 'denied'
+    const calls: Array<[string, ...unknown[]]> = [
+      [
+        RPC_CHANNELS.localApps.INSTALL,
+        {
+          scope: scope(),
+          appConfigVersion: 'version-1',
+          permissions: [],
+          release: confirmedRelease(),
+        },
+      ],
+      [RPC_CHANNELS.localApps.CANCEL_INSTALL, scope()],
+      [RPC_CHANNELS.localApps.START, scope()],
+      [RPC_CHANNELS.localApps.STOP, scope()],
+      [RPC_CHANNELS.localApps.RESTART, scope()],
+      [RPC_CHANNELS.localApps.UNINSTALL, scope(), { preserveData: true }],
+      [RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE, scope(), null],
+      [RPC_CHANNELS.localApps.GET_INSTALLED_APPS, scope()],
+      [RPC_CHANNELS.localApps.GET_RUNTIME_STATUS, scope()],
+      [RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES, { scopes: [scope()] }],
+      [RPC_CHANNELS.localApps.GET_LOGS, scope(), { tail: 10 }],
+    ]
+
+    for (const [channel, ...args] of calls) {
+      await expect(handlers.get(channel)!(context, ...args))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://trusted.example.com/app',
+      currentRelease: undefined,
+    }
+    await expect(handlers.get(
+      RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+    )!(context, scope())).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    for (const runtimeCall of [
+      scopedInstall,
+      scopedRegistry.cancelInstall,
+      scopedStart,
+      scopedRegistry.stop,
+      scopedRegistry.uninstall,
+      scopedStatuses,
+      scopedRegistry.getInstalledApps,
+      scopedRegistry.getRuntimeStatus,
+      scopedRegistry.setAvailableRelease,
+      scopedRegistry.getLogs,
+    ]) {
+      expect(runtimeCall).not.toHaveBeenCalled()
+    }
   })
 
   it('rejects catalog lifecycle operations for another or signed-out account', async () => {

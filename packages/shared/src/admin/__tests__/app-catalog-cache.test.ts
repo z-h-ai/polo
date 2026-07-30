@@ -124,6 +124,17 @@ describe('app catalog cache', () => {
       })
   })
 
+  it('trusts strict SemVer releases with numeric identifiers beyond safe integers', () => {
+    const version = '90071992547409931234567890.0.0'
+    const saved = saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'large-version',
+      apps: [bundleApp('app-a', version)],
+    }, 100)
+
+    expect(saved.trustedReleases?.['app-a']?.version).toBe(version)
+    expect(saved.warnings).toEqual([])
+  })
+
   it('migrates a valid v1 release into trusted release metadata', () => {
     writeFileSync(join(configDir, 'admin-app-catalog.json'), JSON.stringify({
       schemaVersion: 1,

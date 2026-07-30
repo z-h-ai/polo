@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { gt, valid } from 'semver'
 import { i18n } from '@polo-ai/shared/i18n'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import {
+  compareCatalogSemVer,
+  normalizeCatalogSemVer,
+} from '@polo-ai/shared/admin/semver'
 import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
 import {
   createLocalAppScopeKey,
@@ -65,10 +68,7 @@ export type CatalogVersionComparison =
   | { strategy: 'semver'; order: -1 | 0 | 1 }
   | { strategy: 'invalid'; order: null; reason: 'invalid_semver' }
 
-export function normalizeCatalogSemVer(version: string): string | null {
-  const normalized = version.trim().replace(/^v(?=\d)/i, '')
-  return valid(normalized, { loose: false })
-}
+export { normalizeCatalogSemVer }
 
 export function compareCatalogVersions(
   available: string,
@@ -79,8 +79,10 @@ export function compareCatalogVersions(
   if (!left || !right) {
     return { strategy: 'invalid', order: null, reason: 'invalid_semver' }
   }
-  if (left === right) return { strategy: 'semver', order: 0 }
-  return { strategy: 'semver', order: gt(left, right) ? 1 : -1 }
+  return {
+    strategy: 'semver',
+    order: compareCatalogSemVer(left, right)!,
+  }
 }
 
 export function isNewerCatalogVersion(available: string, installed: string): boolean {
@@ -119,8 +121,9 @@ function scopeForCatalogApp(
 
 interface ContextSnapshot {
   contextKey: string
-  generation: number
+  contextGeneration: number
   catalog: AppCatalogCacheEntry
+  syncGeneration?: number
 }
 
 export function useAppCatalog() {
@@ -141,13 +144,18 @@ export function useAppCatalog() {
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
   const contextKeyRef = useRef<string | null>(organizationContextKey)
   contextKeyRef.current = organizationContextKey
+  const contextGenerationRef = useRef(0)
   const syncGenerationRef = useRef(0)
   const operationsRef = useRef(new Map<string, Promise<unknown>>())
   const cancellationOperationsRef = useRef(new Map<string, Promise<void>>())
 
   const isCurrentSnapshot = useCallback((snapshot: ContextSnapshot): boolean => (
     contextKeyRef.current === snapshot.contextKey
-    && syncGenerationRef.current === snapshot.generation
+    && contextGenerationRef.current === snapshot.contextGeneration
+    && (
+      snapshot.syncGeneration === undefined
+      || syncGenerationRef.current === snapshot.syncGeneration
+    )
     && catalogRef.current?.accountId === snapshot.catalog.accountId
     && catalogRef.current?.organizationId === snapshot.catalog.organizationId
   ), [])
@@ -164,7 +172,7 @@ export function useAppCatalog() {
     }
     return {
       contextKey: organizationContextKey,
-      generation: syncGenerationRef.current,
+      contextGeneration: contextGenerationRef.current,
       catalog,
     }
   }, [organization?.accountId, organizationContextKey])
@@ -200,7 +208,7 @@ export function useAppCatalog() {
     }
     const snapshot: ContextSnapshot = suppliedSnapshot ?? {
       contextKey,
-      generation: syncGenerationRef.current,
+      contextGeneration: contextGenerationRef.current,
       catalog,
     }
     if (!isCurrentSnapshot(snapshot)) return
@@ -305,7 +313,8 @@ export function useAppCatalog() {
       }))
       return
     }
-    const generation = ++syncGenerationRef.current
+    const syncGeneration = ++syncGenerationRef.current
+    const contextGeneration = contextGenerationRef.current
     const contextKey = organizationContextKey
     setState(current => ({
       ...current,
@@ -326,7 +335,8 @@ export function useAppCatalog() {
         retry += 1
       ) {
         if (
-          generation !== syncGenerationRef.current
+          syncGeneration !== syncGenerationRef.current
+          || contextGeneration !== contextGenerationRef.current
           || contextKeyRef.current !== contextKey
         ) return
         result = await window.electronAPI.adminSyncAppCatalog(
@@ -335,7 +345,8 @@ export function useAppCatalog() {
         )
       }
       if (
-        generation !== syncGenerationRef.current
+        syncGeneration !== syncGenerationRef.current
+        || contextGeneration !== contextGenerationRef.current
         || contextKeyRef.current !== contextKey
       ) return
       if (!result.success) {
@@ -367,8 +378,9 @@ export function useAppCatalog() {
       catalogRef.current = result.catalog
       const snapshot: ContextSnapshot = {
         contextKey,
-        generation,
+        contextGeneration,
         catalog: result.catalog,
+        syncGeneration,
       }
       setState(current => ({
         ...current,
@@ -387,7 +399,8 @@ export function useAppCatalog() {
       )
     } catch (error) {
       if (
-        generation !== syncGenerationRef.current
+        syncGeneration !== syncGenerationRef.current
+        || contextGeneration !== contextGenerationRef.current
         || contextKeyRef.current !== contextKey
       ) return
       const errorCode = getHomeAppErrorCode(error) ?? 'request_failed'
@@ -433,6 +446,7 @@ export function useAppCatalog() {
   }, [])
 
   useEffect(() => {
+    contextGenerationRef.current += 1
     syncGenerationRef.current += 1
     operationsRef.current.clear()
     cancellationOperationsRef.current.clear()
@@ -451,6 +465,7 @@ export function useAppCatalog() {
     }))
     void sync()
     return () => {
+      contextGenerationRef.current += 1
       syncGenerationRef.current += 1
     }
   }, [organizationContextKey, sync])

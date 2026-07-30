@@ -2,44 +2,44 @@
 
 ## 变更摘要
 
-- 完成 Reviewer 第五轮会话竞态收口。通用 `auth.LOGOUT` 与 Admin 登录、校验、刷新、登出共用同一个 session coordinator；退出先捕获不可复用的 generation，账号级进程清理在锁外完成，最终凭据、Catalog 和配置清理由同一 CAS 提交。账号 A 清理迟到时返回 `SESSION_CHANGED`，不会枚举或删除账号 B 的凭据。
-- 为 `VALIDATE` 和 `SYNC_APP_CATALOG` 的受限离线路径增加最终会话 CAS。离线身份、access mode 和缓存响应均在确认 generation 未变化后才构造；旧账号 continuation 迟到时只返回 `SESSION_CHANGED`。renderer 遇到该结果会重新读取当前可信会话，不会把旧请求当作真实登出。
-- 为每个 `accountId + organizationId` 的 Catalog 同步增加按调用顺序递增的请求代次。成功、授权失败、离线降级和普通失败均在会话锁内检查最新代次；较旧响应只能读取已提交的新缓存，不能覆盖新版本、恢复已撤下 App 或改变最新 access mode。
-- 初次运行状态读取不再把完整 Catalog 截断到 10,000 项，而是按主进程 RPC 的 10,000 项上限分批、顺序读取并合并。`10,000 visible + 1 installed withdrawn` 和 `10,000 visible + 10,000 withdrawn` 均能保留真实状态、日志/停止/卸载入口；500ms busy 轮询仍保持 32 项上限。
-- 保持前四轮已完成的主进程授权 Release 绑定、三元 scope 隔离、受限离线启动、SemVer 可见错误、国际化和 POO-12 生命周期兼容实现不变。
+- 会话结束改为在 Admin session coordinator 的同一互斥区内先推进不可复用 generation，并立即关闭当前账号全部 Catalog access/cache、推进授权 epoch；远程登出和本地进程清理等慢操作移到锁外，最终凭据删除继续使用 ending snapshot CAS。退出清理挂起期间，公开 Catalog／本地 App 操作立即 fail closed；账号 A 的迟到清理不会影响后来登录的账号 B。
+- 显式 401/403 等失权结果开始清理后，并发中的旧 Catalog 成功响应会因 session generation 或授权 epoch 失效而返回 `SESSION_CHANGED`，不能提交缓存或把 access mode 恢复为 online。
+- renderer 将账号／组织／授权上下文的 `contextGeneration` 与 Catalog 请求乱序控制的 `syncGeneration` 分离。本组织普通刷新只淘汰旧同步响应，不再淘汰已通过上下文校验的安装、启动、停止、卸载和日志操作；跨账号、跨组织的迟到结果仍被丢弃。
+- shared 层新增唯一严格 SemVer 2.0 规范化与比较实现，Catalog cache、Electron 主进程和 renderer 共同复用。兼容前导 `v`，正确处理 prerelease/build，拒绝第四段和非法输入，并以字符串长度和字典序比较超出 JavaScript 安全整数范围的数字标识符。
+- 新增会话结束时序、同组织刷新期间 deferred start，以及大数字 SemVer 跨层一致性回归测试。
 
 ## 关键文件列表
 
 - `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/server-core/src/handlers/rpc/auth.ts`
-- `packages/server-core/src/handlers/rpc/index.ts`
 - `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-- `apps/electron/src/renderer/App.tsx`
+- `packages/shared/src/admin/semver.ts`
+- `packages/shared/src/admin/__tests__/semver.test.ts`
+- `packages/shared/src/admin/app-catalog-cache.ts`
+- `packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
+- `packages/shared/src/admin/index.ts`
+- `packages/shared/package.json`
+- `apps/electron/src/main/handlers/local-apps.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
 - `apps/electron/src/renderer/hooks/useAppCatalog.ts`
 - `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.test.ts`
 - `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
 
 ## 自测结果
 
-- POL-51/POO-12 相关普通测试：`108 pass, 0 fail`。覆盖 Catalog cache/client/schema、Local App manager/scoped registry、版本与卡片状态。
-- 相关 isolated 测试：`63 pass, 0 fail`。其中 Admin 会话与 Catalog 为 `43 pass`，主进程批量状态为 `8 pass`，renderer scope/批量状态为 `9 pass`，HomePage 交互为 `3 pass`。
-- 新增确定性回归覆盖：
-  - 账号 A 通用退出清理挂起、账号 B 登录成功、A 清理迟到。
-  - A 的在线校验、过期 token 离线刷新和离线 Catalog continuation 在 B 登录后返回 `SESSION_CHANGED`。
-  - 同一账号/组织的 Catalog v1 挂起、v2 先提交、v1 后返回，最终缓存和授权保持 v2。
-  - `10,000 visible + 1 installed withdrawn` 分为 `10,000 + 1` 两批并保留 withdrawn 真实运行状态。
-  - 最大 `10,000 visible + 10,000 withdrawn` 边界分为两个 10,000 项批次并完整合并。
+- 最新完整默认测试 `bun test`：`4789 pass, 19 skip, 0 fail`，共 364 个测试文件。
+- POL-51 定向测试：`101 pass, 0 fail`。其中 shared SemVer/cache 与 renderer 版本测试 `21 pass`，Admin 会话/Catalog isolated `50 pass`，renderer Catalog 交互 isolated `15 pass`，主进程 Local App 授权 isolated `15 pass`。
+- 完整测试首次运行时，POO-12 既有进程树清理时序用例出现一次瞬时失败；该文件单独重跑 `29 pass, 0 fail`，随后完整测试重跑为上述 `4789 pass, 0 fail`。
 - `bun run typecheck:all`：通过。
-- `bun run lint:i18n:parity`：通过，6 个 locale 各 1703 keys。
+- `bun run lint:electron`：通过，`0 error`；报告 128 个既有 warning。
+- `bun run lint:i18n:parity`：通过，6 个 locale 各 1707 keys。
 - `bun run lint:i18n:sorted`：通过。
 - `bun run lint:i18n:coverage`：通过。
-- 修改过的 Electron 文件执行 ESLint：通过，0 error；仅报告 `App.tsx` 中 8 个既有 hooks warning。
 - `bun run electron:build:main`：通过。
 - `bun run electron:build:renderer`：通过；仅有既有 Vite chunk size warning。
 - `git diff --check`：通过。
 
 ## 遗留问题
 
-- 未连接真实 POL-52 服务、生产对象存储和签名 Bundle 做端到端联调；当前以 AdminClient/RPC mock、临时本地运行目录、renderer 交互测试、全仓类型检查及 Electron 生产构建验证。
-- 本次未做视觉验收；需求快照未启用 `ui_fidelity=true` 或 `visual_acceptance_required=true`，且第五轮改动不改变首页视觉结构。
-- 未发现第五轮裁决范围内的已知代码遗留问题。
+- 未连接真实 POL-52 服务、生产对象存储和签名 Bundle 做端到端联调；当前以确定性 RPC mock、缓存／运行状态测试、全仓测试、类型检查和 Electron 生产构建验证。
+- 本轮不涉及 UI 结构或新增文案；需求快照未启用 `ui_fidelity=true` 或 `visual_acceptance_required=true`，未新增选择器或执行视觉验收。
+- 未发现 Reviewer 最新三项裁决范围内的已知代码遗留问题。

@@ -120,6 +120,11 @@ class AdminSessionCoordinator {
   private generation = 0
   private mutationTail: Promise<void> = Promise.resolve()
   private loginAttempt = 0
+  private endingSession: AdminSessionSnapshot | null = null
+
+  constructor(
+    private readonly closeCatalogAuthorization: (accountId: string) => void,
+  ) {}
 
   async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.mutationTail
@@ -150,6 +155,10 @@ class AdminSessionCoordinator {
     this.generation += 1
   }
 
+  closeAuthorizationForEnding(accountId: string): void {
+    this.closeCatalogAuthorization(accountId)
+  }
+
   createSnapshot(tokens: StoredAdminTokens): AdminSessionSnapshot {
     return {
       generation: this.generation,
@@ -162,7 +171,9 @@ class AdminSessionCoordinator {
   ): Promise<AdminSessionSnapshot | null> {
     return this.runExclusive(async () => {
       const tokens = await manager.getAdminTokens()
-      return tokens ? this.createSnapshot(tokens) : null
+      return tokens && !this.isCurrentSessionEnding(tokens)
+        ? this.createSnapshot(tokens)
+        : null
     })
   }
 
@@ -188,6 +199,83 @@ class AdminSessionCoordinator {
     })
   }
 
+  async beginEnding(
+    manager: CredentialManager,
+    expected: AdminSessionSnapshot,
+  ): Promise<AdminSessionSnapshot | null> {
+    return this.runExclusive(async () => {
+      const current = await manager.getAdminTokens()
+      if (!this.matches(current, expected)) return null
+      this.advanceGeneration()
+      const ending = this.createSnapshot(current!)
+      this.endingSession = ending
+      this.closeAuthorizationForEnding(current!.userId)
+      return ending
+    })
+  }
+
+  async finishEndingIfCurrent<T>(
+    manager: CredentialManager,
+    ending: AdminSessionSnapshot,
+    operation: (current: StoredAdminTokens) => Promise<T>,
+  ): Promise<AdminSessionMutationResult<T>> {
+    return this.runExclusive(async () => {
+      const current = await manager.getAdminTokens()
+      if (!this.matchesEnding(current, ending)) {
+        if (this.sameSnapshot(this.endingSession, ending)) {
+          this.endingSession = null
+        }
+        return { applied: false }
+      }
+      const value = await operation(current!)
+      this.advanceGeneration()
+      this.endingSession = null
+      return { applied: true, value }
+    })
+  }
+
+  private isCurrentSessionEnding(current: StoredAdminTokens): boolean {
+    return Boolean(
+      this.endingSession
+      && this.endingSession.generation === this.generation
+      && this.tokensMatch(current, this.endingSession.tokens),
+    )
+  }
+
+  private matchesEnding(
+    current: StoredAdminTokens | null,
+    ending: AdminSessionSnapshot,
+  ): boolean {
+    return Boolean(
+      current
+      && this.sameSnapshot(this.endingSession, ending)
+      && ending.generation === this.generation
+      && this.tokensMatch(current, ending.tokens),
+    )
+  }
+
+  private sameSnapshot(
+    left: AdminSessionSnapshot | null,
+    right: AdminSessionSnapshot,
+  ): boolean {
+    return Boolean(
+      left
+      && left.generation === right.generation
+      && this.tokensMatch(left.tokens, right.tokens),
+    )
+  }
+
+  private tokensMatch(
+    current: StoredAdminTokens,
+    expected: StoredAdminTokens,
+  ): boolean {
+    return (
+      current.userId === expected.userId
+      && current.accessToken === expected.accessToken
+      && current.refreshToken === expected.refreshToken
+    )
+  }
+
   private matches(
     current: StoredAdminTokens | null,
     expected: AdminSessionSnapshot,
@@ -195,9 +283,8 @@ class AdminSessionCoordinator {
     return Boolean(
       current
       && expected.generation === this.generation
-      && current.userId === expected.tokens.userId
-      && current.accessToken === expected.tokens.accessToken
-      && current.refreshToken === expected.tokens.refreshToken,
+      && !this.isCurrentSessionEnding(current)
+      && this.tokensMatch(current, expected.tokens),
     )
   }
 }
@@ -231,7 +318,6 @@ export function registerAdminHandlers(
   deps: HandlerDeps,
 ): AdminSessionControl {
   const log = deps.platform.logger
-  const sessions = new AdminSessionCoordinator()
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
@@ -245,6 +331,26 @@ export function registerAdminHandlers(
       currentAppCatalogAuthorizationEpoch(scopeKey) + 1,
     )
   }
+  const closeCatalogAuthorizationForAccount = (accountId: string) => {
+    const scopePrefix = `${accountId}\0`
+    for (const scopeKey of appCatalogAuthorizationEpochByScope.keys()) {
+      if (scopeKey.startsWith(scopePrefix)) {
+        advanceAppCatalogAuthorizationEpoch(scopeKey)
+      }
+    }
+    denyAppCatalogAccessForAccount(accountId)
+    try {
+      denyCachedAppCatalogAuthorizationForAccount(accountId)
+    } catch (error) {
+      log?.warn(
+        '[Admin] failed to persist denied Catalog cache while ending the session:',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+  const sessions = new AdminSessionCoordinator(
+    closeCatalogAuthorizationForAccount,
+  )
   const callOrganization = async <T extends object>(
     operation: string,
     callback: (client: AdminClient, accessToken: string) => Promise<T>,
@@ -632,29 +738,27 @@ export function registerAdminHandlers(
     const manager = getCredentialManager()
     const session = await sessions.capture(manager)
     if (!session) return { success: true }
-    const requestContext: AdminRequestContext = { session }
-
-    if (adminUrl) {
-      try {
-        await createAuthenticatedAdminClient(
-          adminUrl,
-          manager,
-          sessions,
-          requestContext,
-        ).logout(session.tokens.accessToken)
-      } catch (error) {
-        log?.warn('[Admin] remote logout failed; clearing local state:', error instanceof Error ? error.message : String(error))
-      }
-    }
 
     const ended = await endAdminSession(
       manager,
       deps,
       sessions,
-      requestContext.session,
+      session,
       async () => {
         await deleteAdminManagedConnections(manager)
         setAdminConfigVersion(undefined)
+      },
+      async () => {
+        if (!adminUrl) return
+        try {
+          await createPublicAdminClient(adminUrl)
+            .logout(session.tokens.accessToken)
+        } catch (error) {
+          log?.warn(
+            '[Admin] remote logout failed; clearing local state:',
+            error instanceof Error ? error.message : String(error),
+          )
+        }
       },
     )
     if (!ended) return staleAdminSessionResult()
@@ -895,19 +999,6 @@ export function registerAdminHandlers(
         }
         const adminError = toAdminRpcError(error)
         if (isSessionEndingAuthFailure(error)) {
-          const denied = await sessions.mutateIfCurrent(
-            manager,
-            requestContext.session,
-            async () => {
-              // Close Catalog lifecycle authorization before potentially slow
-              // account-scoped process cleanup. Concurrent transport failures
-              // must not serve an authorized offline cache after the session
-              // has received an explicit revocation result.
-              denyAppCatalogAccessForAccount(accountId)
-              denyCachedAppCatalogAuthorizationForAccount(accountId)
-            },
-          )
-          if (!denied.applied) return staleAdminSessionResult()
           const ended = await endAdminSession(
             manager,
             deps,
@@ -1279,19 +1370,22 @@ async function endAdminSession(
   sessions: AdminSessionCoordinator,
   expected: AdminSessionSnapshot,
   beforeDelete?: () => void | Promise<void>,
-  remainsCurrent: () => boolean = () => true,
+  whileEnding?: () => void | Promise<void>,
 ): Promise<boolean> {
-  const preflight = await sessions.mutateIfCurrent(
-    manager,
-    expected,
-    async () => remainsCurrent(),
-  )
-  if (!preflight.applied || !preflight.value) return false
+  const ending = await sessions.beginEnding(manager, expected)
+  if (!ending) return false
 
-  // Host cleanup is account-scoped and intentionally happens outside the
-  // coordinator lock. A concurrent login can advance the generation while a
-  // slow process shutdown completes; the final mutation below is the CAS that
-  // prevents the old logout from deleting the replacement session.
+  // Authorization is already closed and the ending generation is visible.
+  // Slow remote/process cleanup stays outside the lock so a replacement login
+  // can proceed; final token deletion is guarded by the ending snapshot CAS.
+  try {
+    await whileEnding?.()
+  } catch (error) {
+    deps?.platform.logger.warn(
+      '[Admin] session-ending side effect failed; continuing fail-closed cleanup:',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
   try {
     await deps?.onAdminSessionEnding?.(expected.tokens.userId)
   } catch (error) {
@@ -1301,14 +1395,10 @@ async function endAdminSession(
     )
   }
 
-  const ended = await sessions.mutateIfCurrent(
+  const ended = await sessions.finishEndingIfCurrent(
     manager,
-    expected,
+    ending,
     async () => {
-      if (!remainsCurrent()) return false
-      sessions.advanceGeneration()
-      denyAppCatalogAccessForAccount(expected.tokens.userId)
-      denyCachedAppCatalogAuthorizationForAccount(expected.tokens.userId)
       try {
         await beforeDelete?.()
       } catch (error) {
@@ -1349,13 +1439,12 @@ async function completeAdminLogin(args: {
     // stale for the full account-transition window.
     args.sessions.advanceGeneration()
     if (previousTokens && switchingAccounts) {
+      args.sessions.closeAuthorizationForEnding(previousTokens.userId)
       await args.deps.onAdminSessionEnding?.(previousTokens.userId)
       await deleteAdminManagedConnections(
         args.manager,
         previousAdminConnectionSlugs,
       )
-      denyAppCatalogAccessForAccount(previousTokens.userId)
-      denyCachedAppCatalogAuthorizationForAccount(previousTokens.userId)
       setAdminConfigVersion(undefined)
     }
 

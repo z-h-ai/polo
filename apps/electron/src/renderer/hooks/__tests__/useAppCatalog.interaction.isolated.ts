@@ -428,6 +428,55 @@ describe('useAppCatalog scoped async state', () => {
     expect(result.current.state.catalog?.organizationId).toBe('organization-b')
   })
 
+  it('keeps a successful start result when the same organization refreshes', async () => {
+    const pendingStart = deferred<LocalAppStartResult>()
+    startLocalApp = mock(() => pendingStart.promise)
+    let syncCount = 0
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
+      syncCount += 1
+      return syncResult('organization-a', `catalog-${syncCount}`)
+    })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('catalog-1')
+    })
+    const catalogApp = result.current.state.catalog!.apps[0]!
+
+    let started!: Promise<LocalAppStartResult>
+    act(() => {
+      started = result.current.start(catalogApp)
+    })
+    await waitFor(() => {
+      expect(result.current.getStatus(catalogApp)?.status).toBe('starting')
+    })
+
+    await act(async () => {
+      await result.current.sync(true)
+    })
+    expect(result.current.state.catalog?.appConfigVersion).toBe('catalog-2')
+
+    const localUrl = 'http://127.0.0.1:9911'
+    let startResult!: LocalAppStartResult
+    await act(async () => {
+      pendingStart.resolve({
+        appId: catalogApp.id,
+        scope: {
+          kind: 'catalog',
+          accountId: 'account-a',
+          organizationId: 'organization-a',
+          catalogAppId: catalogApp.id,
+        },
+        version: '1.0.0',
+        url: localUrl,
+        port: 9911,
+      })
+      startResult = await started
+    })
+
+    expect(startResult).toMatchObject({ url: localUrl })
+    expect(startLocalApp).toHaveBeenCalledTimes(1)
+  })
+
   it('cancels an in-flight install through an independent cancellation channel', async () => {
     const pendingInstall = deferred<void>()
     installLocalApp = mock(() => pendingInstall.promise)

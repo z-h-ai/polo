@@ -29,6 +29,17 @@ describe('organization app catalog version comparison', () => {
     expect(isNewerCatalogVersion('1.0.0-beta.1', '1.0.0')).toBe(false)
   })
 
+  it('orders numeric identifiers beyond JavaScript safe integers', () => {
+    expect(isNewerCatalogVersion(
+      '90071992547409931234567890.0.0',
+      '9007199254740993123456789.0.0',
+    )).toBe(true)
+    expect(isNewerCatalogVersion(
+      '1.0.0-90071992547409931234567890',
+      '1.0.0-9007199254740993123456789',
+    )).toBe(true)
+  })
+
   it('returns an explicit invalid fallback for fourth segments and invalid versions', () => {
     expect(compareCatalogVersions('1.2.3.4', '1.2.3')).toEqual({
       strategy: 'invalid',

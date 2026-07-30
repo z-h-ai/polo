@@ -5,6 +5,10 @@ import {
   type AppReleaseSummary,
   type CatalogApp,
 } from '@polo-ai/shared/admin'
+import {
+  compareCatalogSemVer,
+  normalizeCatalogSemVer,
+} from '@polo-ai/shared/admin/semver'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import {
   normalizeLocalAppPermissions,
@@ -24,7 +28,6 @@ import type {
   LocalAppUninstallOptions,
 } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
-import { gt, valid } from 'semver'
 import {
   getLocalAppRuntimeManager,
   getScopedLocalAppRuntimeRegistry,
@@ -66,7 +69,7 @@ interface AuthorizedCatalogApp {
   accessMode: 'online' | 'offline' | 'denied'
 }
 
-async function requireAuthorizedCatalogEntry(
+async function requireCatalogDataAccess(
   scope: CatalogLocalAppScope,
 ): Promise<AuthorizedCatalogApp> {
   await requireTrustedCatalogAccount(scope)
@@ -79,15 +82,27 @@ async function requireAuthorizedCatalogEntry(
     !catalog
     || catalog.authorizationStatus !== 'authorized'
     || !app
-    || app.availability !== 'available'
     || accessMode === 'denied'
   ) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'This organization app session is no longer authorized',
+    )
+  }
+  return { app, appConfigVersion: catalog.appConfigVersion, accessMode }
+}
+
+async function requireAuthorizedCatalogEntry(
+  scope: CatalogLocalAppScope,
+): Promise<AuthorizedCatalogApp> {
+  const authorized = await requireCatalogDataAccess(scope)
+  if (authorized.app.availability !== 'available') {
     throw new LocalAppRuntimeError(
       'NOT_AUTHORIZED',
       'This organization app is no longer authorized for installation or launch',
     )
   }
-  return { app, appConfigVersion: catalog.appConfigVersion, accessMode }
+  return authorized
 }
 
 async function requireAuthorizedCatalogApp(
@@ -110,7 +125,7 @@ async function withReference<T>(
 ): Promise<T> {
   const reference = requireReference(rawReference)
   if (reference.kind === 'legacy') return legacyOperation(reference.appId)
-  await requireTrustedCatalogAccount(reference)
+  await requireCatalogDataAccess(reference)
   return catalogOperation(reference)
 }
 
@@ -134,10 +149,6 @@ function hostPlatform(): 'darwin' | 'win32' | 'linux' {
 
 function hostArchitecture(): 'arm64' | 'x64' {
   return process.arch === 'arm64' ? 'arm64' : 'x64'
-}
-
-function normalizedCatalogVersion(version: string): string | null {
-  return valid(version.trim().replace(/^v(?=\d)/i, ''), { loose: false })
 }
 
 function matchesConfirmedRelease(
@@ -195,14 +206,14 @@ function deriveCatalogReleaseStatus(
   const release = app.currentRelease
   if (!release) return clearCatalogUpdateState(status)
 
-  const availableVersion = normalizedCatalogVersion(release.version)
+  const availableVersion = normalizeCatalogSemVer(release.version)
   if (!availableVersion) {
     const retainedRelease = status.availableRelease ?? trustedRelease
     if (!retainedRelease || !status.currentVersion) {
       return { ...status, versionError: 'invalid_semver' }
     }
-    const retainedVersion = normalizedCatalogVersion(retainedRelease.version)
-    const installedVersion = normalizedCatalogVersion(status.currentVersion)
+    const retainedVersion = normalizeCatalogSemVer(retainedRelease.version)
+    const installedVersion = normalizeCatalogSemVer(status.currentVersion)
     const exposesUpdateAsPrimaryStatus = (
       status.status === 'installed'
       || status.status === 'stopped'
@@ -210,7 +221,9 @@ function deriveCatalogReleaseStatus(
     )
     return {
       ...status,
-      ...(retainedVersion && installedVersion && gt(retainedVersion, installedVersion)
+      ...(retainedVersion
+        && installedVersion
+        && compareCatalogSemVer(retainedVersion, installedVersion) === 1
         ? {
             status: exposesUpdateAsPrimaryStatus
               ? 'update_available' as const
@@ -225,7 +238,7 @@ function deriveCatalogReleaseStatus(
   }
   if (!status.currentVersion) return clearCatalogUpdateState(status)
 
-  const installedVersion = normalizedCatalogVersion(status.currentVersion)
+  const installedVersion = normalizeCatalogSemVer(status.currentVersion)
   if (!installedVersion) {
     return {
       ...status,
@@ -233,7 +246,7 @@ function deriveCatalogReleaseStatus(
       versionError: 'invalid_semver',
     }
   }
-  if (!gt(availableVersion, installedVersion)) {
+  if (compareCatalogSemVer(availableVersion, installedVersion) !== 1) {
     return clearCatalogUpdateState(status)
   }
 
@@ -318,7 +331,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
           'The authorized Catalog release changed after confirmation',
         )
       }
-      if (!normalizedCatalogVersion(release.version)) {
+      if (!normalizeCatalogSemVer(release.version)) {
         throw new LocalAppRuntimeError(
           'INVALID_REQUEST',
           'The authorized Catalog release has an invalid SemVer version',
@@ -409,9 +422,9 @@ export function registerLocalAppHandlers(server: RpcServer): void {
           const status = await registry.getRuntimeStatus(scope)
           if (!status.currentVersion) return status
           const availableVersion = app.currentRelease
-            ? normalizedCatalogVersion(app.currentRelease.version)
+            ? normalizeCatalogSemVer(app.currentRelease.version)
             : null
-          const installedVersion = normalizedCatalogVersion(status.currentVersion)
+          const installedVersion = normalizeCatalogSemVer(status.currentVersion)
           if (
             (app.currentRelease && !availableVersion)
             || !installedVersion
@@ -422,7 +435,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
           }
           const release = app.currentRelease
             && availableVersion
-            && gt(availableVersion, installedVersion)
+            && compareCatalogSemVer(availableVersion, installedVersion) === 1
             ? app.currentRelease
             : null
           return registry.setAvailableRelease(scope, release)
@@ -484,7 +497,15 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
       // Deliberately one cache read for the entire 10,000-item batch.
       const catalog = getCachedAppCatalog(first.accountId, first.organizationId)
-      if (!catalog || catalog.authorizationStatus !== 'authorized') {
+      const accessMode = getAppCatalogAccessMode(
+        first.accountId,
+        first.organizationId,
+      )
+      if (
+        !catalog
+        || catalog.authorizationStatus !== 'authorized'
+        || accessMode === 'denied'
+      ) {
         throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Catalog authorization is unavailable')
       }
       const localApps = new Map(getAppCatalogApps(catalog)

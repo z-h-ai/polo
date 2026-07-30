@@ -2433,7 +2433,7 @@ describe('registerAdminHandlers', () => {
       newerFailure.reject(testCase.temporaryError)
       expect(await newer).toMatchObject({
         success: false,
-        errorCode: testCase.temporaryError.errorCode,
+        errorCode: 'SESSION_CHANGED',
       })
 
       releaseCleanup.resolve()
@@ -2820,6 +2820,143 @@ describe('registerAdminHandlers', () => {
     expect(configState.connections.map(connection => connection.slug)).toEqual(['user-local'])
     expect(managerState.deletedCredentialSlugs).toEqual(['admin-anthropic'])
     expect(managerState.llmApiKeys.has('admin-anthropic')).toBe(false)
+  })
+
+  it('closes Catalog authorization before a slow remote logout completes', async () => {
+    const organizationId = '17777777-7777-4777-8777-777777777771'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v1',
+      syncedAt: 1,
+      apps: [{
+        id: 'remote-app',
+        organizationId,
+        deliveryMode: 'remote_url',
+        availability: 'available',
+      }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    const logoutStarted = createDeferred<void>()
+    const finishRemoteLogout = createDeferred<void>()
+    adminClientBehavior.logout = async () => {
+      logoutStarted.resolve()
+      await finishRemoteLogout.promise
+    }
+    const { logout, syncAppCatalog } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const pendingLogout = logout(context)
+    await logoutStarted.promise
+
+    expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
+      authorizationStatus: 'denied',
+      apps: [{ availability: 'unavailable' }],
+    })
+    expect(await syncAppCatalog(context, organizationId, { force: true }))
+      .toMatchObject({
+        success: false,
+        errorCode: 'UNAUTHORIZED',
+      })
+    expect(adminClientCalls.filter(call => call.method === 'getAppCatalog'))
+      .toHaveLength(0)
+
+    finishRemoteLogout.resolve()
+    expect(await pendingLogout).toEqual({ success: true })
+    expect(managerState.tokens).toBeNull()
+  })
+
+  it('rejects a concurrent Catalog success after explicit session revocation begins', async () => {
+    const organizationId = '17777777-7777-4777-8777-777777777772'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v0',
+      syncedAt: 1,
+      apps: [],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    const revokedRequest = createDeferred<any>()
+    const successfulRequest = createDeferred<any>()
+    const requestStarted = [createDeferred<void>(), createDeferred<void>()]
+    const cleanupStarted = createDeferred<void>()
+    const finishCleanup = createDeferred<void>()
+    adminSessionEnding.mockImplementationOnce(async () => {
+      cleanupStarted.resolve()
+      await finishCleanup.promise
+    })
+    let requestIndex = 0
+    adminClientBehavior.getAppCatalog = async () => {
+      const index = requestIndex++
+      requestStarted[index]!.resolve()
+      return index === 0 ? revokedRequest.promise : successfulRequest.promise
+    }
+    const { syncAppCatalog } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const revoked = syncAppCatalog(context, organizationId, { force: true })
+    await requestStarted[0]!.promise
+    const concurrentSuccess = syncAppCatalog(
+      context,
+      organizationId,
+      { force: true },
+    )
+    await requestStarted[1]!.promise
+
+    revokedRequest.reject(new TestAdminError(
+      'token revoked',
+      'TOKEN_REVOKED',
+      { status: 401 },
+    ))
+    await cleanupStarted.promise
+    successfulRequest.resolve({
+      notModified: false,
+      appConfigVersion: 'apps-must-not-commit',
+      apps: [],
+    })
+
+    expect(await concurrentSuccess).toMatchObject({
+      success: false,
+      errorCode: 'SESSION_CHANGED',
+    })
+    expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
+      appConfigVersion: 'apps-v0',
+      authorizationStatus: 'denied',
+    })
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+
+    finishCleanup.resolve()
+    expect(await revoked).toMatchObject({
+      success: false,
+      errorCode: 'TOKEN_REVOKED',
+      status: 401,
+    })
   })
 
   it('clears local credentials even when remote logout fails', async () => {

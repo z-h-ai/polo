@@ -13,10 +13,10 @@ import type {
   AppReleaseSummary,
   CatalogApp,
 } from './types.ts'
+import { isValidCatalogSemVer } from './semver.ts'
 
 const CACHE_SCHEMA_VERSION = 3
 const MAX_CACHED_APPS = 10_000
-const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 
 const CachedCatalogAppSchema = CatalogAppSchema.and(z.object({
   availability: z.enum(['available', 'withdrawn', 'unavailable']).optional(),
@@ -73,10 +73,6 @@ function cacheKey(accountId: string, organizationId: string): string {
 
 function emptyCache(): AppCatalogCacheFile {
   return { schemaVersion: CACHE_SCHEMA_VERSION, entries: {} }
-}
-
-function isValidCatalogSemVer(version: string): boolean {
-  return SEMVER_PATTERN.test(version.trim().replace(/^v(?=\d)/i, ''))
 }
 
 function trustedReleasesFromApps(
