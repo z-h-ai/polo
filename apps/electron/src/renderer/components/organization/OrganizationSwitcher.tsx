@@ -21,9 +21,17 @@ export function OrganizationSwitcher({ compact = false }: { compact?: boolean })
   )
   if (!active) return null
 
+  const activeAvailable = active.status !== 'suspended'
+    && active.membership.status === 'active'
+  const selectableOrganizations = organization.organizationSummaries.filter(
+    item => item.status !== 'suspended'
+      && item.membership.status === 'active',
+  )
   const ActiveIcon = active.type === 'creator_space' ? Sparkles : Building2
-  const canManage = organization.organizationMembershipRole === 'owner'
+  const canManage = activeAvailable && (
+    organization.organizationMembershipRole === 'owner'
     || organization.organizationMembershipRole === 'manager'
+  )
 
   return (
     <DropdownMenu>
@@ -52,7 +60,7 @@ export function OrganizationSwitcher({ compact = false }: { compact?: boolean })
         )}
       </DropdownMenuTrigger>
       <StyledDropdownMenuContent align="start" minWidth="min-w-56">
-        {organization.organizationSummaries.map(item => {
+        {selectableOrganizations.map(item => {
           const Icon = item.type === 'creator_space' ? Sparkles : Building2
           const selected = item.id === organization.activeOrganizationId
           return (

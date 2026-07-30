@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { i18n } from '@polo-ai/shared/i18n'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
 import {
+  classifyAdminAuthorizationFailure,
+  markAppCatalogAccessDenied,
+} from '@polo-ai/shared/admin/authorization'
+import {
   compareCatalogSemVer,
   normalizeCatalogSemVer,
 } from '@polo-ai/shared/admin/semver'
@@ -144,45 +148,20 @@ export function createBusyStatusPoller(
   }
 }
 
-const CATALOG_ACCESS_DENIED_CODES = new Set([
-  'UNAUTHORIZED',
-  'FORBIDDEN',
-  'ACCOUNT_DISABLED',
-  'INVALID_TOKEN',
-  'TOKEN_REVOKED',
-  'TOKEN_EXPIRED',
-  'MEMBERSHIP_REMOVED',
-  'MEMBERSHIP_SUSPENDED',
-  'ORGANIZATION_UNAVAILABLE',
-  'NOT_FOUND',
-])
-
 function isCatalogAccessDenied(
   errorCode: string | null | undefined,
   status?: number,
 ): boolean {
-  return (
-    (typeof errorCode === 'string' && CATALOG_ACCESS_DENIED_CODES.has(errorCode))
-    || status === 401
-    || status === 403
-  )
+  return classifyAdminAuthorizationFailure(
+    { errorCode: errorCode ?? undefined, status },
+    { catalogScoped: true },
+  ) === 'catalog_scope'
 }
 
 export function markCatalogAccessDenied(
   catalog: AppCatalogCacheEntry,
 ): AppCatalogCacheEntry {
-  return {
-    ...catalog,
-    authorizationStatus: 'denied',
-    apps: catalog.apps.map(app => ({
-      ...app,
-      availability: 'unavailable',
-    })),
-    withdrawnApps: (catalog.withdrawnApps ?? []).map(app => ({
-      ...app,
-      availability: 'unavailable',
-    })),
-  }
+  return markAppCatalogAccessDenied(catalog)
 }
 
 export type CatalogVersionComparison =
@@ -539,9 +518,18 @@ export function useAppCatalog() {
         emitAdminCatalogSessionAuthFailure(result)
         if (isCatalogAccessDenied(result.errorCode, result.status)) {
           const deniedContextGeneration = ++contextGenerationRef.current
-          const deniedCatalog = catalogRef.current
-            ? markCatalogAccessDenied(catalogRef.current)
+          const returnedCatalog = result.catalog
+          const matchingReturnedCatalog = returnedCatalog
+            && returnedCatalog.accountId === organization.accountId
+            && returnedCatalog.organizationId
+              === organization.activeOrganizationId
+            ? returnedCatalog
             : null
+          const deniedCatalog = matchingReturnedCatalog
+            ? markCatalogAccessDenied(matchingReturnedCatalog)
+            : catalogRef.current
+              ? markCatalogAccessDenied(catalogRef.current)
+              : null
           catalogRef.current = deniedCatalog
           setState(current => ({
             ...current,

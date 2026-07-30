@@ -1,3 +1,7 @@
+import {
+  classifyAdminAuthorizationFailure,
+} from '@polo-ai/shared/admin/authorization'
+
 export interface AdminErrorLike {
   code?: string
   errorCode?: string
@@ -10,34 +14,6 @@ export interface NormalizedAdminError {
 }
 
 export const ADMIN_AUTH_FAILURE_EVENT = 'polo:admin-auth-failure'
-
-const ADMIN_AUTH_FAILURE_CODES = new Set([
-  'ACCOUNT_DISABLED',
-  'FORBIDDEN',
-  'MEMBERSHIP_REMOVED',
-  'MEMBERSHIP_SUSPENDED',
-  'ORGANIZATION_UNAVAILABLE',
-  'TOKEN_REVOKED',
-  'UNAUTHORIZED',
-  'INVALID_TOKEN',
-  'TOKEN_EXPIRED',
-])
-
-const CATALOG_SCOPE_AUTHORIZATION_CODES = new Set([
-  'FORBIDDEN',
-  'MEMBERSHIP_REMOVED',
-  'MEMBERSHIP_SUSPENDED',
-  'ORGANIZATION_UNAVAILABLE',
-  'NOT_FOUND',
-])
-
-const CATALOG_SESSION_ENDING_CODES = new Set([
-  'ACCOUNT_DISABLED',
-  'TOKEN_REVOKED',
-  'UNAUTHORIZED',
-  'INVALID_TOKEN',
-  'TOKEN_EXPIRED',
-])
 
 export function getAdminErrorCode(value: AdminErrorLike): string | undefined {
   return value.code || value.errorCode
@@ -54,12 +30,10 @@ export function normalizeAdminError(
 }
 
 export function isAdminAuthFailureResult(value: AdminErrorLike): boolean {
-  const code = getAdminErrorCode(value)
-  return (
-    (code ? ADMIN_AUTH_FAILURE_CODES.has(code) : false)
-    || value.status === 401
-    || value.status === 403
-  )
+  return classifyAdminAuthorizationFailure(
+    value,
+    { catalogScoped: false },
+  ) === 'session'
 }
 
 export function emitAdminAuthFailure(value: AdminErrorLike): boolean {
@@ -74,10 +48,10 @@ export function emitAdminAuthFailure(value: AdminErrorLike): boolean {
 export function isAdminCatalogSessionAuthFailure(
   value: AdminErrorLike,
 ): boolean {
-  const code = getAdminErrorCode(value)
-  if (code && CATALOG_SESSION_ENDING_CODES.has(code)) return true
-  if (code && CATALOG_SCOPE_AUTHORIZATION_CODES.has(code)) return false
-  return value.status === 401
+  return classifyAdminAuthorizationFailure(
+    value,
+    { catalogScoped: true },
+  ) === 'session'
 }
 
 export function emitAdminCatalogSessionAuthFailure(

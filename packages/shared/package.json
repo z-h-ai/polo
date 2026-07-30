@@ -18,6 +18,7 @@
     "./agent/mode-types": "./src/agent/mode-types.ts",
     "./agent/thinking-levels": "./src/agent/thinking-levels.ts",
     "./admin": "./src/admin/index.ts",
+    "./admin/authorization": "./src/admin/authorization-failure.ts",
     "./admin/catalog-view": "./src/admin/app-catalog-view.ts",
     "./admin/semver": "./src/admin/semver.ts",
     "./admin/schemas": "./src/admin/schemas.ts",

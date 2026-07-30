@@ -14,6 +14,7 @@ import type {
   CatalogApp,
 } from './types.ts'
 import { isValidCatalogSemVer } from './semver.ts'
+import { markAppCatalogAccessDenied } from './authorization-failure.ts'
 
 const CACHE_SCHEMA_VERSION = 3
 const MAX_CACHED_APPS = 10_000
@@ -239,18 +240,7 @@ export function denyCachedAppCatalogAuthorization(
   const key = cacheKey(accountId, organizationId)
   const previous = cache.entries[key]
   if (!previous) return null
-  const entry: AppCatalogCacheEntry = {
-    ...previous,
-    authorizationStatus: 'denied',
-    apps: previous.apps.map(app => ({
-      ...app,
-      availability: 'unavailable',
-    })),
-    withdrawnApps: (previous.withdrawnApps ?? []).map(app => ({
-      ...app,
-      availability: 'unavailable',
-    })),
-  }
+  const entry = markAppCatalogAccessDenied(previous)
   cache.entries[key] = entry
   writeCache(cache)
   return entry
@@ -263,18 +253,7 @@ export function denyCachedAppCatalogAuthorizationForAccount(
   const denied: AppCatalogCacheEntry[] = []
   for (const [key, previous] of Object.entries(cache.entries)) {
     if (previous.accountId !== accountId) continue
-    const entry: AppCatalogCacheEntry = {
-      ...previous,
-      authorizationStatus: 'denied',
-      apps: previous.apps.map(app => ({
-        ...app,
-        availability: 'unavailable',
-      })),
-      withdrawnApps: (previous.withdrawnApps ?? []).map(app => ({
-        ...app,
-        availability: 'unavailable',
-      })),
-    }
+    const entry = markAppCatalogAccessDenied(previous)
     cache.entries[key] = entry
     denied.push(entry)
   }

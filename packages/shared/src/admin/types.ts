@@ -229,6 +229,12 @@ export type AppCatalogSyncResult =
       errorCode: string;
       message: string;
       status?: number;
+      /**
+       * Explicit Catalog scope denial may return the sanitized last trusted
+       * cache so a fresh renderer can expose local data-management actions.
+       */
+      catalog?: AppCatalogCacheEntry;
+      accessMode?: 'denied';
     };
 
 export interface OrganizationJoinPreview {

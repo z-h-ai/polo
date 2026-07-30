@@ -11,6 +11,7 @@ import {
   resumeAppCatalogAccessForAccount,
   saveAppCatalog,
   setAppCatalogAccessMode,
+  type AppCatalogCacheEntry,
   type AppCatalogSyncResult,
   type AdminErrorCode,
   type AdminLlmConnection,
@@ -18,6 +19,10 @@ import {
   type AdminRefreshResponse,
   type AdminUser,
 } from '@polo-ai/shared/admin'
+import {
+  classifyAdminAuthorizationFailure,
+  markAppCatalogAccessDenied,
+} from '@polo-ai/shared/admin/authorization'
 import {
   AdminLoginRpcInputSchema,
   CreateOrganizationInvitationRpcInputSchema,
@@ -431,7 +436,7 @@ export function registerAdminHandlers(
   const denyCatalogScope = (
     accountId: string,
     organizationId: string,
-  ) => {
+  ): AppCatalogCacheEntry | null => {
     const scopeKey = appCatalogScopeKey(accountId, organizationId)
     // The in-memory epoch and gate are the security boundary. Persistence is
     // recovery metadata and must never keep a previously-online process open
@@ -455,13 +460,16 @@ export function registerAdminHandlers(
         error instanceof Error ? error.message : String(error),
       )
     }
+    const cached = getCachedAppCatalog(accountId, organizationId)
     try {
-      denyCachedAppCatalogAuthorization(accountId, organizationId)
+      return denyCachedAppCatalogAuthorization(accountId, organizationId)
+        ?? (cached ? markAppCatalogAccessDenied(cached) : null)
     } catch (error) {
       log?.warn(
         '[Admin] failed to persist denied Catalog cache:',
         error instanceof Error ? error.message : String(error),
       )
+      return cached ? markAppCatalogAccessDenied(cached) : null
     }
   }
   const sessions = new AdminSessionCoordinator(
@@ -1182,8 +1190,20 @@ export function registerAdminHandlers(
             requestContext.session,
             async (): Promise<AppCatalogSyncResult> => {
               if (!isCurrentCatalogSync()) return supersededCatalogResult()
-              denyCatalogScope(accountId, organizationId.data)
-              return { success: false, ...adminError }
+              const deniedCatalog = denyCatalogScope(
+                accountId,
+                organizationId.data,
+              )
+              return {
+                success: false,
+                ...adminError,
+                ...(deniedCatalog
+                  ? {
+                      catalog: deniedCatalog,
+                      accessMode: 'denied' as const,
+                    }
+                  : {}),
+              }
             },
           )
           if (!denied.applied) return staleAdminSessionResult()
@@ -1195,15 +1215,29 @@ export function registerAdminHandlers(
             requestContext.session,
             async (): Promise<AppCatalogSyncResult> => {
               if (!isCurrentCatalogSync()) return supersededCatalogResult()
+              const current = getCachedAppCatalog(accountId, organizationId.data)
+              if (!current || current.authorizationStatus !== 'authorized') {
+                setAppCatalogAccessMode(
+                  accountId,
+                  organizationId.data,
+                  'denied',
+                )
+                return {
+                  success: false,
+                  ...adminError,
+                  ...(current
+                    ? {
+                        catalog: markAppCatalogAccessDenied(current),
+                        accessMode: 'denied' as const,
+                      }
+                    : {}),
+                }
+              }
               setAppCatalogAccessMode(
                 accountId,
                 organizationId.data,
                 'offline',
               )
-              const current = getCachedAppCatalog(accountId, organizationId.data)
-              if (!current || current.authorizationStatus !== 'authorized') {
-                return { success: false, ...adminError }
-              }
               return {
                 success: true,
                 catalog: current,
@@ -1222,11 +1256,23 @@ export function registerAdminHandlers(
         const current = await sessions.mutateIfCurrent(
           manager,
           requestContext.session,
-          async (): Promise<AppCatalogSyncResult> => (
-            isCurrentCatalogSync()
-              ? { success: false, ...adminError }
-              : supersededCatalogResult()
-          ),
+          async (): Promise<AppCatalogSyncResult> => {
+            if (!isCurrentCatalogSync()) return supersededCatalogResult()
+            const deniedCatalog = getCachedAppCatalog(
+              accountId,
+              organizationId.data,
+            )
+            return {
+              success: false,
+              ...adminError,
+              ...(deniedCatalog?.authorizationStatus === 'denied'
+                ? {
+                    catalog: markAppCatalogAccessDenied(deniedCatalog),
+                    accessMode: 'denied' as const,
+                  }
+                : {}),
+            }
+          },
         )
         if (!current.applied) return staleAdminSessionResult()
         log?.warn('[Admin] app catalog sync failed:', adminError.message)
@@ -1992,19 +2038,11 @@ function expiresAtFromNow(expiresInSeconds: number): number {
 }
 
 function isSessionEndingAuthFailure(error: unknown): boolean {
-  return error instanceof AdminError && (
-    error.errorCode === 'UNAUTHORIZED' ||
-    error.errorCode === 'ACCOUNT_DISABLED' ||
-    error.errorCode === 'INVALID_TOKEN' ||
-    error.errorCode === 'TOKEN_REVOKED' ||
-    error.errorCode === 'TOKEN_EXPIRED' ||
-    error.errorCode === 'FORBIDDEN' ||
-    error.errorCode === 'MEMBERSHIP_REMOVED' ||
-    error.errorCode === 'MEMBERSHIP_SUSPENDED' ||
-    error.errorCode === 'ORGANIZATION_UNAVAILABLE' ||
-    error.status === 401 ||
-    error.status === 403
-  )
+  return error instanceof AdminError
+    && classifyAdminAuthorizationFailure(
+      error,
+      { catalogScoped: false },
+    ) === 'session'
 }
 
 function isTemporaryAdminFailure(error: unknown): boolean {
@@ -2017,35 +2055,19 @@ function isTemporaryAdminFailure(error: unknown): boolean {
 }
 
 function isCatalogSessionEndingAuthFailure(error: unknown): boolean {
-  if (!(error instanceof AdminError)) return false
-  if (
-    error.errorCode === 'FORBIDDEN'
-    || error.errorCode === 'MEMBERSHIP_REMOVED'
-    || error.errorCode === 'MEMBERSHIP_SUSPENDED'
-    || error.errorCode === 'ORGANIZATION_UNAVAILABLE'
-    || error.errorCode === 'NOT_FOUND'
-  ) {
-    return false
-  }
-  return (
-    error.errorCode === 'UNAUTHORIZED'
-    || error.errorCode === 'ACCOUNT_DISABLED'
-    || error.errorCode === 'INVALID_TOKEN'
-    || error.errorCode === 'TOKEN_REVOKED'
-    || error.errorCode === 'TOKEN_EXPIRED'
-    || error.status === 401
-  )
+  return error instanceof AdminError
+    && classifyAdminAuthorizationFailure(
+      error,
+      { catalogScoped: true },
+    ) === 'session'
 }
 
 function isCatalogAuthorizationFailure(error: unknown): boolean {
-  return error instanceof AdminError && (
-    error.errorCode === 'FORBIDDEN'
-    || error.errorCode === 'MEMBERSHIP_REMOVED'
-    || error.errorCode === 'MEMBERSHIP_SUSPENDED'
-    || error.errorCode === 'ORGANIZATION_UNAVAILABLE'
-    || error.errorCode === 'NOT_FOUND'
-    || error.status === 403
-  )
+  return error instanceof AdminError
+    && classifyAdminAuthorizationFailure(
+      error,
+      { catalogScoped: true },
+    ) === 'catalog_scope'
 }
 
 function toAdminRpcError(error: unknown): {

@@ -117,6 +117,14 @@ let stopLocalApp = mock(async (
   scope,
   status: 'stopped',
 }))
+let uninstallLocalApp = mock(async (
+  _scope: CatalogLocalAppScope,
+  _options: { preserveData: boolean },
+): Promise<void> => {})
+let getLocalAppLogs = mock(async (
+  _scope: CatalogLocalAppScope,
+  _options: { tail: number },
+): Promise<string> => 'retained logs')
 let installLocalApp = mock(async (
   _request: LocalAppCatalogInstallRequest,
 ): Promise<void> => {})
@@ -193,6 +201,14 @@ beforeEach(() => {
     scope,
     status: 'stopped',
   }))
+  uninstallLocalApp = mock(async (
+    _scope: CatalogLocalAppScope,
+    _options: { preserveData: boolean },
+  ): Promise<void> => {})
+  getLocalAppLogs = mock(async (
+    _scope: CatalogLocalAppScope,
+    _options: { tail: number },
+  ): Promise<string> => 'retained logs')
   installLocalApp = mock(async (
     _request: LocalAppCatalogInstallRequest,
   ): Promise<void> => {})
@@ -226,6 +242,14 @@ beforeEach(() => {
         cancelInstall: (scope: CatalogLocalAppScope) => cancelInstall(scope),
         start: (scope: CatalogLocalAppScope) => startLocalApp(scope),
         stop: (scope: CatalogLocalAppScope) => stopLocalApp(scope),
+        uninstall: (
+          scope: CatalogLocalAppScope,
+          options: { preserveData: boolean },
+        ) => uninstallLocalApp(scope, options),
+        getLogs: (
+          scope: CatalogLocalAppScope,
+          options: { tail: number },
+        ) => getLocalAppLogs(scope, options),
         resolveRemoteUrl: async (scope: CatalogLocalAppScope) => ({
           appId: scope.catalogAppId,
           scope,
@@ -289,6 +313,83 @@ describe('useAppCatalog scoped async state', () => {
     unsubscribe()
   })
 
+  for (const [errorCode, status] of [
+    ['FORBIDDEN', 403],
+    ['MEMBERSHIP_REMOVED', 409],
+  ] as const) {
+    it(`hydrates the first denied ${errorCode} Catalog with real local status and management`, async () => {
+      const localApp = app(
+        'organization-a',
+        `retained-${errorCode.toLowerCase()}`,
+      )
+      const deniedCatalog: AppCatalogCacheEntry = {
+        ...catalog('organization-a', 'denied-catalog', [localApp]),
+        authorizationStatus: 'denied',
+        apps: [{
+          ...localApp,
+          availability: 'unavailable',
+        }],
+      }
+      syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
+        success: false,
+        errorCode,
+        message: 'Organization access is unavailable',
+        status,
+        accessMode: 'denied',
+        catalog: deniedCatalog,
+      }))
+      getRuntimeStatuses = mock(async (
+        request: { scopes: CatalogLocalAppScope[] },
+      ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'running',
+        currentVersion: '1.0.0',
+        runningVersion: '1.0.0',
+      })))
+
+      const { result } = renderHook(() => useAppCatalog())
+      await waitFor(() => {
+        expect(result.current.state.catalog?.authorizationStatus).toBe('denied')
+        expect(result.current.getStatus(
+          result.current.state.catalog!.apps[0]!,
+        )?.status).toBe('running')
+      })
+
+      const retainedApp = result.current.state.catalog!.apps[0]!
+      expect(retainedApp.availability).toBe('unavailable')
+      expect(result.current.state.accessMode).toBe('denied')
+      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
+      expect(getRuntimeStatuses).toHaveBeenCalledWith({
+        scopes: [{
+          kind: 'catalog',
+          accountId: 'account-a',
+          organizationId: 'organization-a',
+          catalogAppId: retainedApp.id,
+        }],
+      })
+
+      await expect(result.current.install(retainedApp, 'denied-catalog'))
+        .rejects.toThrow()
+      await expect(result.current.start(retainedApp)).rejects.toThrow()
+      expect(installLocalApp).not.toHaveBeenCalled()
+      expect(startLocalApp).not.toHaveBeenCalled()
+
+      await expect(result.current.getLogs(retainedApp))
+        .resolves.toBe('retained logs')
+      await act(async () => {
+        await result.current.stop(retainedApp)
+        await result.current.uninstall(retainedApp, true)
+      })
+      expect(getLocalAppLogs).toHaveBeenCalled()
+      expect(stopLocalApp).toHaveBeenCalled()
+      expect(uninstallLocalApp).toHaveBeenCalledWith(
+        expect.objectContaining({ catalogAppId: retainedApp.id }),
+        { preserveData: true },
+      )
+    })
+  }
+
   it('propagates an account-disabled Catalog response into the auth-failure channel', async () => {
     syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
       success: false,
@@ -307,6 +408,34 @@ describe('useAppCatalog scoped async state', () => {
     })
     unsubscribe()
   })
+
+  for (const errorCode of [
+    'FORBIDDEN',
+    'MEMBERSHIP_REMOVED',
+    'unknown_body_error',
+  ]) {
+    it(`treats Catalog HTTP 401 with ${errorCode} as account session loss`, async () => {
+      syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
+        success: false,
+        errorCode,
+        message: 'Admin session is unauthorized',
+        status: 401,
+      }))
+      const failures: Array<{ code: string; status?: number }> = []
+      const unsubscribe = subscribeToAdminAuthFailures(error => {
+        failures.push(error)
+      })
+
+      const { result } = renderHook(() => useAppCatalog())
+      await waitFor(() => {
+        expect(failures).toEqual([{ code: errorCode, status: 401 }])
+      })
+      expect(result.current.state.catalog).toBeNull()
+      expect(result.current.state.accessMode).toBeNull()
+      expect(getRuntimeStatuses).not.toHaveBeenCalled()
+      unsubscribe()
+    })
+  }
 
   it('keeps denied installed app data manageable after a later NOT_FOUND', async () => {
     const localApp = app('organization-a', 'installed-app')

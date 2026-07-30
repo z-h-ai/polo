@@ -361,8 +361,16 @@ describe('HomePage round-two regressions', () => {
         organizationContextKey: 'account-a:organization-a',
         organizationSummaries: [{
           id: catalog.organizationId,
-          type: 'enterprise',
+          type: 'enterprise_workspace',
           name: 'Organization A',
+          purpose: '',
+          status: 'suspended',
+          membership: {
+            id: 'membership-denied',
+            role: 'member',
+            status: 'removed',
+          },
+          memberCount: 1,
         }],
       },
       state: {

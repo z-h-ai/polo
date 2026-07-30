@@ -2394,6 +2394,11 @@ export default function App() {
   ])
   const startupCatalogOrganizationId = organizationContextValue?.activeOrganizationId
   const startupCatalogContextKey = organizationContextValue?.organizationContextKey
+  const activeOrganizationAvailable = Boolean(
+    organization.activeOrganization
+    && organization.activeOrganization.status !== 'suspended'
+    && organization.activeOrganization.membership.status === 'active',
+  )
 
   useEffect(() => {
     if (!startupCatalogOrganizationId) return
@@ -2639,7 +2644,7 @@ export default function App() {
               )}
               />
             </TabShellProvider>
-            {organizationContextValue ? (
+            {organizationContextValue && activeOrganizationAvailable ? (
               <OrganizationManagementDialog
                 open={organizationManagementOpen}
                 onOpenChange={setOrganizationManagementOpen}

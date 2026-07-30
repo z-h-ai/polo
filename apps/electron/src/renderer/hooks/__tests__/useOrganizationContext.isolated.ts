@@ -10,6 +10,7 @@ const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure'
 const {
   clearPendingOrganizationJoinToken,
   getStoredActiveOrganizationId,
+  getUnavailableOrganizationTombstone,
   getVerifiedOrganizationContext,
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
@@ -285,7 +286,7 @@ describe('useOrganizationContextState', () => {
     unsubscribe()
   })
 
-  it('does not restore an organization removed or suspended by a successful list', async () => {
+  it('retains a read-only tombstone when the current organization is removed or suspended', async () => {
     for (const nextOrganizations of [
       [],
       [{
@@ -297,6 +298,9 @@ describe('useOrganizationContextState', () => {
       }],
     ]) {
       localStorage.clear()
+      const unavailableMembershipStatus = nextOrganizations.length > 0
+        ? 'suspended'
+        : 'removed'
       organizationList = mock(async (): Promise<OrganizationListResult> => ({
         success: true,
         organizations: [organizations[0]],
@@ -316,11 +320,46 @@ describe('useOrganizationContextState', () => {
       await act(async () => {
         await online.result.current.refreshOrganizations()
       })
-      expect(online.result.current.activeOrganizationId).toBeNull()
+      expect(online.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+      expect(online.result.current.flowState).toBe('ready')
+      expect(online.result.current.activeOrganization).toMatchObject({
+        id: organizations[0].id,
+        status: 'suspended',
+        membership: { status: unavailableMembershipStatus },
+      })
       expect(getStoredActiveOrganizationId('lost-membership')).toBeNull()
       expect(getVerifiedOrganizationContext('lost-membership'))
         .toMatchObject({ activeOrganizationId: null })
+      expect(getUnavailableOrganizationTombstone('lost-membership'))
+        .toMatchObject({
+          organization: {
+            id: organizations[0].id,
+            status: 'suspended',
+            membership: { status: unavailableMembershipStatus },
+          },
+        })
+      expect(() => {
+        online.result.current.selectOrganization(organizations[0].id)
+      }).toThrow()
       online.unmount()
+
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: true,
+        organizations: nextOrganizations,
+      }))
+      const rebuilt = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        expect(await rebuilt.result.current.bootstrap('lost-membership'))
+          .toBe('ready')
+      })
+      expect(rebuilt.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+      expect(rebuilt.result.current.activeOrganization).toMatchObject({
+        status: 'suspended',
+        membership: { status: unavailableMembershipStatus },
+      })
+      rebuilt.unmount()
 
       organizationList = mock(async (): Promise<OrganizationListResult> => ({
         success: false,
@@ -329,10 +368,14 @@ describe('useOrganizationContextState', () => {
       }))
       const offline = renderHook(() => useOrganizationContextState())
       await act(async () => {
-        await offline.result.current.bootstrap('lost-membership').catch(() => {})
+        expect(await offline.result.current.bootstrap('lost-membership'))
+          .toBe('ready')
       })
-      expect(offline.result.current.activeOrganizationId).toBeNull()
-      expect(offline.result.current.flowState).toBe('loading')
+      expect(offline.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+      expect(offline.result.current.flowState).toBe('ready')
+      expect(offline.result.current.activeOrganization?.membership.status)
+        .toBe(unavailableMembershipStatus)
       offline.unmount()
     }
   })

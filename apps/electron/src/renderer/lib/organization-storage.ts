@@ -3,6 +3,7 @@ import type { OrganizationSummary } from '@polo-ai/shared/admin'
 
 const ACTIVE_ORGANIZATION_PREFIX = 'polo-active-organization:'
 const VERIFIED_ORGANIZATION_CONTEXT_PREFIX = 'polo-verified-organization-context:'
+const UNAVAILABLE_ORGANIZATION_PREFIX = 'polo-unavailable-organization:'
 const PENDING_JOIN_TOKEN_KEY = 'polo-pending-organization-join-token'
 
 function activeOrganizationKey(accountId: string): string {
@@ -13,10 +14,19 @@ function verifiedOrganizationContextKey(accountId: string): string {
   return `${VERIFIED_ORGANIZATION_CONTEXT_PREFIX}${accountId}`
 }
 
+function unavailableOrganizationKey(accountId: string): string {
+  return `${UNAVAILABLE_ORGANIZATION_PREFIX}${accountId}`
+}
+
 export interface VerifiedOrganizationContext {
   organizationSummaries: OrganizationSummary[]
   activeOrganizationId: string | null
   verifiedAt: number
+}
+
+export interface UnavailableOrganizationTombstone {
+  organization: OrganizationSummary
+  recordedAt: number
 }
 
 function isActiveOrganization(organization: OrganizationSummary): boolean {
@@ -129,6 +139,76 @@ export function setVerifiedOrganizationContext(
 export function clearVerifiedOrganizationContext(accountId: string): void {
   try {
     localStorage.removeItem(verifiedOrganizationContextKey(accountId))
+  } catch {
+    // Nothing else to clear.
+  }
+}
+
+export function createUnavailableOrganizationTombstone(
+  organization: OrganizationSummary,
+): OrganizationSummary {
+  return {
+    ...organization,
+    status: 'suspended',
+    membership: {
+      ...organization.membership,
+      status: organization.membership.status === 'active'
+        ? 'removed'
+        : organization.membership.status,
+    },
+  }
+}
+
+export function getUnavailableOrganizationTombstone(
+  accountId: string,
+): UnavailableOrganizationTombstone | null {
+  try {
+    const raw = localStorage.getItem(unavailableOrganizationKey(accountId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<UnavailableOrganizationTombstone>
+    const organization = ListOrganizationsResponseSchema.safeParse({
+      organizations: parsed.organization ? [parsed.organization] : [],
+    })
+    if (
+      !organization.success
+      || typeof parsed.recordedAt !== 'number'
+      || !Number.isInteger(parsed.recordedAt)
+      || parsed.recordedAt < 0
+    ) {
+      return null
+    }
+    const tombstone = organization.data.organizations[0]
+    if (!tombstone || isActiveOrganization(tombstone)) return null
+    return {
+      organization: tombstone,
+      recordedAt: parsed.recordedAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function setUnavailableOrganizationTombstone(
+  accountId: string,
+  organization: OrganizationSummary,
+): void {
+  const tombstone = createUnavailableOrganizationTombstone(organization)
+  try {
+    localStorage.setItem(
+      unavailableOrganizationKey(accountId),
+      JSON.stringify({
+        organization: tombstone,
+        recordedAt: Date.now(),
+      } satisfies UnavailableOrganizationTombstone),
+    )
+  } catch {
+    // The in-memory read-only organization context remains usable.
+  }
+}
+
+export function clearUnavailableOrganizationTombstone(accountId: string): void {
+  try {
+    localStorage.removeItem(unavailableOrganizationKey(accountId))
   } catch {
     // Nothing else to clear.
   }

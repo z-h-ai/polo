@@ -787,6 +787,126 @@ describe('Admin session and scoped local app production wiring', () => {
     expect(managerCalls).toContain('uninstall')
   })
 
+  it('retains local data management when organization listing removes the current organization', async () => {
+    const managerCalls: string[] = []
+    class RemovedOrganizationDataManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus> {
+        managerCalls.push('status')
+        return {
+          appId,
+          status: 'running',
+          currentVersion: '1.0.0',
+          runningVersion: '1.0.0',
+        }
+      }
+
+      override async getLogs(): Promise<string> {
+        managerCalls.push('logs')
+        return 'removed organization logs'
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        managerCalls.push('stop')
+        return {
+          appId,
+          status: 'stopped',
+          currentVersion: '1.0.0',
+        }
+      }
+
+      override async uninstall(): Promise<void> {
+        managerCalls.push('uninstall')
+      }
+
+      override async start(appId: string): Promise<LocalAppStartResult> {
+        managerCalls.push('start')
+        return {
+          appId,
+          version: '1.0.0',
+          url: 'http://127.0.0.1:4681',
+          port: 4681,
+        }
+      }
+    }
+
+    const root = await mkdtemp(join(tmpdir(), 'polo-organization-list-removed-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new RemovedOrganizationDataManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    listOrganizationsAdmin = async () => ({ organizations: [] })
+    const { handlers, context } = registerProductionHandlers(root)
+
+    // Materialize the retained installation before the authorization truth
+    // changes, matching a previously installed local app.
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(context, scope))
+      .resolves.toBe('removed organization logs')
+    await expect(handlers.get(RPC_CHANNELS.admin.LIST_ORGANIZATIONS)!(context))
+      .resolves.toMatchObject({
+        success: true,
+        organizations: [],
+      })
+
+    expect(tokens).toMatchObject({ userId: scope.accountId })
+    expect(deniedAccounts.has(scope.accountId)).toBe(false)
+    expect(accessMode as 'online' | 'offline' | 'denied' | null).toBe('denied')
+    expect(catalog).toMatchObject({
+      authorizationStatus: 'denied',
+      apps: [{
+        id: scope.catalogAppId,
+        availability: 'unavailable',
+      }],
+    })
+
+    await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL)!(
+      context,
+      installRequest(),
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    for (const channel of [
+      RPC_CHANNELS.localApps.START,
+      RPC_CHANNELS.localApps.RESTART,
+    ]) {
+      await expect(handlers.get(channel)!(context, scope))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+    await expect(handlers.get(RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE)!(
+      context,
+      scope,
+      null,
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(managerCalls).not.toContain('start')
+
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES)!(
+      context,
+      { scopes: [scope] },
+    )).resolves.toEqual([
+      expect.objectContaining({
+        appId: scope.catalogAppId,
+        status: 'running',
+      }),
+    ])
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
+      context,
+      scope,
+    )).resolves.toBe('removed organization logs')
+    await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
+      context,
+      scope,
+    )).resolves.toMatchObject({ status: 'stopped' })
+    await expect(handlers.get(RPC_CHANNELS.localApps.UNINSTALL)!(
+      context,
+      scope,
+      { preserveData: true },
+    )).resolves.toBeUndefined()
+    expect(managerCalls).toContain('status')
+    expect(managerCalls).toContain('logs')
+    expect(managerCalls).toContain('stop')
+    expect(managerCalls).toContain('uninstall')
+  })
+
   it('denies lifecycle access when NOT_FOUND cache persistence fails', async () => {
     const {
       handlers,
