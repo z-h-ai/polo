@@ -11,6 +11,7 @@ import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
+import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import type { LoadedSkill } from '../../../shared/types'
 
 export interface SkillsListPanelProps {
@@ -90,10 +91,8 @@ export function SkillsListPanel({
                 <ShieldAlert className="size-3" />
                 {t('creatorSkills.safety.revoked')}
               </span>
-            ) : skill.creatorInstallation && (
-              !skill.creatorInstallation.lastCheckedAt
-              || Date.now() - Date.parse(skill.creatorInstallation.lastCheckedAt) > 24 * 60 * 60 * 1_000
-            ) ? (
+            ) : null}
+            {creatorSkillHasStaleSafetyStatus(skill) ? (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700">
                 <ShieldQuestion className="size-3" />
                 {t('creatorSkills.safety.stale')}

@@ -244,4 +244,30 @@ describe('Creator Skill workspace RPC boundary', () => {
     expect(await access(workspaceOne.rootPath).then(() => true, () => false)).toBe(true)
     expect(await access(sentinel).then(() => true, () => false)).toBe(true)
   })
+
+  it('never accepts an absolute Creator Skill backup path from the renderer', async () => {
+    const deleteBackups = handlers.get(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS)!
+    const sentinel = join(workspaceOne.rootPath, 'backup-boundary-sentinel.txt')
+    await writeFile(sentinel, 'keep')
+
+    expect(await deleteBackups(ctx, {
+      workspaceId: workspaceOne.id,
+      path: temporaryRoot,
+    })).toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+    })
+    expect(await deleteBackups(ctx, {
+      workspaceId: workspaceOne.id,
+      backup: {
+        slug: '..',
+        backupId: '2026-07-30T00-00-00-000Z',
+      },
+    })).toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+    })
+    expect(await access(workspaceOne.rootPath).then(() => true, () => false)).toBe(true)
+    expect(await access(sentinel).then(() => true, () => false)).toBe(true)
+  })
 })

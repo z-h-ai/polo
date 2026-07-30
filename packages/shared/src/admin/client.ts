@@ -489,9 +489,15 @@ export class AdminClient {
     accessToken: string,
     organizationId: string,
     artifactId: string,
+    version?: string,
+    referencePath?: string,
   ): Promise<CreatorArtifactDetail> {
+    const search = new URLSearchParams();
+    if (version) search.set('version', version);
+    if (referencePath) search.set('referencePath', referencePath);
+    const suffix = search.size > 0 ? `?${search}` : '';
     const response = await this.request<unknown>(
-      `/api/artifacts/${encodeURIComponent(artifactId)}`,
+      `/api/artifacts/${encodeURIComponent(artifactId)}${suffix}`,
       { method: 'GET', accessToken },
     );
     return this.readSuccessResponse(response, CreatorArtifactDetailSchema);

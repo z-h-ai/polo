@@ -91,6 +91,55 @@ describe("i18n locale parity", () => {
     });
   }
 
+  it("localizes every stable Creator Skill error code in every locale", () => {
+    const stableCodes = [
+      "VALIDATION_ERROR",
+      "archive_policy_exceeded",
+      "artifact_access_denied",
+      "artifact_not_deletable",
+      "artifact_not_found",
+      "artifact_not_published",
+      "artifact_slug_conflict",
+      "artifact_type_not_allowed",
+      "artifact_version_revoked",
+      "checksum_mismatch",
+      "content_digest_mismatch",
+      "creator_skill_cancelled",
+      "creator_skill_conflict",
+      "creator_skill_download_failed",
+      "creator_skill_feature_disabled",
+      "creator_skill_install_failed",
+      "creator_skill_not_installed",
+      "creator_skill_operation_in_progress",
+      "creator_skill_recovery_failed",
+      "creator_skill_uninstall_failed",
+      "idempotency_conflict",
+      "invalid_backup_path",
+      "invalid_creator_skill_operation_path",
+      "invalid_operation_id",
+      "invalid_skill_archive",
+      "project_skill_conflict",
+      "reference_unavailable",
+      "skill_validation_failed",
+      "upload_expired",
+      "version_conflict",
+      "version_not_deletable",
+      "workspace_context_mismatch",
+      "workspace_read_only",
+    ];
+    for (const code of stableCodes) {
+      const key = `creatorSkills.errors.${code}`;
+      expect(en[key]).toBeTruthy();
+      for (const [lang, translations] of otherLangs) {
+        expect(translations[key], `${lang} is missing ${key}`).toBeTruthy();
+        expect(
+          translations[key],
+          `${lang} still uses the English text for ${key}`,
+        ).not.toBe(en[key]);
+      }
+    }
+  });
+
   // Plural form completeness — check every locale including EN
   for (const [lang, translations] of Object.entries(locales)) {
     it(`${lang} plural forms are complete (_one has _other and vice versa)`, () => {

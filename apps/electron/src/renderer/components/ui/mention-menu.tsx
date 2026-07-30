@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { FadingText } from '@/components/ui/fading-text'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import type { LoadedSkill, LoadedSource, FileSearchResult } from '../../../shared/types'
 import { AGENTS_PLUGIN_NAME } from '@polo-ai/shared/skills/types'
 
@@ -362,7 +363,11 @@ export function InlineMentionMenu({
                   <span className={MENU_TYPE_BADGE}>
                     {item.type === 'skill' && item.skill?.creatorInstallation?.lastKnownStatus === 'revoked'
                       ? t('creatorSkills.safety.revoked')
-                      : item.type === 'skill' ? t('common.skill') : t('common.source')}
+                      : item.type === 'skill'
+                        && item.skill
+                        && creatorSkillHasStaleSafetyStatus(item.skill)
+                        ? t('creatorSkills.safety.stale')
+                        : item.type === 'skill' ? t('common.skill') : t('common.source')}
                   </span>
                 </>
               )}

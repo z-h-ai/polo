@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
   CreateCreatorArtifactRpcInputSchema,
+  CreatorArtifactIdRpcInputSchema,
+  CreatorSkillBackupDeleteRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
   CreatorSkillInstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
@@ -92,6 +94,55 @@ describe('Creator Skill boundary schemas', () => {
       expect(DeleteSkillRpcInputSchema.safeParse({
         workspaceId: 'workspace-id',
         skillSlug,
+      }).success).toBe(false)
+    }
+  })
+
+  it('accepts backup identities but never renderer-provided backup paths', () => {
+    expect(CreatorSkillBackupDeleteRpcInputSchema.safeParse({
+      workspaceId: 'workspace-id',
+      backup: {
+        slug: 'review-helper',
+        backupId: '2026-07-30T00-00-00-000Z',
+      },
+    }).success).toBe(true)
+    expect(CreatorSkillBackupDeleteRpcInputSchema.safeParse({
+      workspaceId: 'workspace-id',
+      path: '/outside/victim',
+    }).success).toBe(false)
+    expect(CreatorSkillBackupDeleteRpcInputSchema.safeParse({
+      workspaceId: 'workspace-id',
+      backup: {
+        slug: '..',
+        backupId: '2026-07-30T00-00-00-000Z',
+      },
+    }).success).toBe(false)
+  })
+
+  it('requires an immutable version for safe reference access', () => {
+    expect(CreatorArtifactIdRpcInputSchema.safeParse({
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      referencePath: 'references/guide.txt',
+    }).success).toBe(true)
+    expect(CreatorArtifactIdRpcInputSchema.safeParse({
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      referencePath: 'references/guide.txt',
+    }).success).toBe(false)
+    for (const referencePath of [
+      '../outside',
+      'references/../outside',
+      'references/nested/../../outside',
+      'references\\outside',
+      'references//outside',
+    ]) {
+      expect(CreatorArtifactIdRpcInputSchema.safeParse({
+        organizationId: 'organization-id',
+        artifactId: 'artifact-id',
+        version: '1.0.0',
+        referencePath,
       }).success).toBe(false)
     }
   })

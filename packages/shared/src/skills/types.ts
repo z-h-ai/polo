@@ -58,4 +58,6 @@ export interface LoadedSkill {
   source: SkillSource;
   /** Creator Space provenance and last-known safety state, when managed. */
   creatorInstallation?: import('../creator-skills/types.ts').InstalledCreatorSkill;
+  /** Renderer-only status of the most recent live safety check. */
+  creatorSafetyCheckStatus?: 'checking' | 'ok' | 'failed';
 }

@@ -1,9 +1,14 @@
 import * as React from 'react'
+import { useSetAtom } from 'jotai'
 import {
   CreatorSkillSafetyScheduler,
   type CreatorSkillSafetyScheduleItem,
 } from '@/lib/creator-skill-safety-scheduler'
 import { actionableCreatorSkillSafeVersion } from '@/lib/creator-skill-version'
+import {
+  creatorSkillSafetyCheckStatesAtom,
+  creatorSkillSafetyIdentityKey,
+} from '@/atoms/creator-skill-safety'
 import type { LoadedSkill } from '../../shared/types'
 
 interface ScheduledSafetyCheck extends CreatorSkillSafetyScheduleItem {
@@ -56,6 +61,7 @@ export function useCreatorSkillSafetyMonitor(
   skills: LoadedSkill[],
   workspaceId?: string,
 ): Record<string, string> {
+  const setSafetyCheckStates = useSetAtom(creatorSkillSafetyCheckStatesAtom)
   const scheduler = React.useRef<CreatorSkillSafetyScheduler<ScheduledSafetyCheck> | null>(null)
   if (!scheduler.current) {
     scheduler.current = new CreatorSkillSafetyScheduler()
@@ -110,13 +116,37 @@ export function useCreatorSkillSafetyMonitor(
     scheduler.current?.update(checks, async ({ skill }) => {
       const installed = skill.creatorInstallation
       if (!installed) return true
+      const safetyIdentity = creatorSkillSafetyIdentityKey({
+        workspaceId,
+        artifactId: installed.artifactId,
+        version: installed.version,
+        archiveChecksum: installed.archiveChecksum,
+      })
+      if (isCurrentScope()) {
+        setSafetyCheckStates(current => ({
+          ...current,
+          [safetyIdentity]: 'checking',
+        }))
+      }
       try {
         const result = await window.electronAPI.creatorSkillGetSafetyStatus({
           artifactId: installed.artifactId,
           version: installed.version,
           archiveChecksum: installed.archiveChecksum,
         })
-        if (!result.success || !isCurrentScope()) return false
+        if (!result.success || !isCurrentScope()) {
+          if (isCurrentScope()) {
+            setSafetyCheckStates(current => ({
+              ...current,
+              [safetyIdentity]: 'failed',
+            }))
+          }
+          return false
+        }
+        setSafetyCheckStates(current => ({
+          ...current,
+          [safetyIdentity]: 'ok',
+        }))
         setSafeVersionCandidates(current => {
           const next = { ...current }
           const actionable = actionableCreatorSkillSafeVersion({
@@ -159,10 +189,16 @@ export function useCreatorSkillSafetyMonitor(
         })
         return updateResult.success
       } catch {
+        if (isCurrentScope()) {
+          setSafetyCheckStates(current => ({
+            ...current,
+            [safetyIdentity]: 'failed',
+          }))
+        }
         return false
       }
     })
-  }, [skills, workspaceId])
+  }, [setSafetyCheckStates, skills, workspaceId])
 
   React.useEffect(() => () => {
     activeWorkspaceScope.current = undefined

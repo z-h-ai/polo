@@ -88,6 +88,10 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
+import {
+  creatorSkillSafetyCheckStatesAtom,
+  creatorSkillSafetyIdentityKey,
+} from "@/atoms/creator-skill-safety"
 import { panelStackAtom, panelCountAtom, focusedPanelIdAtom, focusedSessionIdAtom, focusNextPanelAtom, focusPrevPanelAtom, parseSessionIdFromRoute } from "@/atoms/panel-stack"
 import { type SessionStatusId, type SessionStatus, statusConfigsToSessionStatuses } from "@/config/session-status-config"
 import { useStatuses } from "@/hooks/useStatuses"
@@ -120,6 +124,8 @@ import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
 import { useCreatorSkillSafetyMonitor } from "@/hooks/useCreatorSkillSafetyMonitor"
+import { deleteWorkspaceSkillWithModifiedConfirmation } from "@/lib/creator-skill-delete"
+import { creatorSkillErrorDiagnostic, translateCreatorSkillError } from "@/lib/creator-skill-errors"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { PanelHeader } from "./PanelHeader"
 import { FabNewChat } from "./FabNewChat"
@@ -811,11 +817,25 @@ function AppShellContent({
     skills,
     activeWorkspaceId || undefined,
   )
+  const creatorSkillSafetyCheckStates = useAtomValue(
+    creatorSkillSafetyCheckStatesAtom,
+  )
+  const skillsWithLiveSafety = React.useMemo(() => skills.map(skill => {
+    const installed = skill.creatorInstallation
+    if (!installed || !activeWorkspaceId) return skill
+    const status = creatorSkillSafetyCheckStates[creatorSkillSafetyIdentityKey({
+      workspaceId: activeWorkspaceId,
+      artifactId: installed.artifactId,
+      version: installed.version,
+      archiveChecksum: installed.archiveChecksum,
+    })]
+    return status ? { ...skill, creatorSafetyCheckStatus: status } : skill
+  }), [activeWorkspaceId, creatorSkillSafetyCheckStates, skills])
   // Sync skills to atom for NavigationContext auto-selection
   const setSkillsAtom = useSetAtom(skillsAtom)
   React.useEffect(() => {
-    setSkillsAtom(skills)
-  }, [skills, setSkillsAtom])
+    setSkillsAtom(skillsWithLiveSafety)
+  }, [setSkillsAtom, skillsWithLiveSafety])
   // Automations — state, handlers, loading, subscriptions
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
 
@@ -1573,7 +1593,7 @@ function AppShellContent({
     ...contextValue,
     onDeleteSession: handleDeleteSession,
     enabledSources: sources,
-    skills,
+    skills: skillsWithLiveSafety,
     activeSessionWorkingDirectory,
     labels: displayLabelConfigs,
     onSessionLabelsChange: handleSessionLabelsChange,
@@ -1594,7 +1614,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skillsWithLiveSafety, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1894,18 +1914,32 @@ function AppShellContent({
   const handleDeleteSkill = useCallback(async (skillSlug: string) => {
     if (!activeWorkspace) return
     try {
-      const result = await window.electronAPI.deleteSkill({
+      const outcome = await deleteWorkspaceSkillWithModifiedConfirmation({
         workspaceId: activeWorkspace.id,
-        skillSlug,
+        slug: skillSlug,
+        api: window.electronAPI,
+        confirmPermanentDelete: () => window.confirm(
+          t('creatorSkills.uninstall.confirmForceDeleteModified'),
+        ),
       })
-      toast.success(result.detached
-        ? t('creatorSkills.uninstall.detached')
-        : t('toast.deletedSkill', { slug: skillSlug }))
+      if (outcome.status === 'error') {
+        toast.error(translateCreatorSkillError(t, outcome.result), {
+          description: creatorSkillErrorDiagnostic(outcome.result),
+        })
+        return
+      }
+      toast.success(
+        outcome.status === 'detached'
+          ? t('creatorSkills.uninstall.detached')
+          : outcome.status === 'force_deleted'
+            ? t('creatorSkills.uninstall.forceDeleted')
+            : t('toast.deletedSkill', { slug: skillSlug }),
+      )
     } catch (error) {
       console.error('[Chat] Failed to delete skill:', error)
       toast.error(t('toast.failedToDeleteSkill'))
     }
-  }, [activeWorkspace])
+  }, [activeWorkspace, t])
 
   // Respond to menu bar "New Chat" trigger
   const menuTriggerRef = useRef(menuNewChatTrigger)
@@ -3141,7 +3175,7 @@ function AppShellContent({
             {isSkillsNavigation(navState) && activeWorkspaceId && (
               /* Skills List */
               <SkillsListPanel
-                skills={skills}
+                skills={skillsWithLiveSafety}
                 workspaceId={activeWorkspaceId}
                 workspaceRootPath={activeWorkspace?.rootPath}
                 availableCreatorSkillVersions={availableCreatorSkillVersions}

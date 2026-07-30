@@ -40,11 +40,37 @@ const skill = {
 
 let listInput: unknown
 let detailVersions: Array<Record<string, unknown>>
+let detailArtifact: typeof skill
+let detailInputs: Array<Record<string, unknown>>
+let detailResponse: (
+  input: Record<string, unknown>,
+) => Promise<Record<string, unknown>> | Record<string, unknown>
+let installResponse: (
+  input: { operationId: string },
+) => Promise<Record<string, unknown>> | Record<string, unknown>
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
   listInput = undefined
   detailVersions = []
+  detailArtifact = skill
+  detailInputs = []
+  detailResponse = () => ({
+    success: true as const,
+    artifact: detailArtifact,
+    versions: detailVersions,
+  })
+  installResponse = input => ({
+    success: false as const,
+    operationId: input.operationId,
+    errorCode: 'workspace_read_only',
+    stage: 'prepare' as const,
+    diagnostic: JSON.stringify({
+      errorCode: 'workspace_read_only',
+      stage: 'prepare',
+    }),
+    retryable: false,
+  })
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
@@ -59,11 +85,10 @@ beforeEach(async () => {
           artifacts: [webApp, skill],
         }
       },
-      creatorArtifactGet: async () => ({
-        success: true as const,
-        artifact: skill,
-        versions: detailVersions,
-      }),
+      creatorArtifactGet: async (input: Record<string, unknown>) => {
+        detailInputs.push(input)
+        return detailResponse(input)
+      },
       creatorSkillGetTarget: async () => ({
         success: true as const,
         workspaceId: 'workspace-one',
@@ -90,17 +115,12 @@ beforeEach(async () => {
           maxExpandedBytes: 50 * 1024 * 1024,
         },
       }),
-      creatorSkillInstall: async (input: { operationId: string }) => ({
-        success: false as const,
-        operationId: input.operationId,
-        errorCode: 'workspace_read_only',
-        stage: 'prepare' as const,
-        diagnostic: JSON.stringify({
-          errorCode: 'workspace_read_only',
-          stage: 'prepare',
-        }),
-        retryable: false,
-      }),
+      creatorSkillInstall: async (input: { operationId: string }) => (
+        installResponse(input)
+      ),
+      onCreatorSkillProgress: () => () => {},
+      creatorSkillCancel: async () => ({ success: true as const }),
+      openUrl: async () => {},
     },
   })
 })
@@ -179,5 +199,151 @@ describe('CreatorArtifactsPanel', () => {
       .toContain('This workspace is read-only. Skill changes are not allowed.')
     expect(i18n.t('creatorSkills.errors.workspace_context_mismatch'))
       .toBe('This workspace is no longer the active workspace. Reopen it and try again.')
+  })
+
+  it('shows current and incoming source/version for a different artifact conflict', async () => {
+    detailVersions = [{
+      id: 'version-one',
+      artifactId: skill.id,
+      version: '1.0.0',
+      status: 'published',
+      createdAt: '2026-07-30T00:00:00.000Z',
+      publishedAt: '2026-07-30T00:00:00.000Z',
+      uploadGeneration: 1,
+    }]
+    installResponse = input => ({
+      success: false as const,
+      operationId: input.operationId,
+      errorCode: 'creator_skill_conflict',
+      stage: 'prepare' as const,
+      diagnostic: '{}',
+      retryable: false,
+      conflicts: ['different_artifact'],
+      conflictDetails: {
+        existing: [{
+          source: 'creator_space',
+          artifactId: 'artifact-old',
+          organizationId: 'organization-old',
+          slug: 'review-skill',
+          version: '0.9.0',
+        }],
+        incoming: {
+          source: 'creator_space',
+          artifactId: skill.id,
+          organizationId,
+          slug: 'review-skill',
+          version: '1.0.0',
+        },
+      },
+    })
+    let confirmation = ''
+    window.confirm = mock(message => {
+      confirmation = String(message)
+      return false
+    })
+
+    renderPanel(false, 'workspace-one')
+    fireEvent.click((await screen.findByText('Review Skill')).closest('button')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'Install' }))
+
+    await waitFor(() => {
+      expect(confirmation).toContain('different Creator works')
+      expect(confirmation).toContain('artifact-old')
+      expect(confirmation).toContain('0.9.0')
+      expect(confirmation).toContain('skill-one')
+      expect(confirmation).toContain('1.0.0')
+      expect(confirmation.indexOf('artifact-old'))
+        .toBeLessThan(confirmation.indexOf('skill-one'))
+    })
+  })
+
+  it('switches immutable content and file tree with the selected history version', async () => {
+    detailArtifact = {
+      ...skill,
+      latestPublishedVersion: '2.0.0',
+    }
+    detailVersions = [
+      {
+        id: 'version-one',
+        artifactId: skill.id,
+        version: '1.0.0',
+        status: 'published',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        uploadGeneration: 1,
+      },
+      {
+        id: 'version-two',
+        artifactId: skill.id,
+        version: '2.0.0',
+        status: 'published',
+        createdAt: '2026-07-30T01:00:00.000Z',
+        uploadGeneration: 1,
+      },
+    ]
+    detailResponse = input => {
+      const selected = input.version as string | undefined
+      if (!selected) {
+        return {
+          success: true as const,
+          artifact: detailArtifact,
+          versions: detailVersions,
+        }
+      }
+      if (input.referencePath) {
+        return {
+          success: true as const,
+          artifact: detailArtifact,
+          versions: detailVersions,
+          selectedVersion: selected,
+          reference: {
+            path: input.referencePath,
+            content: `Reference content for ${selected}`,
+          },
+        }
+      }
+      return {
+        success: true as const,
+        artifact: detailArtifact,
+        versions: detailVersions,
+        selectedVersion: selected,
+        skillContent: `SKILL content for ${selected}`,
+        fileTree: [{
+          path: `references/version-${selected}.txt`,
+          size: selected === '1.0.0' ? 10 : 20,
+        }],
+      }
+    }
+
+    renderPanel(false, 'workspace-one')
+    fireEvent.click((await screen.findByText('Review Skill')).closest('button')!)
+    expect(await screen.findByText('SKILL content for 2.0.0')).toBeTruthy()
+    expect(await screen.findByText('references/version-2.0.0.txt')).toBeTruthy()
+
+    const versionSelect = screen.getByRole('combobox')
+    fireEvent.pointerDown(versionSelect, {
+      button: 0,
+      buttons: 1,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    })
+    const oldVersionOption = await screen.findByRole('option', { name: '1.0.0' })
+    fireEvent.click(oldVersionOption)
+
+    expect(await screen.findByText('SKILL content for 1.0.0')).toBeTruthy()
+    expect(await screen.findByText('references/version-1.0.0.txt')).toBeTruthy()
+    expect(screen.queryByText('Reference content for 1.0.0')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as text' }))
+    expect(await screen.findByText('Reference content for 1.0.0')).toBeTruthy()
+    expect(detailInputs).toContainEqual({
+      organizationId,
+      artifactId: skill.id,
+      version: '1.0.0',
+    })
+    expect(detailInputs).toContainEqual({
+      organizationId,
+      artifactId: skill.id,
+      version: '1.0.0',
+      referencePath: 'references/version-1.0.0.txt',
+    })
   })
 })

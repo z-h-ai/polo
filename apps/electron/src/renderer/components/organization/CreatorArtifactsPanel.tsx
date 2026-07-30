@@ -27,6 +27,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { emitAdminAuthFailure } from '@/lib/admin-auth-failure'
+import { creatorSkillConflictConfirmation } from '@/lib/creator-skill-conflicts'
+import {
+  creatorSkillErrorDiagnostic,
+  translateCreatorSkillError,
+} from '@/lib/creator-skill-errors'
 import type {
   CreatorArtifact,
   CreatorArtifactDetail,
@@ -64,9 +69,7 @@ function resultMessage(
   result: { errorCode?: string; message?: string },
 ): string {
   emitAdminAuthFailure(result)
-  return t(`creatorSkills.errors.${result.errorCode ?? 'unknown'}`, {
-    defaultValue: result.message || t('creatorSkills.errors.unknown'),
-  })
+  return translateCreatorSkillError(t, result)
 }
 
 export function CreatorArtifactsPanel({
@@ -80,6 +83,16 @@ export function CreatorArtifactsPanel({
   const [artifacts, setArtifacts] = useState<CreatorArtifact[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<CreatorArtifactDetail | null>(null)
+  const [versionDetails, setVersionDetails] = useState<
+    Record<string, CreatorArtifactDetail>
+  >({})
+  const [versionDetailLoading, setVersionDetailLoading] = useState<string | null>(null)
+  const [referencePreview, setReferencePreview] = useState<{
+    path: string
+    content?: string
+    downloadUrl?: string
+  } | null>(null)
+  const [referenceLoading, setReferenceLoading] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [action, setAction] = useState<ActionState>(null)
@@ -163,9 +176,13 @@ export function CreatorArtifactsPanel({
       setDetail({
         artifact: result.artifact,
         versions: result.versions,
+        selectedVersion: result.selectedVersion,
         skillContent: result.skillContent,
         fileTree: result.fileTree,
+        reference: result.reference,
       })
+      setVersionDetails({})
+      setReferencePreview(null)
       const published = result.versions
         .filter(item => item.status === 'published')
         .sort((left, right) => right.version.localeCompare(left.version))
@@ -199,6 +216,44 @@ export function CreatorArtifactsPanel({
       setDetailLoading(false)
     }
   }, [organizationId, t])
+
+  useEffect(() => {
+    if (!detail || !installVersion) return
+    const artifactId = detail.artifact.id
+    const key = `${artifactId}\0${installVersion}`
+    if (versionDetails[key]) return
+    let active = true
+    setVersionDetailLoading(key)
+    window.electronAPI.creatorArtifactGet({
+      organizationId,
+      artifactId,
+      version: installVersion,
+    }).then(result => {
+      if (!active) return
+      if (!result.success) {
+        setError(resultMessage(t, result))
+        return
+      }
+      setVersionDetails(current => ({
+        ...current,
+        [key]: {
+          artifact: result.artifact,
+          versions: result.versions,
+          selectedVersion: result.selectedVersion ?? installVersion,
+          skillContent: result.skillContent,
+          fileTree: result.fileTree,
+          reference: result.reference,
+        },
+      }))
+    }).catch(() => {
+      if (active) setError(t('creatorSkills.errors.unknown'))
+    }).finally(() => {
+      if (active) setVersionDetailLoading(current => current === key ? null : current)
+    })
+    return () => {
+      active = false
+    }
+  }, [detail, installVersion, organizationId, t, versionDetails])
 
   useEffect(() => {
     void loadArtifacts()
@@ -257,9 +312,17 @@ export function CreatorArtifactsPanel({
   }, [detail, draftVersionId, loadDetail])
 
   const selectedVersion = useMemo(
-    () => detail?.versions.find(item => item.version === installVersion),
-    [detail, installVersion],
+    () => {
+      if (!detail) return undefined
+      const key = `${detail.artifact.id}\0${installVersion}`
+      return versionDetails[key]?.versions.find(item => item.version === installVersion)
+        ?? detail.versions.find(item => item.version === installVersion)
+    },
+    [detail, installVersion, versionDetails],
   )
+  const selectedVersionDetail = useMemo(() => (
+    detail ? versionDetails[`${detail.artifact.id}\0${installVersion}`] : undefined
+  ), [detail, installVersion, versionDetails])
   const draftVersion = useMemo(
     () => detail?.versions.find(item => item.id === draftVersionId),
     [detail, draftVersionId],
@@ -414,7 +477,13 @@ export function CreatorArtifactsPanel({
   }
 
   const install = async (confirmations?: Partial<CreatorSkillInstallInput>) => {
-    if (!detail || !workspaceId || !selectedVersion || !target?.writable) return
+    if (
+      !detail
+      || !workspaceId
+      || !selectedVersion
+      || !selectedVersionDetail
+      || !target?.writable
+    ) return
     setAction('install')
     setError(null)
     setProgress(null)
@@ -449,13 +518,10 @@ export function CreatorArtifactsPanel({
         ...confirmations,
       })
       if (!result.success && result.conflicts?.length) {
-        const accepted = window.confirm(
-          t('creatorSkills.install.confirmConflict', {
-            conflicts: result.conflicts
-              .map(conflict => t(`creatorSkills.conflict.${conflict}`))
-              .join('\n'),
-          }),
-        )
+        const accepted = window.confirm(creatorSkillConflictConfirmation(t, {
+          conflicts: result.conflicts,
+          conflictDetails: result.conflictDetails,
+        }))
         if (accepted) {
           await install({
             replaceExisting: true,
@@ -466,7 +532,8 @@ export function CreatorArtifactsPanel({
         return
       }
       if (!result.success) {
-        setError(`${resultMessage(t, result)}\n${result.diagnostic}`)
+        const diagnostic = creatorSkillErrorDiagnostic(result)
+        setError([resultMessage(t, result), diagnostic].filter(Boolean).join('\n'))
         return
       }
       setProgress({
@@ -482,6 +549,33 @@ export function CreatorArtifactsPanel({
     } finally {
       setAction(null)
       setOperationId(null)
+    }
+  }
+
+  const previewReference = async (path: string) => {
+    if (!detail || !installVersion || !path.startsWith('references/')) return
+    setReferenceLoading(path)
+    setError(null)
+    try {
+      const result = await window.electronAPI.creatorArtifactGet({
+        organizationId,
+        artifactId: detail.artifact.id,
+        version: installVersion,
+        referencePath: path,
+      })
+      if (!result.success) {
+        setError(resultMessage(t, result))
+        return
+      }
+      if (!result.reference || result.reference.path !== path) {
+        setError(t('creatorSkills.errors.reference_unavailable'))
+        return
+      }
+      setReferencePreview(result.reference)
+    } catch {
+      setError(t('creatorSkills.errors.reference_unavailable'))
+    } finally {
+      setReferenceLoading(null)
     }
   }
 
@@ -741,7 +835,13 @@ export function CreatorArtifactsPanel({
             {detail.artifact.status === 'published' && selectedVersion ? (
               <div className="space-y-3 rounded-xl bg-foreground/[0.035] p-4">
                 <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
-                  <Select value={installVersion} onValueChange={setInstallVersion}>
+                  <Select
+                    value={installVersion}
+                    onValueChange={value => {
+                      setInstallVersion(value)
+                      setReferencePreview(null)
+                    }}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {detail.versions
@@ -758,6 +858,9 @@ export function CreatorArtifactsPanel({
                     <p className="mt-1 font-mono">
                       {selectedVersion.archiveChecksum || '—'}
                     </p>
+                    <p className="mt-1 font-mono">
+                      {selectedVersion.contentDigest || '—'}
+                    </p>
                     {selectedVersion.sizeBytes !== undefined ? (
                       <p className="mt-1">
                         {t('creatorSkills.metadata.size', {
@@ -767,6 +870,12 @@ export function CreatorArtifactsPanel({
                     ) : null}
                   </div>
                 </div>
+                {versionDetailLoading === `${detail.artifact.id}\0${installVersion}` ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Spinner />
+                    {t('creatorSkills.version.loadingDetails')}
+                  </div>
+                ) : null}
                 <div className="rounded-lg border border-border/50 px-3 py-2 text-xs">
                   {target ? (
                     <>
@@ -778,7 +887,12 @@ export function CreatorArtifactsPanel({
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
-                    disabled={action !== null || !workspaceId || !target?.writable}
+                    disabled={
+                      action !== null
+                      || !workspaceId
+                      || !target?.writable
+                      || !selectedVersionDetail
+                    }
                     onClick={() => { void install() }}
                   >
                     {action === 'install'
@@ -941,31 +1055,79 @@ export function CreatorArtifactsPanel({
               </div>
             ) : null}
 
-            {detail.skillContent ? (
+            {selectedVersionDetail?.skillContent ? (
               <details className="rounded-xl border border-border/60">
                 <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
                   SKILL.md
                 </summary>
                 <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-border/60 p-4 text-xs">
-                  {detail.skillContent}
+                  {selectedVersionDetail.skillContent}
                 </pre>
               </details>
             ) : null}
 
-            {detail.fileTree?.length ? (
+            {selectedVersionDetail?.fileTree?.length ? (
               <details className="rounded-xl border border-border/60">
                 <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-                  {t('creatorSkills.files.title', { count: detail.fileTree.length })}
+                  {t('creatorSkills.files.title', {
+                    count: selectedVersionDetail.fileTree.length,
+                  })}
                 </summary>
                 <div className="max-h-56 overflow-auto border-t border-border/60 p-3 font-mono text-xs">
-                  {detail.fileTree.map(file => (
-                    <p key={file.path} className="flex justify-between gap-3 py-1">
-                      <span className="truncate">{file.path}</span>
-                      <span className="shrink-0 text-muted-foreground">{file.size} B</span>
-                    </p>
+                  {selectedVersionDetail.fileTree.map(file => (
+                    <div key={file.path} className="flex items-center justify-between gap-3 py-1">
+                      <span className="min-w-0 truncate">{file.path}</span>
+                      <span className="ml-auto shrink-0 text-muted-foreground">
+                        {file.size} B
+                      </span>
+                      {file.path.startsWith('references/') ? (
+                        <button
+                          type="button"
+                          disabled={referenceLoading !== null}
+                          className="shrink-0 rounded px-2 py-0.5 text-accent hover:bg-accent/10 disabled:opacity-50"
+                          onClick={() => { void previewReference(file.path) }}
+                        >
+                          {referenceLoading === file.path
+                            ? t('creatorSkills.references.loading')
+                            : t('creatorSkills.references.preview')}
+                        </button>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
               </details>
+            ) : null}
+
+            {referencePreview ? (
+              <section className="rounded-xl border border-border/60">
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <h3 className="truncate text-sm font-medium">
+                    {referencePreview.path}
+                  </h3>
+                  {referencePreview.downloadUrl ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        void window.electronAPI.openUrl(referencePreview.downloadUrl!)
+                      }}
+                    >
+                      <Download className="mr-1.5 size-3.5" />
+                      {t('creatorSkills.references.download')}
+                    </Button>
+                  ) : null}
+                </div>
+                {referencePreview.content !== undefined ? (
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-border/60 p-4 text-xs">
+                    {referencePreview.content}
+                  </pre>
+                ) : (
+                  <p className="border-t border-border/60 p-4 text-xs text-muted-foreground">
+                    {t('creatorSkills.references.downloadOnly')}
+                  </p>
+                )}
+              </section>
             ) : null}
 
             {canManage ? detail.versions

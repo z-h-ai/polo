@@ -34,6 +34,10 @@ import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { PERMISSION_MODE_CONFIG } from '@polo-ai/shared/agent/mode-types'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import {
+  creatorSkillErrorDiagnostic,
+  translateCreatorSkillError,
+} from '@/lib/creator-skill-errors'
 import { toast } from 'sonner'
 
 import {
@@ -354,10 +358,12 @@ export default function WorkspaceSettingsPage() {
     [enabledModes, updateWorkspaceSetting, t]
   )
 
-  const handleDeleteCreatorSkillBackups = useCallback(async (path?: string) => {
+  const handleDeleteCreatorSkillBackups = useCallback(async (
+    backup?: Pick<CreatorSkillBackup, 'slug' | 'backupId'>,
+  ) => {
     if (!window.electronAPI || !activeWorkspaceId) return
     const confirmed = window.confirm(
-      t(path
+      t(backup
         ? 'creatorSkills.backups.confirmDelete'
         : 'creatorSkills.backups.confirmDeleteAll'),
     )
@@ -365,15 +371,19 @@ export default function WorkspaceSettingsPage() {
     try {
       const result = await window.electronAPI.creatorSkillDeleteBackups({
         workspaceId: activeWorkspaceId,
-        ...(path ? { path } : {}),
+        ...(backup ? { backup } : {}),
       })
-      if (!result.success) throw new Error(result.errorCode)
+      if (!result.success) {
+        toast.error(translateCreatorSkillError(t, result), {
+          description: creatorSkillErrorDiagnostic(result),
+        })
+        return
+      }
       await loadCreatorSkillBackups()
       toast.success(t('creatorSkills.backups.deleted', { count: result.deleted }))
     } catch (error) {
-      toast.error(t('creatorSkills.errors.unknown'), {
-        description: error instanceof Error ? error.message : String(error),
-      })
+      console.error('[Creator Skills] Failed to delete backup:', error)
+      toast.error(translateCreatorSkillError(t))
     }
   }, [activeWorkspaceId, loadCreatorSkillBackups, t])
 
@@ -582,7 +592,7 @@ export default function WorkspaceSettingsPage() {
                 <SettingsCard>
                   {creatorSkillBackups.map((backup) => (
                     <SettingsRow
-                      key={backup.path}
+                      key={`${backup.slug}\0${backup.backupId}`}
                       label={backup.slug}
                       description={[
                         t(`creatorSkills.backups.operation.${backup.operation}`),
@@ -592,7 +602,10 @@ export default function WorkspaceSettingsPage() {
                       action={
                         <button
                           type="button"
-                          onClick={() => void handleDeleteCreatorSkillBackups(backup.path)}
+                          onClick={() => void handleDeleteCreatorSkillBackups({
+                            slug: backup.slug,
+                            backupId: backup.backupId,
+                          })}
                           className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors text-destructive"
                         >
                           {t("creatorSkills.backups.delete")}

@@ -110,11 +110,18 @@ export const CreatorArtifactCatalogPageSchema = z.object({
 export const CreatorArtifactDetailSchema = z.object({
   artifact: CreatorArtifactSchema,
   versions: z.array(CreatorArtifactVersionSchema),
+  selectedVersion: stableSemver.optional(),
   skillContent: z.string().max(5 * 1024 * 1024).optional(),
   fileTree: z.array(z.object({
     path: z.string().max(4_096),
     size: z.number().int().nonnegative(),
+    sha256: checksum.optional(),
   })).max(HARD_SKILL_ARCHIVE_POLICY.maxFileCount).optional(),
+  reference: z.object({
+    path: z.string().min(1).max(4_096),
+    content: z.string().max(5 * 1024 * 1024).optional(),
+    downloadUrl: z.string().url().max(8_192).optional(),
+  }).optional(),
 })
 
 export const CreatorArtifactMutationResponseSchema = z.object({
@@ -202,7 +209,18 @@ export const CreatorArtifactListRpcInputSchema = z.object({
 export const CreatorArtifactIdRpcInputSchema = z.object({
   organizationId: entityId,
   artifactId: entityId,
-}).strict()
+  version: stableSemver.optional(),
+  referencePath: z.string()
+    .min(1)
+    .max(4_096)
+    .regex(
+      /^references\/(?!\/)(?!\.{1,2}(?:\/|$))(?!.*\/\.{1,2}(?:\/|$))(?!.*\\)(?!.*\/\/).+$/,
+    )
+    .optional(),
+}).strict().refine(
+  input => !input.referencePath || Boolean(input.version),
+  { message: 'referencePath requires version', path: ['referencePath'] },
+)
 
 export const CreateCreatorArtifactVersionRpcInputSchema = z.object({
   organizationId: entityId,
@@ -280,7 +298,16 @@ export const CreatorSkillUninstallRpcInputSchema = z.object({
 
 export const CreatorSkillBackupRpcInputSchema = z.object({
   workspaceId: entityId,
-  path: z.string().max(32_768).optional(),
+}).strict()
+
+export const CreatorSkillBackupDeleteRpcInputSchema = z.object({
+  workspaceId: entityId,
+  backup: z.object({
+    slug: skillSlug,
+    backupId: z.string().regex(
+      /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/,
+    ),
+  }).strict().optional(),
 }).strict()
 
 export const CreatorSkillStatusUpdateRpcInputSchema = z.object({

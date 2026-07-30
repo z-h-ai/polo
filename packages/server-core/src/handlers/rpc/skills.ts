@@ -11,6 +11,7 @@ import {
 } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
+  CreatorSkillBackupDeleteRpcInputSchema,
   CreatorSkillBackupRpcInputSchema,
   CreatorSkillInstallRpcInputSchema,
   CreatorSkillIgnoreVersionRpcInputSchema,
@@ -385,23 +386,41 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
-    return {
-      success: true,
-      backups: await listCreatorSkillBackups(workspace.rootPath),
+    try {
+      return {
+        success: true,
+        backups: await listCreatorSkillBackups(workspace.rootPath),
+      }
+    } catch (error) {
+      return {
+        success: false,
+        errorCode: error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: unknown }).code ?? 'unknown')
+          : 'unknown',
+      }
     }
   })
 
   server.handle(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS, async (ctx, rawInput: unknown) => {
-    const input = CreatorSkillBackupRpcInputSchema.safeParse(rawInput)
+    const input = CreatorSkillBackupDeleteRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
       return { success: false, errorCode: 'workspace_read_only' }
     }
-    return {
-      success: true,
-      deleted: await deleteCreatorSkillBackups(workspace.rootPath, input.data.path),
+    try {
+      return {
+        success: true,
+        deleted: await deleteCreatorSkillBackups(workspace.rootPath, input.data.backup),
+      }
+    } catch (error) {
+      return {
+        success: false,
+        errorCode: error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: unknown }).code ?? 'unknown')
+          : 'unknown',
+      }
     }
   })
 

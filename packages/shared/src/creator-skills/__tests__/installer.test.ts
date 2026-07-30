@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'bun:test'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { strToU8, zipSync } from 'fflate'
 import { validateCreatorSkillArchive } from '../archive'
 import {
+  deleteCreatorSkillBackups,
   installCreatorSkill,
   listCreatorSkillBackups,
   recoverCreatorSkillOperations,
@@ -189,6 +199,84 @@ describe('Creator Skill workspace installer', () => {
     })
   })
 
+  it('returns structured existing and incoming identities for an unmanaged conflict', async () => {
+    await withWorkspace(async root => {
+      await mkdir(join(root, 'skills', 'install-test'), { recursive: true })
+      await writeFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        skillContent('local'),
+      )
+      const packaged = await packageGrant(root, '1.0.0')
+
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_INSTALL,
+        grant: packaged.grant,
+      }, { fetch: responseFetch(packaged.bytes) })
+
+      expect(result).toMatchObject({
+        success: false,
+        conflicts: ['workspace_skill'],
+        conflictDetails: {
+          existing: [{
+            source: 'workspace',
+            slug: 'install-test',
+          }],
+          incoming: {
+            source: 'creator_space',
+            artifactId: 'artifact-1',
+            organizationId: 'organization-1',
+            slug: 'install-test',
+            version: '1.0.0',
+          },
+        },
+      })
+    })
+  })
+
+  it('identifies a different Creator artifact and both versions in conflict details', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_FIRST,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_UPDATE,
+        grant: {
+          ...next.grant,
+          artifactId: 'artifact-2',
+          organizationId: 'organization-2',
+        },
+      }, { fetch: responseFetch(next.bytes) })
+
+      expect(result).toMatchObject({
+        success: false,
+        conflicts: ['different_artifact'],
+        conflictDetails: {
+          existing: [{
+            source: 'creator_space',
+            artifactId: 'artifact-1',
+            organizationId: 'organization-1',
+            slug: 'install-test',
+            version: '1.0.0',
+          }],
+          incoming: {
+            source: 'creator_space',
+            artifactId: 'artifact-2',
+            organizationId: 'organization-2',
+            slug: 'install-test',
+            version: '2.0.0',
+          },
+        },
+      })
+    })
+  })
+
   it('backs up local changes and detaches modified content on safe uninstall', async () => {
     await withWorkspace(async root => {
       const first = await packageGrant(root, '1.0.0')
@@ -212,7 +300,13 @@ describe('Creator Skill workspace installer', () => {
       expect(update.success).toBe(true)
       const backups = await listCreatorSkillBackups(root)
       expect(backups).toHaveLength(1)
-      expect(await readFile(join(backups[0]!.path, 'SKILL.md'), 'utf8')).toContain('Local note.')
+      expect(await readFile(join(
+        root,
+        'skill-backups',
+        backups[0]!.slug,
+        backups[0]!.backupId,
+        'SKILL.md',
+      ), 'utf8')).toContain('Local note.')
 
       await writeFile(skillPath, `${skillContent('2.0.0')}\nAnother local note.\n`)
       const uninstall = await uninstallCreatorSkill({
@@ -224,6 +318,125 @@ describe('Creator Skill workspace installer', () => {
       expect(uninstall).toMatchObject({ success: true, detached: true })
       expect(await access(skillPath).then(() => true, () => false)).toBe(true)
       expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
+
+      const forced = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+        slug: 'install-test',
+        forceDeleteModified: true,
+      })
+      expect(forced).toMatchObject({ success: true })
+      expect(await access(skillPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('rejects backup deletion through a symlink ancestor outside the workspace', async () => {
+    await withWorkspace(async root => {
+      const outside = await mkdtemp(join(tmpdir(), 'creator-skill-backup-outside-'))
+      const backupId = '2026-07-30T00-00-00-000Z'
+      try {
+        await mkdir(join(root, 'skill-backups'), { recursive: true })
+        await mkdir(join(outside, backupId), { recursive: true })
+        await writeFile(join(outside, backupId, 'victim.txt'), 'keep')
+        await writeFile(join(outside, 'sentinel.txt'), 'keep')
+        await symlink(
+          outside,
+          join(root, 'skill-backups', 'link'),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+
+        await expect(deleteCreatorSkillBackups(root, {
+          slug: 'link',
+          backupId,
+        })).rejects.toMatchObject({ code: 'invalid_backup_path' })
+        await expect(deleteCreatorSkillBackups(root))
+          .rejects.toMatchObject({ code: 'invalid_backup_path' })
+
+        expect(await readFile(join(outside, backupId, 'victim.txt'), 'utf8')).toBe('keep')
+        expect(await readFile(join(outside, 'sentinel.txt'), 'utf8')).toBe('keep')
+        expect(await access(root).then(() => true, () => false)).toBe(true)
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    })
+  })
+
+  it('rejects symlinked backup roots and targets without touching external content', async () => {
+    await withWorkspace(async root => {
+      const outside = await mkdtemp(join(tmpdir(), 'creator-skill-backup-root-outside-'))
+      const backupId = '2026-07-30T00-00-00-000Z'
+      try {
+        await mkdir(join(outside, 'victim'), { recursive: true })
+        await writeFile(join(outside, 'victim', 'sentinel.txt'), 'keep')
+        await symlink(
+          outside,
+          join(root, 'skill-backups'),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+        await expect(deleteCreatorSkillBackups(root))
+          .rejects.toMatchObject({ code: 'invalid_backup_path' })
+        expect(await readFile(join(outside, 'victim', 'sentinel.txt'), 'utf8')).toBe('keep')
+
+        await rm(join(root, 'skill-backups'))
+        await mkdir(join(root, 'skill-backups', 'install-test'), { recursive: true })
+        await symlink(
+          join(outside, 'victim'),
+          join(root, 'skill-backups', 'install-test', backupId),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+        await expect(deleteCreatorSkillBackups(root, {
+          slug: 'install-test',
+          backupId,
+        })).rejects.toMatchObject({ code: 'invalid_backup_path' })
+        expect(await readFile(join(outside, 'victim', 'sentinel.txt'), 'utf8')).toBe('keep')
+        expect(await access(root).then(() => true, () => false)).toBe(true)
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
+    })
+  })
+
+  it('rejects preserved local backup writes through a symlink ancestor', async () => {
+    await withWorkspace(async root => {
+      const outside = await mkdtemp(join(tmpdir(), 'creator-skill-preserve-outside-'))
+      try {
+        const first = await packageGrant(root, '1.0.0')
+        expect((await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: OP_BASE,
+          grant: first.grant,
+        }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+        const skillPath = join(root, 'skills', 'install-test', 'SKILL.md')
+        await writeFile(skillPath, `${skillContent('1.0.0')}\nLocal note.\n`)
+        await mkdir(join(root, 'skill-backups'), { recursive: true })
+        await symlink(
+          outside,
+          join(root, 'skill-backups', 'install-test'),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+        await writeFile(join(outside, 'sentinel.txt'), 'keep')
+
+        const next = await packageGrant(root, '2.0.0')
+        const result = await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: OP_UPDATE,
+          grant: next.grant,
+          replaceExisting: true,
+          backupLocalChanges: true,
+        }, { fetch: responseFetch(next.bytes) })
+
+        expect(result).toMatchObject({
+          success: false,
+          errorCode: 'invalid_backup_path',
+        })
+        expect(await readFile(skillPath, 'utf8')).toContain('Local note.')
+        expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+        expect(await readFile(join(outside, 'sentinel.txt'), 'utf8')).toBe('keep')
+        expect((await readdir(outside)).sort()).toEqual(['sentinel.txt'])
+      } finally {
+        await rm(outside, { recursive: true, force: true })
+      }
     })
   })
 

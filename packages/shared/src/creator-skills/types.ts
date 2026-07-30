@@ -102,13 +102,20 @@ export interface CreatorArtifactCatalogPage {
 export interface CreatorArtifactDetail {
   artifact: CreatorArtifact
   versions: CreatorArtifactVersion[]
+  selectedVersion?: string
   skillContent?: string
   fileTree?: CreatorSkillFileNode[]
+  reference?: {
+    path: string
+    content?: string
+    downloadUrl?: string
+  }
 }
 
 export interface CreatorSkillFileNode {
   path: string
   size: number
+  sha256?: string
 }
 
 export interface CreateCreatorArtifactInput {
@@ -201,6 +208,19 @@ export type CreatorSkillInstallConflict =
   | 'different_artifact'
   | 'local_changes'
 
+export interface CreatorSkillInstallIdentity {
+  source: 'creator_space' | 'workspace' | 'global'
+  slug: string
+  artifactId?: string
+  organizationId?: string
+  version?: string
+}
+
+export interface CreatorSkillConflictDetails {
+  existing: CreatorSkillInstallIdentity[]
+  incoming: CreatorSkillInstallIdentity
+}
+
 export interface CreatorSkillInstallInput {
   workspaceId: string
   workingDirectory?: string
@@ -227,14 +247,15 @@ export type CreatorSkillOperationResult =
       message?: string
       path?: string
       conflicts?: CreatorSkillInstallConflict[]
+      conflictDetails?: CreatorSkillConflictDetails
       diagnostic: string
       retryable: boolean
     }
 
 export interface CreatorSkillBackup {
+  backupId: string
   slug: string
   createdAt: string
   sizeBytes: number
-  path: string
   operation: 'update'
 }

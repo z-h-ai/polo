@@ -31,6 +31,7 @@ import {
 import {
   HARD_SKILL_ARCHIVE_POLICY,
   type CreatorSkillBackup,
+  type CreatorSkillConflictDetails,
   type CreatorSkillInstallConflict,
   type CreatorSkillInstallInput,
   type CreatorSkillOperationProgress,
@@ -92,6 +93,7 @@ function errorResult(args: {
   message: string
   path?: string
   conflicts?: CreatorSkillInstallConflict[]
+  conflictDetails?: CreatorSkillConflictDetails
   retryable?: boolean
 }): CreatorSkillOperationResult {
   return {
@@ -102,6 +104,7 @@ function errorResult(args: {
     message: args.message,
     ...(args.path ? { path: args.path } : {}),
     ...(args.conflicts ? { conflicts: args.conflicts } : {}),
+    ...(args.conflictDetails ? { conflictDetails: args.conflictDetails } : {}),
     diagnostic: JSON.stringify({
       operationId: args.operationId,
       stage: args.stage,
@@ -120,6 +123,10 @@ function invalidOperationPath(message: string): Error {
   return Object.assign(new Error(message), { code: 'invalid_creator_skill_operation_path' })
 }
 
+function invalidBackupPath(message: string): Error {
+  return Object.assign(new Error(message), { code: 'invalid_backup_path' })
+}
+
 function assertChildPath(parent: string, candidate: string, label: string): void {
   if (candidate === parent || !candidate.startsWith(`${parent}${sep}`)) {
     throw invalidOperationPath(`${label} is outside its allowed directory`)
@@ -135,6 +142,109 @@ async function canonicalWorkspaceRoot(workspaceRoot: string): Promise<string> {
     return canonical
   }
   return candidate
+}
+
+async function lstatIfPresent(path: string) {
+  try {
+    return await lstat(path)
+  } catch (error) {
+    if (
+      error
+      && typeof error === 'object'
+      && (error as { code?: string }).code === 'ENOENT'
+    ) {
+      return null
+    }
+    throw error
+  }
+}
+
+async function assertSafeBackupDirectory(
+  path: string,
+  parent: string,
+  label: string,
+): Promise<void> {
+  assertChildPath(parent, path, label)
+  const pathStats = await lstatIfPresent(path)
+  if (!pathStats) return
+  if (pathStats.isSymbolicLink() || !pathStats.isDirectory()) {
+    throw invalidBackupPath(`${label} must be a regular directory`)
+  }
+  const canonical = await realpath(path)
+  if (canonical !== path) {
+    throw invalidBackupPath(`${label} cannot resolve through a symbolic link`)
+  }
+}
+
+async function resolveCreatorSkillBackupTarget(args: {
+  workspaceRoot: string
+  slug: string
+  backupId: string
+  createAncestors?: boolean
+}): Promise<{
+  workspaceRoot: string
+  backupRoot: string
+  slugBackupRoot: string
+  targetPath: string
+  targetExists: boolean
+}> {
+  if (!SKILL_SLUG_PATTERN.test(args.slug) || !BACKUP_NAME_PATTERN.test(args.backupId)) {
+    throw invalidBackupPath('Creator Skill backup identity is invalid')
+  }
+  const canonicalWorkspace = await canonicalWorkspaceRoot(args.workspaceRoot)
+  const backupRoot = resolve(canonicalWorkspace, BACKUP_DIRECTORY)
+  assertChildPath(canonicalWorkspace, backupRoot, 'Creator Skill backup root')
+  await assertSafeBackupDirectory(
+    backupRoot,
+    canonicalWorkspace,
+    'Creator Skill backup root',
+  )
+  if (!await lstatIfPresent(backupRoot) && args.createAncestors) {
+    await mkdir(backupRoot, { mode: 0o700 })
+    await assertSafeBackupDirectory(
+      backupRoot,
+      canonicalWorkspace,
+      'Creator Skill backup root',
+    )
+  }
+
+  const slugBackupRoot = resolve(backupRoot, args.slug)
+  await assertSafeBackupDirectory(
+    slugBackupRoot,
+    backupRoot,
+    'Creator Skill slug backup root',
+  )
+  if (!await lstatIfPresent(slugBackupRoot) && args.createAncestors) {
+    if (!await lstatIfPresent(backupRoot)) {
+      throw invalidBackupPath('Creator Skill backup root is unavailable')
+    }
+    await mkdir(slugBackupRoot, { mode: 0o700 })
+    await assertSafeBackupDirectory(
+      slugBackupRoot,
+      backupRoot,
+      'Creator Skill slug backup root',
+    )
+  }
+
+  const targetPath = resolve(slugBackupRoot, args.backupId)
+  assertChildPath(slugBackupRoot, targetPath, 'Creator Skill backup target')
+  const targetStats = await lstatIfPresent(targetPath)
+  if (targetStats) {
+    if (targetStats.isSymbolicLink() || !targetStats.isDirectory()) {
+      throw invalidBackupPath('Creator Skill backup target must be a regular directory')
+    }
+    const canonicalTarget = await realpath(targetPath)
+    if (canonicalTarget !== targetPath) {
+      throw invalidBackupPath('Creator Skill backup target cannot resolve through a symbolic link')
+    }
+  }
+  return {
+    workspaceRoot: canonicalWorkspace,
+    backupRoot,
+    slugBackupRoot,
+    targetPath,
+    targetExists: targetStats !== null,
+  }
 }
 
 async function ensureOperationRoot(workspaceRoot: string): Promise<{
@@ -263,24 +373,15 @@ async function deriveJournalPaths(
   let preserveBackupPath: string | undefined
   if (journal.preserveBackupPath !== undefined) {
     const backupName = basename(journal.preserveBackupPath)
-    if (!BACKUP_NAME_PATTERN.test(backupName)) {
-      throw invalidOperationPath('Creator Skill preserved backup name is invalid')
-    }
-    const backupRoot = resolve(canonicalWorkspace, BACKUP_DIRECTORY)
-    const slugBackupRoot = resolve(backupRoot, journal.slug)
-    assertChildPath(canonicalWorkspace, backupRoot, 'Creator Skill backup root')
-    assertChildPath(backupRoot, slugBackupRoot, 'Creator Skill slug backup root')
-    await assertCanonicalPathWhenPresent(backupRoot, 'Creator Skill backup root')
-    await assertCanonicalPathWhenPresent(slugBackupRoot, 'Creator Skill slug backup root')
-    preserveBackupPath = resolve(slugBackupRoot, backupName)
-    assertChildPath(slugBackupRoot, preserveBackupPath, 'Creator Skill preserved backup')
+    const backupTarget = await resolveCreatorSkillBackupTarget({
+      workspaceRoot: canonicalWorkspace,
+      slug: journal.slug,
+      backupId: backupName,
+    })
+    preserveBackupPath = backupTarget.targetPath
     if (await canonicalizePotentialPath(journal.preserveBackupPath) !== preserveBackupPath) {
       throw invalidOperationPath('Creator Skill recovery journal contains an out-of-bound backup')
     }
-    await assertCanonicalPathWhenPresent(
-      preserveBackupPath,
-      'Creator Skill preserved backup',
-    )
   }
 
   return {
@@ -522,6 +623,7 @@ async function inspectConflicts(
   conflicts: CreatorSkillInstallConflict[]
   existing?: InstalledCreatorSkill
   localModified: boolean
+  conflictDetails: CreatorSkillConflictDetails
 }> {
   const slug = input.grant.slug
   const targetPath = join(workspaceRoot, 'skills', slug)
@@ -549,15 +651,49 @@ async function inspectConflicts(
   }
 
   const conflicts: CreatorSkillInstallConflict[] = []
+  const existingIdentities: CreatorSkillConflictDetails['existing'] = []
   if (targetExists && !existing) conflicts.push('workspace_skill')
+  if (targetExists && !existing) {
+    existingIdentities.push({
+      source: 'workspace',
+      slug,
+    })
+  }
   if (existing && existing.artifactId !== input.grant.artifactId) {
     conflicts.push('different_artifact')
+  }
+  if (existing) {
+    existingIdentities.push({
+      source: 'creator_space',
+      artifactId: existing.artifactId,
+      organizationId: existing.organizationId,
+      slug: existing.slug,
+      version: existing.version,
+    })
   }
   if (localModified) conflicts.push('local_changes')
   if (await exists(join(homedir(), '.agents', 'skills', slug))) {
     conflicts.push('global_skill')
+    existingIdentities.push({
+      source: 'global',
+      slug,
+    })
   }
-  return { conflicts, ...(existing ? { existing } : {}), localModified }
+  return {
+    conflicts,
+    ...(existing ? { existing } : {}),
+    localModified,
+    conflictDetails: {
+      existing: existingIdentities,
+      incoming: {
+        source: 'creator_space',
+        artifactId: input.grant.artifactId,
+        organizationId: input.grant.organizationId,
+        slug: input.grant.slug,
+        version: input.grant.version,
+      },
+    },
+  }
 }
 
 function confirmationsMissing(
@@ -622,6 +758,7 @@ export async function installCreatorSkill(
           errorCode: 'creator_skill_conflict',
           message: 'Installing this Skill requires explicit conflict confirmation',
           conflicts: missing,
+          conflictDetails: conflictState.conflictDetails,
         })
       }
 
@@ -707,12 +844,12 @@ export async function installCreatorSkill(
       await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
       const oldLedger = await readLedgerSnapshot(canonicalWorkspace)
       const preserveBackupPath = conflictState.localModified
-        ? resolve(
-            canonicalWorkspace,
-            BACKUP_DIRECTORY,
-            input.grant.slug,
-            creatorSkillBackupTimestamp(),
-          )
+        ? (await resolveCreatorSkillBackupTarget({
+            workspaceRoot: canonicalWorkspace,
+            slug: input.grant.slug,
+            backupId: creatorSkillBackupTimestamp(),
+            createAncestors: true,
+          })).targetPath
         : undefined
       journal = {
         schemaVersion: 1,
@@ -752,7 +889,18 @@ export async function installCreatorSkill(
       let backupPath: string | undefined
       if (preserveBackupPath && await exists(transactionBackupPath)) {
         await withBackupManagementLock(canonicalWorkspace, async () => {
-          await mkdir(dirname(preserveBackupPath), { recursive: true, mode: 0o700 })
+          const backupTarget = await resolveCreatorSkillBackupTarget({
+            workspaceRoot: canonicalWorkspace,
+            slug: input.grant.slug,
+            backupId: basename(preserveBackupPath),
+            createAncestors: true,
+          })
+          if (
+            backupTarget.targetPath !== preserveBackupPath
+            || backupTarget.targetExists
+          ) {
+            throw invalidBackupPath('Creator Skill backup target is unsafe or already exists')
+          }
           await rename(transactionBackupPath, preserveBackupPath)
         })
         backupPath = preserveBackupPath
@@ -874,7 +1022,7 @@ export async function uninstallCreatorSkill(args: {
       const canonicalWorkspace = resolvedOperation.workspaceRoot
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       const installed = ledger.installed.find(item => item.slug === args.slug)
-      if (!installed) {
+      if (!installed && !args.forceDeleteModified) {
         return errorResult({
           operationId: args.operationId,
           stage: 'prepare',
@@ -887,7 +1035,7 @@ export async function uninstallCreatorSkill(args: {
       await assertCanonicalPathWhenPresent(resolve(canonicalWorkspace, 'skills'), 'Workspace Skills root')
       await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
       let modified = false
-      if (await exists(targetPath)) {
+      if (installed && await exists(targetPath)) {
         try {
           modified = (
             await scanCreatorSkillDirectory(targetPath)
@@ -896,7 +1044,9 @@ export async function uninstallCreatorSkill(args: {
           modified = true
         }
       }
-      const nextLedger = removeLedgerInstallation(ledger, args.slug)
+      const nextLedger = installed
+        ? removeLedgerInstallation(ledger, args.slug)
+        : ledger
       if (modified && !args.forceDeleteModified) {
         await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
         return {
@@ -1023,7 +1173,12 @@ export async function recoverCreatorSkillOperations(workspaceRoot: string): Prom
 export async function listCreatorSkillBackups(
   workspaceRoot: string,
 ): Promise<CreatorSkillBackup[]> {
-  const root = join(workspaceRoot, BACKUP_DIRECTORY)
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const root = resolve(canonicalWorkspace, BACKUP_DIRECTORY)
+  assertChildPath(canonicalWorkspace, root, 'Creator Skill backup root')
+  const rootStats = await lstatIfPresent(root)
+  if (!rootStats) return []
+  await assertSafeBackupDirectory(root, canonicalWorkspace, 'Creator Skill backup root')
   let slugs
   try {
     slugs = await readdir(root, { withFileTypes: true })
@@ -1032,17 +1187,34 @@ export async function listCreatorSkillBackups(
   }
   const backups: CreatorSkillBackup[] = []
   for (const slugEntry of slugs) {
+    if (slugEntry.isSymbolicLink()) {
+      throw invalidBackupPath('Creator Skill backup slug cannot be a symbolic link')
+    }
     if (!slugEntry.isDirectory()) continue
-    const slugPath = join(root, slugEntry.name)
+    if (!SKILL_SLUG_PATTERN.test(slugEntry.name)) continue
+    const slugPath = resolve(root, slugEntry.name)
+    await assertSafeBackupDirectory(
+      slugPath,
+      root,
+      'Creator Skill slug backup root',
+    )
     const versions = await readdir(slugPath, { withFileTypes: true })
     for (const version of versions) {
+      if (version.isSymbolicLink()) {
+        throw invalidBackupPath('Creator Skill backup target cannot be a symbolic link')
+      }
       if (!version.isDirectory()) continue
-      const path = join(slugPath, version.name)
-      backups.push({
+      if (!BACKUP_NAME_PATTERN.test(version.name)) continue
+      const resolved = await resolveCreatorSkillBackupTarget({
+        workspaceRoot: canonicalWorkspace,
         slug: slugEntry.name,
-        createdAt: inferBackupCreatedAt(path),
-        sizeBytes: await directorySize(path),
-        path,
+        backupId: version.name,
+      })
+      backups.push({
+        backupId: version.name,
+        slug: slugEntry.name,
+        createdAt: inferBackupCreatedAt(resolved.targetPath),
+        sizeBytes: await directorySize(resolved.targetPath),
         operation: 'update',
       })
     }
@@ -1052,23 +1224,29 @@ export async function listCreatorSkillBackups(
 
 export async function deleteCreatorSkillBackups(
   workspaceRoot: string,
-  path?: string,
+  backup?: { slug: string; backupId: string },
 ): Promise<number> {
   return withBackupManagementLock(workspaceRoot, async () => {
-    const root = resolve(workspaceRoot, BACKUP_DIRECTORY)
-    if (!path) {
-      const count = (await listCreatorSkillBackups(workspaceRoot)).length
-      await rm(root, { recursive: true, force: true })
-      return count
+    if (!backup) {
+      const backups = await listCreatorSkillBackups(workspaceRoot)
+      for (const item of backups) {
+        const target = await resolveCreatorSkillBackupTarget({
+          workspaceRoot,
+          slug: item.slug,
+          backupId: item.backupId,
+        })
+        if (!target.targetExists) continue
+        await rm(target.targetPath, { recursive: true, force: true })
+      }
+      return backups.length
     }
-    const target = resolve(path)
-    if (!target.startsWith(`${root}${sep}`) || target === root) {
-      throw Object.assign(new Error('Backup path is outside the workspace backup directory'), {
-        code: 'invalid_backup_path',
-      })
-    }
-    if (!await exists(target)) return 0
-    await rm(target, { recursive: true, force: true })
+    const target = await resolveCreatorSkillBackupTarget({
+      workspaceRoot,
+      slug: backup.slug,
+      backupId: backup.backupId,
+    })
+    if (!target.targetExists) return 0
+    await rm(target.targetPath, { recursive: true, force: true })
     return 1
   })
 }
@@ -1119,13 +1297,15 @@ export async function copyCreatorSkillBackupForTesting(
   workspaceRoot: string,
   slug: string,
 ): Promise<string> {
-  const target = join(
+  const target = await resolveCreatorSkillBackupTarget({
     workspaceRoot,
-    BACKUP_DIRECTORY,
-    basename(slug),
-    creatorSkillBackupTimestamp(),
-  )
-  await mkdir(dirname(target), { recursive: true })
-  await cp(source, target, { recursive: true, errorOnExist: true })
-  return target
+    slug,
+    backupId: creatorSkillBackupTimestamp(),
+    createAncestors: true,
+  })
+  if (target.targetExists) {
+    throw invalidBackupPath('Creator Skill backup target already exists')
+  }
+  await cp(source, target.targetPath, { recursive: true, errorOnExist: true })
+  return target.targetPath
 }

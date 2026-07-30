@@ -7,6 +7,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
+import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import type { LoadedSkill } from '../../../shared/types'
 
 // ============================================================================
@@ -157,6 +158,10 @@ export function InlineSkillMention({
                   {skill.creatorInstallation?.lastKnownStatus === 'revoked' ? (
                     <span className="shrink-0 rounded bg-destructive/10 px-1 py-0.5 text-[9px] text-destructive">
                       {t('creatorSkills.safety.revoked')}
+                    </span>
+                  ) : creatorSkillHasStaleSafetyStatus(skill) ? (
+                    <span className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[9px] text-amber-700">
+                      {t('creatorSkills.safety.stale')}
                     </span>
                   ) : null}
                 </div>

@@ -7,6 +7,7 @@
  */
 
 import * as React from 'react'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useState, useCallback } from 'react'
 import { AlertTriangle } from 'lucide-react'
@@ -17,6 +18,17 @@ import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { routes, navigate } from '@/lib/navigate'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
+import { creatorSkillConflictConfirmation } from '@/lib/creator-skill-conflicts'
+import { deleteWorkspaceSkillWithModifiedConfirmation } from '@/lib/creator-skill-delete'
+import {
+  creatorSkillErrorDiagnostic,
+  translateCreatorSkillError,
+} from '@/lib/creator-skill-errors'
+import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
+import {
+  creatorSkillSafetyCheckStatesAtom,
+  creatorSkillSafetyIdentityKey,
+} from '@/atoms/creator-skill-safety'
 import {
   actionableCreatorSkillSafeVersion,
   compareStableCreatorSkillVersion,
@@ -99,18 +111,59 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   const creatorArchiveChecksum = creatorInstallation?.archiveChecksum
   const creatorIgnoredVersion = creatorInstallation?.ignoredVersion
   const creatorInstalledVersion = creatorInstallation?.version
+  const setCreatorSkillSafetyCheckStates = useSetAtom(
+    creatorSkillSafetyCheckStatesAtom,
+  )
+  const creatorSkillSafetyCheckStates = useAtomValue(
+    creatorSkillSafetyCheckStatesAtom,
+  )
+  const safetyIdentity = (
+    creatorArtifactId
+    && creatorArchiveChecksum
+    && creatorInstalledVersion
+  ) ? creatorSkillSafetyIdentityKey({
+      workspaceId,
+      artifactId: creatorArtifactId,
+      version: creatorInstalledVersion,
+      archiveChecksum: creatorArchiveChecksum,
+    }) : null
+  const currentSafetyCheckStatus = safetyIdentity
+    ? creatorSkillSafetyCheckStates[safetyIdentity]
+    : undefined
   useEffect(() => {
     if (!creatorArtifactId || !creatorArchiveChecksum || !creatorInstalledVersion) {
       setAvailableVersion(null)
       return
     }
+    const requestIdentity = creatorSkillSafetyIdentityKey({
+      workspaceId,
+      artifactId: creatorArtifactId,
+      version: creatorInstalledVersion,
+      archiveChecksum: creatorArchiveChecksum,
+    })
+    setCreatorSkillSafetyCheckStates(current => ({
+      ...current,
+      [requestIdentity]: 'checking',
+    }))
     let active = true
     void window.electronAPI.creatorSkillGetSafetyStatus({
       artifactId: creatorArtifactId,
       version: creatorInstalledVersion,
       archiveChecksum: creatorArchiveChecksum,
     }).then(async result => {
-      if (!active || !result.success) return
+      if (!active) return
+      if (!result.success) {
+        setAvailableVersion(null)
+        setCreatorSkillSafetyCheckStates(current => ({
+          ...current,
+          [requestIdentity]: 'failed',
+        }))
+        return
+      }
+      setCreatorSkillSafetyCheckStates(current => ({
+        ...current,
+        [requestIdentity]: 'ok',
+      }))
       await window.electronAPI.creatorSkillUpdateSafetyStatus({
         workspaceId,
         status: {
@@ -130,7 +183,13 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         status: result.status,
       }))
     }).catch(() => {
-      if (active) setAvailableVersion(null)
+      if (active) {
+        setAvailableVersion(null)
+        setCreatorSkillSafetyCheckStates(current => ({
+          ...current,
+          [requestIdentity]: 'failed',
+        }))
+      }
     })
     return () => {
       active = false
@@ -140,6 +199,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     creatorArchiveChecksum,
     creatorIgnoredVersion,
     creatorInstalledVersion,
+    setCreatorSkillSafetyCheckStates,
     workspaceId,
   ])
 
@@ -157,7 +217,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
       ignoredVersion: availableVersion,
     })
     if (result.success) setAvailableVersion(null)
-    else toast.error(t('creatorSkills.errors.unknown'))
+    else toast.error(translateCreatorSkillError(t, result))
   }, [availableVersion, creatorInstallation, t, workspaceId])
 
   const handleUpdateCreatorSkill = useCallback(async () => {
@@ -170,7 +230,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         version: availableVersion,
       })
       if (!grant.success) {
-        toast.error(grant.message || t('creatorSkills.errors.unknown'))
+        toast.error(translateCreatorSkillError(t, grant))
         return
       }
       const runInstall = (confirmations: {
@@ -202,10 +262,9 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
       }
       let result = await runInstall()
       if (!result.success && result.conflicts?.length) {
-        const accepted = window.confirm(t('creatorSkills.install.confirmConflict', {
-          conflicts: result.conflicts
-            .map(conflict => t(`creatorSkills.conflict.${conflict}`))
-            .join('\n'),
+        const accepted = window.confirm(creatorSkillConflictConfirmation(t, {
+          conflicts: result.conflicts,
+          conflictDetails: result.conflictDetails,
         }))
         if (!accepted) return
         result = await runInstall({
@@ -215,17 +274,16 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         })
       }
       if (!result.success) {
-        toast.error(t(`creatorSkills.errors.${result.errorCode}`, {
-          defaultValue: result.message || t('creatorSkills.errors.unknown'),
-        }), { description: result.diagnostic })
+        toast.error(translateCreatorSkillError(t, result), {
+          description: creatorSkillErrorDiagnostic(result),
+        })
         return
       }
       setAvailableVersion(null)
       toast.success(t('creatorSkills.update.success', { version: availableVersion }))
     } catch (caught) {
-      toast.error(t('creatorSkills.errors.unknown'), {
-        description: caught instanceof Error ? caught.message : undefined,
-      })
+      console.error('[Creator Skills] Failed to update Skill:', caught)
+      toast.error(translateCreatorSkillError(t))
     } finally {
       setUpdatingCreatorSkill(false)
       setUpdateOperationId(null)
@@ -251,22 +309,34 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
 
     try {
       if (skill.source !== 'workspace') return
-      const result = await window.electronAPI.deleteSkill({ workspaceId, skillSlug })
-      toast.success(result.detached
-        ? t('creatorSkills.uninstall.detached')
-        : t('skillInfo.deletedSkill', { name: skill.metadata.name }))
-      if (!result.detached) navigate(routes.view.skills())
-    } catch (err) {
-      const errorCode = err && typeof err === 'object' && 'code' in err
-        ? String((err as { code?: unknown }).code ?? '')
-        : ''
-      toast.error(errorCode
-        ? t(`creatorSkills.errors.${errorCode}`, {
-            defaultValue: t('skillInfo.failedToDelete'),
-          })
-        : t('skillInfo.failedToDelete'), {
-        description: errorCode ? undefined : err instanceof Error ? err.message : undefined,
+      const outcome = await deleteWorkspaceSkillWithModifiedConfirmation({
+        workspaceId,
+        slug: skillSlug,
+        api: window.electronAPI,
+        confirmPermanentDelete: () => window.confirm(
+          t('creatorSkills.uninstall.confirmForceDeleteModified'),
+        ),
       })
+      if (outcome.status === 'error') {
+        toast.error(translateCreatorSkillError(t, outcome.result), {
+          description: creatorSkillErrorDiagnostic(outcome.result),
+        })
+        return
+      }
+      toast.success(
+        outcome.status === 'detached'
+          ? t('creatorSkills.uninstall.detached')
+          : outcome.status === 'force_deleted'
+            ? t('creatorSkills.uninstall.forceDeleted')
+            : t('skillInfo.deletedSkill', { name: skill.metadata.name }),
+      )
+      if (outcome.status !== 'detached') navigate(routes.view.skills())
+    } catch (err) {
+      const payload = err && typeof err === 'object'
+        ? err as { code?: unknown; message?: unknown }
+        : undefined
+      console.error('[Creator Skills] Failed to delete Skill:', err)
+      toast.error(translateCreatorSkillError(t, payload))
     }
   }, [skill, workspaceId, skillSlug, t])
 
@@ -340,10 +410,11 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>{t('creatorSkills.safety.archived')}</span>
             </div>
-          ) : skill.creatorInstallation && (
-            !skill.creatorInstallation.lastCheckedAt
-            || Date.now() - Date.parse(skill.creatorInstallation.lastCheckedAt) > 24 * 60 * 60 * 1_000
-          ) ? (
+          ) : null}
+          {creatorSkillHasStaleSafetyStatus({
+            ...skill,
+            creatorSafetyCheckStatus: currentSafetyCheckStatus,
+          }) ? (
             <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>{t('creatorSkills.safety.stale')}</span>

@@ -244,7 +244,10 @@ import type {
   CreatorArtifactDetail,
   CreatorArtifactVersion,
   CreatorSkillBackup,
+  CreatorSkillConflictDetails,
   CreatorSkillDownloadGrant,
+  CreatorSkillInstallConflict,
+  CreatorSkillInstallIdentity,
   CreatorSkillInstallInput,
   CreatorSkillOperationProgress,
   CreatorSkillOperationResult,
@@ -258,7 +261,10 @@ export type {
   CreatorArtifactDetail,
   CreatorArtifactVersion,
   CreatorSkillBackup,
+  CreatorSkillConflictDetails,
   CreatorSkillDownloadGrant,
+  CreatorSkillInstallConflict,
+  CreatorSkillInstallIdentity,
   CreatorSkillInstallInput,
   CreatorSkillOperationProgress,
   CreatorSkillOperationResult,
@@ -591,6 +597,8 @@ export interface ElectronAPI {
   creatorArtifactGet(input: {
     organizationId: string
     artifactId: string
+    version?: string
+    referencePath?: string
   }): Promise<OrganizationRpcResult<CreatorArtifactDetail>>
   creatorArtifactCreate(input: {
     organizationId: string
@@ -683,7 +691,10 @@ export interface ElectronAPI {
   >
   creatorSkillDeleteBackups(input: {
     workspaceId: string
-    path?: string
+    backup?: {
+      slug: string
+      backupId: string
+    }
   }): Promise<
     { success: true; deleted: number }
     | { success: false; errorCode: string }

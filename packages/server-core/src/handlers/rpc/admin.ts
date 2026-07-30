@@ -544,6 +544,8 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         accessToken,
         input.data.organizationId,
         input.data.artifactId,
+        input.data.version,
+        input.data.referencePath,
       ))
   })
 
