@@ -39,6 +39,110 @@ export interface AppCatalogState {
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
 export const BUSY_RUNTIME_STATUS_LIMIT = 32
 export const CATALOG_SYNC_SUPERSEDED_RETRY_LIMIT = 2
+export const BUSY_RUNTIME_STATUS_POLL_INTERVAL_MS = 500
+
+export interface BusyStatusPollRequest {
+  requestGeneration: number
+  isCurrent(): boolean
+}
+
+interface BusyStatusPollTimers {
+  set(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>
+  clear(timer: ReturnType<typeof setTimeout>): void
+}
+
+export interface BusyStatusPoller {
+  replace(task: ((request: BusyStatusPollRequest) => Promise<void>) | null): void
+  stop(): void
+}
+
+/**
+ * Runs a replaceable status poll with one shared in-flight slot.
+ *
+ * A busy-set change invalidates the old loop immediately, but the replacement
+ * still waits for the old request to settle. The request generation is a
+ * second commit fence, so an invalidated response cannot publish stale state.
+ */
+export function createBusyStatusPoller(
+  intervalMs = BUSY_RUNTIME_STATUS_POLL_INTERVAL_MS,
+  timers: BusyStatusPollTimers = {
+    set: (callback, delayMs) => setTimeout(callback, delayMs),
+    clear: timer => clearTimeout(timer),
+  },
+): BusyStatusPoller {
+  let stopped = false
+  let loopGeneration = 0
+  let requestGeneration = 0
+  let task: ((request: BusyStatusPollRequest) => Promise<void>) | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let inFlight: Promise<void> | null = null
+
+  const clearTimer = () => {
+    if (timer === null) return
+    timers.clear(timer)
+    timer = null
+  }
+
+  const schedule = (generation: number) => {
+    clearTimer()
+    if (stopped || generation !== loopGeneration || !task) return
+    timer = timers.set(() => {
+      timer = null
+      void run(generation)
+    }, intervalMs)
+  }
+
+  const run = async (generation: number) => {
+    const previous = inFlight
+    if (previous) {
+      try {
+        await previous
+      } catch {
+        // Poll failures are represented in hook state; they must not break the loop.
+      }
+    }
+    if (stopped || generation !== loopGeneration || !task) return
+
+    const currentTask = task
+    const currentRequestGeneration = ++requestGeneration
+    const isCurrent = () => (
+      !stopped
+      && generation === loopGeneration
+      && currentRequestGeneration === requestGeneration
+      && task === currentTask
+    )
+    const active = Promise.resolve().then(() => currentTask({
+      requestGeneration: currentRequestGeneration,
+      isCurrent,
+    }))
+    inFlight = active
+    try {
+      await active
+    } catch {
+      // The next single-flight cycle retries busy status reads.
+    } finally {
+      if (inFlight === active) inFlight = null
+      if (isCurrent()) schedule(generation)
+    }
+  }
+
+  return {
+    replace(nextTask) {
+      if (stopped) return
+      loopGeneration += 1
+      task = nextTask
+      clearTimer()
+      if (task) schedule(loopGeneration)
+    },
+    stop() {
+      if (stopped) return
+      stopped = true
+      loopGeneration += 1
+      task = null
+      clearTimer()
+    },
+  }
+}
 
 const CATALOG_ACCESS_DENIED_CODES = new Set([
   'UNAUTHORIZED',
@@ -151,6 +255,7 @@ export function useAppCatalog() {
   const syncGenerationRef = useRef(0)
   const operationsRef = useRef(new Map<string, Promise<unknown>>())
   const cancellationOperationsRef = useRef(new Map<string, Promise<void>>())
+  const busyStatusPollerRef = useRef<BusyStatusPoller | null>(null)
 
   const isCurrentSnapshot = useCallback((snapshot: ContextSnapshot): boolean => (
     contextKeyRef.current === snapshot.contextKey
@@ -195,6 +300,7 @@ export function useAppCatalog() {
     refreshMode: 'replace' | 'merge' = (
       apps === undefined && busyScopeKeys === undefined ? 'replace' : 'merge'
     ),
+    commitGuard?: () => boolean,
   ) => {
     const catalog = suppliedSnapshot?.catalog ?? catalogRef.current
     const contextKey = suppliedSnapshot?.contextKey ?? contextKeyRef.current
@@ -214,7 +320,7 @@ export function useAppCatalog() {
       contextGeneration: contextGenerationRef.current,
       catalog,
     }
-    if (!isCurrentSnapshot(snapshot)) return
+    if (!isCurrentSnapshot(snapshot) || (commitGuard && !commitGuard())) return
 
     const selectedApps = selectRuntimeStatusApps(
       apps ?? getAppCatalogApps(catalog),
@@ -222,7 +328,11 @@ export function useAppCatalog() {
       app => createLocalAppScopeKey(scopeForCatalogApp(catalog, app)),
     )
     if (selectedApps.length === 0) {
-      if (refreshMode === 'replace' && isCurrentSnapshot(snapshot)) {
+      if (
+        refreshMode === 'replace'
+        && isCurrentSnapshot(snapshot)
+        && (!commitGuard || commitGuard())
+      ) {
         setState(current => ({
           ...current,
           statuses: {},
@@ -261,9 +371,12 @@ export function useAppCatalog() {
         for (const scopeKey of requestedKeys) failedScopeKeys.add(scopeKey)
       }
     }
-    if (!isCurrentSnapshot(snapshot)) return
+    if (!isCurrentSnapshot(snapshot) || (commitGuard && !commitGuard())) return
 
     setState(current => {
+      if (!isCurrentSnapshot(snapshot) || (commitGuard && !commitGuard())) {
+        return current
+      }
       const nextStatuses: Record<string, LocalAppRuntimeStatus> = (
         refreshMode === 'merge' ? { ...current.statuses } : {}
       )
@@ -494,16 +607,38 @@ export function useAppCatalog() {
   const busyScopesSignature = JSON.stringify(busyScopes)
 
   useEffect(() => {
+    const poller = createBusyStatusPoller()
+    busyStatusPollerRef.current = poller
+    return () => {
+      if (busyStatusPollerRef.current === poller) {
+        busyStatusPollerRef.current = null
+      }
+      poller.stop()
+    }
+  }, [])
+
+  useEffect(() => {
     const selected = JSON.parse(busyScopesSignature) as Array<{
       scopeKey: string
       scope: CatalogLocalAppScope
     }>
-    if (selected.length === 0) return
+    const poller = busyStatusPollerRef.current
+    if (selected.length === 0) {
+      poller?.replace(null)
+      return
+    }
     const busyKeys = new Set(selected.map(item => item.scopeKey))
-    const interval = window.setInterval(() => {
-      void refreshRuntimeStatuses(undefined, busyKeys, undefined, 'merge')
-    }, 500)
-    return () => window.clearInterval(interval)
+    // Replacing the task advances the poller's loop generation. The shared
+    // in-flight slot prevents overlapping 500ms reads even when this busy set
+    // changes while the previous request is still pending.
+    poller?.replace(request => refreshRuntimeStatuses(
+      undefined,
+      busyKeys,
+      undefined,
+      'merge',
+      request.isCurrent,
+    ))
+    return () => poller?.replace(null)
   }, [busyScopesSignature, refreshRuntimeStatuses])
 
   const runExclusive = useCallback(<T,>(

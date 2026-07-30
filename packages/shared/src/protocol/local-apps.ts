@@ -34,8 +34,9 @@ export type LocalAppScope =
     }
 
 /**
- * Every renderer-to-main lifecycle request carries an explicit identity.
- * POO-12 callers use `kind: 'legacy'`; a missing scope never falls back to it.
+ * Internal runtime/persistence reference. Renderer-facing Local Apps RPC
+ * narrows this to CatalogLocalAppScope; trusted main-process POO-12 callers
+ * may continue to use the legacy namespace directly.
  */
 export type LocalAppReference = LocalAppScope
 
@@ -135,9 +136,11 @@ export interface LocalAppLegacyInstallRequest extends LocalAppInstallRequest {
   scope: LegacyLocalAppScope
 }
 
-export type LocalAppRpcInstallRequest =
-  | LocalAppCatalogInstallRequest
-  | LocalAppLegacyInstallRequest
+/**
+ * Public renderer-to-main install contract. Legacy install requests remain a
+ * main-process-only compatibility type and are never accepted by this RPC.
+ */
+export type LocalAppRpcInstallRequest = LocalAppCatalogInstallRequest
 
 export interface LocalAppBatchStatusRequest {
   scopes: CatalogLocalAppScope[]

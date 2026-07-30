@@ -80,42 +80,6 @@ const scopedRegistry = {
   isInstalledAndReady,
 }
 
-const legacyManager = {
-  install: mock(async () => ({
-    appId: 'legacy-app',
-    currentVersion: '1.0.0',
-    versions: ['1.0.0'],
-    runtime: 'static' as const,
-    status: 'installed' as const,
-    installedAt: 1,
-  })),
-  cancelInstall: mock(() => false),
-  start: mock(async () => ({
-    appId: 'legacy-app',
-    version: '1.0.0',
-    url: 'http://127.0.0.1:9877',
-    port: 9877,
-  })),
-  stop: mock(async () => ({ appId: 'legacy-app', status: 'stopped' as const })),
-  restart: mock(async () => ({
-    appId: 'legacy-app',
-    version: '1.0.0',
-    url: 'http://127.0.0.1:9877',
-    port: 9877,
-  })),
-  uninstall: mock(async () => {}),
-  setAvailableRelease: mock(async () => ({
-    appId: 'legacy-app',
-    status: 'installed' as const,
-  })),
-  getInstalledApps: mock(async () => []),
-  getRuntimeStatus: mock(async () => ({
-    appId: 'legacy-app',
-    status: 'not_installed' as const,
-  })),
-  getLogs: mock(async () => ''),
-}
-
 mock.module('@polo-ai/shared/admin', () => ({
   getCachedAppCatalog,
   getAppCatalogAccessMode,
@@ -144,7 +108,9 @@ mock.module('../../local-app-runtime', () => {
   }
 
   return {
-    getLocalAppRuntimeManager: () => legacyManager,
+    getLocalAppRuntimeManager: () => {
+      throw new Error('renderer RPC must never reach the trusted legacy manager')
+    },
     getScopedLocalAppRuntimeRegistry: () => scopedRegistry,
     LocalAppRuntimeError,
     MAX_CATALOG_STATUS_SCOPES: 10_000,
@@ -460,7 +426,7 @@ describe('local app main-process authorization boundary', () => {
     await expect(install(context, {
       appId: '应用.App-ID',
       version: '1.2.3',
-    })).rejects.toThrow('explicit catalog or legacy install scope')
+    })).rejects.toThrow('explicit Catalog install scope')
 
     catalog.apps[0] = {
       ...catalog.apps[0]!,
@@ -477,6 +443,41 @@ describe('local app main-process authorization boundary', () => {
     }
     await expect(install(context, { scope: scope() }))
       .rejects.toThrow('no installable release')
+  })
+
+  it('rejects forged renderer legacy install and start in every access mode', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const legacyScope = { kind: 'legacy', appId: 'trusted-looking.app' }
+    const scenarios: Array<{
+      mode: 'online' | 'offline' | 'denied'
+      accountId: string | null
+    }> = [
+      { mode: 'online', accountId: 'account-a' },
+      { mode: 'offline', accountId: 'account-a' },
+      { mode: 'denied', accountId: 'account-a' },
+      { mode: 'online', accountId: null },
+    ]
+
+    for (const scenario of scenarios) {
+      accessMode = scenario.mode
+      signedInAccountId = scenario.accountId
+      await expect(install(context, {
+        scope: legacyScope,
+        appId: legacyScope.appId,
+        version: '1.0.0',
+        downloadUrl: 'https://attacker.example/app.zip',
+        checksum: 'a'.repeat(64),
+        sizeBytes: 1,
+        platform: 'darwin',
+        arch: 'arm64',
+      })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+      await expect(start(context, legacyScope))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+
+    expect(scopedInstall).not.toHaveBeenCalled()
+    expect(scopedStart).not.toHaveBeenCalled()
   })
 
   it('resolves remote URLs from the trusted cache and rejects stale access after denial', async () => {

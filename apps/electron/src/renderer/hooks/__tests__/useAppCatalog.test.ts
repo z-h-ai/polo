@@ -5,6 +5,7 @@ import {
   BUSY_RUNTIME_STATUS_LIMIT,
   CATALOG_RUNTIME_STATUS_LIMIT,
   compareCatalogVersions,
+  createBusyStatusPoller,
   isNewerCatalogVersion,
   selectRuntimeStatusApps,
 } from '../useAppCatalog'
@@ -121,5 +122,84 @@ describe('organization app runtime status selection', () => {
     )).toEqual([
       apps[3],
     ])
+  })
+})
+
+describe('busy runtime status polling', () => {
+  it('keeps one request in flight and prevents an invalidated response from committing', async () => {
+    let nextTimerId = 0
+    const scheduled = new Map<number, () => void>()
+    const timers = {
+      set(callback: () => void) {
+        const id = ++nextTimerId
+        scheduled.set(id, callback)
+        return id as unknown as ReturnType<typeof setTimeout>
+      },
+      clear(timer: ReturnType<typeof setTimeout>) {
+        scheduled.delete(timer as unknown as number)
+      },
+    }
+    const runNextTimer = () => {
+      const entry = [...scheduled.entries()]
+        .sort(([left], [right]) => left - right)[0]
+      expect(entry).toBeDefined()
+      scheduled.delete(entry![0])
+      entry![1]()
+    }
+    const flushMicrotasks = async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await Promise.resolve()
+      }
+    }
+    let resolveFirst!: () => void
+    let resolveSecond!: () => void
+    const first = new Promise<void>(resolve => {
+      resolveFirst = resolve
+    })
+    const second = new Promise<void>(resolve => {
+      resolveSecond = resolve
+    })
+    let active = 0
+    let maxActive = 0
+    const requestGenerations: number[] = []
+    const committed: string[] = []
+    const poller = createBusyStatusPoller(500, timers)
+
+    poller.replace(async request => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      requestGenerations.push(request.requestGeneration)
+      await first
+      if (request.isCurrent()) committed.push('stale')
+      active -= 1
+    })
+    runNextTimer()
+    await flushMicrotasks()
+    expect(active).toBe(1)
+
+    poller.replace(async request => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      requestGenerations.push(request.requestGeneration)
+      await second
+      if (request.isCurrent()) committed.push('current')
+      active -= 1
+    })
+    runNextTimer()
+    await flushMicrotasks()
+    expect(requestGenerations).toEqual([1])
+    expect(maxActive).toBe(1)
+
+    resolveFirst()
+    await flushMicrotasks()
+    expect(requestGenerations).toEqual([1, 2])
+    expect(committed).toEqual([])
+    expect(maxActive).toBe(1)
+
+    resolveSecond()
+    await flushMicrotasks()
+    expect(committed).toEqual(['current'])
+    expect(maxActive).toBe(1)
+    poller.stop()
   })
 })

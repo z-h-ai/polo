@@ -16,39 +16,34 @@ import {
 } from '@polo-ai/shared/protocol'
 import type {
   CatalogLocalAppScope,
-  LegacyLocalAppScope,
   LocalAppAvailableRelease,
   LocalAppBatchStatusRequest,
   LocalAppCatalogInstallRequest,
-  LocalAppLegacyInstallRequest,
   LocalAppLogsOptions,
-  LocalAppReference,
-  LocalAppRpcInstallRequest,
   LocalAppRuntimeStatus,
   LocalAppUninstallOptions,
 } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import {
-  getLocalAppRuntimeManager,
   getScopedLocalAppRuntimeRegistry,
   LocalAppRuntimeError,
   MAX_CATALOG_STATUS_SCOPES,
   validateCatalogLocalAppScope,
 } from '../local-app-runtime'
 
-function requireReference(reference: unknown): LocalAppReference {
-  if (!reference || typeof reference !== 'object') {
+function requireRendererCatalogScope(reference: unknown): CatalogLocalAppScope {
+  if (
+    reference
+    && typeof reference === 'object'
+    && (reference as { kind?: unknown }).kind === 'legacy'
+  ) {
+    // The renderer has no trusted capability for the POO-12 compatibility
+    // namespace. Reject it before session/cache checks so forged legacy calls
+    // stay closed while signed out, denied, or in restricted offline mode.
     throw new LocalAppRuntimeError(
-      'INVALID_REQUEST',
-      'An explicit local app scope is required',
+      'NOT_AUTHORIZED',
+      'Renderer local app RPC only permits authorized Catalog scopes',
     )
-  }
-  if ((reference as LocalAppReference).kind === 'legacy') {
-    const appId = (reference as LegacyLocalAppScope).appId
-    if (typeof appId !== 'string' || !appId) {
-      throw new LocalAppRuntimeError('INVALID_REQUEST', 'legacy scope.appId is required')
-    }
-    return { kind: 'legacy', appId }
   }
   return validateCatalogLocalAppScope(reference)
 }
@@ -118,26 +113,13 @@ async function requireAuthorizedCatalogApp(
   return { app, appConfigVersion, accessMode }
 }
 
-async function withReference<T>(
+async function withCatalogScope<T>(
   rawReference: unknown,
   catalogOperation: (scope: CatalogLocalAppScope) => Promise<T>,
-  legacyOperation: (appId: string) => Promise<T> | T,
 ): Promise<T> {
-  const reference = requireReference(rawReference)
-  if (reference.kind === 'legacy') return legacyOperation(reference.appId)
+  const reference = requireRendererCatalogScope(rawReference)
   await requireCatalogDataAccess(reference)
   return catalogOperation(reference)
-}
-
-function legacyInstallRequest(request: LocalAppLegacyInstallRequest) {
-  if (request.scope.appId !== request.appId) {
-    throw new LocalAppRuntimeError(
-      'INVALID_REQUEST',
-      'Install appId does not match the explicit legacy scope',
-    )
-  }
-  const { scope: _scope, ...managerRequest } = request
-  return managerRequest
 }
 
 function hostPlatform(): 'darwin' | 'win32' | 'linux' {
@@ -287,20 +269,14 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
   server.handle(
     RPC_CHANNELS.localApps.INSTALL,
-    async (ctx, rawRequest: LocalAppRpcInstallRequest) => {
+    async (ctx, rawRequest: LocalAppCatalogInstallRequest) => {
       if (!rawRequest || typeof rawRequest !== 'object' || !('scope' in rawRequest)) {
         throw new LocalAppRuntimeError(
           'INVALID_REQUEST',
-          'An explicit catalog or legacy install scope is required',
+          'An explicit Catalog install scope is required',
         )
       }
-      const reference = requireReference(rawRequest.scope)
-      if (reference.kind === 'legacy') {
-        return getLocalAppRuntimeManager().install(
-          legacyInstallRequest(rawRequest as LocalAppLegacyInstallRequest),
-          { signal: ctx.signal },
-        )
-      }
+      const reference = requireRendererCatalogScope(rawRequest.scope)
 
       const {
         app,
@@ -321,7 +297,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       }
       const release = app.currentRelease
       if (!matchesConfirmedRelease(
-        rawRequest as LocalAppCatalogInstallRequest,
+        rawRequest,
         app,
         appConfigVersion,
         release,
@@ -351,10 +327,9 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
   server.handle(
     RPC_CHANNELS.localApps.CANCEL_INSTALL,
-    (_ctx, reference: unknown) => withReference(
+    (_ctx, reference: unknown) => withCatalogScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().cancelInstall(scope),
-      appId => getLocalAppRuntimeManager().cancelInstall(appId),
     ),
   )
 
@@ -371,21 +346,19 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   }
 
   server.handle(RPC_CHANNELS.localApps.START, (_ctx, reference: unknown) =>
-    withReference(
+    withCatalogScope(
       reference,
       startCatalogApp,
-      appId => getLocalAppRuntimeManager().start(appId),
     ))
 
   server.handle(RPC_CHANNELS.localApps.STOP, (_ctx, reference: unknown) =>
-    withReference(
+    withCatalogScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().stop(scope),
-      appId => getLocalAppRuntimeManager().stop(appId),
     ))
 
   server.handle(RPC_CHANNELS.localApps.RESTART, (_ctx, reference: unknown) =>
-    withReference(
+    withCatalogScope(
       reference,
       async scope => {
         const { accessMode } = await requireAuthorizedCatalogApp(scope)
@@ -398,23 +371,21 @@ export function registerLocalAppHandlers(server: RpcServer): void {
         }
         return registry.restart(scope)
       },
-      appId => getLocalAppRuntimeManager().restart(appId),
     ))
 
   server.handle(
     RPC_CHANNELS.localApps.UNINSTALL,
     (_ctx, reference: unknown, options?: LocalAppUninstallOptions) =>
-      withReference(
+      withCatalogScope(
         reference,
         scope => getScopedLocalAppRuntimeRegistry().uninstall(scope, options),
-        appId => getLocalAppRuntimeManager().uninstall(appId, options),
       ),
   )
 
   server.handle(
     RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
-    (_ctx, reference: unknown, requestedRelease: LocalAppAvailableRelease | null) =>
-      withReference(
+    (_ctx, reference: unknown, _requestedRelease: LocalAppAvailableRelease | null) =>
+      withCatalogScope(
         reference,
         async scope => {
           const { app } = await requireAuthorizedCatalogApp(scope)
@@ -440,26 +411,22 @@ export function registerLocalAppHandlers(server: RpcServer): void {
             : null
           return registry.setAvailableRelease(scope, release)
         },
-        appId => getLocalAppRuntimeManager().setAvailableRelease(appId, requestedRelease),
       ),
   )
 
   server.handle(
     RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
-    (_ctx, reference: unknown) => withReference(
+    (_ctx, reference: unknown) => withCatalogScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().getInstalledApps(scope),
-      appId => getLocalAppRuntimeManager().getInstalledApps()
-        .then(apps => apps.filter(app => app.appId === appId)),
     ),
   )
 
   server.handle(
     RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
-    (_ctx, reference: unknown) => withReference(
+    (_ctx, reference: unknown) => withCatalogScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().getRuntimeStatus(scope),
-      appId => getLocalAppRuntimeManager().getRuntimeStatus(appId),
     ),
   )
 
@@ -479,7 +446,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       }
       if (rawRequest.scopes.length === 0) return []
 
-      const scopes = rawRequest.scopes.map(validateCatalogLocalAppScope)
+      const scopes = rawRequest.scopes.map(requireRendererCatalogScope)
       const first = scopes[0]!
       const tokens = await getCredentialManager().getAdminTokens()
       if (!tokens || tokens.userId !== first.accountId) {
@@ -549,10 +516,9 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   server.handle(
     RPC_CHANNELS.localApps.GET_LOGS,
     (_ctx, reference: unknown, options?: LocalAppLogsOptions) =>
-      withReference(
+      withCatalogScope(
         reference,
         scope => getScopedLocalAppRuntimeRegistry().getLogs(scope, options),
-        appId => getLocalAppRuntimeManager().getLogs(appId, options),
       ),
   )
 }

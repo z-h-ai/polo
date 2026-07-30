@@ -215,9 +215,8 @@ import type {
   CatalogLocalAppScope,
   LocalAppAvailableRelease,
   LocalAppBatchStatusRequest,
-  LocalAppRpcInstallRequest,
+  LocalAppCatalogInstallRequest,
   LocalAppInstalledApp,
-  LocalAppReference,
   LocalAppRemoteUrlResult,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
@@ -500,21 +499,21 @@ export interface ElectronAPI {
       platform: 'darwin' | 'win32' | 'linux'
       arch: 'arm64' | 'x64'
     }>
-    install(request: LocalAppRpcInstallRequest): Promise<LocalAppInstalledApp>
-    cancelInstall(app: LocalAppReference): Promise<boolean>
-    start(app: LocalAppReference): Promise<LocalAppStartResult>
-    stop(app: LocalAppReference): Promise<LocalAppRuntimeStatus>
-    restart(app: LocalAppReference): Promise<LocalAppStartResult>
-    uninstall(app: LocalAppReference, options?: LocalAppUninstallOptions): Promise<void>
+    install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
+    cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
+    start(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
-      app: LocalAppReference,
+      app: CatalogLocalAppScope,
       release: LocalAppAvailableRelease | null,
     ): Promise<LocalAppRuntimeStatus>
-    getInstalledApps(scope: LocalAppReference): Promise<LocalAppInstalledApp[]>
-    getRuntimeStatus(app: LocalAppReference): Promise<LocalAppRuntimeStatus>
+    getInstalledApps(scope: CatalogLocalAppScope): Promise<LocalAppInstalledApp[]>
+    getRuntimeStatus(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
     getRuntimeStatuses(request: LocalAppBatchStatusRequest): Promise<LocalAppRuntimeStatus[]>
     resolveRemoteUrl(scope: CatalogLocalAppScope): Promise<LocalAppRemoteUrlResult>
-    getLogs(app: LocalAppReference, options?: LocalAppLogsOptions): Promise<string>
+    getLogs(app: CatalogLocalAppScope, options?: LocalAppLogsOptions): Promise<string>
   }
 
   // Auth

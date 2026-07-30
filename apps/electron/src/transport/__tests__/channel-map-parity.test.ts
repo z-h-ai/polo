@@ -78,12 +78,17 @@ describe('CHANNEL_MAP runtime contract', () => {
     } as unknown as RpcClient
     const api = buildClientApi(client, CHANNEL_MAP)
 
-    const legacyScope = { kind: 'legacy' as const, appId: 'demo.app' }
-    await api.localApps.setAvailableRelease(legacyScope, { version: '2.0.0' })
+    const catalogScope = {
+      kind: 'catalog' as const,
+      accountId: 'account-1',
+      organizationId: 'organization-1',
+      catalogAppId: 'demo.app',
+    }
+    await api.localApps.setAvailableRelease(catalogScope, { version: '2.0.0' })
 
     expect(invoke).toHaveBeenCalledWith(
       RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
-      legacyScope,
+      catalogScope,
       { version: '2.0.0' },
     )
   })
