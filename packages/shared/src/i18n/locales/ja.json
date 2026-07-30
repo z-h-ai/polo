@@ -550,6 +550,7 @@
   "homeApps.recent.title": "最近使用した項目",
   "homeApps.status.downloading": "ダウンロード中",
   "homeApps.status.downloadingUpdate": "アップデートをダウンロード中",
+  "homeApps.status.extracting": "アプリを展開中",
   "homeApps.status.incompatible": "このデバイスでは利用できません",
   "homeApps.status.installed": "インストール済み",
   "homeApps.status.installing": "インストール中",

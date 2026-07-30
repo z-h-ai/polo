@@ -759,6 +759,9 @@ app.whenReady().then(async () => {
             onAdminSessionEnding: async (accountId: string) => {
               await getScopedLocalAppRuntimeRegistry().stopAccount(accountId)
             },
+            onAdminSessionStarted: (accountId: string) => {
+              getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
+            },
           }
         },
         // Headless: register only core handlers (no GUI handlers for browser, settings, etc.)

@@ -550,6 +550,7 @@
   "homeApps.recent.title": "Usadas recientemente",
   "homeApps.status.downloading": "Descargando",
   "homeApps.status.downloadingUpdate": "Descargando actualización",
+  "homeApps.status.extracting": "Extrayendo aplicación",
   "homeApps.status.incompatible": "No disponible para este dispositivo",
   "homeApps.status.installed": "Instalada",
   "homeApps.status.installing": "Instalando",

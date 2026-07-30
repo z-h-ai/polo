@@ -53,14 +53,7 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
       const manager = getCredentialManager()
       const adminTokens = await manager.getAdminTokens()
       if (adminTokens) {
-        try {
-          await deps.onAdminSessionEnding?.(adminTokens.userId)
-        } catch (error) {
-          deps.platform.logger.warn(
-            'Failed to stop Admin account local apps during logout:',
-            error instanceof Error ? error.message : String(error),
-          )
-        }
+        await deps.onAdminSessionEnding?.(adminTokens.userId)
       }
 
       // List and delete all stored credentials

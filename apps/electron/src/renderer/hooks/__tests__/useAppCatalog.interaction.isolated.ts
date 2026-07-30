@@ -153,6 +153,7 @@ const {
   waitFor,
 } = await import('@testing-library/react')
 const { useAppCatalog } = await import('../useAppCatalog')
+const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 
 beforeEach(() => {
   organizationContext = organization('organization-a')
@@ -218,6 +219,26 @@ afterEach(() => {
 })
 
 describe('useAppCatalog scoped async state', () => {
+  it('propagates a cached catalog 403 into the App auth-failure channel', async () => {
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
+      success: false,
+      errorCode: 'FORBIDDEN',
+      message: 'Admin request is not permitted',
+      status: 403,
+    }))
+    const failures: Array<{ code: string; status?: number }> = []
+    const unsubscribe = subscribeToAdminAuthFailures(error => {
+      failures.push(error)
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.errorCode).toBe('FORBIDDEN')
+    })
+    expect(failures).toEqual([{ code: 'FORBIDDEN', status: 403 }])
+    unsubscribe()
+  })
+
   it('discards an out-of-order response after the organization changes', async () => {
     const organizationA = deferred<AppCatalogSyncResult>()
     const organizationB = deferred<AppCatalogSyncResult>()

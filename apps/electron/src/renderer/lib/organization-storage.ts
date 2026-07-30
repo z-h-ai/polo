@@ -19,6 +19,11 @@ export interface VerifiedOrganizationContext {
   verifiedAt: number
 }
 
+function isActiveOrganization(organization: OrganizationSummary): boolean {
+  return organization.status !== 'suspended'
+    && organization.membership.status === 'active'
+}
+
 export function getStoredActiveOrganizationId(accountId: string): string | null {
   try {
     return localStorage.getItem(activeOrganizationKey(accountId))
@@ -71,7 +76,7 @@ export function getVerifiedOrganizationContext(
       activeOrganizationId
       && !organizations.data.organizations.some(organization => (
         organization.id === activeOrganizationId
-        && organization.membership.status === 'active'
+        && isActiveOrganization(organization)
       ))
     ) {
       return null
@@ -95,27 +100,30 @@ export function setVerifiedOrganizationContext(
     organizations: organizationSummaries,
   })
   if (!verified.success) return
-  if (
-    activeOrganizationId
-    && !verified.data.organizations.some(organization => (
+  const verifiedActiveOrganizationId = activeOrganizationId
+    && verified.data.organizations.some(organization => (
       organization.id === activeOrganizationId
-      && organization.membership.status === 'active'
+      && isActiveOrganization(organization)
     ))
-  ) {
-    return
-  }
+    ? activeOrganizationId
+    : null
   try {
     localStorage.setItem(
       verifiedOrganizationContextKey(accountId),
       JSON.stringify({
         organizationSummaries: verified.data.organizations,
-        activeOrganizationId,
+        activeOrganizationId: verifiedActiveOrganizationId,
         verifiedAt: Date.now(),
       } satisfies VerifiedOrganizationContext),
     )
   } catch {
-    // The online organization flow remains available without persistence.
+    // Never leave an older authorized context recoverable after a successful
+    // online response established a new authorization truth.
+    if (!verifiedActiveOrganizationId) {
+      clearVerifiedOrganizationContext(accountId)
+    }
   }
+  if (!verifiedActiveOrganizationId) clearStoredActiveOrganizationId(accountId)
 }
 
 export function clearVerifiedOrganizationContext(accountId: string): void {

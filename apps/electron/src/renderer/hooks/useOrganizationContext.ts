@@ -60,6 +60,11 @@ function isTemporaryOrganizationError(error: OrganizationFlowError): boolean {
   )
 }
 
+function isActiveOrganization(organization: OrganizationSummary): boolean {
+  return organization.status !== 'suspended'
+    && organization.membership.status === 'active'
+}
+
 function resultError(result: {
   errorCode?: string
   status?: number
@@ -126,7 +131,7 @@ export function useOrganizationContextState() {
     organizationId: string,
   ) => {
     const organization = summaries.find(item => item.id === organizationId)
-    if (!organization || organization.membership.status !== 'active') {
+    if (!organization || !isActiveOrganization(organization)) {
       throw { code: 'membership_not_active' } satisfies OrganizationFlowError
     }
 
@@ -237,7 +242,10 @@ export function useOrganizationContextState() {
       }
 
       if (!isCurrentAccountScope(scope)) return null
-      if (summaries.length === 0) {
+      const activeSummaries = summaries.filter(
+        isActiveOrganization,
+      )
+      if (activeSummaries.length === 0) {
         activeOrganizationIdRef.current = null
         setActiveOrganizationId(null)
         setOrganizationMembershipRole(null)
@@ -247,8 +255,8 @@ export function useOrganizationContextState() {
 
       const storedId = getStoredActiveOrganizationId(accountId)
       const preferred = (
-        storedId ? summaries.find(item => item.id === storedId) : undefined
-      ) ?? (summaries.length === 1 ? summaries[0] : undefined)
+        storedId ? activeSummaries.find(item => item.id === storedId) : undefined
+      ) ?? (activeSummaries.length === 1 ? activeSummaries[0] : undefined)
 
       if (preferred) {
         activateOrganization(accountId, summaries, preferred.id)
@@ -271,7 +279,7 @@ export function useOrganizationContextState() {
         const active = cached?.activeOrganizationId
           ? cached.organizationSummaries.find(organization => (
               organization.id === cached.activeOrganizationId
-              && organization.membership.status === 'active'
+              && isActiveOrganization(organization)
             ))
           : undefined
         if (cached && active && isCurrentAccountScope(scope)) {
@@ -308,7 +316,8 @@ export function useOrganizationContextState() {
     setJoinPreview(null)
     setError(null)
 
-    if (organizationSummaries.length === 0) {
+    const activeSummaries = organizationSummaries.filter(isActiveOrganization)
+    if (activeSummaries.length === 0) {
       setFlowState('create')
       return 'create'
     }
@@ -317,9 +326,9 @@ export function useOrganizationContextState() {
     const storedId = accountId ? getStoredActiveOrganizationId(accountId) : null
     const preferred = (
       storedId
-        ? organizationSummaries.find(item => item.id === storedId)
+        ? activeSummaries.find(item => item.id === storedId)
         : undefined
-    ) ?? (organizationSummaries.length === 1 ? organizationSummaries[0] : undefined)
+    ) ?? (activeSummaries.length === 1 ? activeSummaries[0] : undefined)
 
     if (accountId && preferred) {
       activateOrganization(accountId, organizationSummaries, preferred.id)
@@ -476,7 +485,10 @@ export function useOrganizationContextState() {
       setVerifiedOrganizationContext(requestAccountId, summaries, null)
       return summaries
     }
-    const active = summaries.find(item => item.id === requestOrganizationId)
+    const active = summaries.find(item => (
+      item.id === requestOrganizationId
+      && isActiveOrganization(item)
+    ))
     if (!active) {
       clearStoredActiveOrganizationId(requestAccountId)
       setVerifiedOrganizationContext(requestAccountId, summaries, null)

@@ -125,6 +125,12 @@ export class ScopedLocalAppRuntimeRegistry {
     string,
     Promise<LocalAppRuntimeManager | null>
   >()
+  private readonly sessionEndingAccounts = new Set<string>()
+  private readonly accountOperations = new Map<
+    string,
+    Map<Promise<unknown>, CatalogLocalAppScope>
+  >()
+  private readonly stopAccountPromises = new Map<string, Promise<void>>()
 
   constructor(options: ScopedLocalAppRuntimeRegistryOptions) {
     this.scopesDir = join(resolve(options.rootDir), 'catalog-scopes')
@@ -139,67 +145,102 @@ export class ScopedLocalAppRuntimeRegistry {
     request: ScopedCatalogInstallRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<LocalAppInstalledApp> {
-    const scope = validateCatalogLocalAppScope(request.scope)
-    const manager = await this.getManager(scope)
-    const runtimeAppId = createCatalogRuntimeAppId(scope)
-    const { scope: _scope, ...release } = request
-    const managerRequest: LocalAppInstallRequest = {
-      ...release,
-      appId: runtimeAppId,
-      expectedManifestAppId: scope.catalogAppId,
-    }
-    const installed = await manager.install(
-      managerRequest,
-      options,
-    )
-    return attachScope(installed, scope)
+    return this.runTrackedScopeOperation(request.scope, async scope => {
+      const manager = await this.getManager(scope)
+      this.assertAccountSessionActive(scope.accountId)
+      const runtimeAppId = createCatalogRuntimeAppId(scope)
+      const { scope: _scope, ...release } = request
+      const managerRequest: LocalAppInstallRequest = {
+        ...release,
+        appId: runtimeAppId,
+        expectedManifestAppId: scope.catalogAppId,
+      }
+      const installed = await manager.install(
+        managerRequest,
+        options,
+      )
+      return attachScope(installed, scope)
+    })
   }
 
   async cancelInstall(scope: CatalogLocalAppScope): Promise<boolean> {
-    const manager = await this.getManager(scope)
-    return manager.cancelInstall(createCatalogRuntimeAppId(scope))
+    return this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getManager(safeScope)
+      this.assertAccountSessionActive(safeScope.accountId)
+      return manager.cancelInstall(createCatalogRuntimeAppId(safeScope))
+    })
   }
 
   async start(scope: CatalogLocalAppScope): Promise<LocalAppStartResult> {
-    const manager = await this.getManager(scope)
-    return attachScope(await manager.start(createCatalogRuntimeAppId(scope)), scope)
+    return this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getManager(safeScope)
+      this.assertAccountSessionActive(safeScope.accountId)
+      return attachScope(
+        await manager.start(createCatalogRuntimeAppId(safeScope)),
+        safeScope,
+      )
+    })
   }
 
   async stop(scope: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus> {
-    const manager = await this.getManager(scope)
-    return attachScope(await manager.stop(createCatalogRuntimeAppId(scope)), scope)
+    return this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getManager(safeScope)
+      this.assertAccountSessionActive(safeScope.accountId)
+      return attachScope(
+        await manager.stop(createCatalogRuntimeAppId(safeScope)),
+        safeScope,
+      )
+    })
   }
 
   async restart(scope: CatalogLocalAppScope): Promise<LocalAppStartResult> {
-    const manager = await this.getManager(scope)
-    return attachScope(await manager.restart(createCatalogRuntimeAppId(scope)), scope)
+    return this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getManager(safeScope)
+      this.assertAccountSessionActive(safeScope.accountId)
+      return attachScope(
+        await manager.restart(createCatalogRuntimeAppId(safeScope)),
+        safeScope,
+      )
+    })
   }
 
   async uninstall(
     scope: CatalogLocalAppScope,
     options?: LocalAppUninstallOptions,
   ): Promise<void> {
-    const manager = await this.getManager(scope)
-    await manager.uninstall(createCatalogRuntimeAppId(scope), options)
+    await this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getManager(safeScope)
+      this.assertAccountSessionActive(safeScope.accountId)
+      await manager.uninstall(createCatalogRuntimeAppId(safeScope), options)
+    })
   }
 
   async setAvailableRelease(
     scope: CatalogLocalAppScope,
     release: LocalAppAvailableRelease | null,
   ): Promise<LocalAppRuntimeStatus> {
-    const manager = await this.getManager(scope)
-    return attachScope(
-      await manager.setAvailableRelease(createCatalogRuntimeAppId(scope), release),
-      scope,
-    )
+    return this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getManager(safeScope)
+      this.assertAccountSessionActive(safeScope.accountId)
+      return attachScope(
+        await manager.setAvailableRelease(
+          createCatalogRuntimeAppId(safeScope),
+          release,
+        ),
+        safeScope,
+      )
+    })
   }
 
   async getInstalledApps(
     scope: CatalogLocalAppScope,
   ): Promise<LocalAppInstalledApp[]> {
-    const manager = await this.getExistingManager(scope)
-    if (!manager) return []
-    return (await manager.getInstalledApps()).map(app => attachScope(app, scope))
+    return this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getExistingManager(safeScope)
+      if (!manager) return []
+      return (await manager.getInstalledApps())
+        .map(app => attachScope(app, safeScope))
+    })
   }
 
   async getRuntimeStatus(
@@ -218,30 +259,32 @@ export class ScopedLocalAppRuntimeRegistry {
       )
     }
     const scopes = rawScopes.map(validateCatalogLocalAppScope)
-    const statuses = new Array<LocalAppRuntimeStatus>(scopes.length)
-    let nextIndex = 0
-    const workers = Array.from(
-      { length: Math.min(STATUS_READ_CONCURRENCY, scopes.length) },
-      async () => {
-        while (nextIndex < scopes.length) {
-          const index = nextIndex++
-          const scope = scopes[index]!
-          const manager = await this.getExistingManager(scope)
-          statuses[index] = manager
-            ? attachScope(
-                await manager.getRuntimeStatus(createCatalogRuntimeAppId(scope)),
-                scope,
-              )
-            : {
-                appId: scope.catalogAppId,
-                scope,
-                status: 'not_installed',
-              }
-        }
-      },
-    )
-    await Promise.all(workers)
-    return statuses
+    return this.runTrackedScopesOperation(scopes, async () => {
+      const statuses = new Array<LocalAppRuntimeStatus>(scopes.length)
+      let nextIndex = 0
+      const workers = Array.from(
+        { length: Math.min(STATUS_READ_CONCURRENCY, scopes.length) },
+        async () => {
+          while (nextIndex < scopes.length) {
+            const index = nextIndex++
+            const scope = scopes[index]!
+            const manager = await this.getExistingManager(scope)
+            statuses[index] = manager
+              ? attachScope(
+                  await manager.getRuntimeStatus(createCatalogRuntimeAppId(scope)),
+                  scope,
+                )
+              : {
+                  appId: scope.catalogAppId,
+                  scope,
+                  status: 'not_installed',
+                }
+          }
+        },
+      )
+      await Promise.all(workers)
+      return statuses
+    })
   }
 
   async isInstalledAndReady(scope: CatalogLocalAppScope): Promise<boolean> {
@@ -313,12 +356,75 @@ export class ScopedLocalAppRuntimeRegistry {
     scope: CatalogLocalAppScope,
     options?: { tail?: number },
   ): Promise<string> {
-    const manager = await this.getManager(scope)
-    return manager.getLogs(createCatalogRuntimeAppId(scope), options)
+    return this.runTrackedScopeOperation(scope, async safeScope => {
+      const manager = await this.getManager(safeScope)
+      return manager.getLogs(createCatalogRuntimeAppId(safeScope), options)
+    })
   }
 
   async stopAccount(accountId: string): Promise<void> {
     const safeAccountId = validateScopeField(accountId, 'accountId')
+    this.sessionEndingAccounts.add(safeAccountId)
+    const existingStop = this.stopAccountPromises.get(safeAccountId)
+    if (existingStop) return existingStop
+    const stopPromise = this.performStopAccount(safeAccountId)
+      .finally(() => {
+        if (this.stopAccountPromises.get(safeAccountId) === stopPromise) {
+          this.stopAccountPromises.delete(safeAccountId)
+        }
+      })
+    this.stopAccountPromises.set(safeAccountId, stopPromise)
+    return stopPromise
+  }
+
+  resumeAccount(accountId: string): void {
+    const safeAccountId = validateScopeField(accountId, 'accountId')
+    if (this.stopAccountPromises.has(safeAccountId)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'Cannot resume a local app account while session cleanup is active',
+      )
+    }
+    this.sessionEndingAccounts.delete(safeAccountId)
+  }
+
+  private async performStopAccount(safeAccountId: string): Promise<void> {
+    const trackedOperations = [
+      ...(this.accountOperations.get(safeAccountId)?.keys() ?? []),
+    ]
+    const trackedScopes = [
+      ...(this.accountOperations.get(safeAccountId)?.values() ?? []),
+    ]
+    const failures: string[] = []
+
+    for (const scope of trackedScopes) {
+      const key = createCatalogLocalAppScopeKey(scope)
+      const pendingManager = this.managerPromises.get(key)
+      if (pendingManager) {
+        const pendingResult = await Promise.allSettled([pendingManager])
+        const rejected = pendingResult[0]
+        if (rejected?.status === 'rejected') {
+          failures.push(rejected.reason instanceof Error
+            ? rejected.reason.message
+            : String(rejected.reason))
+        }
+      }
+      this.managers.get(key)?.cancelInstall(createCatalogRuntimeAppId(scope))
+    }
+
+    const operationResults = await Promise.allSettled(trackedOperations)
+    failures.push(...operationResults.flatMap(result => {
+      if (result.status !== 'rejected') return []
+      const reason = result.reason
+      if (
+        reason instanceof LocalAppRuntimeError
+        && (reason.code === 'INSTALL_CANCELLED' || reason.code === 'NOT_AUTHORIZED')
+      ) {
+        return []
+      }
+      return [reason instanceof Error ? reason.message : String(reason)]
+    }))
+
     const scopesByKey = new Map<string, CatalogLocalAppScope>()
     for (const scope of [
       ...this.managerScopes.values(),
@@ -328,13 +434,15 @@ export class ScopedLocalAppRuntimeRegistry {
     }
     const scopes = [...scopesByKey.values()]
       .filter(scope => scope.accountId === safeAccountId)
-    const failures: string[] = []
     for (let index = 0; index < scopes.length; index += STOP_ACCOUNT_CONCURRENCY) {
       const results = await Promise.allSettled(
         scopes.slice(index, index + STOP_ACCOUNT_CONCURRENCY)
           .map(async scope => {
-            await this.cancelInstall(scope)
-            return this.stop(scope)
+            const manager = await this.getExistingManager(scope)
+              ?? this.managers.get(createCatalogLocalAppScopeKey(scope))
+            if (!manager) return
+            manager.cancelInstall(createCatalogRuntimeAppId(scope))
+            return manager.stop(createCatalogRuntimeAppId(scope))
           }),
       )
       failures.push(...results
@@ -350,6 +458,57 @@ export class ScopedLocalAppRuntimeRegistry {
         { failures },
       )
     }
+  }
+
+  private assertAccountSessionActive(accountId: string): void {
+    if (this.sessionEndingAccounts.has(accountId)) {
+      throw new LocalAppRuntimeError(
+        'NOT_AUTHORIZED',
+        'The Admin session for this local app account is ending',
+      )
+    }
+  }
+
+  private runTrackedScopeOperation<T>(
+    rawScope: CatalogLocalAppScope,
+    operation: (scope: CatalogLocalAppScope) => Promise<T>,
+  ): Promise<T> {
+    const scope = validateCatalogLocalAppScope(rawScope)
+    this.assertAccountSessionActive(scope.accountId)
+    return this.runTrackedScopesOperation([scope], () => operation(scope))
+  }
+
+  private runTrackedScopesOperation<T>(
+    scopes: CatalogLocalAppScope[],
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const accounts = new Map<string, CatalogLocalAppScope>()
+    for (const scope of scopes) {
+      this.assertAccountSessionActive(scope.accountId)
+      if (!accounts.has(scope.accountId)) accounts.set(scope.accountId, scope)
+    }
+    let trackedPromise!: Promise<T>
+    trackedPromise = Promise.resolve()
+      .then(() => {
+        for (const accountId of accounts.keys()) {
+          this.assertAccountSessionActive(accountId)
+        }
+        return operation()
+      })
+      .finally(() => {
+        for (const accountId of accounts.keys()) {
+          const operations = this.accountOperations.get(accountId)
+          operations?.delete(trackedPromise)
+          if (operations?.size === 0) this.accountOperations.delete(accountId)
+        }
+      })
+    for (const [accountId, scope] of accounts) {
+      const operations = this.accountOperations.get(accountId)
+        ?? new Map<Promise<unknown>, CatalogLocalAppScope>()
+      operations.set(trackedPromise, scope)
+      this.accountOperations.set(accountId, operations)
+    }
+    return trackedPromise
   }
 
   async shutdown(): Promise<void> {

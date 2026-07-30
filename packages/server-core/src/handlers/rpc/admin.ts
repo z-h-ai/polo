@@ -6,6 +6,7 @@ import {
   denyCachedAppCatalogAuthorizationForAccount,
   getCachedAppCatalog,
   getSafeAdminErrorMessage,
+  listCachedAppCatalogs,
   saveAppCatalog,
   setAppCatalogAccessMode,
   type AppCatalogSyncResult,
@@ -507,15 +508,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
               await endAdminSession(manager, deps)
             }
             log?.warn('[Admin] app catalog authorization denied:', adminError.message)
-            return {
-              success: true,
-              catalog: deniedCatalog,
-              source: 'cache',
-              refreshed: false,
-              accessMode: 'denied',
-              warningCode: adminError.errorCode,
-              warning: adminError.message,
-            }
+            return { success: false, ...adminError }
           }
         }
         if (isSessionEndingAuthFailure(error)) {
@@ -540,9 +533,36 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     },
   )
 
-  server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATIONS, async () =>
-    callOrganization('listOrganizations', (client, accessToken) =>
-      client.listOrganizations(accessToken)))
+  server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATIONS, async () => {
+    const result = await callOrganization(
+      'listOrganizations',
+      (client, accessToken) => client.listOrganizations(accessToken),
+    )
+    if (result.success) {
+      const tokens = await getCredentialManager().getAdminTokens()
+      if (tokens) {
+        const activeOrganizationIds = new Set(result.organizations
+          .filter(organization => (
+            organization.status !== 'suspended'
+            && organization.membership.status === 'active'
+          ))
+          .map(organization => organization.id))
+        for (const cached of listCachedAppCatalogs(tokens.userId)) {
+          if (activeOrganizationIds.has(cached.organizationId)) continue
+          denyCachedAppCatalogAuthorization(
+            tokens.userId,
+            cached.organizationId,
+          )
+          setAppCatalogAccessMode(
+            tokens.userId,
+            cached.organizationId,
+            'denied',
+          )
+        }
+      }
+    }
+    return result
+  })
 
   server.handle(RPC_CHANNELS.admin.CREATE_ORGANIZATION, async (_ctx, rawInput: unknown) => {
     const input = CreateOrganizationRpcInputSchema.safeParse(rawInput)
@@ -735,14 +755,7 @@ async function endAdminSession(
 ): Promise<void> {
   const tokens = await manager.getAdminTokens()
   if (tokens) {
-    try {
-      await deps?.onAdminSessionEnding?.(tokens.userId)
-    } catch (error) {
-      deps?.platform.logger?.warn(
-        '[Admin] failed to stop account local apps before clearing credentials:',
-        error instanceof Error ? error.message : String(error),
-      )
-    }
+    await deps?.onAdminSessionEnding?.(tokens.userId)
     denyAppCatalogAccessForAccount(tokens.userId)
     denyCachedAppCatalogAuthorizationForAccount(tokens.userId)
   }
@@ -753,7 +766,10 @@ async function completeAdminLogin(args: {
   adminUrl: string
   manager: CredentialManager
   login: AdminLoginResponse
-  deps: Pick<HandlerDeps, 'onAdminSessionEnding' | 'platform'>
+  deps: Pick<
+    HandlerDeps,
+    'onAdminSessionEnding' | 'onAdminSessionStarted' | 'platform'
+  >
   onSyncFailure: (error: unknown) => void
 }): Promise<void> {
   const previousTokens = await args.manager.getAdminTokens()
@@ -775,6 +791,7 @@ async function completeAdminLogin(args: {
     setAdminConfigVersion(undefined)
   }
 
+  await args.deps.onAdminSessionStarted?.(args.login.user.id)
   await args.manager.setAdminTokens({
     accessToken: args.login.accessToken,
     refreshToken: args.login.refreshToken,
@@ -1067,6 +1084,9 @@ function isSessionEndingAuthFailure(error: unknown): boolean {
     error.errorCode === 'TOKEN_REVOKED' ||
     error.errorCode === 'TOKEN_EXPIRED' ||
     error.errorCode === 'FORBIDDEN' ||
+    error.errorCode === 'MEMBERSHIP_REMOVED' ||
+    error.errorCode === 'MEMBERSHIP_SUSPENDED' ||
+    error.errorCode === 'ORGANIZATION_UNAVAILABLE' ||
     error.status === 401 ||
     error.status === 403
   )
@@ -1084,6 +1104,9 @@ function isCatalogAuthorizationFailure(error: unknown): boolean {
   return error instanceof AdminError && (
     error.errorCode === 'FORBIDDEN'
     || error.errorCode === 'ACCOUNT_DISABLED'
+    || error.errorCode === 'MEMBERSHIP_REMOVED'
+    || error.errorCode === 'MEMBERSHIP_SUSPENDED'
+    || error.errorCode === 'ORGANIZATION_UNAVAILABLE'
     || error.errorCode === 'NOT_FOUND'
     || error.status === 403
   )

@@ -10,9 +10,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
   LocalAppInstallRequest,
+  LocalAppInstalledApp,
   LocalAppRuntimeStatus,
+  LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
 import { LocalAppRuntimeManager } from '../manager'
+import { LocalAppRuntimeError } from '../runtime-error'
 import {
   createCatalogLocalAppScopeKey,
   createCatalogRuntimeAppId,
@@ -201,6 +204,138 @@ describe('scoped local app runtime registry', () => {
     expect(stopped).toEqual([
       `account-a:${createCatalogRuntimeAppId(scope('account-a'))}`,
     ])
+  })
+
+  it('gates new scopes and waits for a cancelled install to become quiescent', async () => {
+    let rejectInstall!: (reason: unknown) => void
+    let installStarted!: () => void
+    const started = new Promise<void>(resolve => {
+      installStarted = resolve
+    })
+    let cancelCalls = 0
+    class TrackingManager extends LocalAppRuntimeManager {
+      override install(): Promise<LocalAppInstalledApp> {
+        installStarted()
+        return new Promise((_resolve, reject) => {
+          rejectInstall = reject
+        })
+      }
+
+      override cancelInstall(): boolean {
+        cancelCalls += 1
+        return true
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        return { appId, status: 'stopped' }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new TrackingManager(options),
+    })
+    const accountScope = scope('account-a')
+    const install = registry.install({
+      scope: accountScope,
+      version: '1.0.0',
+      downloadUrl: 'https://example.com/app.zip',
+      checksum: 'a'.repeat(64),
+      sizeBytes: 1,
+      platform: 'darwin',
+      arch: 'arm64',
+    })
+    await started
+
+    let cleanupFinished = false
+    const cleanup = registry.stopAccount('account-a').then(() => {
+      cleanupFinished = true
+    })
+    await Promise.resolve()
+    expect(cancelCalls).toBe(1)
+    expect(cleanupFinished).toBe(false)
+    await expect(registry.start({
+      ...accountScope,
+      catalogAppId: 'new-scope',
+    })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    rejectInstall(new LocalAppRuntimeError(
+      'INSTALL_CANCELLED',
+      'controlled cancellation cleanup complete',
+    ))
+    await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
+    await cleanup
+    expect(cleanupFinished).toBe(true)
+  })
+
+  it('waits for an in-flight start before stopping its process', async () => {
+    let resolveStart!: (value: LocalAppStartResult) => void
+    let startEntered!: () => void
+    const started = new Promise<void>(resolve => {
+      startEntered = resolve
+    })
+    const calls: string[] = []
+    class TrackingManager extends LocalAppRuntimeManager {
+      override start(appId: string): Promise<LocalAppStartResult> {
+        calls.push('start')
+        startEntered()
+        return new Promise(resolve => {
+          resolveStart = resolve
+        })
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        return { appId, status: 'stopped' }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new TrackingManager(options),
+    })
+    const accountScope = scope('account-a')
+    const start = registry.start(accountScope)
+    await started
+    const cleanup = registry.stopAccount('account-a')
+    await Promise.resolve()
+    expect(calls).toEqual(['start'])
+
+    resolveStart({
+      appId: createCatalogRuntimeAppId(accountScope),
+      version: '1.0.0',
+      url: 'http://127.0.0.1:3456',
+      port: 3456,
+    })
+    await start
+    await cleanup
+    expect(calls).toEqual(['start', 'stop'])
+  })
+
+  it('keeps a failed session cleanup gated until a trusted login resumes it', async () => {
+    class FailingManager extends LocalAppRuntimeManager {
+      override async stop(): Promise<LocalAppRuntimeStatus> {
+        throw new LocalAppRuntimeError('STOP_FAILED', 'controlled stop failure')
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new FailingManager(options),
+    })
+    const accountScope = scope('account-a')
+    await expect(registry.stop(accountScope)).rejects.toMatchObject({
+      code: 'STOP_FAILED',
+    })
+
+    await expect(registry.stopAccount('account-a')).rejects.toMatchObject({
+      code: 'STOP_FAILED',
+    })
+    await expect(registry.getRuntimeStatus(accountScope)).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+
+    registry.resumeAccount('account-a')
+    await expect(registry.getRuntimeStatus(accountScope)).resolves.toMatchObject({
+      appId: accountScope.catalogAppId,
+    })
   })
 
   it('keeps the business manifest id separate from the internal runtime id', async () => {

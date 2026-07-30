@@ -119,6 +119,10 @@ const legacyManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   getCachedAppCatalog,
   getAppCatalogAccessMode,
+  getAppCatalogApps: (entry: AppCatalogCacheEntry) => [
+    ...entry.apps,
+    ...(entry.withdrawnApps ?? []),
+  ],
 }))
 
 mock.module('@polo-ai/shared/credentials', () => ({
@@ -355,6 +359,33 @@ describe('local app main-process authorization boundary', () => {
     isInstalledAndReady.mockResolvedValueOnce(false)
     await expect(start(context, scope()))
       .rejects.toThrow('installed and prepared')
+  })
+
+  it('retains a full-directory tombstone but rejects its launch and status access', async () => {
+    const withdrawn = {
+      ...catalog.apps[0]!,
+      availability: 'withdrawn' as const,
+    }
+    catalog.apps = Array.from({ length: 10_000 }, (_, index) => ({
+      ...catalog.apps[0]!,
+      id: `visible-${index}`,
+    }))
+    catalog.withdrawnApps = [withdrawn]
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const getStatuses = handlers.get(
+      RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES,
+    )!
+
+    await expect(start(context, scope(withdrawn.id)))
+      .rejects.toThrow('no longer authorized')
+    await expect(getStatuses(context, { scopes: [scope(withdrawn.id)] }))
+      .resolves.toEqual([{
+        appId: withdrawn.id,
+        scope: scope(withdrawn.id),
+        status: 'not_installed',
+      }])
+    expect(catalog.apps).toHaveLength(10_000)
+    expect(catalog.withdrawnApps).toEqual([withdrawn])
   })
 
   it('reads authorization once and returns complete 1,000, 1,001, and 10,000 batches', async () => {

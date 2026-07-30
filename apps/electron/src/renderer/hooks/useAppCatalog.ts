@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { gt, valid } from 'semver'
 import { i18n } from '@polo-ai/shared/i18n'
-import type {
-  AppCatalogCacheEntry,
-  CatalogApp,
-} from '@polo-ai/shared/admin'
+import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
 import {
   createLocalAppScopeKey,
   type CatalogLocalAppScope,
@@ -174,7 +172,7 @@ export function useAppCatalog() {
     if (!isCurrentSnapshot(snapshot)) return
 
     const selectedApps = selectRuntimeStatusApps(
-      apps ?? catalog.apps,
+      apps ?? getAppCatalogApps(catalog),
       busyScopeKeys,
       app => createLocalAppScopeKey(scopeForCatalogApp(catalog, app)),
     )
@@ -275,7 +273,7 @@ export function useAppCatalog() {
         accessMode: result.accessMode,
       }))
       await refreshRuntimeStatuses(
-        result.catalog.apps,
+        getAppCatalogApps(result.catalog),
         undefined,
         snapshot,
         'replace',

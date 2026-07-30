@@ -198,6 +198,11 @@ export interface AppCatalogCacheEntry extends AppCatalogResponse {
   authorizationStatus: 'authorized' | 'denied';
   syncedAt: number;
   /**
+   * Withdrawn apps are bounded independently from the 10,000 currently visible
+   * Catalog entries so a full directory cannot erase local/recent references.
+   */
+  withdrawnApps?: CatalogApp[];
+  /**
    * Last releases whose version strings passed the client SemVer contract.
    * This is deliberately separate from the latest catalog payload so a bad
    * server version cannot erase a previously actionable update.
@@ -330,6 +335,9 @@ export type AdminErrorCode =
   | 'INVALID_TOKEN'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
+  | 'MEMBERSHIP_REMOVED'
+  | 'MEMBERSHIP_SUSPENDED'
+  | 'ORGANIZATION_UNAVAILABLE'
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
   | 'SERVER_ERROR'

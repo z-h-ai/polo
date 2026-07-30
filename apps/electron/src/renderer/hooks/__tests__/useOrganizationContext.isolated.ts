@@ -285,6 +285,58 @@ describe('useOrganizationContextState', () => {
     unsubscribe()
   })
 
+  it('does not restore an organization removed or suspended by a successful list', async () => {
+    for (const nextOrganizations of [
+      [],
+      [{
+        ...organizations[0],
+        membership: {
+          ...organizations[0].membership,
+          status: 'suspended' as const,
+        },
+      }],
+    ]) {
+      localStorage.clear()
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: true,
+        organizations: [organizations[0]],
+      }))
+      const online = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        expect(await online.result.current.bootstrap('lost-membership'))
+          .toBe('ready')
+      })
+      expect(online.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: true,
+        organizations: nextOrganizations,
+      }))
+      await act(async () => {
+        await online.result.current.refreshOrganizations()
+      })
+      expect(online.result.current.activeOrganizationId).toBeNull()
+      expect(getStoredActiveOrganizationId('lost-membership')).toBeNull()
+      expect(getVerifiedOrganizationContext('lost-membership'))
+        .toMatchObject({ activeOrganizationId: null })
+      online.unmount()
+
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: false,
+        errorCode: 'NETWORK_ERROR',
+        status: 503,
+      }))
+      const offline = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        await offline.result.current.bootstrap('lost-membership').catch(() => {})
+      })
+      expect(offline.result.current.activeOrganizationId).toBeNull()
+      expect(offline.result.current.flowState).toBe('loading')
+      offline.unmount()
+    }
+  })
+
   it('discards account A bootstrap after clearing A and bootstrapping account B', async () => {
     let resolveAccountA!: (value: OrganizationListResult) => void
     let resolveAccountB!: (value: OrganizationListResult) => void

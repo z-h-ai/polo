@@ -32,4 +32,9 @@ export interface HandlerDeps<
    * available and before credentials are deleted.
    */
   onAdminSessionEnding?: (accountId: string) => Promise<void>
+  /**
+   * Re-enables host lifecycle operations only after a fresh trusted login has
+   * completed any prior account cleanup.
+   */
+  onAdminSessionStarted?: (accountId: string) => Promise<void> | void
 }

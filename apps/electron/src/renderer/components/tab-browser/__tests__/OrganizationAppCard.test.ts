@@ -82,4 +82,46 @@ describe('OrganizationAppCard invalid version state', () => {
     expect(statusText(translate, app, status, true))
       .toBe('homeApps.errors.openGeneric')
   })
+
+  it('uses the observable install phase before the top-level installing state', () => {
+    const verifying: LocalAppRuntimeStatus = {
+      appId: app.id,
+      status: 'installing',
+      progress: {
+        phase: 'verifying',
+        bytesDownloaded: 100,
+        sizeBytes: 100,
+        percent: 100,
+      },
+    }
+    const extracting: LocalAppRuntimeStatus = {
+      ...verifying,
+      progress: {
+        ...verifying.progress!,
+        phase: 'extracting',
+      },
+    }
+
+    expect(statusText(translate, app, verifying, true))
+      .toBe('homeApps.status.verifying')
+    expect(statusText(translate, app, extracting, true))
+      .toBe('homeApps.status.extracting')
+  })
+
+  it('keeps a withdrawn installed app visible while denying a new launch', () => {
+    const withdrawnApp: CatalogApp = {
+      ...app,
+      availability: 'withdrawn',
+    }
+    const status: LocalAppRuntimeStatus = {
+      appId: app.id,
+      status: 'installed',
+      currentVersion: '1.0.0',
+    }
+
+    expect(primaryActionFor(withdrawnApp, status, true, false))
+      .toBe('unavailable')
+    expect(statusText(translate, withdrawnApp, status, true))
+      .toBe('homeApps.status.withdrawn')
+  })
 })

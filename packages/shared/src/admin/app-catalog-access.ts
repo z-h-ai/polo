@@ -2,7 +2,10 @@ export type AppCatalogAccessMode = 'online' | 'offline' | 'denied'
 
 const accessModes = new Map<string, AppCatalogAccessMode>()
 
-function key(accountId: string, organizationId: string): string {
+function createAppCatalogAccessKey(
+  accountId: string,
+  organizationId: string,
+): string {
   return JSON.stringify([accountId, organizationId])
 }
 
@@ -15,7 +18,9 @@ export function getAppCatalogAccessMode(
   accountId: string,
   organizationId: string,
 ): AppCatalogAccessMode {
-  return accessModes.get(key(accountId, organizationId)) ?? 'offline'
+  return accessModes.get(
+    createAppCatalogAccessKey(accountId, organizationId),
+  ) ?? 'offline'
 }
 
 export function setAppCatalogAccessMode(
@@ -23,7 +28,7 @@ export function setAppCatalogAccessMode(
   organizationId: string,
   mode: AppCatalogAccessMode,
 ): void {
-  accessModes.set(key(accountId, organizationId), mode)
+  accessModes.set(createAppCatalogAccessKey(accountId, organizationId), mode)
 }
 
 export function denyAppCatalogAccessForAccount(accountId: string): void {

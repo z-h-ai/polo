@@ -371,6 +371,7 @@ Object.defineProperty(window, 'electronAPI', {
 const { act, cleanup, render, screen, waitFor } = await import('@testing-library/react')
 const userEvent = (await import('@testing-library/user-event')).default
 const { default: App } = await import('../App')
+const { emitAdminAuthFailure } = await import('@/lib/admin-auth-failure')
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
@@ -452,5 +453,33 @@ describe('App deferred organization deep-link wiring', () => {
     expect(screen.getByTestId('login-route')).toBeTruthy()
     expect(screen.queryByTestId('organization-route')).toBeNull()
     expect(loginRouteRenderCount).toBe(loginRenderCountAfterLogout)
+  })
+
+  it('clears the App account context when a cached catalog sync returns 403', async () => {
+    authenticated = true
+    activeWorkspaceId = 'workspace-1'
+    listedOrganizations = [organizationSummary]
+    render(createElement(I18nextProvider, { i18n }, createElement(App)))
+
+    await screen.findByTestId('ready-route')
+    expect(localStorage.getItem(
+      `polo-verified-organization-context:${account.userId}`,
+    )).not.toBeNull()
+
+    act(() => {
+      expect(emitAdminAuthFailure({
+        code: 'FORBIDDEN',
+        status: 403,
+      })).toBe(true)
+    })
+
+    await screen.findByTestId('login-route')
+    expect(screen.queryByTestId('ready-route')).toBeNull()
+    expect(localStorage.getItem(
+      `polo-verified-organization-context:${account.userId}`,
+    )).toBeNull()
+    expect(localStorage.getItem(
+      `polo-active-organization:${account.userId}`,
+    )).toBeNull()
   })
 })

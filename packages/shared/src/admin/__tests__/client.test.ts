@@ -560,6 +560,38 @@ describe('AdminClient', () => {
     });
   });
 
+  it('preserves explicit membership loss codes on non-auth HTTP statuses', async () => {
+    for (const [errorCode, status, safeMessage] of [
+      [
+        'MEMBERSHIP_REMOVED',
+        409,
+        'Organization membership is no longer available',
+      ],
+      [
+        'MEMBERSHIP_SUSPENDED',
+        423,
+        'Organization membership is suspended',
+      ],
+      [
+        'ORGANIZATION_UNAVAILABLE',
+        409,
+        'Organization is no longer available',
+      ],
+    ] as const) {
+      mockJsonFetch({
+        errorCode,
+        message: 'private server authorization detail',
+      }, status);
+      const client = new AdminClient('https://admin.example.com');
+
+      await expect(client.listOrganizations('access-token')).rejects.toMatchObject({
+        errorCode,
+        status,
+        message: safeMessage,
+      });
+    }
+  });
+
   it('refreshes tokens and retries once on authenticated 401 responses', async () => {
     fetchCalls = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {

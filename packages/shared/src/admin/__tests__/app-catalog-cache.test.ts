@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import {
   denyCachedAppCatalogAuthorization,
   denyCachedAppCatalogAuthorizationForAccount,
+  getAppCatalogApps,
   getCachedAppCatalog,
   saveAppCatalog,
 } from '../app-catalog-cache.ts'
@@ -90,6 +91,12 @@ describe('app catalog cache', () => {
 
     expect(refreshed.apps).toEqual([
       { ...remoteApp('app-a'), availability: 'available' },
+    ])
+    expect(refreshed.withdrawnApps).toEqual([
+      { ...remoteApp('app-b'), availability: 'withdrawn' },
+    ])
+    expect(getAppCatalogApps(refreshed)).toEqual([
+      { ...remoteApp('app-a'), availability: 'available' },
       { ...remoteApp('app-b'), availability: 'withdrawn' },
     ])
   })
@@ -158,21 +165,31 @@ describe('app catalog cache', () => {
     })
     expect(replaced.apps).toHaveLength(10_000)
     expect(replaced.apps.some(app => app.id === 'app-0')).toBe(false)
+    expect(replaced.withdrawnApps).toEqual([
+      { ...remoteApp('app-0'), availability: 'withdrawn' },
+    ])
 
     const withdrawn = saveAppCatalog('account-a', 'organization-1', {
       appConfigVersion: 'v3',
       apps: replacement.slice(1),
     })
-    expect(withdrawn.apps).toHaveLength(10_000)
-    expect(withdrawn.apps.at(-1)).toMatchObject({
+    expect(withdrawn.apps).toHaveLength(9_999)
+    expect(withdrawn.withdrawnApps).toHaveLength(2)
+    expect(withdrawn.withdrawnApps).toContainEqual(expect.objectContaining({
       id: 'app-1',
       availability: 'withdrawn',
-    })
+    }))
     expect(getCachedAppCatalog('account-a', 'organization-1')?.apps)
-      .toHaveLength(10_000)
+      .toHaveLength(9_999)
+    expect(getAppCatalogApps(withdrawn)).toHaveLength(10_001)
 
-    expect(denyCachedAppCatalogAuthorization('account-a', 'organization-1')?.apps)
-      .toHaveLength(10_000)
+    const denied = denyCachedAppCatalogAuthorization(
+      'account-a',
+      'organization-1',
+    )
+    expect(denied?.apps).toHaveLength(9_999)
+    expect(denied?.withdrawnApps).toHaveLength(2)
+    expect(getAppCatalogApps(denied!)).toHaveLength(10_001)
     expect(getCachedAppCatalog('account-a', 'organization-1'))
       .toMatchObject({ authorizationStatus: 'denied' })
   })
@@ -238,6 +255,6 @@ describe('app catalog cache', () => {
     expect(JSON.parse(readFileSync(
       join(configDir, 'admin-app-catalog.json'),
       'utf8',
-    )).schemaVersion).toBe(2)
+    )).schemaVersion).toBe(3)
   })
 })

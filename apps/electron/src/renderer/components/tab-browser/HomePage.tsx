@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { CatalogApp } from '@polo-ai/shared/admin'
+import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
 import { AppIcon } from './AppIcon'
 import {
   OrganizationAppCard,
@@ -143,9 +144,11 @@ export function HomePage({ onAddApp }: HomePageProps) {
     [installedApps],
   )
   const organizationApps = useMemo(
-    () => [...(catalog.state.catalog?.apps ?? [])]
-      .sort((left, right) => left.sortOrder - right.sortOrder),
-    [catalog.state.catalog?.apps],
+    () => catalog.state.catalog
+      ? getAppCatalogApps(catalog.state.catalog)
+          .sort((left, right) => left.sortOrder - right.sortOrder)
+      : [],
+    [catalog.state.catalog],
   )
   const activeOrganization = catalog.organization?.organizationSummaries.find(
     item => item.id === catalog.organization?.activeOrganizationId,

@@ -14,7 +14,7 @@ import type {
   CatalogApp,
 } from './types.ts'
 
-const CACHE_SCHEMA_VERSION = 2
+const CACHE_SCHEMA_VERSION = 3
 const MAX_CACHED_APPS = 10_000
 const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 
@@ -30,7 +30,7 @@ const AppCatalogCacheEntryV1Schema = AppCatalogResponseSchema.extend({
   apps: z.array(CachedCatalogAppSchema).max(MAX_CACHED_APPS),
 })
 
-const AppCatalogCacheEntrySchema = AppCatalogCacheEntryV1Schema.extend({
+const AppCatalogCacheEntryV2Schema = AppCatalogCacheEntryV1Schema.extend({
   trustedReleases: z.record(z.string(), AppReleaseSummarySchema).default({}),
   warnings: z.array(z.object({
     code: z.literal('invalid_semver'),
@@ -38,9 +38,18 @@ const AppCatalogCacheEntrySchema = AppCatalogCacheEntryV1Schema.extend({
   })).max(MAX_CACHED_APPS).default([]),
 })
 
+const AppCatalogCacheEntrySchema = AppCatalogCacheEntryV2Schema.extend({
+  withdrawnApps: z.array(CachedCatalogAppSchema).max(MAX_CACHED_APPS).default([]),
+})
+
 const AppCatalogCacheFileSchema = z.object({
   schemaVersion: z.literal(CACHE_SCHEMA_VERSION),
   entries: z.record(z.string(), AppCatalogCacheEntrySchema),
+})
+
+const AppCatalogCacheFileV2Schema = z.object({
+  schemaVersion: z.literal(2),
+  entries: z.record(z.string(), AppCatalogCacheEntryV2Schema),
 })
 
 const AppCatalogCacheFileV1Schema = z.object({
@@ -82,14 +91,40 @@ function trustedReleasesFromApps(
   )))
 }
 
-function migrateCacheV1(raw: unknown): AppCatalogCacheFile | null {
-  const parsed = AppCatalogCacheFileV1Schema.safeParse(raw)
-  if (!parsed.success) return null
+function migrateLegacyCache(raw: unknown): AppCatalogCacheFile | null {
+  const v2 = AppCatalogCacheFileV2Schema.safeParse(raw)
+  if (v2.success) {
+    return {
+      schemaVersion: CACHE_SCHEMA_VERSION,
+      entries: Object.fromEntries(Object.entries(v2.data.entries).map(
+        ([entryKey, entry]) => [entryKey, {
+          ...entry,
+          apps: entry.apps.filter(app => app.availability !== 'withdrawn'),
+          withdrawnApps: entry.apps
+            .filter(app => app.availability === 'withdrawn')
+            .map(app => ({ ...app, availability: 'withdrawn' as const })),
+          warnings: entry.apps.flatMap(app => (
+            app.deliveryMode === 'local_bundle'
+            && app.currentRelease
+            && !isValidCatalogSemVer(app.currentRelease.version)
+              ? [{ code: 'invalid_semver' as const, catalogAppId: app.id }]
+              : []
+          )),
+        }],
+      )),
+    }
+  }
+  const v1 = AppCatalogCacheFileV1Schema.safeParse(raw)
+  if (!v1.success) return null
   return {
     schemaVersion: CACHE_SCHEMA_VERSION,
-    entries: Object.fromEntries(Object.entries(parsed.data.entries).map(
-      ([key, entry]) => [key, {
+    entries: Object.fromEntries(Object.entries(v1.data.entries).map(
+      ([entryKey, entry]) => [entryKey, {
         ...entry,
+        apps: entry.apps.filter(app => app.availability !== 'withdrawn'),
+        withdrawnApps: entry.apps
+          .filter(app => app.availability === 'withdrawn')
+          .map(app => ({ ...app, availability: 'withdrawn' as const })),
         trustedReleases: trustedReleasesFromApps(entry.apps),
         warnings: entry.apps.flatMap(app => (
           app.deliveryMode === 'local_bundle'
@@ -111,7 +146,7 @@ function readCache(): AppCatalogCacheFile {
     const parsed = AppCatalogCacheFileSchema.safeParse(raw)
     return parsed.success
       ? parsed.data
-      : migrateCacheV1(raw) ?? emptyCache()
+      : migrateLegacyCache(raw) ?? emptyCache()
   } catch {
     return emptyCache()
   }
@@ -133,6 +168,8 @@ export function getCachedAppCatalog(
   return readCache().entries[cacheKey(accountId, organizationId)] ?? null
 }
 
+export { getAppCatalogApps } from './app-catalog-view.ts'
+
 export function saveAppCatalog(
   accountId: string,
   organizationId: string,
@@ -142,19 +179,21 @@ export function saveAppCatalog(
   const cache = readCache()
   const previous = cache.entries[cacheKey(accountId, organizationId)]
   const visibleIds = new Set(catalog.apps.map(app => app.id))
-  const withdrawnCapacity = Math.max(0, MAX_CACHED_APPS - catalog.apps.length)
-  const withdrawn = (previous?.apps ?? [])
-    .filter(app => !visibleIds.has(app.id))
-    .map((app): CatalogApp => ({ ...app, availability: 'withdrawn' }))
-    .slice(0, withdrawnCapacity)
-  const apps = [
-    ...catalog.apps.map((app): CatalogApp => ({
-      ...app,
-      availability: 'available',
-    })),
-    ...withdrawn,
-  ]
-  const retainedIds = new Set(apps
+  const withdrawnById = new Map<string, CatalogApp>()
+  for (const app of [
+    ...(previous?.apps ?? []).filter(app => !visibleIds.has(app.id)),
+    ...(previous?.withdrawnApps ?? []).filter(app => !visibleIds.has(app.id)),
+  ]) {
+    if (!withdrawnById.has(app.id)) {
+      withdrawnById.set(app.id, { ...app, availability: 'withdrawn' })
+    }
+  }
+  const apps = catalog.apps.map((app): CatalogApp => ({
+    ...app,
+    availability: 'available',
+  }))
+  const withdrawnApps = [...withdrawnById.values()].slice(0, MAX_CACHED_APPS)
+  const retainedIds = new Set([...apps, ...withdrawnApps]
     .filter(app => app.deliveryMode === 'local_bundle')
     .map(app => app.id))
   const trustedReleases = Object.fromEntries(Object.entries({
@@ -168,6 +207,7 @@ export function saveAppCatalog(
     appConfigVersion: catalog.appConfigVersion,
     syncedAt,
     apps,
+    withdrawnApps,
     trustedReleases,
     warnings: catalog.apps.flatMap(app => (
       app.deliveryMode === 'local_bundle'
@@ -197,6 +237,10 @@ export function denyCachedAppCatalogAuthorization(
       ...app,
       availability: 'unavailable',
     })),
+    withdrawnApps: (previous.withdrawnApps ?? []).map(app => ({
+      ...app,
+      availability: 'unavailable',
+    })),
   }
   cache.entries[key] = entry
   writeCache(cache)
@@ -214,6 +258,10 @@ export function denyCachedAppCatalogAuthorizationForAccount(
       ...previous,
       authorizationStatus: 'denied',
       apps: previous.apps.map(app => ({
+        ...app,
+        availability: 'unavailable',
+      })),
+      withdrawnApps: (previous.withdrawnApps ?? []).map(app => ({
         ...app,
         availability: 'unavailable',
       })),

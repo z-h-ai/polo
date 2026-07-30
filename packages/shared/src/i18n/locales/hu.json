@@ -550,6 +550,7 @@
   "homeApps.recent.title": "Legutóbb használt",
   "homeApps.status.downloading": "Letöltés",
   "homeApps.status.downloadingUpdate": "Frissítés letöltése",
+  "homeApps.status.extracting": "Alkalmazás kibontása",
   "homeApps.status.incompatible": "Ezen az eszközön nem érhető el",
   "homeApps.status.installed": "Telepítve",
   "homeApps.status.installing": "Telepítés",

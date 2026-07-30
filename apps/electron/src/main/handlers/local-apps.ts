@@ -1,5 +1,6 @@
 import {
   getAppCatalogAccessMode,
+  getAppCatalogApps,
   getCachedAppCatalog,
   type AppReleaseSummary,
   type CatalogApp,
@@ -65,7 +66,9 @@ async function requireAuthorizedCatalogApp(
 ): Promise<AuthorizedCatalogApp> {
   await requireTrustedCatalogAccount(scope)
   const catalog = getCachedAppCatalog(scope.accountId, scope.organizationId)
-  const app = catalog?.apps.find(candidate => candidate.id === scope.catalogAppId)
+  const app = catalog
+    ? getAppCatalogApps(catalog).find(candidate => candidate.id === scope.catalogAppId)
+    : undefined
   const accessMode = getAppCatalogAccessMode(scope.accountId, scope.organizationId)
   if (
     !catalog
@@ -426,7 +429,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       if (!catalog || catalog.authorizationStatus !== 'authorized') {
         throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Catalog authorization is unavailable')
       }
-      const localApps = new Map(catalog.apps
+      const localApps = new Map(getAppCatalogApps(catalog)
         .filter(app => app.deliveryMode === 'local_bundle')
         .map(app => [app.id, app]))
       if (scopes.some(scope => !localApps.has(scope.catalogAppId))) {

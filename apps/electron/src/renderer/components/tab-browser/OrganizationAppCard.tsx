@@ -69,20 +69,25 @@ export function statusText(
   if (!compatible) return t('homeApps.status.incompatible')
   if (app.deliveryMode === 'remote_url') return t('homeApps.status.remote')
   if (!status) return t('homeApps.status.notInstalled')
+  if (status.progress) {
+    switch (status.progress.phase) {
+      case 'downloading':
+        return t('homeApps.status.downloading')
+      case 'verifying':
+        return t('homeApps.status.verifying')
+      case 'extracting':
+        return t('homeApps.status.extracting')
+      case 'preparing':
+        return t('homeApps.status.preparing')
+    }
+  }
   if (status.installationStatus) {
     return status.installationStatus === 'downloading'
       ? t('homeApps.status.downloadingUpdate')
       : t('homeApps.status.installingUpdate')
   }
-  if (status.status === 'downloading') {
-    return status.progress?.phase === 'verifying'
-      ? t('homeApps.status.verifying')
-      : t('homeApps.status.downloading')
-  }
-  if (status.status === 'installing') {
-    if (status.progress?.phase === 'preparing') return t('homeApps.status.preparing')
-    return t('homeApps.status.installing')
-  }
+  if (status.status === 'downloading') return t('homeApps.status.downloading')
+  if (status.status === 'installing') return t('homeApps.status.installing')
   if (status.status === 'starting') return t('homeApps.status.starting')
   if (status.versionError === 'invalid_semver') {
     return t('homeApps.status.invalidVersion')

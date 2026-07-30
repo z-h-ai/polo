@@ -550,6 +550,7 @@
   "homeApps.recent.title": "最近使用",
   "homeApps.status.downloading": "正在下载",
   "homeApps.status.downloadingUpdate": "正在下载更新",
+  "homeApps.status.extracting": "正在解压应用",
   "homeApps.status.incompatible": "此设备不可用",
   "homeApps.status.installed": "已安装",
   "homeApps.status.installing": "正在安装",
