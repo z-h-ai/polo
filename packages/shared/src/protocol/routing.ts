@@ -253,6 +253,12 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK,
   RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER,
   RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER,
+
+  // preferences — device-local launcher and verified Admin organization state
+  RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
 ])
 
 // ---------------------------------------------------------------------------
@@ -375,8 +381,6 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // preferences — workspace-level preferences
   RPC_CHANNELS.preferences.READ,
   RPC_CHANNELS.preferences.WRITE,
-  RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
-  RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
 
   // drafts — workspace content
   RPC_CHANNELS.drafts.GET,

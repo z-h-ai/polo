@@ -68,4 +68,17 @@ describe('channel routing behavior', () => {
       }
     }
   })
+
+  test('device-local launcher and organization preferences stay local', () => {
+    const deviceLocalPreferences = [
+      RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
+      RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+      RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+      RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+    ]
+    for (const channel of deviceLocalPreferences) {
+      expect(LOCAL_ONLY_CHANNELS.has(channel)).toBe(true)
+      expect(REMOTE_ELIGIBLE_CHANNELS.has(channel)).toBe(false)
+    }
+  })
 })

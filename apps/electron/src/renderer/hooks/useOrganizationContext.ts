@@ -8,18 +8,20 @@ import type {
 import {
   clearPendingOrganizationJoinToken,
   clearStoredActiveOrganizationId,
-  clearUnavailableOrganizationTombstone,
   clearVerifiedOrganizationContext,
   createUnavailableOrganizationTombstone,
   createOrganizationContextKey,
+  getOrganizationContextStorage,
   getPendingOrganizationJoinToken,
   getStoredActiveOrganizationId,
-  getUnavailableOrganizationTombstone,
-  getVerifiedOrganizationContext,
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
-  setUnavailableOrganizationTombstone,
+  setUnavailableOrganizationContext,
   setVerifiedOrganizationContext,
+} from '@/lib/organization-storage'
+import type {
+  UnavailableOrganizationTombstone,
+  VerifiedOrganizationContext,
 } from '@/lib/organization-storage'
 import {
   emitAdminAuthFailure,
@@ -99,6 +101,13 @@ function caughtError(caught: unknown): OrganizationFlowError {
   return { code: 'request_failed' }
 }
 
+function persistOrganizationContext(persistence: Promise<void>): void {
+  void persistence.catch(() => {
+    // The live authorization state remains authoritative. A later verified
+    // response or bootstrap will retry the device-local preference write.
+  })
+}
+
 export function useOrganizationContextState() {
   const [flowState, setFlowState] = useState<OrganizationFlowState>('idle')
   const [organizationSummaries, setOrganizationSummaries] = useState<OrganizationSummary[]>([])
@@ -123,6 +132,9 @@ export function useOrganizationContextState() {
   const organizationSummariesRef = useRef(organizationSummaries)
   organizationSummariesRef.current = organizationSummaries
   const activeOrganizationIdRef = useRef<string | null>(null)
+  const unavailableOrganizationRef = useRef<
+    UnavailableOrganizationTombstone | null
+  >(null)
   const organizationScopeGenerationRef = useRef(0)
   const refreshGenerationRef = useRef(0)
 
@@ -142,8 +154,10 @@ export function useOrganizationContextState() {
     }
 
     setStoredActiveOrganizationId(accountId, organizationId)
-    setVerifiedOrganizationContext(accountId, summaries, organizationId)
-    clearUnavailableOrganizationTombstone(accountId)
+    persistOrganizationContext(
+      setVerifiedOrganizationContext(accountId, summaries, organizationId),
+    )
+    unavailableOrganizationRef.current = null
     accountIdRef.current = accountId
     organizationSummariesRef.current = summaries
     activeOrganizationIdRef.current = organizationId
@@ -177,8 +191,17 @@ export function useOrganizationContextState() {
       tombstone,
     ]
     clearStoredActiveOrganizationId(accountId)
-    setVerifiedOrganizationContext(accountId, summaries, null)
-    setUnavailableOrganizationTombstone(accountId, tombstone)
+    persistOrganizationContext(
+      setUnavailableOrganizationContext(
+        accountId,
+        summaries,
+        tombstone,
+      ),
+    )
+    unavailableOrganizationRef.current = {
+      organization: tombstone,
+      recordedAt: Date.now(),
+    }
     accountIdRef.current = accountId
     organizationSummariesRef.current = nextSummaries
     activeOrganizationIdRef.current = tombstone.id
@@ -209,11 +232,13 @@ export function useOrganizationContextState() {
     if (!result.success) throw resultError(result)
     organizationSummariesRef.current = result.organizations
     setOrganizationSummaries(result.organizations)
-    setVerifiedOrganizationContext(
-      scope.accountId,
-      result.organizations,
-      activeOrganizationIdRef.current
-        ?? getStoredActiveOrganizationId(scope.accountId),
+    persistOrganizationContext(
+      setVerifiedOrganizationContext(
+        scope.accountId,
+        result.organizations,
+        activeOrganizationIdRef.current
+          ?? getStoredActiveOrganizationId(scope.accountId),
+      ),
     )
     return result.organizations
   }, [isCurrentAccountScope])
@@ -258,8 +283,6 @@ export function useOrganizationContextState() {
   const bootstrap = useCallback(async (
     accountId: string,
   ): Promise<OrganizationFlowState | null> => {
-    const previouslyVerified = getVerifiedOrganizationContext(accountId)
-    const persistedTombstone = getUnavailableOrganizationTombstone(accountId)
     const scope = {
       accountId,
       generation: ++accountScopeGenerationRef.current,
@@ -277,7 +300,15 @@ export function useOrganizationContextState() {
     setFlowState('loading')
     setError(null)
 
+    let previouslyVerified: VerifiedOrganizationContext | null = null
+    let persistedTombstone: UnavailableOrganizationTombstone | null = null
     try {
+      const persisted = await getOrganizationContextStorage(accountId)
+      if (!isCurrentAccountScope(scope)) return null
+      previouslyVerified = persisted.verifiedContext ?? null
+      persistedTombstone = persisted.unavailableTombstone ?? null
+      unavailableOrganizationRef.current = persistedTombstone
+
       const summaries = await loadOrganizations(scope)
       if (!summaries || !isCurrentAccountScope(scope)) return null
       const token = getPendingOrganizationJoinToken() ?? pendingJoinTokenRef.current
@@ -344,9 +375,10 @@ export function useOrganizationContextState() {
       const nextError = caughtError(caught)
       if (nextError.authFailureHandled) {
         clearStoredActiveOrganizationId(accountId)
-        clearVerifiedOrganizationContext(accountId)
+        persistOrganizationContext(clearVerifiedOrganizationContext(accountId))
+        unavailableOrganizationRef.current = null
       } else if (isTemporaryOrganizationError(nextError)) {
-        const cached = getVerifiedOrganizationContext(accountId)
+        const cached = previouslyVerified
         const active = cached?.activeOrganizationId
           ? cached.organizationSummaries.find(organization => (
               organization.id === cached.activeOrganizationId
@@ -358,9 +390,7 @@ export function useOrganizationContextState() {
           activateOrganization(accountId, cached.organizationSummaries, active.id)
           return 'ready'
         }
-        const unavailable = getUnavailableOrganizationTombstone(
-          accountId,
-        )?.organization
+        const unavailable = persistedTombstone?.organization
         if (unavailable && isCurrentAccountScope(scope)) {
           retainUnavailableOrganization(accountId, [], unavailable)
           return 'ready'
@@ -403,7 +433,7 @@ export function useOrganizationContextState() {
 
     const accountId = accountIdRef.current
     const unavailable = accountId
-      ? getUnavailableOrganizationTombstone(accountId)?.organization
+      ? unavailableOrganizationRef.current?.organization
       : null
     if (accountId && unavailable) {
       retainUnavailableOrganization(
@@ -568,7 +598,10 @@ export function useOrganizationContextState() {
       const nextError = resultError(result)
       if (nextError.authFailureHandled) {
         clearStoredActiveOrganizationId(requestAccountId)
-        clearVerifiedOrganizationContext(requestAccountId)
+        persistOrganizationContext(
+          clearVerifiedOrganizationContext(requestAccountId),
+        )
+        unavailableOrganizationRef.current = null
       }
       throw nextError
     }
@@ -577,7 +610,9 @@ export function useOrganizationContextState() {
     if (!requestOrganizationId) {
       organizationSummariesRef.current = summaries
       setOrganizationSummaries(summaries)
-      setVerifiedOrganizationContext(requestAccountId, summaries, null)
+      persistOrganizationContext(
+        setVerifiedOrganizationContext(requestAccountId, summaries, null),
+      )
       return summaries
     }
     const active = summaries.find(item => (
@@ -589,9 +624,7 @@ export function useOrganizationContextState() {
         item => item.id === requestOrganizationId,
       ) ?? organizationSummariesRef.current.find(
         item => item.id === requestOrganizationId,
-      ) ?? getUnavailableOrganizationTombstone(
-        requestAccountId,
-      )?.organization
+      ) ?? unavailableOrganizationRef.current?.organization
       if (unavailable) {
         retainUnavailableOrganization(
           requestAccountId,
@@ -603,7 +636,10 @@ export function useOrganizationContextState() {
       organizationSummariesRef.current = summaries
       setOrganizationSummaries(summaries)
       clearStoredActiveOrganizationId(requestAccountId)
-      setVerifiedOrganizationContext(requestAccountId, summaries, null)
+      persistOrganizationContext(
+        setVerifiedOrganizationContext(requestAccountId, summaries, null),
+      )
+      unavailableOrganizationRef.current = null
       activeOrganizationIdRef.current = null
       organizationScopeGenerationRef.current += 1
       setActiveOrganizationId(null)
@@ -613,8 +649,10 @@ export function useOrganizationContextState() {
     }
     organizationSummariesRef.current = summaries
     setOrganizationSummaries(summaries)
-    clearUnavailableOrganizationTombstone(requestAccountId)
-    setVerifiedOrganizationContext(requestAccountId, summaries, active.id)
+    unavailableOrganizationRef.current = null
+    persistOrganizationContext(
+      setVerifiedOrganizationContext(requestAccountId, summaries, active.id),
+    )
     setOrganizationMembershipRole(active.membership.role)
     return summaries
   }, [retainUnavailableOrganization])
@@ -626,7 +664,9 @@ export function useOrganizationContextState() {
     const targetAccountId = accountId ?? accountIdRef.current
     if (targetAccountId) {
       clearStoredActiveOrganizationId(targetAccountId)
-      clearVerifiedOrganizationContext(targetAccountId)
+      persistOrganizationContext(
+        clearVerifiedOrganizationContext(targetAccountId),
+      )
     }
     const preservedJoinToken = options?.preservePendingJoinToken
       ? pendingJoinTokenRef.current ?? getPendingOrganizationJoinToken()
@@ -638,6 +678,7 @@ export function useOrganizationContextState() {
     accountIdRef.current = null
     accountScopeGenerationRef.current += 1
     activeOrganizationIdRef.current = null
+    unavailableOrganizationRef.current = null
     organizationScopeGenerationRef.current += 1
     refreshGenerationRef.current += 1
     organizationSummariesRef.current = []

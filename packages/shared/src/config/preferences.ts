@@ -11,11 +11,29 @@ import {
   type HomeRecentAppPreference,
   type HomeRecentAppsByContext,
 } from './home-recent.ts';
+import {
+  type OrganizationContextStorage,
+  type OrganizationContextStorageByAccount,
+  type OrganizationContextStoragePatch,
+  type UnavailableOrganizationTombstonePreference,
+  type VerifiedOrganizationContextPreference,
+} from './organization-context.ts';
+import {
+  AdminEntityIdSchema,
+  ListOrganizationsResponseSchema,
+} from '../admin/schemas.ts';
 export type {
   HomeRecentAppKind,
   HomeRecentAppPreference,
   HomeRecentAppsByContext,
 } from './home-recent.ts';
+export type {
+  OrganizationContextStorage,
+  OrganizationContextStorageByAccount,
+  OrganizationContextStoragePatch,
+  UnavailableOrganizationTombstonePreference,
+  VerifiedOrganizationContextPreference,
+} from './organization-context.ts';
 
 export interface UserLocation {
   city?: string;
@@ -45,6 +63,8 @@ export interface UserPreferences {
   diffViewer?: DiffViewerPreferences;
   // Home launcher history, isolated by a versioned account/organization key.
   homeRecentApps?: HomeRecentAppsByContext;
+  // Device-local, last verified Admin organization state, isolated by account.
+  organizationContextStorage?: OrganizationContextStorageByAccount;
   // Whether to include Co-Authored-By trailer on git commits (default: true)
   includeCoAuthoredBy?: boolean;
   // When the preferences were last updated
@@ -133,6 +153,170 @@ export function setHomeRecentApps(
     },
   });
   return sanitized;
+}
+
+function sanitizeVerifiedOrganizationContext(
+  value: unknown,
+): VerifiedOrganizationContextPreference | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Partial<VerifiedOrganizationContextPreference>;
+  const organizations = ListOrganizationsResponseSchema.safeParse({
+    organizations: candidate.organizationSummaries,
+  });
+  if (
+    !organizations.success
+    || (candidate.activeOrganizationId !== null
+      && typeof candidate.activeOrganizationId !== 'string')
+    || !Number.isSafeInteger(candidate.verifiedAt)
+    || (candidate.verifiedAt ?? -1) < 0
+  ) {
+    return undefined;
+  }
+  if (
+    candidate.activeOrganizationId
+    && !organizations.data.organizations.some(
+      organization => organization.id === candidate.activeOrganizationId,
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    organizationSummaries: organizations.data.organizations,
+    activeOrganizationId: candidate.activeOrganizationId ?? null,
+    verifiedAt: candidate.verifiedAt!,
+  };
+}
+
+function sanitizeUnavailableOrganizationTombstone(
+  value: unknown,
+): UnavailableOrganizationTombstonePreference | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Partial<UnavailableOrganizationTombstonePreference>;
+  const organizations = ListOrganizationsResponseSchema.safeParse({
+    organizations: candidate.organization ? [candidate.organization] : [],
+  });
+  if (
+    !organizations.success
+    || !organizations.data.organizations[0]
+    || !Number.isSafeInteger(candidate.recordedAt)
+    || (candidate.recordedAt ?? -1) < 0
+  ) {
+    return undefined;
+  }
+  return {
+    organization: organizations.data.organizations[0],
+    recordedAt: candidate.recordedAt!,
+  };
+}
+
+function sanitizeOrganizationContextStorage(
+  value: unknown,
+): OrganizationContextStorage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = value as OrganizationContextStorage;
+  const verifiedContext = sanitizeVerifiedOrganizationContext(
+    candidate.verifiedContext,
+  );
+  const unavailableTombstone = sanitizeUnavailableOrganizationTombstone(
+    candidate.unavailableTombstone,
+  );
+  return verifiedContext || unavailableTombstone
+    ? {
+        ...(verifiedContext ? { verifiedContext } : {}),
+        ...(unavailableTombstone ? { unavailableTombstone } : {}),
+      }
+    : null;
+}
+
+function assertOrganizationContextAccountId(accountId: string): void {
+  if (!AdminEntityIdSchema.safeParse(accountId).success) {
+    throw new Error('Organization context account is invalid');
+  }
+}
+
+function getStoredOrganizationContext(
+  preferences: UserPreferences,
+  accountId: string,
+): unknown {
+  const byAccount = preferences.organizationContextStorage;
+  return byAccount && Object.prototype.hasOwnProperty.call(byAccount, accountId)
+    ? byAccount[accountId]
+    : undefined;
+}
+
+export function getOrganizationContextStorage(
+  accountId: string,
+): OrganizationContextStorage | null {
+  assertOrganizationContextAccountId(accountId);
+  return sanitizeOrganizationContextStorage(
+    getStoredOrganizationContext(loadPreferences(), accountId),
+  );
+}
+
+export function updateOrganizationContextStorage(
+  accountId: string,
+  patch: OrganizationContextStoragePatch,
+): OrganizationContextStorage | null {
+  assertOrganizationContextAccountId(accountId);
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new Error('Organization context patch is invalid');
+  }
+
+  const currentPreferences = loadPreferences();
+  const current = sanitizeOrganizationContextStorage(
+    getStoredOrganizationContext(currentPreferences, accountId),
+  ) ?? {};
+  const next: OrganizationContextStorage = { ...current };
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'verifiedContext')) {
+    if (patch.verifiedContext === null) {
+      delete next.verifiedContext;
+    } else {
+      const verified = sanitizeVerifiedOrganizationContext(
+        patch.verifiedContext,
+      );
+      if (!verified) throw new Error('Verified organization context is invalid');
+      next.verifiedContext = verified;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'unavailableTombstone')) {
+    if (patch.unavailableTombstone === null) {
+      delete next.unavailableTombstone;
+    } else {
+      const tombstone = sanitizeUnavailableOrganizationTombstone(
+        patch.unavailableTombstone,
+      );
+      if (!tombstone) {
+        throw new Error('Unavailable organization tombstone is invalid');
+      }
+      next.unavailableTombstone = tombstone;
+    }
+  }
+
+  const byAccount = {
+    ...(currentPreferences.organizationContextStorage ?? {}),
+  };
+  if (next.verifiedContext || next.unavailableTombstone) {
+    Object.defineProperty(byAccount, accountId, {
+      configurable: true,
+      enumerable: true,
+      value: next,
+      writable: true,
+    });
+  } else {
+    delete byAccount[accountId];
+  }
+  savePreferences({
+    ...currentPreferences,
+    organizationContextStorage: byAccount,
+  });
+  return next.verifiedContext || next.unavailableTombstone ? next : null;
 }
 
 export function getPreferencesPath(): string {

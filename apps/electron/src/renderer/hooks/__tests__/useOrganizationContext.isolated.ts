@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement, useEffect, useState } from 'react'
+import type {
+  OrganizationContextStorage,
+  OrganizationContextStoragePatch,
+} from '@polo-ai/shared/config/organization-context'
 
 GlobalRegistrator.register()
 
@@ -14,6 +18,7 @@ const {
   getStoredActiveOrganizationId,
   getUnavailableOrganizationTombstone,
   getVerifiedOrganizationContext,
+  resetOrganizationStorageMemoryForTests,
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
 } = await import('@/lib/organization-storage')
@@ -95,10 +100,16 @@ let organizationAcceptJoin = mock(async (
   },
   replayed: false,
 }))
+let organizationContextStorageByAccount = new Map<
+  string,
+  OrganizationContextStorage
+>()
 
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
+  resetOrganizationStorageMemoryForTests()
+  organizationContextStorageByAccount = new Map()
   organizationList = mock(async (): Promise<OrganizationListResult> => ({
     success: true as const,
     organizations,
@@ -146,6 +157,31 @@ beforeEach(() => {
       organizationCreate: (...args: [Parameters<typeof organizationCreate>[0]]) =>
         organizationCreate(...args),
       organizationAcceptJoin: (...args: [string]) => organizationAcceptJoin(...args),
+      getOrganizationContextStorage: async (accountId: string) =>
+        organizationContextStorageByAccount.get(accountId) ?? null,
+      updateOrganizationContextStorage: async (
+        accountId: string,
+        patch: OrganizationContextStoragePatch,
+      ) => {
+        const next = {
+          ...(organizationContextStorageByAccount.get(accountId) ?? {}),
+        }
+        if (patch.verifiedContext === null) delete next.verifiedContext
+        else if (patch.verifiedContext) {
+          next.verifiedContext = patch.verifiedContext
+        }
+        if (patch.unavailableTombstone === null) {
+          delete next.unavailableTombstone
+        } else if (patch.unavailableTombstone) {
+          next.unavailableTombstone = patch.unavailableTombstone
+        }
+        if (next.verifiedContext || next.unavailableTombstone) {
+          organizationContextStorageByAccount.set(accountId, next)
+          return next
+        }
+        organizationContextStorageByAccount.delete(accountId)
+        return null
+      },
     },
   })
 })
@@ -235,7 +271,7 @@ describe('useOrganizationContextState', () => {
     })
     online.unmount()
 
-    expect(getVerifiedOrganizationContext('offline-account')).toMatchObject({
+    expect(await getVerifiedOrganizationContext('offline-account')).toMatchObject({
       activeOrganizationId: organizations[1].id,
       organizationSummaries: organizations,
     })
@@ -283,7 +319,7 @@ describe('useOrganizationContextState', () => {
 
     expect(revoked.result.current.flowState).toBe('loading')
     expect(revoked.result.current.activeOrganizationId).toBeNull()
-    expect(getVerifiedOrganizationContext('revoked-account')).toBeNull()
+    expect(await getVerifiedOrganizationContext('revoked-account')).toBeNull()
     expect(authFailures).toEqual(['FORBIDDEN'])
     unsubscribe()
   })
@@ -300,6 +336,7 @@ describe('useOrganizationContextState', () => {
       }],
     ]) {
       localStorage.clear()
+      organizationContextStorageByAccount.clear()
       const unavailableMembershipStatus = nextOrganizations.length > 0
         ? 'suspended'
         : 'removed'
@@ -331,9 +368,9 @@ describe('useOrganizationContextState', () => {
         membership: { status: unavailableMembershipStatus },
       })
       expect(getStoredActiveOrganizationId('lost-membership')).toBeNull()
-      expect(getVerifiedOrganizationContext('lost-membership'))
+      expect(await getVerifiedOrganizationContext('lost-membership'))
         .toMatchObject({ activeOrganizationId: null })
-      expect(getUnavailableOrganizationTombstone('lost-membership'))
+      expect(await getUnavailableOrganizationTombstone('lost-membership'))
         .toMatchObject({
           organization: {
             id: organizations[0].id,
@@ -397,12 +434,18 @@ describe('useOrganizationContextState', () => {
     act(() => {
       bootstrapAccountA = result.current.bootstrap('account-a')
     })
+    await act(async () => {
+      await Promise.resolve()
+    })
     act(() => {
       result.current.clearAccount('account-a')
     })
     let bootstrapAccountB!: ReturnType<typeof result.current.bootstrap>
     act(() => {
       bootstrapAccountB = result.current.bootstrap('account-b')
+    })
+    await act(async () => {
+      await Promise.resolve()
     })
 
     await act(async () => {

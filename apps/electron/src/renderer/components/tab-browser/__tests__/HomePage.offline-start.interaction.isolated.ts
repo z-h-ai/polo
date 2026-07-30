@@ -12,6 +12,10 @@ import { createElement, useEffect } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type { CatalogLocalAppScope } from '@polo-ai/shared/protocol'
+import type {
+  OrganizationContextStorage,
+  OrganizationContextStoragePatch,
+} from '@polo-ai/shared/config/organization-context'
 import { BUILTIN_APP_DEFINITIONS } from '../../../../shared/tab-browser-types'
 
 GlobalRegistrator.register()
@@ -32,7 +36,10 @@ const { cleanup, fireEvent, render, screen, waitFor } = await import(
 )
 const { OrganizationProvider } = await import('@/context/OrganizationContext')
 const { useOrganizationContextState } = await import('@/hooks/useOrganizationContext')
-const { setVerifiedOrganizationContext } = await import('@/lib/organization-storage')
+const {
+  resetOrganizationStorageMemoryForTests,
+  setVerifiedOrganizationContext,
+} = await import('@/lib/organization-storage')
 const { HomePage } = await import('../HomePage')
 
 const accountId = 'account-offline'
@@ -71,6 +78,7 @@ const start = jest.fn(async (scope: CatalogLocalAppScope) => ({
   url: 'http://127.0.0.1:9876',
   port: 9876,
 }))
+let organizationContextStorage: OrganizationContextStorage | null = null
 
 function AppHomeHarness() {
   const context = useOrganizationContextState()
@@ -108,10 +116,11 @@ function AppHomeHarness() {
 beforeEach(async () => {
   localStorage.clear()
   sessionStorage.clear()
+  resetOrganizationStorageMemoryForTests()
   openApp.mockClear()
   start.mockClear()
   await i18n.changeLanguage('en')
-  setVerifiedOrganizationContext(accountId, [organization], organization.id)
+  organizationContextStorage = null
 
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
@@ -122,6 +131,24 @@ beforeEach(async () => {
         status: 503,
         message: 'offline',
       }),
+      getOrganizationContextStorage: async () => organizationContextStorage,
+      updateOrganizationContextStorage: async (
+        _accountId: string,
+        patch: OrganizationContextStoragePatch,
+      ) => {
+        const next = { ...(organizationContextStorage ?? {}) }
+        if (patch.verifiedContext === null) delete next.verifiedContext
+        else if (patch.verifiedContext) {
+          next.verifiedContext = patch.verifiedContext
+        }
+        if (patch.unavailableTombstone === null) {
+          delete next.unavailableTombstone
+        } else if (patch.unavailableTombstone) {
+          next.unavailableTombstone = patch.unavailableTombstone
+        }
+        organizationContextStorage = next
+        return next
+      },
       adminSyncAppCatalog: async () => ({
         success: true as const,
         catalog: {
@@ -150,6 +177,11 @@ beforeEach(async () => {
       },
     },
   })
+  await setVerifiedOrganizationContext(
+    accountId,
+    [organization],
+    organization.id,
+  )
 })
 
 afterEach(() => {

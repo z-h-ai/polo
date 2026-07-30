@@ -236,6 +236,12 @@ export const CHANNEL_MAP = {
   writePreferences: invoke(RPC_CHANNELS.preferences.WRITE),
   getHomeRecentApps: invoke(RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS),
   setHomeRecentApps: invoke(RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS),
+  getOrganizationContextStorage: invoke(
+    RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+  ),
+  updateOrganizationContextStorage: invoke(
+    RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  ),
 
   // Session Drafts
   getDraft: invoke(RPC_CHANNELS.drafts.GET),

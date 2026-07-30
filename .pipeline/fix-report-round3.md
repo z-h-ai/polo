@@ -1,73 +1,86 @@
 # POL-51 第 3 轮阻塞审查修复报告
 
-## 逐条 Issue 处理结果
+## 逐项处理结果
 
-### 1. Catalog 撤下与 retained tombstone 提交竞态
-
-已修复。
-
-- Catalog 修改响应先在当前 session/sync generation 的提交锁内计算撤下集合，并为完整 `accountId + organizationId + catalogAppId` scope 同步建立 lifecycle deny fence。
-- 慢清理在 session coordinator 锁外执行，避免阻塞账号切换；清理失败时拒绝本次 Catalog 提交并保留 deny gate。
-- fence 和清理完成后重新扫描 retained scopes，并将初次扫描与最终扫描合并，确保初次扫描后才完成安装并落盘的 App 不会在 tombstone 容量边界被遗漏。
-- 缓存写入前再次执行 session、sync generation、授权状态和撤下集合校验；上下文或 Catalog 基线已变化时不提交旧结果。
-- 新增确定性 production-wiring 回归：初次 retained 扫描挂起后完成 INSTALL，在 10,000 tombstone 边界撤下该 App；断言缓存保留真实本地状态，且 STATUS、STOP、UNINSTALL 均可达。
-
-### 2. GET_LOGS 与 RESTART 的 TOCTOU 日志泄露
+### 1. Home recent GET/SET 错误路由到远程 workspace
 
 已修复。
 
-- Runtime manager 新增 failure-recovery 专用原子日志接口，并为每个 runtime App 维护不可复用的 lifecycle generation。
-- 读取前拒绝正在排队的生命周期操作或活跃安装，确认可信状态为 `broken`；日志进入主进程内存后再次校验 generation、生命周期空闲和 `broken` 状态，任一条件变化都返回 `NOT_AUTHORIZED`，不提交已读取内容。
-- Scoped registry 在账号级管理操作跟踪内完成业务 scope 到内部 runtime ID 的映射；公开 GET_LOGS RPC 只调用该原子接口，不再把独立状态查询与普通日志读取拼接。
-- 新增真实 manager 并发回归：GET_LOGS 的底层读取挂起时执行 RESTART，恢复为 running 后迟到日志请求必须返回 `NOT_AUTHORIZED`，且不会返回敏感日志内容。
+- 将 `GET_HOME_RECENT_APPS`、`SET_HOME_RECENT_APPS` 从
+  `REMOTE_ELIGIBLE_CHANNELS` 移除并加入 `LOCAL_ONLY_CHANNELS`。
+- RoutedClient 在远程 workspace 已连接时仍将两个调用交给设备本地
+  client，远程 client 不会收到 launcher 历史。
+- 新增 routing 集合穷尽检查和 RoutedClient 真实路由回归，覆盖 GET 与
+  SET 两个方向。
 
-### 3. HomePage 跨 App 日志请求乱序覆盖
+### 2. 组织快照和 unavailable tombstone 使用 localStorage
 
 已修复。
 
-- 日志请求使用完整 App scope key，并为每次打开、关闭或切换分配单调 request generation。
-- 只有 generation 与当前 `logsTarget` scope 同时匹配时，异步结果才可以提交 logs、error 或 loading 状态。
-- 关闭弹窗、切换目标以及账号/组织 context generation 变化都会立即使旧请求失效。
-- 新增 A/B deferred 交互回归：A 请求未完成时切换到 B，A 先返回不会覆盖 B 内容或提前清除 B loading，B 返回后仅展示 B 日志。
+- 新增 browser-safe 的组织上下文 preferences 类型，以及
+  `GET_ORGANIZATION_CONTEXT_STORAGE` /
+  `UPDATE_ORGANIZATION_CONTEXT_STORAGE` 两个设备本地 RPC。
+- 已验证组织快照和 unavailable tombstone 现在写入 Electron
+  `preferences.json`，按完整 account entity ID 隔离；RPC 与配置校验接受
+  512 字符、NUL、冒号和 Unicode 等合法实体 ID。
+- renderer bootstrap 先从本地 preferences hydrate，并在账号 generation
+  校验后提交，账号切换后的迟到读取不会污染新账号状态。
+- 旧 `polo-verified-organization-context:*`、
+  `polo-unavailable-organization:*` 和 active organization localStorage
+  值仅用于一次性兼容读取；只有 durable RPC 写入成功后才清理，写入失败
+  时保留旧值以便后续重试。
+- 组织失权的 verified snapshot 与 tombstone 通过同一次 patch 原子写入，
+  恢复授权时也在同一次 patch 中清除 tombstone。
+- 通用 preferences WRITE 会保留隐藏的组织上下文字段，避免旧设置写入
+  覆盖新持久化数据。
 
 ## 关键文件
 
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-- `apps/electron/src/main/handlers/local-apps.ts`
-- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-- `apps/electron/src/main/local-app-runtime/manager.ts`
-- `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
-- `apps/electron/src/main/local-app-runtime/__tests__/manager.test.ts`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
+- `packages/shared/src/protocol/routing.ts`
+- `packages/shared/src/protocol/__tests__/routing.test.ts`
+- `apps/electron/src/transport/__tests__/routed-client.test.ts`
+- `packages/shared/src/config/organization-context.ts`
+- `packages/shared/src/config/preferences.ts`
+- `packages/shared/src/config/validators.ts`
+- `packages/shared/src/protocol/channels.ts`
+- `packages/server-core/src/handlers/rpc/settings.ts`
+- `apps/electron/src/transport/channel-map.ts`
+- `apps/electron/src/shared/types.ts`
+- `apps/electron/src/renderer/lib/organization-storage.ts`
+- `apps/electron/src/renderer/hooks/useOrganizationContext.ts`
+- `apps/electron/src/renderer/lib/__tests__/organization-storage.isolated.ts`
+- `packages/shared/src/config/__tests__/home-recent-apps.test.ts`
 
-## 自测结果
+## 实际运行的测试与结果
 
 - `bun run test`
-  - 通过（exit 0）；常规测试与仓库全部 `*.isolated.ts` 测试均完成。
+  - 通过（exit 0）。
+  - 常规套件：4,833 pass，19 skip，0 fail。
+  - 仓库脚本随后逐文件运行全部 `*.isolated.ts`，全部通过。
+- 路由、RPC 与配置定向测试：
+  - `bun test packages/shared/src/protocol/__tests__/routing.test.ts apps/electron/src/transport/__tests__/routed-client.test.ts packages/shared/src/config/__tests__/home-recent-apps.test.ts apps/electron/src/shared/__tests__/ipc-channels.test.ts`
+  - 33 pass，0 fail。
+- renderer 持久化与组织上下文定向测试（按 isolated 文件逐个运行）：
+  - `organization-storage.isolated.ts`：3 pass，0 fail。
+  - `useOrganizationContext.isolated.ts`：14 pass，0 fail。
+  - `HomePage.offline-start.interaction.isolated.ts`：1 pass，0 fail。
+  - `App.organization-deep-link.interaction.isolated.ts`：6 pass，0 fail。
 - `bun run validate:ci`
-  - 通过；包含全部 workspace 类型检查、shared/config/doc-tools 测试，以及 i18n parity、sorted、coverage 检查。
-- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 55 pass，0 fail。
-- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-  - 19 pass，0 fail。
-- `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-  - 19 pass，0 fail。
-- `bun test apps/electron/src/main/local-app-runtime/__tests__/manager.test.ts`
-  - 30 pass，0 fail。
-- `bun test apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
-  - 20 pass，0 fail。
-- `bun test ./apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
-  - 11 pass，0 fail。
-- `bun test packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
-  - 11 pass，0 fail。
-- Electron 变更文件定向 ESLint
-  - 0 error；HomePage 测试文件有 3 个既有 `localStorage` 规则 warning。
+  - 通过；全部 workspace typecheck、shared config 测试、19 个文档工具
+    smoke tests，以及 i18n parity（6 locales / 1706 keys）、sorted、
+    coverage 均通过。
+- `bun run lint:electron`
+  - 通过（0 errors，120 warnings）；warnings 为仓库既有规则告警及测试中的
+    legacy localStorage 迁移/隔离清理调用。
+- `bun run electron:build`
+  - 通过；main、preload、renderer、resources、assets 均构建成功，
+    renderer production build 转换 5,582 modules。
 - `git diff --check`
   - 通过。
 
 ## 遗留问题
 
-- 未发现本轮三个 blocking issues 的已知代码遗留。
-- worktree 中任务开始前已有的 `.pipeline/fix-report-round4.md` 删除和 `design-demos/`、`docs/spec-home-app-admin-config*.md` 未跟踪文件未纳入本轮修改或提交。
+- 本轮两个 review issues 无已知遗留。
+- worktree 中本轮开始前已有的 `.pipeline/fix-report-round4.md` 删除，
+  `design-demos/` 和 `docs/spec-home-app-admin-config*.md` 未跟踪文件均未
+  修改、未纳入本轮提交。

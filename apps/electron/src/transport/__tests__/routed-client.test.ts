@@ -81,6 +81,45 @@ describe('RoutedClient', () => {
       expect(local.invoke).not.toHaveBeenCalled()
     })
 
+    it('keeps Home recent preferences local with a remote workspace active', async () => {
+      const getChannel = RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS
+      const setChannel = RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS
+      const local = stubClient({
+        invoke: mock(async channel => (
+          channel === getChannel ? [{ id: 'local-app' }] : [{ id: 'saved-app' }]
+        )),
+      })
+      const remoteWorkspace = stubClient({
+        getConnectionState: mock((): TransportConnectionState => ({
+          mode: 'remote',
+          status: 'connected',
+          url: 'wss://remote:9001',
+          attempt: 0,
+          updatedAt: Date.now(),
+        })),
+      })
+      const routed = new RoutedClient(local, remoteWorkspace)
+
+      expect(await routed.invoke(getChannel, 'device-context')).toEqual([
+        { id: 'local-app' },
+      ])
+      expect(await routed.invoke(setChannel, 'device-context', [
+        { id: 'saved-app' },
+      ])).toEqual([{ id: 'saved-app' }])
+      expect(local.invoke).toHaveBeenNthCalledWith(
+        1,
+        getChannel,
+        'device-context',
+      )
+      expect(local.invoke).toHaveBeenNthCalledWith(
+        2,
+        setChannel,
+        'device-context',
+        [{ id: 'saved-app' }],
+      )
+      expect(remoteWorkspace.invoke).not.toHaveBeenCalled()
+    })
+
     it('routes LOCAL_ONLY listeners to localClient', () => {
       const local = stubClient()
       const workspace = stubClient()
@@ -269,5 +308,20 @@ describe('isLocalOnly consistency', () => {
 
   it('correctly classifies session channels as REMOTE_ELIGIBLE', () => {
     expect(isLocalOnly(REMOTE_CHANNEL)).toBe(false)
+  })
+
+  it('classifies device-local preference channels as LOCAL_ONLY', () => {
+    expect(isLocalOnly(
+      RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
+    )).toBe(true)
+    expect(isLocalOnly(
+      RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+    )).toBe(true)
+    expect(isLocalOnly(
+      RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+    )).toBe(true)
+    expect(isLocalOnly(
+      RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+    )).toBe(true)
   })
 })

@@ -629,6 +629,21 @@ export interface ElectronAPI {
     contextKey: string,
     apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
   ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  getOrganizationContextStorage(
+    accountId: string,
+  ): Promise<
+    import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
+    | null
+  >
+  updateOrganizationContextStorage(
+    accountId: string,
+    patch: import(
+      '@polo-ai/shared/config/organization-context'
+    ).OrganizationContextStoragePatch,
+  ): Promise<
+    import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
+    | null
+  >
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>

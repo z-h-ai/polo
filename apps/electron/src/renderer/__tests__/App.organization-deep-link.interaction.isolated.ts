@@ -4,6 +4,10 @@ import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import { createElement } from 'react'
 import type { ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
+import type {
+  OrganizationContextStorage,
+  OrganizationContextStoragePatch,
+} from '@polo-ai/shared/config/organization-context'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -327,6 +331,10 @@ let catalogSyncResult:
     } = { success: true }
 let pendingAdminLogout: Deferred<SessionChangedLogoutResult> | null = null
 let pendingCommonLogout: Deferred<SessionChangedLogoutResult> | null = null
+let organizationContextStorageByAccount = new Map<
+  string,
+  OrganizationContextStorage
+>()
 let deepLinkNavigateListener:
   | ((navigation: { joinToken?: string }) => void)
   | null = null
@@ -400,6 +408,31 @@ const electronAPI = new Proxy<Record<string, unknown>>({
     success: true,
     organizations: listedOrganizations,
   }),
+  getOrganizationContextStorage: async (accountId: string) =>
+    organizationContextStorageByAccount.get(accountId) ?? null,
+  updateOrganizationContextStorage: async (
+    accountId: string,
+    patch: OrganizationContextStoragePatch,
+  ) => {
+    const next = {
+      ...(organizationContextStorageByAccount.get(accountId) ?? {}),
+    }
+    if (patch.verifiedContext === null) delete next.verifiedContext
+    else if (patch.verifiedContext) {
+      next.verifiedContext = patch.verifiedContext
+    }
+    if (patch.unavailableTombstone === null) {
+      delete next.unavailableTombstone
+    } else if (patch.unavailableTombstone) {
+      next.unavailableTombstone = patch.unavailableTombstone
+    }
+    if (next.verifiedContext || next.unavailableTombstone) {
+      organizationContextStorageByAccount.set(accountId, next)
+      return next
+    }
+    organizationContextStorageByAccount.delete(accountId)
+    return null
+  },
   organizationPreviewJoin: async () => {
     previewJoinCallCount += 1
     const request = deferred<PreviewResult>()
@@ -448,12 +481,18 @@ const { act, cleanup, render, screen, waitFor } = await import('@testing-library
 const userEvent = (await import('@testing-library/user-event')).default
 const { default: App } = await import('../App')
 const { emitAdminAuthFailure } = await import('@/lib/admin-auth-failure')
+const {
+  getStoredActiveOrganizationId,
+  resetOrganizationStorageMemoryForTests,
+} = await import('@/lib/organization-storage')
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
   // eslint-disable-next-line polo-ai/no-localstorage -- isolate the real organization persistence between App integration cases
   localStorage.clear()
   sessionStorage.clear()
+  resetOrganizationStorageMemoryForTests()
+  organizationContextStorageByAccount = new Map()
   authenticated = false
   currentAccount = account
   activeWorkspaceId = null
@@ -553,14 +592,13 @@ describe('App deferred organization deep-link wiring', () => {
     await screen.findByTestId('ready-route')
     await waitFor(() => expect(catalogSyncCallCount).toBe(1))
     expect(screen.queryByTestId('login-route')).toBeNull()
-    // eslint-disable-next-line polo-ai/no-localstorage -- verify the real App organization context survives Catalog-only denial
-    expect(localStorage.getItem(
-      `polo-verified-organization-context:${account.userId}`,
-    )).not.toBeNull()
-    // eslint-disable-next-line polo-ai/no-localstorage -- verify the real App organization context survives Catalog-only denial
-    expect(localStorage.getItem(
-      `polo-active-organization:${account.userId}`,
-    )).toBe(organization.id)
+    await waitFor(() => {
+      expect(organizationContextStorageByAccount.get(account.userId))
+        .toMatchObject({
+          verifiedContext: { activeOrganizationId: organization.id },
+        })
+    })
+    expect(getStoredActiveOrganizationId(account.userId)).toBe(organization.id)
   })
 
   it('clears the App account context for an actual account-disabled failure', async () => {
@@ -570,9 +608,12 @@ describe('App deferred organization deep-link wiring', () => {
     render(createElement(I18nextProvider, { i18n }, createElement(App)))
 
     await screen.findByTestId('ready-route')
-    expect(localStorage.getItem(
-      `polo-verified-organization-context:${account.userId}`,
-    )).not.toBeNull()
+    await waitFor(() => {
+      expect(organizationContextStorageByAccount.get(account.userId))
+        .toMatchObject({
+          verifiedContext: { activeOrganizationId: organization.id },
+        })
+    })
 
     act(() => {
       expect(emitAdminAuthFailure({
@@ -583,12 +624,11 @@ describe('App deferred organization deep-link wiring', () => {
 
     await screen.findByTestId('login-route')
     expect(screen.queryByTestId('ready-route')).toBeNull()
-    expect(localStorage.getItem(
-      `polo-verified-organization-context:${account.userId}`,
-    )).toBeNull()
-    expect(localStorage.getItem(
-      `polo-active-organization:${account.userId}`,
-    )).toBeNull()
+    await waitFor(() => {
+      expect(organizationContextStorageByAccount.get(account.userId))
+        .toBeUndefined()
+    })
+    expect(getStoredActiveOrganizationId(account.userId)).toBeNull()
   })
 
   it('discards a stale logout continuation after another account logs in', async () => {
@@ -631,9 +671,12 @@ describe('App deferred organization deep-link wiring', () => {
     expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
       .toBe(replacementAccount.userId)
     expect(screen.queryByTestId('login-route')).toBeNull()
-    expect(localStorage.getItem(
-      `polo-verified-organization-context:${replacementAccount.userId}`,
-    )).not.toBeNull()
+    expect(organizationContextStorageByAccount.get(replacementAccount.userId))
+      .toMatchObject({
+        verifiedContext: {
+          activeOrganizationId: replacementOrganizationSummary.id,
+        },
+      })
   })
 
   it('discards a stale common-reset continuation after another account logs in', async () => {
@@ -677,8 +720,11 @@ describe('App deferred organization deep-link wiring', () => {
     expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
       .toBe(replacementAccount.userId)
     expect(screen.queryByTestId('login-route')).toBeNull()
-    expect(localStorage.getItem(
-      `polo-verified-organization-context:${replacementAccount.userId}`,
-    )).not.toBeNull()
+    expect(organizationContextStorageByAccount.get(replacementAccount.userId))
+      .toMatchObject({
+        verifiedContext: {
+          activeOrganizationId: replacementOrganizationSummary.id,
+        },
+      })
   })
 })

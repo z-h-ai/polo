@@ -269,6 +269,8 @@ export const RPC_CHANNELS = {
     WRITE: 'preferences:write',
     GET_HOME_RECENT_APPS: 'preferences:getHomeRecentApps',
     SET_HOME_RECENT_APPS: 'preferences:setHomeRecentApps',
+    GET_ORGANIZATION_CONTEXT_STORAGE: 'preferences:getOrganizationContextStorage',
+    UPDATE_ORGANIZATION_CONTEXT_STORAGE: 'preferences:updateOrganizationContextStorage',
   },
   drafts: {
     GET: 'drafts:get',

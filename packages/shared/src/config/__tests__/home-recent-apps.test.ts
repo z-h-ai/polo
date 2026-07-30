@@ -26,7 +26,12 @@ function runEval(configDir: string, code: string): string {
   const run = Bun.spawnSync([
     process.execPath,
     '--eval',
-    `import { getHomeRecentApps, setHomeRecentApps } from '${
+    `import {
+      getHomeRecentApps,
+      getOrganizationContextStorage,
+      setHomeRecentApps,
+      updateOrganizationContextStorage,
+    } from '${
       PREFERENCES_MODULE_PATH
     }'; ${code}`,
   ], {
@@ -141,5 +146,44 @@ describe('Home recent App preferences', () => {
       kind: 'organization',
       openedAt: 42,
     }])
+  })
+
+  it('persists organization snapshots by full account identity', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'polo-organization-context-'))
+    const accountId = '\0'.repeat(512)
+    const organization = {
+      id: 'organization:\0组织',
+      type: 'creator_space',
+      name: 'Studio',
+      purpose: 'Publish apps',
+      membership: {
+        id: 'membership:\0owner',
+        role: 'owner',
+        status: 'active',
+      },
+      memberCount: 1,
+    }
+    const verifiedContext = {
+      organizationSummaries: [organization],
+      activeOrganizationId: organization.id,
+      verifiedAt: 42,
+    }
+    runRpcEval(configDir, `
+      await handlers.get('preferences:updateOrganizationContextStorage')({}, ${
+        JSON.stringify(accountId)
+      }, {
+        verifiedContext: ${JSON.stringify(verifiedContext)},
+      });
+    `)
+
+    const reloaded = runRpcEval(
+      configDir,
+      `console.log(JSON.stringify(
+        await handlers.get('preferences:getOrganizationContextStorage')({}, ${
+          JSON.stringify(accountId)
+        }),
+      ))`,
+    )
+    expect(JSON.parse(reloaded)).toEqual({ verifiedContext })
   })
 })

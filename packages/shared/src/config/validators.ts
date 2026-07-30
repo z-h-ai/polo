@@ -24,6 +24,11 @@ import {
   MAX_HOME_RECENT_APP_ID_LENGTH,
   MAX_HOME_RECENT_CONTEXT_KEY_LENGTH,
 } from './home-recent.ts';
+import {
+  AdminEntityIdSchema,
+  OrganizationMembershipSchema,
+  OrganizationSchema,
+} from '../admin/schemas.ts';
 
 // ============================================================
 // Config Directory
@@ -156,6 +161,41 @@ const HomeRecentAppsByContextSchema = z.record(
   }
 });
 
+const OrganizationSummaryPreferenceSchema = OrganizationSchema.extend({
+  membership: OrganizationMembershipSchema,
+  memberCount: z.number().int().min(0),
+});
+
+const VerifiedOrganizationContextPreferenceSchema = z.object({
+  organizationSummaries: z.array(OrganizationSummaryPreferenceSchema),
+  activeOrganizationId: AdminEntityIdSchema.nullable(),
+  verifiedAt: z.number().int().min(0),
+}).superRefine((context, refinement) => {
+  if (
+    context.activeOrganizationId
+    && !context.organizationSummaries.some(
+      organization => organization.id === context.activeOrganizationId,
+    )
+  ) {
+    refinement.addIssue({
+      code: 'custom',
+      message: 'Active organization is absent from the verified snapshot',
+      path: ['activeOrganizationId'],
+    });
+  }
+});
+
+const OrganizationContextStorageByAccountSchema = z.record(
+  AdminEntityIdSchema,
+  z.object({
+    verifiedContext: VerifiedOrganizationContextPreferenceSchema.optional(),
+    unavailableTombstone: z.object({
+      organization: OrganizationSummaryPreferenceSchema,
+      recordedAt: z.number().int().min(0),
+    }).optional(),
+  }),
+);
+
 export const UserPreferencesSchema = z.object({
   name: z.string().optional(),
   timezone: z.string().optional(),  // TODO: Could validate against IANA timezone list
@@ -163,6 +203,7 @@ export const UserPreferencesSchema = z.object({
   language: z.string().optional(),
   notes: z.string().optional(),
   homeRecentApps: HomeRecentAppsByContextSchema.optional(),
+  organizationContextStorage: OrganizationContextStorageByAccountSchema.optional(),
   updatedAt: z.number().int().min(0).optional(),
 });
 
