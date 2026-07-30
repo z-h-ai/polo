@@ -194,6 +194,39 @@ describe('app catalog cache', () => {
       .toMatchObject({ authorizationStatus: 'denied' })
   })
 
+  it('prioritizes an installed tombstone when a full cache gains a newly withdrawn app', () => {
+    const initial = Array.from({ length: 10_000 }, (_, index) =>
+      bundleApp(`app-${index}`, '1.0.0'))
+    saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'v1',
+      apps: initial,
+    })
+    saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'v2',
+      apps: [],
+    })
+    saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'v3',
+      apps: [bundleApp('newly-withdrawn', '1.0.0')],
+    })
+
+    const refreshed = saveAppCatalog(
+      'account-a',
+      'organization-1',
+      {
+        appConfigVersion: 'v4',
+        apps: [],
+      },
+      400,
+      new Set(['app-9999']),
+    )
+
+    expect(refreshed.withdrawnApps).toHaveLength(10_000)
+    expect(refreshed.withdrawnApps![0]).toMatchObject({ id: 'app-9999' })
+    expect(refreshed.withdrawnApps!.some(app => app.id === 'newly-withdrawn'))
+      .toBe(true)
+  })
+
   it('fails closed after explicit authorization loss and recovers only after a successful sync', () => {
     saveAppCatalog('account-a', 'organization-1', {
       appConfigVersion: 'v1',

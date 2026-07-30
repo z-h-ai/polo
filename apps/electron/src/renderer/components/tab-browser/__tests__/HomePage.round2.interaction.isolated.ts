@@ -263,6 +263,75 @@ describe('HomePage round-two regressions', () => {
     expect(refreshRuntimeStatuses).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a retained withdrawn app manageable when its first status batch fails', async () => {
+    const withdrawnApp: CatalogApp = {
+      id: 'retained-withdrawn',
+      organizationId: 'organization-a',
+      name: 'Retained Withdrawn',
+      description: '',
+      deliveryMode: 'local_bundle',
+      sortOrder: 0,
+      availability: 'withdrawn',
+    }
+    const catalog: AppCatalogCacheEntry = {
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      appConfigVersion: 'v1',
+      authorizationStatus: 'authorized',
+      apps: [],
+      withdrawnApps: [withdrawnApp],
+      syncedAt: 1,
+    }
+    const scopeKey = createLocalAppScopeKey({
+      kind: 'catalog',
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: withdrawnApp.id,
+    })
+    appCatalogHook = {
+      ...signedOutCatalogHook(),
+      organization: {
+        accountId: 'account-a',
+        activeOrganizationId: 'organization-a',
+        organizationContextKey: 'account-a:organization-a',
+        organizationSummaries: [{
+          id: 'organization-a',
+          type: 'enterprise',
+          name: 'Organization A',
+        }],
+      },
+      state: {
+        ...signedOutCatalogHook().state,
+        catalog,
+        accessMode: 'online',
+        statusErrorCode: 'status_read_failed',
+        statusErrorScopeKeys: { [scopeKey]: true },
+      },
+      scopeKeyForApp: () => scopeKey,
+    }
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    expect(screen.getByTestId('organization-app-retained-withdrawn')).toBeTruthy()
+    expect(screen.getByText('Status unavailable')).toBeTruthy()
+    expect(screen.getByTestId('organization-app-action-retained-withdrawn')
+      .hasAttribute('disabled')).toBe(true)
+    const management = screen.getByLabelText(
+      'More actions for Retained Withdrawn',
+    )
+    expect(management).toBeTruthy()
+    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
+    await waitFor(() => {
+      expect(screen.getByText('View logs')).toBeTruthy()
+      expect(screen.getByText('Uninstall')).toBeTruthy()
+      expect(screen.getByText('Stop')).toBeTruthy()
+    })
+  })
+
   it('segments a maximum catalog and excludes withdrawn apps without local data', () => {
     const visibleApps: CatalogApp[] = Array.from(
       { length: 10_000 },

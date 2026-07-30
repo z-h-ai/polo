@@ -157,6 +157,11 @@ export function OrganizationAppCard({
     && Boolean(status && status.status !== 'not_installed'
       && status.status !== 'downloading'
       && status.status !== 'installing')
+  const localManagementAvailable = installed || (
+    app.deliveryMode === 'local_bundle'
+    && app.availability === 'withdrawn'
+    && statusUnavailable
+  )
   const progress = status?.progress?.percent
 
   return (
@@ -175,7 +180,7 @@ export function OrganizationAppCard({
             {app.creatorName || t('homeApps.organizationSource')}
           </p>
         </div>
-        {installed && (
+        {localManagementAvailable && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -189,7 +194,9 @@ export function OrganizationAppCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {(status?.status === 'running' || status?.status === 'starting') && (
+              {(statusUnavailable
+                || status?.status === 'running'
+                || status?.status === 'starting') && (
                 <DropdownMenuItem onSelect={() => onStop(app)}>
                   <Icons.Square />
                   {t('homeApps.actions.stop')}

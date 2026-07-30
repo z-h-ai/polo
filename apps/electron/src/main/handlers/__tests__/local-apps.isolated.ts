@@ -352,6 +352,11 @@ describe('local app main-process authorization boundary', () => {
     accessMode = 'denied'
     await expect(resolveRemoteUrl(context, scope()))
       .rejects.toThrow('no longer authorized')
+
+    accessMode = 'online'
+    catalog.authorizationStatus = 'denied'
+    await expect(resolveRemoteUrl(context, scope()))
+      .rejects.toThrow('no longer authorized')
   })
 
   it('rejects catalog lifecycle operations for another or signed-out account', async () => {

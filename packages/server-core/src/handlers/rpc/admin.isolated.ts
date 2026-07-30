@@ -234,6 +234,10 @@ const appCatalogCache = new Map<string, any>()
 const appCatalogAccess = new Map<string, string>()
 const adminSessionEnding = jest.fn(async (_accountId: string) => {})
 const adminSessionStarted = jest.fn(async (_accountId: string) => {})
+const retainedCatalogAppIds = jest.fn(async (
+  _accountId: string,
+  _organizationId: string,
+): Promise<ReadonlySet<string>> => new Set())
 const listStoredCredentials = jest.fn(async () => ['admin-tokens', 'local-provider'])
 const deleteStoredCredential = jest.fn(async (_credentialId: string) => true)
 
@@ -446,6 +450,7 @@ function createHarness() {
     },
     onAdminSessionEnding: adminSessionEnding,
     onAdminSessionStarted: adminSessionStarted,
+    getRetainedCatalogAppIds: retainedCatalogAppIds,
   } satisfies HandlerDeps
 
   const adminSessions = registerAdminHandlers(server, deps)
@@ -539,6 +544,8 @@ beforeEach(() => {
   adminSessionEnding.mockImplementation(async () => {})
   adminSessionStarted.mockClear()
   adminSessionStarted.mockImplementation(async () => {})
+  retainedCatalogAppIds.mockClear()
+  retainedCatalogAppIds.mockImplementation(async () => new Set())
   listStoredCredentials.mockClear()
   deleteStoredCredential.mockClear()
   adminClientCalls.length = 0
@@ -1891,6 +1898,7 @@ describe('registerAdminHandlers', () => {
   })
 
   it('returns a revoked-token signal when refresh fails during validate', async () => {
+    const organizationId = 'organization-cleanup-401'
     managerState.tokens = {
       accessToken: 'expired-access-token',
       refreshToken: 'revoked-refresh-token',
@@ -1899,6 +1907,16 @@ describe('registerAdminHandlers', () => {
       username: 'admin',
       displayName: 'Admin User',
     }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      apps: [{ id: 'remote-app', availability: 'available' }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    adminSessionEnding.mockImplementationOnce(async () => {
+      throw new Error('controlled local stop failure')
+    })
     adminClientBehavior.refresh = async () => {
       throw new TestAdminError('Refresh token revoked', 'TOKEN_REVOKED', { status: 401 })
     }
@@ -1914,6 +1932,13 @@ describe('registerAdminHandlers', () => {
     })
     expect(managerState.tokens).toBeNull()
     expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(appCatalogCache.get(`user-1:${organizationId}`))
+      .toMatchObject({ authorizationStatus: 'denied' })
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('continuing fail-closed cleanup'),
+      'controlled local stop failure',
+    )
   })
 
   it('fails closed when an expired-token refresh returns a non-temporary client error', async () => {
@@ -2172,6 +2197,10 @@ describe('registerAdminHandlers', () => {
       args: [organizationId, 'apps-v1'],
       accessToken: 'access-token',
     })
+    expect(retainedCatalogAppIds).toHaveBeenCalledWith(
+      'user-1',
+      organizationId,
+    )
   })
 
   it('does not let an older catalog response overwrite a newer committed catalog', async () => {
@@ -2248,14 +2277,10 @@ describe('registerAdminHandlers', () => {
         sortOrder: 0,
       }],
     })
-    expect(await older).toMatchObject({
-      success: true,
-      source: 'cache',
-      refreshed: false,
-      catalog: {
-        appConfigVersion: 'apps-v2',
-        apps: [{ id: 'new-app' }],
-      },
+    expect(await older).toEqual({
+      success: false,
+      errorCode: 'REQUEST_SUPERSEDED',
+      message: 'A newer app catalog sync replaced this request',
     })
     expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
       appConfigVersion: 'apps-v2',
@@ -2331,6 +2356,10 @@ describe('registerAdminHandlers', () => {
         availability: 'available',
       }],
     })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    adminSessionEnding.mockImplementationOnce(async () => {
+      throw new Error('controlled local stop failure')
+    })
     adminClientBehavior.getAppCatalog = async () => {
       throw new TestAdminError('membership removed', 'FORBIDDEN', { status: 403 })
     }
@@ -2353,6 +2382,11 @@ describe('registerAdminHandlers', () => {
     })
     expect(managerState.tokens).toBeNull()
     expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('continuing fail-closed cleanup'),
+      'controlled local stop failure',
+    )
   })
 
   it('denies cached catalog access for semantic membership loss on non-403 statuses', async () => {
@@ -2526,7 +2560,8 @@ describe('registerAdminHandlers', () => {
     expect(loggerWarn).toHaveBeenCalled()
   })
 
-  it('retains trusted credentials when local session cleanup fails', async () => {
+  it('completes local logout fail-closed when process cleanup fails', async () => {
+    const organizationId = 'organization-logout-cleanup'
     managerState.tokens = {
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
@@ -2534,6 +2569,13 @@ describe('registerAdminHandlers', () => {
       userId: 'user-1',
       username: 'admin',
     }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      apps: [{ id: 'remote-app', availability: 'available' }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
     adminSessionEnding.mockImplementationOnce(async () => {
       throw new Error('runtime cleanup failed')
     })
@@ -2541,10 +2583,14 @@ describe('registerAdminHandlers', () => {
 
     await expect(logout(
       { clientId: 'client-1', workspaceId: null, webContentsId: null },
-    )).rejects.toThrow('runtime cleanup failed')
-    expect(managerState.tokens).toMatchObject({
-      userId: 'user-1',
-      accessToken: 'access-token',
-    })
+    )).resolves.toEqual({ success: true })
+    expect(managerState.tokens).toBeNull()
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(appCatalogCache.get(`user-1:${organizationId}`))
+      .toMatchObject({ authorizationStatus: 'denied' })
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('continuing fail-closed cleanup'),
+      'runtime cleanup failed',
+    )
   })
 })

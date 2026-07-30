@@ -138,6 +138,7 @@ const EXPECTED_CHANNELS: string[] = [
   'local-apps:getRuntimeStatus',
   'local-apps:getRuntimeStatuses',
   'local-apps:install',
+  'local-apps:resolveRemoteUrl',
   'local-apps:restart',
   'local-apps:setAvailableRelease',
   'local-apps:start',

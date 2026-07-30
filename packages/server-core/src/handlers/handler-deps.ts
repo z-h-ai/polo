@@ -37,4 +37,12 @@ export interface HandlerDeps<
    * completed any prior account cleanup.
    */
   onAdminSessionStarted?: (accountId: string) => Promise<void> | void
+  /**
+   * Returns Catalog business ids that still have local installation or
+   * runtime data and therefore must survive withdrawn tombstone pruning.
+   */
+  getRetainedCatalogAppIds?: (
+    accountId: string,
+    organizationId: string,
+  ) => Promise<ReadonlySet<string>>
 }

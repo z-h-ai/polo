@@ -55,6 +55,7 @@ export const ORGANIZATION_APP_PAGE_SIZE = 60
 export function selectOrganizationAppsForDisplay(
   catalog: AppCatalogCacheEntry | null,
   statuses: Readonly<Record<string, LocalAppRuntimeStatus>>,
+  statusErrorScopeKeys: Readonly<Record<string, true>> = {},
 ): CatalogApp[] {
   if (!catalog) return []
   const withdrawnWithLocalData = (catalog.withdrawnApps ?? []).filter(app => {
@@ -66,7 +67,10 @@ export function selectOrganizationAppsForDisplay(
       catalogAppId: app.id,
     })
     const status = statuses[scopeKey]
-    return Boolean(status && status.status !== 'not_installed')
+    return Boolean(
+      (status && status.status !== 'not_installed')
+      || statusErrorScopeKeys[scopeKey],
+    )
   })
   return [...catalog.apps, ...withdrawnWithLocalData]
     .sort((left, right) => left.sortOrder - right.sortOrder)
@@ -174,8 +178,13 @@ export function HomePage({ onAddApp }: HomePageProps) {
     () => selectOrganizationAppsForDisplay(
       catalog.state.catalog,
       catalog.state.statuses,
+      catalog.state.statusErrorScopeKeys,
     ),
-    [catalog.state.catalog, catalog.state.statuses],
+    [
+      catalog.state.catalog,
+      catalog.state.statusErrorScopeKeys,
+      catalog.state.statuses,
+    ],
   )
   const displayedOrganizationApps = organizationApps.slice(0, organizationAppLimit)
   useEffect(() => {

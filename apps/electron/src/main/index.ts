@@ -762,6 +762,13 @@ app.whenReady().then(async () => {
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },
+            getRetainedCatalogAppIds: (
+              accountId: string,
+              organizationId: string,
+            ) => getScopedLocalAppRuntimeRegistry().getRetainedCatalogAppIds(
+              accountId,
+              organizationId,
+            ),
           }
         },
         // Headless: register only core handlers (no GUI handlers for browser, settings, etc.)

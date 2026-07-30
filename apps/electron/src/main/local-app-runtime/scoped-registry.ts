@@ -298,6 +298,36 @@ export class ScopedLocalAppRuntimeRegistry {
     )
   }
 
+  async getRetainedCatalogAppIds(
+    accountId: string,
+    organizationId: string,
+  ): Promise<ReadonlySet<string>> {
+    const safeAccountId = validateScopeField(accountId, 'accountId')
+    const safeOrganizationId = validateScopeField(
+      organizationId,
+      'organizationId',
+    )
+    const scopes = (await this.readPersistedScopes()).filter(scope => (
+      scope.accountId === safeAccountId
+      && scope.organizationId === safeOrganizationId
+    ))
+    const retained = new Set<string>()
+    for (
+      let offset = 0;
+      offset < scopes.length;
+      offset += MAX_CATALOG_STATUS_SCOPES
+    ) {
+      const batch = scopes.slice(offset, offset + MAX_CATALOG_STATUS_SCOPES)
+      const statuses = await this.getRuntimeStatuses(batch)
+      statuses.forEach((status, index) => {
+        if (status.status !== 'not_installed') {
+          retained.add(batch[index]!.catalogAppId)
+        }
+      })
+    }
+    return retained
+  }
+
   private async getExistingManager(
     rawScope: CatalogLocalAppScope,
   ): Promise<LocalAppRuntimeManager | null> {

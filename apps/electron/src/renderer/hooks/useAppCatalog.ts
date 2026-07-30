@@ -34,6 +34,7 @@ export interface AppCatalogState {
 
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
 export const BUSY_RUNTIME_STATUS_LIMIT = 32
+export const CATALOG_SYNC_SUPERSEDED_RETRY_LIMIT = 2
 
 const CATALOG_ACCESS_DENIED_CODES = new Set([
   'UNAUTHORIZED',
@@ -312,10 +313,26 @@ export function useAppCatalog() {
       errorCode: null,
     }))
     try {
-      const result = await window.electronAPI.adminSyncAppCatalog(
+      let result = await window.electronAPI.adminSyncAppCatalog(
         organization.activeOrganizationId,
         { force },
       )
+      for (
+        let retry = 0;
+        !result.success
+          && result.errorCode === 'REQUEST_SUPERSEDED'
+          && retry < CATALOG_SYNC_SUPERSEDED_RETRY_LIMIT;
+        retry += 1
+      ) {
+        if (
+          generation !== syncGenerationRef.current
+          || contextKeyRef.current !== contextKey
+        ) return
+        result = await window.electronAPI.adminSyncAppCatalog(
+          organization.activeOrganizationId,
+          { force },
+        )
+      }
       if (
         generation !== syncGenerationRef.current
         || contextKeyRef.current !== contextKey

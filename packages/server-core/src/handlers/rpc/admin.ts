@@ -754,26 +754,11 @@ export function registerAdminHandlers(
       if (!registeredRequest.applied) return staleAdminSessionResult()
       const isLatestCatalogSync = () =>
         latestAppCatalogSyncByScope.get(catalogSyncKey) === syncInvocation
-      const supersededCatalogResult = (): AppCatalogSyncResult => {
-        const current = getCachedAppCatalog(accountId, organizationId.data)
-        if (current?.authorizationStatus === 'authorized') {
-          return {
-            success: true,
-            catalog: current,
-            source: 'cache',
-            refreshed: false,
-            accessMode: getAppCatalogAccessMode(accountId, organizationId.data),
-            ...(current.warnings?.length
-              ? { warningCode: 'INVALID_SEMVER' }
-              : {}),
-          }
-        }
-        return {
-          success: false,
-          errorCode: 'REQUEST_SUPERSEDED',
-          message: 'A newer app catalog sync replaced this request',
-        }
-      }
+      const supersededCatalogResult = (): AppCatalogSyncResult => ({
+        success: false,
+        errorCode: 'REQUEST_SUPERSEDED',
+        message: 'A newer app catalog sync replaced this request',
+      })
       const cached = getCachedAppCatalog(accountId, organizationId.data)
       if (tokenResult.accessMode === 'offline') {
         const committed = await sessions.mutateIfCurrent(
@@ -834,6 +819,12 @@ export function registerAdminHandlers(
             'SERVER_ERROR',
           )
         }
+        const retainedWithdrawnAppIds = result.notModified
+          ? new Set<string>()
+          : await deps.getRetainedCatalogAppIds?.(
+              accountId,
+              organizationId.data,
+            ) ?? new Set<string>()
         const committed = await sessions.mutateIfCurrent(
           manager,
           requestContext.session,
@@ -862,6 +853,8 @@ export function registerAdminHandlers(
               accountId,
               organizationId.data,
               result,
+              Date.now(),
+              retainedWithdrawnAppIds,
             )
             setAppCatalogAccessMode(accountId, organizationId.data, 'online')
             return {
@@ -1265,7 +1258,14 @@ async function endAdminSession(
   // coordinator lock. A concurrent login can advance the generation while a
   // slow process shutdown completes; the final mutation below is the CAS that
   // prevents the old logout from deleting the replacement session.
-  await deps?.onAdminSessionEnding?.(expected.tokens.userId)
+  try {
+    await deps?.onAdminSessionEnding?.(expected.tokens.userId)
+  } catch (error) {
+    deps?.platform.logger.warn(
+      '[Admin] local app cleanup failed while ending the session; continuing fail-closed cleanup:',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
 
   const ended = await sessions.mutateIfCurrent(
     manager,
@@ -1275,7 +1275,14 @@ async function endAdminSession(
       sessions.advanceGeneration()
       denyAppCatalogAccessForAccount(expected.tokens.userId)
       denyCachedAppCatalogAuthorizationForAccount(expected.tokens.userId)
-      await beforeDelete?.()
+      try {
+        await beforeDelete?.()
+      } catch (error) {
+        deps?.platform.logger.warn(
+          '[Admin] secondary session cleanup failed; deleting Admin credentials:',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
       await manager.deleteAdminTokens()
       return true
     },

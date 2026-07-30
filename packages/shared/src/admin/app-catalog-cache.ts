@@ -175,6 +175,7 @@ export function saveAppCatalog(
   organizationId: string,
   catalog: AppCatalogResponse,
   syncedAt = Date.now(),
+  retainedWithdrawnAppIds: ReadonlySet<string> = new Set(),
 ): AppCatalogCacheEntry {
   const cache = readCache()
   const previous = cache.entries[cacheKey(accountId, organizationId)]
@@ -192,14 +193,26 @@ export function saveAppCatalog(
     ...app,
     availability: 'available',
   }))
-  const withdrawnApps = [...withdrawnById.values()].slice(0, MAX_CACHED_APPS)
-  const retainedIds = new Set([...apps, ...withdrawnApps]
+  const withdrawnCandidates = [...withdrawnById.values()]
+  const retainedWithdrawnApps = withdrawnCandidates.filter(app =>
+    retainedWithdrawnAppIds.has(app.id))
+  if (retainedWithdrawnApps.length > MAX_CACHED_APPS) {
+    throw new Error(
+      `Cannot retain ${retainedWithdrawnApps.length} installed withdrawn apps`,
+    )
+  }
+  const retainedIds = new Set(retainedWithdrawnApps.map(app => app.id))
+  const withdrawnApps = [
+    ...retainedWithdrawnApps,
+    ...withdrawnCandidates.filter(app => !retainedIds.has(app.id)),
+  ].slice(0, MAX_CACHED_APPS)
+  const retainedCatalogIds = new Set([...apps, ...withdrawnApps]
     .filter(app => app.deliveryMode === 'local_bundle')
     .map(app => app.id))
   const trustedReleases = Object.fromEntries(Object.entries({
     ...(previous?.trustedReleases ?? trustedReleasesFromApps(previous?.apps ?? [])),
     ...trustedReleasesFromApps(catalog.apps),
-  }).filter(([appId]) => retainedIds.has(appId)))
+  }).filter(([appId]) => retainedCatalogIds.has(appId)))
   const entry: AppCatalogCacheEntry = {
     accountId,
     organizationId,

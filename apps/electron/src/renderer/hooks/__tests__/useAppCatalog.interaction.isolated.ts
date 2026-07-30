@@ -280,6 +280,56 @@ describe('useAppCatalog scoped async state', () => {
     await expect(result.current.resolveRemoteUrl(staleRemoteApp)).rejects.toThrow()
   })
 
+  it('retries a superseded startup sync until the no-cache caller receives the committed catalog', async () => {
+    let calls = 0
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
+      calls += 1
+      return calls === 1
+        ? {
+            success: false,
+            errorCode: 'REQUEST_SUPERSEDED',
+            message: 'A newer startup sync owns the result',
+          }
+        : syncResult('organization-a', 'committed-no-cache')
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion)
+        .toBe('committed-no-cache')
+    })
+
+    expect(syncCatalog).toHaveBeenCalledTimes(2)
+    expect(result.current.state.errorCode).toBeNull()
+  })
+
+  it('retries a superseded refresh instead of leaving the Home caller on old cache', async () => {
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('initial')
+    })
+    let calls = 0
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
+      calls += 1
+      return calls === 1
+        ? {
+            success: false,
+            errorCode: 'REQUEST_SUPERSEDED',
+            message: 'A newer startup sync owns the result',
+          }
+        : syncResult('organization-a', 'committed-after-cache')
+    })
+
+    await act(async () => {
+      await result.current.sync(true)
+    })
+
+    expect(syncCatalog).toHaveBeenCalledTimes(2)
+    expect(result.current.state.catalog?.appConfigVersion)
+      .toBe('committed-after-cache')
+    expect(result.current.state.errorCode).toBeNull()
+  })
+
   it('discards an out-of-order response after the organization changes', async () => {
     const organizationA = deferred<AppCatalogSyncResult>()
     const organizationB = deferred<AppCatalogSyncResult>()

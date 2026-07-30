@@ -114,6 +114,52 @@ describe('scoped local app runtime registry', () => {
     expect(managerCount).toBe(0)
   })
 
+  it('reports only retained Catalog ids with actual local installation data', async () => {
+    const installedScope = {
+      ...scope('account-a'),
+      catalogAppId: 'installed-app',
+    }
+    const failedScope = {
+      ...scope('account-a'),
+      catalogAppId: 'failed-app',
+    }
+    for (const catalogScope of [installedScope, failedScope]) {
+      const scopeDir = join(
+        rootDir,
+        'catalog-scopes',
+        createCatalogLocalAppScopeKey(catalogScope),
+      )
+      await mkdir(scopeDir, { recursive: true })
+      await writeFile(join(scopeDir, 'scope.json'), JSON.stringify({
+        schemaVersion: 1,
+        scope: catalogScope,
+      }))
+      if (catalogScope === installedScope) {
+        const appDir = join(
+          scopeDir,
+          'apps',
+          createCatalogRuntimeAppId(catalogScope),
+        )
+        await mkdir(appDir, { recursive: true })
+        await writeFile(join(appDir, 'metadata.json'), '{}')
+      }
+    }
+    class TrackingManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus> {
+        return { appId, status: 'running', currentVersion: '1.0.0' }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new TrackingManager(options),
+    })
+
+    await expect(registry.getRetainedCatalogAppIds(
+      'account-a',
+      'organization-1',
+    )).resolves.toEqual(new Set(['installed-app']))
+  })
+
   it('loads one existing manager for duplicate scopes in a concurrent batch', async () => {
     let managerCount = 0
     const catalogScope = scope('account-a')
