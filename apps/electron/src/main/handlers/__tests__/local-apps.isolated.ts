@@ -42,10 +42,12 @@ const scopedStart = mock(async (scope: CatalogLocalAppScope) => ({
   url: 'http://127.0.0.1:9876',
   port: 9876,
 }))
-const scopedStatuses = mock(async (scopes: CatalogLocalAppScope[]) => scopes.map(scope => ({
+const scopedStatuses = mock(async (
+  scopes: CatalogLocalAppScope[],
+): Promise<LocalAppRuntimeStatus[]> => scopes.map(scope => ({
   appId: scope.catalogAppId,
   scope,
-  status: 'not_installed' as const,
+  status: 'not_installed',
 })))
 const isInstalledAndReady = mock(async () => true)
 
@@ -218,6 +220,11 @@ describe('local app main-process authorization boundary', () => {
     ]) {
       handlerMock.mockClear()
     }
+    scopedStatuses.mockImplementation(async scopes => scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'not_installed',
+    })))
     const server = {
       handle(channel, handler) {
         handlers.set(channel, handler as Handler)
@@ -352,17 +359,74 @@ describe('local app main-process authorization boundary', () => {
 
   it('reads authorization once and returns complete 1,000, 1,001, and 10,000 batches', async () => {
     const getStatuses = handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES)!
+    scopedStatuses.mockImplementation(async scopes => scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'installed',
+      currentVersion: '1.0.0',
+    })))
 
     for (const count of [1_000, 1_001, 10_000]) {
       catalog = createCatalog(count)
       getCachedAppCatalog.mockClear()
+      scopedStatuses.mockClear()
+      scopedRegistry.setAvailableRelease.mockClear()
       const scopes = catalog.apps.map(app => scope(app.id))
       const statuses = await getStatuses(context, { scopes }) as LocalAppRuntimeStatus[]
 
       expect(statuses).toHaveLength(count)
       expect(statuses.at(-1)?.appId).toBe(scopes.at(-1)?.catalogAppId)
+      expect(statuses[0]).toMatchObject({
+        status: 'update_available',
+        currentVersion: '1.0.0',
+        availableRelease: catalog.apps[0]!.currentRelease,
+      })
       expect(getCachedAppCatalog).toHaveBeenCalledTimes(1)
+      expect(scopedStatuses).toHaveBeenCalledTimes(1)
       expect(scopedStatuses).toHaveBeenLastCalledWith(scopes)
+      expect(scopedRegistry.setAvailableRelease).not.toHaveBeenCalled()
     }
+  })
+
+  it('keeps trusted batch update metadata visible when either version is invalid', async () => {
+    const getStatuses = handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES)!
+    const trustedRelease = { version: '1.1.0' }
+    scopedStatuses.mockImplementation(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'update_available',
+      currentVersion: '1.0.0',
+      availableRelease: trustedRelease,
+    })))
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      currentRelease: {
+        ...catalog.apps[0]!.currentRelease!,
+        version: '1.2.3.4',
+      },
+    }
+
+    await expect(getStatuses(context, { scopes: [scope()] })).resolves.toEqual([
+      expect.objectContaining({
+        versionError: 'invalid_semver',
+        availableRelease: trustedRelease,
+      }),
+    ])
+
+    catalog = createCatalog(1)
+    scopedStatuses.mockImplementation(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'update_available',
+      currentVersion: 'release-one',
+      availableRelease: trustedRelease,
+    })))
+    await expect(getStatuses(context, { scopes: [scope()] })).resolves.toEqual([
+      expect.objectContaining({
+        versionError: 'invalid_semver',
+        availableRelease: trustedRelease,
+      }),
+    ])
+    expect(scopedRegistry.setAvailableRelease).not.toHaveBeenCalled()
   })
 })

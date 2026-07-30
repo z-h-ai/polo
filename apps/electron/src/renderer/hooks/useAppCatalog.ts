@@ -31,7 +31,6 @@ export interface AppCatalogState {
   } | null
 }
 
-export const CATALOG_RUNTIME_STATUS_CONCURRENCY = 8
 export const CATALOG_RUNTIME_STATUS_LIMIT = 10_000
 export const BUSY_RUNTIME_STATUS_LIMIT = 32
 
@@ -86,26 +85,6 @@ export function selectRuntimeStatusApps(
     .slice(0, limit)
 }
 
-async function mapWithConcurrency<T, R>(
-  values: T[],
-  concurrency: number,
-  callback: (value: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(values.length)
-  let nextIndex = 0
-  const workers = Array.from(
-    { length: Math.min(concurrency, values.length) },
-    async () => {
-      while (nextIndex < values.length) {
-        const index = nextIndex++
-        results[index] = await callback(values[index]!, index)
-      }
-    },
-  )
-  await Promise.all(workers)
-  return results
-}
-
 function scopeForCatalogApp(
   catalog: AppCatalogCacheEntry,
   app: CatalogApp,
@@ -145,6 +124,7 @@ export function useAppCatalog() {
   contextKeyRef.current = organizationContextKey
   const syncGenerationRef = useRef(0)
   const operationsRef = useRef(new Map<string, Promise<unknown>>())
+  const cancellationOperationsRef = useRef(new Map<string, Promise<void>>())
 
   const isCurrentSnapshot = useCallback((snapshot: ContextSnapshot): boolean => (
     contextKeyRef.current === snapshot.contextKey
@@ -178,48 +158,20 @@ export function useAppCatalog() {
     createLocalAppScopeKey(scopeForApp(app))
   ), [scopeForApp])
 
-  const reconcileVersionStatuses = useCallback(async (
-    apps: CatalogApp[],
-    statuses: LocalAppRuntimeStatus[],
-    snapshot: ContextSnapshot,
-  ): Promise<LocalAppRuntimeStatus[]> => mapWithConcurrency(
-    statuses,
-    CATALOG_RUNTIME_STATUS_CONCURRENCY,
-    async (status, index) => {
-      const app = apps[index]!
-      const release = app.currentRelease
-      if (!release) return status
-      if (!normalizeCatalogSemVer(release.version)) {
-        return { ...status, versionError: 'invalid_semver' }
-      }
-      if (!status.currentVersion) return status
-      const comparison = compareCatalogVersions(release.version, status.currentVersion)
-      if (comparison.strategy === 'invalid') {
-        // Preserve the last trusted availableRelease already held by POO-12.
-        return { ...status, versionError: comparison.reason }
-      }
-      const desiredRelease = comparison.order === 1 ? release : null
-      try {
-        const next = await window.electronAPI.localApps.setAvailableRelease(
-          scopeForCatalogApp(snapshot.catalog, app),
-          desiredRelease,
-        )
-        return next
-      } catch {
-        return status
-      }
-    },
-  ), [])
-
   const refreshRuntimeStatuses = useCallback(async (
     apps?: CatalogApp[],
     busyScopeKeys?: ReadonlySet<string>,
     suppliedSnapshot?: ContextSnapshot,
+    refreshMode: 'replace' | 'merge' = (
+      apps === undefined && busyScopeKeys === undefined ? 'replace' : 'merge'
+    ),
   ) => {
     const catalog = suppliedSnapshot?.catalog ?? catalogRef.current
     const contextKey = suppliedSnapshot?.contextKey ?? contextKeyRef.current
     if (!catalog || !contextKey) {
-      if (!busyScopeKeys) setState(current => ({ ...current, statuses: {} }))
+      if (refreshMode === 'replace') {
+        setState(current => ({ ...current, statuses: {} }))
+      }
       return
     }
     const snapshot: ContextSnapshot = suppliedSnapshot ?? {
@@ -235,7 +187,7 @@ export function useAppCatalog() {
       app => createLocalAppScopeKey(scopeForCatalogApp(catalog, app)),
     )
     if (selectedApps.length === 0) {
-      if (!busyScopeKeys && isCurrentSnapshot(snapshot)) {
+      if (refreshMode === 'replace' && isCurrentSnapshot(snapshot)) {
         setState(current => ({ ...current, statuses: {} }))
       }
       return
@@ -252,13 +204,12 @@ export function useAppCatalog() {
         status: 'not_installed',
       }))
     }
-    statuses = await reconcileVersionStatuses(selectedApps, statuses, snapshot)
     if (!isCurrentSnapshot(snapshot)) return
 
     setState(current => ({
       ...current,
       statuses: {
-        ...(busyScopeKeys ? current.statuses : {}),
+        ...(refreshMode === 'merge' ? current.statuses : {}),
         ...Object.fromEntries(statuses.map(status => {
           const scope = status.scope
           if (!scope || scope.kind !== 'catalog') {
@@ -268,7 +219,7 @@ export function useAppCatalog() {
         })),
       },
     }))
-  }, [isCurrentSnapshot, reconcileVersionStatuses])
+  }, [isCurrentSnapshot])
 
   const sync = useCallback(async (force = false) => {
     if (
@@ -331,7 +282,12 @@ export function useAppCatalog() {
         error: null,
         accessMode: result.accessMode,
       }))
-      await refreshRuntimeStatuses(result.catalog.apps, undefined, snapshot)
+      await refreshRuntimeStatuses(
+        result.catalog.apps,
+        undefined,
+        snapshot,
+        'replace',
+      )
     } catch (error) {
       if (
         generation !== syncGenerationRef.current
@@ -365,6 +321,7 @@ export function useAppCatalog() {
   useEffect(() => {
     syncGenerationRef.current += 1
     operationsRef.current.clear()
+    cancellationOperationsRef.current.clear()
     catalogRef.current = null
     setState(current => ({
       ...current,
@@ -405,7 +362,7 @@ export function useAppCatalog() {
     if (selected.length === 0) return
     const busyKeys = new Set(selected.map(item => item.scopeKey))
     const interval = window.setInterval(() => {
-      void refreshRuntimeStatuses(undefined, busyKeys)
+      void refreshRuntimeStatuses(undefined, busyKeys, undefined, 'merge')
     }, 500)
     return () => window.clearInterval(interval)
   }, [busyScopesSignature, refreshRuntimeStatuses])
@@ -422,6 +379,21 @@ export function useAppCatalog() {
       }
     })
     operationsRef.current.set(scopeKey, promise)
+    return promise
+  }, [])
+
+  const runCancellationExclusive = useCallback((
+    scopeKey: string,
+    operation: () => Promise<void>,
+  ): Promise<void> => {
+    const existing = cancellationOperationsRef.current.get(scopeKey)
+    if (existing) return existing
+    const promise = operation().finally(() => {
+      if (cancellationOperationsRef.current.get(scopeKey) === promise) {
+        cancellationOperationsRef.current.delete(scopeKey)
+      }
+    })
+    cancellationOperationsRef.current.set(scopeKey, promise)
     return promise
   }, [])
 
@@ -472,7 +444,7 @@ export function useAppCatalog() {
         requireCurrent(snapshot)
       } finally {
         if (isCurrentSnapshot(snapshot)) {
-          await refreshRuntimeStatuses([app], undefined, snapshot)
+          await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
         }
       }
     })
@@ -511,7 +483,7 @@ export function useAppCatalog() {
         return result
       } finally {
         if (isCurrentSnapshot(snapshot)) {
-          await refreshRuntimeStatuses([app], undefined, snapshot)
+          await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
         }
       }
     })
@@ -530,7 +502,7 @@ export function useAppCatalog() {
     return runExclusive(scopeKey, async () => {
       await window.electronAPI.localApps.stop(scope)
       requireCurrent(snapshot)
-      await refreshRuntimeStatuses([app], undefined, snapshot)
+      await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
     })
   }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
 
@@ -541,7 +513,7 @@ export function useAppCatalog() {
     return runExclusive(scopeKey, async () => {
       await window.electronAPI.localApps.uninstall(scope, { preserveData })
       requireCurrent(snapshot)
-      await refreshRuntimeStatuses([app], undefined, snapshot)
+      await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
     })
   }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
 
@@ -549,12 +521,17 @@ export function useAppCatalog() {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
-    return runExclusive(scopeKey, async () => {
+    return runCancellationExclusive(scopeKey, async () => {
       await window.electronAPI.localApps.cancelInstall(scope)
       requireCurrent(snapshot)
-      await refreshRuntimeStatuses([app], undefined, snapshot)
+      await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
     })
-  }, [currentSnapshotForApp, refreshRuntimeStatuses, requireCurrent, runExclusive])
+  }, [
+    currentSnapshotForApp,
+    refreshRuntimeStatuses,
+    requireCurrent,
+    runCancellationExclusive,
+  ])
 
   const getLogs = useCallback(async (app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)

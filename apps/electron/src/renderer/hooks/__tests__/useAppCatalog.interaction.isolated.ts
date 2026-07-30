@@ -36,11 +36,14 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject }
 }
 
-function app(organizationId: string): CatalogApp {
+function app(
+  organizationId: string,
+  id = 'shared-app-id',
+): CatalogApp {
   return {
-    id: 'shared-app-id',
+    id,
     organizationId,
-    name: `App ${organizationId}`,
+    name: `App ${organizationId} ${id}`,
     description: '',
     deliveryMode: 'local_bundle',
     currentRelease: {
@@ -55,13 +58,17 @@ function app(organizationId: string): CatalogApp {
   }
 }
 
-function catalog(organizationId: string, appConfigVersion: string): AppCatalogCacheEntry {
+function catalog(
+  organizationId: string,
+  appConfigVersion: string,
+  apps: CatalogApp[] = [app(organizationId)],
+): AppCatalogCacheEntry {
   return {
     accountId: 'account-a',
     organizationId,
     appConfigVersion,
     authorizationStatus: 'authorized',
-    apps: [app(organizationId)],
+    apps,
     syncedAt: 1,
   }
 }
@@ -69,10 +76,11 @@ function catalog(organizationId: string, appConfigVersion: string): AppCatalogCa
 function syncResult(
   organizationId: string,
   version: string,
+  apps?: CatalogApp[],
 ): Extract<AppCatalogSyncResult, { success: true }> {
   return {
     success: true,
-    catalog: catalog(organizationId, version),
+    catalog: catalog(organizationId, version, apps),
     source: 'network',
     refreshed: true,
     accessMode: 'online',
@@ -99,6 +107,19 @@ let startLocalApp = mock(async (
   version: '1.0.0',
   url: 'http://127.0.0.1:9876',
   port: 9876,
+}))
+let installLocalApp = mock(async (
+  _request: { scope: CatalogLocalAppScope },
+): Promise<void> => {})
+let cancelInstall = mock(async (
+  _scope: CatalogLocalAppScope,
+): Promise<boolean> => true)
+let setAvailableRelease = mock(async (
+  scope: CatalogLocalAppScope,
+): Promise<LocalAppRuntimeStatus> => ({
+  appId: scope.catalogAppId,
+  scope,
+  status: 'not_installed',
 }))
 
 function organization(organizationId: string) {
@@ -155,6 +176,19 @@ beforeEach(() => {
     url: 'http://127.0.0.1:9876',
     port: 9876,
   }))
+  installLocalApp = mock(async (
+    _request: { scope: CatalogLocalAppScope },
+  ): Promise<void> => {})
+  cancelInstall = mock(async (
+    _scope: CatalogLocalAppScope,
+  ): Promise<boolean> => true)
+  setAvailableRelease = mock(async (
+    scope: CatalogLocalAppScope,
+  ): Promise<LocalAppRuntimeStatus> => ({
+    appId: scope.catalogAppId,
+    scope,
+    status: 'not_installed',
+  }))
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
@@ -167,13 +201,12 @@ beforeEach(() => {
         getRuntimeStatuses: (
           request: { scopes: CatalogLocalAppScope[] },
         ) => getRuntimeStatuses(request),
-        setAvailableRelease: async (
+        setAvailableRelease: (
           scope: CatalogLocalAppScope,
-        ): Promise<LocalAppRuntimeStatus> => ({
-          appId: scope.catalogAppId,
-          scope,
-          status: 'not_installed',
-        }),
+        ) => setAvailableRelease(scope),
+        install: (request: { scope: CatalogLocalAppScope }) =>
+          installLocalApp(request),
+        cancelInstall: (scope: CatalogLocalAppScope) => cancelInstall(scope),
         start: (scope: CatalogLocalAppScope) => startLocalApp(scope),
       },
     },
@@ -280,5 +313,133 @@ describe('useAppCatalog scoped async state', () => {
     expect(startLocalApp.mock.calls.map(call => call[0].organizationId))
       .toEqual(['organization-a', 'organization-b'])
     expect(result.current.state.catalog?.organizationId).toBe('organization-b')
+  })
+
+  it('cancels an in-flight install through an independent cancellation channel', async () => {
+    const pendingInstall = deferred<void>()
+    installLocalApp = mock(() => pendingInstall.promise)
+    cancelInstall = mock(async () => {
+      pendingInstall.reject(new Error('cancelled'))
+      return true
+    })
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+      expect(result.current.state.host).not.toBeNull()
+    })
+    const catalogApp = result.current.state.catalog!.apps[0]!
+
+    let installOutcome!: Promise<'fulfilled' | 'rejected'>
+    act(() => {
+      installOutcome = result.current.install(catalogApp).then(
+        () => 'fulfilled',
+        () => 'rejected',
+      )
+    })
+    await waitFor(() => {
+      expect(result.current.getStatus(catalogApp)?.status).toBe('downloading')
+    })
+
+    let cancelPromise!: Promise<void>
+    act(() => {
+      cancelPromise = result.current.cancelInstall(catalogApp)
+    })
+    await act(async () => {
+      await cancelPromise
+      expect(await installOutcome).toBe('rejected')
+    })
+
+    expect(installLocalApp).toHaveBeenCalledTimes(1)
+    expect(cancelInstall).toHaveBeenCalledTimes(1)
+    expect(cancelInstall).toHaveBeenCalledWith(expect.objectContaining({
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'shared-app-id',
+    }))
+    expect(result.current.getStatus(catalogApp)?.status).toBe('not_installed')
+  })
+
+  it('merges a completed single-app refresh without dropping other app statuses', async () => {
+    const apps = [
+      app('organization-a', 'app-a'),
+      app('organization-a', 'app-b'),
+    ]
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> =>
+      syncResult('organization-a', 'two-apps', apps))
+    let appAStarted = false
+    startLocalApp = mock(async (
+      scope: CatalogLocalAppScope,
+    ): Promise<LocalAppStartResult> => {
+      appAStarted = true
+      return {
+        appId: scope.catalogAppId,
+        scope,
+        version: '1.0.0',
+        url: 'http://127.0.0.1:9876',
+        port: 9876,
+      }
+    })
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: scope.catalogAppId === 'app-a'
+        ? (appAStarted ? 'running' : 'installed')
+        : 'running',
+      currentVersion: '1.0.0',
+    })))
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(Object.keys(result.current.state.statuses)).toHaveLength(2)
+    })
+    const [appA, appB] = result.current.state.catalog!.apps
+
+    await act(async () => {
+      await result.current.start(appA!)
+    })
+
+    expect(getRuntimeStatuses.mock.calls.map(call => call[0].scopes.length))
+      .toEqual([2, 1])
+    expect(result.current.getStatus(appA!)?.status).toBe('running')
+    expect(result.current.getStatus(appB!)?.status).toBe('running')
+    expect(Object.keys(result.current.state.statuses)).toHaveLength(2)
+  })
+
+  it('uses one batch status RPC and no per-app release RPC for large catalogs', async () => {
+    for (const count of [1_000, 1_001, 10_000]) {
+      const apps = Array.from(
+        { length: count },
+        (_, index) => app('organization-a', `app-${index}`),
+      )
+      syncCatalog = mock(async (): Promise<AppCatalogSyncResult> =>
+        syncResult('organization-a', `catalog-${count}`, apps))
+      getRuntimeStatuses = mock(async (
+        request: { scopes: CatalogLocalAppScope[] },
+      ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'installed',
+        currentVersion: '1.0.0',
+      })))
+      setAvailableRelease = mock(async (
+        scope: CatalogLocalAppScope,
+      ): Promise<LocalAppRuntimeStatus> => ({
+        appId: scope.catalogAppId,
+        scope,
+        status: 'installed',
+      }))
+
+      const view = renderHook(() => useAppCatalog())
+      await waitFor(() => {
+        expect(Object.keys(view.result.current.state.statuses)).toHaveLength(count)
+      }, { timeout: 5_000 })
+
+      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
+      expect(getRuntimeStatuses.mock.calls[0]![0].scopes).toHaveLength(count)
+      expect(setAvailableRelease).not.toHaveBeenCalled()
+      view.unmount()
+    }
   })
 })

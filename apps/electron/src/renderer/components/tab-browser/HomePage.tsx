@@ -125,10 +125,6 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const [logs, setLogs] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
 
-  const builtins = useMemo(
-    () => installedApps.filter(app => BUILTIN_APP_IDS.has(app.id)),
-    [installedApps],
-  )
   const externalApps = useMemo(
     () => installedApps
       .filter(app => app.type === 'webapp' && !BUILTIN_APP_IDS.has(app.id))
@@ -330,16 +326,6 @@ export function HomePage({ onAddApp }: HomePageProps) {
       })
     }
 
-    for (const app of builtins) {
-      const key = `builtin:${app.id}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      entries.push({
-        key,
-        definition: app,
-        onOpen: () => openPersonalApp(app),
-      })
-    }
     return entries.slice(0, MAX_RECENT_APPS)
   })()
 

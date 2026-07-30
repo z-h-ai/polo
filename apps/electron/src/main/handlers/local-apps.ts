@@ -14,6 +14,7 @@ import type {
   LocalAppLogsOptions,
   LocalAppReference,
   LocalAppRpcInstallRequest,
+  LocalAppRuntimeStatus,
   LocalAppUninstallOptions,
 } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
@@ -121,6 +122,59 @@ function hostArchitecture(): 'arm64' | 'x64' {
 
 function normalizedCatalogVersion(version: string): string | null {
   return valid(version.trim().replace(/^v(?=\d)/i, ''), { loose: false })
+}
+
+function clearCatalogUpdateState(
+  status: LocalAppRuntimeStatus,
+): LocalAppRuntimeStatus {
+  const {
+    availableRelease: _availableRelease,
+    versionError: _versionError,
+    ...cleared
+  } = status
+  if (cleared.status === 'update_available') {
+    return {
+      ...cleared,
+      status: cleared.currentVersion ? 'installed' : 'not_installed',
+    }
+  }
+  return cleared
+}
+
+function deriveCatalogReleaseStatus(
+  status: LocalAppRuntimeStatus,
+  app: CatalogApp,
+): LocalAppRuntimeStatus {
+  const release = app.currentRelease
+  if (!release) return clearCatalogUpdateState(status)
+
+  const availableVersion = normalizedCatalogVersion(release.version)
+  if (!availableVersion) {
+    // Invalid Catalog data must stay visible without clearing the last trusted
+    // update metadata already stored by the runtime manager.
+    return { ...status, versionError: 'invalid_semver' }
+  }
+  if (!status.currentVersion) return clearCatalogUpdateState(status)
+
+  const installedVersion = normalizedCatalogVersion(status.currentVersion)
+  if (!installedVersion) {
+    return { ...status, versionError: 'invalid_semver' }
+  }
+  if (!gt(availableVersion, installedVersion)) {
+    return clearCatalogUpdateState(status)
+  }
+
+  const { versionError: _versionError, ...current } = status
+  const exposesUpdateAsPrimaryStatus = (
+    current.status === 'installed'
+    || current.status === 'stopped'
+    || current.status === 'update_available'
+  )
+  return {
+    ...current,
+    status: exposesUpdateAsPrimaryStatus ? 'update_available' : current.status,
+    availableRelease: release,
+  }
 }
 
 export const HANDLED_CHANNELS = [
@@ -344,16 +398,21 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       if (!catalog || catalog.authorizationStatus !== 'authorized') {
         throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Catalog authorization is unavailable')
       }
-      const localAppIds = new Set(catalog.apps
+      const localApps = new Map(catalog.apps
         .filter(app => app.deliveryMode === 'local_bundle')
-        .map(app => app.id))
-      if (scopes.some(scope => !localAppIds.has(scope.catalogAppId))) {
+        .map(app => [app.id, app]))
+      if (scopes.some(scope => !localApps.has(scope.catalogAppId))) {
         throw new LocalAppRuntimeError(
           'NOT_AUTHORIZED',
           'A batch status scope is not present in the authorized Catalog',
         )
       }
-      return getScopedLocalAppRuntimeRegistry().getRuntimeStatuses(scopes)
+      const statuses = await getScopedLocalAppRuntimeRegistry()
+        .getRuntimeStatuses(scopes)
+      return statuses.map((status, index) => deriveCatalogReleaseStatus(
+        status,
+        localApps.get(scopes[index]!.catalogAppId)!,
+      ))
     },
   )
 
