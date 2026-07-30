@@ -82,4 +82,30 @@ describe('Creator Skill boundary schemas', () => {
       maxArchiveBytes: HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes + 1,
     }).success).toBe(false)
   })
+
+  it('requires UUID operation identifiers at the renderer RPC boundary', () => {
+    const base = {
+      workspaceId: 'workspace-id',
+      grant: {
+        artifactId: 'artifact-id',
+        organizationId: 'organization-id',
+        slug: 'review-helper',
+        version: '1.0.0',
+        url: 'https://download.example.test/skill.zip',
+        expiresAt: '2026-07-30T00:01:00.000Z',
+        archiveChecksum: 'a'.repeat(64),
+        contentDigest: 'b'.repeat(64),
+        manifest: [],
+        validationPolicy: HARD_SKILL_ARCHIVE_POLICY,
+      },
+    }
+    expect(CreatorSkillInstallRpcInputSchema.safeParse({
+      ...base,
+      operationId: '11111111-1111-4111-8111-111111111111',
+    }).success).toBe(true)
+    expect(CreatorSkillInstallRpcInputSchema.safeParse({
+      ...base,
+      operationId: '../outside',
+    }).success).toBe(false)
+  })
 })

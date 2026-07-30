@@ -17,6 +17,16 @@ import {
   type CreatorSkillDownloadGrant,
 } from '../types'
 
+const OP_INSTALL = '11111111-1111-4111-8111-111111111111'
+const OP_FIRST = '22222222-2222-4222-8222-222222222222'
+const OP_BLOCKED = '33333333-3333-4333-8333-333333333333'
+const OP_BASE = '44444444-4444-4444-8444-444444444444'
+const OP_UPDATE = '55555555-5555-4555-8555-555555555555'
+const OP_UNINSTALL = '66666666-6666-4666-8666-666666666666'
+const OP_RECOVERY = '77777777-7777-4777-8777-777777777777'
+const OP_FAULT_LEDGER = '88888888-8888-4888-8888-888888888888'
+const OP_FAULT_COMMITTED = '99999999-9999-4999-8999-999999999999'
+
 function skillContent(version: string): string {
   return `---
 name: Install Test
@@ -84,7 +94,7 @@ describe('Creator Skill workspace installer', () => {
       let commitChecked = false
       const result = await installCreatorSkill(root, {
         workspaceId: 'workspace-1',
-        operationId: 'operation-install',
+        operationId: OP_INSTALL,
         grant: packaged.grant,
       }, {
         fetch: responseFetch(packaged.bytes),
@@ -144,14 +154,14 @@ describe('Creator Skill workspace installer', () => {
       const first = await packageGrant(root, '1.0.0')
       expect((await installCreatorSkill(root, {
         workspaceId: 'workspace-1',
-        operationId: 'operation-first',
+        operationId: OP_FIRST,
         grant: first.grant,
       }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
 
       const next = await packageGrant(root, '2.0.0')
       const result = await installCreatorSkill(root, {
         workspaceId: 'workspace-1',
-        operationId: 'operation-blocked',
+        operationId: OP_BLOCKED,
         grant: next.grant,
         replaceExisting: true,
       }, {
@@ -180,7 +190,7 @@ describe('Creator Skill workspace installer', () => {
       const first = await packageGrant(root, '1.0.0')
       expect((await installCreatorSkill(root, {
         workspaceId: 'workspace-1',
-        operationId: 'operation-base',
+        operationId: OP_BASE,
         grant: first.grant,
       }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
 
@@ -189,7 +199,7 @@ describe('Creator Skill workspace installer', () => {
       const next = await packageGrant(root, '2.0.0')
       const update = await installCreatorSkill(root, {
         workspaceId: 'workspace-1',
-        operationId: 'operation-update',
+        operationId: OP_UPDATE,
         grant: next.grant,
         replaceExisting: true,
         backupLocalChanges: true,
@@ -204,7 +214,7 @@ describe('Creator Skill workspace installer', () => {
       const uninstall = await uninstallCreatorSkill({
         workspaceRoot: root,
         workspaceId: 'workspace-1',
-        operationId: 'operation-uninstall',
+        operationId: OP_UNINSTALL,
         slug: 'install-test',
       })
       expect(uninstall).toMatchObject({ success: true, detached: true })
@@ -215,7 +225,7 @@ describe('Creator Skill workspace installer', () => {
 
   it('rolls back a crash after a preserved local backup was moved', async () => {
     await withWorkspace(async root => {
-      const operationPath = join(root, '.creator-skill-ops', 'recovery-operation')
+      const operationPath = join(root, '.creator-skill-ops', OP_RECOVERY)
       const targetPath = join(root, 'skills', 'install-test')
       const preserveBackupPath = join(
         root,
@@ -235,7 +245,7 @@ describe('Creator Skill workspace installer', () => {
       const oldLedger = `${JSON.stringify({ schemaVersion: 1, installed: [] }, null, 2)}\n`
       await writeFile(join(operationPath, 'journal.json'), JSON.stringify({
         schemaVersion: 1,
-        operationId: 'recovery-operation',
+        operationId: OP_RECOVERY,
         action: 'install',
         slug: 'install-test',
         targetPath,
@@ -251,6 +261,158 @@ describe('Creator Skill workspace installer', () => {
       expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8')).toBe('old local content')
       expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
       expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('rejects operationId traversal before touching the derived operation path', async () => {
+    await withWorkspace(async root => {
+      const outside = join(root, 'outside-operation')
+      await mkdir(outside)
+      await writeFile(join(outside, 'sentinel.txt'), 'keep')
+      const packaged = await packageGrant(root, '1.0.0')
+
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '../outside-operation',
+        grant: packaged.grant,
+      }, { fetch: responseFetch(packaged.bytes) })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'invalid_operation_id',
+      })
+      expect(await readFile(join(outside, 'sentinel.txt'), 'utf8')).toBe('keep')
+    })
+  })
+
+  it('rejects recovery journals that point any transaction path outside the workspace', async () => {
+    const pathFields = [
+      'targetPath',
+      'transactionBackupPath',
+      'preserveBackupPath',
+    ] as const
+    for (const [index, field] of pathFields.entries()) {
+      await withWorkspace(async root => {
+        const operationId = `aaaaaaa${index + 1}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`
+        const operationPath = join(root, '.creator-skill-ops', operationId)
+        const targetPath = join(root, 'skills', 'install-test')
+        const outside = await mkdtemp(join(tmpdir(), `creator-skill-outside-${index}-`))
+        try {
+          await mkdir(operationPath, { recursive: true })
+          await mkdir(targetPath, { recursive: true })
+          await writeFile(join(targetPath, 'SKILL.md'), 'new content')
+          await writeFile(join(outside, 'sentinel.txt'), 'keep')
+          const journal = {
+            schemaVersion: 1,
+            operationId,
+            action: 'install',
+            slug: 'install-test',
+            targetPath,
+            transactionBackupPath: join(operationPath, 'backup'),
+            preserveBackupPath: join(
+              root,
+              'skill-backups',
+              'install-test',
+              '2026-07-30T00-00-00-000Z',
+            ),
+            ledgerPath: join(root, 'creator-skills.json'),
+            oldLedger: null,
+            state: 'ledger_committed',
+            [field]: outside,
+          }
+          await writeFile(join(operationPath, 'journal.json'), JSON.stringify(journal))
+
+          await expect(recoverCreatorSkillOperations(root)).rejects.toMatchObject({
+            code: 'creator_skill_recovery_failed',
+          })
+          expect(await readFile(join(outside, 'sentinel.txt'), 'utf8')).toBe('keep')
+          expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8')).toBe('new content')
+        } finally {
+          await rm(outside, { recursive: true, force: true })
+        }
+      })
+    }
+  })
+
+  it('keeps the rollback backup through ledger_committed fault injection', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_FAULT_LEDGER,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        onJournalPersisted: async state => {
+          if (state !== 'ledger_committed') return
+          expect(await access(join(
+            root,
+            '.creator-skill-ops',
+            OP_FAULT_LEDGER,
+            'backup',
+          )).then(() => true, () => false)).toBe(true)
+          throw new Error('fault after ledger_committed')
+        },
+      })
+
+      expect(result.success).toBe(false)
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('1.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+    })
+  })
+
+  it('persists committed before deleting the transaction backup', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_FAULT_COMMITTED,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        onJournalPersisted: async state => {
+          if (state !== 'committed') return
+          expect(await access(join(
+            root,
+            '.creator-skill-ops',
+            OP_FAULT_COMMITTED,
+            'backup',
+          )).then(() => true, () => false)).toBe(true)
+          throw new Error('simulated crash after committed')
+        },
+      })
+
+      expect(result.success).toBe(true)
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('2.0.0')
+      await recoverCreatorSkillOperations(root)
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('2.0.0'))
+      expect(await access(join(
+        root,
+        '.creator-skill-ops',
+        OP_FAULT_COMMITTED,
+      )).then(() => true, () => false)).toBe(false)
     })
   })
 })

@@ -1,10 +1,12 @@
 import { join } from 'path'
-import { existsSync, readdirSync, statSync } from 'fs'
+import { constants as fsConstants, existsSync, readdirSync, statSync } from 'fs'
+import { access } from 'node:fs/promises'
 import { RPC_CHANNELS, type SkillFile } from '@polo-ai/shared/protocol'
 import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import {
   CLIENT_CREATOR_SKILL_COMMIT_CHECK,
   pushTyped,
+  type RequestContext,
   type RpcServer,
 } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -12,7 +14,9 @@ import {
   CreatorSkillBackupRpcInputSchema,
   CreatorSkillInstallRpcInputSchema,
   CreatorSkillIgnoreVersionRpcInputSchema,
+  CreatorSkillOperationIdSchema,
   CreatorSkillStatusUpdateRpcInputSchema,
+  CreatorSkillTargetRpcInputSchema,
   CreatorSkillUninstallRpcInputSchema,
 } from '@polo-ai/shared/creator-skills/schemas'
 import {
@@ -28,6 +32,59 @@ import {
   readCreatorSkillsLedger,
 } from '@polo-ai/shared/creator-skills/ledger'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
+
+function currentWorkspaceId(ctx: RequestContext, deps: HandlerDeps): string | null {
+  if (ctx.workspaceId) return ctx.workspaceId
+  if (ctx.webContentsId === null) return null
+  return deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+}
+
+function getBoundWorkspace(
+  ctx: RequestContext,
+  requestedWorkspaceId: string,
+  deps: HandlerDeps,
+) {
+  const activeId = currentWorkspaceId(ctx, deps)
+  if (!activeId) return null
+  const activeWorkspace = getWorkspaceByNameOrId(activeId)
+  const requestedWorkspace = getWorkspaceByNameOrId(requestedWorkspaceId)
+  if (!activeWorkspace || !requestedWorkspace || activeWorkspace.id !== requestedWorkspace.id) {
+    return null
+  }
+  return requestedWorkspace
+}
+
+export async function hasWorkspaceSkillWriteAccess(workspaceRoot: string): Promise<boolean> {
+  const paths = [
+    workspaceRoot,
+    join(workspaceRoot, 'skills'),
+    join(workspaceRoot, '.creator-skill-ops'),
+    join(workspaceRoot, 'creator-skills.json'),
+  ].filter(path => path === workspaceRoot || existsSync(path))
+  try {
+    await Promise.all(paths.map(path => access(path, fsConstants.W_OK)))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function workspaceMutationError(
+  operationId: string,
+  errorCode: 'workspace_context_mismatch' | 'workspace_read_only',
+) {
+  return {
+    success: false as const,
+    operationId,
+    errorCode,
+    stage: 'prepare' as const,
+    message: errorCode === 'workspace_read_only'
+      ? 'The active workspace does not allow Skill changes'
+      : 'The requested workspace is not the active workspace for this connection',
+    diagnostic: JSON.stringify({ errorCode, stage: 'prepare' }),
+    retryable: false,
+  }
+}
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
@@ -170,9 +227,16 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   })
 
   // Delete a skill from a workspace
-  server.handle(RPC_CHANNELS.skills.DELETE, async (_ctx, workspaceId: string, skillSlug: string) => {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) throw new Error('Workspace not found')
+  server.handle(RPC_CHANNELS.skills.DELETE, async (ctx, workspaceId: string, skillSlug: string) => {
+    const workspace = getBoundWorkspace(ctx, workspaceId, deps)
+    if (!workspace) throw Object.assign(new Error('Workspace context mismatch'), {
+      code: 'workspace_context_mismatch',
+    })
+    if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
+      throw Object.assign(new Error('Workspace is read-only'), {
+        code: 'workspace_read_only',
+      })
+    }
     await ensureRecovered(workspace.rootPath)
 
     const ledger = await readCreatorSkillsLedger(workspace.rootPath)
@@ -181,7 +245,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (managed) {
       const result = await uninstallCreatorSkill({
         workspaceRoot: workspace.rootPath,
-        workspaceId,
+        workspaceId: workspace.id,
         operationId: crypto.randomUUID(),
         slug: skillSlug,
       })
@@ -193,26 +257,24 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       const { deleteSkill } = await import('@polo-ai/shared/skills')
       deleteSkill(workspace.rootPath, skillSlug)
     }
-    await broadcastSkillsChanged(workspaceId, workspace.rootPath)
+    await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     deps.platform.logger?.info(`Deleted skill: ${skillSlug}`)
     return { managed, detached }
   })
 
-  server.handle(RPC_CHANNELS.creatorSkills.GET_TARGET, async (_ctx, rawInput: unknown) => {
-    const workspaceId = rawInput && typeof rawInput === 'object'
-      ? (rawInput as { workspaceId?: unknown }).workspaceId
-      : undefined
-    if (typeof workspaceId !== 'string') {
+  server.handle(RPC_CHANNELS.creatorSkills.GET_TARGET, async (ctx, rawInput: unknown) => {
+    const input = CreatorSkillTargetRpcInputSchema.safeParse(rawInput)
+    if (!input.success) {
       return { success: false, errorCode: 'VALIDATION_ERROR' }
     }
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
+    if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     return {
       success: true,
       workspaceId: workspace.id,
       name: workspace.name,
       path: workspace.rootPath,
-      writable: true,
+      writable: await hasWorkspaceSkillWriteAccess(workspace.rootPath),
     }
   })
 
@@ -229,17 +291,12 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         retryable: false,
       }
     }
-    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) {
-      return {
-        success: false,
-        operationId: input.data.operationId,
-        errorCode: 'workspace_not_found',
-        stage: 'prepare',
-        message: 'The active workspace is unavailable',
-        diagnostic: JSON.stringify({ errorCode: 'workspace_not_found', stage: 'prepare' }),
-        retryable: false,
-      }
+      return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
+    }
+    if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
+      return workspaceMutationError(input.data.operationId, 'workspace_read_only')
     }
     await ensureRecovered(workspace.rootPath)
     const result = await installCreatorSkill(workspace.rootPath, input.data, {
@@ -279,18 +336,18 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       },
     })
     if (result.success) {
-      await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+      await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }
     return result
   })
 
   server.handle(RPC_CHANNELS.creatorSkills.CANCEL, async (_ctx, operationId: unknown) => ({
-    success: typeof operationId === 'string'
-      ? cancelCreatorSkillOperation(operationId)
+    success: CreatorSkillOperationIdSchema.safeParse(operationId).success
+      ? cancelCreatorSkillOperation(operationId as string)
       : false,
   }))
 
-  server.handle(RPC_CHANNELS.creatorSkills.UNINSTALL, async (_ctx, rawInput: unknown) => {
+  server.handle(RPC_CHANNELS.creatorSkills.UNINSTALL, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillUninstallRpcInputSchema.safeParse(rawInput)
     if (!input.success) {
       return {
@@ -303,17 +360,12 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         retryable: false,
       }
     }
-    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) {
-      return {
-        success: false,
-        operationId: input.data.operationId,
-        errorCode: 'workspace_not_found',
-        stage: 'prepare',
-        message: 'The active workspace is unavailable',
-        diagnostic: JSON.stringify({ errorCode: 'workspace_not_found', stage: 'prepare' }),
-        retryable: false,
-      }
+      return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
+    }
+    if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
+      return workspaceMutationError(input.data.operationId, 'workspace_read_only')
     }
     await ensureRecovered(workspace.rootPath)
     const result = await uninstallCreatorSkill({
@@ -321,38 +373,41 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       ...input.data,
     })
     if (result.success) {
-      await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+      await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     }
     return result
   })
 
-  server.handle(RPC_CHANNELS.creatorSkills.LIST_BACKUPS, async (_ctx, rawInput: unknown) => {
+  server.handle(RPC_CHANNELS.creatorSkills.LIST_BACKUPS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillBackupRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
-    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
-    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
+    if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     return {
       success: true,
       backups: await listCreatorSkillBackups(workspace.rootPath),
     }
   })
 
-  server.handle(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS, async (_ctx, rawInput: unknown) => {
+  server.handle(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillBackupRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
-    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
-    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
+    if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
+    if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
+      return { success: false, errorCode: 'workspace_read_only' }
+    }
     return {
       success: true,
       deleted: await deleteCreatorSkillBackups(workspace.rootPath, input.data.path),
     }
   })
 
-  server.handle(RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS, async (_ctx, rawInput: unknown) => {
+  server.handle(RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillStatusUpdateRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
-    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
-    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
+    if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     await ensureRecovered(workspace.rootPath)
     const updated = await updateCreatorSkillInstallationMetadata({
       workspaceRoot: workspace.rootPath,
@@ -365,15 +420,18 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       },
     })
     if (!updated) return { success: false, errorCode: 'creator_skill_not_installed' }
-    await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+    await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     return { success: true }
   })
 
-  server.handle(RPC_CHANNELS.creatorSkills.IGNORE_VERSION, async (_ctx, rawInput: unknown) => {
+  server.handle(RPC_CHANNELS.creatorSkills.IGNORE_VERSION, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillIgnoreVersionRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
-    const workspace = getWorkspaceByNameOrId(input.data.workspaceId)
-    if (!workspace) return { success: false, errorCode: 'workspace_not_found' }
+    const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
+    if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
+    if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
+      return { success: false, errorCode: 'workspace_read_only' }
+    }
     await ensureRecovered(workspace.rootPath)
     const updated = await updateCreatorSkillInstallationMetadata({
       workspaceRoot: workspace.rootPath,
@@ -385,7 +443,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       },
     })
     if (!updated) return { success: false, errorCode: 'creator_skill_not_installed' }
-    await broadcastSkillsChanged(input.data.workspaceId, workspace.rootPath)
+    await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     return { success: true }
   })
 

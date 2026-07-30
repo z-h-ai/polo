@@ -18,6 +18,10 @@ import { routes, navigate } from '@/lib/navigate'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
 import {
+  actionableCreatorSkillSafeVersion,
+  compareStableCreatorSkillVersion,
+} from '@/lib/creator-skill-version'
+import {
   Info_Page,
   Info_Section,
   Info_Table,
@@ -29,16 +33,6 @@ interface SkillInfoPageProps {
   skillSlug: string
   workspaceId: string
   workingDirectory?: string
-}
-
-function compareStableSemver(left: string, right: string): number {
-  const a = left.split('.').map(Number)
-  const b = right.split('.').map(Number)
-  for (let index = 0; index < 3; index += 1) {
-    const difference = (a[index] ?? 0) - (b[index] ?? 0)
-    if (difference !== 0) return difference
-  }
-  return 0
 }
 
 export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory }: SkillInfoPageProps) {
@@ -129,14 +123,12 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         checkedAt: new Date().toISOString(),
       })
       if (!active) return
-      const candidate = result.safeVersion
-      setAvailableVersion(
-        candidate
-        && compareStableSemver(candidate, creatorInstalledVersion) > 0
-        && candidate !== creatorIgnoredVersion
-          ? candidate
-          : null,
-      )
+      setAvailableVersion(actionableCreatorSkillSafeVersion({
+        candidate: result.safeVersion,
+        installedVersion: creatorInstalledVersion,
+        ignoredVersion: creatorIgnoredVersion,
+        status: result.status,
+      }))
     }).catch(() => {
       if (active) setAvailableVersion(null)
     })
@@ -277,6 +269,11 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   // Get skill name for header
   const skillName = skill?.metadata.name || skillSlug
   const canDeleteSkill = skill?.source === 'workspace'
+  const isSafeRollback = Boolean(
+    availableVersion
+    && creatorInstalledVersion
+    && compareStableCreatorSkillVersion(availableVersion, creatorInstalledVersion) < 0,
+  )
 
   // Format path to show just the skill-relative portion (skills/{slug}/)
   const formatPath = (path: string) => {
@@ -346,7 +343,12 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
           {availableVersion ? (
             <div className="mx-4 mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-accent/20 bg-accent/5 px-3 py-2 text-sm">
               <span className="mr-auto">
-                {t('creatorSkills.update.available', { version: availableVersion })}
+                {t(
+                  isSafeRollback
+                    ? 'creatorSkills.update.rollbackAvailable'
+                    : 'creatorSkills.update.available',
+                  { version: availableVersion },
+                )}
               </span>
               <button
                 type="button"
@@ -356,7 +358,11 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
               >
                 {updatingCreatorSkill
                   ? t(`creatorSkills.stage.${updateProgress?.stage ?? 'download'}`)
-                  : t('creatorSkills.update.action')}
+                  : t(
+                    isSafeRollback
+                      ? 'creatorSkills.update.rollbackAction'
+                      : 'creatorSkills.update.action',
+                  )}
               </button>
               {updateProgress?.cancellable && updateOperationId ? (
                 <button
@@ -369,14 +375,16 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
                   {t('common.cancel')}
                 </button>
               ) : null}
-              <button
-                type="button"
-                disabled={updatingCreatorSkill}
-                className="rounded-md px-2.5 py-1 text-muted-foreground hover:bg-foreground/5"
-                onClick={() => { void handleIgnoreCreatorVersion() }}
-              >
-                {t('creatorSkills.update.ignore')}
-              </button>
+              {!isSafeRollback ? (
+                <button
+                  type="button"
+                  disabled={updatingCreatorSkill}
+                  className="rounded-md px-2.5 py-1 text-muted-foreground hover:bg-foreground/5"
+                  onClick={() => { void handleIgnoreCreatorVersion() }}
+                >
+                  {t('creatorSkills.update.ignore')}
+                </button>
+              ) : null}
             </div>
           ) : null}
           {/* Hero: Avatar, title, and description */}

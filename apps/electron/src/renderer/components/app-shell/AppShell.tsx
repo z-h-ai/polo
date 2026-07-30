@@ -119,6 +119,7 @@ import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
+import { useCreatorSkillSafetyMonitor } from "@/hooks/useCreatorSkillSafetyMonitor"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { PanelHeader } from "./PanelHeader"
 import { FabNewChat } from "./FabNewChat"
@@ -806,6 +807,10 @@ function AppShellContent({
 
   // Skills state (workspace-scoped)
   const [skills, setSkills] = React.useState<LoadedSkill[]>([])
+  const availableCreatorSkillVersions = useCreatorSkillSafetyMonitor(
+    skills,
+    activeWorkspaceId || undefined,
+  )
   // Sync skills to atom for NavigationContext auto-selection
   const setSkillsAtom = useSetAtom(skillsAtom)
   React.useEffect(() => {
@@ -3136,6 +3141,7 @@ function AppShellContent({
                 skills={skills}
                 workspaceId={activeWorkspaceId}
                 workspaceRootPath={activeWorkspace?.rootPath}
+                availableCreatorSkillVersions={availableCreatorSkillVersions}
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}

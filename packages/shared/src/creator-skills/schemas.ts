@@ -7,6 +7,7 @@ const checksum = z.string().regex(/^[a-f0-9]{64}$/)
 const stableSemver = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
 const skillSlug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
 const idempotencyKey = z.string().min(1).max(128).regex(/^[\x21-\x7E]+$/)
+export const CreatorSkillOperationIdSchema = z.string().uuid()
 
 export const SkillArchivePolicySchema = z.object({
   version: z.string().min(1).max(128),
@@ -230,7 +231,7 @@ export const CreatorArtifactUploadRpcInputSchema = z.object({
   artifactId: entityId,
   versionId: entityId,
   archivePath: z.string().min(1).max(32_768),
-  operationId: entityId,
+  operationId: CreatorSkillOperationIdSchema,
   idempotencyKey,
 }).strict()
 
@@ -245,6 +246,10 @@ export const CreatorSkillDownloadRpcInputSchema = z.object({
   version: stableSemver,
 }).strict()
 
+export const CreatorSkillTargetRpcInputSchema = z.object({
+  workspaceId: entityId,
+}).strict()
+
 export const CreatorSkillSafetyRpcInputSchema = z.object({
   artifactId: entityId,
   version: stableSemver,
@@ -254,7 +259,7 @@ export const CreatorSkillSafetyRpcInputSchema = z.object({
 export const CreatorSkillInstallRpcInputSchema = z.object({
   workspaceId: entityId,
   workingDirectory: z.string().max(32_768).optional(),
-  operationId: entityId,
+  operationId: CreatorSkillOperationIdSchema,
   grant: CreatorSkillDownloadGrantSchema,
   replaceExisting: z.boolean().optional(),
   confirmGlobalOverride: z.boolean().optional(),
@@ -263,7 +268,7 @@ export const CreatorSkillInstallRpcInputSchema = z.object({
 
 export const CreatorSkillUninstallRpcInputSchema = z.object({
   workspaceId: entityId,
-  operationId: entityId,
+  operationId: CreatorSkillOperationIdSchema,
   slug: skillSlug,
   forceDeleteModified: z.boolean().optional(),
 }).strict()

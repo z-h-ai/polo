@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Download,
   FileArchive,
+  Globe2,
   PackagePlus,
   RefreshCw,
   RotateCcw,
@@ -51,6 +52,7 @@ type ActionState =
   | 'archive'
   | 'delete'
   | 'revoke'
+  | 'open-web-app'
   | null
 
 function idempotencyKey(action: string): string {
@@ -83,9 +85,10 @@ export function CreatorArtifactsPanel({
   const [action, setAction] = useState<ActionState>(null)
   const [error, setError] = useState<string | null>(null)
   const [issues, setIssues] = useState<SkillValidationIssue[]>([])
+  const [newArtifactType, setNewArtifactType] = useState<'web_app' | 'skill' | null>(null)
   const [slug, setSlug] = useState('')
   const [version, setVersion] = useState('1.0.0')
-  const [changelog, setChangelog] = useState('Initial release')
+  const [changelog, setChangelog] = useState('')
   const [draftVersionId, setDraftVersionId] = useState<string | null>(null)
   const [installVersion, setInstallVersion] = useState('')
   const [progress, setProgress] = useState<CreatorSkillOperationProgress | null>(null)
@@ -112,10 +115,12 @@ export function CreatorArtifactsPanel({
         return
       }
       setEnabled(capability.creatorSkillArtifacts)
-      if (!capability.creatorSkillArtifacts) return
+      if (!capability.creatorSkillArtifacts) {
+        setNewArtifactType(current => current === 'skill' ? null : current)
+      }
       const result = await window.electronAPI.creatorArtifactList({
         organizationId,
-        type: 'skill',
+        ...(!capability.creatorSkillArtifacts ? { type: 'web_app' as const } : {}),
         includeDrafts: canManage,
       })
       if (generation !== requestGeneration.current) return
@@ -177,7 +182,11 @@ export function CreatorArtifactsPanel({
       setDraftVersionId(draft?.id ?? null)
       setIssues(draft?.validationIssues ?? [])
       setVersion('1.0.0')
-      setChangelog(result.versions.length === 0 ? 'Initial release' : '')
+      setChangelog(
+        result.versions.length === 0
+          ? t('creatorSkills.version.initialChangelog')
+          : '',
+      )
     } catch (caught) {
       emitAdminAuthFailure(
         caught && typeof caught === 'object'
@@ -199,9 +208,14 @@ export function CreatorArtifactsPanel({
   }, [loadArtifacts])
 
   useEffect(() => {
-    if (selectedId) void loadDetail(selectedId)
-    else setDetail(null)
-  }, [loadDetail, selectedId])
+    const selected = artifacts.find(item => item.id === selectedId)
+    if (selected?.type === 'skill') {
+      void loadDetail(selected.id)
+    } else {
+      setDetail(null)
+      setDetailLoading(false)
+    }
+  }, [artifacts, loadDetail, selectedId])
 
   useEffect(() => {
     if (!workspaceId) {
@@ -250,6 +264,29 @@ export function CreatorArtifactsPanel({
     () => detail?.versions.find(item => item.id === draftVersionId),
     [detail, draftVersionId],
   )
+  const selectedArtifact = useMemo(
+    () => artifacts.find(item => item.id === selectedId) ?? null,
+    [artifacts, selectedId],
+  )
+
+  const openWebAppManagement = async () => {
+    setAction('open-web-app')
+    setError(null)
+    try {
+      const status = await window.electronAPI.adminGetStatus()
+      if (!status.adminUrl) {
+        setError(t('creatorSkills.errors.webAppManagementUnavailable'))
+        return
+      }
+      const managementUrl = new URL('/organization-apps', status.adminUrl)
+      managementUrl.searchParams.set('organizationId', organizationId)
+      await window.electronAPI.openUrl(managementUrl.toString())
+    } catch {
+      setError(t('creatorSkills.errors.webAppManagementUnavailable'))
+    } finally {
+      setAction(null)
+    }
+  }
 
   const createArtifact = async () => {
     const normalized = slug.trim()
@@ -514,16 +551,11 @@ export function CreatorArtifactsPanel({
   if (loading || enabled === null) {
     return <div className="flex justify-center py-12"><Spinner /></div>
   }
-  if (enabled === false) {
-    return (
-      <div className="rounded-xl border border-border/60 p-5 text-sm text-muted-foreground">
-        {t('creatorSkills.featureDisabled')}
-      </div>
-    )
-  }
-
   return (
-    <div className="grid min-h-[440px] gap-4 pt-2 md:grid-cols-[220px_minmax(0,1fr)]">
+    <div
+      data-testid="creator-artifacts-panel"
+      className="grid min-h-[440px] gap-4 pt-2 md:grid-cols-[220px_minmax(0,1fr)]"
+    >
       <aside className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">{t('creatorSkills.artifacts.title')}</h3>
@@ -533,25 +565,66 @@ export function CreatorArtifactsPanel({
         </div>
         {canManage ? (
           <div className="space-y-2 rounded-xl border border-border/60 p-3">
-            <Label htmlFor="creator-skill-slug">{t('creatorSkills.artifact.slug')}</Label>
-            <Input
-              id="creator-skill-slug"
-              value={slug}
-              placeholder="my-skill"
-              onChange={event => setSlug(event.target.value)}
-            />
-            <Button
-              type="button"
-              size="sm"
-              className="w-full"
-              disabled={action !== null || !slug.trim()}
-              onClick={() => { void createArtifact() }}
+            <Label>{t('creatorSkills.artifact.type')}</Label>
+            <Select
+              value={newArtifactType ?? undefined}
+              onValueChange={value => setNewArtifactType(value as 'web_app' | 'skill')}
             >
-              {action === 'create-artifact'
-                ? <Spinner className="mr-1.5" />
-                : <PackagePlus className="mr-1.5 size-3.5" />}
-              {t('creatorSkills.artifact.create')}
-            </Button>
+              <SelectTrigger data-testid="creator-artifact-type-select">
+                <SelectValue placeholder={t('creatorSkills.artifact.chooseType')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="web_app">
+                  {t('creatorSkills.artifact.type.web_app')}
+                </SelectItem>
+                {enabled ? (
+                  <SelectItem value="skill">
+                    {t('creatorSkills.artifact.type.skill')}
+                  </SelectItem>
+                ) : null}
+              </SelectContent>
+            </Select>
+            {newArtifactType === 'skill' ? (
+              <>
+                <Label htmlFor="creator-skill-slug">{t('creatorSkills.artifact.slug')}</Label>
+                <Input
+                  id="creator-skill-slug"
+                  value={slug}
+                  placeholder="my-skill"
+                  onChange={event => setSlug(event.target.value)}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  disabled={action !== null || !slug.trim()}
+                  onClick={() => { void createArtifact() }}
+                >
+                  {action === 'create-artifact'
+                    ? <Spinner className="mr-1.5" />
+                    : <PackagePlus className="mr-1.5 size-3.5" />}
+                  {t('creatorSkills.artifact.create')}
+                </Button>
+              </>
+            ) : newArtifactType === 'web_app' ? (
+              <Button
+                type="button"
+                size="sm"
+                className="w-full"
+                disabled={action !== null}
+                onClick={() => { void openWebAppManagement() }}
+              >
+                {action === 'open-web-app'
+                  ? <Spinner className="mr-1.5" />
+                  : <Globe2 className="mr-1.5 size-3.5" />}
+                {t('creatorSkills.artifact.continueWebApp')}
+              </Button>
+            ) : null}
+            {enabled === false ? (
+              <p className="text-xs text-muted-foreground">
+                {t('creatorSkills.featureDisabled')}
+              </p>
+            ) : null}
           </div>
         ) : null}
         <div className="max-h-[360px] space-y-1 overflow-auto">
@@ -563,6 +636,7 @@ export function CreatorArtifactsPanel({
             <button
               type="button"
               key={item.id}
+              data-testid="creator-artifact-row"
               className={[
                 'w-full rounded-lg border px-3 py-2 text-left',
                 item.id === selectedId
@@ -576,7 +650,11 @@ export function CreatorArtifactsPanel({
                 {item.name || item.slug}
               </span>
               <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                <FileArchive className="size-3" />
+                {item.type === 'skill'
+                  ? <FileArchive className="size-3" />
+                  : <Globe2 className="size-3" />}
+                <span>{t(`creatorSkills.artifact.type.${item.type}`)}</span>
+                <span>·</span>
                 {item.latestPublishedVersion ?? t(`creatorSkills.status.${item.status}`)}
               </span>
             </button>
@@ -584,9 +662,38 @@ export function CreatorArtifactsPanel({
         </div>
       </aside>
 
-      <section className="min-w-0 max-h-[58vh] overflow-auto rounded-xl border border-border/60 p-4">
+      <section
+        data-testid="creator-artifact-detail"
+        className="min-w-0 max-h-[58vh] overflow-auto rounded-xl border border-border/60 p-4"
+      >
         {detailLoading ? (
           <div className="flex justify-center py-12"><Spinner /></div>
+        ) : selectedArtifact?.type === 'web_app' ? (
+          <div className="flex min-h-56 flex-col items-center justify-center gap-4 text-center">
+            <Globe2 className="size-10 text-muted-foreground" />
+            <div>
+              <h2 className="text-lg font-semibold">
+                {selectedArtifact.name || selectedArtifact.slug}
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {selectedArtifact.summary || t('creatorSkills.artifact.webAppExistingFlow')}
+              </p>
+            </div>
+            {canManage ? (
+              <Button
+                type="button"
+                disabled={action !== null}
+                onClick={() => { void openWebAppManagement() }}
+              >
+                {t('creatorSkills.artifact.manageWebApp')}
+              </Button>
+            ) : null}
+            {error ? (
+              <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
+            ) : null}
+          </div>
         ) : !detail ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             {t('creatorSkills.artifacts.select')}
@@ -601,6 +708,10 @@ export function CreatorArtifactsPanel({
                 <p className="mt-1 text-sm text-muted-foreground">
                   {detail.artifact.summary || detail.artifact.slug}
                 </p>
+                <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  <FileArchive className="size-3" />
+                  {t('creatorSkills.artifact.type.skill')}
+                </span>
               </div>
               {canManage ? (
                 <div className="flex gap-1">

@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto'
 import {
   access,
   cp,
+  lstat,
   mkdir,
   open,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -38,10 +40,14 @@ import {
 
 const OP_DIRECTORY = '.creator-skill-ops'
 const BACKUP_DIRECTORY = 'skill-backups'
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const SKILL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const BACKUP_NAME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/
+const MAX_JOURNAL_BYTES = 5 * 1024 * 1024
 const processQueues = new Map<string, Promise<void>>()
 const cancellationControllers = new Map<string, AbortController>()
 
-type JournalState =
+export type CreatorSkillJournalState =
   | 'prepared'
   | 'old_backed_up'
   | 'new_installed'
@@ -57,7 +63,7 @@ interface CreatorSkillJournal {
   transactionBackupPath: string
   ledgerPath: string
   oldLedger: string | null
-  state: JournalState
+  state: CreatorSkillJournalState
   preserveBackupPath?: string
 }
 
@@ -69,6 +75,8 @@ export interface CreatorSkillInstallerDependencies {
     version: string
     archiveChecksum: string
   }) => Promise<void>
+  /** Transaction checkpoint hook used by deterministic crash/fault tests. */
+  onJournalPersisted?: (state: CreatorSkillJournalState) => Promise<void> | void
 }
 
 function errorResult(args: {
@@ -102,6 +110,181 @@ function exists(path: string): Promise<boolean> {
   return access(path).then(() => true, () => false)
 }
 
+function invalidOperationPath(message: string): Error {
+  return Object.assign(new Error(message), { code: 'invalid_creator_skill_operation_path' })
+}
+
+function assertChildPath(parent: string, candidate: string, label: string): void {
+  if (candidate === parent || !candidate.startsWith(`${parent}${sep}`)) {
+    throw invalidOperationPath(`${label} is outside its allowed directory`)
+  }
+}
+
+async function canonicalWorkspaceRoot(workspaceRoot: string): Promise<string> {
+  const candidate = resolve(workspaceRoot)
+  const canonical = await realpath(candidate)
+  if (canonical !== candidate) {
+    // The configured workspace root itself may legitimately be reached through
+    // a symlink. All descendants are derived from its canonical path.
+    return canonical
+  }
+  return candidate
+}
+
+async function ensureOperationRoot(workspaceRoot: string): Promise<{
+  workspaceRoot: string
+  operationRoot: string
+}> {
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const candidate = resolve(canonicalWorkspace, OP_DIRECTORY)
+  assertChildPath(canonicalWorkspace, candidate, 'Creator Skill operation root')
+  await mkdir(candidate, { recursive: true, mode: 0o700 })
+  const canonicalOperationRoot = await realpath(candidate)
+  if (canonicalOperationRoot !== candidate) {
+    throw invalidOperationPath('Creator Skill operation root cannot be a symbolic link')
+  }
+  assertChildPath(canonicalWorkspace, canonicalOperationRoot, 'Creator Skill operation root')
+  return {
+    workspaceRoot: canonicalWorkspace,
+    operationRoot: canonicalOperationRoot,
+  }
+}
+
+async function resolveOperationPath(
+  workspaceRoot: string,
+  operationId: string,
+): Promise<{
+  workspaceRoot: string
+  operationRoot: string
+  operationPath: string
+}> {
+  if (!UUID_PATTERN.test(operationId)) {
+    throw Object.assign(new Error('Creator Skill operationId must be a UUID'), {
+      code: 'invalid_operation_id',
+    })
+  }
+  const roots = await ensureOperationRoot(workspaceRoot)
+  const operationPath = resolve(roots.operationRoot, operationId)
+  assertChildPath(roots.operationRoot, operationPath, 'Creator Skill operation')
+  if (await exists(operationPath)) {
+    const canonicalOperationPath = await realpath(operationPath)
+    if (canonicalOperationPath !== operationPath) {
+      throw invalidOperationPath('Creator Skill operation directory cannot be a symbolic link')
+    }
+    assertChildPath(roots.operationRoot, canonicalOperationPath, 'Creator Skill operation')
+  }
+  return { ...roots, operationPath }
+}
+
+function validateJournalShape(
+  journal: CreatorSkillJournal,
+  expectedOperationId: string,
+): void {
+  if (
+    !journal
+    || journal.schemaVersion !== 1
+    || journal.operationId !== expectedOperationId
+    || !UUID_PATTERN.test(journal.operationId)
+    || !SKILL_SLUG_PATTERN.test(journal.slug)
+    || !['install', 'uninstall'].includes(journal.action)
+    || !['prepared', 'old_backed_up', 'new_installed', 'ledger_committed', 'committed']
+      .includes(journal.state)
+    || (journal.oldLedger !== null && typeof journal.oldLedger !== 'string')
+    || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES
+  ) {
+    throw invalidOperationPath('Creator Skill recovery journal is invalid')
+  }
+}
+
+async function assertCanonicalPathWhenPresent(path: string, label: string): Promise<void> {
+  if (!await exists(path)) return
+  const canonical = await realpath(path)
+  if (canonical !== path) {
+    throw invalidOperationPath(`${label} cannot be a symbolic link`)
+  }
+}
+
+async function canonicalizePotentialPath(path: string): Promise<string> {
+  let existingAncestor = resolve(path)
+  const missingSegments: string[] = []
+  while (!await exists(existingAncestor)) {
+    const parent = dirname(existingAncestor)
+    if (parent === existingAncestor) {
+      throw invalidOperationPath('Creator Skill recovery path has no valid ancestor')
+    }
+    missingSegments.unshift(basename(existingAncestor))
+    existingAncestor = parent
+  }
+  return resolve(await realpath(existingAncestor), ...missingSegments)
+}
+
+async function deriveJournalPaths(
+  workspaceRoot: string,
+  operationPath: string,
+  journal: CreatorSkillJournal,
+): Promise<{
+  targetPath: string
+  transactionBackupPath: string
+  ledgerPath: string
+  preserveBackupPath?: string
+}> {
+  validateJournalShape(journal, basename(operationPath))
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const skillsRoot = resolve(canonicalWorkspace, 'skills')
+  assertChildPath(canonicalWorkspace, skillsRoot, 'Workspace Skills root')
+  await assertCanonicalPathWhenPresent(skillsRoot, 'Workspace Skills root')
+  const targetPath = resolve(skillsRoot, journal.slug)
+  assertChildPath(skillsRoot, targetPath, 'Creator Skill target')
+  await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
+
+  const transactionBackupPath = resolve(operationPath, 'backup')
+  assertChildPath(operationPath, transactionBackupPath, 'Creator Skill transaction backup')
+  await assertCanonicalPathWhenPresent(
+    transactionBackupPath,
+    'Creator Skill transaction backup',
+  )
+  const ledgerPath = resolve(canonicalWorkspace, 'creator-skills.json')
+  assertChildPath(canonicalWorkspace, ledgerPath, 'Creator Skill ledger')
+
+  if (
+    await canonicalizePotentialPath(journal.targetPath) !== targetPath
+    || await canonicalizePotentialPath(journal.transactionBackupPath) !== transactionBackupPath
+    || await canonicalizePotentialPath(journal.ledgerPath) !== ledgerPath
+  ) {
+    throw invalidOperationPath('Creator Skill recovery journal contains an out-of-bound path')
+  }
+
+  let preserveBackupPath: string | undefined
+  if (journal.preserveBackupPath !== undefined) {
+    const backupName = basename(journal.preserveBackupPath)
+    if (!BACKUP_NAME_PATTERN.test(backupName)) {
+      throw invalidOperationPath('Creator Skill preserved backup name is invalid')
+    }
+    const backupRoot = resolve(canonicalWorkspace, BACKUP_DIRECTORY)
+    const slugBackupRoot = resolve(backupRoot, journal.slug)
+    assertChildPath(canonicalWorkspace, backupRoot, 'Creator Skill backup root')
+    assertChildPath(backupRoot, slugBackupRoot, 'Creator Skill slug backup root')
+    await assertCanonicalPathWhenPresent(backupRoot, 'Creator Skill backup root')
+    await assertCanonicalPathWhenPresent(slugBackupRoot, 'Creator Skill slug backup root')
+    preserveBackupPath = resolve(slugBackupRoot, backupName)
+    assertChildPath(slugBackupRoot, preserveBackupPath, 'Creator Skill preserved backup')
+    if (await canonicalizePotentialPath(journal.preserveBackupPath) !== preserveBackupPath) {
+      throw invalidOperationPath('Creator Skill recovery journal contains an out-of-bound backup')
+    }
+    await assertCanonicalPathWhenPresent(
+      preserveBackupPath,
+      'Creator Skill preserved backup',
+    )
+  }
+
+  return {
+    targetPath,
+    transactionBackupPath,
+    ledgerPath,
+    ...(preserveBackupPath ? { preserveBackupPath } : {}),
+  }
+}
+
 function compareStableSemver(left: string, right: string): number {
   const a = left.split('.').map(Number)
   const b = right.split('.').map(Number)
@@ -131,11 +314,44 @@ function report(
 
 async function writeJournal(path: string, journal: CreatorSkillJournal): Promise<void> {
   const tempPath = `${path}.${randomUUID()}.tmp`
-  await writeFile(tempPath, `${JSON.stringify(journal, null, 2)}\n`, {
-    mode: 0o600,
-    flag: 'wx',
-  })
-  await rename(tempPath, path)
+  let handle
+  try {
+    handle = await open(tempPath, 'wx', 0o600)
+    await handle.writeFile(`${JSON.stringify(journal, null, 2)}\n`)
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    await rename(tempPath, path)
+    // Persist the rename itself before a transaction backup can be deleted.
+    // Directory fsync is not supported by every platform/filesystem, so keep
+    // the file fsync as the mandatory durability boundary and treat an
+    // unsupported directory sync as best effort.
+    let directoryHandle
+    try {
+      directoryHandle = await open(dirname(path), 'r')
+      await directoryHandle.sync()
+    } catch (error) {
+      const code = error && typeof error === 'object'
+        ? (error as { code?: string }).code
+        : undefined
+      if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EISDIR') throw error
+    } finally {
+      await directoryHandle?.close()
+    }
+  } catch (error) {
+    await handle?.close().catch(() => {})
+    await rm(tempPath, { force: true }).catch(() => {})
+    throw error
+  }
+}
+
+async function persistJournal(
+  path: string,
+  journal: CreatorSkillJournal,
+  dependencies?: CreatorSkillInstallerDependencies,
+): Promise<void> {
+  await writeJournal(path, journal)
+  await dependencies?.onJournalPersisted?.(journal.state)
 }
 
 async function readLedgerSnapshot(workspaceRoot: string): Promise<string | null> {
@@ -161,8 +377,20 @@ async function restoreLedgerSnapshot(
 }
 
 async function acquireOperationLock(workspaceRoot: string, slug: string): Promise<() => Promise<void>> {
-  const lockDirectory = join(workspaceRoot, OP_DIRECTORY, 'locks')
+  if (
+    slug !== '__creator-skill-backups__'
+    && !SKILL_SLUG_PATTERN.test(slug)
+  ) {
+    throw invalidOperationPath('Creator Skill lock slug is invalid')
+  }
+  const { operationRoot } = await ensureOperationRoot(workspaceRoot)
+  const lockDirectory = resolve(operationRoot, 'locks')
+  assertChildPath(operationRoot, lockDirectory, 'Creator Skill lock directory')
   await mkdir(lockDirectory, { recursive: true, mode: 0o700 })
+  const canonicalLockDirectory = await realpath(lockDirectory)
+  if (canonicalLockDirectory !== lockDirectory) {
+    throw invalidOperationPath('Creator Skill lock directory cannot be a symbolic link')
+  }
   const lockPath = join(lockDirectory, `${slug}.lock`)
   let handle
   try {
@@ -324,20 +552,21 @@ async function rollbackJournal(
   operationPath: string,
   journal: CreatorSkillJournal,
 ): Promise<void> {
-  const recoverableBackupPath = await exists(journal.transactionBackupPath)
-    ? journal.transactionBackupPath
-    : journal.preserveBackupPath && await exists(journal.preserveBackupPath)
-      ? journal.preserveBackupPath
+  const paths = await deriveJournalPaths(workspaceRoot, operationPath, journal)
+  const recoverableBackupPath = await exists(paths.transactionBackupPath)
+    ? paths.transactionBackupPath
+    : paths.preserveBackupPath && await exists(paths.preserveBackupPath)
+      ? paths.preserveBackupPath
       : undefined
   if (
     journal.state === 'new_installed'
     || journal.state === 'ledger_committed'
   ) {
-    await rm(journal.targetPath, { recursive: true, force: true })
+    await rm(paths.targetPath, { recursive: true, force: true })
   }
   if (recoverableBackupPath) {
-    await mkdir(dirname(journal.targetPath), { recursive: true })
-    await rename(recoverableBackupPath, journal.targetPath)
+    await mkdir(dirname(paths.targetPath), { recursive: true })
+    await rename(recoverableBackupPath, paths.targetPath)
   }
   await restoreLedgerSnapshot(workspaceRoot, journal.oldLedger)
   await rm(operationPath, { recursive: true, force: true })
@@ -356,6 +585,7 @@ export async function installCreatorSkill(
     let operationPath: string | undefined
     let journal: CreatorSkillJournal | undefined
     let commitStarted = false
+    let committedResult: Extract<CreatorSkillOperationResult, { success: true }> | undefined
     try {
       releaseLock = await acquireOperationLock(workspaceRoot, input.grant.slug)
       const conflictState = await inspectConflicts(workspaceRoot, input)
@@ -370,7 +600,9 @@ export async function installCreatorSkill(
         })
       }
 
-      operationPath = join(workspaceRoot, OP_DIRECTORY, input.operationId)
+      const resolvedOperation = await resolveOperationPath(workspaceRoot, input.operationId)
+      const canonicalWorkspace = resolvedOperation.workspaceRoot
+      operationPath = resolvedOperation.operationPath
       const stagePath = join(operationPath, 'stage')
       const archivePath = join(operationPath, 'archive.zip')
       const transactionBackupPath = join(operationPath, 'backup')
@@ -425,7 +657,7 @@ export async function installCreatorSkill(
         })
       }
 
-      const ledger = await readCreatorSkillsLedger(workspaceRoot)
+      const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       const previous = conflictState.existing
       const ignoredVersion = (
         previous
@@ -444,11 +676,14 @@ export async function installCreatorSkill(
         lastCheckedAt: new Date().toISOString(),
         ...(ignoredVersion ? { ignoredVersion } : {}),
       }
-      const targetPath = join(workspaceRoot, 'skills', input.grant.slug)
-      const oldLedger = await readLedgerSnapshot(workspaceRoot)
+      const targetPath = resolve(canonicalWorkspace, 'skills', input.grant.slug)
+      assertChildPath(resolve(canonicalWorkspace, 'skills'), targetPath, 'Creator Skill target')
+      await assertCanonicalPathWhenPresent(resolve(canonicalWorkspace, 'skills'), 'Workspace Skills root')
+      await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
+      const oldLedger = await readLedgerSnapshot(canonicalWorkspace)
       const preserveBackupPath = conflictState.localModified
-        ? join(
-            workspaceRoot,
+        ? resolve(
+            canonicalWorkspace,
             BACKUP_DIRECTORY,
             input.grant.slug,
             creatorSkillBackupTimestamp(),
@@ -461,13 +696,13 @@ export async function installCreatorSkill(
         slug: input.grant.slug,
         targetPath,
         transactionBackupPath,
-        ledgerPath: join(workspaceRoot, 'creator-skills.json'),
+        ledgerPath: resolve(canonicalWorkspace, 'creator-skills.json'),
         oldLedger,
         state: 'prepared',
         ...(preserveBackupPath ? { preserveBackupPath } : {}),
       }
       const journalPath = join(operationPath, 'journal.json')
-      await writeJournal(journalPath, journal)
+      await persistJournal(journalPath, journal, dependencies)
 
       commitStarted = true
       report(dependencies, input, 'commit', 72, false)
@@ -476,41 +711,54 @@ export async function installCreatorSkill(
         await rename(targetPath, transactionBackupPath)
       }
       journal.state = 'old_backed_up'
-      await writeJournal(journalPath, journal)
+      await persistJournal(journalPath, journal, dependencies)
 
       await rename(join(stagePath, input.grant.slug), targetPath)
       journal.state = 'new_installed'
-      await writeJournal(journalPath, journal)
+      await persistJournal(journalPath, journal, dependencies)
 
       await writeCreatorSkillsLedger(
-        workspaceRoot,
+        canonicalWorkspace,
         replaceLedgerInstallation(ledger, installation),
       )
       journal.state = 'ledger_committed'
-      await writeJournal(journalPath, journal)
+      await persistJournal(journalPath, journal, dependencies)
 
       let backupPath: string | undefined
       if (preserveBackupPath && await exists(transactionBackupPath)) {
-        await withBackupManagementLock(workspaceRoot, async () => {
+        await withBackupManagementLock(canonicalWorkspace, async () => {
           await mkdir(dirname(preserveBackupPath), { recursive: true, mode: 0o700 })
           await rename(transactionBackupPath, preserveBackupPath)
         })
         backupPath = preserveBackupPath
-      } else {
-        await rm(transactionBackupPath, { recursive: true, force: true })
       }
+      // `committed` is the point of no return. Persist it durably before the
+      // old transaction backup is deleted, so every earlier checkpoint can
+      // still restore both the previous directory and previous Ledger.
       journal.state = 'committed'
       await writeJournal(journalPath, journal)
-      await rm(operationPath, { recursive: true, force: true })
-
-      report(dependencies, input, 'refresh', 100, false)
-      return {
+      committedResult = {
         success: true,
         operationId: input.operationId,
         installed: installation,
         ...(backupPath ? { backupPath } : {}),
       }
+      await dependencies.onJournalPersisted?.(journal.state)
+      if (!preserveBackupPath) {
+        await rm(transactionBackupPath, { recursive: true, force: true })
+      }
+      await rm(operationPath, { recursive: true, force: true })
+
+      report(dependencies, input, 'refresh', 100, false)
+      return committedResult
     } catch (error) {
+      if (journal?.state === 'committed' && committedResult) {
+        // The directory and Ledger are already atomically committed. Leave
+        // cleanup to startup recovery rather than attempting an unsafe rollback
+        // after the point of no return.
+        report(dependencies, input, 'refresh', 100, false)
+        return committedResult
+      }
       if (commitStarted && operationPath && journal) {
         try {
           await rollbackJournal(workspaceRoot, operationPath, journal)
@@ -558,6 +806,7 @@ export async function installCreatorSkill(
 }
 
 export function cancelCreatorSkillOperation(operationId: string): boolean {
+  if (!UUID_PATTERN.test(operationId)) return false
   const controller = cancellationControllers.get(operationId)
   if (!controller) return false
   controller.abort()
@@ -576,9 +825,15 @@ export async function uninstallCreatorSkill(args: {
     let releaseLock: (() => Promise<void>) | undefined
     let journal: CreatorSkillJournal | undefined
     let operationPath: string | undefined
+    let committedResult: Extract<CreatorSkillOperationResult, { success: true }> | undefined
     try {
       releaseLock = await acquireOperationLock(args.workspaceRoot, args.slug)
-      const ledger = await readCreatorSkillsLedger(args.workspaceRoot)
+      const resolvedOperation = await resolveOperationPath(
+        args.workspaceRoot,
+        args.operationId,
+      )
+      const canonicalWorkspace = resolvedOperation.workspaceRoot
+      const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       const installed = ledger.installed.find(item => item.slug === args.slug)
       if (!installed) {
         return errorResult({
@@ -588,7 +843,10 @@ export async function uninstallCreatorSkill(args: {
           message: 'This workspace Skill is not managed by Creator Space',
         })
       }
-      const targetPath = join(args.workspaceRoot, 'skills', args.slug)
+      const targetPath = resolve(canonicalWorkspace, 'skills', args.slug)
+      assertChildPath(resolve(canonicalWorkspace, 'skills'), targetPath, 'Creator Skill target')
+      await assertCanonicalPathWhenPresent(resolve(canonicalWorkspace, 'skills'), 'Workspace Skills root')
+      await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
       let modified = false
       if (await exists(targetPath)) {
         try {
@@ -601,7 +859,7 @@ export async function uninstallCreatorSkill(args: {
       }
       const nextLedger = removeLedgerInstallation(ledger, args.slug)
       if (modified && !args.forceDeleteModified) {
-        await writeCreatorSkillsLedger(args.workspaceRoot, nextLedger)
+        await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
         return {
           success: true,
           operationId: args.operationId,
@@ -609,7 +867,7 @@ export async function uninstallCreatorSkill(args: {
         }
       }
 
-      operationPath = join(args.workspaceRoot, OP_DIRECTORY, args.operationId)
+      operationPath = resolvedOperation.operationPath
       await rm(operationPath, { recursive: true, force: true })
       await mkdir(operationPath, { recursive: true, mode: 0o700 })
       const transactionBackupPath = join(operationPath, 'backup')
@@ -620,8 +878,8 @@ export async function uninstallCreatorSkill(args: {
         slug: args.slug,
         targetPath,
         transactionBackupPath,
-        ledgerPath: join(args.workspaceRoot, 'creator-skills.json'),
-        oldLedger: await readLedgerSnapshot(args.workspaceRoot),
+        ledgerPath: resolve(canonicalWorkspace, 'creator-skills.json'),
+        oldLedger: await readLedgerSnapshot(canonicalWorkspace),
         state: 'prepared',
       }
       const journalPath = join(operationPath, 'journal.json')
@@ -629,14 +887,18 @@ export async function uninstallCreatorSkill(args: {
       if (await exists(targetPath)) await rename(targetPath, transactionBackupPath)
       journal.state = 'old_backed_up'
       await writeJournal(journalPath, journal)
-      await writeCreatorSkillsLedger(args.workspaceRoot, nextLedger)
+      await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
       journal.state = 'ledger_committed'
       await writeJournal(journalPath, journal)
       journal.state = 'committed'
       await writeJournal(journalPath, journal)
+      committedResult = { success: true, operationId: args.operationId }
       await rm(operationPath, { recursive: true, force: true })
-      return { success: true, operationId: args.operationId }
+      return committedResult
     } catch (error) {
+      if (journal?.state === 'committed' && committedResult) {
+        return committedResult
+      }
       if (journal && operationPath) {
         await rollbackJournal(args.workspaceRoot, operationPath, journal).catch(() => {})
       }
@@ -656,24 +918,43 @@ export async function uninstallCreatorSkill(args: {
 }
 
 export async function recoverCreatorSkillOperations(workspaceRoot: string): Promise<void> {
-  const root = join(workspaceRoot, OP_DIRECTORY)
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const root = resolve(canonicalWorkspace, OP_DIRECTORY)
+  assertChildPath(canonicalWorkspace, root, 'Creator Skill operation root')
   let entries
   try {
     entries = await readdir(root, { withFileTypes: true })
   } catch {
     return
   }
+  const canonicalRoot = await realpath(root)
+  if (canonicalRoot !== root) {
+    throw invalidOperationPath('Creator Skill operation root cannot be a symbolic link')
+  }
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === 'locks') continue
-    const operationPath = join(root, entry.name)
+    if (entry.name === 'locks') continue
+    if (!entry.isDirectory() || !UUID_PATTERN.test(entry.name)) {
+      throw Object.assign(
+        new Error(`Creator Skill recovery requires attention for operation '${entry.name}'`),
+        { code: 'creator_skill_recovery_failed' },
+      )
+    }
+    const { operationPath } = await resolveOperationPath(canonicalWorkspace, entry.name)
     try {
+      const journalPath = resolve(operationPath, 'journal.json')
+      assertChildPath(operationPath, journalPath, 'Creator Skill recovery journal')
+      const journalStats = await lstat(journalPath)
+      if (!journalStats.isFile() || journalStats.size > MAX_JOURNAL_BYTES) {
+        throw invalidOperationPath('Creator Skill recovery journal is oversized or invalid')
+      }
       const journal = JSON.parse(
-        await readFile(join(operationPath, 'journal.json'), 'utf8'),
+        await readFile(journalPath, 'utf8'),
       ) as CreatorSkillJournal
+      await deriveJournalPaths(canonicalWorkspace, operationPath, journal)
       if (journal.state === 'committed') {
         await rm(operationPath, { recursive: true, force: true })
       } else {
-        await rollbackJournal(workspaceRoot, operationPath, journal)
+        await rollbackJournal(canonicalWorkspace, operationPath, journal)
       }
     } catch {
       // Preserve an unreadable operation directory for diagnostics. Deleting it
@@ -685,7 +966,18 @@ export async function recoverCreatorSkillOperations(workspaceRoot: string): Prom
       )
     }
   }
-  await rm(join(root, 'locks'), { recursive: true, force: true })
+  const lockRoot = resolve(root, 'locks')
+  assertChildPath(root, lockRoot, 'Creator Skill lock directory')
+  if (await exists(lockRoot)) {
+    const lockStats = await stat(lockRoot)
+    if (lockStats.isDirectory()) {
+      const canonicalLockRoot = await realpath(lockRoot)
+      if (canonicalLockRoot !== lockRoot) {
+        throw invalidOperationPath('Creator Skill lock directory cannot be a symbolic link')
+      }
+    }
+    await rm(lockRoot, { recursive: true, force: true })
+  }
 }
 
 export async function listCreatorSkillBackups(

@@ -37,6 +37,10 @@ const EXECUTABLE_MAGICS = [
   Buffer.from([0xbe, 0xba, 0xfe, 0xca]),
 ]
 const NESTED_ARCHIVE_EXTENSIONS = ['.zip', '.tar', '.tgz', '.tar.gz']
+// maxFileCount limits regular files. This separate absolute bound also counts
+// directory and packaging-noise entries so a ZIP cannot exhaust memory through
+// an oversized central directory made up of empty directories.
+const HARD_MAX_ARCHIVE_ENTRIES = HARD_SKILL_ARCHIVE_POLICY.maxFileCount
 
 interface NormalizedArchiveEntry {
   entry: Entry
@@ -397,12 +401,21 @@ function openZip(archivePath: string): Promise<ZipFile> {
   })
 }
 
-function readEntries(zipFile: ZipFile): Promise<Entry[]> {
+function readEntries(
+  zipFile: ZipFile,
+  maxEntries = HARD_MAX_ARCHIVE_ENTRIES,
+): Promise<Entry[]> {
   return new Promise((resolvePromise, reject) => {
     const entries: Entry[] = []
+    let settled = false
+    const rejectOnce = (error: Error) => {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
     const fail = (error: Error) => {
       const traversalRejected = /invalid relative path|absolute path|\.\./i.test(error.message)
-      reject(new CreatorSkillArchiveError(
+      rejectOnce(new CreatorSkillArchiveError(
         'invalid_skill_archive',
         traversalRejected
           ? 'Archive contains path traversal'
@@ -418,13 +431,41 @@ function readEntries(zipFile: ZipFile): Promise<Entry[]> {
     }
     zipFile.once('error', fail)
     zipFile.on('entry', (entry: Entry) => {
+      if (settled) return
+      if (entries.length >= maxEntries) {
+        zipFile.removeListener('error', fail)
+        rejectOnce(new CreatorSkillArchiveError(
+          'archive_policy_exceeded',
+          'ZIP contains too many central-directory entries',
+          [issue(
+            'max_entry_count_exceeded',
+            entry.fileName,
+            `Archive must contain at most ${maxEntries} total files and directories`,
+          )],
+        ))
+        return
+      }
       entries.push(entry)
       zipFile.readEntry()
     })
     zipFile.once('end', () => {
+      if (settled) return
+      settled = true
       zipFile.removeListener('error', fail)
       resolvePromise(entries)
     })
+    if (zipFile.entryCount > maxEntries) {
+      rejectOnce(new CreatorSkillArchiveError(
+        'archive_policy_exceeded',
+        'ZIP contains too many central-directory entries',
+        [issue(
+          'max_entry_count_exceeded',
+          '',
+          `Archive must contain at most ${maxEntries} total files and directories`,
+        )],
+      ))
+      return
+    }
     zipFile.readEntry()
   })
 }

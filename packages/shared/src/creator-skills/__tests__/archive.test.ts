@@ -228,4 +228,24 @@ describe('Creator Skill archive validation', () => {
       expect(await readFile(join(root, 'escaped.txt'), 'utf8').catch(() => null)).toBeNull()
     })
   })
+
+  it('rejects an oversized central directory made only of empty directories', async () => {
+    await withTemp(async root => {
+      const directories = Object.fromEntries(
+        Array.from({ length: 1_001 }, (_, index) => [
+          `review-helper/references/empty-${index}/`,
+          new Uint8Array(),
+        ]),
+      )
+      const archivePath = await writeZip(root, directories, 'empty-directories.zip')
+
+      await expect(preflightCreatorSkillArchive({
+        archivePath,
+        slug: 'review-helper',
+      })).rejects.toMatchObject({
+        code: 'archive_policy_exceeded',
+        issues: [{ code: 'max_entry_count_exceeded' }],
+      })
+    })
+  })
 })
