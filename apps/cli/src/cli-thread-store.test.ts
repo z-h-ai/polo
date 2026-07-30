@@ -279,32 +279,55 @@ describe('CLI Thread store', () => {
     expect(await locateCliThread(record.metadata.threadId)).toBeNull()
   })
 
-  it('reclaims historical half-created directories but preserves a live creator', async () => {
+  it('only reclaims half-created directories proven ephemeral and preserves live or persistent creators', async () => {
     const executionsRoot = join(root, 'cli-sessions', 'workspace-1', 'executions')
-    const staleDirectory = join(executionsRoot, crypto.randomUUID())
+    const ephemeralDirectory = join(executionsRoot, crypto.randomUUID())
     const activeDirectory = join(executionsRoot, crypto.randomUUID())
+    const persistentDirectory = join(executionsRoot, crypto.randomUUID())
+    const unknownDirectory = join(executionsRoot, crypto.randomUUID())
     await Promise.all([
-      mkdir(join(staleDirectory, 'sessions'), { recursive: true }),
+      mkdir(join(ephemeralDirectory, 'sessions'), { recursive: true }),
       mkdir(join(activeDirectory, 'sessions'), { recursive: true }),
+      mkdir(join(persistentDirectory, 'sessions'), { recursive: true }),
+      mkdir(join(unknownDirectory, 'sessions'), { recursive: true }),
     ])
     const staleAt = new Date(Date.now() - 11 * 60_000)
     const processIdentity = getProcessBirthIdentity(process.pid)
     expect(processIdentity).toBeTruthy()
-    await writeFile(join(activeDirectory, 'creating.json'), JSON.stringify({
+    const creatingMarker = {
       version: 1,
-      pid: process.pid,
-      processIdentity,
+      origin: 'cli-exec',
+      persistence: 'ephemeral',
+      pid: 2_147_483_647,
+      processIdentity: 'missing-creator',
       createdAt: staleAt.getTime(),
-    }))
+    }
     await Promise.all([
-      utimes(staleDirectory, staleAt, staleAt),
+      writeFile(join(ephemeralDirectory, 'creating.json'), JSON.stringify(creatingMarker)),
+      writeFile(join(activeDirectory, 'creating.json'), JSON.stringify({
+        ...creatingMarker,
+        pid: process.pid,
+        processIdentity,
+      })),
+      writeFile(join(persistentDirectory, 'creating.json'), JSON.stringify({
+        ...creatingMarker,
+        origin: 'cli-run',
+        persistence: 'persistent',
+      })),
+    ])
+    await Promise.all([
+      utimes(ephemeralDirectory, staleAt, staleAt),
       utimes(activeDirectory, staleAt, staleAt),
+      utimes(persistentDirectory, staleAt, staleAt),
+      utimes(unknownDirectory, staleAt, staleAt),
     ])
 
     expect(await listCliThreads()).toEqual([])
     expect(await cleanupStaleEphemeralThreads()).toBe(1)
-    expect(await stat(staleDirectory).then(() => true).catch(() => false)).toBe(false)
+    expect(await stat(ephemeralDirectory).then(() => true).catch(() => false)).toBe(false)
     expect(await stat(activeDirectory).then(() => true).catch(() => false)).toBe(true)
+    expect(await stat(persistentDirectory).then(() => true).catch(() => false)).toBe(true)
+    expect(await stat(unknownDirectory).then(() => true).catch(() => false)).toBe(true)
   })
 
   it('serializes delete and acquire so they can never both succeed', async () => {

@@ -912,12 +912,9 @@ export async function executeTurn(
       // the final lease evidence is still durable. Persistent Threads release
       // ownership normally. Both paths are serialized by the Thread state lock.
       try {
-        const interruptedBeforeSession = !!receivedSignal
-          && ownsNewThread
-          && !record?.metadata.mainSessionId
         if (
           record
-          && (record.metadata.persistence === 'ephemeral' || interruptedBeforeSession)
+          && record.metadata.persistence === 'ephemeral'
           && (lease || ownsNewThread)
         ) {
           await deleteCliThread(record, {

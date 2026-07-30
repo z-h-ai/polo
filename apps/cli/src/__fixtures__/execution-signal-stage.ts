@@ -1,12 +1,12 @@
 import { writeFile } from 'node:fs/promises'
 import type { ExecutionLifecycleStage } from '../one-shot.ts'
 
-const [configRoot, targetStage, markerFile, serverEntry, persistence] = process.argv.slice(2) as [
+const [configRoot, targetStage, markerFile, serverEntry, mode] = process.argv.slice(2) as [
   string,
   ExecutionLifecycleStage,
   string,
   string,
-  'persistent' | 'ephemeral',
+  'persistent' | 'ephemeral' | 'run-no-cleanup',
 ]
 
 process.env.POLO_AI_CONFIG_DIR = configRoot
@@ -19,9 +19,9 @@ const [{ parseExecutionArgs }, { executeTurn }] = await Promise.all([
 const args = parseExecutionArgs([
   'bun',
   'index.ts',
-  'exec',
-  '--json',
-  ...(persistence === 'ephemeral' ? ['--ephemeral'] : []),
+  mode === 'run-no-cleanup' ? 'run' : 'exec',
+  ...(mode === 'run-no-cleanup' ? ['--no-cleanup'] : ['--json']),
+  ...(mode === 'ephemeral' ? ['--ephemeral'] : []),
   '--server-entry',
   serverEntry,
   'hello',

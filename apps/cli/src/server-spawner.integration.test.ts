@@ -284,18 +284,19 @@ describe('server spawner process integration', () => {
   it('handles SIGINT/SIGTERM at every startup lifecycle boundary', async () => {
     if (process.platform === 'win32') return
     const cases = [
-      { stage: 'thread:create', signal: 'SIGTERM' },
-      { stage: 'thread:create', signal: 'SIGINT' },
-      { stage: 'snapshot', signal: 'SIGTERM' },
-      { stage: 'spawnServer', signal: 'SIGTERM' },
-      { stage: 'connect', signal: 'SIGTERM' },
-      { stage: 'session:create', signal: 'SIGTERM' },
+      { stage: 'thread:create', signal: 'SIGTERM', mode: 'persistent' },
+      { stage: 'thread:create', signal: 'SIGINT', mode: 'persistent' },
+      { stage: 'snapshot', signal: 'SIGTERM', mode: 'persistent' },
+      { stage: 'spawnServer', signal: 'SIGTERM', mode: 'persistent' },
+      { stage: 'connect', signal: 'SIGTERM', mode: 'persistent' },
+      { stage: 'session:create', signal: 'SIGTERM', mode: 'persistent' },
+      { stage: 'thread:create', signal: 'SIGTERM', mode: 'run-no-cleanup' },
     ] as const
 
-    for (const { stage, signal } of cases) {
+    for (const { stage, signal, mode } of cases) {
       const root = await mkdtemp(join(
         tmpdir(),
-        `polo-startup-signal-${stage.replace(':', '-')}-${signal.toLowerCase()}-`,
+        `polo-startup-signal-${mode}-${stage.replace(':', '-')}-${signal.toLowerCase()}-`,
       ))
       tempDirs.push(root)
       const markerFile = join(root, 'stage-ready')
@@ -312,7 +313,7 @@ describe('server spawner process integration', () => {
         stage,
         markerFile,
         join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
-        'persistent',
+        mode,
       ], {
         cwd: root,
         stdin: 'ignore',
@@ -364,7 +365,12 @@ describe('server spawner process integration', () => {
       ])
       expect(exitCode, `${stage}: ${stderr}`).toBe(signal === 'SIGINT' ? 130 : 143)
       expect(stdout, stage).toBe('')
-      expect(stderr, stage).toBe('')
+      if (mode === 'run-no-cleanup') {
+        expect(stderr, stage).toContain('thread_id:')
+        expect(stderr, stage).toContain('thread_dir:')
+      } else {
+        expect(stderr, stage).toBe('')
+      }
       const threadIds = await readdir(
         join(root, 'cli-sessions', 'global', 'executions'),
       ).catch(() => [])
@@ -389,7 +395,23 @@ describe('server spawner process integration', () => {
         })
         expect(await Bun.file(join(threadRoot, 'owner.json')).exists()).toBe(false)
       } else {
-        expect(threadIds, stage).toEqual([])
+        expect(threadIds, stage).toHaveLength(1)
+        const threadRoot = join(
+          root,
+          'cli-sessions',
+          'global',
+          'executions',
+          threadIds[0]!,
+        )
+        expect(JSON.parse(await readFile(
+          join(threadRoot, 'thread.json'),
+          'utf-8',
+        ))).toMatchObject({
+          origin: mode === 'run-no-cleanup' ? 'cli-run' : 'cli-exec',
+          persistence: 'persistent',
+          status: 'interrupted',
+        })
+        expect(await Bun.file(join(threadRoot, 'owner.json')).exists()).toBe(false)
       }
 
       if (await Bun.file(runtimeInfoFile).exists()) {

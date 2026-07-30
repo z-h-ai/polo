@@ -99,6 +99,8 @@ interface CliThreadDeletingMarker {
 
 interface CliThreadCreatingMarker {
   version: 1
+  origin: CliThreadOrigin
+  persistence: CliThreadPersistence
   pid: number
   processIdentity: string
   createdAt: number
@@ -476,6 +478,8 @@ export async function createCliThread(input: {
     }
     await atomicWriteJson(join(directory, THREAD_CREATING_FILE), {
       version: 1,
+      origin: input.origin,
+      persistence: input.persistence,
       pid: process.pid,
       processIdentity,
       createdAt: Date.now(),
@@ -898,18 +902,31 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
     }
     for (const incomplete of scan.incomplete) {
       if (now - incomplete.observedMtime <= STALE_EPHEMERAL_MS) continue
+      const creating = await readJson<CliThreadCreatingMarker>(
+        join(incomplete.directory, THREAD_CREATING_FILE),
+      ).catch(() => null)
+      // An incomplete directory is recoverable only when its durable creation
+      // marker proves that it belongs to an ephemeral invocation. Historical
+      // markers without retention metadata, persistent exec Threads, and
+      // run --no-cleanup Threads must fail closed and remain untouched.
+      if (
+        creating?.persistence !== 'ephemeral'
+        || (creating.origin !== 'cli-run' && creating.origin !== 'cli-exec')
+      ) {
+        continue
+      }
       const threadId = basename(incomplete.directory)
       const scopeId = basename(dirname(dirname(incomplete.directory)))
       const record = recordFor(incomplete.directory, {
         version: 1,
         threadId,
-        origin: 'cli-run',
+        origin: creating.origin,
         configurationScopeId: scopeId,
         configurationWorkspacePath: configRoot(),
         workingDirectory: configRoot(),
         createdAt: incomplete.observedMtime,
         lastUsedAt: incomplete.observedMtime,
-        persistence: 'ephemeral',
+        persistence: creating.persistence,
       })
       let stateLock: CliThreadStateLock
       try {
@@ -922,11 +939,17 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
         // Creation can finish after the directory scan but before the state
         // lock is acquired. Never classify a now-complete Thread as debris.
         if (existsSync(join(record.directory, 'thread.json'))) continue
-        const [owner, marker, creating] = await Promise.all([
+        const [owner, marker, currentCreating] = await Promise.all([
           readJson<CliThreadOwner>(record.ownerFile).catch(() => null),
           readJson<CliThreadDeletingMarker>(deletingMarkerPath(record)).catch(() => null),
           readJson<CliThreadCreatingMarker>(creatingMarkerPath(record)).catch(() => null),
         ])
+        if (
+          currentCreating?.persistence !== 'ephemeral'
+          || currentCreating.origin !== creating.origin
+        ) {
+          continue
+        }
         const evidence = owner ?? marker?.owner
         const cliExists = evidence
           ? processIdentityMatches(evidence.cliPid, evidence.cliProcessIdentity)
@@ -938,15 +961,15 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
           marker.initiatorPid,
           marker.initiatorProcessIdentity,
         )
-        const creatorExists = !!creating && processIdentityMatches(
-          creating.pid,
-          creating.processIdentity,
+        const creatorExists = processIdentityMatches(
+          currentCreating.pid,
+          currentCreating.processIdentity,
         )
         const lastHeartbeatAt = Math.max(
           incomplete.observedMtime,
           evidence?.heartbeatAt ?? 0,
           marker?.lastHeartbeatAt ?? 0,
-          creating?.createdAt ?? 0,
+          currentCreating.createdAt,
         )
         const leaseExpired = !evidence
           || now - evidence.heartbeatAt > ACTIVE_LEASE_WINDOW_MS

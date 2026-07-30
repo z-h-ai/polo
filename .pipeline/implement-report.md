@@ -1,90 +1,61 @@
-# POO-16 人工裁决修复实施报告
+# POO-16 实施报告
 
 ## 变更摘要
 
-- 完成 Pi 的 Thread 路径注入：web fetch、large response、`call_llm` 及 mini completion 均从当前 `SessionStorage` 解析出的显式 `sessionPath` 工作，不再回退 Electron workspace session root。
-- 删除 session MCP 的模块级 mutable resolver；skill validation 通过当前 session context 获取路径。两个临时 title agent 均注入当前 `SessionStorage`。
-- 修正 Thread ownership：有效进程启动身份或新鲜 lease heartbeat 任一存在即判活；stale cleaner 仅回收 lease 过期、CLI/runtime 身份均不存在且 heartbeat 超过十分钟的 ephemeral Thread。
-- `resume --ephemeral` 在 clone 前完成 scope 和工作目录验证；Thread 创建、clone/copy 任一步失败均回滚临时 Thread。
-- Session ID 使用非递归 `mkdir` 原子预留，并在并发冲突时重新生成；保存失败会删除已预留目录。
-- 删除和移动 Thread 前使用 `lstat`、`realpath`、canonical CLI root containment 校验并拒绝 symlink；统一受控文件 unlink 路径。
-- 落地 invocation-scoped loopback credential proxy：
-  - 真实 API key、OAuth access token 和 Authorization header 仅存在 CLI runtime 内存，由 loopback proxy 注入上游请求。
-  - Claude/Pi model subprocess 只接收本地 proxy URL 和不透明 capability。
-  - ChatGPT Codex 使用只含非秘密 routing claim 的 provider-shaped capability，真实 JWT 不进入 model subprocess；search 同样经 proxy。
-  - OAuth 更新只替换 runtime 内 proxy target，child 始终只收到 capability。
-  - Bash 和 session-tool 子进程环境改为显式白名单，capability 和任意宿主秘密变量均不进入工具环境。
-- Thread JSON、provider anchor、API error、tool metadata 等 sidecar 使用私有临时文件加 rename 原子写入；CLI 目录/文件统一强化为 `0700`/`0600`。web fetch、downloads、large responses 等 artifact 同步使用私有权限。
-- `--color` 仅装饰 stderr；普通 stdout、JSONL 和 run 文本输出移除 ANSI。`-o` 仍保留最终 assistant message 原文且无附加换行。
+- `polo run` 与 `polo exec` 使用独立 CLI runtime、独立 lock namespace 和 `~/.polo-ai/cli-sessions/` Thread 存储，不连接或复用 Electron RPC，也不把 CLI session 写入 Electron workspace。
+- 交付 `polo exec`、`exec resume`、`exec sessions`、`exec delete`，包含严格参数解析、safe/allow-all 权限映射、JSONL 事件适配、原子 `-o`、退出码和持久/临时 Thread 生命周期。
+- 完成可注入 `SessionStorage`，覆盖 session persistence、files RPC、bundle/import/fork、MCP、browser/tool metadata、附件与 sidecar 路径。
+- 完成 invocation-scoped credential proxy、CLI/model/tool 子进程环境白名单、敏感信息 redaction、私有目录/文件权限、symlink/realpath containment、租约/heartbeat/process birth identity 和 stale cleanup。
+- 关闭最终 reviewer 的两项阻断：
+  - 持久化 `exec` 与 `run --no-cleanup` 在主 session 创建前收到信号时保留 Thread，并原子记录 `interrupted`；仅 ephemeral Thread 自动删除。
+  - `creating.json` 从目录创建第一刻持久化真实 `origin` 与 `persistence`。stale cleaner 仅在该标记可证明 Thread 为 ephemeral 时回收；旧标记、缺失标记、普通持久化 exec 与 `run --no-cleanup` 均 fail closed。
 
 ## 关键文件列表
 
-- CLI 生命周期、ownership、路径与输出：
-  - `apps/cli/src/cli-thread-store.ts`
-  - `apps/cli/src/one-shot.ts`
+- CLI 命令、生命周期与存储：
   - `apps/cli/src/index.ts`
+  - `apps/cli/src/execution-parser.ts`
+  - `apps/cli/src/one-shot.ts`
+  - `apps/cli/src/cli-thread-store.ts`
+  - `apps/cli/src/server-spawner.ts`
   - `apps/cli/src/exec-event-adapter.ts`
   - `apps/cli/src/terminal-output.ts`
-- credential proxy 与 agent 隔离：
-  - `packages/shared/src/credentials/invocation-credential-proxy.ts`
-  - `packages/shared/src/agent/claude-agent.ts`
-  - `packages/shared/src/agent/pi-agent.ts`
-  - `packages/shared/src/agent/tool-env-sanitizer.ts`
-  - `packages/pi-agent-server/src/index.ts`
-  - `packages/pi-agent-server/src/tools/search/resolve-provider.ts`
-  - `packages/pi-agent-server/src/tools/search/providers/chatgpt.ts`
-  - `packages/pi-agent-server/src/tools/search/providers/google.ts`
-- SessionStorage、MCP 与 sidecar：
-  - `packages/shared/src/sessions/session-storage.ts`
-  - `packages/shared/src/sessions/storage.ts`
-  - `packages/server-core/src/sessions/SessionManager.ts`
-  - `packages/session-mcp-server/src/index.ts`
-  - `packages/session-tools-core/src/source-helpers.ts`
-  - `packages/session-tools-core/src/handlers/skill-validate.ts`
-  - `packages/session-tools-core/src/runtime/sandbox-env.ts`
-  - `packages/shared/src/interceptor-common.ts`
-  - `packages/shared/src/utils/binary-detection.ts`
-  - `packages/shared/src/utils/large-response.ts`
-  - `packages/pi-agent-server/src/tools/web-fetch.ts`
-- 新增或扩充的专项测试：
+- 最终阻断回归：
   - `apps/cli/src/cli-thread-store.test.ts`
-  - `apps/cli/src/one-shot.test.ts`
-  - `apps/cli/src/terminal-output.test.ts`
-  - `packages/shared/src/credentials/__tests__/invocation-credential-proxy.test.ts`
-  - `packages/shared/src/sessions/session-storage.test.ts`
-  - `packages/server-core/src/sessions/session-sidecar-permissions.test.ts`
-  - `packages/session-tools-core/src/source-helpers.test.ts`
+  - `apps/cli/src/server-spawner.integration.test.ts`
+  - `apps/cli/src/__fixtures__/execution-signal-stage.ts`
+- SessionStorage、runtime 与凭据隔离：
+  - `packages/shared/src/sessions/session-storage.ts`
+  - `packages/shared/src/credentials/invocation-credential-proxy.ts`
+  - `packages/server-core/src/sessions/SessionManager.ts`
+  - `packages/server-core/src/handlers/rpc/files.ts`
+  - `packages/server-core/src/bootstrap/headless-start.ts`
+  - `packages/server/src/index.ts`
+  - `packages/session-mcp-server/src/index.ts`
+  - `packages/session-tools-core/src/runtime/sandbox-env.ts`
+  - `packages/pi-agent-server/src/index.ts`
 
 ## 自测结果
 
+- `bun test apps/cli/src/cli-thread-store.test.ts apps/cli/src/server-spawner.integration.test.ts`
+  - **24 pass，0 fail，292 expect**。
+  - 覆盖 persistent exec 与 `run --no-cleanup` 的启动阶段信号保留、ephemeral 删除、创建标记策略、十分钟 stale 回收以及持久/未知目录保护。
+- `(cd apps/cli && bun run typecheck)`
+  - 通过。
 - `bun run test`
-  - 最终标准测试阶段：**4809 pass，19 skip，0 fail**，共 4828 tests / 371 files。
-  - 随后的 **13/13 isolated test files 全部通过**。
-  - 整条命令最终退出码 0。
-- 裁决项集中回归：
-  - `bun test apps/cli/src/cli-thread-store.test.ts apps/cli/src/one-shot.test.ts apps/cli/src/exec-event-adapter.test.ts apps/cli/src/terminal-output.test.ts packages/shared/src/sessions/session-storage.test.ts packages/shared/src/agent/__tests__/tool-env-sanitizer.test.ts packages/shared/src/credentials/__tests__/invocation-credential-proxy.test.ts packages/session-tools-core/src/runtime/sandbox-env.test.ts packages/session-tools-core/src/source-helpers.test.ts packages/pi-agent-server/src/tools/search/resolve-provider.test.ts packages/server-core/src/sessions/session-sidecar-permissions.test.ts`
-  - **43 pass，0 fail**。
-- 最终 credential/output/sidecar 专项：
-  - `bun test apps/cli/src/one-shot.test.ts apps/cli/src/terminal-output.test.ts packages/shared/src/credentials/__tests__/invocation-credential-proxy.test.ts packages/pi-agent-server/src/tools/search/providers/chatgpt.test.ts packages/server-core/src/sessions/session-sidecar-permissions.test.ts`
-  - **25 pass，0 fail**。
+  - 标准测试：**4852 pass，19 skip，0 fail**，377 files。
+  - 13 个 isolated test files：**149 pass，0 fail**。
+  - 整条命令退出码 0。
 - `bun run typecheck:all`
-  - 全部 package TypeScript 检查通过。
+  - core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部通过。
 - `bun run server:build:subprocess`
   - session MCP server 与 Pi agent server 均成功 bundle。
-- CLI 输出 smoke：
-  - `bun apps/cli/src/index.ts exec --color always --unsupported`
-  - 退出码 2；stdout 为空且无 ANSI；stderr 包含彩色 Error label。
 - `git diff --check`
   - 通过。
 
 ## 遗留问题
 
-- 无已知 P0 阻塞遗留。
-- 本轮未使用真实第三方凭据执行外网 provider E2E；credential proxy 已通过本地 loopback upstream 集成测试、provider-shaped capability 测试、ChatGPT search proxy routing 测试和全量回归验证。
-- Windows ACL 与 Windows 进程路径未在 Windows 真机执行；现有 Windows 分支保持当前用户 ACL 语义。
-- 需求快照中列明的 P1 参数与功能仍按原范围不实现。
-
-## 提交约定
-
-- 本轮提交信息：`POO-16: 完成人工裁决隔离修复`
-- 不执行 push。
+- 无已知 P0 阻塞。
+- 未使用真实第三方付费 provider 凭据执行外网 E2E；凭据代理与泄漏负向路径由本地 loopback、真实子进程和全量回归覆盖。
+- POSIX 信号、进程出生身份、目录权限与多进程用例在 macOS 执行；Windows ACL 与 Windows 进程路径未在 Windows 真机复测。
+- 需求快照列出的 P1 参数和功能按范围不实现。
