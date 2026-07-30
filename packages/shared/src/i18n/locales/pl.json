@@ -1227,6 +1227,7 @@
   "settings.terminalFeatures.status.profileConflict": "Konfiguracja terminala Polo w pliku {{path}} jest nieprawidłowa. Polo jej nie zmieniło.",
   "settings.terminalFeatures.status.ready": "Funkcje terminala Polo są gotowe.",
   "settings.terminalFeatures.status.repairRequired": "Funkcje terminala Polo wymagają naprawy.",
+  "settings.terminalFeatures.statusUnavailable": "Stan funkcji terminala jest niedostępny",
   "settings.terminalFeatures.title": "Funkcje terminala Polo",
   "settings.terminalFeatures.uninstall": "Odinstaluj",
   "settings.tools.builtInBrowser": "Wbudowana przeglądarka",

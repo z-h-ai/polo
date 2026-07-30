@@ -1227,6 +1227,7 @@
   "settings.terminalFeatures.status.profileConflict": "{{path}} の Polo ターミナル設定が不正です。Polo は変更しませんでした。",
   "settings.terminalFeatures.status.ready": "Polo のターミナル機能を使用できます。",
   "settings.terminalFeatures.status.repairRequired": "Polo のターミナル機能を修復する必要があります。",
+  "settings.terminalFeatures.statusUnavailable": "ターミナル機能の状態を確認できません",
   "settings.terminalFeatures.title": "Polo ターミナル機能",
   "settings.terminalFeatures.uninstall": "アンインストール",
   "settings.tools.builtInBrowser": "組み込みブラウザ",

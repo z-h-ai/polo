@@ -31,7 +31,9 @@ function startWorker(
   label: string,
   options: {
     pauseBeforePublish?: boolean
+    pauseBeforeRecoveryPublish?: boolean
     pauseRecovery?: boolean
+    pauseAfterQuarantine?: boolean
     criticalGuard?: string
   } = {},
 ): ChildProcess {
@@ -53,6 +55,18 @@ function startWorker(
         ? {
             POLO_LOCK_RECOVERY: eventPath(root, label, 'recovery'),
             POLO_LOCK_RELEASE_RECOVERY: eventPath(root, label, 'release-recovery'),
+          }
+        : {}),
+      ...(options.pauseBeforeRecoveryPublish
+        ? {
+            POLO_LOCK_BEFORE_RECOVERY_PUBLISH: eventPath(root, label, 'before-recovery-publish'),
+            POLO_LOCK_RELEASE_RECOVERY_PUBLISH: eventPath(root, label, 'release-recovery-publish'),
+          }
+        : {}),
+      ...(options.pauseAfterQuarantine
+        ? {
+            POLO_LOCK_QUARANTINED: eventPath(root, label, 'quarantined'),
+            POLO_LOCK_RELEASE_QUARANTINE: eventPath(root, label, 'release-quarantine'),
           }
         : {}),
       ...(options.criticalGuard
@@ -113,6 +127,33 @@ function lockArtifacts(root: string, lockDir: string): string[] {
     || name.includes(`${lockName}.stale.`)
     || name.includes(`${lockName}.pending.`),
   )
+}
+
+async function assertTwoContendersSerialize(
+  root: string,
+  lockDir: string,
+  criticalGuard: string,
+  prefix: string,
+): Promise<void> {
+  const firstLabel = `${prefix}-one`
+  const secondLabel = `${prefix}-two`
+  const first = startWorker(root, lockDir, firstLabel, { criticalGuard })
+  const second = startWorker(root, lockDir, secondLabel, { criticalGuard })
+  const enteredFirst = eventPath(root, firstLabel, 'entered')
+  const enteredSecond = eventPath(root, secondLabel, 'entered')
+  const winner = await waitForEither(enteredFirst, enteredSecond)
+  const winnerLabel = winner === 'first' ? firstLabel : secondLabel
+  const waitingLabel = winner === 'first' ? secondLabel : firstLabel
+  expect(existsSync(eventPath(root, waitingLabel, 'entered'))).toBe(false)
+
+  release(root, winnerLabel)
+  await waitForPath(eventPath(root, winnerLabel, 'exited'))
+  await waitForPath(eventPath(root, waitingLabel, 'entered'))
+  release(root, waitingLabel)
+  await waitForPath(eventPath(root, waitingLabel, 'exited'))
+  expect(await waitForExit(first)).toBe(0)
+  expect(await waitForExit(second)).toBe(0)
+  expect(existsSync(criticalGuard)).toBe(false)
 }
 
 afterEach(async () => {
@@ -219,6 +260,54 @@ describe('cross-process file lock races', () => {
     await waitForPath(eventPath(root, 'cleanup', 'entered'))
     release(root, 'cleanup')
     expect(await waitForExit(recovery)).toBe(0)
+    expect(lockArtifacts(root, lockDir)).toEqual([])
+  })
+
+  it('cleans a recovery claim prepared directory after the recoverer is killed before publish', async () => {
+    const root = makeRoot()
+    const lockDir = join(root, '.config.transaction.lock')
+    const criticalGuard = join(root, 'critical.guard')
+    const owner = startWorker(root, lockDir, 'owner-before-claim')
+    await waitForPath(eventPath(root, 'owner-before-claim', 'entered'))
+
+    const recoverer = startWorker(root, lockDir, 'recoverer-before-claim', {
+      pauseBeforeRecoveryPublish: true,
+    })
+    owner.kill('SIGKILL')
+    await waitForExit(owner)
+    await waitForPath(eventPath(root, 'recoverer-before-claim', 'before-recovery-publish'))
+    expect(readdirSync(root).some(name =>
+      name.startsWith('..config.transaction.lock.recovery.')
+      && name.includes('.pending.'),
+    )).toBe(true)
+
+    recoverer.kill('SIGKILL')
+    await waitForExit(recoverer)
+    await assertTwoContendersSerialize(root, lockDir, criticalGuard, 'post-prepared-crash')
+    expect(lockArtifacts(root, lockDir)).toEqual([])
+  })
+
+  it('cleans a stale quarantine after the recoverer is killed after the canonical move', async () => {
+    const root = makeRoot()
+    const lockDir = join(root, '.credentials.transaction.lock')
+    const criticalGuard = join(root, 'critical.guard')
+    const owner = startWorker(root, lockDir, 'owner-before-quarantine')
+    await waitForPath(eventPath(root, 'owner-before-quarantine', 'entered'))
+
+    const recoverer = startWorker(root, lockDir, 'recoverer-after-quarantine', {
+      pauseAfterQuarantine: true,
+    })
+    owner.kill('SIGKILL')
+    await waitForExit(owner)
+    await waitForPath(eventPath(root, 'recoverer-after-quarantine', 'quarantined'))
+    expect(existsSync(lockDir)).toBe(false)
+    expect(readdirSync(root).some(name =>
+      name.startsWith('.credentials.transaction.lock.stale.'),
+    )).toBe(true)
+
+    recoverer.kill('SIGKILL')
+    await waitForExit(recoverer)
+    await assertTwoContendersSerialize(root, lockDir, criticalGuard, 'post-quarantine-crash')
     expect(lockArtifacts(root, lockDir)).toEqual([])
   })
 })

@@ -30,8 +30,12 @@ const exitedPath = required('POLO_LOCK_EXITED')
 const releasePath = required('POLO_LOCK_RELEASE')
 const beforePublishPath = process.env.POLO_LOCK_BEFORE_PUBLISH
 const releasePublishPath = process.env.POLO_LOCK_RELEASE_PUBLISH
+const beforeRecoveryPublishPath = process.env.POLO_LOCK_BEFORE_RECOVERY_PUBLISH
+const releaseRecoveryPublishPath = process.env.POLO_LOCK_RELEASE_RECOVERY_PUBLISH
 const recoveryPath = process.env.POLO_LOCK_RECOVERY
 const releaseRecoveryPath = process.env.POLO_LOCK_RELEASE_RECOVERY
+const quarantinedPath = process.env.POLO_LOCK_QUARANTINED
+const releaseQuarantinePath = process.env.POLO_LOCK_RELEASE_QUARANTINE
 const criticalGuardPath = process.env.POLO_LOCK_CRITICAL_GUARD
 
 withCrossProcessFileLockSync(
@@ -59,10 +63,22 @@ withCrossProcessFileLockSync(
           waitFor(releasePublishPath)
         }
       : undefined,
+    beforeRecoveryClaimPublish: beforeRecoveryPublishPath && releaseRecoveryPublishPath
+      ? () => {
+          writeFileSync(beforeRecoveryPublishPath, label)
+          waitFor(releaseRecoveryPublishPath)
+        }
+      : undefined,
     afterRecoveryClaimPublished: recoveryPath && releaseRecoveryPath
       ? () => {
           writeFileSync(recoveryPath, label)
           waitFor(releaseRecoveryPath)
+        }
+      : undefined,
+    afterLockQuarantined: quarantinedPath && releaseQuarantinePath
+      ? () => {
+          writeFileSync(quarantinedPath, label)
+          waitFor(releaseQuarantinePath)
         }
       : undefined,
   },

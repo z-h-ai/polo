@@ -338,7 +338,12 @@ function cleanupRecoveryClaims(lockDir: string): boolean {
 
 function cleanupAbandonedPreparedDirectories(lockDir: string): void {
   const parent = dirname(lockDir);
-  const prefix = `.${basename(lockDir)}.pending.`;
+  const lockName = basename(lockDir);
+  const canonicalPrefix = `.${lockName}.pending.`;
+  // A recovery claim is itself prepared atomically. Because lock names begin
+  // with a dot, these paths have the intentional double-dot shape:
+  // `..config.transaction.lock.recovery.<...>.pending.<...>`.
+  const recoveryPrefix = `.${lockName}.recovery.`;
   let names: string[];
   try {
     names = readdirSync(parent);
@@ -346,7 +351,10 @@ function cleanupAbandonedPreparedDirectories(lockDir: string): void {
     return;
   }
   for (const name of names) {
-    if (!name.startsWith(prefix)) continue;
+    const isCanonicalPrepared = name.startsWith(canonicalPrefix);
+    const isRecoveryPrepared = name.startsWith(recoveryPrefix)
+      && name.includes('.pending.');
+    if (!isCanonicalPrepared && !isRecoveryPrepared) continue;
     const preparedPath = join(parent, name);
     if (!ownerDirectoryIsActive(preparedPath)) {
       rmSync(preparedPath, { recursive: true, force: true });
@@ -354,10 +362,47 @@ function cleanupAbandonedPreparedDirectories(lockDir: string): void {
   }
 }
 
+function cleanupAbandonedStaleQuarantines(lockDir: string): void {
+  const parent = dirname(lockDir);
+  const stalePrefix = `${basename(lockDir)}.stale.`;
+  let names: string[];
+  try {
+    names = readdirSync(parent);
+  } catch {
+    return;
+  }
+
+  for (const name of names) {
+    if (!name.startsWith(stalePrefix)) continue;
+    const recoverySuffix = name.slice(stalePrefix.length);
+    const claimPath = `${lockDir}.recovery.${recoverySuffix}`;
+    // A live recoverer owns both its claim and quarantine. Never disturb it.
+    if (existsSync(claimPath) && ownerDirectoryIsActive(claimPath)) continue;
+
+    const quarantine = join(parent, name);
+    if (ownerDirectoryIsActive(quarantine)) {
+      // A mismatched live owner may have been quarantined by an older
+      // implementation. Restore only when canonical is absent. A current
+      // canonical directory is non-empty, so rename cannot overwrite it.
+      if (!existsSync(lockDir)) {
+        try {
+          renameSync(quarantine, lockDir);
+        } catch {
+          // Preserve the live owner for a later recovery attempt.
+        }
+      }
+      continue;
+    }
+    rmSync(quarantine, { recursive: true, force: true });
+  }
+}
+
 /** @internal Deterministic pause points used only by multi-process tests. */
 export interface CrossProcessFileLockTestHooks {
   beforePublish?: (preparedPath: string) => void;
+  beforeRecoveryClaimPublish?: (preparedClaimPath: string) => void;
   afterRecoveryClaimPublished?: (claimPath: string) => void;
+  afterLockQuarantined?: (quarantinePath: string) => void;
 }
 
 function recoverAbandonedLock(
@@ -367,6 +412,7 @@ function recoverAbandonedLock(
   const recoveryOwner = createLockOwner();
   const claimPath = `${lockDir}.recovery.${recoveryOwner.pid}.${recoveryOwner.nonce}`;
   const preparedClaim = prepareOwnedDirectory(claimPath, recoveryOwner);
+  hooks?.beforeRecoveryClaimPublish?.(preparedClaim);
   if (!publishOwnedDirectory(preparedClaim, claimPath)) {
     throw new Error(`Recovery claim unexpectedly already exists: ${claimPath}`);
   }
@@ -388,6 +434,7 @@ function recoverAbandonedLock(
     } catch {
       return true;
     }
+    hooks?.afterLockQuarantined?.(quarantine);
 
     const quarantinedOwner = readLockOwner(quarantine);
     if (
@@ -429,7 +476,9 @@ export function withCrossProcessFileLockSync<T>(
 
   while (true) {
     cleanupAbandonedPreparedDirectories(lockDir);
-    if (!cleanupRecoveryClaims(lockDir)) {
+    const activeRecovery = cleanupRecoveryClaims(lockDir);
+    cleanupAbandonedStaleQuarantines(lockDir);
+    if (!activeRecovery) {
       const preparedPath = prepareOwnedDirectory(lockDir, owner);
       try {
         hooks?.beforePublish?.(preparedPath);

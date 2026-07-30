@@ -119,6 +119,7 @@ import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
   removeElectronRuntimeDiscovery,
   writeElectronRuntimeDiscovery,
+  type ElectronRuntimeDiscoveryWriteResult,
 } from '@polo-ai/shared/runtime-discovery'
 import {
   BeforeQuitCleanupCoordinator,
@@ -133,6 +134,7 @@ import {
   type TerminalIntegrationOptions,
 } from './terminal-integration'
 import { runTerminalOnboarding } from './terminal-onboarding'
+import { runNonCriticalTerminalOnboarding } from './startup-continuation'
 import { TERMINAL_INTEGRATION_ERROR_KEYS } from '../shared/terminal-integration'
 import type {
   TerminalIntegrationOperation,
@@ -258,6 +260,11 @@ let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
 let adminResumeValidationInFlight: Promise<void> | null = null
+const electronRuntimeInstance = {
+  instanceId: randomUUID(),
+  startedAt: new Date().toISOString(),
+}
+let publishedElectronRuntime: ElectronRuntimeDiscoveryWriteResult | null = null
 
 const ADMIN_REAUTH_REQUIRED_CHANNEL = 'admin:reauthRequired'
 
@@ -909,14 +916,15 @@ app.whenReady().then(async () => {
       })
 
       try {
-        const discoveryPath = writeElectronRuntimeDiscovery({
+        publishedElectronRuntime = writeElectronRuntimeDiscovery({
           pid: process.pid,
           url: `${instance.protocol}://127.0.0.1:${instance.port}`,
           token: instance.token,
           version: app.getVersion(),
+          ...electronRuntimeInstance,
         })
         mainLog.info('[runtime-discovery] Local Electron endpoint published', {
-          path: discoveryPath,
+          path: publishedElectronRuntime.path,
           pid: process.pid,
           version: app.getVersion(),
         })
@@ -1232,19 +1240,25 @@ app.whenReady().then(async () => {
         const terminalOptions = terminalIntegrationOptions()
         const setupCopy = terminalSetupCopy()
         const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-        await runTerminalOnboarding({
-          terminalOptions,
-          copy: setupCopy,
-          showMessageBox: (options) => dialog.showMessageBox(win, options),
-          formatError: error => i18n.t(
-            TERMINAL_INTEGRATION_ERROR_KEYS[error.errorCode],
-            error.errorParams,
-          ),
-          logError: error => mainLog.error(
-            '[terminal-integration] onboarding install failed',
+        await runNonCriticalTerminalOnboarding(
+          () => runTerminalOnboarding({
+            terminalOptions,
+            copy: setupCopy,
+            showMessageBox: (options) => dialog.showMessageBox(win, options),
+            formatError: error => i18n.t(
+              TERMINAL_INTEGRATION_ERROR_KEYS[error.errorCode],
+              error.errorParams,
+            ),
+            logError: error => mainLog.error(
+              '[terminal-integration] onboarding failed',
+              error,
+            ),
+          }),
+          error => mainLog.error(
+            '[terminal-integration] unexpected onboarding failure',
             error,
           ),
-        })
+        )
       }
     }
 
@@ -1462,7 +1476,13 @@ app.on('before-quit', (event) => {
       // Release the server lock file so the next launch doesn't see a stale PID.
       // This must happen regardless of the exit path (normal quit or update quit).
       releaseServerLock()
-      removeElectronRuntimeDiscovery({ expectedPid: process.pid })
+      if (publishedElectronRuntime) {
+        removeElectronRuntimeDiscovery({
+          path: publishedElectronRuntime.path,
+          expectedRecord: publishedElectronRuntime.record,
+        })
+        publishedElectronRuntime = null
+      }
     }
 
     return true
@@ -1499,5 +1519,10 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Last-resort synchronous cleanup for initialization failures and forced exits.
 process.on('exit', () => {
-  removeElectronRuntimeDiscovery({ expectedPid: process.pid })
+  if (!publishedElectronRuntime) return
+  removeElectronRuntimeDiscovery({
+    path: publishedElectronRuntime.path,
+    expectedRecord: publishedElectronRuntime.record,
+  })
+  publishedElectronRuntime = null
 })

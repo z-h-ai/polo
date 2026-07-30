@@ -65,19 +65,64 @@ export async function runTerminalOnboarding({
   formatError,
   logError = error => console.error('[terminal-integration] onboarding failed', error),
   dependencies,
-}: TerminalOnboardingOptions): Promise<TerminalIntegrationStatus> {
+}: TerminalOnboardingOptions): Promise<TerminalIntegrationStatus | null> {
   const getStatus = dependencies?.getStatus ?? getTerminalIntegrationStatus
   const install = dependencies?.install ?? installTerminalIntegration
   const wasDismissed = dependencies?.wasDismissed ?? wasTerminalSetupDismissed
   const setDismissed = dependencies?.setDismissed ?? setTerminalSetupDismissed
 
-  let status = getStatus(terminalOptions)
-  if (isTerminalIntegrationReady(status) || wasDismissed(terminalOptions)) {
-    return status
+  const showMessageBoxSafely = async (
+    options: MessageBoxOptions,
+  ): Promise<{ response: number } | null> => {
+    try {
+      return await showMessageBox(options)
+    } catch (error) {
+      logError(error)
+      return null
+    }
   }
 
+  const showFailure = async (
+    failure: TerminalIntegrationErrorPayload,
+  ): Promise<'retry' | 'stop'> => {
+    const choice = await showMessageBoxSafely({
+      type: 'error',
+      title: copy.failedTitle,
+      message: copy.failedMessage,
+      detail: `${formatError(failure)}\n\n${copy.skippedDetail}`,
+      buttons: [copy.retry, copy.notNow],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    })
+    return choice?.response === 0 ? 'retry' : 'stop'
+  }
+
+  let status: TerminalIntegrationStatus | null = null
+  while (status === null) {
+    try {
+      status = getStatus(terminalOptions)
+    } catch (error) {
+      logError(error)
+      const action = await showFailure({
+        errorCode: 'status_failed',
+        errorParams: { operation: 'status' },
+      })
+      if (action !== 'retry') return null
+    }
+  }
+
+  let dismissed = false
+  try {
+    dismissed = wasDismissed(terminalOptions)
+  } catch (error) {
+    // A damaged dismissal preference must not block application startup.
+    logError(error)
+  }
+  if (isTerminalIntegrationReady(status) || dismissed) return status
+
   if (status.conflict) {
-    const choice = await showMessageBox({
+    const choice = await showMessageBoxSafely({
       type: 'warning',
       title: copy.conflictTitle,
       message: copy.conflictMessage,
@@ -87,9 +132,9 @@ export async function runTerminalOnboarding({
       cancelId: 1,
       noLink: true,
     })
-    if (choice.response !== 0) return status
+    if (choice?.response !== 0) return status
   } else {
-    const choice = await showMessageBox({
+    const choice = await showMessageBoxSafely({
       type: 'info',
       title: copy.setupTitle,
       message: copy.setupTitle,
@@ -99,9 +144,14 @@ export async function runTerminalOnboarding({
       cancelId: 1,
       noLink: true,
     })
+    if (!choice) return status
     if (choice.response !== 0) {
-      setDismissed(terminalOptions, true)
-      await showMessageBox({
+      try {
+        setDismissed(terminalOptions, true)
+      } catch (error) {
+        logError(error)
+      }
+      await showMessageBoxSafely({
         type: 'warning',
         title: copy.skippedTitle,
         message: copy.skippedMessage,
@@ -119,12 +169,24 @@ export async function runTerminalOnboarding({
     } catch (error) {
       logError(error)
       failure = toTerminalIntegrationErrorPayload(error, 'install')
-      status = getStatus(terminalOptions)
+      try {
+        status = getStatus(terminalOptions)
+      } catch (refreshError) {
+        logError(refreshError)
+        failure = {
+          errorCode: 'status_failed',
+          errorParams: { operation: 'status' },
+        }
+      }
     }
 
     if (isTerminalIntegrationReady(status)) {
-      setDismissed(terminalOptions, false)
-      await showMessageBox({
+      try {
+        setDismissed(terminalOptions, false)
+      } catch (error) {
+        logError(error)
+      }
+      await showMessageBoxSafely({
         type: 'info',
         title: copy.completeTitle,
         message: copy.completeMessage,
@@ -134,7 +196,7 @@ export async function runTerminalOnboarding({
       return status
     }
 
-    const choice = await showMessageBox({
+    const choice = await showMessageBoxSafely({
       type: 'error',
       title: copy.failedTitle,
       message: copy.failedMessage,
@@ -148,7 +210,7 @@ export async function runTerminalOnboarding({
       cancelId: 1,
       noLink: true,
     })
-    if (choice.response !== 0) {
+    if (choice?.response !== 0) {
       // Deliberately keep setup incomplete so a later launch or Settings action
       // can retry. Failure is not recorded as a successful/dismissed setup.
       return status

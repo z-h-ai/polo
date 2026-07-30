@@ -1227,6 +1227,7 @@
   "settings.terminalFeatures.status.profileConflict": "Die Polo-Terminalkonfiguration in {{path}} ist fehlerhaft. Polo hat sie nicht geändert.",
   "settings.terminalFeatures.status.ready": "Die Polo-Terminalfunktionen sind bereit.",
   "settings.terminalFeatures.status.repairRequired": "Die Polo-Terminalfunktionen müssen repariert werden.",
+  "settings.terminalFeatures.statusUnavailable": "Status der Terminalfunktionen nicht verfügbar",
   "settings.terminalFeatures.title": "Polo-Terminalfunktionen",
   "settings.terminalFeatures.uninstall": "Deinstallieren",
   "settings.tools.builtInBrowser": "Integrierter Browser",

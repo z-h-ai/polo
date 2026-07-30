@@ -1,22 +1,27 @@
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { getProcessInstanceFingerprint } from './utils/files'
 
-export const RUNTIME_DISCOVERY_SCHEMA_VERSION = 1
+export const RUNTIME_DISCOVERY_SCHEMA_VERSION = 2
 
 export interface ElectronRuntimeDiscovery {
   schemaVersion: typeof RUNTIME_DISCOVERY_SCHEMA_VERSION
   pid: number
+  instanceId: string
   url: string
   token: string
   version: string
@@ -81,6 +86,8 @@ function isRecord(value: unknown): value is ElectronRuntimeDiscovery {
   return record.schemaVersion === RUNTIME_DISCOVERY_SCHEMA_VERSION
     && Number.isSafeInteger(record.pid)
     && (record.pid ?? 0) > 0
+    && typeof record.instanceId === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.instanceId)
     && typeof record.url === 'string'
     && isLoopbackWebSocketUrl(record.url)
     && typeof record.token === 'string'
@@ -185,15 +192,138 @@ function removeIfPresent(path: string): void {
   }
 }
 
+function recordsHaveSameIdentity(
+  left: ElectronRuntimeDiscovery,
+  right: ElectronRuntimeDiscovery,
+): boolean {
+  return left.schemaVersion === right.schemaVersion
+    && left.pid === right.pid
+    && left.instanceId === right.instanceId
+    && left.startedAt === right.startedAt
+    && left.url === right.url
+    && left.token === right.token
+    && left.version === right.version
+}
+
+const CLEANUP_CLAIM_MARKER = '.cleanup.'
+
+function cleanupClaimPrefix(path: string): string {
+  return `.${basename(path)}${CLEANUP_CLAIM_MARKER}`
+}
+
+function fingerprintHash(fingerprint: string): string {
+  return createHash('sha256').update(fingerprint).digest('hex').slice(0, 24)
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+function cleanupClaimOwnerIsActive(
+  claimName: string,
+  prefix: string,
+): boolean {
+  if (!claimName.startsWith(prefix)) return true
+  const [pidText, expectedFingerprint] = claimName.slice(prefix.length).split('.')
+  const pid = Number(pidText)
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !expectedFingerprint) return true
+  if (!processExists(pid)) return false
+  if (expectedFingerprint === 'unknown') return true
+  const actualFingerprint = getProcessInstanceFingerprint(pid)
+  return actualFingerprint === null
+    || fingerprintHash(actualFingerprint) === expectedFingerprint
+}
+
+function listCleanupClaims(path: string): Array<{
+  path: string
+  name: string
+  mtimeMs: number
+}> {
+  const parent = dirname(path)
+  const prefix = cleanupClaimPrefix(path)
+  try {
+    return readdirSync(parent)
+      .filter(name => name.startsWith(prefix))
+      .map(name => {
+        const claimPath = join(parent, name)
+        let mtimeMs = 0
+        try {
+          mtimeMs = statSync(claimPath).mtimeMs
+        } catch {
+          // A concurrent cleanup completed between readdir and stat.
+        }
+        return { path: claimPath, name, mtimeMs }
+      })
+  } catch {
+    return []
+  }
+}
+
+function restoreClaimWithoutOverwrite(claimPath: string, path: string): boolean {
+  if (!existsSync(claimPath)) return existsSync(path)
+  try {
+    // A hard link atomically restores the claimed file only when canonical is
+    // absent. Unlike rename, it can never overwrite a newer publication.
+    linkSync(claimPath, path)
+    removeIfPresent(claimPath)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST' || existsSync(path)) {
+      // A newer canonical record supersedes this claimed record.
+      removeIfPresent(claimPath)
+      return true
+    }
+    // Preserve the claim for a later reader rather than losing the record.
+    return false
+  }
+}
+
+/**
+ * Recover a record left in quarantine when a cleanup process exited after its
+ * atomic claim. A live cleanup owner is never disturbed. When several dead
+ * claims exist, the newest is restored and older claims are superseded.
+ */
+function recoverAbandonedCleanupClaims(path: string): void {
+  const prefix = cleanupClaimPrefix(path)
+  const claims = listCleanupClaims(path)
+  if (claims.some(claim => cleanupClaimOwnerIsActive(claim.name, prefix))) return
+
+  const abandoned = claims.sort((left, right) => right.mtimeMs - left.mtimeMs)
+  for (const claim of abandoned) {
+    if (existsSync(path)) {
+      removeIfPresent(claim.path)
+      continue
+    }
+    restoreClaimWithoutOverwrite(claim.path, path)
+  }
+}
+
+export interface ElectronRuntimeDiscoveryWriteResult {
+  path: string
+  record: ElectronRuntimeDiscovery
+}
+
 export function writeElectronRuntimeDiscovery(
-  input: Omit<ElectronRuntimeDiscovery, 'schemaVersion' | 'startedAt'> & { startedAt?: string },
+  input: Omit<
+    ElectronRuntimeDiscovery,
+    'schemaVersion' | 'instanceId' | 'startedAt'
+  > & {
+    instanceId?: string
+    startedAt?: string
+  },
   options?: { path?: string },
-): string {
+): ElectronRuntimeDiscoveryWriteResult {
   const path = options?.path ?? getElectronRuntimeDiscoveryPath()
   const runtimeDir = dirname(path)
   const record: ElectronRuntimeDiscovery = {
     schemaVersion: RUNTIME_DISCOVERY_SCHEMA_VERSION,
     pid: input.pid,
+    instanceId: input.instanceId ?? randomUUID(),
     url: input.url,
     token: input.token,
     version: input.version,
@@ -206,8 +336,9 @@ export function writeElectronRuntimeDiscovery(
 
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
   if (process.platform !== 'win32') chmodSync(runtimeDir, 0o700)
+  recoverAbandonedCleanupClaims(path)
 
-  const tempPath = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`
+  const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`
   try {
     writeFileSync(tempPath, `${JSON.stringify(record, null, 2)}\n`, {
       encoding: 'utf8',
@@ -221,7 +352,10 @@ export function writeElectronRuntimeDiscovery(
     removeIfPresent(tempPath)
   }
 
-  return path
+  // The newly published canonical record supersedes any cleanup process that
+  // exited while holding an older record in quarantine.
+  recoverAbandonedCleanupClaims(path)
+  return { path, record }
 }
 
 export function readElectronRuntimeDiscovery(options?: {
@@ -232,6 +366,7 @@ export function readElectronRuntimeDiscovery(options?: {
   windowsProcessOwner?: (pid: number, startedAt: string) => boolean
 }): RuntimeDiscoveryResult {
   const path = options?.path ?? getElectronRuntimeDiscoveryPath()
+  recoverAbandonedCleanupClaims(path)
   if (!existsSync(path)) return { status: 'missing', path }
 
   const platform = options?.platform ?? process.platform
@@ -268,7 +403,7 @@ export function readElectronRuntimeDiscovery(options?: {
     windowsProcessOwner: options?.windowsProcessOwner,
   })) {
     if (options?.cleanupStale) {
-      removeElectronRuntimeDiscovery({ path, expectedPid: parsed.pid })
+      removeElectronRuntimeDiscovery({ path, expectedRecord: parsed })
     }
     return {
       status: 'stale',
@@ -289,22 +424,55 @@ export function readElectronRuntimeDiscovery(options?: {
   return { status: 'available', path, record: parsed }
 }
 
-export function removeElectronRuntimeDiscovery(options?: {
+export interface RuntimeDiscoveryCleanupTestHooks {
+  afterClaim?: (claimPath: string) => void
+}
+
+export function removeElectronRuntimeDiscovery(options: {
   path?: string
-  expectedPid?: number
+  expectedRecord: ElectronRuntimeDiscovery
+  hooks?: RuntimeDiscoveryCleanupTestHooks
 }): boolean {
   const path = options?.path ?? getElectronRuntimeDiscoveryPath()
+  recoverAbandonedCleanupClaims(path)
   if (!existsSync(path)) return false
 
-  if (options?.expectedPid !== undefined) {
-    try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ElectronRuntimeDiscovery>
-      if (parsed.pid !== options.expectedPid) return false
-    } catch {
-      return false
-    }
+  const processFingerprint = getProcessInstanceFingerprint()
+  const claimOwnerFingerprint = processFingerprint
+    ? fingerprintHash(processFingerprint)
+    : 'unknown'
+  const claimPath = join(
+    dirname(path),
+    `${cleanupClaimPrefix(path)}${process.pid}.${claimOwnerFingerprint}.${randomUUID()}`,
+  )
+  try {
+    renameSync(path, claimPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
   }
 
-  removeIfPresent(path)
-  return true
+  try {
+    options.hooks?.afterClaim?.(claimPath)
+    let claimed: unknown
+    try {
+      claimed = JSON.parse(readFileSync(claimPath, 'utf8'))
+    } catch {
+      claimed = null
+    }
+
+    if (isRecord(claimed) && recordsHaveSameIdentity(claimed, options.expectedRecord)) {
+      removeIfPresent(claimPath)
+      return true
+    }
+
+    // The canonical path changed after the caller read its expected record.
+    // Restore the claimed replacement only if no still-newer canonical record
+    // exists; never overwrite a concurrent Electron publication.
+    restoreClaimWithoutOverwrite(claimPath, path)
+    return false
+  } catch (error) {
+    restoreClaimWithoutOverwrite(claimPath, path)
+    throw error
+  }
 }

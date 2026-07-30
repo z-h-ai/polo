@@ -161,25 +161,32 @@ export default function AppSettingsPage() {
     loadSettings()
   }, [])
 
+  const loadTerminalStatus = useCallback(async () => {
+    setTerminalBusy(true)
+    setTerminalError(null)
+    try {
+      const result = await window.electronAPI.getTerminalIntegrationStatus()
+      if (result.success) {
+        setTerminalStatus(result.status)
+        setTerminalError(null)
+      } else {
+        setTerminalError(result)
+      }
+    } catch (error) {
+      console.error('[terminal-integration] status IPC failed', error)
+      setTerminalError({
+        errorCode: 'ipc_failed',
+        errorParams: { operation: 'status' },
+      })
+    } finally {
+      setTerminalBusy(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!isElectron) return
-    void window.electronAPI.getTerminalIntegrationStatus()
-      .then((result) => {
-        if (result.success) {
-          setTerminalStatus(result.status)
-          setTerminalError(null)
-        } else {
-          setTerminalError(result)
-        }
-      })
-      .catch((error) => {
-        console.error('[terminal-integration] status IPC failed', error)
-        setTerminalError({
-          errorCode: 'ipc_failed',
-          errorParams: { operation: 'status' },
-        })
-      })
-  }, [isElectron])
+    void loadTerminalStatus()
+  }, [isElectron, loadTerminalStatus])
 
   const handleTerminalAction = useCallback(async (action: 'install' | 'uninstall') => {
     setTerminalBusy(true)
@@ -363,42 +370,59 @@ export default function AppSettingsPage() {
                 </SettingsCard>
               </SettingsSection>
 
-              {isElectron && terminalStatus?.supported && (
+              {isElectron && (terminalError !== null || terminalStatus?.supported) && (
                 <SettingsSection
                   title={t("settings.terminalFeatures.title")}
                   description={t("settings.terminalFeatures.description")}
                 >
                   <SettingsCard>
                     <SettingsRow
-                      label={terminalStatus.installed
-                        ? t("settings.terminalFeatures.installed")
-                        : t("settings.terminalFeatures.notInstalled")}
+                      label={!terminalStatus
+                        ? t("settings.terminalFeatures.statusUnavailable")
+                        : terminalStatus.installed
+                          ? t("settings.terminalFeatures.installed")
+                          : t("settings.terminalFeatures.notInstalled")}
                       description={terminalError
                         ? getTerminalIntegrationErrorMessage(terminalError, t)
-                        : getTerminalIntegrationStatusMessage(terminalStatus, t)}
+                        : terminalStatus
+                          ? getTerminalIntegrationStatusMessage(terminalStatus, t)
+                          : undefined}
                     >
                       <div className="flex items-center gap-2">
-                        {terminalStatus.installed && (
+                        {!terminalStatus ? (
                           <Button
                             variant="outline"
                             size="sm"
                             disabled={terminalBusy}
-                            onClick={() => void handleTerminalAction('uninstall')}
+                            onClick={() => void loadTerminalStatus()}
                           >
-                            {t("settings.terminalFeatures.uninstall")}
+                            {terminalBusy ? t("common.loading") : t("common.retry")}
                           </Button>
+                        ) : (
+                          <>
+                            {terminalStatus.installed && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={terminalBusy}
+                                onClick={() => void handleTerminalAction('uninstall')}
+                              >
+                                {t("settings.terminalFeatures.uninstall")}
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              disabled={terminalBusy || !!terminalStatus.conflict}
+                              onClick={() => void handleTerminalAction('install')}
+                            >
+                              {terminalBusy
+                                ? t("common.loading")
+                                : terminalStatus.installed
+                                  ? t("settings.terminalFeatures.repair")
+                                  : t("settings.terminalFeatures.install")}
+                            </Button>
+                          </>
                         )}
-                        <Button
-                          size="sm"
-                          disabled={terminalBusy || !!terminalStatus.conflict}
-                          onClick={() => void handleTerminalAction('install')}
-                        >
-                          {terminalBusy
-                            ? t("common.loading")
-                            : terminalStatus.installed
-                              ? t("settings.terminalFeatures.repair")
-                              : t("settings.terminalFeatures.install")}
-                        </Button>
                       </div>
                     </SettingsRow>
                   </SettingsCard>

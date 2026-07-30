@@ -2,6 +2,7 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  readElectronRuntimeDiscovery,
   removeElectronRuntimeDiscovery,
   writeElectronRuntimeDiscovery,
 } from '../packages/shared/src/runtime-discovery'
@@ -117,7 +118,13 @@ try {
   console.log('✓ Self-relative launcher passed through an installed symlink')
   console.log('✓ Runtime validation passed from a path containing spaces and non-ASCII characters')
 } finally {
-  removeElectronRuntimeDiscovery({ path: discoveryPath, expectedPid: proc.pid })
+  const discovery = readElectronRuntimeDiscovery({ path: discoveryPath })
+  if (discovery.status === 'available') {
+    removeElectronRuntimeDiscovery({
+      path: discoveryPath,
+      expectedRecord: discovery.record,
+    })
+  }
   proc.kill('SIGTERM')
   await Promise.race([
     proc.exited,

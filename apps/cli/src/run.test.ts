@@ -15,6 +15,8 @@ import type { SpawnedServer } from './server-spawner.ts'
 // ---------------------------------------------------------------------------
 
 interface MockServerOptions {
+  /** Token published in runtime discovery for this server. */
+  token?: string
   /** What LLM_Connection:list returns */
   connections?: unknown[]
   /** What workspaces:get returns */
@@ -23,6 +25,10 @@ interface MockServerOptions {
   serverVersion?: string
   /** RPC errors returned after a successful handshake, keyed by channel. */
   requestErrors?: Record<string, { code: ErrorCode; message: string }>
+  /** Called when this server receives a handshake, before replying. */
+  onHandshake?: () => void
+  /** Reject the handshake instead of acknowledging it. */
+  handshakeError?: { code: ErrorCode; message: string }
 }
 
 interface MockServer {
@@ -55,7 +61,7 @@ function pushSessionEvents(
 }
 
 function createMockServer(opts?: MockServerOptions): MockServer {
-  const token = 'test-token-0123456789'
+  const token = opts?.token ?? 'test-token-0123456789'
   const invokedChannels: string[] = []
   const invokeArgs: Record<string, unknown[][]> = {}
   let createSessionArgs: unknown[] | undefined
@@ -74,6 +80,15 @@ function createMockServer(opts?: MockServerOptions): MockServer {
         const envelope = deserializeEnvelope(raw)
 
         if (envelope.type === 'handshake') {
+          opts?.onHandshake?.()
+          if (opts?.handshakeError) {
+            ws.send(serializeEnvelope({
+              id: crypto.randomUUID(),
+              type: 'error',
+              error: opts.handshakeError,
+            }))
+            return
+          }
           ws.send(serializeEnvelope({
             id: crypto.randomUUID(),
             type: 'handshake_ack',
@@ -195,6 +210,7 @@ mock.module('./server-spawner.ts', () => ({
 
 // Import main AFTER mocking
 const {
+  connectForCommand,
   connectForRun,
   main,
   parseArgs,
@@ -359,6 +375,61 @@ describe('run command', () => {
 
     expect((caught as { exitCode?: number })?.exitCode).toBe(1)
     expect(existsSync(runtimePath)).toBe(true)
+  })
+
+  it('does not delete an Electron replacement that races a handshake failure', async () => {
+    const replacementServer = createMockServer({
+      token: 'replacement-token-0123456789',
+    })
+    mockWsServer?.close()
+    let replacementInstanceId = ''
+    mockWsServer = createMockServer({
+      token: 'stale-token-0123456789',
+      handshakeError: {
+        code: 'AUTH_FAILED',
+        message: 'stale endpoint rejected the handshake',
+      },
+      onHandshake() {
+        const replacement = writeElectronRuntimeDiscovery({
+          pid: process.pid,
+          url: replacementServer.url,
+          token: replacementServer.token,
+          version: '0.10.0',
+          startedAt: '2026-07-30T12:00:01.000Z',
+        })
+        replacementInstanceId = replacement.record.instanceId
+      },
+    })
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: mockWsServer.url,
+      token: mockWsServer.token,
+      version: '0.10.0',
+      startedAt: '2026-07-30T12:00:00.000Z',
+    })
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--timeout', '500',
+      'sessions',
+    ])
+
+    try {
+      await expect(connectForCommand(args)).rejects.toThrow(
+        'stale endpoint rejected the handshake',
+      )
+      const runtimePath = process.env.POLO_AI_RUNTIME_DISCOVERY_FILE!
+      const replacement = await import('@polo-ai/shared/runtime-discovery')
+        .then(({ readElectronRuntimeDiscovery }) =>
+          readElectronRuntimeDiscovery({ path: runtimePath }))
+      expect(replacement.status).toBe('available')
+      if (replacement.status === 'available') {
+        expect(replacement.record.instanceId).toBe(replacementInstanceId)
+        expect(replacement.record.url).toBe(replacementServer.url)
+        expect(replacement.record.token).toBe(replacementServer.token)
+      }
+    } finally {
+      replacementServer.close()
+    }
   })
 
   it('cleans an unreachable discovery record and falls back for run only', async () => {

@@ -6,6 +6,7 @@ import {
   areMajorVersionsCompatible,
   readElectronRuntimeDiscovery,
   removeElectronRuntimeDiscovery,
+  RUNTIME_DISCOVERY_SCHEMA_VERSION,
   writeElectronRuntimeDiscovery,
 } from '../runtime-discovery'
 
@@ -37,6 +38,7 @@ describe('Electron runtime discovery', () => {
     expect(result.status).toBe('available')
     if (result.status === 'available') {
       expect(result.record.pid).toBe(process.pid)
+      expect(result.record.instanceId).toMatch(/^[0-9a-f-]{36}$/)
       expect(result.record.token).toBe('0123456789abcdef0123456789abcdef')
     }
   })
@@ -138,13 +140,14 @@ describe('Electron runtime discovery', () => {
 
   it('does not delete a replacement runtime record during stale cleanup', () => {
     const path = tempPath()
-    const stalePid = process.pid + 10_000
-    writeElectronRuntimeDiscovery({
-      pid: stalePid,
+    const stale = writeElectronRuntimeDiscovery({
+      pid: process.pid,
       url: 'ws://127.0.0.1:53124',
       token: '0123456789abcdef',
       version: '0.10.0',
+      startedAt: '2000-01-01T00:00:00.000Z',
     }, { path })
+    let replacementInstanceId = ''
 
     const result = readElectronRuntimeDiscovery({
       path,
@@ -152,23 +155,67 @@ describe('Electron runtime discovery', () => {
       cleanupStale: true,
       windowsProcessOwner() {
         // Simulate Electron restarting and atomically replacing the discovery
-        // file after the stale record was read but before cleanup.
-        writeElectronRuntimeDiscovery({
+        // file with the same reused PID after the stale record was read but
+        // before cleanup.
+        const replacement = writeElectronRuntimeDiscovery({
           pid: process.pid,
           url: 'ws://127.0.0.1:53125',
-          token: 'fedcba9876543210',
+          token: 'fedcba9876543210fedcba9876543210',
           version: '0.10.0',
+          startedAt: '2026-07-30T12:00:00.000Z',
         }, { path })
+        replacementInstanceId = replacement.record.instanceId
         return false
       },
     })
 
     expect(result.status).toBe('stale')
+    expect(stale.record.instanceId).not.toBe(replacementInstanceId)
     const replacement = readElectronRuntimeDiscovery({ path })
     expect(replacement.status).toBe('available')
     if (replacement.status === 'available') {
       expect(replacement.record.pid).toBe(process.pid)
       expect(replacement.record.url).toBe('ws://127.0.0.1:53125')
+      expect(replacement.record.token).toBe('fedcba9876543210fedcba9876543210')
+      expect(replacement.record.startedAt).toBe('2026-07-30T12:00:00.000Z')
+      expect(replacement.record.instanceId).toBe(replacementInstanceId)
+    }
+  })
+
+  it('preserves a new canonical record published after cleanup atomically claims the old one', () => {
+    const path = tempPath()
+    const old = writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: 'ws://127.0.0.1:53124',
+      token: 'old-token-0123456789abcdef',
+      version: '0.10.0',
+      startedAt: '2026-07-30T12:00:00.000Z',
+    }, { path })
+    let replacementInstanceId = ''
+
+    expect(removeElectronRuntimeDiscovery({
+      path,
+      expectedRecord: old.record,
+      hooks: {
+        afterClaim() {
+          const replacement = writeElectronRuntimeDiscovery({
+            pid: process.pid,
+            url: 'ws://127.0.0.1:53126',
+            token: 'new-token-fedcba9876543210',
+            version: '0.10.0',
+            startedAt: '2026-07-30T12:00:01.000Z',
+          }, { path })
+          replacementInstanceId = replacement.record.instanceId
+        },
+      },
+    })).toBe(true)
+
+    const result = readElectronRuntimeDiscovery({ path })
+    expect(result.status).toBe('available')
+    if (result.status === 'available') {
+      expect(result.record.instanceId).toBe(replacementInstanceId)
+      expect(result.record.url).toBe('ws://127.0.0.1:53126')
+      expect(result.record.token).toBe('new-token-fedcba9876543210')
     }
   })
 
@@ -205,8 +252,9 @@ describe('Electron runtime discovery', () => {
     const path = tempPath()
     mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 })
     writeFileSync(path, JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: RUNTIME_DISCOVERY_SCHEMA_VERSION,
       pid: process.pid,
+      instanceId: crypto.randomUUID(),
       url: 'ws://192.168.1.5:9100',
       token: '0123456789abcdef',
       version: '0.10.0',
@@ -232,14 +280,27 @@ describe('Electron runtime discovery', () => {
 
   it('does not remove a newer process record', () => {
     const path = tempPath()
-    writeElectronRuntimeDiscovery({
+    const old = writeElectronRuntimeDiscovery({
       pid: process.pid,
       url: 'ws://127.0.0.1:53124',
       token: '0123456789abcdef',
       version: '0.10.0',
     }, { path })
+    const replacement = writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: 'ws://127.0.0.1:53125',
+      token: 'fedcba9876543210',
+      version: '0.10.0',
+    }, { path })
 
-    expect(removeElectronRuntimeDiscovery({ path, expectedPid: process.pid + 1 })).toBe(false)
-    expect(removeElectronRuntimeDiscovery({ path, expectedPid: process.pid })).toBe(true)
+    expect(removeElectronRuntimeDiscovery({
+      path,
+      expectedRecord: old.record,
+    })).toBe(false)
+    expect(readElectronRuntimeDiscovery({ path }).status).toBe('available')
+    expect(removeElectronRuntimeDiscovery({
+      path,
+      expectedRecord: replacement.record,
+    })).toBe(true)
   })
 })

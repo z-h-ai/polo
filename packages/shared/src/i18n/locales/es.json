@@ -1227,6 +1227,7 @@
   "settings.terminalFeatures.status.profileConflict": "La configuración de terminal de Polo en {{path}} no es válida. Polo no la modificó.",
   "settings.terminalFeatures.status.ready": "Las funciones de terminal de Polo están listas.",
   "settings.terminalFeatures.status.repairRequired": "Las funciones de terminal de Polo necesitan reparación.",
+  "settings.terminalFeatures.statusUnavailable": "Estado de las funciones de terminal no disponible",
   "settings.terminalFeatures.title": "Funciones de terminal de Polo",
   "settings.terminalFeatures.uninstall": "Desinstalar",
   "settings.tools.builtInBrowser": "Navegador integrado",

@@ -1227,6 +1227,7 @@
   "settings.terminalFeatures.status.profileConflict": "A(z) {{path}} fájlban lévő Polo terminálkonfiguráció hibás. A Polo nem módosította.",
   "settings.terminalFeatures.status.ready": "A Polo terminálfunkciói használatra készek.",
   "settings.terminalFeatures.status.repairRequired": "A Polo terminálfunkcióit javítani kell.",
+  "settings.terminalFeatures.statusUnavailable": "A terminálfunkciók állapota nem érhető el",
   "settings.terminalFeatures.title": "Polo terminálfunkciók",
   "settings.terminalFeatures.uninstall": "Eltávolítás",
   "settings.tools.builtInBrowser": "Beépített böngésző",

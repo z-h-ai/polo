@@ -1227,6 +1227,7 @@
   "settings.terminalFeatures.status.profileConflict": "The Polo terminal configuration in {{path}} is malformed. Polo did not change it.",
   "settings.terminalFeatures.status.ready": "Polo terminal features are ready.",
   "settings.terminalFeatures.status.repairRequired": "Polo terminal features need repair.",
+  "settings.terminalFeatures.statusUnavailable": "Terminal feature status unavailable",
   "settings.terminalFeatures.title": "Polo terminal features",
   "settings.terminalFeatures.uninstall": "Uninstall",
   "settings.tools.builtInBrowser": "Built-in browser",

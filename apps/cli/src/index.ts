@@ -11,6 +11,7 @@ import { basename, resolve } from 'path'
 import {
   readElectronRuntimeDiscovery,
   removeElectronRuntimeDiscovery,
+  type ElectronRuntimeDiscovery,
 } from '@polo-ai/shared/runtime-discovery'
 import { CliRpcClient } from './client.ts'
 import { version as cliVersion } from '../package.json'
@@ -293,7 +294,7 @@ async function cmdApp(): Promise<void> {
 
 interface AppliedRuntimeDiscovery {
   path: string
-  pid: number
+  record: ElectronRuntimeDiscovery
 }
 
 function applyRuntimeDiscovery(args: CliArgs): AppliedRuntimeDiscovery | undefined {
@@ -312,7 +313,7 @@ function applyRuntimeDiscovery(args: CliArgs): AppliedRuntimeDiscovery | undefin
   if (result.status === 'available') {
     args.url = result.record.url
     args.token = result.record.token
-    return { path: result.path, pid: result.record.pid }
+    return { path: result.path, record: result.record }
   }
   if (result.status === 'incompatible' || result.status === 'invalid') {
     throw new Error(result.reason)
@@ -658,7 +659,7 @@ function handshakeFailureMessage(
 
   removeElectronRuntimeDiscovery({
     path: discovery.path,
-    expectedPid: discovery.pid,
+    expectedRecord: discovery.record,
   })
   return `Polo App runtime is unavailable (${message}). `
     + 'Restart it with `polo app`, or use --url/--token to connect to another server.'
@@ -719,7 +720,7 @@ export async function connectForRun(args: CliArgs): Promise<RunConnection> {
       // a compatible handshake. Remove only the record we read, then fall back.
       removeElectronRuntimeDiscovery({
         path: discovery.path,
-        expectedPid: discovery.pid,
+        expectedRecord: discovery.record,
       })
       args.url = ''
       args.token = ''
