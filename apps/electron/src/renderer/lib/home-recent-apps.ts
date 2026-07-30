@@ -1,7 +1,7 @@
 import {
   MAX_HOME_RECENT_APP_ID_LENGTH,
   type HomeRecentAppPreference,
-} from '@polo-ai/shared/config'
+} from '@polo-ai/shared/config/home-recent'
 import {
   get as getLocalStorage,
   KEYS,

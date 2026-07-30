@@ -5,7 +5,7 @@ export * from './models.ts';
 export * from './models-pi.ts';
 export * from './model-fetcher.ts';
 export * from './preferences.ts';
-export * from './home-recent-limits.ts';
+export * from './home-recent.ts';
 export * from './storage.ts';
 export * from './theme.ts';
 export * from './validators.ts';

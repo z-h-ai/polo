@@ -7,7 +7,7 @@ import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
 import type {
   HomeRecentAppKind,
   HomeRecentAppPreference,
-} from '@polo-ai/shared/config'
+} from '@polo-ai/shared/config/home-recent'
 import {
   createLocalAppScopeKey,
   type LocalAppRuntimeStatus,

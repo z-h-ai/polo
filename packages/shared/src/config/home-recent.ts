@@ -1,3 +1,16 @@
+export type HomeRecentAppKind = 'builtin' | 'external' | 'organization'
+
+export interface HomeRecentAppPreference {
+  id: string
+  kind: HomeRecentAppKind
+  openedAt: number
+}
+
+export type HomeRecentAppsByContext = Record<
+  string,
+  HomeRecentAppPreference[]
+>
+
 const MAX_ADMIN_ENTITY_ID_LENGTH = 512
 const MAX_ESCAPED_ENTITY_ID_LENGTH = MAX_ADMIN_ENTITY_ID_LENGTH * 6
 

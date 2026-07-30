@@ -1,57 +1,43 @@
-# POL-51 第 2 轮 Blocking Issues 修复报告
+# POL-51 第 2 轮 Blocking Issue 修复报告
 
-## 逐条处理结果
+## Issue 处理结果
 
-### 1. 全量测试中的 transfer TTL 与 session watcher 竞态
+### Renderer 误引入 Node-heavy shared config barrel
 
-- Transfer 收到合法 chunk 后会在文件写入前刷新 TTL，避免旧 deadline 在异步文件 I/O 期间提前清理仍活跃的传输。
-- TTL 回归测试改为 fake timer 驱动，不再依赖 25ms 墙钟等待。
-- Session 文件监听增加可注入的 watcher factory 测试 seam；两组 watcher 测试使用事件控制器明确触发变更并等待目标 client push，不再依赖真实 `fs.watch` 的调度时机和固定 sleep。
-- Transfer + 两组 watcher 回归连续复跑 5 次，均为 10 pass、0 fail。
-- 项目标准 `bun run test` 完整执行 3 次，均成功退出。
-
-### 2. GET_LOGS 主进程授权边界
-
-- `local-apps:getLogs` 在主进程先读取 scoped registry 的可信运行状态，仅 `status = broken` 时允许读取日志；`installed`、`running`、`stopped` 等健康状态统一返回 `NOT_AUTHORIZED`。
-- denied/withdrawn App 仍可读取状态并执行 STOP、UNINSTALL，但健康状态不能读取日志。
-- 新增直接 RPC 回归，覆盖 healthy installed/running/stopped、denied healthy 均拒绝，以及 broken/启动失败状态可读取日志。
-
-### 3. Catalog 同 ID deliveryMode 变更
-
-- 将 `deliveryMode` 纳入 Catalog App 身份契约：同一账号、组织、Catalog App ID 一旦存在于最近可信的 visible 或 withdrawn Catalog 中，后续成功响应不得把 `remote_url` 与 `local_bundle` 相互切换。
-- 模式冲突会在建立新 fence 或保存新缓存前以 `SERVER_ERROR` 拒绝，新响应不能提交；同步保留上一可信缓存并进入现有受限离线回退。
-- 因旧 local bundle 身份和授权上下文不发生切换，已经进入 manager 的 START/INSTALL 结果仍按旧可信上下文提交，STOP/UNINSTALL 数据管理入口继续可达。
-- 新增 shared handler 级 remote-to-local 冲突测试，以及 production wiring 的 deferred START、deferred INSTALL、STOP、UNINSTALL 确定性测试。
+- 新增 browser-safe leaf export `@polo-ai/shared/config/home-recent`，集中提供 Home 最近应用类型及长度常量。该模块不依赖 Node API、配置持久化实现或 Claude Agent SDK。
+- Renderer 的最近应用运行时代码与相关类型引用均改为从安全 leaf 导入，不再经过 `@polo-ai/shared/config` 聚合入口。
+- Node 侧配置实现继续从同一 leaf 复用类型和边界常量，并从原聚合入口重导出类型，保持既有服务端调用兼容。
+- 新增真实 browser bundle 边界测试：使用 esbuild 打包 `home-recent-apps.ts`，断言依赖图包含安全 leaf，同时不包含 config barrel、preferences 实现或 `@anthropic-ai/claude-agent-sdk`。
+- 完整 `bun run electron:build` 已通过，main、preload 和 renderer production bundles 均构建并完成资源校验。
 
 ## 关键文件
 
-- `packages/server-core/src/handlers/rpc/transfer.ts`
-- `packages/server-core/src/handlers/rpc/transfer.test.ts`
-- `packages/server-core/src/handlers/handler-deps.ts`
-- `packages/server-core/src/handlers/rpc/sessions.ts`
-- `apps/electron/src/main/handlers/__tests__/session-watcher.test.ts`
-- `apps/electron/src/main/handlers/__tests__/sessions-watchers.test.ts`
-- `apps/electron/src/main/handlers/local-apps.ts`
-- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+- `packages/shared/src/config/home-recent.ts`
+- `packages/shared/src/config/home-recent-limits.ts`（由安全 leaf 替代）
+- `packages/shared/src/config/index.ts`
+- `packages/shared/src/config/preferences.ts`
+- `packages/shared/src/config/validators.ts`
+- `packages/shared/package.json`
+- `apps/electron/src/renderer/lib/home-recent-apps.ts`
+- `apps/electron/src/renderer/lib/__tests__/home-recent-browser-boundary.test.ts`
+- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
+- `apps/electron/src/shared/types.ts`
+- `packages/server-core/src/handlers/rpc/settings.ts`
 
-## 自测结果
+## 实际运行的测试与结果
 
-- `bun run test`：完整执行 3 次，均通过；最终复跑为 4,816 pass、19 skip、0 fail。
-- `bun run validate:ci`：通过；包含 shared 配置测试、资源脚本 smoke tests、i18n parity/sorted/coverage 检查。
-- Transfer 与 watcher 三个目标测试文件连续复跑 5 次：每次 10 pass、0 fail。
-- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`：55 pass、0 fail。
-- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`：18 pass、0 fail。
-- `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`：19 pass、0 fail。
+- `bun run electron:build`：通过；main、preload、renderer production build 及资源复制/校验全部成功，renderer 共转换 5,582 个模块。
+- `bun test apps/electron/src/renderer/lib/__tests__/home-recent-browser-boundary.test.ts packages/shared/src/config/__tests__/home-recent-apps.test.ts`：3 pass、0 fail。
+- `bun test ./apps/electron/src/renderer`：479 pass、0 fail。
+- 对 `apps/electron/src/renderer` 下所有 `*.isolated.ts` 逐文件执行 `bun test`：全部通过、0 fail。
+- `bun run typecheck:shared`：通过。
 - `bun run typecheck:electron`：通过。
 - `packages/server-core` 执行 `bun run tsc --noEmit`：通过。
-- `packages/shared` 执行 `bun run tsc --noEmit`：通过。
-- 变更涉及的 Electron 文件定向 ESLint：通过。
+- Electron 本轮变更文件定向 ESLint：通过。
+- shared 本轮变更文件定向 ESLint：通过。
 - `git diff --check`：通过。
 
 ## 遗留问题
 
-- 本轮 3 项 blocking issue 无遗留。
-- worktree 中原有的 `.pipeline/fix-report-round3.md`、`.pipeline/fix-report-round4.md` 删除状态，以及 `design-demos/`、3 个 `docs/spec-home-app-admin-config*.md` 未跟踪内容均未改动，也不会纳入本轮 commit。
+- 本轮 blocking issue 无遗留。
+- worktree 原有的 `.pipeline/fix-report-round3.md`、`.pipeline/fix-report-round4.md` 删除状态，以及 `design-demos/` 和 3 个未跟踪的 `docs/spec-home-app-admin-config*.md` 均保持不动，不纳入本轮 commit。

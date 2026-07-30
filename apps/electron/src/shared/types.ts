@@ -624,11 +624,11 @@ export interface ElectronAPI {
   writePreferences(content: string): Promise<{ success: boolean; error?: string }>
   getHomeRecentApps(
     contextKey: string,
-  ): Promise<import('@polo-ai/shared/config').HomeRecentAppPreference[]>
+  ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
   setHomeRecentApps(
     contextKey: string,
-    apps: import('@polo-ai/shared/config').HomeRecentAppPreference[],
-  ): Promise<import('@polo-ai/shared/config').HomeRecentAppPreference[]>
+    apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
+  ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>

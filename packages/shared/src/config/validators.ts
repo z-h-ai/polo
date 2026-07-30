@@ -23,7 +23,7 @@ import { isValidProviderAuthCombination } from './llm-connections.ts';
 import {
   MAX_HOME_RECENT_APP_ID_LENGTH,
   MAX_HOME_RECENT_CONTEXT_KEY_LENGTH,
-} from './home-recent-limits.ts';
+} from './home-recent.ts';
 
 // ============================================================
 // Config Directory

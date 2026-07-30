@@ -8,7 +8,14 @@ import { LOCALE_REGISTRY, type LanguageCode } from '../i18n/registry.ts';
 import {
   MAX_HOME_RECENT_APP_ID_LENGTH,
   MAX_HOME_RECENT_CONTEXT_KEY_LENGTH,
-} from './home-recent-limits.ts';
+  type HomeRecentAppPreference,
+  type HomeRecentAppsByContext,
+} from './home-recent.ts';
+export type {
+  HomeRecentAppKind,
+  HomeRecentAppPreference,
+  HomeRecentAppsByContext,
+} from './home-recent.ts';
 
 export interface UserLocation {
   city?: string;
@@ -26,16 +33,6 @@ export interface DiffViewerPreferences {
   /** Whether to disable background highlighting on changed lines */
   disableBackground?: boolean;
 }
-
-export type HomeRecentAppKind = 'builtin' | 'external' | 'organization';
-
-export interface HomeRecentAppPreference {
-  id: string;
-  kind: HomeRecentAppKind;
-  openedAt: number;
-}
-
-export type HomeRecentAppsByContext = Record<string, HomeRecentAppPreference[]>;
 
 export interface UserPreferences {
   name?: string;

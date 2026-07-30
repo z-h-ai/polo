@@ -13,8 +13,10 @@ import {
   setSessionDraft,
   deleteSessionDraft,
   getWorkspaceByNameOrId,
-  type HomeRecentAppPreference,
 } from '@polo-ai/shared/config'
+import type {
+  HomeRecentAppPreference,
+} from '@polo-ai/shared/config/home-recent'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
