@@ -6,6 +6,7 @@ import { getCredentialManager } from '@polo-ai/shared/credentials'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientConfirmDialog } from '@polo-ai/server-core/transport'
+import type { AdminSessionControl } from './admin'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.auth.LOGOUT,
@@ -14,7 +15,11 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.credentials.HEALTH_CHECK,
 ] as const
 
-export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void {
+export function registerAuthHandlers(
+  server: RpcServer,
+  deps: HandlerDeps,
+  adminSessions: AdminSessionControl,
+): void {
   // Show logout confirmation dialog (routed to client)
   server.handle(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION, async (ctx) => {
     const result = await requestClientConfirmDialog(server, ctx.clientId, {
@@ -50,25 +55,30 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
   // Logout - clear all credentials and config
   server.handle(RPC_CHANNELS.auth.LOGOUT, async () => {
     try {
-      const manager = getCredentialManager()
-      const adminTokens = await manager.getAdminTokens()
-      if (adminTokens) {
-        await deps.onAdminSessionEnding?.(adminTokens.userId)
-      }
+      const ended = await adminSessions.endCurrentSession(async manager => {
+        // Enumerate only inside the final session CAS. If account A's process
+        // cleanup races with a login to B, no credential belonging to B can be
+        // observed or deleted by this stale logout.
+        const allCredentials = await manager.list()
+        for (const credId of allCredentials) {
+          await manager.delete(credId)
+        }
 
-      // List and delete all stored credentials
-      const allCredentials = await manager.list()
-      for (const credId of allCredentials) {
-        await manager.delete(credId)
-      }
-
-      // Delete the config file
-      const configPath = join(homedir(), '.polo-ai', 'config.json')
-      await unlink(configPath).catch(() => {
-        // Ignore if file doesn't exist
+        const configPath = join(homedir(), '.polo-ai', 'config.json')
+        await unlink(configPath).catch(() => {
+          // Ignore if file doesn't exist
+        })
       })
+      if (ended === 'session_changed') {
+        return {
+          success: false,
+          errorCode: 'SESSION_CHANGED',
+          message: 'Admin session changed',
+        }
+      }
 
       deps.platform.logger.info('Logout complete - cleared all credentials and config')
+      return { success: true }
     } catch (error) {
       deps.platform.logger.error('Logout error:', error)
       throw error

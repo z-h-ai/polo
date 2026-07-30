@@ -30,8 +30,8 @@ export function registerCoreRpcHandlers(
   deps: HandlerDeps,
   serverCtx?: ServerHandlerContext,
 ): void {
-  registerAdminHandlers(server, deps)
-  registerAuthHandlers(server, deps)
+  const adminSessions = registerAdminHandlers(server, deps)
+  registerAuthHandlers(server, deps, adminSessions)
   registerAutomationsHandlers(server, deps)
   registerFilesHandlers(server, deps)
   registerLabelsHandlers(server, deps)

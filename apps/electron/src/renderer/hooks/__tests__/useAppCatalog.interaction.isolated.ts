@@ -503,4 +503,93 @@ describe('useAppCatalog scoped async state', () => {
       view.unmount()
     }
   })
+
+  it('reads the installed withdrawn app after 10,000 visible apps in a second batch', async () => {
+    const visibleApps = Array.from(
+      { length: 10_000 },
+      (_, index) => app('organization-a', `visible-${index}`),
+    )
+    const withdrawn = {
+      ...app('organization-a', 'installed-withdrawn'),
+      availability: 'withdrawn' as const,
+    }
+    const catalogResult = syncResult(
+      'organization-a',
+      'visible-plus-withdrawn',
+      visibleApps,
+    )
+    catalogResult.catalog.withdrawnApps = [withdrawn]
+    syncCatalog = mock(async () => catalogResult)
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: scope.catalogAppId === withdrawn.id ? 'running' : 'not_installed',
+      ...(scope.catalogAppId === withdrawn.id
+        ? { currentVersion: '1.0.0', runningVersion: '1.0.0' }
+        : {}),
+    })))
+
+    const view = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(Object.keys(view.result.current.state.statuses)).toHaveLength(10_001)
+    }, { timeout: 10_000 })
+
+    expect(getRuntimeStatuses.mock.calls.map(call => call[0].scopes.length))
+      .toEqual([10_000, 1])
+    expect(view.result.current.getStatus(withdrawn)).toMatchObject({
+      appId: 'installed-withdrawn',
+      status: 'running',
+      currentVersion: '1.0.0',
+    })
+    view.unmount()
+  })
+
+  it('reads the maximum retained tombstone boundary without truncation', async () => {
+    const visibleApps = Array.from(
+      { length: 10_000 },
+      (_, index) => app('organization-a', `visible-${index}`),
+    )
+    const withdrawnApps = Array.from(
+      { length: 10_000 },
+      (_, index) => ({
+        ...app('organization-a', `withdrawn-${index}`),
+        availability: 'withdrawn' as const,
+      }),
+    )
+    const catalogResult = syncResult(
+      'organization-a',
+      'maximum-tombstones',
+      visibleApps,
+    )
+    catalogResult.catalog.withdrawnApps = withdrawnApps
+    syncCatalog = mock(async () => catalogResult)
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: scope.catalogAppId === 'withdrawn-9999'
+        ? 'installed'
+        : 'not_installed',
+      ...(scope.catalogAppId === 'withdrawn-9999'
+        ? { currentVersion: '1.0.0' }
+        : {}),
+    })))
+
+    const view = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(Object.keys(view.result.current.state.statuses)).toHaveLength(20_000)
+    }, { timeout: 15_000 })
+
+    expect(getRuntimeStatuses.mock.calls.map(call => call[0].scopes.length))
+      .toEqual([10_000, 10_000])
+    expect(view.result.current.getStatus(withdrawnApps.at(-1)!)).toMatchObject({
+      appId: 'withdrawn-9999',
+      status: 'installed',
+      currentVersion: '1.0.0',
+    })
+    view.unmount()
+  })
 })

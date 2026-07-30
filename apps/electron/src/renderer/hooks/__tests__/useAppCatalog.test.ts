@@ -62,8 +62,13 @@ function bundleApp(id: string): CatalogApp {
 }
 
 describe('organization app runtime status selection', () => {
-  it('keeps 1,000, 1,001, and 10,000 item catalogs in the initial batch', () => {
-    for (const count of [1_000, 1_001, CATALOG_RUNTIME_STATUS_LIMIT]) {
+  it('keeps the complete catalog selection and leaves RPC chunking to the caller', () => {
+    for (const count of [
+      1_000,
+      1_001,
+      CATALOG_RUNTIME_STATUS_LIMIT,
+      CATALOG_RUNTIME_STATUS_LIMIT + 1,
+    ]) {
       const apps = Array.from(
         { length: count },
         (_, index) => bundleApp(`app-${index}`),

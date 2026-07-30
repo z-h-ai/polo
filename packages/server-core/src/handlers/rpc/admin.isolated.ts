@@ -234,6 +234,8 @@ const appCatalogCache = new Map<string, any>()
 const appCatalogAccess = new Map<string, string>()
 const adminSessionEnding = jest.fn(async (_accountId: string) => {})
 const adminSessionStarted = jest.fn(async (_accountId: string) => {})
+const listStoredCredentials = jest.fn(async () => ['admin-tokens', 'local-provider'])
+const deleteStoredCredential = jest.fn(async (_credentialId: string) => true)
 
 const mockCredentialManager = {
   async getAdminTokens(): Promise<StoredTokens | null> {
@@ -257,6 +259,8 @@ const mockCredentialManager = {
   isExpired(credential: { expiresAt?: number }): boolean {
     return typeof credential.expiresAt === 'number' && Date.now() > credential.expiresAt - 5 * 60 * 1000
   },
+  list: listStoredCredentials,
+  delete: deleteStoredCredential,
 }
 
 mock.module('@polo-ai/shared/admin', () => ({
@@ -401,6 +405,7 @@ mock.module('@polo-ai/shared/credentials', () => ({
 }))
 
 const { readApiKey, registerAdminHandlers } = await import('./admin')
+const { registerAuthHandlers } = await import('./auth')
 
 function createHarness() {
   const handlers = new Map<string, HandlerFn>()
@@ -443,7 +448,8 @@ function createHarness() {
     onAdminSessionStarted: adminSessionStarted,
   } satisfies HandlerDeps
 
-  registerAdminHandlers(server, deps)
+  const adminSessions = registerAdminHandlers(server, deps)
+  registerAuthHandlers(server, deps, adminSessions)
 
   return {
     login: requiredHandler(handlers, RPC_CHANNELS.admin.LOGIN),
@@ -457,6 +463,7 @@ function createHarness() {
     setPassword: requiredHandler(handlers, RPC_CHANNELS.admin.SET_PASSWORD),
     validate: requiredHandler(handlers, RPC_CHANNELS.admin.VALIDATE),
     logout: requiredHandler(handlers, RPC_CHANNELS.admin.LOGOUT),
+    authLogout: requiredHandler(handlers, RPC_CHANNELS.auth.LOGOUT),
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     syncAppCatalog: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_APP_CATALOG),
     listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
@@ -529,7 +536,11 @@ function createDeferred<T>() {
 beforeEach(() => {
   loggerWarn.mockClear()
   adminSessionEnding.mockClear()
+  adminSessionEnding.mockImplementation(async () => {})
   adminSessionStarted.mockClear()
+  adminSessionStarted.mockImplementation(async () => {})
+  listStoredCredentials.mockClear()
+  deleteStoredCredential.mockClear()
   adminClientCalls.length = 0
   configState.adminUrl = 'https://admin.example.com'
   configState.adminConfigVersion = undefined
@@ -613,6 +624,7 @@ describe('registerAdminHandlers', () => {
 
     expect(Object.keys(harness).sort()).toEqual([
       'acceptOrganizationJoin',
+      'authLogout',
       'cancelOrganizationInvitation',
       'createOrganization',
       'createOrganizationInvitation',
@@ -1404,8 +1416,8 @@ describe('registerAdminHandlers', () => {
     })
 
     expect(await accountAValidation).toMatchObject({
-      loggedIn: true,
-      user: { id: 'account-b' },
+      loggedIn: false,
+      errorCode: 'SESSION_CHANGED',
     })
     expect(managerState.tokens).toMatchObject({
       userId: 'account-b',
@@ -1461,6 +1473,224 @@ describe('registerAdminHandlers', () => {
       userId: 'user-1',
       accessToken: 'access-token',
     })
+  })
+
+  it('keeps account B intact when common logout for A finishes cleanup late', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    appCatalogAccess.set('account-b:organization-b', 'online')
+    appCatalogCache.set('account-b:organization-b', {
+      accountId: 'account-b',
+      organizationId: 'organization-b',
+      authorizationStatus: 'authorized',
+      apps: [],
+    })
+    const cleanupStarted = createDeferred<void>()
+    const finishCleanup = createDeferred<void>()
+    adminSessionEnding
+      .mockImplementationOnce(async () => {
+        cleanupStarted.resolve()
+        await finishCleanup.promise
+      })
+      .mockImplementation(async () => {})
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { authLogout, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const staleLogout = authLogout(context)
+    await cleanupStarted.promise
+    expect(await login(context, 'account-b', 'secret')).toMatchObject({
+      success: true,
+      user: { id: 'account-b' },
+    })
+    finishCleanup.resolve()
+
+    expect(await staleLogout).toEqual({
+      success: false,
+      errorCode: 'SESSION_CHANGED',
+      message: 'Admin session changed',
+    })
+    expect(managerState.tokens).toMatchObject({
+      userId: 'account-b',
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+    })
+    expect(appCatalogAccess.get('account-b:organization-b')).toBe('online')
+    expect(appCatalogCache.get('account-b:organization-b')).toMatchObject({
+      authorizationStatus: 'authorized',
+    })
+    expect(listStoredCredentials).not.toHaveBeenCalled()
+    expect(deleteStoredCredential).not.toHaveBeenCalled()
+  })
+
+  it('returns SESSION_CHANGED when account A offline validation loses the final CAS to B', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    const validationStarted = createDeferred<void>()
+    const pendingValidation = createDeferred<any>()
+    adminClientBehavior.validate = async () => {
+      validationStarted.resolve()
+      return pendingValidation.promise
+    }
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { validate, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const staleValidation = validate(context)
+    await validationStarted.promise
+    await login(context, 'account-b', 'secret')
+    pendingValidation.reject(new TestAdminError('offline', 'NETWORK_ERROR'))
+
+    expect(await staleValidation).toEqual({
+      loggedIn: false,
+      errorCode: 'SESSION_CHANGED',
+      message: 'Admin session changed',
+    })
+    expect(managerState.tokens).toMatchObject({ userId: 'account-b' })
+  })
+
+  it('returns SESSION_CHANGED when account A offline refresh loses the final CAS to B', async () => {
+    managerState.tokens = {
+      accessToken: 'expired-account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() - 1,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    const refreshStarted = createDeferred<void>()
+    const pendingRefresh = createDeferred<any>()
+    adminClientBehavior.refresh = async () => {
+      refreshStarted.resolve()
+      return pendingRefresh.promise
+    }
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { validate, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const staleValidation = validate(context)
+    await refreshStarted.promise
+    await login(context, 'account-b', 'secret')
+    pendingRefresh.reject(new TestAdminError('offline', 'NETWORK_ERROR'))
+
+    expect(await staleValidation).toEqual({
+      loggedIn: false,
+      errorCode: 'SESSION_CHANGED',
+      message: 'Admin session changed',
+    })
+    expect(managerState.tokens).toMatchObject({ userId: 'account-b' })
+  })
+
+  it('does not commit account A offline catalog after its refresh loses the CAS to B', async () => {
+    const organizationA = '11111111-1111-4111-8111-111111111111'
+    managerState.tokens = {
+      accessToken: 'expired-account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() - 1,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    appCatalogCache.set(`account-a:${organizationA}`, {
+      accountId: 'account-a',
+      organizationId: organizationA,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-a',
+      apps: [],
+    })
+    appCatalogAccess.set(`account-a:${organizationA}`, 'online')
+    appCatalogAccess.set('account-b:organization-b', 'online')
+    const refreshStarted = createDeferred<void>()
+    const pendingRefresh = createDeferred<any>()
+    adminClientBehavior.refresh = async () => {
+      refreshStarted.resolve()
+      return pendingRefresh.promise
+    }
+    adminClientBehavior.login = async () => ({
+      accessToken: 'account-b-token',
+      refreshToken: 'account-b-refresh',
+      expiresIn: 3600,
+      user: {
+        id: 'account-b',
+        username: 'account-b',
+        displayName: 'Account B',
+        role: 'member',
+        groupIds: [],
+      },
+    })
+    const { syncAppCatalog, login } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const staleSync = syncAppCatalog(context, organizationA, { force: true })
+    await refreshStarted.promise
+    await login(context, 'account-b', 'secret')
+    pendingRefresh.reject(new TestAdminError('offline', 'NETWORK_ERROR'))
+
+    expect(await staleSync).toEqual({
+      success: false,
+      errorCode: 'SESSION_CHANGED',
+      message: 'Admin session changed',
+    })
+    expect(managerState.tokens).toMatchObject({ userId: 'account-b' })
+    expect(appCatalogAccess.get(`account-a:${organizationA}`)).toBe('denied')
+    expect(appCatalogAccess.get('account-b:organization-b')).toBe('online')
   })
 
   it('fails closed without replacing credentials when old-account cleanup fails', async () => {
@@ -1902,6 +2132,97 @@ describe('registerAdminHandlers', () => {
     })
   })
 
+  it('does not let an older catalog response overwrite a newer committed catalog', async () => {
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v0',
+      syncedAt: 50,
+      apps: [],
+    })
+    const v1 = createDeferred<any>()
+    const v2 = createDeferred<any>()
+    const requestStarted = [
+      createDeferred<void>(),
+      createDeferred<void>(),
+    ]
+    let requestIndex = 0
+    adminClientBehavior.getAppCatalog = async () => {
+      const index = requestIndex++
+      requestStarted[index]!.resolve()
+      return index === 0 ? v1.promise : v2.promise
+    }
+    const { syncAppCatalog } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const older = syncAppCatalog(context, organizationId, { force: true })
+    await requestStarted[0]!.promise
+    const newer = syncAppCatalog(context, organizationId, { force: true })
+    await requestStarted[1]!.promise
+    v2.resolve({
+      notModified: false,
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'new-app',
+        organizationId,
+        name: 'New app',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://new.example.com',
+        sortOrder: 0,
+      }],
+    })
+    expect(await newer).toMatchObject({
+      success: true,
+      catalog: {
+        appConfigVersion: 'apps-v2',
+        apps: [{ id: 'new-app' }],
+      },
+    })
+
+    v1.resolve({
+      notModified: false,
+      appConfigVersion: 'apps-v1',
+      apps: [{
+        id: 'withdrawn-old-app',
+        organizationId,
+        name: 'Old app',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://old.example.com',
+        sortOrder: 0,
+      }],
+    })
+    expect(await older).toMatchObject({
+      success: true,
+      source: 'cache',
+      refreshed: false,
+      catalog: {
+        appConfigVersion: 'apps-v2',
+        apps: [{ id: 'new-app' }],
+      },
+    })
+    expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
+      appConfigVersion: 'apps-v2',
+      authorizationStatus: 'authorized',
+      apps: [{ id: 'new-app' }],
+    })
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('online')
+  })
+
   it('keeps the last app catalog when a non-auth refresh fails', async () => {
     const organizationId = '11111111-1111-4111-8111-111111111111'
     managerState.tokens = {
@@ -1914,6 +2235,7 @@ describe('registerAdminHandlers', () => {
     const cached = {
       accountId: 'user-1',
       organizationId,
+      authorizationStatus: 'authorized',
       appConfigVersion: 'apps-v1',
       syncedAt: 50,
       apps: [],

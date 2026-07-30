@@ -64,15 +64,14 @@ export function selectRuntimeStatusApps(
   busyScopeKeys?: ReadonlySet<string>,
   scopeKeyForApp: (app: CatalogApp) => string = app => app.id,
 ): CatalogApp[] {
-  const limit = busyScopeKeys
-    ? BUSY_RUNTIME_STATUS_LIMIT
-    : CATALOG_RUNTIME_STATUS_LIMIT
-  return apps
+  const selected = apps
     .filter(app => (
       app.deliveryMode === 'local_bundle'
       && (!busyScopeKeys || busyScopeKeys.has(scopeKeyForApp(app)))
     ))
-    .slice(0, limit)
+  return busyScopeKeys
+    ? selected.slice(0, BUSY_RUNTIME_STATUS_LIMIT)
+    : selected
 }
 
 function scopeForCatalogApp(
@@ -186,7 +185,13 @@ export function useAppCatalog() {
     const scopes = selectedApps.map(app => scopeForCatalogApp(catalog, app))
     let statuses: LocalAppRuntimeStatus[]
     try {
-      statuses = await window.electronAPI.localApps.getRuntimeStatuses({ scopes })
+      statuses = []
+      for (let offset = 0; offset < scopes.length; offset += CATALOG_RUNTIME_STATUS_LIMIT) {
+        const batch = scopes.slice(offset, offset + CATALOG_RUNTIME_STATUS_LIMIT)
+        statuses.push(
+          ...await window.electronAPI.localApps.getRuntimeStatuses({ scopes: batch }),
+        )
+      }
     } catch {
       statuses = scopes.map(scope => ({
         appId: scope.catalogAppId,

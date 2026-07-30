@@ -131,6 +131,12 @@ function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; stat
   return result.errorCode === 'TOKEN_REVOKED'
 }
 
+function isAdminSessionChangedResult(
+  result: { loggedIn?: boolean; errorCode?: string },
+): boolean {
+  return result.loggedIn === false && result.errorCode === 'SESSION_CHANGED'
+}
+
 function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
   return result.errorCode === 'ACCOUNT_DISABLED'
     || (result.status === 403 && /disabled|禁用/i.test(result.message ?? ''))
@@ -857,7 +863,10 @@ export default function App() {
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
-    const validation = await window.electronAPI.adminValidate()
+    let validation = await window.electronAPI.adminValidate()
+    if (isAdminSessionChangedResult(validation)) {
+      validation = await window.electronAPI.adminValidate()
+    }
     if (!validation.loggedIn && isAdminKickedResult(validation)) {
       enterAdminKicked()
       return
@@ -922,7 +931,10 @@ export default function App() {
         let signedInAccountId: string | null = null
 
         if (adminStatus.adminUrl) {
-          const validation = await window.electronAPI.adminValidate()
+          let validation = await window.electronAPI.adminValidate()
+          if (isAdminSessionChangedResult(validation)) {
+            validation = await window.electronAPI.adminValidate()
+          }
           if (!isCurrentInitialization()) return
           if (!validation.loggedIn) {
             startupInitializationHandlersRef.current.handleAdminAuthFailure(validation)
