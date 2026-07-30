@@ -508,6 +508,7 @@
   "homeApps.errors.offlineInstall": "离线时不能安装或更新组织应用。",
   "homeApps.errors.openGeneric": "无法打开应用。",
   "homeApps.errors.openTitle": "无法打开 {{name}}",
+  "homeApps.errors.releaseChanged": "应用发布版本已变更，请确认更新后的版本再安装。",
   "homeApps.errors.releaseUnavailable": "发布版本或设备信息不可用。",
   "homeApps.errors.staleContext": "当前组织应用上下文已失效。",
   "homeApps.errors.statusReadFailed": "部分应用状态刷新失败。",

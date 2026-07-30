@@ -100,8 +100,21 @@ export interface LocalAppInstallRequest {
   arch: LocalAppArchitecture
 }
 
+export interface LocalAppCatalogReleaseFingerprint {
+  version: string
+  checksum: string
+  sizeBytes: number
+  platform: LocalAppPlatform | null
+  arch: LocalAppArchitecture | null
+}
+
 export interface LocalAppCatalogInstallRequest {
   scope: CatalogLocalAppScope
+  /**
+   * Exact Release metadata shown in the renderer confirmation dialog. Main
+   * compares it with the currently authorized Catalog before downloading.
+   */
+  release: LocalAppCatalogReleaseFingerprint
 }
 
 export interface LocalAppLegacyInstallRequest extends LocalAppInstallRequest {
@@ -204,6 +217,7 @@ export type LocalAppErrorCode =
   | 'UNSAFE_ARCHIVE'
   | 'RUNTIME_UNAVAILABLE'
   | 'DEPENDENCY_INSTALL_FAILED'
+  | 'RELEASE_CHANGED'
   | 'NOT_AUTHORIZED'
   | 'NOT_INSTALLED'
   | 'START_FAILED'

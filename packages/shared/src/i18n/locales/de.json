@@ -508,6 +508,7 @@
   "homeApps.errors.offlineInstall": "Organisations-Apps können offline nicht installiert oder aktualisiert werden.",
   "homeApps.errors.openGeneric": "Die App konnte nicht geöffnet werden.",
   "homeApps.errors.openTitle": "{{name}} konnte nicht geöffnet werden",
+  "homeApps.errors.releaseChanged": "Diese App-Version wurde geändert. Prüfe die aktualisierte Version vor der Installation.",
   "homeApps.errors.releaseUnavailable": "Versions- oder Geräteinformationen sind nicht verfügbar.",
   "homeApps.errors.staleContext": "Der Kontext der Organisations-App ist nicht mehr aktuell.",
   "homeApps.errors.statusReadFailed": "Einige App-Status konnten nicht aktualisiert werden.",

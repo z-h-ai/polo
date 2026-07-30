@@ -472,8 +472,17 @@ export class AdminClient {
     ) {
       const refreshToken = await this.tokenStore.getRefreshToken();
       if (refreshToken) {
-        const refreshed = await this.refresh(refreshToken);
-        await this.tokenStore.onTokensRefreshed?.(refreshed);
+        const originalAuthenticationError = this.createError(response, data);
+        let refreshed: AdminRefreshResponse;
+        try {
+          refreshed = await this.refresh(refreshToken);
+          await this.tokenStore.onTokensRefreshed?.(refreshed);
+        } catch {
+          // A protected endpoint has already provided a definitive
+          // authentication result. A refresh transport/service failure must
+          // not overwrite that 401 and turn it into restricted offline access.
+          throw originalAuthenticationError;
+        }
         return this.request<T>(path, {
           ...options,
           accessToken: refreshed.accessToken,

@@ -508,6 +508,7 @@
   "homeApps.errors.offlineInstall": "No se pueden instalar ni actualizar aplicaciones de la organización sin conexión.",
   "homeApps.errors.openGeneric": "No se pudo abrir la aplicación.",
   "homeApps.errors.openTitle": "No se pudo abrir {{name}}",
+  "homeApps.errors.releaseChanged": "Esta versión de la aplicación ha cambiado. Revisa la versión actualizada antes de instalarla.",
   "homeApps.errors.releaseUnavailable": "La información de la versión o del dispositivo no está disponible.",
   "homeApps.errors.staleContext": "El contexto de la aplicación de la organización ya no está actualizado.",
   "homeApps.errors.statusReadFailed": "No se pudieron actualizar algunos estados de las aplicaciones.",

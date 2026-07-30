@@ -555,8 +555,25 @@ export function useAppCatalog() {
         },
       }))
       try {
-        await window.electronAPI.localApps.install({ scope })
+        await window.electronAPI.localApps.install({
+          scope,
+          release: {
+            version: release.version,
+            checksum: release.checksum,
+            sizeBytes: release.sizeBytes,
+            platform: release.platform ?? null,
+            arch: release.arch ?? null,
+          },
+        })
         requireCurrent(snapshot)
+      } catch (error) {
+        if (
+          getHomeAppErrorCode(error) === 'RELEASE_CHANGED'
+          && isCurrentSnapshot(snapshot)
+        ) {
+          await sync(true)
+        }
+        throw error
       } finally {
         if (isCurrentSnapshot(snapshot)) {
           await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
@@ -571,6 +588,7 @@ export function useAppCatalog() {
     runExclusive,
     state.accessMode,
     state.host,
+    sync,
   ])
 
   const start = useCallback((app: CatalogApp): Promise<LocalAppStartResult> => {

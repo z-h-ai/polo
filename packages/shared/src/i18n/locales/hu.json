@@ -508,6 +508,7 @@
   "homeApps.errors.offlineInstall": "Offline állapotban a szervezeti alkalmazások nem telepíthetők és nem frissíthetők.",
   "homeApps.errors.openGeneric": "Az alkalmazás nem nyitható meg.",
   "homeApps.errors.openTitle": "A(z) {{name}} nem nyitható meg",
+  "homeApps.errors.releaseChanged": "Az alkalmazás kiadása megváltozott. Telepítés előtt ellenőrizd a frissített kiadást.",
   "homeApps.errors.releaseUnavailable": "A kiadás vagy az eszköz adatai nem érhetők el.",
   "homeApps.errors.staleContext": "A szervezeti alkalmazás környezete már nem aktuális.",
   "homeApps.errors.statusReadFailed": "Néhány alkalmazás állapota nem frissíthető.",

@@ -508,6 +508,7 @@
   "homeApps.errors.offlineInstall": "オフライン中は組織アプリをインストールまたは更新できません。",
   "homeApps.errors.openGeneric": "アプリを開けませんでした。",
   "homeApps.errors.openTitle": "{{name}} を開けませんでした",
+  "homeApps.errors.releaseChanged": "アプリのリリースが変更されました。インストール前に更新後のリリースを確認してください。",
   "homeApps.errors.releaseUnavailable": "リリースまたはデバイス情報を利用できません。",
   "homeApps.errors.staleContext": "組織アプリのコンテキストは最新ではありません。",
   "homeApps.errors.statusReadFailed": "一部のアプリの状態を更新できませんでした。",

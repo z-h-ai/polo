@@ -200,6 +200,16 @@ function scope(catalogAppId = '应用.App-ID'): CatalogLocalAppScope {
   }
 }
 
+function confirmedRelease() {
+  return {
+    version: 'v1.2.3',
+    checksum: 'a'.repeat(64),
+    sizeBytes: 321,
+    platform: 'darwin' as const,
+    arch: 'arm64' as const,
+  }
+}
+
 describe('local app main-process authorization boundary', () => {
   const handlers = new Map<string, Handler>()
   const context = {
@@ -251,10 +261,8 @@ describe('local app main-process authorization boundary', () => {
     const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
     await install(context, {
       scope: scope(),
-      version: '9.9.9',
+      release: confirmedRelease(),
       downloadUrl: 'https://attacker.example/bundle.zip',
-      checksum: 'b'.repeat(64),
-      sizeBytes: 999,
     })
 
     expect(scopedInstall).toHaveBeenCalledWith({
@@ -266,6 +274,25 @@ describe('local app main-process authorization boundary', () => {
       platform: 'darwin',
       arch: 'arm64',
     }, { signal: context.signal })
+  })
+
+  it('rejects every stale confirmed Release fingerprint before download', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    const staleFingerprints = [
+      { ...confirmedRelease(), version: '1.2.2' },
+      { ...confirmedRelease(), checksum: 'b'.repeat(64) },
+      { ...confirmedRelease(), sizeBytes: 322 },
+      { ...confirmedRelease(), platform: null },
+      { ...confirmedRelease(), arch: null },
+    ]
+
+    for (const release of staleFingerprints) {
+      await expect(install(context, {
+        scope: scope(),
+        release,
+      })).rejects.toMatchObject({ code: 'RELEASE_CHANGED' })
+    }
+    expect(scopedInstall).not.toHaveBeenCalled()
   })
 
   it('derives update state in main and preserves trusted metadata for invalid versions', async () => {

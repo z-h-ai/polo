@@ -508,6 +508,7 @@
   "homeApps.errors.offlineInstall": "W trybie offline nie można instalować ani aktualizować aplikacji organizacji.",
   "homeApps.errors.openGeneric": "Nie udało się otworzyć aplikacji.",
   "homeApps.errors.openTitle": "Nie udało się otworzyć {{name}}",
+  "homeApps.errors.releaseChanged": "Wydanie aplikacji uległo zmianie. Przed instalacją sprawdź zaktualizowane wydanie.",
   "homeApps.errors.releaseUnavailable": "Informacje o wydaniu lub urządzeniu są niedostępne.",
   "homeApps.errors.staleContext": "Kontekst aplikacji organizacji jest już nieaktualny.",
   "homeApps.errors.statusReadFailed": "Nie udało się odświeżyć części stanów aplikacji.",

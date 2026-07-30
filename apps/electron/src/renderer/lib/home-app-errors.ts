@@ -33,6 +33,9 @@ export function homeAppOperationErrorText(
   if (code === 'INSTALL_CANCELLED') {
     return t('homeApps.errors.installCancelled')
   }
+  if (code === 'RELEASE_CHANGED') {
+    return t('homeApps.errors.releaseChanged')
+  }
   if (code === 'NOT_INSTALLED') {
     return t('homeApps.errors.notInstalled')
   }

@@ -508,6 +508,7 @@
   "homeApps.errors.offlineInstall": "Installing and updating organization apps is unavailable while offline.",
   "homeApps.errors.openGeneric": "Could not open the app.",
   "homeApps.errors.openTitle": "Could not open {{name}}",
+  "homeApps.errors.releaseChanged": "This app release changed. Review the updated release before installing.",
   "homeApps.errors.releaseUnavailable": "Release or device information is unavailable.",
   "homeApps.errors.staleContext": "The organization app context is no longer current.",
   "homeApps.errors.statusReadFailed": "Some app statuses could not be refreshed.",

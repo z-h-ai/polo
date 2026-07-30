@@ -128,6 +128,11 @@ describe('HomePage round-two regressions', () => {
       { code: 'UNINSTALL_FAILED', message: secret },
       'uninstall',
     )).toBe('无法卸载应用。')
+    expect(homeAppOperationErrorText(
+      i18n.t.bind(i18n),
+      { code: 'RELEASE_CHANGED', message: secret },
+      'install',
+    )).toBe('应用发布版本已变更，请确认更新后的版本再安装。')
     expect(catalogStateMessage(
       i18n.t.bind(i18n),
       'NETWORK_ERROR',

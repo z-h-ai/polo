@@ -234,6 +234,17 @@ export function registerAdminHandlers(
   const sessions = new AdminSessionCoordinator()
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
+  const appCatalogAuthorizationEpochByScope = new Map<string, number>()
+  const appCatalogScopeKey = (accountId: string, organizationId: string) =>
+    `${accountId}\0${organizationId}`
+  const currentAppCatalogAuthorizationEpoch = (scopeKey: string) =>
+    appCatalogAuthorizationEpochByScope.get(scopeKey) ?? 0
+  const advanceAppCatalogAuthorizationEpoch = (scopeKey: string) => {
+    appCatalogAuthorizationEpochByScope.set(
+      scopeKey,
+      currentAppCatalogAuthorizationEpoch(scopeKey) + 1,
+    )
+  }
   const callOrganization = async <T extends object>(
     operation: string,
     callback: (client: AdminClient, accessToken: string) => Promise<T>,
@@ -737,11 +748,14 @@ export function registerAdminHandlers(
       const requestContext: AdminRequestContext = {
         session: tokenResult.session,
       }
-      const catalogSyncKey = `${accountId}\0${organizationId.data}`
+      const catalogSyncKey = appCatalogScopeKey(accountId, organizationId.data)
       const registeredRequest = await sessions.mutateIfCurrent(
         manager,
         requestContext.session,
         async () => {
+          if (!appCatalogAuthorizationEpochByScope.has(catalogSyncKey)) {
+            appCatalogAuthorizationEpochByScope.set(catalogSyncKey, 0)
+          }
           latestAppCatalogSyncByScope.set(
             catalogSyncKey,
             Math.max(
@@ -749,11 +763,16 @@ export function registerAdminHandlers(
               syncInvocation,
             ),
           )
+          return currentAppCatalogAuthorizationEpoch(catalogSyncKey)
         },
       )
       if (!registeredRequest.applied) return staleAdminSessionResult()
-      const isLatestCatalogSync = () =>
+      const registeredAuthorizationEpoch = registeredRequest.value!
+      const isCurrentCatalogSync = () => (
         latestAppCatalogSyncByScope.get(catalogSyncKey) === syncInvocation
+        && currentAppCatalogAuthorizationEpoch(catalogSyncKey)
+          === registeredAuthorizationEpoch
+      )
       const supersededCatalogResult = (): AppCatalogSyncResult => ({
         success: false,
         errorCode: 'REQUEST_SUPERSEDED',
@@ -765,7 +784,7 @@ export function registerAdminHandlers(
           manager,
           requestContext.session,
           async (): Promise<AppCatalogSyncResult> => {
-            if (!isLatestCatalogSync()) return supersededCatalogResult()
+            if (!isCurrentCatalogSync()) return supersededCatalogResult()
             setAppCatalogAccessMode(accountId, organizationId.data, 'offline')
             const current = getCachedAppCatalog(accountId, organizationId.data)
             if (current?.authorizationStatus === 'authorized') {
@@ -829,7 +848,7 @@ export function registerAdminHandlers(
           manager,
           requestContext.session,
           async (): Promise<AppCatalogSyncResult> => {
-            if (!isLatestCatalogSync()) return supersededCatalogResult()
+            if (!isCurrentCatalogSync()) return supersededCatalogResult()
             if (result.notModified) {
               if (!cached) {
                 throw new AdminError(
@@ -882,14 +901,14 @@ export function registerAdminHandlers(
             sessions,
             requestContext.session,
             undefined,
-            isLatestCatalogSync,
+            isCurrentCatalogSync,
           )
           if (!ended) {
             const current = await sessions.mutateIfCurrent(
               manager,
               requestContext.session,
               async () => (
-                isLatestCatalogSync()
+                isCurrentCatalogSync()
                   ? staleAdminSessionResult()
                   : supersededCatalogResult()
               ),
@@ -905,7 +924,7 @@ export function registerAdminHandlers(
             manager,
             requestContext.session,
             async (): Promise<AppCatalogSyncResult> => {
-              if (!isLatestCatalogSync()) return supersededCatalogResult()
+              if (!isCurrentCatalogSync()) return supersededCatalogResult()
               denyCachedAppCatalogAuthorization(
                 accountId,
                 organizationId.data,
@@ -926,7 +945,7 @@ export function registerAdminHandlers(
             manager,
             requestContext.session,
             async (): Promise<AppCatalogSyncResult> => {
-              if (!isLatestCatalogSync()) return supersededCatalogResult()
+              if (!isCurrentCatalogSync()) return supersededCatalogResult()
               setAppCatalogAccessMode(
                 accountId,
                 organizationId.data,
@@ -955,7 +974,7 @@ export function registerAdminHandlers(
           manager,
           requestContext.session,
           async (): Promise<AppCatalogSyncResult> => (
-            isLatestCatalogSync()
+            isCurrentCatalogSync()
               ? { success: false, ...adminError }
               : supersededCatalogResult()
           ),
@@ -978,15 +997,27 @@ export function registerAdminHandlers(
             && organization.membership.status === 'active'
           ))
           .map(organization => organization.id))
-        for (const cached of listCachedAppCatalogs(session.tokens.userId)) {
-          if (activeOrganizationIds.has(cached.organizationId)) continue
+        const accountId = session.tokens.userId
+        const scopedOrganizationIds = new Set(
+          listCachedAppCatalogs(accountId).map(cached => cached.organizationId),
+        )
+        const scopePrefix = `${accountId}\0`
+        for (const scopeKey of appCatalogAuthorizationEpochByScope.keys()) {
+          if (scopeKey.startsWith(scopePrefix)) {
+            scopedOrganizationIds.add(scopeKey.slice(scopePrefix.length))
+          }
+        }
+        for (const organizationId of scopedOrganizationIds) {
+          if (activeOrganizationIds.has(organizationId)) continue
+          const scopeKey = appCatalogScopeKey(accountId, organizationId)
+          advanceAppCatalogAuthorizationEpoch(scopeKey)
           denyCachedAppCatalogAuthorization(
-            session.tokens.userId,
-            cached.organizationId,
+            accountId,
+            organizationId,
           )
           setAppCatalogAccessMode(
-            session.tokens.userId,
-            cached.organizationId,
+            accountId,
+            organizationId,
             'denied',
           )
         }

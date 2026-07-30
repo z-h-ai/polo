@@ -12,6 +12,7 @@ import type {
   LegacyLocalAppScope,
   LocalAppAvailableRelease,
   LocalAppBatchStatusRequest,
+  LocalAppCatalogInstallRequest,
   LocalAppLegacyInstallRequest,
   LocalAppLogsOptions,
   LocalAppReference,
@@ -133,6 +134,21 @@ function hostArchitecture(): 'arm64' | 'x64' {
 
 function normalizedCatalogVersion(version: string): string | null {
   return valid(version.trim().replace(/^v(?=\d)/i, ''), { loose: false })
+}
+
+function matchesConfirmedRelease(
+  request: LocalAppCatalogInstallRequest,
+  release: AppReleaseSummary,
+): boolean {
+  const confirmed = request.release
+  return Boolean(
+    confirmed
+    && confirmed.version === release.version
+    && confirmed.checksum === release.checksum
+    && confirmed.sizeBytes === release.sizeBytes
+    && confirmed.platform === (release.platform ?? null)
+    && confirmed.arch === (release.arch ?? null),
+  )
 }
 
 function clearCatalogUpdateState(
@@ -268,6 +284,15 @@ export function registerLocalAppHandlers(server: RpcServer): void {
         )
       }
       const release = app.currentRelease
+      if (!matchesConfirmedRelease(
+        rawRequest as LocalAppCatalogInstallRequest,
+        release,
+      )) {
+        throw new LocalAppRuntimeError(
+          'RELEASE_CHANGED',
+          'The authorized Catalog release changed after confirmation',
+        )
+      }
       if (!normalizedCatalogVersion(release.version)) {
         throw new LocalAppRuntimeError(
           'INVALID_REQUEST',

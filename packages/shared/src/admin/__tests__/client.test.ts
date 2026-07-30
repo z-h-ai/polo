@@ -658,6 +658,74 @@ describe('AdminClient', () => {
     expect((fetchCalls[2]!.init.headers as Record<string, string>).Authorization).toBe('Bearer fresh-access-token');
   });
 
+  it('preserves protected 401 when VALIDATE refresh is unreachable or Catalog refresh returns 5xx', async () => {
+    for (const testCase of [
+      {
+        name: 'validate-network',
+        protectedPath: '/api/auth/validate',
+        invoke: (client: AdminClient) => client.validate('locally-unexpired-token'),
+        refreshResponse: null,
+      },
+      {
+        name: 'catalog-5xx',
+        protectedPath: '/api/apps?',
+        invoke: (client: AdminClient) => client.getAppCatalog(
+          'locally-unexpired-token',
+          'organization-1',
+        ),
+        refreshResponse: new Response(JSON.stringify({
+          errorCode: 'SERVER_ERROR',
+          message: 'temporarily unavailable',
+        }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      },
+    ]) {
+      fetchCalls = [];
+      globalThis.fetch = (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const url = typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        fetchCalls.push({ url, init: init ?? {} });
+        if (url.endsWith('/api/auth/refresh')) {
+          if (!testCase.refreshResponse) {
+            throw new TypeError('network disconnected');
+          }
+          return testCase.refreshResponse.clone();
+        }
+        expect(url).toContain(testCase.protectedPath);
+        return new Response(JSON.stringify({
+          errorCode: 'TOKEN_REVOKED',
+          message: 'definitive protected endpoint rejection',
+        }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+      const client = new AdminClient('https://admin.example.com', {
+        tokenStore: {
+          getRefreshToken: () => 'refresh-token',
+        },
+      });
+
+      await expect(testCase.invoke(client)).rejects.toMatchObject({
+        errorCode: 'TOKEN_REVOKED',
+        status: 401,
+        message: 'Admin session is no longer valid',
+      });
+      expect(fetchCalls.map(call => call.url)).toHaveLength(2);
+      expect(fetchCalls[1]!.url).toBe(
+        'https://admin.example.com/api/auth/refresh',
+      );
+    }
+  });
+
   it('lists organizations and strips fields outside the client contract', async () => {
     mockJsonFetch({
       organizations: [{

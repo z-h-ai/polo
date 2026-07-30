@@ -1941,6 +1941,50 @@ describe('registerAdminHandlers', () => {
     )
   })
 
+  it('ends a locally unexpired session when VALIDATE preserves its protected 401', async () => {
+    const organizationId = 'organization-protected-validate-401'
+    managerState.tokens = {
+      accessToken: 'locally-unexpired-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      apps: [{ id: 'remote-app', availability: 'available' }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    adminClientBehavior.validate = async () => {
+      throw new TestAdminError(
+        'protected endpoint rejected the token',
+        'TOKEN_REVOKED',
+        { status: 401 },
+      )
+    }
+    const { validate } = createHarness()
+
+    expect(await validate({
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    })).toEqual({
+      loggedIn: false,
+      errorCode: 'TOKEN_REVOKED',
+      message: 'Admin session is no longer valid',
+      status: 401,
+    })
+    expect(managerState.tokens).toBeNull()
+    expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(appCatalogCache.get(`user-1:${organizationId}`))
+      .toMatchObject({ authorizationStatus: 'denied' })
+    expect(adminClientCalls.map(call => call.method)).toEqual(['validate'])
+  })
+
   it('fails closed when an expired-token refresh returns a non-temporary client error', async () => {
     const cases = [
       { errorCode: 'BAD_REQUEST', status: 400 },
@@ -2290,6 +2334,82 @@ describe('registerAdminHandlers', () => {
     expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('online')
   })
 
+  it('does not let a pending Catalog response reopen an organization removed by a newer list', async () => {
+    const organizationId = '14444444-4444-4444-8444-444444444444'
+    managerState.tokens = {
+      accessToken: 'locally-unexpired-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v0',
+      syncedAt: 50,
+      apps: [{
+        id: 'cached-app',
+        organizationId,
+        deliveryMode: 'remote_url',
+        availability: 'available',
+      }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    const pendingCatalog = createDeferred<any>()
+    const catalogStarted = createDeferred<void>()
+    adminClientBehavior.getAppCatalog = async () => {
+      catalogStarted.resolve()
+      return pendingCatalog.promise
+    }
+    adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
+    const { listOrganizations, syncAppCatalog } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    const oldCatalogRequest = syncAppCatalog(
+      context,
+      organizationId,
+      { force: true },
+    )
+    await catalogStarted.promise
+    expect(await listOrganizations(context)).toMatchObject({ success: true })
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+
+    pendingCatalog.resolve({
+      notModified: false,
+      appConfigVersion: 'apps-v1',
+      apps: [{
+        id: 'stale-reopened-app',
+        organizationId,
+        name: 'Stale app',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://stale.example.com',
+        sortOrder: 0,
+      }],
+    })
+
+    expect(await oldCatalogRequest).toEqual({
+      success: false,
+      errorCode: 'REQUEST_SUPERSEDED',
+      message: 'A newer app catalog sync replaced this request',
+    })
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
+      appConfigVersion: 'apps-v0',
+      authorizationStatus: 'denied',
+      apps: [{
+        id: 'cached-app',
+        availability: 'unavailable',
+      }],
+    })
+  })
+
   it('keeps the last app catalog when a non-auth refresh fails', async () => {
     const organizationId = '11111111-1111-4111-8111-111111111111'
     managerState.tokens = {
@@ -2387,6 +2507,57 @@ describe('registerAdminHandlers', () => {
       expect.stringContaining('continuing fail-closed cleanup'),
       'controlled local stop failure',
     )
+  })
+
+  it('ends a locally unexpired session when Catalog preserves its protected 401', async () => {
+    const organizationId = '15555555-5555-4555-8555-555555555555'
+    managerState.tokens = {
+      accessToken: 'locally-unexpired-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [{
+        id: 'private-app',
+        organizationId,
+        deliveryMode: 'local_bundle',
+        availability: 'available',
+      }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    adminClientBehavior.getAppCatalog = async () => {
+      throw new TestAdminError(
+        'protected endpoint rejected the token',
+        'TOKEN_REVOKED',
+        { status: 401 },
+      )
+    }
+    const { syncAppCatalog } = createHarness()
+
+    expect(await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      { force: true },
+    )).toMatchObject({
+      success: false,
+      errorCode: 'TOKEN_REVOKED',
+      status: 401,
+    })
+    expect(managerState.tokens).toBeNull()
+    expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+    expect(appCatalogCache.get(`user-1:${organizationId}`)).toMatchObject({
+      authorizationStatus: 'denied',
+      apps: [{ availability: 'unavailable' }],
+    })
+    expect(adminClientCalls.map(call => call.method)).toEqual(['getAppCatalog'])
   })
 
   it('denies cached catalog access for semantic membership loss on non-403 statuses', async () => {

@@ -14,6 +14,7 @@ import type {
 } from '@polo-ai/shared/admin'
 import type {
   CatalogLocalAppScope,
+  LocalAppCatalogInstallRequest,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
@@ -109,7 +110,7 @@ let startLocalApp = mock(async (
   port: 9876,
 }))
 let installLocalApp = mock(async (
-  _request: { scope: CatalogLocalAppScope },
+  _request: LocalAppCatalogInstallRequest,
 ): Promise<void> => {})
 let cancelInstall = mock(async (
   _scope: CatalogLocalAppScope,
@@ -178,7 +179,7 @@ beforeEach(() => {
     port: 9876,
   }))
   installLocalApp = mock(async (
-    _request: { scope: CatalogLocalAppScope },
+    _request: LocalAppCatalogInstallRequest,
   ): Promise<void> => {})
   cancelInstall = mock(async (
     _scope: CatalogLocalAppScope,
@@ -205,7 +206,7 @@ beforeEach(() => {
         setAvailableRelease: (
           scope: CatalogLocalAppScope,
         ) => setAvailableRelease(scope),
-        install: (request: { scope: CatalogLocalAppScope }) =>
+        install: (request: LocalAppCatalogInstallRequest) =>
           installLocalApp(request),
         cancelInstall: (scope: CatalogLocalAppScope) => cancelInstall(scope),
         start: (scope: CatalogLocalAppScope) => startLocalApp(scope),
@@ -469,6 +470,85 @@ describe('useAppCatalog scoped async state', () => {
       catalogAppId: 'shared-app-id',
     }))
     expect(result.current.getStatus(catalogApp)?.status).toBe('not_installed')
+  })
+
+  it('refreshes a changed Release and requires confirmation of the new fingerprint', async () => {
+    const releaseA: CatalogApp = {
+      ...app('organization-a'),
+      currentRelease: {
+        version: '1.0.0',
+        runtime: 'static',
+        downloadUrl: 'https://example.com/a.zip',
+        checksum: 'a'.repeat(64),
+        sizeBytes: 100,
+        platform: 'darwin',
+        arch: 'arm64',
+      },
+    }
+    const releaseB: CatalogApp = {
+      ...releaseA,
+      currentRelease: {
+        ...releaseA.currentRelease!,
+        version: '2.0.0',
+        downloadUrl: 'https://example.com/b.zip',
+        checksum: 'b'.repeat(64),
+        sizeBytes: 200,
+      },
+    }
+    let syncCount = 0
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
+      syncCount += 1
+      return syncResult(
+        'organization-a',
+        syncCount === 1 ? 'release-a' : 'release-b',
+        [syncCount === 1 ? releaseA : releaseB],
+      )
+    })
+    installLocalApp = mock(async () => {
+      throw Object.assign(new Error('Release changed'), {
+        code: 'RELEASE_CHANGED',
+      })
+    })
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('release-a')
+      expect(result.current.state.host).not.toBeNull()
+    })
+    const confirmedApp = result.current.state.catalog!.apps[0]!
+
+    await act(async () => {
+      await expect(result.current.install(confirmedApp)).rejects.toMatchObject({
+        code: 'RELEASE_CHANGED',
+      })
+    })
+
+    expect(installLocalApp).toHaveBeenCalledWith({
+      scope: {
+        kind: 'catalog',
+        accountId: 'account-a',
+        organizationId: 'organization-a',
+        catalogAppId: 'shared-app-id',
+      },
+      release: {
+        version: '1.0.0',
+        checksum: 'a'.repeat(64),
+        sizeBytes: 100,
+        platform: 'darwin',
+        arch: 'arm64',
+      },
+    })
+    expect(syncCatalog).toHaveBeenCalledTimes(2)
+    expect(result.current.state.catalog).toMatchObject({
+      appConfigVersion: 'release-b',
+      apps: [{
+        currentRelease: {
+          version: '2.0.0',
+          checksum: 'b'.repeat(64),
+          sizeBytes: 200,
+        },
+      }],
+    })
   })
 
   it('merges a completed single-app refresh without dropping other app statuses', async () => {
