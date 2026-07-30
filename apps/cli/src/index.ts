@@ -15,6 +15,7 @@ import {
   parseExecutionArgs,
 } from './execution-parser.ts'
 import { runExecutionCommand } from './one-shot.ts'
+import { PROVIDER_ENV_KEYS } from './provider-env.ts'
 import { colorModeFromArgv, stderrErrorLine } from './terminal-output.ts'
 
 // ---------------------------------------------------------------------------
@@ -519,19 +520,6 @@ async function spawnLocalServer(args: CliArgs, opts?: { quiet?: boolean }): Prom
 // ---------------------------------------------------------------------------
 // LLM connection helpers
 // ---------------------------------------------------------------------------
-
-const PROVIDER_ENV_KEYS: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  google: 'GOOGLE_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
-  groq: 'GROQ_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
-  xai: 'XAI_API_KEY',
-  cerebras: 'CEREBRAS_API_KEY',
-  huggingface: 'HUGGINGFACE_API_KEY',
-}
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   anthropic: 'Anthropic',

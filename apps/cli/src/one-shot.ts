@@ -46,6 +46,7 @@ import {
   readExecutionPrompt,
   type ExecutionArgs,
 } from './execution-parser.ts'
+import { PROVIDER_ENV_KEYS } from './provider-env.ts'
 import { spawnServer, type SpawnedServer } from './server-spawner.ts'
 import { stderrErrorLine, stderrLabel, stripAnsi } from './terminal-output.ts'
 
@@ -60,19 +61,6 @@ export interface TurnResult {
   finalMessage: string
   error?: Error
   signal?: NodeJS.Signals
-}
-
-const PROVIDER_ENV_KEYS: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  google: 'GOOGLE_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
-  groq: 'GROQ_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
-  xai: 'XAI_API_KEY',
-  cerebras: 'CEREBRAS_API_KEY',
-  huggingface: 'HUGGINGFACE_API_KEY',
 }
 
 function configRoot(): string {
@@ -550,7 +538,10 @@ export async function waitForTurn(
   prompt: string,
   args: ExecutionArgs,
   adapter: ExecEventAdapter,
-  options: { lifecycleFailure?: Promise<Error> } = {},
+  options: {
+    lifecycleFailure?: Promise<Error>
+    interrupted?: Promise<NodeJS.Signals>
+  } = {},
 ): Promise<TurnResult> {
   let finalMessage = ''
   let settled = false
@@ -618,8 +609,6 @@ export async function waitForTurn(
     }
   })
 
-  const installedSignals: NodeJS.Signals[] = []
-  let receivedSignal: NodeJS.Signals | undefined
   const turnTimeout = args.kind === 'run' && args.sendTimeout
     ? setTimeout(() => {
         void client.invoke('sessions:cancel', sessionId, true).catch(() => {})
@@ -631,20 +620,6 @@ export async function waitForTurn(
       }, args.sendTimeout)
     : undefined
   turnTimeout?.unref()
-  const signalHandler = (signal: NodeJS.Signals) => {
-    if (receivedSignal) return
-    receivedSignal = signal
-    void client.invoke('sessions:cancel', sessionId, true).catch(() => {})
-    finish({ status: 'interrupted', finalMessage: '', signal })
-  }
-  for (const signal of getCatchableInterruptSignals()) {
-    try {
-      process.on(signal, signalHandler)
-      installedSignals.push(signal)
-    } catch {
-      // Signal availability differs by platform and Node/Bun runtime.
-    }
-  }
 
   try {
     await client.invoke('sessions:sendMessage', sessionId, prompt)
@@ -659,13 +634,18 @@ export async function waitForTurn(
     if (options.lifecycleFailure) {
       competitors.push(options.lifecycleFailure.then(failed))
     }
+    if (options.interrupted) {
+      competitors.push(options.interrupted.then(signal => {
+        void client.invoke('sessions:cancel', sessionId, true).catch(() => {})
+        return { status: 'interrupted', finalMessage: '', signal }
+      }))
+    }
     return await Promise.race(competitors)
   } catch (error) {
     return { status: 'failed', finalMessage: '', error: error instanceof Error ? error : new Error(String(error)) }
   } finally {
     if (turnTimeout) clearTimeout(turnTimeout)
     unsubscribe()
-    for (const signal of installedSignals) process.off(signal, signalHandler)
   }
 }
 
@@ -679,15 +659,16 @@ async function resolveResumeRecord(args: ExecutionArgs): Promise<CliThreadRecord
     let record: CliThreadRecord | undefined
     for (const candidate of await listCliThreads()) {
       if (
-        candidate.metadata.origin === 'cli-exec'
-        && candidate.metadata.persistence === 'persistent'
-        && candidate.metadata.configurationScopeId === scope.id
-        && candidate.metadata.workingDirectory === workingDirectory
-        && !(await isCliThreadActive(candidate))
-      ) {
-        record = candidate
-        break
-      }
+        candidate.metadata.origin !== 'cli-exec'
+        || candidate.metadata.persistence !== 'persistent'
+        || candidate.metadata.configurationScopeId !== scope.id
+        || candidate.metadata.workingDirectory !== workingDirectory
+        || await isCliThreadActive(candidate)
+      ) continue
+      const summary = await readCliMainSessionSummary(candidate)
+      if (summary.state !== 'ok') continue
+      record = candidate
+      break
     }
     if (!record) throw new Error('no resumable CLI exec Thread found for this workspace and directory')
     return record
@@ -753,7 +734,34 @@ async function createOrResolveExecution(
   return { record, scope, workingDirectory }
 }
 
-async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number> {
+export type ExecutionLifecycleStage =
+  | 'thread:create'
+  | 'snapshot'
+  | 'spawnServer'
+  | 'connect'
+  | 'session:create'
+
+export interface ExecuteTurnOptions {
+  /**
+   * Test-only dependency injection used by subprocess integration fixtures to
+   * hold an exact lifecycle boundary while a real OS signal is delivered.
+   */
+  lifecycleStageHook?: (
+    stage: ExecutionLifecycleStage,
+    state: {
+      threadId?: string
+      directory?: string
+      mainSessionId?: string
+      persistence?: CliThreadRecord['metadata']['persistence']
+    },
+  ) => void | Promise<void>
+}
+
+export async function executeTurn(
+  args: ExecutionArgs,
+  prompt: string,
+  options: ExecuteTurnOptions = {},
+): Promise<number> {
   let record: CliThreadRecord | undefined
   let scope: ConfigurationScope | undefined
   let workingDirectory: string | undefined
@@ -761,6 +769,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
   let adapter: ExecEventAdapter | undefined
   let server: SpawnedServer | undefined
   let client: CliRpcClient | undefined
+  let currentSessionId: string | undefined
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined
   let result: TurnResult = { status: 'failed', finalMessage: '', error: new Error('execution did not start') }
   let cleanupError: Error | undefined
@@ -768,6 +777,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
   let protocolStarted = false
   let lifecycleState: 'initializing' | 'leased' | 'runtime' | 'cleaning' | 'cleaned' = 'initializing'
   let cleanupPromise: Promise<void> | undefined
+  let threadDeleted = false
   let reportLifecycleFailure!: (error: Error) => void
   let lifecycleFailureReported = false
   const lifecycleFailure = new Promise<Error>(resolveFailure => {
@@ -779,12 +789,72 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
   })
   const ownsNewThread = args.kind !== 'resume' || args.ephemeral
 
+  let receivedSignal: NodeJS.Signals | undefined
+  let resolveInterrupted!: (signal: NodeJS.Signals) => void
+  const interrupted = new Promise<NodeJS.Signals>(resolveSignal => {
+    resolveInterrupted = resolveSignal
+  })
+  const installedSignals: NodeJS.Signals[] = []
+
+  const cancelActiveSession = async (): Promise<void> => {
+    if (!client) return
+    if (!currentSessionId) {
+      // Break an in-flight connect/session:create request so startup signals
+      // do not wait for the RPC timeout before entering cleanup.
+      client.destroy()
+      return
+    }
+    await client.invoke('sessions:cancel', currentSessionId, true).catch(() => {})
+  }
+  const applyReceivedSignal = (): void => {
+    if (!receivedSignal || cleanupError) return
+    result = {
+      status: 'interrupted',
+      finalMessage: '',
+      signal: receivedSignal,
+    }
+  }
+  const signalHandler = (signal: NodeJS.Signals): void => {
+    if (receivedSignal) return
+    receivedSignal = signal
+    applyReceivedSignal()
+    resolveInterrupted(signal)
+    void cancelActiveSession()
+  }
+  const throwIfInterrupted = async (): Promise<void> => {
+    if (!receivedSignal) return
+    await cancelActiveSession()
+    throw new Error(`execution interrupted by ${receivedSignal}`)
+  }
+  const completeStage = async (stage: ExecutionLifecycleStage): Promise<void> => {
+    await options.lifecycleStageHook?.(stage, {
+      threadId: record?.metadata.threadId,
+      directory: record?.directory,
+      mainSessionId: record?.metadata.mainSessionId,
+      persistence: record?.metadata.persistence,
+    })
+    await throwIfInterrupted()
+  }
+
+  // Install process-wide handlers before the first await. They remain active
+  // through runtime shutdown, persistence, retention and lease release.
+  for (const signal of getCatchableInterruptSignals()) {
+    try {
+      process.on(signal, signalHandler)
+      installedSignals.push(signal)
+    } catch {
+      // Signal availability differs by platform and Node/Bun runtime.
+    }
+  }
+
   const cleanup = (): Promise<void> => {
     if (cleanupPromise) return cleanupPromise
     cleanupPromise = (async () => {
       lifecycleState = 'cleaning'
       // Phase 1: stop accepting events and terminate the private runtime.
       if (heartbeatTimer) clearInterval(heartbeatTimer)
+      applyReceivedSignal()
+      if (receivedSignal) await cancelActiveSession()
       if (server) {
         try {
           await server.stop()
@@ -799,6 +869,8 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
 
       if (cleanupError) {
         result = { status: 'failed', finalMessage: '', error: cleanupError }
+      } else {
+        applyReceivedSignal()
       }
 
       // Phase 2: persist the terminal Thread state and atomically publish -o.
@@ -815,6 +887,17 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
                 }
               : {}),
           })
+          applyReceivedSignal()
+          if (
+            receivedSignal
+            && !cleanupError
+            && record.metadata.status !== 'interrupted'
+          ) {
+            await updateCliThread(record, {
+              status: 'interrupted',
+              lastUsedAt: Date.now(),
+            })
+          }
           if (result.status === 'completed' && args.outputLastMessage) {
             await atomicWriteLastMessage(args.outputLastMessage, result.finalMessage)
           }
@@ -829,10 +912,18 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       // the final lease evidence is still durable. Persistent Threads release
       // ownership normally. Both paths are serialized by the Thread state lock.
       try {
-        if (record?.metadata.persistence === 'ephemeral' && (lease || ownsNewThread)) {
+        const interruptedBeforeSession = !!receivedSignal
+          && ownsNewThread
+          && !record?.metadata.mainSessionId
+        if (
+          record
+          && (record.metadata.persistence === 'ephemeral' || interruptedBeforeSession)
+          && (lease || ownsNewThread)
+        ) {
           await deleteCliThread(record, {
             expectedLeaseId: lease?.owner.leaseId,
           })
+          threadDeleted = true
         } else {
           await lease?.release()
         }
@@ -841,6 +932,24 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         cleanupError = error instanceof Error ? error : new Error(String(error))
         result = { status: 'failed', finalMessage: '', error: cleanupError }
       }
+      applyReceivedSignal()
+      if (
+        receivedSignal
+        && !cleanupError
+        && record
+        && !threadDeleted
+        && record.metadata.status !== 'interrupted'
+      ) {
+        try {
+          await updateCliThread(record, {
+            status: 'interrupted',
+            lastUsedAt: Date.now(),
+          })
+        } catch (error) {
+          cleanupError = error instanceof Error ? error : new Error(String(error))
+          result = { status: 'failed', finalMessage: '', error: cleanupError }
+        }
+      }
       lifecycleState = 'cleaned'
     })()
     return cleanupPromise
@@ -848,14 +957,18 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
 
   try {
     await cleanupStaleEphemeralThreads().catch(() => {})
+    await throwIfInterrupted()
     const execution = await createOrResolveExecution(args)
     record = execution.record
     scope = execution.scope
     workingDirectory = execution.workingDirectory
+    await completeStage('thread:create')
     lease = await acquireCliThreadLease(record)
     lifecycleState = 'leased'
+    await throwIfInterrupted()
 
     const resolvedConnection = await resolveConnection(args, record, scope)
+    await throwIfInterrupted()
     if (resolvedConnection.connection) {
       await updateCliThread(record, {
         connection: {
@@ -869,6 +982,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         },
       })
     }
+    await throwIfInterrupted()
     adapter = new ExecEventAdapter({
       json: args.kind !== 'run' && args.json,
       secrets: [
@@ -878,6 +992,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
     })
 
     const snapshotRoot = await createConfigurationSnapshot(record, scope)
+    await completeStage('snapshot')
     const workspace = { ...runtimeWorkspace(scope), rootPath: snapshotRoot }
     server = await spawnServer({
       serverEntry: args.serverEntry,
@@ -910,11 +1025,13 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         },
       },
     })
+    await completeStage('spawnServer')
     await lease.heartbeat({
       pid: server.pid,
       startedAt: server.startedAt,
       processIdentity: server.processIdentity,
     })
+    await throwIfInterrupted()
     const activeLease = lease
     lifecycleState = 'runtime'
     heartbeatTimer = setInterval(() => {
@@ -934,8 +1051,10 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       workspaceId: workspace.id,
     })
     await client.connect()
+    await completeStage('connect')
 
     let sessionId = record.metadata.mainSessionId
+    currentSessionId = sessionId
     if (!sessionId) {
       const created = await client.invoke('sessions:create', workspace.id, {
         permissionMode: args.permissionMode,
@@ -947,7 +1066,9 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         llmConnection: resolvedConnection.connection?.slug,
       }) as { id: string }
       sessionId = created.id
+      currentSessionId = sessionId
       await updateCliThread(record, { mainSessionId: sessionId })
+      await completeStage('session:create')
     } else {
       await client.invoke('sessions:command', sessionId, {
         type: 'updateWorkingDirectory',
@@ -966,6 +1087,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
           resolvedConnection.connection?.slug,
         )
       }
+      await throwIfInterrupted()
     }
 
     if (args.kind !== 'run') {
@@ -974,18 +1096,28 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
     }
     result = await waitForTurn(client, sessionId, prompt, args, adapter, {
       lifecycleFailure,
+      interrupted,
     })
+    applyReceivedSignal()
     if (result.status === 'completed' && args.kind !== 'run') {
       adapter.agentMessage(result.finalMessage)
     }
   } catch (error) {
-    result = {
-      status: 'failed',
-      finalMessage: '',
-      error: error instanceof Error ? error : new Error(String(error)),
+    if (receivedSignal) {
+      applyReceivedSignal()
+    } else {
+      result = {
+        status: 'failed',
+        finalMessage: '',
+        error: error instanceof Error ? error : new Error(String(error)),
+      }
     }
   } finally {
-    await cleanup()
+    try {
+      await cleanup()
+    } finally {
+      for (const signal of installedSignals) process.off(signal, signalHandler)
+    }
   }
 
   if (args.kind === 'run') {
@@ -994,7 +1126,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       process.stderr.write(stderrErrorLine(formatError(result.error, adapter), args.color))
     }
     if (args.noCleanup) {
-      if (record) {
+      if (record && !threadDeleted) {
         process.stderr.write(
           `${stderrLabel('thread_id:', args.color)} ${record.metadata.threadId}\n`
           + `${stderrLabel('thread_dir:', args.color)} ${stripAnsi(record.directory)}\n`,

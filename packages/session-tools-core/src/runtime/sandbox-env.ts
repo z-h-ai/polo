@@ -32,7 +32,7 @@ export const BLOCKED_ENV_VARS = [
   'NPM_TOKEN',
 ] as const;
 
-export const TOOL_ENV_ALLOWLIST = new Set([
+export const TOOL_ENV_ALLOWLIST_NAMES = [
   'PATH',
   'HOME',
   'USER',
@@ -54,7 +54,17 @@ export const TOOL_ENV_ALLOWLIST = new Set([
   'NODE_EXTRA_CA_CERTS',
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
-]);
+] as const;
+
+export const TOOL_ENV_ALLOWLIST = new Set<string>(TOOL_ENV_ALLOWLIST_NAMES);
+
+/** POSIX shell case pattern generated from the same canonical allowlist. */
+export const TOOL_ENV_ALLOWLIST_SHELL_PATTERN =
+  [...TOOL_ENV_ALLOWLIST_NAMES, 'LC_*'].join('|');
+
+export function isToolEnvironmentVariableAllowed(key: string): boolean {
+  return TOOL_ENV_ALLOWLIST.has(key) || key.startsWith('LC_');
+}
 
 /**
  * Desktop tools preserve their historical custom environment behavior while
@@ -70,7 +80,7 @@ export function createSanitizedEnv(
   for (const [key, value] of Object.entries(baseEnv)) {
     if (value === undefined) continue;
     if (credentialIsolation) {
-      if (TOOL_ENV_ALLOWLIST.has(key) || key.startsWith('LC_')) env[key] = value;
+      if (isToolEnvironmentVariableAllowed(key)) env[key] = value;
     } else if (!(BLOCKED_ENV_VARS as readonly string[]).includes(key)) {
       env[key] = value;
     }

@@ -7,6 +7,7 @@ import {
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -276,6 +277,34 @@ describe('CLI Thread store', () => {
 
     expect(await cleanupStaleEphemeralThreads()).toBe(1)
     expect(await locateCliThread(record.metadata.threadId)).toBeNull()
+  })
+
+  it('reclaims historical half-created directories but preserves a live creator', async () => {
+    const executionsRoot = join(root, 'cli-sessions', 'workspace-1', 'executions')
+    const staleDirectory = join(executionsRoot, crypto.randomUUID())
+    const activeDirectory = join(executionsRoot, crypto.randomUUID())
+    await Promise.all([
+      mkdir(join(staleDirectory, 'sessions'), { recursive: true }),
+      mkdir(join(activeDirectory, 'sessions'), { recursive: true }),
+    ])
+    const staleAt = new Date(Date.now() - 11 * 60_000)
+    const processIdentity = getProcessBirthIdentity(process.pid)
+    expect(processIdentity).toBeTruthy()
+    await writeFile(join(activeDirectory, 'creating.json'), JSON.stringify({
+      version: 1,
+      pid: process.pid,
+      processIdentity,
+      createdAt: staleAt.getTime(),
+    }))
+    await Promise.all([
+      utimes(staleDirectory, staleAt, staleAt),
+      utimes(activeDirectory, staleAt, staleAt),
+    ])
+
+    expect(await listCliThreads()).toEqual([])
+    expect(await cleanupStaleEphemeralThreads()).toBe(1)
+    expect(await stat(staleDirectory).then(() => true).catch(() => false)).toBe(false)
+    expect(await stat(activeDirectory).then(() => true).catch(() => false)).toBe(true)
   })
 
   it('serializes delete and acquire so they can never both succeed', async () => {

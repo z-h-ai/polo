@@ -6,16 +6,19 @@ import {
   readdir,
   realpath,
   rm,
+  stat,
   writeFile,
 } from 'node:fs/promises'
 import { constants as osConstants, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Subprocess } from 'bun'
 import {
+  acquireCliThreadLease,
   createCliThread,
   processIdentityMatches,
   updateCliThread,
 } from './cli-thread-store.ts'
+import { readCliMainSessionSummary } from './one-shot.ts'
 import { spawnServer, type SpawnedServer } from './server-spawner.ts'
 
 const tempDirs: string[] = []
@@ -278,6 +281,251 @@ describe('server spawner process integration', () => {
     expect(await Bun.file(join(result.threadRoot, 'owner.json')).exists()).toBe(false)
   }, 20_000)
 
+  it('handles SIGINT/SIGTERM at every startup lifecycle boundary', async () => {
+    if (process.platform === 'win32') return
+    const cases = [
+      { stage: 'thread:create', signal: 'SIGTERM' },
+      { stage: 'thread:create', signal: 'SIGINT' },
+      { stage: 'snapshot', signal: 'SIGTERM' },
+      { stage: 'spawnServer', signal: 'SIGTERM' },
+      { stage: 'connect', signal: 'SIGTERM' },
+      { stage: 'session:create', signal: 'SIGTERM' },
+    ] as const
+
+    for (const { stage, signal } of cases) {
+      const root = await mkdtemp(join(
+        tmpdir(),
+        `polo-startup-signal-${stage.replace(':', '-')}-${signal.toLowerCase()}-`,
+      ))
+      tempDirs.push(root)
+      const markerFile = join(root, 'stage-ready')
+      const runtimeInfoFile = join(root, 'runtime-info.json')
+      await writeFile(
+        join(root, '.polo-lifecycle-fixture.json'),
+        JSON.stringify({ mode: 'hang', runtimeInfoFile }),
+      )
+      const proc = Bun.spawn([
+        'bun',
+        'run',
+        join(import.meta.dir, '__fixtures__', 'execution-signal-stage.ts'),
+        root,
+        stage,
+        markerFile,
+        join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
+        'persistent',
+      ], {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env },
+      })
+      processes.push(proc)
+
+      const readyDeadline = Date.now() + 15_000
+      while (!(await Bun.file(markerFile).exists())) {
+        if (proc.exitCode !== null) {
+          throw new Error(`${stage} fixture exited before reaching its lifecycle boundary`)
+        }
+        if (Date.now() >= readyDeadline) {
+          proc.kill('SIGKILL')
+          throw new Error(`${stage} fixture did not reach its lifecycle boundary`)
+        }
+        await Bun.sleep(10)
+      }
+      const stageState = JSON.parse(await readFile(markerFile, 'utf-8')) as {
+        stage: string
+        ephemeral: boolean
+        directory?: string
+        mainSessionId?: string
+        persistence?: string
+      }
+      expect(stageState).toMatchObject({
+        stage,
+        ephemeral: false,
+        persistence: 'persistent',
+      })
+
+      proc.kill(signal)
+      if (stage === 'thread:create' && signal === 'SIGTERM') {
+        await Bun.sleep(20)
+        proc.kill('SIGINT')
+      }
+      const exitCode = await Promise.race([
+        proc.exited,
+        Bun.sleep(15_000).then(() => {
+          proc.kill('SIGKILL')
+          throw new Error(`${stage} signal cleanup did not finish`)
+        }),
+      ])
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout!).text(),
+        new Response(proc.stderr!).text(),
+      ])
+      expect(exitCode, `${stage}: ${stderr}`).toBe(signal === 'SIGINT' ? 130 : 143)
+      expect(stdout, stage).toBe('')
+      expect(stderr, stage).toBe('')
+      const threadIds = await readdir(
+        join(root, 'cli-sessions', 'global', 'executions'),
+      ).catch(() => [])
+      if (stage === 'session:create') {
+        expect(stageState.mainSessionId).toBe('fixture-session')
+        expect(stageState.directory).toBeTruthy()
+        expect(await stat(stageState.directory!).then(() => true).catch(() => false)).toBe(true)
+        expect(threadIds, stage).toHaveLength(1)
+        const threadRoot = join(
+          root,
+          'cli-sessions',
+          'global',
+          'executions',
+          threadIds[0]!,
+        )
+        expect(JSON.parse(await readFile(
+          join(threadRoot, 'thread.json'),
+          'utf-8',
+        ))).toMatchObject({
+          status: 'interrupted',
+          mainSessionId: 'fixture-session',
+        })
+        expect(await Bun.file(join(threadRoot, 'owner.json')).exists()).toBe(false)
+      } else {
+        expect(threadIds, stage).toEqual([])
+      }
+
+      if (await Bun.file(runtimeInfoFile).exists()) {
+        const runtime = JSON.parse(await readFile(runtimeInfoFile, 'utf-8')) as {
+          pid: number
+          processIdentity: string
+        }
+        const runtimeDeadline = Date.now() + 5_000
+        while (
+          Date.now() < runtimeDeadline
+          && processIdentityMatches(runtime.pid, runtime.processIdentity)
+        ) {
+          await Bun.sleep(20)
+        }
+        expect(processIdentityMatches(runtime.pid, runtime.processIdentity), stage).toBe(false)
+      }
+    }
+  }, 90_000)
+
+  it('resume --last skips active, deleting, missing and corrupt newer candidates', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-resume-last-integrity-'))
+    tempDirs.push(root)
+    await writeFile(
+      join(root, '.polo-lifecycle-fixture.json'),
+      JSON.stringify({ mode: 'disconnect' }),
+    )
+    const canonicalRoot = await realpath(root)
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = root
+
+    const writeValidSession = async (
+      record: Awaited<ReturnType<typeof createCliThread>>,
+      sessionId: string,
+    ) => {
+      const sessionDirectory = join(record.sessionsRoot, sessionId)
+      await mkdir(sessionDirectory, { recursive: true })
+      await writeFile(join(sessionDirectory, 'session.jsonl'), `${JSON.stringify({
+        id: sessionId,
+        workspaceRootPath: root,
+        createdAt: 1,
+        lastUsedAt: 2,
+        lastMessageAt: 3,
+        messageCount: 1,
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      })}\n`)
+      await updateCliThread(record, { mainSessionId: sessionId })
+    }
+    const createCandidate = async (lastUsedAt: number) => {
+      const record = await createCliThread({
+        origin: 'cli-exec',
+        configurationScopeId: 'global',
+        configurationWorkspacePath: canonicalRoot,
+        workingDirectory: canonicalRoot,
+        persistence: 'persistent',
+      })
+      await updateCliThread(record, { status: 'completed', lastUsedAt })
+      return record
+    }
+
+    let runningLease: Awaited<ReturnType<typeof acquireCliThreadLease>> | undefined
+    try {
+      const now = Date.now()
+      const valid = await createCandidate(now - 6_000)
+      await writeValidSession(valid, 'valid-session')
+      expect(await readCliMainSessionSummary(valid)).toMatchObject({ state: 'ok' })
+
+      await createCandidate(now - 5_000) // missing mainSessionId
+
+      const missingJsonl = await createCandidate(now - 4_000)
+      await updateCliThread(missingJsonl, { mainSessionId: 'missing-jsonl' })
+
+      const invalidHeader = await createCandidate(now - 3_000)
+      const invalidDirectory = join(invalidHeader.sessionsRoot, 'invalid-header')
+      await mkdir(invalidDirectory, { recursive: true })
+      await writeFile(join(invalidDirectory, 'session.jsonl'), '{invalid\n')
+      await updateCliThread(invalidHeader, { mainSessionId: 'invalid-header' })
+
+      const deleting = await createCandidate(now - 2_000)
+      await writeValidSession(deleting, 'deleting-session')
+      await writeFile(join(deleting.directory, 'deleting.json'), '{}', { mode: 0o600 })
+
+      const running = await createCandidate(now - 1_000)
+      await writeValidSession(running, 'running-session')
+      runningLease = await acquireCliThreadLease(running)
+
+      const proc = Bun.spawn([
+        'bun',
+        'run',
+        join(import.meta.dir, 'index.ts'),
+        'exec',
+        'resume',
+        '--last',
+        '--json',
+        '--server-entry',
+        join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
+        '--',
+        'continue',
+      ], {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          ...process.env,
+          POLO_AI_CONFIG_DIR: root,
+        },
+      })
+      processes.push(proc)
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout!).text(),
+        new Response(proc.stderr!).text(),
+      ])
+
+      expect(exitCode, stderr).toBe(1)
+      expect(stdout.trim(), stderr).not.toBe('')
+      const events = stdout.trim().split('\n').map(line => JSON.parse(line))
+      const started = events.find(event => event.type === 'thread.started')
+      expect(started?.thread_id).toBe(valid.metadata.threadId)
+      expect(stdout).not.toContain(missingJsonl.metadata.threadId)
+      expect(stdout).not.toContain(invalidHeader.metadata.threadId)
+      expect(stdout).not.toContain(deleting.metadata.threadId)
+      expect(stdout).not.toContain(running.metadata.threadId)
+    } finally {
+      await runningLease?.release().catch(() => {})
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
+  }, 30_000)
+
   it('handles a non-standard catchable signal with interrupted cleanup', async () => {
     if (process.platform === 'win32' || !osConstants.signals.SIGQUIT) return
 
@@ -429,6 +677,25 @@ describe('server spawner process integration', () => {
         persistence: 'persistent',
       })
       await updateCliThread(record, { mainSessionId: 'fixture-session' })
+      await mkdir(join(record.sessionsRoot, 'fixture-session'), { recursive: true })
+      await writeFile(
+        join(record.sessionsRoot, 'fixture-session', 'session.jsonl'),
+        `${JSON.stringify({
+          id: 'fixture-session',
+          workspaceRootPath: canonicalOldWorkspace,
+          createdAt: 1,
+          lastUsedAt: 2,
+          lastMessageAt: 3,
+          messageCount: 1,
+          tokenUsage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            contextTokens: 0,
+            costUsd: 0,
+          },
+        })}\n`,
+      )
     } finally {
       if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
       else process.env.POLO_AI_CONFIG_DIR = previousConfigDir

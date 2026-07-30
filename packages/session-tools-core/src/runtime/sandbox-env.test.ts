@@ -2,7 +2,14 @@ import { describe, it, expect, afterEach } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BLOCKED_ENV_VARS, createSanitizedEnv, createScriptRuntimeEnv } from './sandbox-env.ts';
+import {
+  BLOCKED_ENV_VARS,
+  TOOL_ENV_ALLOWLIST,
+  TOOL_ENV_ALLOWLIST_NAMES,
+  TOOL_ENV_ALLOWLIST_SHELL_PATTERN,
+  createSanitizedEnv,
+  createScriptRuntimeEnv,
+} from './sandbox-env.ts';
 
 describe('sandbox-env', () => {
   const createdDirs: string[] = [];
@@ -42,6 +49,16 @@ describe('sandbox-env', () => {
     expect(sanitized.SAFE_VAR).toBeUndefined();
     expect(sanitized.OPENAI_API_KEY).toBeUndefined();
     expect(sanitized.POLO_AI_RUNTIME_PROFILE).toBeUndefined();
+  });
+
+  it('derives the Set and Bash pattern from the same canonical allowlist', () => {
+    expect([...TOOL_ENV_ALLOWLIST].sort()).toEqual([...TOOL_ENV_ALLOWLIST_NAMES].sort());
+    expect(
+      TOOL_ENV_ALLOWLIST_SHELL_PATTERN
+        .split('|')
+        .filter(value => value !== 'LC_*')
+        .sort(),
+    ).toEqual([...TOOL_ENV_ALLOWLIST].sort());
   });
 
   it('sets python/uv cache and temp dirs inside data directory', () => {

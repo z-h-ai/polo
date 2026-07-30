@@ -97,6 +97,13 @@ interface CliThreadDeletingMarker {
   lastHeartbeatAt: number
 }
 
+interface CliThreadCreatingMarker {
+  version: 1
+  pid: number
+  processIdentity: string
+  createdAt: number
+}
+
 interface CliThreadStateLock {
   lockId: string
   path: string
@@ -110,6 +117,7 @@ const STALE_EPHEMERAL_MS = 10 * 60_000
 const THREAD_STATE_LOCK_STALE_MS = 60_000
 const THREAD_STATE_LOCK_FILE = '.owner.takeover.lock'
 const THREAD_DELETING_FILE = 'deleting.json'
+const THREAD_CREATING_FILE = 'creating.json'
 
 function configRoot(): string {
   return resolve(process.env.POLO_AI_CONFIG_DIR || join(homedir(), '.polo-ai'))
@@ -312,6 +320,10 @@ function deletingMarkerPath(record: CliThreadRecord): string {
   return join(record.directory, THREAD_DELETING_FILE)
 }
 
+function creatingMarkerPath(record: CliThreadRecord): string {
+  return join(record.directory, THREAD_CREATING_FILE)
+}
+
 async function acquireThreadStateLock(
   record: CliThreadRecord,
   operation: CliThreadStateLockRecord['operation'],
@@ -458,6 +470,16 @@ export async function createCliThread(input: {
 
   assertControlledPath(root, directory)
   try {
+    const processIdentity = getProcessBirthIdentity(process.pid)
+    if (!processIdentity) {
+      throw new Error(`Could not verify CLI process birth identity for pid ${process.pid}`)
+    }
+    await atomicWriteJson(join(directory, THREAD_CREATING_FILE), {
+      version: 1,
+      pid: process.pid,
+      processIdentity,
+      createdAt: Date.now(),
+    } satisfies CliThreadCreatingMarker)
     await ensurePrivateDir(join(directory, 'sessions'))
 
     const now = Date.now()
@@ -475,6 +497,7 @@ export async function createCliThread(input: {
       connection: input.connection,
     }
     await atomicWriteJson(join(directory, 'thread.json'), metadata)
+    await unlinkControlledFile(root, join(directory, THREAD_CREATING_FILE))
     return recordFor(directory, metadata)
   } catch (error) {
     await assertCanonicalControlledPath(root, directory)
@@ -618,11 +641,17 @@ export async function locateCliThread(threadId: string): Promise<CliThreadRecord
   return null
 }
 
-export async function listCliThreads(): Promise<CliThreadRecord[]> {
+interface CliThreadDirectoryScan {
+  records: CliThreadRecord[]
+  incomplete: Array<{ directory: string; observedMtime: number }>
+}
+
+async function scanCliThreadDirectories(): Promise<CliThreadDirectoryScan> {
   const root = getCliSessionsRoot()
-  if (!existsSync(root)) return []
+  if (!existsSync(root)) return { records: [], incomplete: [] }
   await assertCanonicalControlledPath(root, root)
   const records: CliThreadRecord[] = []
+  const incomplete: Array<{ directory: string; observedMtime: number }> = []
   for (const scope of await readdir(root, { withFileTypes: true })) {
     if (!scope.isDirectory() || scope.name === 'trash') continue
     const scopeRoot = join(root, scope.name)
@@ -635,17 +664,31 @@ export async function listCliThreads(): Promise<CliThreadRecord[]> {
       continue
     }
     for (const entry of await readdir(executionsRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
+      if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/i.test(entry.name)) continue
       const directory = join(executionsRoot, entry.name)
       try {
         await assertCanonicalControlledPath(root, directory)
-        const metadata = await readJson<CliThreadMetadata>(join(directory, 'thread.json'))
+        const metadataPath = join(directory, 'thread.json')
+        if (!existsSync(metadataPath)) {
+          incomplete.push({
+            directory,
+            observedMtime: (await stat(directory)).mtimeMs,
+          })
+          continue
+        }
+        const metadata = await readJson<CliThreadMetadata>(metadataPath)
+        if (metadata.threadId !== entry.name) continue
         records.push(recordFor(directory, metadata))
       } catch {
         // Corrupt or half-created Threads are not advertised as resumable.
       }
     }
   }
+  return { records, incomplete }
+}
+
+export async function listCliThreads(): Promise<CliThreadRecord[]> {
+  const { records } = await scanCliThreadDirectories()
   return records.sort((a, b) => b.metadata.lastUsedAt - a.metadata.lastUsedAt)
 }
 
@@ -801,7 +844,8 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
 
   let cleaned = 0
   try {
-    for (const record of await listCliThreads()) {
+    const scan = await scanCliThreadDirectories()
+    for (const record of scan.records) {
       if (record.metadata.persistence !== 'ephemeral') continue
       let stateLock: CliThreadStateLock
       try {
@@ -844,6 +888,82 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
         trash = await moveThreadToTrash(record, stateLock)
       } catch {
         // Another state transition won, or the Thread failed containment checks.
+      } finally {
+        if (!trash) await stateLock.release()
+      }
+      if (!trash) continue
+      await assertCanonicalControlledPath(root, trash)
+      await rm(trash, { recursive: true, force: true })
+      cleaned++
+    }
+    for (const incomplete of scan.incomplete) {
+      if (now - incomplete.observedMtime <= STALE_EPHEMERAL_MS) continue
+      const threadId = basename(incomplete.directory)
+      const scopeId = basename(dirname(dirname(incomplete.directory)))
+      const record = recordFor(incomplete.directory, {
+        version: 1,
+        threadId,
+        origin: 'cli-run',
+        configurationScopeId: scopeId,
+        configurationWorkspacePath: configRoot(),
+        workingDirectory: configRoot(),
+        createdAt: incomplete.observedMtime,
+        lastUsedAt: incomplete.observedMtime,
+        persistence: 'ephemeral',
+      })
+      let stateLock: CliThreadStateLock
+      try {
+        stateLock = await acquireThreadStateLock(record, 'stale-cleanup')
+      } catch {
+        continue
+      }
+      let trash: string | undefined
+      try {
+        // Creation can finish after the directory scan but before the state
+        // lock is acquired. Never classify a now-complete Thread as debris.
+        if (existsSync(join(record.directory, 'thread.json'))) continue
+        const [owner, marker, creating] = await Promise.all([
+          readJson<CliThreadOwner>(record.ownerFile).catch(() => null),
+          readJson<CliThreadDeletingMarker>(deletingMarkerPath(record)).catch(() => null),
+          readJson<CliThreadCreatingMarker>(creatingMarkerPath(record)).catch(() => null),
+        ])
+        const evidence = owner ?? marker?.owner
+        const cliExists = evidence
+          ? processIdentityMatches(evidence.cliPid, evidence.cliProcessIdentity)
+          : false
+        const runtimeExists = evidence
+          ? processIdentityMatches(evidence.serverPid, evidence.serverProcessIdentity)
+          : false
+        const markerInitiatorExists = !!marker && processIdentityMatches(
+          marker.initiatorPid,
+          marker.initiatorProcessIdentity,
+        )
+        const creatorExists = !!creating && processIdentityMatches(
+          creating.pid,
+          creating.processIdentity,
+        )
+        const lastHeartbeatAt = Math.max(
+          incomplete.observedMtime,
+          evidence?.heartbeatAt ?? 0,
+          marker?.lastHeartbeatAt ?? 0,
+          creating?.createdAt ?? 0,
+        )
+        const leaseExpired = !evidence
+          || now - evidence.heartbeatAt > ACTIVE_LEASE_WINDOW_MS
+        if (
+          cliExists
+          || runtimeExists
+          || markerInitiatorExists
+          || creatorExists
+          || !leaseExpired
+          || now - lastHeartbeatAt <= STALE_EPHEMERAL_MS
+        ) {
+          continue
+        }
+        if (!marker) await writeDeletingMarker(record, owner, now)
+        trash = await moveThreadToTrash(record, stateLock)
+      } catch {
+        // A concurrent creator/state transition won, or containment failed.
       } finally {
         if (!trash) await stateLock.release()
       }

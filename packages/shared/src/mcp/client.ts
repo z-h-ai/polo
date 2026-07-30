@@ -9,8 +9,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import {
-  TOOL_ENV_ALLOWLIST,
   createSanitizedEnv,
+  isToolEnvironmentVariableAllowed,
 } from '@polo-ai/session-tools-core';
 
 /**
@@ -92,7 +92,7 @@ function buildCliOneShotStdioEnv(
         `CLI one-shot stdio MCP environment rejects credential-like variable: ${key}`,
       );
     }
-    if (TOOL_ENV_ALLOWLIST.has(key) || key.startsWith('LC_')) {
+    if (isToolEnvironmentVariableAllowed(key)) {
       env[key] = value;
     }
   }
