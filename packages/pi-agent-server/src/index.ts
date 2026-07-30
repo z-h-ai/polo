@@ -78,6 +78,7 @@ import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowPoloAiMetadataProperties, stripPoloAiMetadata } from './polo-ai-metadata-schema.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
+import { sanitizeShellToolInput } from '../../shared/src/agent/tool-env-sanitizer.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -751,6 +752,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
 
     // Send to main process for permission checking + transforms
     inputObj = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
+    inputObj = sanitizeShellToolInput(sdkToolName, inputObj);
 
     // Metadata is for Polo AI UI only. Keep a final defensive strip here so the
     // upstream Pi tool implementation always receives clean executable args,

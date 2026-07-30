@@ -7,6 +7,8 @@ import {
   cleanupStaleEphemeralThreads,
   createCliThread,
   deleteCliThread,
+  getProcessBirthIdentity,
+  isOwnerActive,
   listCliThreads,
   locateCliThread,
   updateCliThread,
@@ -73,6 +75,20 @@ describe('CLI Thread store', () => {
     await lease.release()
     const next = await acquireCliThreadLease(record)
     await next.release()
+  })
+
+  it('does not treat a reused PID with the wrong birth identity as active', () => {
+    const actualIdentity = getProcessBirthIdentity(process.pid)
+    expect(actualIdentity).toBeTruthy()
+    expect(isOwnerActive({
+      leaseId: crypto.randomUUID(),
+      cliPid: process.pid,
+      cliStartedAt: Date.now(),
+      cliProcessIdentity: `${actualIdentity}-different-process`,
+      serverPid: 0,
+      serverStartedAt: 0,
+      heartbeatAt: Date.now(),
+    })).toBe(false)
   })
 
   it('deletes by atomically moving the whole Thread boundary', async () => {

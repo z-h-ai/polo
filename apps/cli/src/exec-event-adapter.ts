@@ -12,6 +12,7 @@ export interface InternalSessionEvent {
   toolIntent?: string
   toolUseId?: string
   result?: unknown
+  isError?: boolean
   error?: unknown
   usage?: {
     inputTokens?: number
@@ -76,14 +77,18 @@ export class ExecEventAdapter {
       if (!key) return
       const item = this.activeItems.get(key) ?? { id: key, command: event.toolName || 'tool' }
       this.activeItems.delete(key)
+      const failed = event.isError === true
       this.emit({
-        type: 'item.completed',
+        type: failed ? 'item.failed' : 'item.completed',
         item: {
           id: item.id,
           type: 'command_execution',
           command: this.redact(item.command),
-          status: 'completed',
-          exit_code: 0,
+          status: failed ? 'failed' : 'completed',
+          exit_code: failed ? 1 : 0,
+          ...(failed && event.result !== undefined
+            ? { error: this.redact(String(event.result)) }
+            : {}),
         },
       })
     }

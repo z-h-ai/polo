@@ -143,6 +143,7 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
   }
 
   let afterSeparator = false
+  let positionalsBeforeSeparator: number | undefined
   let yolo = false
   let dangerousAlias = false
   let modeProvided = false
@@ -155,6 +156,7 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
       continue
     }
     if (token === '--') {
+      positionalsBeforeSeparator = positionals.length
       afterSeparator = true
       continue
     }
@@ -345,31 +347,45 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
     return args
   }
 
-  if (!afterSeparator && positionals[0] === 'review') {
+  const hasReservedLocator = positionalsBeforeSeparator === undefined || positionalsBeforeSeparator > 0
+
+  if (hasReservedLocator && positionals[0] === 'review') {
     throw new UsageError('unsupported subcommand: review')
   }
 
-  if (!afterSeparator && positionals[0] === 'resume') {
+  if (hasReservedLocator && positionals[0] === 'resume') {
     args.kind = 'resume'
     positionals.shift()
     if (args.last) {
-      if (positionals[0] && /^[0-9a-f-]{36}$/i.test(positionals[0])) {
+      const possibleLocatorIsBeforeSeparator = positionalsBeforeSeparator === undefined
+        || positionalsBeforeSeparator > 1
+      if (
+        possibleLocatorIsBeforeSeparator
+        && positionals[0]
+        && /^[0-9a-f-]{36}$/i.test(positionals[0])
+      ) {
         throw new UsageError('resume accepts either <thread_id> or --last, not both')
       }
     } else {
+      if (positionalsBeforeSeparator !== undefined && positionalsBeforeSeparator < 2) {
+        throw new UsageError('missing thread_id for exec resume')
+      }
       const threadId = positionals.shift()
       if (!threadId) throw new UsageError('missing thread_id for exec resume')
       args.threadId = threadId
     }
-  } else if (!afterSeparator && positionals[0] === 'sessions') {
+  } else if (hasReservedLocator && positionals[0] === 'sessions') {
     args.kind = 'sessions'
     positionals.shift()
-  } else if (!afterSeparator && positionals[0] === 'delete') {
+  } else if (hasReservedLocator && positionals[0] === 'delete') {
     args.kind = 'delete'
     positionals.shift()
+    if (positionalsBeforeSeparator !== undefined && positionalsBeforeSeparator < 2) {
+      throw new UsageError('missing thread_id for exec delete')
+    }
     args.threadId = positionals.shift()
     if (!args.threadId) throw new UsageError('missing thread_id for exec delete')
-  } else if (!afterSeparator && positionals[0] === 'help') {
+  } else if (hasReservedLocator && positionals[0] === 'help') {
     args.kind = 'help'
     positionals.shift()
   }

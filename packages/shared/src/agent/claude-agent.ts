@@ -31,8 +31,8 @@ import { consumeLlmQueryMessages } from './claude-llm-query.ts';
 import { debug } from '../utils/debug.ts';
 import { guardLargeResult } from '../utils/large-response.ts';
 import { SourceActivationDrainController } from './source-activation-drain.ts';
+import { sanitizeShellToolInput } from './tool-env-sanitizer.ts';
 import {
-  getSessionPlansDir,
   getLastPlanFilePath,
   clearPlanFileState,
   registerSessionScopedToolCallbacks,
@@ -54,7 +54,6 @@ import {
   PERMISSION_MODE_CONFIG,
   SAFE_MODE_CONFIG,
 } from './mode-manager.ts';
-import { getSessionDataPath, getSessionPlansPath, getSessionPath } from '../sessions/storage.ts';
 import { getLastApiError } from '../interceptor-common.ts';
 import { extractWorkspaceSlug } from '../utils/workspace.ts';
 import {
@@ -667,13 +666,14 @@ export class ClaudeAgent extends BaseAgent {
       return { authInjected: false, authWarning: `Connection not found: ${slug}`, authWarningLevel: 'error' };
     }
 
-    // Clear all auth env vars first for clean state.
-    // Claude subprocesses must never inherit Bedrock-routing toggles from a
-    // previous connection or parent process environment.
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    delete process.env.ANTHROPIC_BASE_URL;
-    clearClaudeBedrockRoutingEnvVars();
+    const invocationScoped = this.config.sessionStorage?.owner === 'cli';
+    if (!invocationScoped) {
+      // Desktop retains its historical process-wide compatibility behavior.
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      delete process.env.ANTHROPIC_BASE_URL;
+      clearClaudeBedrockRoutingEnvVars();
+    }
 
     // Resolve auth env vars via shared utility
     const manager = getCredentialManager();
@@ -683,9 +683,16 @@ export class ClaudeAgent extends BaseAgent {
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
     }
 
-    // Apply env vars to process.env (for SDK subprocess) and envOverrides (per-session isolation)
-    for (const [key, value] of Object.entries(result.envVars)) {
-      process.env[key] = value;
+    // CLI credentials never enter the runtime's process.env. They are scoped to
+    // the model subprocess configuration; tool subprocesses use sanitized envs.
+    this.config.envOverrides = {
+      ...this.config.envOverrides,
+      ...result.envVars,
+    };
+    if (!invocationScoped) {
+      for (const [key, value] of Object.entries(result.envVars)) {
+        process.env[key] = value;
+      }
     }
 
     // Pass mini model to SDK subprocess so built-in tools like WebFetch
@@ -693,7 +700,8 @@ export class ClaudeAgent extends BaseAgent {
     // This is critical for custom providers where the default Haiku model ID
     // doesn't exist on the provider's endpoint.
     if (this.config.miniModel) {
-      process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
+      this.config.envOverrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
+      if (!invocationScoped) process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
     }
 
     return { authInjected: true };
@@ -882,7 +890,13 @@ export class ClaudeAgent extends BaseAgent {
       // Build full MCP servers set first, then filter for mini agents
       const fullMcpServers: Options['mcpServers'] = {
         // Session-scoped tools (SubmitPlan, source_test, update_user_preferences, transform_data, etc.)
-        session: getSessionScopedTools(sessionId, this.workspaceRootPath),
+        session: getSessionScopedTools(
+          sessionId,
+          this.workspaceRootPath,
+          undefined,
+          this.sessionStorage,
+          this.workingDirectory,
+        ),
         // Polo AI documentation - always available for searching setup guides
         // This is a public Mintlify MCP server, no auth needed
         'polo-ai-docs': {
@@ -910,7 +924,7 @@ export class ClaudeAgent extends BaseAgent {
       const defaultConn = defaultConnSlug ? getLlmConnection(defaultConnSlug) : null;
       const activeBaseUrl = defaultConn?.baseUrl;
       if (activeBaseUrl) {
-        debug(`[chat] Custom provider: baseUrl=${activeBaseUrl}, model=${model}, hasApiKey=${!!process.env.ANTHROPIC_API_KEY}`);
+        debug(`[chat] Custom provider: baseUrl=${activeBaseUrl}, model=${model}, hasApiKey=${!!this.config.envOverrides?.ANTHROPIC_API_KEY}`);
       }
 
       const thinkingOptions = resolveClaudeThinkingOptions({
@@ -1098,6 +1112,12 @@ export class ClaudeAgent extends BaseAgent {
               this.onDebug?.(`PreToolUse hook: ${input.tool_name} (sessionId=${sessionId}, permissionMode=${permissionMode})`);
 
               const toolInput = input.tool_input as Record<string, unknown>;
+              const sanitizeToolInput = (candidate: Record<string, unknown>) =>
+                sanitizeShellToolInput(
+                  input.tool_name,
+                  candidate,
+                  this.sessionStorage.owner === 'cli',
+                );
 
               // Build RTK context fresh per call so toggling the preference
               // takes effect without restart. `getRtkPath()` is cached per
@@ -1114,8 +1134,8 @@ export class ClaudeAgent extends BaseAgent {
                 permissionMode,
                 workspaceRootPath: this.workspaceRootPath,
                 workspaceId: extractWorkspaceSlug(this.workspaceRootPath, this.config.workspace.id),
-                plansFolderPath: sessionId ? getSessionPlansPath(this.workspaceRootPath, sessionId) : undefined,
-                dataFolderPath: sessionId ? getSessionDataPath(this.workspaceRootPath, sessionId) : undefined,
+                plansFolderPath: sessionId ? this.sessionStorage.getPlansPath(this.workspaceRootPath, sessionId) : undefined,
+                dataFolderPath: sessionId ? this.sessionStorage.getDataPath(this.workspaceRootPath, sessionId) : undefined,
                 workingDirectory: this.config.session?.workingDirectory,
                 activeSourceSlugs: Array.from(this.sourceManager.getActiveSlugs()),
                 allSourceSlugs: this.sourceManager.getAllSources().map(s => s.config.slug),
@@ -1136,23 +1156,28 @@ export class ClaudeAgent extends BaseAgent {
               // Translate result to SDK format
               switch (checkResult.type) {
                 case 'allow':
-                  if (steerMsg) {
+                  {
+                    const sanitizedInput = sanitizeToolInput(toolInput);
+                    const inputChanged = sanitizedInput !== toolInput;
+                    if (!steerMsg && !inputChanged) return { continue: true };
                     return {
                       continue: true,
                       hookSpecificOutput: {
                         hookEventName: 'PreToolUse' as const,
-                        additionalContext: `The user just sent a new message while you were working. Stop what you are currently doing and address their message instead:\n\n${steerMsg}`,
+                        ...(inputChanged ? { updatedInput: sanitizedInput } : {}),
+                        ...(steerMsg
+                          ? { additionalContext: `The user just sent a new message while you were working. Stop what you are currently doing and address their message instead:\n\n${steerMsg}` }
+                          : {}),
                       },
                     };
                   }
-                  return { continue: true };
 
                 case 'modify':
                   return {
                     continue: true,
                     hookSpecificOutput: {
                       hookEventName: 'PreToolUse' as const,
-                      updatedInput: checkResult.input,
+                      updatedInput: sanitizeToolInput(checkResult.input),
                       ...(steerMsg ? { additionalContext: `The user just sent a new message while you were working. Stop what you are currently doing and address their message instead:\n\n${steerMsg}` } : {}),
                     },
                   };
@@ -1273,11 +1298,22 @@ export class ClaudeAgent extends BaseAgent {
                       continue: true,
                       hookSpecificOutput: {
                         hookEventName: 'PreToolUse' as const,
-                        updatedInput: checkResult.modifiedInput,
+                        updatedInput: sanitizeToolInput(checkResult.modifiedInput),
                       },
                     };
                   }
-                  return { continue: true };
+                  {
+                    const sanitizedInput = sanitizeToolInput(toolInput);
+                    return sanitizedInput === toolInput
+                      ? { continue: true }
+                      : {
+                          continue: true,
+                          hookSpecificOutput: {
+                            hookEventName: 'PreToolUse' as const,
+                            updatedInput: sanitizedInput,
+                          },
+                        };
+                  }
                 }
               }
             }],
@@ -1428,7 +1464,7 @@ This is a branched conversation. All prior messages in this conversation are par
 
       // Initialize event adapter for this turn
       // Session directory prevents race condition when concurrent sessions clobber toolMetadataStore.
-      const metadataSessionDir = getSessionPath(this.workspaceRootPath, sessionId);
+      const metadataSessionDir = this.sessionStorage.getSessionPath(this.workspaceRootPath, sessionId);
       this.eventAdapter.updateSessionDir(metadataSessionDir);
       this.eventAdapter.startTurn();
 
@@ -2020,6 +2056,9 @@ This is a branched conversation. All prior messages in this conversation are par
             rawError: stderrContext || rawErrorMsg,
             providerType: this.config.providerType || connection?.providerType,
             baseUrl: connection?.baseUrl,
+            sessionDir: this.config.session?.id
+              ? this.sessionStorage.getSessionPath(this.workspaceRootPath, this.config.session.id)
+              : undefined,
           });
 
           debug('[SESSION_DEBUG] diagnostics.code:', diagnostics.code);
@@ -2159,7 +2198,7 @@ This is a branched conversation. All prior messages in this conversation are par
       `modeVersion=${textPromptDiagnostics.modeVersion} changedBy=${textPromptDiagnostics.lastChangedBy} changedAt=${textPromptDiagnostics.lastChangedAt}`
     )
     const contextParts = this.promptBuilder.buildContextParts(
-      { plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId) },
+      { plansFolderPath: this.sessionStorage.getPlansPath(this.workspaceRootPath, this.modeSessionId) },
       this.sourceManager.formatSourceState()
     );
 
@@ -2205,7 +2244,7 @@ This is a branched conversation. All prior messages in this conversation are par
       `modeVersion=${sdkPromptDiagnostics.modeVersion} changedBy=${sdkPromptDiagnostics.lastChangedBy} changedAt=${sdkPromptDiagnostics.lastChangedAt}`
     )
     const contextParts = this.promptBuilder.buildContextParts(
-      { plansFolderPath: getSessionPlansPath(this.workspaceRootPath, this.modeSessionId) },
+      { plansFolderPath: this.sessionStorage.getPlansPath(this.workspaceRootPath, this.modeSessionId) },
       this.sourceManager.formatSourceState()
     );
 
@@ -2370,8 +2409,9 @@ This is a branched conversation. All prior messages in this conversation are par
       return getLastApiError();
     }
 
-    const sessionDir = getSessionPath(this.workspaceRootPath, sessionId);
-    return getLastApiError(sessionDir) ?? getLastApiError();
+    const sessionDir = this.sessionStorage.getSessionPath(this.workspaceRootPath, sessionId);
+    const scoped = getLastApiError(sessionDir);
+    return this.sessionStorage.owner === 'cli' ? scoped : scoped ?? getLastApiError();
   }
 
   /**
@@ -2772,7 +2812,7 @@ This is a branched conversation. All prior messages in this conversation are par
     const candidates: Array<string | null | undefined> = [
       !isRetry && this.branchFromSdkSessionId ? this.branchFromSdkCwd : null,
       this.config.session?.sdkCwd,
-      sessionId ? getSessionPath(this.workspaceRootPath, sessionId) : null,
+      sessionId ? this.sessionStorage.getSessionPath(this.workspaceRootPath, sessionId) : null,
       this.workspaceRootPath,
     ];
     for (const c of candidates) {

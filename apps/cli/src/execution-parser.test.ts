@@ -79,6 +79,18 @@ describe('execution parser', () => {
     })
     expect(parseExecutionArgs(argv('exec', 'sessions')).kind).toBe('sessions')
     expect(parseExecutionArgs(argv('exec', 'delete', id))).toMatchObject({ kind: 'delete', threadId: id })
+    expect(parseExecutionArgs(argv('exec', 'resume', id, '--', 'continue'))).toMatchObject({
+      kind: 'resume',
+      threadId: id,
+      prompt: 'continue',
+    })
+    expect(() => parseExecutionArgs(argv('exec', 'resume', '--', id))).toThrow('missing thread_id')
+    expect(() => parseExecutionArgs(argv('exec', 'delete', '--', id))).toThrow('missing thread_id')
+    expect(parseExecutionArgs(argv('exec', 'resume', '--last', '--', id))).toMatchObject({
+      kind: 'resume',
+      last: true,
+      prompt: id,
+    })
   })
 
   it('rejects unknown, unsupported, missing, conflicting and extra args', () => {

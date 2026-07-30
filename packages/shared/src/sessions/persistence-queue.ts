@@ -1,11 +1,19 @@
 import { chmod, writeFile, rename, unlink } from 'fs/promises'
-import { dirname } from 'path'
+import { mkdirSync } from 'node:fs'
+import { dirname, join } from 'path'
+import { sanitizeSessionId } from './validation.ts'
 import type { StoredSession, SessionHeader } from './types.js'
-import { getSessionFilePath, ensureSessionsDir, ensureSessionDir } from './storage.js'
-import { getSessionStorage } from './session-storage.js'
 import { toPortablePath } from '../utils/paths.js'
 import { createSessionHeader, makeSessionPathPortable, readSessionHeader } from './jsonl.js'
 import { debug } from '../utils/debug.js'
+
+export interface SessionPersistencePaths {
+  readonly owner: 'electron' | 'cli'
+  ensureSessionsRoot(workspaceRootPath: string): string
+  ensureSession(workspaceRootPath: string, sessionId: string): string
+  getSessionFilePath(workspaceRootPath: string, sessionId: string): string
+  redactPersistedValue?(value: string): string
+}
 
 interface PendingWrite {
   data: StoredSession
@@ -64,7 +72,10 @@ class SessionPersistenceQueue {
   private debounceMs: number
   private writeErrors = new Map<string, unknown>()
 
-  constructor(debounceMs = 500) {
+  constructor(
+    private readonly paths: SessionPersistencePaths,
+    debounceMs = 500,
+  ) {
     this.debounceMs = debounceMs
   }
 
@@ -82,7 +93,7 @@ class SessionPersistenceQueue {
       // Preserve the error for flush()/flushAll(), where lifecycle callers can
       // fail cleanup deterministically, without creating an unhandled rejection
       // from the debounce callback itself.
-      void this.write(session.id).catch(() => {})
+      void this.startWrite(session.id).catch(() => {})
     }, this.debounceMs)
 
     this.pending.set(session.id, { data: session, timer })
@@ -100,10 +111,10 @@ class SessionPersistenceQueue {
 
     try {
       const { data } = entry
-      ensureSessionsDir(data.workspaceRootPath)
-      ensureSessionDir(data.workspaceRootPath, sessionId)
+      this.paths.ensureSessionsRoot(data.workspaceRootPath)
+      this.paths.ensureSession(data.workspaceRootPath, sessionId)
 
-      const filePath = getSessionFilePath(data.workspaceRootPath, sessionId)
+      const filePath = this.paths.getSessionFilePath(data.workspaceRootPath, sessionId)
 
       // Prepare session with portable paths for cross-machine compatibility
       const storageSession: StoredSession = {
@@ -146,7 +157,7 @@ class SessionPersistenceQueue {
       const lines = [
         makeSessionPathPortable(JSON.stringify(header), sessionDir),
         ...persistableMessages.map(m => makeSessionPathPortable(JSON.stringify(m), sessionDir)),
-      ]
+      ].map(line => this.paths.redactPersistedValue?.(line) ?? line)
 
       // Atomic write: write to .tmp then rename over the real file.
       // If the process crashes mid-write, only the .tmp is corrupted —
@@ -160,7 +171,7 @@ class SessionPersistenceQueue {
       this.lastWrittenHeaderSignature.set(sessionId, finalSignature)
 
       const tmpFile = filePath + '.tmp'
-      const privateFile = getSessionStorage().owner === 'cli'
+      const privateFile = this.paths.owner === 'cli'
       await writeFile(tmpFile, lines.join('\n') + '\n', {
         encoding: 'utf-8',
         ...(privateFile ? { mode: 0o600 } : {}),
@@ -180,30 +191,45 @@ class SessionPersistenceQueue {
   }
 
   /**
+   * Put every write, including debounce-timer writes, on the same per-session
+   * chain. A timer callback must never bypass the chain observed by flush().
+   */
+  private startWrite(sessionId: string): Promise<void> {
+    const previous = this.writeInProgress.get(sessionId) ?? Promise.resolve()
+    const writePromise = previous
+      .catch(() => {
+        // The prior failure is retained in writeErrors and rethrown by flush.
+        // Continue the chain so a newer snapshot can still be persisted.
+      })
+      .then(() => this.write(sessionId))
+
+    this.writeInProgress.set(sessionId, writePromise)
+    void writePromise.finally(() => {
+      if (this.writeInProgress.get(sessionId) === writePromise) {
+        this.writeInProgress.delete(sessionId)
+      }
+    }).catch(() => {})
+    return writePromise
+  }
+
+  /**
    * Immediately flush a specific session if pending.
    * Waits for any in-progress write to complete before starting a new one
    * to prevent race conditions on the shared .tmp file.
    */
   async flush(sessionId: string): Promise<void> {
-    const entry = this.pending.get(sessionId)
-    if (entry) {
-      clearTimeout(entry.timer)
-
-      // Wait for any in-progress write to complete first
+    // Enqueue can race a timer-triggered write. Loop until both the pending
+    // snapshot and the in-flight chain are empty at the same observation point.
+    while (true) {
+      const entry = this.pending.get(sessionId)
+      if (entry) {
+        clearTimeout(entry.timer)
+        await this.startWrite(sessionId)
+        continue
+      }
       const inProgress = this.writeInProgress.get(sessionId)
-      if (inProgress) {
-        await inProgress
-      }
-
-      // Start new write and track it
-      const writePromise = this.write(sessionId)
-      this.writeInProgress.set(sessionId, writePromise)
-
-      try {
-        await writePromise
-      } finally {
-        this.writeInProgress.delete(sessionId)
-      }
+      if (!inProgress) break
+      await inProgress
     }
     const error = this.writeErrors.get(sessionId)
     if (error) throw error
@@ -226,8 +252,13 @@ class SessionPersistenceQueue {
    * Flush all pending sessions. Call this on app quit.
    */
   async flushAll(): Promise<void> {
-    const sessionIds = [...this.pending.keys()]
-    await Promise.all(sessionIds.map(id => this.flush(id)))
+    while (this.pending.size > 0 || this.writeInProgress.size > 0) {
+      const sessionIds = new Set([
+        ...this.pending.keys(),
+        ...this.writeInProgress.keys(),
+      ])
+      await Promise.all([...sessionIds].map(id => this.flush(id)))
+    }
     if (this.writeErrors.size > 0) {
       const first = this.writeErrors.values().next().value
       throw first instanceof Error ? first : new Error(String(first))
@@ -257,8 +288,24 @@ class SessionPersistenceQueue {
   }
 }
 
-// Singleton instance
-export const sessionPersistenceQueue = new SessionPersistenceQueue()
+// Backward-compatible desktop queue for legacy functional callers. Runtime
+// hosts should inject a SessionStorage instance and use its private queue.
+export const sessionPersistenceQueue = new SessionPersistenceQueue({
+  owner: 'electron',
+  ensureSessionsRoot(workspaceRootPath) {
+    const path = join(workspaceRootPath, 'sessions')
+    mkdirSync(path, { recursive: true })
+    return path
+  },
+  ensureSession(workspaceRootPath, sessionId) {
+    const path = join(workspaceRootPath, 'sessions', sanitizeSessionId(sessionId))
+    mkdirSync(path, { recursive: true })
+    return path
+  },
+  getSessionFilePath(workspaceRootPath, sessionId) {
+    return join(workspaceRootPath, 'sessions', sanitizeSessionId(sessionId), 'session.jsonl')
+  },
+})
 
 // Named exports for testing/customization
 export { SessionPersistenceQueue, getHeaderMetadataSignature, mergeHeaderWithExternalMetadata }

@@ -7,6 +7,28 @@
 
 import { resolve, join } from 'node:path'
 import type { Subprocess } from 'bun'
+import { getProcessBirthIdentity } from './cli-thread-store.ts'
+
+const BLOCKED_CHILD_CREDENTIAL_ENV = new Set([
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'OPENAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'OPENROUTER_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'XAI_API_KEY',
+  'CEREBRAS_API_KEY',
+  'HUGGINGFACE_API_KEY',
+  'LLM_API_KEY',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'NPM_TOKEN',
+])
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,6 +39,8 @@ export interface SpawnedServer {
   token: string
   pid: number
   startedAt: number
+  processIdentity: string
+  diagnostics: () => string
   stop: () => Promise<void>
 }
 
@@ -29,6 +53,10 @@ export interface SpawnServerOptions {
   startupTimeout?: number
   /** Suppress server stderr output (useful for validation where only test output matters). */
   quiet?: boolean
+  /** First framed message on the inherited parent-death pipe. */
+  bootstrapPayload?: unknown
+  /** Values removed from the child environment and redacted from diagnostics. */
+  secrets?: Array<string | undefined>
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +90,15 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
 
   // Strip CLAUDECODE to avoid the Claude Agent SDK's nesting guard rejecting
   // subprocess launches when the CLI is invoked from within a Claude Code session.
-  const { CLAUDECODE: _, ...parentEnv } = process.env
+  const { CLAUDECODE: _, ...rawParentEnv } = process.env
+  const secrets = (opts?.secrets ?? []).filter((value): value is string => !!value)
+  const parentEnv = Object.fromEntries(
+    Object.entries(rawParentEnv).filter(([key, value]) =>
+      value !== undefined
+      && !BLOCKED_CHILD_CREDENTIAL_ENV.has(key)
+      && !secrets.some(secret => value.includes(secret)),
+    ),
+  )
   const proc: Subprocess = Bun.spawn(['bun', 'run', serverEntry], {
     env: {
       ...parentEnv,
@@ -73,21 +109,58 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
     },
     stdout: 'pipe',
     stderr: 'pipe',
+    stdin: 'pipe',
   })
 
-  // Pipe server stderr to our stderr so --debug logs are visible (unless quiet)
-  if (proc.stderr && !opts?.quiet) {
+  if (opts?.bootstrapPayload !== undefined && proc.stdin) {
+    const sink = proc.stdin as unknown as { write(value: string): number; flush(): Promise<number> }
+    sink.write(`${JSON.stringify(opts.bootstrapPayload)}\n`)
+    await sink.flush()
+  }
+
+  const redact = (value: string): string => {
+    let output = value
+    for (const secret of secrets) output = output.split(secret).join('[REDACTED]')
+    return output
+      .replace(/Authorization\s*:\s*(?:Bearer|Basic)\s+\S+/gi, 'Authorization: [REDACTED]')
+      .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
+  }
+  const MAX_DIAGNOSTIC_BYTES = 16 * 1024
+  let diagnosticBuffer = ''
+  let stderrCarry = ''
+  const carryLength = Math.max(256, ...secrets.map(secret => secret.length + 64))
+
+  const appendDiagnostics = (value: string): void => {
+    diagnosticBuffer = (diagnosticBuffer + value).slice(-MAX_DIAGNOSTIC_BYTES)
+  }
+  const flushSafeStderr = (final = false): void => {
+    const safeLength = final ? stderrCarry.length : Math.max(0, stderrCarry.length - carryLength)
+    if (safeLength === 0) return
+    const safe = redact(stderrCarry.slice(0, safeLength))
+    stderrCarry = stderrCarry.slice(safeLength)
+    appendDiagnostics(safe)
+    if (!opts?.quiet) process.stderr.write(safe)
+  }
+
+  // Always drain stderr. Quiet mode retains only a bounded, redacted tail so a
+  // verbose child can never fill the pipe and deadlock the runtime.
+  if (proc.stderr) {
     ;(async () => {
       // @ts-expect-error — Bun Subprocess types don't narrow stderr to ReadableStream when stderr: 'pipe'
       const reader = proc.stderr.getReader()
+      const decoder = new TextDecoder()
       try {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          process.stderr.write(value)
+          stderrCarry += decoder.decode(value, { stream: true })
+          flushSafeStderr()
         }
+        stderrCarry += decoder.decode()
+        flushSafeStderr(true)
       } catch {
         // Server exited — normal
+        flushSafeStderr(true)
       }
     })()
   }
@@ -115,12 +188,20 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
         // Once we have the URL, the server is ready
         if (url) {
           clearTimeout(timer)
+          const processIdentity = getProcessBirthIdentity(proc.pid)
+          if (!processIdentity) {
+            proc.kill()
+            reject(new Error(`Could not verify CLI runtime process identity for pid ${proc.pid}`))
+            return
+          }
           let stopPromise: Promise<void> | null = null
           resolve({
             url,
             token,
             pid: proc.pid,
             startedAt,
+            processIdentity,
+            diagnostics: () => redact(diagnosticBuffer + stderrCarry).slice(-MAX_DIAGNOSTIC_BYTES),
             stop: async () => {
               if (!stopPromise) {
                 stopPromise = (async () => {
@@ -156,7 +237,10 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
       // If we get here without resolving, the process exited before printing the URL
       clearTimeout(timer)
       if (!url) {
-        reject(new Error('Server process exited before printing POLO_AI_SERVER_URL'))
+        const diagnostics = redact(diagnosticBuffer + stderrCarry).slice(-MAX_DIAGNOSTIC_BYTES).trim()
+        reject(new Error(
+          `Server process exited before printing POLO_AI_SERVER_URL${diagnostics ? `\n${diagnostics}` : ''}`,
+        ))
       }
     })()
   })

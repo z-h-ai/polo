@@ -41,6 +41,7 @@ import {
   type Workspace,
 } from '@polo-ai/shared/config'
 import { RootedSessionStorage } from '@polo-ai/shared/sessions'
+import { processIdentityMatches } from '@polo-ai/shared/utils'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 
 // --generate-token: print a crypto-random token and exit
@@ -68,31 +69,65 @@ if (isCliOneShot && process.platform !== 'win32') {
   process.umask(0o077)
 }
 let cliRuntimeConfig: CliRuntimeConfig | undefined
+let cliInvocationApiKey: string | undefined
+let cliOwnerConfig: {
+  pid: number
+  ownerFile: string
+  leaseId: string
+  processIdentity: string
+} | undefined
+let cliParentDeath: Promise<void> | undefined
+
+async function readCliBootstrapFromParentPipe(): Promise<void> {
+  const reader = Bun.stdin.stream().getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (!buffer.includes('\n')) {
+    const { done, value } = await reader.read()
+    if (done) throw new Error('CLI parent pipe closed before runtime bootstrap')
+    buffer += decoder.decode(value, { stream: true })
+    if (buffer.length > 1024 * 1024) throw new Error('CLI runtime bootstrap payload is too large')
+  }
+  const line = buffer.slice(0, buffer.indexOf('\n'))
+  const parsed = JSON.parse(line) as {
+    runtimeConfig?: CliRuntimeConfig
+    apiKey?: string
+    owner?: typeof cliOwnerConfig
+  }
+  if (!parsed.runtimeConfig || !parsed.owner) {
+    throw new Error('Incomplete CLI runtime bootstrap payload')
+  }
+  cliRuntimeConfig = parsed.runtimeConfig
+  cliInvocationApiKey = parsed.apiKey
+  cliOwnerConfig = parsed.owner
+  cliParentDeath = (async () => {
+    while (true) {
+      const { done } = await reader.read()
+      if (done) return
+    }
+  })()
+}
+
 if (isCliOneShot) {
-  const raw = process.env.POLO_AI_CLI_RUNTIME_CONFIG
-  if (!raw) {
-    console.error('Missing POLO_AI_CLI_RUNTIME_CONFIG for cli-one-shot runtime')
-    process.exit(1)
-  }
   try {
-    cliRuntimeConfig = JSON.parse(raw) as CliRuntimeConfig
-  } catch {
-    console.error('Invalid POLO_AI_CLI_RUNTIME_CONFIG')
+    await readCliBootstrapFromParentPipe()
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : 'Invalid CLI runtime bootstrap payload')
     process.exit(1)
   }
-  if (!cliRuntimeConfig.sessionsRoot || !cliRuntimeConfig.workspace?.id || !cliRuntimeConfig.workspace?.rootPath) {
+  const runtimeConfig = cliRuntimeConfig
+  if (!runtimeConfig?.sessionsRoot || !runtimeConfig.workspace?.id || !runtimeConfig.workspace?.rootPath) {
     console.error('Incomplete CLI runtime configuration')
     process.exit(1)
   }
-  if (cliRuntimeConfig.connection) {
-    setInvocationLlmConnections([cliRuntimeConfig.connection], cliRuntimeConfig.connection.slug)
-    const invocationApiKey = process.env.POLO_AI_CLI_API_KEY
-    if (invocationApiKey) {
+  cliRuntimeConfig = runtimeConfig
+  if (runtimeConfig.connection) {
+    setInvocationLlmConnections([runtimeConfig.connection], runtimeConfig.connection.slug)
+    if (cliInvocationApiKey) {
       setInvocationCredential(
-        { type: 'llm_api_key', connectionSlug: cliRuntimeConfig.connection.slug },
-        { value: invocationApiKey },
+        { type: 'llm_api_key', connectionSlug: runtimeConfig.connection.slug },
+        { value: cliInvocationApiKey },
       )
-      delete process.env.POLO_AI_CLI_API_KEY
     }
   }
 }
@@ -260,7 +295,9 @@ const instance = await (async () => {
       createSessionManager: () => isCliOneShot
         ? new SessionManager({
             profile: 'cli-one-shot',
-            sessionStorage: new RootedSessionStorage(cliRuntimeConfig!.sessionsRoot),
+            sessionStorage: new RootedSessionStorage(cliRuntimeConfig!.sessionsRoot, {
+              secrets: [cliInvocationApiKey],
+            }),
             workspace: cliRuntimeConfig!.workspace,
           })
         : new SessionManager(),
@@ -431,25 +468,42 @@ process.on('SIGINT', shutdownAndExit)
 process.on('SIGTERM', shutdownAndExit)
 
 if (isCliOneShot) {
-  const ownerPid = Number(process.env.POLO_AI_CLI_OWNER_PID)
-  const ownerFile = process.env.POLO_AI_CLI_OWNER_FILE
-  const leaseId = process.env.POLO_AI_CLI_LEASE_ID
+  const ownerPid = cliOwnerConfig?.pid
+  const ownerFile = cliOwnerConfig?.ownerFile
+  const leaseId = cliOwnerConfig?.leaseId
+  const ownerProcessIdentity = cliOwnerConfig?.processIdentity
 
-  if (!Number.isInteger(ownerPid) || ownerPid <= 0 || !ownerFile || !leaseId) {
+  if (
+    typeof ownerPid !== 'number'
+    || !Number.isInteger(ownerPid)
+    || ownerPid <= 0
+    || !ownerFile
+    || !leaseId
+    || !ownerProcessIdentity
+  ) {
     console.error('Incomplete CLI owner supervision configuration')
     await shutdown()
     process.exit(1)
   }
 
-  const ownerMonitor = setInterval(async () => {
-    let ownerAlive = process.ppid === ownerPid
-    if (ownerAlive) {
-      try {
-        process.kill(ownerPid, 0)
-      } catch {
-        ownerAlive = false
-      }
+  let ownerLossHandled = false
+  const handleOwnerLoss = async () => {
+    if (ownerLossHandled) return
+    ownerLossHandled = true
+    clearInterval(ownerMonitor)
+    try {
+      await instance.sessionManager.cancelAllProcessing()
+      await shutdown()
+      process.exit(0)
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error))
+      process.exit(1)
     }
+  }
+
+  const ownerMonitor = setInterval(async () => {
+    const ownerAlive = process.ppid === ownerPid
+      && processIdentityMatches(ownerPid, ownerProcessIdentity)
 
     let leaseMatches = false
     try {
@@ -460,16 +514,9 @@ if (isCliOneShot) {
     }
 
     if (!ownerAlive || !leaseMatches) {
-      clearInterval(ownerMonitor)
-      try {
-        await instance.sessionManager.cancelAllProcessing()
-        await shutdown()
-        process.exit(0)
-      } catch (error) {
-        console.error(error instanceof Error ? error.message : String(error))
-        process.exit(1)
-      }
+      await handleOwnerLoss()
     }
   }, 1000)
   ownerMonitor.unref()
+  void cliParentDeath?.then(handleOwnerLoss, handleOwnerLoss)
 }

@@ -6,8 +6,7 @@ import { randomUUID } from 'crypto'
 import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult } from '@polo-ai/shared/protocol'
 import type { StoredAttachment } from '@polo-ai/core/types'
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@polo-ai/shared/utils'
-import { getSessionAttachmentsPath, validateSessionId } from '@polo-ai/shared/sessions'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { validateSessionId } from '@polo-ai/shared/sessions'
 import { resizeImageForAPI, inspectImageBuffer } from '@polo-ai/server-core/services'
 import { sanitizeFilename, validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { MarkItDown } from 'markitdown-js'
@@ -227,18 +226,15 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       if (!workspaceId) {
         throw new Error('Cannot determine workspace for attachment storage')
       }
-      const workspace = getWorkspaceByNameOrId(workspaceId)
-      if (!workspace) {
-        throw new Error(`Workspace not found: ${workspaceId}`)
-      }
-      const workspaceRootPath = workspace.rootPath
-
       // SECURITY: Validate sessionId to prevent path traversal attacks
       // This must happen before using sessionId in any file path operations
       validateSessionId(sessionId)
 
-      // Create attachments directory if it doesn't exist
-      const attachmentsDir = getSessionAttachmentsPath(workspaceRootPath, sessionId)
+      // Resolve through the runtime-owned storage instance. This keeps CLI
+      // attachments inside the Thread root without any module-global resolver.
+      const sessionPath = deps.sessionManager.getSessionPath(sessionId)
+      if (!sessionPath) throw new Error(`Session not found: ${sessionId}`)
+      const attachmentsDir = join(sessionPath, 'attachments')
       await mkdir(attachmentsDir, { recursive: true })
 
       // Generate unique ID for this attachment

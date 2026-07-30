@@ -14,6 +14,13 @@ import {
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import {
+  getProcessBirthIdentity,
+  processIdentityMatches,
+} from '@polo-ai/shared/utils'
+import type { LlmConnection } from '@polo-ai/shared/config'
+
+export { getProcessBirthIdentity, processIdentityMatches } from '@polo-ai/shared/utils'
 
 export type CliThreadOrigin = 'cli-run' | 'cli-exec'
 export type CliThreadStatus = 'completed' | 'failed' | 'interrupted'
@@ -37,7 +44,9 @@ export interface CliThreadMetadata {
     provider?: string
     model?: string
     baseUrl?: string
-    connectionType?: string
+    connectionType?: LlmConnection['providerType']
+    authType?: LlmConnection['authType']
+    customEndpoint?: LlmConnection['customEndpoint']
   }
 }
 
@@ -45,8 +54,10 @@ export interface CliThreadOwner {
   leaseId: string
   cliPid: number
   cliStartedAt: number
+  cliProcessIdentity: string
   serverPid: number
   serverStartedAt: number
+  serverProcessIdentity?: string
   heartbeatAt: number
 }
 
@@ -60,7 +71,7 @@ export interface CliThreadRecord {
 export interface CliThreadLease {
   record: CliThreadRecord
   owner: CliThreadOwner
-  heartbeat(server?: { pid: number; startedAt: number }): Promise<void>
+  heartbeat(server?: { pid: number; startedAt: number; processIdentity: string }): Promise<void>
   release(): Promise<void>
 }
 
@@ -184,29 +195,25 @@ export async function updateCliThread(
   record.metadata = next
 }
 
-function isProcessAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-export function isOwnerActive(owner: CliThreadOwner, now = Date.now()): boolean {
-  const heartbeatValid = now - owner.heartbeatAt <= ACTIVE_LEASE_WINDOW_MS
-  return heartbeatValid || isProcessAlive(owner.cliPid) || isProcessAlive(owner.serverPid)
+export function isOwnerActive(owner: CliThreadOwner, _now = Date.now()): boolean {
+  const cliMatches = processIdentityMatches(owner.cliPid, owner.cliProcessIdentity)
+  const serverMatches = processIdentityMatches(owner.serverPid, owner.serverProcessIdentity)
+  return cliMatches || serverMatches
 }
 
 export async function acquireCliThreadLease(record: CliThreadRecord): Promise<CliThreadLease> {
   await ensurePrivateDir(record.directory)
   const ownerFile = record.ownerFile
   const now = Date.now()
+  const cliProcessIdentity = getProcessBirthIdentity(process.pid)
+  if (!cliProcessIdentity) {
+    throw new Error(`Could not verify CLI process birth identity for pid ${process.pid}`)
+  }
   const owner: CliThreadOwner = {
     leaseId: crypto.randomUUID(),
     cliPid: process.pid,
     cliStartedAt: now,
+    cliProcessIdentity,
     serverPid: 0,
     serverStartedAt: 0,
     heartbeatAt: now,
@@ -239,6 +246,7 @@ export async function acquireCliThreadLease(record: CliThreadRecord): Promise<Cl
       if (server) {
         owner.serverPid = server.pid
         owner.serverStartedAt = server.startedAt
+        owner.serverProcessIdentity = server.processIdentity
       }
       owner.heartbeatAt = Date.now()
       const current = await readJson<CliThreadOwner>(ownerFile)
@@ -314,15 +322,22 @@ export async function cloneCliThreadEphemeral(source: CliThreadRecord): Promise<
     persistence: 'ephemeral',
     connection: source.metadata.connection,
   })
-  await rm(clone.sessionsRoot, { recursive: true, force: true })
-  await cp(source.sessionsRoot, clone.sessionsRoot, {
-    recursive: true,
-    force: false,
-    errorOnExist: true,
-  })
-  if (process.platform !== 'win32') await chmod(clone.sessionsRoot, DIRECTORY_MODE)
-  await updateCliThread(clone, { mainSessionId: source.metadata.mainSessionId })
-  return clone
+  try {
+    await rm(clone.sessionsRoot, { recursive: true, force: true })
+    await cp(source.sessionsRoot, clone.sessionsRoot, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+    })
+    if (process.platform !== 'win32') await chmod(clone.sessionsRoot, DIRECTORY_MODE)
+    await updateCliThread(clone, { mainSessionId: source.metadata.mainSessionId })
+    return clone
+  } catch (error) {
+    // The outer execution lifecycle does not own this clone until it is
+    // returned, so rollback every failure after createCliThread here.
+    await deleteCliThread(clone).catch(() => {})
+    throw error
+  }
 }
 
 async function moveThreadToTrash(record: CliThreadRecord): Promise<string> {
@@ -368,7 +383,10 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
       if (record.metadata.persistence !== 'ephemeral') continue
       const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
       if (!owner) continue
-      if (isProcessAlive(owner.cliPid) || isProcessAlive(owner.serverPid)) continue
+      const cliExists = processIdentityMatches(owner.cliPid, owner.cliProcessIdentity)
+      const runtimeExists = processIdentityMatches(owner.serverPid, owner.serverProcessIdentity)
+      const leaseExpired = now - owner.heartbeatAt > ACTIVE_LEASE_WINDOW_MS
+      if (cliExists || runtimeExists || !leaseExpired) continue
       if (now - owner.heartbeatAt <= STALE_EPHEMERAL_MS) continue
       const trash = await moveThreadToTrash(record).catch(() => null)
       if (!trash) continue

@@ -85,7 +85,6 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 // Session storage (plans folder path)
-import { getSessionDataPath, getSessionPath, getSessionPlansPath } from '../sessions/storage.ts';
 
 // Error typing
 import { parseError, type AgentError } from './errors.ts';
@@ -332,7 +331,7 @@ export class PiAgent extends BaseAgent {
 
     // Set session dir on adapter for concurrent-safe toolMetadataStore lookups
     if (config.session?.id && config.workspace.rootPath) {
-      this.adapter.setSessionDir(getSessionPath(config.workspace.rootPath, config.session.id));
+      this.adapter.setSessionDir(this.sessionStorage.getSessionPath(config.workspace.rootPath, config.session.id));
     }
 
     // Wire the adapter's async overflow fallback into the event queue. The
@@ -408,7 +407,7 @@ export class PiAgent extends BaseAgent {
     // Build session ID and session dir path upfront (used for spawn env + init command)
     const sessionId = this.config.session?.id || `agent-${Date.now()}`;
     const sessionDir = this.config.session
-      ? getSessionPath(this.config.workspace.rootPath, sessionId)
+      ? this.sessionStorage.getSessionPath(this.config.workspace.rootPath, sessionId)
       : undefined;
 
     // Build spawn args — optionally preload the network interceptor
@@ -500,9 +499,9 @@ export class PiAgent extends BaseAgent {
     });
 
     const sessionPath = this.config.session
-      ? getSessionPath(this.config.workspace.rootPath, sessionId)
+      ? this.sessionStorage.getSessionPath(this.config.workspace.rootPath, sessionId)
       : '';
-    const plansFolderPath = getSessionPlansPath(this.config.workspace.rootPath, sessionId);
+    const plansFolderPath = this.sessionStorage.getPlansPath(this.config.workspace.rootPath, sessionId);
     const workingDirectory = this.config.session?.workingDirectory || cwd;
 
     // Send init command (flat structure matching subprocess InboundMessage type)
@@ -1184,10 +1183,10 @@ export class PiAgent extends BaseAgent {
     const workspaceSlug = extractWorkspaceSlug(rootPath, this.config.workspace.id);
     const sessionId = this.config.session?.id || this._sessionId;
     const plansFolderPath = sessionId
-      ? getSessionPlansPath(rootPath, sessionId)
+      ? this.sessionStorage.getPlansPath(rootPath, sessionId)
       : undefined;
     const dataFolderPath = sessionId
-      ? getSessionDataPath(rootPath, sessionId)
+      ? this.sessionStorage.getDataPath(rootPath, sessionId)
       : undefined;
 
     // Build RTK context fresh per call so toggling the preference takes
@@ -1452,6 +1451,8 @@ export class PiAgent extends BaseAgent {
       sessionId,
       workspacePath,
       workspaceId,
+      sessionStorage: this.sessionStorage,
+      workingDirectory: this.workingDirectory,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         this.onPlanSubmitted?.(planPath);
@@ -1515,7 +1516,7 @@ export class PiAgent extends BaseAgent {
 
           let content = result.output;
           if (result.image) {
-            const sessionPath = getSessionPath(this.config.workspace.rootPath, this._sessionId);
+            const sessionPath = this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this._sessionId);
             const imageBuffer = Buffer.from(result.image.data, 'base64');
             const ext = result.image.mimeType === 'image/jpeg' ? 'jpg' : 'png';
             const saved = saveBinaryResponse(sessionPath, `browser-screenshot.${ext}`, imageBuffer, result.image.mimeType);
@@ -2013,7 +2014,7 @@ export class PiAgent extends BaseAgent {
 
       // Build context parts using centralized PromptBuilder
       const contextParts = this.promptBuilder.buildContextParts(
-        { plansFolderPath: getSessionPlansPath(this.config.workspace.rootPath, this._sessionId) },
+        { plansFolderPath: this.sessionStorage.getPlansPath(this.config.workspace.rootPath, this._sessionId) },
         sourceContext
       );
 

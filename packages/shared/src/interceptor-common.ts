@@ -256,7 +256,7 @@ export interface ToolMetadata {
  *
  * The session directory is determined by:
  * - SDK subprocess: POLO_AI_SESSION_DIR env var (set by main process before spawn)
- * - Main process: toolMetadataStore.setSessionDir(path) called during agent creation
+ * - Main process: readers pass an explicit SessionStorage-resolved sessionDir
  *
  * IMPORTANT: Multiple sessions can run concurrently in the main process (parallel chats,
  * title generation, etc.). The singleton _sessionDir gets clobbered by whichever session

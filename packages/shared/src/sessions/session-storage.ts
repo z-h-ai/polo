@@ -1,7 +1,15 @@
 import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { sanitizeSessionId } from './validation.ts'
-import { setSessionFilePathResolver } from '@polo-ai/session-tools-core'
+import { SessionPersistenceQueue } from './persistence-queue.ts'
+import type { SessionConfig, SessionMetadata, StoredSession } from './types.ts'
+import {
+  createSessionWithStorage,
+  deleteSessionWithStorage,
+  listSessionsWithStorage,
+  loadSessionWithStorage,
+  saveSessionWithStorage,
+} from './storage.ts'
 
 export type SessionStorageOwner = 'electron' | 'cli'
 
@@ -16,11 +24,29 @@ export type SessionStorageOwner = 'electron' | 'cli'
  */
 export interface SessionStorage {
   readonly owner: SessionStorageOwner
+  readonly persistenceQueue: SessionPersistenceQueue
   getSessionsRoot(workspaceRootPath: string): string
   getSessionPath(workspaceRootPath: string, sessionId: string): string
   getSessionFilePath(workspaceRootPath: string, sessionId: string): string
+  getAttachmentsPath(workspaceRootPath: string, sessionId: string): string
+  getPlansPath(workspaceRootPath: string, sessionId: string): string
+  getDataPath(workspaceRootPath: string, sessionId: string): string
+  getDownloadsPath(workspaceRootPath: string, sessionId: string): string
+  getLongResponsesPath(workspaceRootPath: string, sessionId: string): string
+  getMetaPath(workspaceRootPath: string, sessionId: string): string
   ensureSessionsRoot(workspaceRootPath: string): string
   ensureSession(workspaceRootPath: string, sessionId: string): string
+  create(
+    workspaceRootPath: string,
+    options?: Parameters<typeof createSessionWithStorage>[2],
+  ): Promise<SessionConfig>
+  load(workspaceRootPath: string, sessionId: string): StoredSession | null
+  list(workspaceRootPath: string): SessionMetadata[]
+  save(session: StoredSession): Promise<void>
+  flush(sessionId: string): Promise<void>
+  flushAll(): Promise<void>
+  delete(workspaceRootPath: string, sessionId: string): boolean
+  redactPersistedValue?(value: string): string
 }
 
 function ensurePrivateDirectory(path: string): string {
@@ -50,12 +76,16 @@ function ensureSessionTree(path: string, owner: SessionStorageOwner): string {
   return path
 }
 
-export class WorkspaceSessionStorage implements SessionStorage {
-  readonly owner = 'electron' as const
+abstract class FilesystemSessionStorage implements SessionStorage {
+  abstract readonly owner: SessionStorageOwner
+  readonly persistenceQueue: SessionPersistenceQueue
 
-  getSessionsRoot(workspaceRootPath: string): string {
-    return join(workspaceRootPath, 'sessions')
+  protected constructor() {
+    this.persistenceQueue = new SessionPersistenceQueue(this)
   }
+
+  abstract getSessionsRoot(workspaceRootPath: string): string
+  abstract ensureSessionsRoot(workspaceRootPath: string): string
 
   getSessionPath(workspaceRootPath: string, sessionId: string): string {
     return join(this.getSessionsRoot(workspaceRootPath), sanitizeSessionId(sessionId))
@@ -65,25 +95,95 @@ export class WorkspaceSessionStorage implements SessionStorage {
     return join(this.getSessionPath(workspaceRootPath, sessionId), 'session.jsonl')
   }
 
-  ensureSessionsRoot(workspaceRootPath: string): string {
-    return ensureDirectory(this.getSessionsRoot(workspaceRootPath))
-  }
-
   ensureSession(workspaceRootPath: string, sessionId: string): string {
     this.ensureSessionsRoot(workspaceRootPath)
     return ensureSessionTree(this.getSessionPath(workspaceRootPath, sessionId), this.owner)
   }
+
+  getAttachmentsPath(workspaceRootPath: string, sessionId: string): string {
+    return join(this.getSessionPath(workspaceRootPath, sessionId), 'attachments')
+  }
+
+  getPlansPath(workspaceRootPath: string, sessionId: string): string {
+    return join(this.getSessionPath(workspaceRootPath, sessionId), 'plans')
+  }
+
+  getDataPath(workspaceRootPath: string, sessionId: string): string {
+    return join(this.getSessionPath(workspaceRootPath, sessionId), 'data')
+  }
+
+  getDownloadsPath(workspaceRootPath: string, sessionId: string): string {
+    return join(this.getSessionPath(workspaceRootPath, sessionId), 'downloads')
+  }
+
+  getLongResponsesPath(workspaceRootPath: string, sessionId: string): string {
+    return join(this.getSessionPath(workspaceRootPath, sessionId), 'long_responses')
+  }
+
+  getMetaPath(workspaceRootPath: string, sessionId: string): string {
+    return join(this.getSessionPath(workspaceRootPath, sessionId), 'meta')
+  }
+
+  create(
+    workspaceRootPath: string,
+    options?: Parameters<typeof createSessionWithStorage>[2],
+  ): Promise<SessionConfig> {
+    return createSessionWithStorage(workspaceRootPath, this, options)
+  }
+
+  load(workspaceRootPath: string, sessionId: string): StoredSession | null {
+    return loadSessionWithStorage(workspaceRootPath, sessionId, this)
+  }
+
+  list(workspaceRootPath: string): SessionMetadata[] {
+    return listSessionsWithStorage(workspaceRootPath, this)
+  }
+
+  save(session: StoredSession): Promise<void> {
+    return saveSessionWithStorage(session, this)
+  }
+
+  flush(sessionId: string): Promise<void> {
+    return this.persistenceQueue.flush(sessionId)
+  }
+
+  flushAll(): Promise<void> {
+    return this.persistenceQueue.flushAll()
+  }
+
+  delete(workspaceRootPath: string, sessionId: string): boolean {
+    return deleteSessionWithStorage(workspaceRootPath, sessionId, this)
+  }
 }
 
-export class RootedSessionStorage implements SessionStorage {
+export class WorkspaceSessionStorage extends FilesystemSessionStorage {
+  readonly owner = 'electron' as const
+
+  constructor() {
+    super()
+  }
+
+  getSessionsRoot(workspaceRootPath: string): string {
+    return join(workspaceRootPath, 'sessions')
+  }
+
+  ensureSessionsRoot(workspaceRootPath: string): string {
+    return ensureDirectory(this.getSessionsRoot(workspaceRootPath))
+  }
+}
+
+export class RootedSessionStorage extends FilesystemSessionStorage {
   readonly owner = 'cli' as const
   readonly sessionsRoot: string
+  private readonly secrets: string[]
 
-  constructor(sessionsRoot: string) {
+  constructor(sessionsRoot: string, options?: { secrets?: Array<string | undefined> }) {
+    super()
     if (!sessionsRoot || !isAbsolute(sessionsRoot)) {
       throw new Error('CLI sessions root must be an absolute, normalized path')
     }
     this.sessionsRoot = resolve(sessionsRoot)
+    this.secrets = (options?.secrets ?? []).filter((value): value is string => !!value)
   }
 
   getSessionsRoot(_workspaceRootPath: string): string {
@@ -106,29 +206,17 @@ export class RootedSessionStorage implements SessionStorage {
     this.ensureSessionsRoot(workspaceRootPath)
     return ensureSessionTree(this.getSessionPath(workspaceRootPath, sessionId), this.owner)
   }
+
+  redactPersistedValue(value: string): string {
+    let redacted = value
+    for (const secret of this.secrets) {
+      redacted = redacted.split(secret).join('[REDACTED]')
+    }
+    return redacted
+      .replace(/Authorization\s*:\s*(?:Bearer|Basic)\s+\S+/gi, 'Authorization: [REDACTED]')
+      .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
+  }
 }
 
-const desktopSessionStorage = new WorkspaceSessionStorage()
-let activeSessionStorage: SessionStorage = desktopSessionStorage
-
-/**
- * Installs the storage service for the current host process. CLI execution
- * runtimes are one-Thread processes; Electron keeps the default service.
- */
-export function setSessionStorage(storage: SessionStorage): void {
-  activeSessionStorage = storage
-  setSessionFilePathResolver((workspaceRootPath, sessionId) =>
-    storage.getSessionFilePath(workspaceRootPath, sessionId)
-  )
-}
-
-export function getSessionStorage(): SessionStorage {
-  return activeSessionStorage
-}
-
-export function resetSessionStorage(): void {
-  activeSessionStorage = desktopSessionStorage
-  setSessionFilePathResolver((workspaceRootPath, sessionId) =>
-    desktopSessionStorage.getSessionFilePath(workspaceRootPath, sessionId)
-  )
-}
+/** Immutable compatibility storage for functional desktop callers. */
+export const defaultWorkspaceSessionStorage = new WorkspaceSessionStorage()

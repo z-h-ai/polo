@@ -42,13 +42,13 @@ import {
 } from './execution-parser.ts'
 import { spawnServer, type SpawnedServer } from './server-spawner.ts'
 
-interface ConfigurationScope {
+export interface ConfigurationScope {
   id: string
   workspace?: Workspace
   path: string
 }
 
-interface TurnResult {
+export interface TurnResult {
   status: CliThreadStatus
   finalMessage: string
   error?: Error
@@ -167,7 +167,7 @@ async function makePrivateTree(path: string): Promise<void> {
   for (const entry of await readdir(path)) await makePrivateTree(join(path, entry))
 }
 
-async function createConfigurationSnapshot(
+export async function createConfigurationSnapshot(
   record: CliThreadRecord,
   scope: ConfigurationScope,
 ): Promise<string> {
@@ -175,7 +175,10 @@ async function createConfigurationSnapshot(
   await rm(snapshotRoot, { recursive: true, force: true })
   await mkdir(snapshotRoot, { recursive: true, mode: 0o700 })
 
-  const entries = await readdir(scope.path, { withFileTypes: true })
+  const entries = await readdir(scope.path, { withFileTypes: true }).catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && scope.id === 'global') return []
+    throw error
+  })
   for (const entry of entries) {
     if (entry.name === 'sessions') continue
     if (scope.id === 'global' && !GLOBAL_SNAPSHOT_ENTRIES.has(entry.name)) continue
@@ -204,6 +207,19 @@ async function createConfigurationSnapshot(
       updatedAt: now,
     }, null, 2), { mode: 0o600 })
   }
+
+  // CLI-first startup cannot rely on Electron having initialized the config
+  // root. Seed the private snapshot from the bundled, read-only defaults.
+  const bundledDefaultsCandidates = [
+    process.env.POLO_AI_BUNDLED_ASSETS_ROOT
+      ? join(process.env.POLO_AI_BUNDLED_ASSETS_ROOT, 'apps', 'electron', 'resources', 'config-defaults.json')
+      : '',
+    join(import.meta.dir, '..', '..', '..', 'apps', 'electron', 'resources', 'config-defaults.json'),
+  ].filter(Boolean)
+  const bundledDefaults = bundledDefaultsCandidates.find(candidate => Bun.file(candidate).size > 0)
+  if (!bundledDefaults) throw new Error('bundled config-defaults.json is unavailable')
+  await cp(bundledDefaults, join(snapshotRoot, 'config-defaults.json'), { force: true })
+
   await makePrivateTree(snapshotRoot)
   return snapshotRoot
 }
@@ -221,15 +237,19 @@ function makeInvocationConnection(input: {
   provider: string
   baseUrl?: string
   model?: string
+  providerType?: LlmConnection['providerType']
+  authType?: LlmConnection['authType']
+  customEndpoint?: LlmConnection['customEndpoint']
 }): LlmConnection {
-  const customEndpoint = input.baseUrl
+  const customEndpoint = input.customEndpoint ?? (input.baseUrl
     ? { api: input.provider === 'anthropic' ? 'anthropic-messages' as const : 'openai-completions' as const }
-    : undefined
+    : undefined)
   return {
     slug: input.slug,
     name: `${input.provider} (CLI invocation)`,
-    providerType: input.baseUrl ? 'pi_compat' : input.provider === 'anthropic' ? 'anthropic' : 'pi',
-    authType: 'api_key',
+    providerType: input.providerType
+      ?? (input.baseUrl ? 'pi_compat' : input.provider === 'anthropic' ? 'anthropic' : 'pi'),
+    authType: input.authType ?? 'api_key',
     piAuthProvider: input.provider,
     baseUrl: input.baseUrl,
     customEndpoint,
@@ -251,7 +271,7 @@ async function loadWorkspaceConnectionDefault(scope: ConfigurationScope): Promis
   }
 }
 
-async function resolveConnection(
+export async function resolveConnection(
   args: ExecutionArgs,
   record: CliThreadRecord,
   scope: ConfigurationScope,
@@ -261,11 +281,24 @@ async function resolveConnection(
   const defaultSlug = workspaceDefault || config?.defaultLlmConnection
   const defaultConnection = config?.llmConnections?.find(connection => connection.slug === defaultSlug)
     ?? config?.llmConnections?.[0]
-  const provider = args.provider
-  const baseUrl = args.baseUrl
-  const model = args.model ?? defaultConnection?.defaultModel
+  const saved = record.metadata.connection
   const selectedConnection = defaultConnection
-  const needsSyntheticConnection = !!(args.provider || args.baseUrl || args.apiKey)
+  const provider = args.provider
+    ?? saved?.provider
+    ?? selectedConnection?.piAuthProvider
+  const baseUrl = args.baseUrl
+    ?? saved?.baseUrl
+    ?? selectedConnection?.baseUrl
+  const model = args.model
+    ?? saved?.model
+    ?? selectedConnection?.defaultModel
+  const hasExplicitConnectionOverride = !!(args.provider || args.baseUrl || args.apiKey)
+  // A Thread's persisted non-secret snapshot precedes mutable current
+  // defaults, even when a config connection with the same slug still exists.
+  const needsSavedSyntheticConnection = !!saved
+  const needsSyntheticConnection = hasExplicitConnectionOverride
+    || needsSavedSyntheticConnection
+    || (!!args.apiKey && !selectedConnection)
   if (!needsSyntheticConnection && selectedConnection) {
     const connection = { ...selectedConnection }
     return {
@@ -276,14 +309,18 @@ async function resolveConnection(
   }
   if (!needsSyntheticConnection) return { model }
 
-  const effectiveProvider = provider || selectedConnection?.piAuthProvider || 'anthropic'
-  const slug = `cli-${record.metadata.threadId}`
+  const effectiveProvider = provider || 'anthropic'
+  const slug = saved?.slug || `cli-${record.metadata.threadId}`
+  const retainSavedConnectionShape = !!saved && !hasExplicitConnectionOverride
   return {
     connection: makeInvocationConnection({
       slug,
       provider: effectiveProvider,
       baseUrl,
       model,
+      providerType: retainSavedConnectionShape ? saved.connectionType : undefined,
+      authType: retainSavedConnectionShape ? saved.authType : undefined,
+      customEndpoint: retainSavedConnectionShape ? saved.customEndpoint : undefined,
     }),
     apiKey: resolveInvocationApiKey(args, effectiveProvider),
     model,
@@ -325,7 +362,7 @@ function formatError(error: unknown, adapter?: ExecEventAdapter): string {
   return adapter ? adapter.redact(message) : message
 }
 
-async function waitForTurn(
+export async function waitForTurn(
   client: CliRpcClient,
   sessionId: string,
   prompt: string,
@@ -375,6 +412,19 @@ async function waitForTurn(
         status: 'failed',
         finalMessage: '',
         error: new Error(formatError(event.error ?? 'execution failed', adapter)),
+      })
+    }
+    if (event.type === 'typed_error') {
+      const typed = event.error && typeof event.error === 'object'
+        ? event.error as { message?: string; title?: string; code?: string }
+        : undefined
+      finish({
+        status: 'failed',
+        finalMessage: '',
+        error: new Error(formatError(
+          typed?.message || typed?.title || typed?.code || 'provider execution failed',
+          adapter,
+        )),
       })
     }
   })
@@ -489,28 +539,11 @@ async function createOrResolveExecution(
 }
 
 async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number> {
-  await cleanupStaleEphemeralThreads().catch(() => {})
-  const execution = await createOrResolveExecution(args)
-  const { record, scope, workingDirectory } = execution
-  const lease = await acquireCliThreadLease(record)
-  const resolvedConnection = await resolveConnection(args, record, scope)
-  if (resolvedConnection.connection) {
-    await updateCliThread(record, {
-      connection: {
-        slug: resolvedConnection.connection.slug,
-        provider: resolvedConnection.connection.piAuthProvider || 'anthropic',
-        model: resolvedConnection.model,
-        baseUrl: resolvedConnection.connection.baseUrl,
-        connectionType: resolvedConnection.connection.providerType,
-      },
-    })
-  }
-
-  const adapter = new ExecEventAdapter({
-    json: args.kind !== 'run' && args.json,
-    secrets: [args.apiKey, resolvedConnection.apiKey],
-  })
-
+  let record: CliThreadRecord | undefined
+  let scope: ConfigurationScope | undefined
+  let workingDirectory: string | undefined
+  let lease: Awaited<ReturnType<typeof acquireCliThreadLease>> | undefined
+  let adapter: ExecEventAdapter | undefined
   let server: SpawnedServer | undefined
   let client: CliRpcClient | undefined
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined
@@ -518,8 +551,92 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
   let cleanupError: Error | undefined
   let outputWriteError: Error | undefined
   let protocolStarted = false
+  let lifecycleState: 'initializing' | 'leased' | 'runtime' | 'cleaning' | 'cleaned' = 'initializing'
+  let cleanupPromise: Promise<void> | undefined
+  const ownsNewThread = args.kind !== 'resume' || args.ephemeral
+
+  const cleanup = (): Promise<void> => {
+    if (cleanupPromise) return cleanupPromise
+    cleanupPromise = (async () => {
+      lifecycleState = 'cleaning'
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      if (server) {
+        try {
+          await server.stop()
+        } catch (error) {
+          const diagnostics = server.diagnostics()
+          cleanupError = new Error(
+            `${error instanceof Error ? error.message : String(error)}${diagnostics ? `\n${diagnostics}` : ''}`,
+          )
+        }
+      }
+      client?.destroy()
+
+      if (cleanupError) {
+        result = { status: 'failed', finalMessage: '', error: cleanupError }
+      }
+
+      if (record && scope && workingDirectory && (lease || ownsNewThread)) {
+        try {
+          await updateCliThread(record, {
+            status: result.status,
+            lastUsedAt: Date.now(),
+            workingDirectory,
+            configurationWorkspaceId: scope.workspace?.id,
+            configurationWorkspacePath: scope.path,
+          })
+          if (result.status === 'completed' && args.outputLastMessage) {
+            await atomicWriteLastMessage(args.outputLastMessage, result.finalMessage)
+          }
+        } catch (error) {
+          outputWriteError = error instanceof Error ? error : new Error(String(error))
+          result = { status: 'failed', finalMessage: '', error: outputWriteError }
+          await updateCliThread(record, { status: 'failed', lastUsedAt: Date.now() }).catch(() => {})
+        }
+      }
+
+      try {
+        await lease?.release()
+        if (record?.metadata.persistence === 'ephemeral' && (lease || ownsNewThread)) {
+          await deleteCliThread(record)
+        }
+      } catch (error) {
+        cleanupError = error instanceof Error ? error : new Error(String(error))
+        result = { status: 'failed', finalMessage: '', error: cleanupError }
+      }
+      lifecycleState = 'cleaned'
+    })()
+    return cleanupPromise
+  }
 
   try {
+    await cleanupStaleEphemeralThreads().catch(() => {})
+    const execution = await createOrResolveExecution(args)
+    record = execution.record
+    scope = execution.scope
+    workingDirectory = execution.workingDirectory
+    lease = await acquireCliThreadLease(record)
+    lifecycleState = 'leased'
+
+    const resolvedConnection = await resolveConnection(args, record, scope)
+    if (resolvedConnection.connection) {
+      await updateCliThread(record, {
+        connection: {
+          slug: resolvedConnection.connection.slug,
+          provider: resolvedConnection.connection.piAuthProvider || 'anthropic',
+          model: resolvedConnection.model,
+          baseUrl: resolvedConnection.connection.baseUrl,
+          connectionType: resolvedConnection.connection.providerType,
+          authType: resolvedConnection.connection.authType,
+          customEndpoint: resolvedConnection.connection.customEndpoint,
+        },
+      })
+    }
+    adapter = new ExecEventAdapter({
+      json: args.kind !== 'run' && args.json,
+      secrets: [args.apiKey, resolvedConnection.apiKey],
+    })
+
     const snapshotRoot = await createConfigurationSnapshot(record, scope)
     const workspace = { ...runtimeWorkspace(scope), rootPath: snapshotRoot }
     server = await spawnServer({
@@ -528,20 +645,34 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       quiet: !args.verbose,
       env: {
         POLO_AI_RUNTIME_PROFILE: 'cli-one-shot',
-        POLO_AI_CLI_RUNTIME_CONFIG: JSON.stringify({
+        POLO_AI_CONFIG_DIR: snapshotRoot,
+        POLO_AI_SHARED_CREDENTIALS_DIR: configRoot(),
+      },
+      secrets: [args.apiKey, resolvedConnection.apiKey],
+      bootstrapPayload: {
+        runtimeConfig: {
           sessionsRoot: record.sessionsRoot,
           workspace,
           connection: resolvedConnection.connection,
-        }),
-        POLO_AI_CLI_API_KEY: resolvedConnection.apiKey || '',
-        POLO_AI_CLI_OWNER_PID: String(process.pid),
-        POLO_AI_CLI_OWNER_FILE: record.ownerFile,
-        POLO_AI_CLI_LEASE_ID: lease.owner.leaseId,
+        },
+        apiKey: resolvedConnection.apiKey,
+        owner: {
+          pid: process.pid,
+          ownerFile: record.ownerFile,
+          leaseId: lease.owner.leaseId,
+          processIdentity: lease.owner.cliProcessIdentity,
+        },
       },
     })
-    await lease.heartbeat({ pid: server.pid, startedAt: server.startedAt })
+    await lease.heartbeat({
+      pid: server.pid,
+      startedAt: server.startedAt,
+      processIdentity: server.processIdentity,
+    })
+    const activeLease = lease
+    lifecycleState = 'runtime'
     heartbeatTimer = setInterval(() => {
-      void lease.heartbeat().catch(error => {
+      void activeLease.heartbeat().catch(error => {
         cleanupError = error instanceof Error ? error : new Error(String(error))
       })
     }, 2000)
@@ -603,44 +734,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       error: error instanceof Error ? error : new Error(String(error)),
     }
   } finally {
-    if (heartbeatTimer) clearInterval(heartbeatTimer)
-    client?.destroy()
-    if (server) {
-      try {
-        await server.stop()
-      } catch (error) {
-        cleanupError = error instanceof Error ? error : new Error(String(error))
-      }
-    }
-
-    if (cleanupError) {
-      result = { status: 'failed', finalMessage: '', error: cleanupError }
-    }
-
-    try {
-      await updateCliThread(record, {
-        status: result.status,
-        lastUsedAt: Date.now(),
-        workingDirectory,
-        configurationWorkspaceId: scope.workspace?.id,
-        configurationWorkspacePath: scope.path,
-      })
-      if (result.status === 'completed' && args.outputLastMessage) {
-        await atomicWriteLastMessage(args.outputLastMessage, result.finalMessage)
-      }
-    } catch (error) {
-      outputWriteError = error instanceof Error ? error : new Error(String(error))
-      result = { status: 'failed', finalMessage: '', error: outputWriteError }
-      await updateCliThread(record, { status: 'failed', lastUsedAt: Date.now() }).catch(() => {})
-    }
-
-    try {
-      await lease.release()
-      if (record.metadata.persistence === 'ephemeral') await deleteCliThread(record)
-    } catch (error) {
-      cleanupError = error instanceof Error ? error : new Error(String(error))
-      result = { status: 'failed', finalMessage: '', error: cleanupError }
-    }
+    await cleanup()
   }
 
   if (args.kind === 'run') {
@@ -649,13 +743,15 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
       process.stderr.write(`Error: ${formatError(result.error, adapter)}\n`)
     }
     if (args.noCleanup) {
-      process.stderr.write(`thread_id: ${record.metadata.threadId}\nthread_dir: ${record.directory}\n`)
+      if (record) {
+        process.stderr.write(`thread_id: ${record.metadata.threadId}\nthread_dir: ${record.directory}\n`)
+      }
     }
   } else if (protocolStarted) {
     if (result.status === 'completed') {
-      adapter.completed()
+      adapter?.completed()
     } else {
-      adapter.failed(result.error || `execution ${result.status}`, result.signal)
+      adapter?.failed(result.error || `execution ${result.status}`, result.signal)
     }
   } else if (result.error) {
     process.stderr.write(`Error: ${formatError(result.error, adapter)}\n`)
@@ -669,6 +765,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
   }
 
   if (result.signal) return signalExitCode(result.signal)
+  void lifecycleState
   return result.status === 'completed' ? 0 : 1
 }
 

@@ -34,6 +34,7 @@ import {
 } from 'crypto';
 import { execSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { open, stat, unlink } from 'node:fs/promises';
 import { hostname, userInfo, homedir } from 'os';
 import { join } from 'path';
 
@@ -130,6 +131,7 @@ export class SecureStorageBackend implements CredentialBackend {
 
   private readonly credentialsDir: string;
   private readonly credentialsFile: string;
+  private readonly writeLockFile: string;
   private readonly legacyCredentialsFile: string;
   private readonly allowLegacyPathMigration: boolean;
   private cachedStore: CredentialStore | null = null;
@@ -137,8 +139,11 @@ export class SecureStorageBackend implements CredentialBackend {
   private salt: Buffer | null = null;
 
   constructor(options: SecureStorageBackendOptions = {}) {
-    this.credentialsDir = options.credentialsDir ?? CONFIG_DIR;
+    this.credentialsDir = options.credentialsDir
+      ?? process.env.POLO_AI_SHARED_CREDENTIALS_DIR
+      ?? CONFIG_DIR;
     this.credentialsFile = join(this.credentialsDir, 'credentials.enc');
+    this.writeLockFile = join(this.credentialsDir, '.credentials.write.lock');
     this.legacyCredentialsFile = join(
       options.legacyCredentialsDir ?? DEFAULT_CREDENTIALS_DIR,
       'credentials.enc',
@@ -160,29 +165,41 @@ export class SecureStorageBackend implements CredentialBackend {
   }
 
   async set(id: CredentialId, credential: StoredCredential): Promise<void> {
-    let store = await this.loadStore();
+    await this.withWriteLock(async () => {
+      // Re-read after acquiring the cross-process lock so an OAuth refresh
+      // cannot overwrite a credential update made by Electron or another CLI.
+      this.cachedStore = null;
+      let store = await this.loadStore();
+      if (!store) {
+        store = {
+          version: 1,
+          credentials: {},
+          metadata: {
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        };
+      }
 
-    if (!store) {
-      // Initialize new store
-      store = {
-        version: 1,
-        credentials: {},
-        metadata: {
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      };
-    }
-
-    const key = credentialIdToAccount(id);
-    store.credentials[key] = credential;
-    store.metadata.updatedAt = Date.now();
-
-    await this.saveStore(store);
+      const key = credentialIdToAccount(id);
+      store.credentials[key] = credential;
+      store.metadata.updatedAt = Date.now();
+      await this.saveStore(store);
+    });
   }
 
   async delete(id: CredentialId): Promise<boolean> {
-    return this.deleteSync(id);
+    return this.withWriteLock(async () => {
+      this.cachedStore = null;
+      const store = await this.loadStore();
+      if (!store) return false;
+      const key = credentialIdToAccount(id);
+      if (!(key in store.credentials)) return false;
+      delete store.credentials[key];
+      store.metadata.updatedAt = Date.now();
+      await this.saveStore(store);
+      return true;
+    });
   }
 
   deleteSync(id: CredentialId): boolean {
@@ -223,6 +240,37 @@ export class SecureStorageBackend implements CredentialBackend {
 
   private async loadStore(): Promise<CredentialStore | null> {
     return this.loadStoreSync();
+  }
+
+  private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+    if (!existsSync(this.credentialsDir)) {
+      mkdirSync(this.credentialsDir, { recursive: true, mode: 0o700 });
+    }
+
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try {
+        handle = await open(this.writeLockFile, 'wx', 0o600);
+        await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: Date.now() }));
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const info = await stat(this.writeLockFile).catch(() => null);
+        if (info && Date.now() - info.mtimeMs > 30_000) {
+          await unlink(this.writeLockFile).catch(() => {});
+          continue;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
+
+    if (!handle) throw new Error('Timed out acquiring shared credential write lock');
+    try {
+      return await operation();
+    } finally {
+      await handle.close().catch(() => {});
+      await unlink(this.writeLockFile).catch(() => {});
+    }
   }
 
   private loadStoreSync(): CredentialStore | null {

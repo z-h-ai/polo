@@ -40,7 +40,10 @@ import { debug } from '../utils/debug.ts';
 import { getStatusCategory } from '../statuses/storage.ts';
 import { readSessionHeader, readSessionJsonl } from './jsonl.ts';
 import { sessionPersistenceQueue } from './persistence-queue.ts';
-import { getSessionStorage } from './session-storage.ts';
+import {
+  defaultWorkspaceSessionStorage,
+  type SessionStorage,
+} from './session-storage.ts';
 
 // Re-export types for convenience
 export type { SessionConfig } from './types.ts';
@@ -52,8 +55,11 @@ export type { SessionConfig } from './types.ts';
 /**
  * Ensure sessions directory exists for a workspace
  */
-export function ensureSessionsDir(workspaceRootPath: string): string {
-  return getSessionStorage().ensureSessionsRoot(workspaceRootPath);
+export function ensureSessionsDir(
+  workspaceRootPath: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.ensureSessionsRoot(workspaceRootPath);
 }
 
 /**
@@ -62,50 +68,78 @@ export function ensureSessionsDir(workspaceRootPath: string): string {
  * SECURITY: Uses sanitizeSessionId() as defense-in-depth to prevent path traversal.
  * Callers should still validate sessionId before calling this function.
  */
-export function getSessionPath(workspaceRootPath: string, sessionId: string): string {
-  return getSessionStorage().getSessionPath(workspaceRootPath, sessionId);
+export function getSessionPath(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.getSessionPath(workspaceRootPath, sessionId);
 }
 
 /**
  * Get path to a session's JSONL file (inside session folder)
  */
-export function getSessionFilePath(workspaceRootPath: string, sessionId: string): string {
-  return getSessionStorage().getSessionFilePath(workspaceRootPath, sessionId);
+export function getSessionFilePath(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.getSessionFilePath(workspaceRootPath, sessionId);
 }
 
 /**
  * Ensure session directory exists with all subdirectories
  */
-export function ensureSessionDir(workspaceRootPath: string, sessionId: string): string {
-  return getSessionStorage().ensureSession(workspaceRootPath, sessionId);
+export function ensureSessionDir(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.ensureSession(workspaceRootPath, sessionId);
 }
 
 /**
  * Get the attachments directory for a session
  */
-export function getSessionAttachmentsPath(workspaceRootPath: string, sessionId: string): string {
-  return join(getSessionPath(workspaceRootPath, sessionId), 'attachments');
+export function getSessionAttachmentsPath(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.getAttachmentsPath(workspaceRootPath, sessionId);
 }
 
 /**
  * Get the plans directory for a session
  */
-export function getSessionPlansPath(workspaceRootPath: string, sessionId: string): string {
-  return join(getSessionPath(workspaceRootPath, sessionId), 'plans');
+export function getSessionPlansPath(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.getPlansPath(workspaceRootPath, sessionId);
 }
 
 /**
  * Get the data directory for a session (transform_data tool output)
  */
-export function getSessionDataPath(workspaceRootPath: string, sessionId: string): string {
-  return join(getSessionPath(workspaceRootPath, sessionId), 'data');
+export function getSessionDataPath(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.getDataPath(workspaceRootPath, sessionId);
 }
 
 /**
  * Get the downloads directory for a session (binary files from API responses)
  */
-export function getSessionDownloadsPath(workspaceRootPath: string, sessionId: string): string {
-  return join(getSessionPath(workspaceRootPath, sessionId), 'downloads');
+export function getSessionDownloadsPath(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.getDownloadsPath(workspaceRootPath, sessionId);
 }
 
 // ============================================================
@@ -115,8 +149,8 @@ export function getSessionDownloadsPath(workspaceRootPath: string, sessionId: st
 /**
  * Get existing session IDs for collision detection
  */
-function getExistingSessionIds(workspaceRootPath: string): Set<string> {
-  const sessionsDir = getSessionStorage().getSessionsRoot(workspaceRootPath);
+function getExistingSessionIds(workspaceRootPath: string, storage: SessionStorage): Set<string> {
+  const sessionsDir = storage.getSessionsRoot(workspaceRootPath);
   if (!existsSync(sessionsDir)) {
     return new Set();
   }
@@ -128,8 +162,11 @@ function getExistingSessionIds(workspaceRootPath: string): Set<string> {
  * Generate a human-readable session ID
  * Format: YYMMDD-adjective-noun (e.g., 260111-swift-river)
  */
-export function generateSessionId(workspaceRootPath: string): string {
-  const existingIds = getExistingSessionIds(workspaceRootPath);
+export function generateSessionId(
+  workspaceRootPath: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  const existingIds = getExistingSessionIds(workspaceRootPath, storage);
   return generateUniqueSessionId(existingIds);
 }
 
@@ -142,7 +179,12 @@ export function generateSessionId(workspaceRootPath: string): string {
  */
 export async function createSession(
   workspaceRootPath: string,
-  options?: {
+  options?: CreateSessionOptions,
+): Promise<SessionConfig> {
+  return createSessionWithStorage(workspaceRootPath, defaultWorkspaceSessionStorage, options);
+}
+
+export interface CreateSessionOptions {
     name?: string;
     workingDirectory?: string;
     permissionMode?: SessionConfig['permissionMode'];
@@ -154,20 +196,25 @@ export async function createSession(
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
     isFlagged?: boolean;
-  }
+}
+
+export async function createSessionWithStorage(
+  workspaceRootPath: string,
+  storage: SessionStorage,
+  options?: CreateSessionOptions,
 ): Promise<SessionConfig> {
-  ensureSessionsDir(workspaceRootPath);
+  ensureSessionsDir(workspaceRootPath, storage);
 
   const now = Date.now();
-  const sessionId = generateSessionId(workspaceRootPath);
+  const sessionId = generateSessionId(workspaceRootPath, storage);
 
   // Create session directory with all subdirectories (plans, attachments)
-  ensureSessionDir(workspaceRootPath, sessionId);
+  ensureSessionDir(workspaceRootPath, sessionId, storage);
 
   // Set sdkCwd to initial working directory or session path - this never changes
   // The SDK stores session transcripts at ~/.claude/projects/{cwd-slugified}/
   // If workingDirectory changes later, sdkCwd stays the same to preserve session resumption
-  const sdkCwd = options?.workingDirectory ?? getSessionPath(workspaceRootPath, sessionId);
+  const sdkCwd = options?.workingDirectory ?? getSessionPath(workspaceRootPath, sessionId, storage);
 
   const session: SessionConfig = {
     id: sessionId,
@@ -200,7 +247,7 @@ export async function createSession(
       costUsd: 0,
     },
   };
-  await saveSession(storedSession);
+  await saveSessionWithStorage(storedSession, storage);
 
   return session;
 }
@@ -271,8 +318,15 @@ export async function getOrCreateSessionById(
  * Writes in JSONL format: line 1 = header, lines 2+ = messages
  */
 export async function saveSession(session: StoredSession): Promise<void> {
-  sessionPersistenceQueue.enqueue(session);
-  await sessionPersistenceQueue.flush(session.id);
+  await saveSessionWithStorage(session, defaultWorkspaceSessionStorage);
+}
+
+export async function saveSessionWithStorage(
+  session: StoredSession,
+  storage: SessionStorage,
+): Promise<void> {
+  storage.persistenceQueue.enqueue(session);
+  await storage.persistenceQueue.flush(session.id);
 }
 
 /**
@@ -287,9 +341,17 @@ export { sessionPersistenceQueue, getHeaderMetadataSignature } from './persisten
  * Loads session from folder structure in JSONL format.
  */
 export function loadSession(workspaceRootPath: string, sessionId: string): StoredSession | null {
+  return loadSessionWithStorage(workspaceRootPath, sessionId, defaultWorkspaceSessionStorage);
+}
+
+export function loadSessionWithStorage(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage,
+): StoredSession | null {
   const end = perf.start('session.loadSession', { sessionId });
 
-  const jsonlPath = getSessionFilePath(workspaceRootPath, sessionId);
+  const jsonlPath = getSessionFilePath(workspaceRootPath, sessionId, storage);
   if (existsSync(jsonlPath)) {
     const session = readSessionJsonl(jsonlPath);
     if (session) {
@@ -309,8 +371,15 @@ export function loadSession(workspaceRootPath: string, sessionId: string): Store
  * Uses JSONL header for fast loading (only reads first line of each file).
  */
 export function listSessions(workspaceRootPath: string): SessionMetadata[] {
+  return listSessionsWithStorage(workspaceRootPath, defaultWorkspaceSessionStorage);
+}
+
+export function listSessionsWithStorage(
+  workspaceRootPath: string,
+  storage: SessionStorage,
+): SessionMetadata[] {
   const span = perf.span('session.listSessions');
-  const sessionsDir = getSessionStorage().getSessionsRoot(workspaceRootPath);
+  const sessionsDir = storage.getSessionsRoot(workspaceRootPath);
   if (!existsSync(sessionsDir)) {
     span.end();
     return [];
@@ -336,7 +405,7 @@ export function listSessions(workspaceRootPath: string): SessionMetadata[] {
       if (existsSync(jsonlFile)) {
         const header = readSessionHeader(jsonlFile);
         if (header) {
-          const metadata = headerToMetadata(header, workspaceRootPath);
+          const metadata = headerToMetadata(header, workspaceRootPath, storage);
           if (metadata) sessions.push(metadata);
         }
       }
@@ -355,7 +424,11 @@ export function listSessions(workspaceRootPath: string): SessionMetadata[] {
  * Convert SessionHeader to SessionMetadata
  * Used for fast session list loading from JSONL format.
  */
-function headerToMetadata(header: SessionHeader, workspaceRootPath: string): SessionMetadata | null {
+function headerToMetadata(
+  header: SessionHeader,
+  workspaceRootPath: string,
+  storage: SessionStorage,
+): SessionMetadata | null {
   try {
     // Migration: accept old 'todoState' field from pre-rename session files
     const rawStatus = header.sessionStatus ?? (header as unknown as { todoState?: string }).todoState;
@@ -363,7 +436,7 @@ function headerToMetadata(header: SessionHeader, workspaceRootPath: string): Ses
     const validatedStatus = validateSessionStatus(workspaceRootPath, rawStatus);
 
     // Count plan files for this session
-    const planCount = listPlanFiles(workspaceRootPath, header.id).length;
+    const planCount = listPlanFiles(workspaceRootPath, header.id, storage).length;
 
     // Migration: For sessions created before sdkCwd was added, use workingDirectory as fallback.
     const workingDir = header.workingDirectory ? expandPath(header.workingDirectory) : undefined;
@@ -395,9 +468,18 @@ function headerToMetadata(header: SessionHeader, workspaceRootPath: string): Ses
  * Deletes session folder and all associated files
  */
 export function deleteSession(workspaceRootPath: string, sessionId: string): boolean {
+  return deleteSessionWithStorage(workspaceRootPath, sessionId, defaultWorkspaceSessionStorage);
+}
+
+export function deleteSessionWithStorage(
+  workspaceRootPath: string,
+  sessionId: string,
+  storage: SessionStorage,
+): boolean {
   try {
+    storage.persistenceQueue.cancel(sessionId);
     // Delete session directory (includes session.json, attachments, plans)
-    const sessionDir = getSessionPath(workspaceRootPath, sessionId);
+    const sessionDir = getSessionPath(workspaceRootPath, sessionId, storage);
     if (existsSync(sessionDir)) {
       rmSync(sessionDir, { recursive: true });
     }
@@ -509,9 +591,10 @@ export async function updateSessionMetadata(
     | 'llmConnection'
     | 'isArchived'
     | 'archivedAt'
-  >>
+  >>,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): Promise<void> {
-  const session = loadSession(workspaceRootPath, sessionId);
+  const session = loadSessionWithStorage(workspaceRootPath, sessionId, storage);
   if (!session) return;
 
   if (updates.isFlagged !== undefined) session.isFlagged = updates.isFlagged;
@@ -531,7 +614,7 @@ export async function updateSessionMetadata(
   if (updates.isArchived !== undefined) session.isArchived = updates.isArchived;
   if ('archivedAt' in updates) session.archivedAt = updates.archivedAt;
 
-  await saveSession(session);
+  await saveSessionWithStorage(session, storage);
 }
 
 /**
@@ -604,8 +687,9 @@ export async function setPendingPlanExecution(
   sessionId: string,
   planPath: string,
   draftInputSnapshot?: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): Promise<void> {
-  const session = loadSession(workspaceRootPath, sessionId);
+  const session = loadSessionWithStorage(workspaceRootPath, sessionId, storage);
   if (!session) return;
 
   session.pendingPlanExecution = {
@@ -614,7 +698,7 @@ export async function setPendingPlanExecution(
     awaitingCompaction: true,
     executionDispatched: false,
   };
-  await saveSession(session);
+  await saveSessionWithStorage(session, storage);
 }
 
 /**
@@ -624,13 +708,14 @@ export async function setPendingPlanExecution(
  */
 export async function markCompactionComplete(
   workspaceRootPath: string,
-  sessionId: string
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): Promise<void> {
-  const session = loadSession(workspaceRootPath, sessionId);
+  const session = loadSessionWithStorage(workspaceRootPath, sessionId, storage);
   if (!session?.pendingPlanExecution) return;
 
   session.pendingPlanExecution.awaitingCompaction = false;
-  await saveSession(session);
+  await saveSessionWithStorage(session, storage);
 }
 
 /**
@@ -640,13 +725,14 @@ export async function markCompactionComplete(
  */
 export async function markPendingPlanExecutionDispatched(
   workspaceRootPath: string,
-  sessionId: string
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): Promise<void> {
-  const session = loadSession(workspaceRootPath, sessionId);
+  const session = loadSessionWithStorage(workspaceRootPath, sessionId, storage);
   if (!session?.pendingPlanExecution) return;
 
   session.pendingPlanExecution.executionDispatched = true;
-  await saveSession(session);
+  await saveSessionWithStorage(session, storage);
 }
 
 /**
@@ -656,13 +742,14 @@ export async function markPendingPlanExecutionDispatched(
  */
 export async function clearPendingPlanExecution(
   workspaceRootPath: string,
-  sessionId: string
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): Promise<void> {
-  const session = loadSession(workspaceRootPath, sessionId);
+  const session = loadSessionWithStorage(workspaceRootPath, sessionId, storage);
   if (!session) return;
 
   delete session.pendingPlanExecution;
-  await saveSession(session);
+  await saveSessionWithStorage(session, storage);
 }
 
 /**
@@ -671,9 +758,10 @@ export async function clearPendingPlanExecution(
  */
 export function getPendingPlanExecution(
   workspaceRootPath: string,
-  sessionId: string
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): { planPath: string; draftInputSnapshot?: string; awaitingCompaction: boolean; executionDispatched: boolean } | null {
-  const session = loadSession(workspaceRootPath, sessionId);
+  const session = loadSessionWithStorage(workspaceRootPath, sessionId, storage);
   if (!session?.pendingPlanExecution) return null;
   return {
     ...session.pendingPlanExecution,
@@ -977,9 +1065,10 @@ export function loadPlanFromPath(filePath: string): Plan | null {
  */
 export function listPlanFiles(
   workspaceRootPath: string,
-  sessionId: string
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): Array<{ name: string; path: string; modifiedAt: number }> {
-  const plansDir = getSessionPlansPath(workspaceRootPath, sessionId);
+  const plansDir = getSessionPlansPath(workspaceRootPath, sessionId, storage);
   if (!existsSync(plansDir)) {
     return [];
   }

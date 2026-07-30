@@ -41,11 +41,6 @@ import type { ActiveSessionInfo, SessionProcessingStatus } from '@polo-ai/core/t
 import { loadWorkspaceConfig } from '@polo-ai/shared/workspaces'
 import {
   // Session persistence functions
-  listSessions as listStoredSessions,
-  loadSession as loadStoredSession,
-  saveSession as saveStoredSession,
-  createSession as createStoredSession,
-  deleteSession as deleteStoredSession,
   updateSessionMetadata,
   canUpdateSdkCwd,
   setPendingPlanExecution as setStoredPendingPlanExecution,
@@ -58,7 +53,6 @@ import {
   ensureSessionDir,
   getSessionFilePath,
   generateSessionId,
-  sessionPersistenceQueue,
   getHeaderMetadataSignature,
   writeSessionJsonl,
   serializeSession,
@@ -71,14 +65,14 @@ import {
   type SessionStatus,
   type SessionHeader,
   pickSessionFields,
-  setSessionStorage,
+  WorkspaceSessionStorage,
   type SessionStorage,
 } from '@polo-ai/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@polo-ai/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@polo-ai/shared/config'
 import { getValidClaudeOAuthToken } from '@polo-ai/shared/auth'
 import { resolveAuthEnvVars } from '@polo-ai/shared/config'
-import { toolMetadataStore, getLastApiError } from '@polo-ai/shared/interceptor'
+import { getLastApiError } from '@polo-ai/shared/interceptor'
 import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
@@ -1074,7 +1068,11 @@ const DEFAULT_TOKEN_USAGE = {
  * Convert a ManagedSession to a renderer-side Session object.
  * Uses pickSessionFields() for persistent fields so new fields propagate automatically.
  */
-function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Session {
+function managedToSession(
+  m: ManagedSession,
+  storage: SessionStorage,
+  overrides?: Partial<Session>,
+): Session {
   return {
     ...pickSessionFields(m),
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
@@ -1088,7 +1086,7 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     workspaceName: m.workspace.name,
     messages: [],
     isProcessing: m.isProcessing,
-    sessionFolderPath: getSessionStoragePath(m.workspace.rootPath, m.id),
+    sessionFolderPath: storage.getSessionPath(m.workspace.rootPath, m.id),
     supportsBranching: resolveSupportsBranching(m),
     ...overrides,
   } as Session
@@ -1105,6 +1103,7 @@ interface PendingDelta {
 export class SessionManager implements ISessionManager {
   private readonly runtimeProfile: 'default' | 'cli-one-shot'
   private readonly runtimeWorkspace?: Workspace
+  readonly sessionStorage: SessionStorage
   private sessions: Map<string, ManagedSession> = new Map()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
@@ -1160,9 +1159,7 @@ export class SessionManager implements ISessionManager {
   }) {
     this.runtimeProfile = options?.profile ?? 'default'
     this.runtimeWorkspace = options?.workspace
-    if (options?.sessionStorage) {
-      setSessionStorage(options.sessionStorage)
-    }
+    this.sessionStorage = options?.sessionStorage ?? new WorkspaceSessionStorage()
   }
 
   private getRuntimeWorkspaces(): Workspace[] {
@@ -1451,7 +1448,7 @@ export class SessionManager implements ISessionManager {
       sessionLog.info(`External metadata change detected for session ${sessionId}`)
 
       // Prevent stale pending writes from reverting externally-updated metadata.
-      sessionPersistenceQueue.cancel(sessionId)
+      this.sessionStorage.persistenceQueue.cancel(sessionId)
       this.persistSession(managed)
     }
 
@@ -1562,7 +1559,7 @@ export class SessionManager implements ISessionManager {
         // Self-writes don't need in-memory sync (already up to date), but
         // still need to notify the automation system for event matching.
         const incomingSignature = getHeaderMetadataSignature(header)
-        const lastWrittenSignature = sessionPersistenceQueue.getLastWrittenSignature(sessionId)
+        const lastWrittenSignature = this.sessionStorage.persistenceQueue.getLastWrittenSignature(sessionId)
         const isSelfWrite = !!(lastWrittenSignature && incomingSignature === lastWrittenSignature)
 
         // For external writes: sync in-memory state + emit UI events.
@@ -1756,7 +1753,7 @@ export class SessionManager implements ISessionManager {
       enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
     )
     // Pass session path so large API responses can be saved to session folder
-    const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
+    const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, managed.id)
     const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
     const intendedSlugs = enabledSources.map(s => s.config.slug)
 
@@ -1786,6 +1783,12 @@ export class SessionManager implements ISessionManager {
    * @param connectionSlug - Optional connection slug to use (overrides default)
    */
   async reinitializeAuth(connectionSlug?: string): Promise<void> {
+    if (this.runtimeProfile === 'cli-one-shot') {
+      // CLI backends resolve invocation/shared credentials into their own
+      // backend config. Never mutate the quiet runtime's general environment.
+      sessionLog.info('Skipping process-wide auth reinitialization for CLI runtime')
+      return
+    }
     try {
       const manager = getCredentialManager()
 
@@ -1838,8 +1841,11 @@ export class SessionManager implements ISessionManager {
         await migrateLegacyCredentials()
       }
 
-      // Set up authentication environment variables (critical for SDK to work)
-      await this.reinitializeAuth()
+      // Desktop preserves its legacy process-wide auth initialization. A CLI
+      // runtime resolves credentials into backend-local memory/env only.
+      if (this.runtimeProfile === 'default') {
+        await this.reinitializeAuth()
+      }
 
       // Eagerly activate ConfigWatcher + AutomationSystem for every workspace so
       // the scheduler and event handlers start at boot — not lazily on first
@@ -1872,7 +1878,7 @@ export class SessionManager implements ISessionManager {
       // Iterate over each workspace and load its sessions
       for (const workspace of workspaces) {
         const workspaceRootPath = workspace.rootPath
-        const sessionMetadata = listStoredSessions(workspaceRootPath)
+        const sessionMetadata = this.sessionStorage.list(workspaceRootPath)
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
         const wsDefaultWorkingDir = wsConfig?.defaults?.workingDirectory
@@ -1959,7 +1965,7 @@ export class SessionManager implements ISessionManager {
   // queue recovery has already run here.
   private hydrateMessagesForColdPersist(managed: ManagedSession): void {
     sessionLog.debug(`Cold-load triggered for persistSession on ${managed.id}`)
-    const stored = loadStoredSession(managed.workspace.rootPath, managed.id)
+    const stored = this.sessionStorage.load(managed.workspace.rootPath, managed.id)
     if (stored) {
       managed.messages = (stored.messages || []).map(storedToMessage)
       managed.tokenUsage = stored.tokenUsage
@@ -2020,7 +2026,7 @@ export class SessionManager implements ISessionManager {
       } as StoredSession
 
       // Queue for async persistence with debouncing
-      sessionPersistenceQueue.enqueue(storedSession)
+      this.sessionStorage.persistenceQueue.enqueue(storedSession)
     } catch (error) {
       sessionLog.error(`Failed to queue session ${managed.id} for persistence:`, error)
     }
@@ -2030,12 +2036,12 @@ export class SessionManager implements ISessionManager {
   // Cold-persist hydration is synchronous, so by the time we reach here the
   // queue already has an entry whenever persistSession was just called.
   async flushSession(sessionId: string): Promise<void> {
-    await sessionPersistenceQueue.flush(sessionId)
+    await this.sessionStorage.flush(sessionId)
   }
 
   // Flush all pending sessions (call on app quit).
   async flushAllSessions(): Promise<void> {
-    await sessionPersistenceQueue.flushAll()
+    await this.sessionStorage.flushAll()
   }
 
   // ============================================
@@ -2140,7 +2146,7 @@ export class SessionManager implements ISessionManager {
     // Update bridge-mcp-server config/credentials for backends that need it
     if (result.success && result.sourceSlug && managed.agent) {
       const workspaceRootPath = managed.workspace.rootPath
-      const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
+      const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, managed.id)
       const enabledSlugs = managed.enabledSourceSlugs || []
       const allSources = loadAllSources(workspaceRootPath)
       const enabledSources = allSources.filter(s =>
@@ -2327,7 +2333,7 @@ export class SessionManager implements ISessionManager {
     }
 
     return sessions
-      .map(m => managedToSession(m))
+      .map(m => managedToSession(m, this.sessionStorage))
       .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
   }
 
@@ -2399,7 +2405,7 @@ export class SessionManager implements ISessionManager {
     // Lazy-load messages from disk if not yet loaded
     await this.ensureMessagesLoaded(m)
 
-    return managedToSession(m, { messages: m.messages })
+    return managedToSession(m, this.sessionStorage, { messages: m.messages })
   }
 
   /**
@@ -2431,7 +2437,7 @@ export class SessionManager implements ISessionManager {
    * Internal: Load messages from disk storage into the managed session.
    */
   private async loadMessagesFromDisk(managed: ManagedSession): Promise<void> {
-    const storedSession = loadStoredSession(managed.workspace.rootPath, managed.id)
+    const storedSession = this.sessionStorage.load(managed.workspace.rootPath, managed.id)
     if (storedSession) {
       managed.messages = (storedSession.messages || []).map(storedToMessage)
       managed.tokenUsage = storedSession.tokenUsage
@@ -2487,7 +2493,12 @@ export class SessionManager implements ISessionManager {
   getSessionPath(sessionId: string): string | null {
     const managed = this.sessions.get(sessionId)
     if (!managed) return null
-    return getSessionStoragePath(managed.workspace.rootPath, sessionId)
+    return this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
+  }
+
+  getSessionsRoot(workspaceId: string): string | null {
+    const workspace = this.resolveRuntimeWorkspace(workspaceId)
+    return workspace ? this.sessionStorage.getSessionsRoot(workspace.rootPath) : null
   }
 
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
@@ -2600,10 +2611,10 @@ export class SessionManager implements ISessionManager {
 
         // Flush source session to disk to ensure latest message list is available for branch copy.
         this.persistSession(sourceManaged)
-        await sessionPersistenceQueue.flush(sourceManaged.id)
+        await this.sessionStorage.flush(sourceManaged.id)
       }
 
-      const sourceSession = loadStoredSession(workspaceRootPath, options.branchFromSessionId)
+      const sourceSession = this.sessionStorage.load(workspaceRootPath, options.branchFromSessionId)
       if (!sourceSession) {
         sessionLog.warn('Branch validation failed: source session not found on disk', {
           workspaceId,
@@ -2658,7 +2669,7 @@ export class SessionManager implements ISessionManager {
         ? (sourceManaged?.sdkSessionId || sourceSession.sdkSessionId)
         : undefined
       const branchFromSessionPath = branchContextStrategy === 'sdk-fork'
-        ? getSessionStoragePath(workspaceRootPath, options.branchFromSessionId)
+        ? this.sessionStorage.getSessionPath(workspaceRootPath, options.branchFromSessionId)
         : undefined
       // Capture parent's sdkCwd so the child SDK subprocess can find the parent's
       // session file (stored under ~/.claude/projects/{cwd-hash}/).
@@ -2751,7 +2762,7 @@ export class SessionManager implements ISessionManager {
     }
 
     // Use storage layer to create and persist the session
-    const storedSession = await createStoredSession(workspaceRootPath, {
+    const storedSession = await this.sessionStorage.create(workspaceRootPath, {
       name: options?.name,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -2764,7 +2775,7 @@ export class SessionManager implements ISessionManager {
 
     // Branch: copy messages from source session up to and including the branch point
     if (validatedBranch) {
-      const branchedStored = loadStoredSession(workspaceRootPath, storedSession.id)
+      const branchedStored = this.sessionStorage.load(workspaceRootPath, storedSession.id)
       if (!branchedStored) {
         throw new Error(`Failed to load newly created session ${storedSession.id} for branch copy`)
       }
@@ -2775,8 +2786,8 @@ export class SessionManager implements ISessionManager {
       // so they contain absolute paths to the *source* session directory. When saved to the
       // branch session, makeSessionPathPortable uses the *branch* dir — which won't match.
       // Fix: replace source dir paths with branch dir paths so tokenization works on save.
-      const sourceDir = normalizePath(getSessionStoragePath(workspaceRootPath, validatedBranch.sourceSessionId))
-      const branchDir = normalizePath(getSessionStoragePath(workspaceRootPath, storedSession.id))
+      const sourceDir = normalizePath(this.sessionStorage.getSessionPath(workspaceRootPath, validatedBranch.sourceSessionId))
+      const branchDir = normalizePath(this.sessionStorage.getSessionPath(workspaceRootPath, storedSession.id))
       if (sourceDir !== branchDir) {
         branchedStored.messages = sourceMessages.map(m => {
           const json = JSON.stringify(m)
@@ -2799,7 +2810,7 @@ export class SessionManager implements ISessionManager {
         delete branchedStored.branchFromSdkCwd
         delete branchedStored.branchFromSdkTurnId
       }
-      await saveStoredSession(branchedStored)
+      await this.sessionStorage.save(branchedStored)
 
       // Propagate the Pi turn-anchor sidecar into the branch so a downstream
       // branch can still resolve anchors for messages copied here from the
@@ -2891,7 +2902,7 @@ export class SessionManager implements ISessionManager {
               if (m) m.autoRetryPending = undefined
               this.sessions.delete(id)
             },
-            deleteStoredSession,
+            deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
           })
 
           throw new Error(
@@ -2922,7 +2933,11 @@ export class SessionManager implements ISessionManager {
       })
     }
 
-    return managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
+    return managedToSession(
+      managed,
+      this.sessionStorage,
+      isBranch ? { messages: managed.messages } : undefined,
+    )
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
@@ -3189,12 +3204,9 @@ export class SessionManager implements ISessionManager {
         sessionLog.warn(`No LLM connection found for session ${managed.id}, using default anthropic provider`)
       }
 
-      // Set session directory for tool metadata cross-process sharing.
-      // The SDK subprocess reads POLO_AI_SESSION_DIR to write tool-metadata.json;
-      // the main process reads it via toolMetadataStore.setSessionDir().
-      const sessionDirForMetadata = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-      process.env.POLO_AI_SESSION_DIR = sessionDirForMetadata
-      toolMetadataStore.setSessionDir(sessionDirForMetadata)
+      // Set the exact instance-resolved directory for cross-process metadata.
+      // Main-process adapters use explicit per-session lookups.
+      const sessionDirForMetadata = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
 
       // Set up agentReady promise so title generation can await agent creation
       managed.agentReady = new Promise<void>(r => { managed.agentReadyResolve = r })
@@ -3203,7 +3215,7 @@ export class SessionManager implements ISessionManager {
       // Common setup: sources, MCP pool, session config
       // ============================================================
 
-      const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+      const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
       const enabledSlugs = managed.enabledSourceSlugs || []
       const allSources = loadAllSources(managed.workspace.rootPath)
       const enabledSources = allSources.filter(s =>
@@ -3229,6 +3241,7 @@ export class SessionManager implements ISessionManager {
       const miniModel = connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined
       const envOverrides: Record<string, string> = {
         POLO_AI_WORKSPACE_PATH: managed.workspace.rootPath,
+        POLO_AI_SESSION_DIR: sessionDirForMetadata,
         // Pass mini model to SDK subprocess so built-in tools like WebFetch
         // use the correct model for summarization (instead of hardcoded Haiku)
         ...(miniModel ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: miniModel } : {}),
@@ -3270,14 +3283,14 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`SDK session ID captured for ${managed.id}: ${sdkSessionId}`)
         }
         this.persistSession(managed)
-        sessionPersistenceQueue.flush(managed.id)
+        void this.sessionStorage.flush(managed.id)
       }
 
       const onSdkSessionIdCleared = () => {
         managed.sdkSessionId = undefined
         sessionLog.info(`SDK session ID cleared for ${managed.id} (resume recovery)`)
         this.persistSession(managed)
-        sessionPersistenceQueue.flush(managed.id)
+        void this.sessionStorage.flush(managed.id)
       }
 
       const onBranchForkInvalidated = () => {
@@ -3287,7 +3300,7 @@ export class SessionManager implements ISessionManager {
         managed.branchFromSdkTurnId = undefined
         sessionLog.info(`Branch fork invalidated for ${managed.id}: cleared all fork metadata`)
         this.persistSession(managed)
-        sessionPersistenceQueue.flush(managed.id)
+        void this.sessionStorage.flush(managed.id)
       }
 
       const getRecoveryMessages = () => {
@@ -3360,6 +3373,7 @@ export class SessionManager implements ISessionManager {
         hostRuntime: buildBackendHostRuntimeContext(),
         coreConfig: {
         workspace: managed.workspace,
+        sessionStorage: this.sessionStorage,
         miniModel,
         thinkingLevel: managed.thinkingLevel,
         session: sessionConfig,
@@ -4275,7 +4289,7 @@ export class SessionManager implements ISessionManager {
         // Build server configs for all enabled sources
         const allEnabledSources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs || [])
         // Pass session path so large API responses can be saved to session folder
-        const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
+        const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, managed.id)
         const { mcpServers, apiServers, errors } = await buildServersFromSources(allEnabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
 
         if (errors.length > 0) {
@@ -4480,7 +4494,13 @@ export class SessionManager implements ISessionManager {
   async setPendingPlanExecution(sessionId: string, planPath: string, draftInputSnapshot?: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      await setStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, planPath, draftInputSnapshot)
+      await setStoredPendingPlanExecution(
+        managed.workspace.rootPath,
+        sessionId,
+        planPath,
+        draftInputSnapshot,
+        this.sessionStorage,
+      )
       sessionLog.info(`Session ${sessionId}: set pending plan execution for ${planPath}`)
     }
   }
@@ -4493,7 +4513,7 @@ export class SessionManager implements ISessionManager {
   async markCompactionComplete(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      await markStoredCompactionComplete(managed.workspace.rootPath, sessionId)
+      await markStoredCompactionComplete(managed.workspace.rootPath, sessionId, this.sessionStorage)
       sessionLog.info(`Session ${sessionId}: compaction marked complete for pending plan`)
     }
   }
@@ -4506,7 +4526,7 @@ export class SessionManager implements ISessionManager {
   async markPendingPlanExecutionDispatched(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      await markStoredPendingPlanExecutionDispatched(managed.workspace.rootPath, sessionId)
+      await markStoredPendingPlanExecutionDispatched(managed.workspace.rootPath, sessionId, this.sessionStorage)
       sessionLog.info(`Session ${sessionId}: marked pending plan execution as dispatched`)
     }
   }
@@ -4519,7 +4539,7 @@ export class SessionManager implements ISessionManager {
   async clearPendingPlanExecution(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
+      await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
       sessionLog.info(`Session ${sessionId}: cleared pending plan execution`)
     }
   }
@@ -4531,7 +4551,7 @@ export class SessionManager implements ISessionManager {
   getPendingPlanExecution(sessionId: string): { planPath: string; draftInputSnapshot?: string; awaitingCompaction: boolean; executionDispatched: boolean } | null {
     const managed = this.sessions.get(sessionId)
     if (!managed) return null
-    return getStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
+    return getStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
   }
 
   /**
@@ -4575,7 +4595,7 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Load session directly from disk (already in correct format)
-      const storedSession = loadStoredSession(managed.workspace.rootPath, sessionId)
+      const storedSession = this.sessionStorage.load(managed.workspace.rootPath, sessionId)
       if (!storedSession) {
         return { success: false, error: 'Session file not found' }
       }
@@ -4604,7 +4624,7 @@ export class SessionManager implements ISessionManager {
       await updateSessionMetadata(workspaceRootPath, sessionId, {
         sharedUrl: data.url,
         sharedId: data.id,
-      })
+      }, this.sessionStorage)
 
       sessionLog.info(`Session ${sessionId} shared at ${data.url}`)
       // Notify all windows for this workspace
@@ -4639,7 +4659,7 @@ export class SessionManager implements ISessionManager {
 
     try {
       // Load session directly from disk (already in correct format)
-      const storedSession = loadStoredSession(managed.workspace.rootPath, sessionId)
+      const storedSession = this.sessionStorage.load(managed.workspace.rootPath, sessionId)
       if (!storedSession) {
         return { success: false, error: 'Session file not found' }
       }
@@ -4707,7 +4727,7 @@ export class SessionManager implements ISessionManager {
       await updateSessionMetadata(workspaceRootPath, sessionId, {
         sharedUrl: undefined,
         sharedId: undefined,
-      })
+      }, this.sessionStorage)
 
       sessionLog.info(`Session ${sessionId} share revoked`)
       // Notify all windows for this workspace
@@ -4761,7 +4781,7 @@ export class SessionManager implements ISessionManager {
     if (managed.agent) {
       const sources = getSourcesBySlugs(workspaceRootPath, sourceSlugs)
       // Pass session path so large API responses can be saved to session folder
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+      const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
       const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, managed.agent.getSummarizeCallback())
       if (errors.length > 0) {
         sessionLog.warn(`Source build errors:`, errors)
@@ -4890,7 +4910,7 @@ export class SessionManager implements ISessionManager {
     // Persist changes
     if (needsPersist) {
       const workspaceRootPath = managed.workspace.rootPath
-      await updateSessionMetadata(workspaceRootPath, sessionId, updates)
+      await updateSessionMetadata(workspaceRootPath, sessionId, updates, this.sessionStorage)
       this.emitUnreadSummaryChanged()
     }
   }
@@ -4906,7 +4926,12 @@ export class SessionManager implements ISessionManager {
       managed.lastReadMessageId = undefined
       // Persist to disk
       const workspaceRootPath = managed.workspace.rootPath
-      await updateSessionMetadata(workspaceRootPath, sessionId, { hasUnread: true, lastReadMessageId: undefined })
+      await updateSessionMetadata(
+        workspaceRootPath,
+        sessionId,
+        { hasUnread: true, lastReadMessageId: undefined },
+        this.sessionStorage,
+      )
       this.emitUnreadSummaryChanged()
     }
   }
@@ -4924,7 +4949,12 @@ export class SessionManager implements ISessionManager {
       if (!managed.hasUnread) continue
       managed.hasUnread = false
       updates.push(
-        updateSessionMetadata(managed.workspace.rootPath, managed.id, { hasUnread: false })
+        updateSessionMetadata(
+          managed.workspace.rootPath,
+          managed.id,
+          { hasUnread: false },
+          this.sessionStorage,
+        )
       )
     }
     if (updates.length > 0) {
@@ -5139,7 +5169,12 @@ export class SessionManager implements ISessionManager {
       if (connection && !managed.connectionLocked) {
         updates.llmConnection = connection
       }
-      await updateSessionMetadata(managed.workspace.rootPath, sessionId, updates)
+      await updateSessionMetadata(
+        managed.workspace.rootPath,
+        sessionId,
+        updates,
+        this.sessionStorage,
+      )
       // Update agent model if it already exists (takes effect on next query)
       if (managed.agent) {
         // Fallback chain: session model > workspace default > connection default
@@ -5395,7 +5430,7 @@ export class SessionManager implements ISessionManager {
     this.clearPendingPermissionRequestsForSession(sessionId)
 
     // Cancel any pending persistence write (session is being deleted, no need to save)
-    sessionPersistenceQueue.cancel(sessionId)
+    this.sessionStorage.persistenceQueue.cancel(sessionId)
 
     // Clean up session-scoped tool callbacks to prevent memory accumulation
     unregisterSessionScopedToolCallbacks(sessionId)
@@ -5437,7 +5472,7 @@ export class SessionManager implements ISessionManager {
     }
 
     // Delete from disk too
-    deleteStoredSession(workspaceRootPath, sessionId)
+    this.sessionStorage.delete(workspaceRootPath, sessionId)
 
     // Notify all windows for this workspace that the session was deleted
     this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
@@ -5490,7 +5525,7 @@ export class SessionManager implements ISessionManager {
     // Clear any pending plan execution state when a new user message is sent.
     // This acts as a safety valve - if the user moves on, we don't want to
     // auto-execute an old plan later.
-    await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
+    await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
 
     // Ensure messages are loaded before we try to add new ones
     await this.ensureMessagesLoaded(managed)
@@ -5790,7 +5825,7 @@ export class SessionManager implements ISessionManager {
 
     // Apply source servers if any are enabled
     if (hasSources) {
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+      const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
       // Single fresh build — tokens already refreshed above.
       const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
       if (errors.length > 0) {
@@ -5826,11 +5861,6 @@ export class SessionManager implements ISessionManager {
       // The UI layer (extractBadges in mentions.ts) injects fully-qualified names
       // in the rawText, and canUseTool in polo-ai.ts provides a fallback
       // to qualify short names. No transformation needed here.
-
-      // Ensure main process reads tool metadata from the correct session directory.
-      // This must be set before each chat() call since multiple sessions share the process.
-      const chatSessionDir = getSessionStoragePath(workspaceRootPath, sessionId)
-      toolMetadataStore.setSessionDir(chatSessionDir)
 
       // Inject interruption context so the LLM knows the previous turn was cut short.
       // Uses <system-reminder> tags so the LLM treats it as transient system guidance
@@ -5893,7 +5923,7 @@ export class SessionManager implements ISessionManager {
             sessionLog.info(`Captured SDK session ID via fallback: ${sdkId}`)
             // Also flush here since we're in fallback mode
             this.persistSession(managed)
-            sessionPersistenceQueue.flush(managed.id)
+            void this.sessionStorage.flush(managed.id)
           }
         }
 
@@ -5936,7 +5966,7 @@ export class SessionManager implements ISessionManager {
             // Check if there's a captured API error that explains the silent failure.
             // Pass explicit session path to avoid reading from the wrong session
             // (_sessionDir singleton can be clobbered by concurrent sessions).
-            const sessionErrorPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+            const sessionErrorPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, managed.id)
             const apiError = getLastApiError(sessionErrorPath)
 
             if (apiError && apiError.status === 400) {
@@ -6284,7 +6314,12 @@ export class SessionManager implements ISessionManager {
         // User is not watching - mark as unread for NEW badge
         if (!managed.hasUnread) {
           managed.hasUnread = true
-          await updateSessionMetadata(managed.workspace.rootPath, sessionId, { hasUnread: true })
+          await updateSessionMetadata(
+            managed.workspace.rootPath,
+            sessionId,
+            { hasUnread: true },
+            this.sessionStorage,
+          )
           this.emitUnreadSummaryChanged()
         }
       }
@@ -6876,7 +6911,7 @@ export class SessionManager implements ISessionManager {
           managed.lastMessageRole = 'assistant'
           managed.lastFinalMessageId = assistantMessage.id
 
-          const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+          const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
 
           // Claude branch-cutoff support: persist message UUID + SDK session lineage in sidecar.
           // Used to guard resumeSessionAt so we only send anchors valid for the parent SDK session.
@@ -6927,7 +6962,7 @@ export class SessionManager implements ISessionManager {
           sessionLog.debug(`pi_turn_anchor for unknown sdkMessageId=${event.sdkMessageId}; ignoring`)
           break
         }
-        const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+        const sessionPath = this.sessionStorage.getSessionPath(managed.workspace.rootPath, sessionId)
         try {
           await savePiTurnAnchor(sessionPath, poloAiMessageId, event.sdkTurnAnchor)
         } catch (error) {
@@ -7206,7 +7241,11 @@ export class SessionManager implements ISessionManager {
           // This is done here (backend) rather than in the renderer so it's
           // not affected by CMD+R during compaction. The frontend reload
           // recovery will see awaitingCompaction=false and trigger execution.
-          void markStoredCompactionComplete(managed.workspace.rootPath, sessionId)
+          void markStoredCompactionComplete(
+            managed.workspace.rootPath,
+            sessionId,
+            this.sessionStorage,
+          )
           sessionLog.info(`Session ${sessionId}: compaction complete, marked pending plan ready`)
 
           // Emit usage_update so the context count badge refreshes immediately
@@ -7743,6 +7782,7 @@ export class SessionManager implements ISessionManager {
       hostRuntime: buildBackendHostRuntimeContext(),
       coreConfig: {
         workspace: managed.workspace,
+        sessionStorage: this.sessionStorage,
         session: {
           id: `${managed.id}-remote-transfer-summary`,
           workspaceRootPath,
@@ -7787,7 +7827,7 @@ export class SessionManager implements ISessionManager {
     }
 
     this.persistSession(managed)
-    await sessionPersistenceQueue.flush(sessionId)
+    await this.sessionStorage.flush(sessionId)
 
     const summary = await this.generateRemoteTransferSummary(managed)
     if (!summary) {
@@ -7828,7 +7868,7 @@ export class SessionManager implements ISessionManager {
     managed.transferredSessionSummary = payload.summary.trim()
     managed.transferredSessionSummaryApplied = false
     this.persistSession(managed)
-    await sessionPersistenceQueue.flush(session.id)
+    await this.sessionStorage.flush(session.id)
 
     return { sessionId: session.id }
   }
@@ -7861,9 +7901,9 @@ export class SessionManager implements ISessionManager {
 
     // Flush pending writes to ensure JSONL is up to date
     this.persistSession(managed)
-    await sessionPersistenceQueue.flush(sessionId)
+    await this.sessionStorage.flush(sessionId)
 
-    const bundle = serializeSession(managed.workspace.rootPath, sessionId)
+    const bundle = serializeSession(managed.workspace.rootPath, sessionId, this.sessionStorage)
     if (!bundle) {
       sessionLog.error(`[dispatch] Failed to serialize session ${sessionId}`)
       return null
@@ -7907,7 +7947,7 @@ export class SessionManager implements ISessionManager {
     // Determine session ID
     const sessionId = mode === 'move'
       ? bundle.session.header.id
-      : generateSessionId(workspaceRootPath)
+      : generateSessionId(workspaceRootPath, this.sessionStorage)
 
     // Check for ID collision on move
     if (mode === 'move' && this.sessions.has(sessionId)) {
@@ -7915,7 +7955,7 @@ export class SessionManager implements ISessionManager {
     }
 
     // Create session directory with all subdirectories
-    const sessionDir = ensureSessionDir(workspaceRootPath, sessionId)
+    const sessionDir = ensureSessionDir(workspaceRootPath, sessionId, this.sessionStorage)
 
     // Build the stored session from bundle data
     const header = bundle.session.header
@@ -7926,7 +7966,7 @@ export class SessionManager implements ISessionManager {
       // Always regenerate sdkCwd for the target workspace.
       // The source sdkCwd points to a path on the originating server
       // which doesn't exist here (cross-server transfer).
-      sdkCwd: getSessionStoragePath(workspaceRootPath, sessionId),
+      sdkCwd: this.sessionStorage.getSessionPath(workspaceRootPath, sessionId),
       name: header.name,
       createdAt: header.createdAt,
       lastUsedAt: Date.now(),
@@ -8020,7 +8060,7 @@ export class SessionManager implements ISessionManager {
     }
 
     // Write JSONL file (after compatibility checks so remapped values are persisted)
-    const sessionFile = getSessionFilePath(workspaceRootPath, sessionId)
+    const sessionFile = getSessionFilePath(workspaceRootPath, sessionId, this.sessionStorage)
     sessionLog.info(`[import] Writing JSONL: ${sessionFile} (llmConnection=${storedSession.llmConnection ?? 'default'}, messages=${storedSession.messages.length})`)
     writeSessionJsonl(sessionFile, storedSession)
 

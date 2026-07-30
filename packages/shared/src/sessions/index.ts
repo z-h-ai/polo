@@ -27,9 +27,7 @@ export type { SessionStorage, SessionStorageOwner } from './session-storage.ts';
 export {
   WorkspaceSessionStorage,
   RootedSessionStorage,
-  setSessionStorage,
-  getSessionStorage,
-  resetSessionStorage,
+  defaultWorkspaceSessionStorage,
 } from './session-storage.ts';
 
 // Storage functions
