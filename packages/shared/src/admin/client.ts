@@ -480,7 +480,7 @@ export class AdminClient {
       }, this.requestTimeoutMs);
     });
 
-    let response: Response;
+    let response: Response | undefined;
     let data: unknown;
     try {
       ({ response, data } = await Promise.race([
@@ -491,6 +491,10 @@ export class AdminClient {
             body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
             signal: controller.signal,
           });
+          // Preserve a definitive authorization status as soon as the response
+          // headers arrive. The body remains deadline-bounded, but a half-open
+          // 401/403 body must not be reclassified as a transport timeout.
+          response = fetchedResponse;
           return {
             response: fetchedResponse,
             data: await this.readJson(fetchedResponse),
@@ -499,10 +503,18 @@ export class AdminClient {
         timeoutPromise,
       ]));
     } catch (error) {
-      if (timedOut || error === timeoutError) throw timeoutError;
-      throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
+      if (response?.status === 401 || response?.status === 403) {
+        data = undefined;
+      } else {
+        if (timedOut || error === timeoutError) throw timeoutError;
+        throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
+      }
     } finally {
       if (timeout) clearTimeout(timeout);
+    }
+
+    if (!response) {
+      throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR');
     }
 
     if (response.status === 304 && options.allowNotModified) {

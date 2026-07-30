@@ -316,6 +316,15 @@ let previewRequests: Deferred<PreviewResult>[] = []
 let previewJoinCallCount = 0
 let adminLogoutCallCount = 0
 let commonLogoutCallCount = 0
+let catalogSyncCallCount = 0
+let catalogSyncResult:
+  | { success: true }
+  | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+    } = { success: true }
 let pendingAdminLogout: Deferred<SessionChangedLogoutResult> | null = null
 let pendingCommonLogout: Deferred<SessionChangedLogoutResult> | null = null
 let deepLinkNavigateListener:
@@ -364,6 +373,10 @@ const electronAPI = new Proxy<Record<string, unknown>>({
         errorCode: 'UNAUTHORIZED',
       },
   adminSyncConnections: async () => ({ success: true }),
+  adminSyncAppCatalog: async () => {
+    catalogSyncCallCount += 1
+    return catalogSyncResult
+  },
   adminLogout: async () => {
     adminLogoutCallCount += 1
     if (pendingAdminLogout) return pendingAdminLogout.promise
@@ -449,6 +462,8 @@ beforeEach(async () => {
   previewJoinCallCount = 0
   adminLogoutCallCount = 0
   commonLogoutCallCount = 0
+  catalogSyncCallCount = 0
+  catalogSyncResult = { success: true }
   pendingAdminLogout = null
   pendingCommonLogout = null
   loginRouteRenderCount = 0
@@ -523,7 +538,32 @@ describe('App deferred organization deep-link wiring', () => {
     expect(loginRouteRenderCount).toBe(loginRenderCountAfterLogout)
   })
 
-  it('clears the App account context when a cached catalog sync returns 403', async () => {
+  it('keeps the App account context when startup Catalog sync returns organization 403', async () => {
+    authenticated = true
+    activeWorkspaceId = 'workspace-1'
+    listedOrganizations = [organizationSummary]
+    catalogSyncResult = {
+      success: false,
+      errorCode: 'FORBIDDEN',
+      message: 'Admin request is not permitted',
+      status: 403,
+    }
+    render(createElement(I18nextProvider, { i18n }, createElement(App)))
+
+    await screen.findByTestId('ready-route')
+    await waitFor(() => expect(catalogSyncCallCount).toBe(1))
+    expect(screen.queryByTestId('login-route')).toBeNull()
+    // eslint-disable-next-line polo-ai/no-localstorage -- verify the real App organization context survives Catalog-only denial
+    expect(localStorage.getItem(
+      `polo-verified-organization-context:${account.userId}`,
+    )).not.toBeNull()
+    // eslint-disable-next-line polo-ai/no-localstorage -- verify the real App organization context survives Catalog-only denial
+    expect(localStorage.getItem(
+      `polo-active-organization:${account.userId}`,
+    )).toBe(organization.id)
+  })
+
+  it('clears the App account context for an actual account-disabled failure', async () => {
     authenticated = true
     activeWorkspaceId = 'workspace-1'
     listedOrganizations = [organizationSummary]
@@ -536,7 +576,7 @@ describe('App deferred organization deep-link wiring', () => {
 
     act(() => {
       expect(emitAdminAuthFailure({
-        code: 'FORBIDDEN',
+        code: 'ACCOUNT_DISABLED',
         status: 403,
       })).toBe(true)
     })

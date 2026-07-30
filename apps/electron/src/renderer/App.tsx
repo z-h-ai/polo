@@ -84,9 +84,9 @@ import {
 import { useOrganizationContextState } from '@/hooks/useOrganizationContext'
 import {
   emitAdminAuthFailure,
+  emitAdminCatalogSessionAuthFailure,
   getAdminErrorCode,
   isAdminAuthFailureResult,
-  normalizeAdminError,
   subscribeToAdminAuthFailures,
   type AdminErrorLike,
 } from '@/lib/admin-auth-failure'
@@ -2402,7 +2402,7 @@ export default function App() {
       startupCatalogOrganizationId,
     ).then((result) => {
       if (!cancelled && !result.success) {
-        emitAdminAuthFailure(normalizeAdminError(result))
+        emitAdminCatalogSessionAuthFailure(result)
       }
     }).catch(() => {
       // Home surfaces refresh failures and the server retains the last confirmed cache.

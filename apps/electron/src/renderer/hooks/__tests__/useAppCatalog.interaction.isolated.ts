@@ -269,7 +269,7 @@ describe('useAppCatalog scoped async state', () => {
     })
   })
 
-  it('propagates a cached catalog 403 into the App auth-failure channel', async () => {
+  it('keeps a cached Catalog 403 out of the account auth-failure channel', async () => {
     syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
       success: false,
       errorCode: 'FORBIDDEN',
@@ -285,7 +285,26 @@ describe('useAppCatalog scoped async state', () => {
     await waitFor(() => {
       expect(result.current.state.errorCode).toBe('FORBIDDEN')
     })
-    expect(failures).toEqual([{ code: 'FORBIDDEN', status: 403 }])
+    expect(failures).toEqual([])
+    unsubscribe()
+  })
+
+  it('propagates an account-disabled Catalog response into the auth-failure channel', async () => {
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
+      success: false,
+      errorCode: 'ACCOUNT_DISABLED',
+      message: 'Admin account is disabled',
+      status: 403,
+    }))
+    const failures: Array<{ code: string; status?: number }> = []
+    const unsubscribe = subscribeToAdminAuthFailures(error => {
+      failures.push(error)
+    })
+
+    renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(failures).toEqual([{ code: 'ACCOUNT_DISABLED', status: 403 }])
+    })
     unsubscribe()
   })
 

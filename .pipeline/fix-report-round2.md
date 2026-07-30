@@ -1,77 +1,75 @@
-# POL-51 第 2 轮 Review 修复报告
+# POL-51 第 2 轮阻塞审查修复报告
 
-## 每条 issue 的处理结果
+## 逐条处理
 
-### 1. VALIDATE 受限离线返回未关闭既有在线 Catalog 安装权限
+### 1. 区分账号认证失效与 Catalog 组织失权
 
-已修复。
+- 为 Catalog 同步增加独立的认证失败分类：
+  - `UNAUTHORIZED`、`INVALID_TOKEN`、`TOKEN_REVOKED`、`TOKEN_EXPIRED`、
+    `ACCOUNT_DISABLED` 以及明确 HTTP 401 继续结束可信账号会话。
+  - `FORBIDDEN`、`MEMBERSHIP_REMOVED`、`MEMBERSHIP_SUSPENDED`、
+    `ORGANIZATION_UNAVAILABLE`、`NOT_FOUND` 以及 Catalog HTTP 403
+    只调用 `denyCatalogScope`。
+- Catalog 组织失权不再依赖“必须存在缓存”才建立 deny gate；无缓存时同样
+  fail closed。
+- renderer 的 Catalog 同步使用独立的账号失效事件分类。组织级 403/成员失权
+  不再触发 App 全局登出，账号禁用和 token/session 失效仍触发登出。
+- 组织失权后保留当前账号凭据和 denied Catalog：
+  - `INSTALL`、更新 Release、`START`、`RESTART` 均返回
+    `NOT_AUTHORIZED`。
+  - 运行状态、日志、`STOP`、`UNINSTALL` 继续可用。
+- 增加真实 Admin handler + scoped local runtime production wiring 测试，
+  覆盖 Catalog 403 后账号会话保留、生命周期操作 fail closed，以及本地数据
+  管理继续可用。
+- 增加 App 与 `useAppCatalog` 测试，覆盖组织 403 不清理账号上下文、
+  `ACCOUNT_DISABLED` 仍进入账号认证失效链路。
 
-- 两条受限离线路径（过期 token 刷新网络失败、未过期 token 校验网络失败）都在最终 `mutateIfCurrent` session CAS 内枚举当前账号已缓存或已注册的 Catalog scope。
-- 仅将仍为 `online` 的 scope 原子降级为 `offline`，不会把已经 `denied` 的 scope 重新开放。
-- 新增真实 Admin handler、Local Apps handler 与 scoped runtime registry 接线测试：先完成 online Catalog sync，再触发两类离线 VALIDATE；紧接着公开 INSTALL 均返回 `NOT_AUTHORIZED`，runtime manager 创建次数为 0。
+### 2. 401/403 响应体半开时保留已知授权状态
 
-### 2. renderer 按 scope 复用不同生命周期操作的在途 Promise
-
-已修复。
-
-- `useAppCatalog` 的生命周期 single-flight key 改为完整 scope key 加 operation kind（install/start/stop/uninstall）。
-- 相同 scope 的重复同类操作继续去重，但 STOP 不再复用在途 START Promise，可真实发送到主进程并由主进程生命周期队列串行处理。
-- 新增 deferred START 确定性测试：START 未完成时调用 STOP，断言 STOP RPC 在 START resolve 前已发送且只发送一次。
-
-### 3. 严格 SemVer 错误接受大写 `V` 前缀
-
-已修复。
-
-- shared 唯一解析实现移除大小写不敏感标志，只兼容精确小写单个前导 `v`。
-- shared parser、Catalog cache、主进程、renderer 和 scoped runtime 五层测试都新增大写 `V` 拒绝用例。
-- 原有小写 `v`、大数字标识符、prerelease、第四段和首尾空白契约保持不变。
-
-### 4. 明确失权时缓存写失败可能保留内存 online 门禁
-
-已修复。
-
-- 新增统一 fail-closed scope denial：先推进 authorization epoch，再将内存 access mode 设置为 `denied`，最后才尝试持久化 denied cache。
-- denied cache 写失败只记录告警，不再中断内存授权关闭，也不会让 RPC 返回路径恢复在线。
-- Catalog `NOT_FOUND` 与组织列表确认成员移除均复用该顺序。
-- 新增两条缓存写失败生产接线测试：缓存仍显示旧 authorized 元数据时，内存门禁已为 denied，公开 INSTALL 立即返回 `NOT_AUTHORIZED`，runtime manager 创建次数为 0。
+- AdminClient 在 `fetch` 返回响应头时立即记录 `Response`。
+- 统一 deadline 仍覆盖 `response.text()`；响应体半开会按期限 abort。
+- 若已收到 HTTP 401/403，body 超时或读取失败不再改写为 `TIMEOUT`：
+  - 401 保留为 `UNAUTHORIZED`，继续遵循既有 token refresh 规则。
+  - 403 保留为 `FORBIDDEN`。
+- 其他 fetch/body 半开行为仍稳定映射为 `TIMEOUT`。
+- 新增 401、403 body 永不结束的确定性测试，验证 abort 只发生一次且不会
+  延迟重复触发。
+- server-core 回归测试确认 Catalog 403 进入 denied Catalog，不会进入
+  `NETWORK_ERROR`/`TIMEOUT` 的旧授权缓存回退。
 
 ## 关键文件
 
+- `packages/shared/src/admin/client.ts`
+- `packages/shared/src/admin/__tests__/client.test.ts`
 - `packages/server-core/src/handlers/rpc/admin.ts`
+- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
 - `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+- `apps/electron/src/renderer/lib/admin-auth-failure.ts`
 - `apps/electron/src/renderer/hooks/useAppCatalog.ts`
 - `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-- `packages/shared/src/admin/semver.ts`
-- `packages/shared/src/admin/__tests__/semver.test.ts`
-- `packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
-- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-- `apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
-- `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.test.ts`
-- `.pipeline/fix-report-round2.md`
+- `apps/electron/src/renderer/App.tsx`
+- `apps/electron/src/renderer/__tests__/App.organization-deep-link.interaction.isolated.ts`
 
-## 自测命令与结果
+## 全量自测结果
 
-- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
-  - 结果：5 pass，0 fail。
-- `bun test ./apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-  - 结果：16 pass，0 fail。
-- `bun test ./packages/shared/src/admin/__tests__/semver.test.ts ./packages/shared/src/admin/__tests__/app-catalog-cache.test.ts ./apps/electron/src/renderer/hooks/__tests__/useAppCatalog.test.ts ./apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
-  - 结果：36 pass，0 fail。
-- `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-  - 结果：17 pass，0 fail。
-- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 结果：50 pass，0 fail。
-- `bun run typecheck:all`
-  - 结果：通过。
-- `cd apps/electron && bunx eslint src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts src/main/handlers/__tests__/local-apps.isolated.ts src/main/local-app-runtime/__tests__/scoped-registry.test.ts src/renderer/hooks/useAppCatalog.ts src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts src/renderer/hooks/__tests__/useAppCatalog.test.ts`
-  - 结果：通过，0 error。
-- `bun run electron:build:main`
-  - 结果：主进程构建并校验通过。
-- `bun run test`
-  - 结果：全量非 isolated 测试 4792 pass、19 skip、0 fail；随后全部 isolated 测试通过，包含本轮新增授权和 renderer 竞态回归。
-- `git diff --check`
-  - 结果：通过。
+- 定向回归：
+  - AdminClient：34 pass，0 fail。
+  - Admin RPC：50 pass，0 fail。
+  - production wiring：13 pass，0 fail。
+  - `useAppCatalog`：20 pass，0 fail。
+  - App：6 pass，0 fail。
+- `bun run test`：通过。
+  - 常规测试：4,803 pass，19 skip，0 fail（4,822 tests / 365 files）。
+  - 19 个 isolated 测试文件：268 pass，0 fail。
+  - 合计：5,071 pass，19 skip，0 fail。
+- `bun run typecheck:all`：通过。
+- 修改文件定向 ESLint：0 error；Electron 仅有既存 warning。
+- `git diff --check`：通过。
 
 ## 遗留问题
 
-无本轮遗留问题。
+- 功能与阻塞审查项无遗留。
+- 根级 `bun run lint` 目前无法完整启动：仓库引用的
+  `scripts/check-raw-sends.sh` 与 `scripts/check-task-tool-checks.sh`
+  在当前 worktree 不存在；已改为对本轮修改文件执行可用的 package ESLint，
+  结果 0 error。

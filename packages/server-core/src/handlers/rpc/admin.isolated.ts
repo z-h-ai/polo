@@ -2357,8 +2357,8 @@ describe('registerAdminHandlers', () => {
       {
         organizationId: '16666666-6666-4666-8666-666666666662',
         authError: new TestAdminError(
-          'membership forbidden',
-          'FORBIDDEN',
+          'account disabled',
+          'ACCOUNT_DISABLED',
           { status: 403 },
         ),
         temporaryError: new TestAdminError(
@@ -2583,7 +2583,7 @@ describe('registerAdminHandlers', () => {
     }
   })
 
-  it('returns an auth failure and marks cached apps unavailable after a cached 403', async () => {
+  it('denies only the Catalog scope after a cached organization 403', async () => {
     const organizationId = '11111111-1111-4111-8111-111111111111'
     managerState.tokens = {
       accessToken: 'access-token',
@@ -2610,9 +2610,6 @@ describe('registerAdminHandlers', () => {
       }],
     })
     appCatalogAccess.set(`user-1:${organizationId}`, 'online')
-    adminSessionEnding.mockImplementationOnce(async () => {
-      throw new Error('controlled local stop failure')
-    })
     adminClientBehavior.getAppCatalog = async () => {
       throw new TestAdminError('membership removed', 'FORBIDDEN', { status: 403 })
     }
@@ -2633,13 +2630,9 @@ describe('registerAdminHandlers', () => {
       authorizationStatus: 'denied',
       apps: [{ availability: 'unavailable' }],
     })
-    expect(managerState.tokens).toBeNull()
-    expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
+    expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
+    expect(adminSessionEnding).not.toHaveBeenCalled()
     expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
-    expect(loggerWarn).toHaveBeenCalledWith(
-      expect.stringContaining('continuing fail-closed cleanup'),
-      'controlled local stop failure',
-    )
   })
 
   it('ends a locally unexpired session when Catalog preserves its protected 401', async () => {
@@ -2739,9 +2732,8 @@ describe('registerAdminHandlers', () => {
         authorizationStatus: 'denied',
         apps: [{ availability: 'unavailable' }],
       })
-      expect(managerState.tokens).toBeNull()
-      expect(adminSessionEnding).toHaveBeenCalledWith('user-1')
-      adminSessionEnding.mockClear()
+      expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
+      expect(adminSessionEnding).not.toHaveBeenCalled()
     }
   })
 

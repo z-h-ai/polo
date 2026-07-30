@@ -15,8 +15,7 @@ import {
 } from '@polo-ai/shared/protocol'
 import { useOptionalOrganizationContext } from '@/context/OrganizationContext'
 import {
-  emitAdminAuthFailure,
-  normalizeAdminError,
+  emitAdminCatalogSessionAuthFailure,
 } from '@/lib/admin-auth-failure'
 import { getHomeAppErrorCode } from '@/lib/home-app-errors'
 
@@ -537,7 +536,7 @@ export function useAppCatalog() {
         || contextKeyRef.current !== contextKey
       ) return
       if (!result.success) {
-        emitAdminAuthFailure(normalizeAdminError(result))
+        emitAdminCatalogSessionAuthFailure(result)
         if (isCatalogAccessDenied(result.errorCode, result.status)) {
           const deniedContextGeneration = ++contextGenerationRef.current
           const deniedCatalog = catalogRef.current

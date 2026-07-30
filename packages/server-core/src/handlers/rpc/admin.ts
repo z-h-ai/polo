@@ -1161,7 +1161,7 @@ export function registerAdminHandlers(
           return staleAdminSessionResult()
         }
         const adminError = toAdminRpcError(error)
-        if (isSessionEndingAuthFailure(error)) {
+        if (isCatalogSessionEndingAuthFailure(error)) {
           const ended = await endAdminSession(
             manager,
             deps,
@@ -1176,7 +1176,7 @@ export function registerAdminHandlers(
           }
           log?.warn('[Admin] app catalog authorization denied:', adminError.message)
           return { success: false, ...adminError }
-        } else if (cached && isCatalogAuthorizationFailure(error)) {
+        } else if (isCatalogAuthorizationFailure(error)) {
           const denied = await sessions.mutateIfCurrent(
             manager,
             requestContext.session,
@@ -2016,10 +2016,30 @@ function isTemporaryAdminFailure(error: unknown): boolean {
   )
 }
 
+function isCatalogSessionEndingAuthFailure(error: unknown): boolean {
+  if (!(error instanceof AdminError)) return false
+  if (
+    error.errorCode === 'FORBIDDEN'
+    || error.errorCode === 'MEMBERSHIP_REMOVED'
+    || error.errorCode === 'MEMBERSHIP_SUSPENDED'
+    || error.errorCode === 'ORGANIZATION_UNAVAILABLE'
+    || error.errorCode === 'NOT_FOUND'
+  ) {
+    return false
+  }
+  return (
+    error.errorCode === 'UNAUTHORIZED'
+    || error.errorCode === 'ACCOUNT_DISABLED'
+    || error.errorCode === 'INVALID_TOKEN'
+    || error.errorCode === 'TOKEN_REVOKED'
+    || error.errorCode === 'TOKEN_EXPIRED'
+    || error.status === 401
+  )
+}
+
 function isCatalogAuthorizationFailure(error: unknown): boolean {
   return error instanceof AdminError && (
     error.errorCode === 'FORBIDDEN'
-    || error.errorCode === 'ACCOUNT_DISABLED'
     || error.errorCode === 'MEMBERSHIP_REMOVED'
     || error.errorCode === 'MEMBERSHIP_SUSPENDED'
     || error.errorCode === 'ORGANIZATION_UNAVAILABLE'

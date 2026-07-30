@@ -559,6 +559,49 @@ describe('AdminClient', () => {
     }
   });
 
+  it('preserves 401 and 403 response authorization when their bodies never finish', async () => {
+    for (const [status, errorCode] of [
+      [401, 'UNAUTHORIZED'],
+      [403, 'FORBIDDEN'],
+    ] as const) {
+      let capturedSignal: AbortSignal | undefined;
+      let abortCount = 0;
+      globalThis.fetch = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        capturedSignal = init?.signal as AbortSignal;
+        return {
+          ok: false,
+          status,
+          text: () => new Promise<never>((_resolve, reject) => {
+            const onAbort = () => {
+              abortCount += 1;
+              capturedSignal!.removeEventListener('abort', onAbort);
+              reject(capturedSignal!.reason);
+            };
+            capturedSignal!.addEventListener('abort', onAbort);
+          }),
+        } as unknown as Response;
+      }) as typeof globalThis.fetch;
+
+      const client = new AdminClient('https://admin.example.com', {
+        requestTimeoutMs: 10,
+      });
+      await expect(client.getAppCatalog(
+        'access-token',
+        '11111111-1111-4111-8111-111111111111',
+      )).rejects.toMatchObject({
+        errorCode,
+        status,
+      });
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(abortCount).toBe(1);
+      await Bun.sleep(20);
+      expect(abortCount).toBe(1);
+    }
+  });
+
   it('clears the request deadline after the response body is consumed', async () => {
     let capturedSignal: AbortSignal | undefined;
     globalThis.fetch = (async (
