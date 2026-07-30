@@ -234,6 +234,8 @@ export const CHANNEL_MAP = {
   // User Preferences
   readPreferences: invoke(RPC_CHANNELS.preferences.READ),
   writePreferences: invoke(RPC_CHANNELS.preferences.WRITE),
+  getHomeRecentApps: invoke(RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS),
+  setHomeRecentApps: invoke(RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS),
 
   // Session Drafts
   getDraft: invoke(RPC_CHANNELS.drafts.GET),

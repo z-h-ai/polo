@@ -25,6 +25,13 @@ const openApp = jest.fn()
 const removeApp = jest.fn(async () => {})
 let appCatalogHook: any
 let installedApps = [...BUILTIN_APP_DEFINITIONS]
+const homeRecentAppsByContext = new Map<string, any[]>()
+const getHomeRecentApps = jest.fn(async (contextKey: string) =>
+  homeRecentAppsByContext.get(contextKey) ?? [])
+const setHomeRecentApps = jest.fn(async (contextKey: string, apps: any[]) => {
+  homeRecentAppsByContext.set(contextKey, apps)
+  return apps
+})
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void
@@ -106,6 +113,16 @@ beforeEach(async () => {
   removeApp.mockClear()
   appCatalogHook = signedOutCatalogHook()
   installedApps = [...BUILTIN_APP_DEFINITIONS]
+  homeRecentAppsByContext.clear()
+  getHomeRecentApps.mockClear()
+  setHomeRecentApps.mockClear()
+  Object.defineProperty(window, 'electronAPI', {
+    configurable: true,
+    value: {
+      getHomeRecentApps,
+      setHomeRecentApps,
+    },
+  })
   await i18n.changeLanguage('en')
 })
 
@@ -138,7 +155,7 @@ describe('HomePage round-two regressions', () => {
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
-  it('keeps non-recent built-ins discoverable on a signed-out returning profile', () => {
+  it('migrates recents to preferences while keeping other built-ins discoverable', async () => {
     installedApps = [
       ...BUILTIN_APP_DEFINITIONS,
       {
@@ -169,6 +186,10 @@ describe('HomePage round-two regressions', () => {
       createElement(HomePage, { onAddApp: () => {} }),
     ))
 
+    await waitFor(() => {
+      expect(setHomeRecentApps).toHaveBeenCalledTimes(1)
+    })
+    expect(localStorage.getItem('craft-home-recent-apps')).toBeNull()
     const launcher = screen.getByTestId('builtin-app-launcher')
     expect(within(launcher).queryByText('Pro Buddy')).toBeNull()
     expect(within(launcher).getByText('Kanban')).toBeTruthy()

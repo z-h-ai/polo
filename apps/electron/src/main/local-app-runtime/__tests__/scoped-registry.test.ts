@@ -76,9 +76,15 @@ describe('scoped local app runtime registry', () => {
     expect(first).toMatch(/^catalog-[a-f0-9]{64}$/)
   })
 
-  it('accepts uppercase, Unicode, and 512-character business ids', () => {
-    for (const catalogAppId of ['App.ID', '应用-甲', 'x'.repeat(512)]) {
-      const value = { ...scope('account-a'), catalogAppId }
+  it('accepts the shared entity-id contract across every business scope field', () => {
+    const entityIds = ['App.ID', '应用-甲', '含\0NUL', 'x'.repeat(512)]
+    for (const entityId of entityIds) {
+      const value = {
+        kind: 'catalog' as const,
+        accountId: entityId,
+        organizationId: entityId,
+        catalogAppId: entityId,
+      }
       expect(createCatalogRuntimeAppId(value)).toMatch(/^catalog-[a-f0-9]{64}$/)
     }
   })

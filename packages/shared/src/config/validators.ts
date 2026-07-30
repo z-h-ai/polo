@@ -136,6 +136,14 @@ export const UserPreferencesSchema = z.object({
   location: LocationSchema.optional(),
   language: z.string().optional(),
   notes: z.string().optional(),
+  homeRecentApps: z.record(
+    z.string(),
+    z.array(z.object({
+      id: z.string().min(1).max(2_048),
+      kind: z.enum(['builtin', 'external', 'organization']),
+      openedAt: z.number().finite().min(0),
+    })).max(6),
+  ).optional(),
   updatedAt: z.number().int().min(0).optional(),
 });
 

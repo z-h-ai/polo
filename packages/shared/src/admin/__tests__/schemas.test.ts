@@ -114,6 +114,7 @@ describe('Catalog organization entity id RPC contract', () => {
     const entityIds = [
       'tenant:creator-space',
       '组织：研发圈',
+      '组织\0研发圈',
       `org:${'x'.repeat(508)}`,
     ]
     for (const organizationId of entityIds) {

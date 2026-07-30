@@ -232,6 +232,11 @@ const managerState: {
 const loggerWarn = jest.fn()
 const appCatalogCache = new Map<string, any>()
 const appCatalogAccess = new Map<string, string>()
+const appCatalogCacheBehavior: {
+  denyWriteError: Error | null
+} = {
+  denyWriteError: null,
+}
 const adminSessionEnding = jest.fn(async (_accountId: string) => {})
 const adminSessionStarted = jest.fn(async (_accountId: string) => {})
 const retainedCatalogAppIds = jest.fn(async (
@@ -290,6 +295,9 @@ mock.module('@polo-ai/shared/admin', () => ({
   listCachedAppCatalogs: (accountId: string) => [...appCatalogCache.values()]
     .filter(cached => cached.accountId === accountId),
   denyCachedAppCatalogAuthorization: (accountId: string, organizationId: string) => {
+    if (appCatalogCacheBehavior.denyWriteError) {
+      throw appCatalogCacheBehavior.denyWriteError
+    }
     const key = `${accountId}:${organizationId}`
     const cached = appCatalogCache.get(key)
     if (!cached) return null
@@ -305,6 +313,9 @@ mock.module('@polo-ai/shared/admin', () => ({
     return denied
   },
   denyCachedAppCatalogAuthorizationForAccount: (accountId: string) => {
+    if (appCatalogCacheBehavior.denyWriteError) {
+      throw appCatalogCacheBehavior.denyWriteError
+    }
     const denied = []
     for (const [key, cached] of appCatalogCache) {
       if (!key.startsWith(`${accountId}:`)) continue
@@ -559,6 +570,7 @@ beforeEach(() => {
   managerState.deletedCredentialSlugs = []
   appCatalogCache.clear()
   appCatalogAccess.clear()
+  appCatalogCacheBehavior.denyWriteError = null
 
   adminClientBehavior.login = async () => ({
     accessToken: 'access-token',
@@ -3306,6 +3318,101 @@ describe('registerAdminHandlers', () => {
     expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
     expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
     expect(adminSessionEnding).not.toHaveBeenCalled()
+  })
+
+  it('keeps the process deny gate above stale authorized cache fallbacks', async () => {
+    for (const temporaryErrorCode of ['NETWORK_ERROR', 'TIMEOUT']) {
+      const organizationId = `deny-write-failure-${temporaryErrorCode}`
+      managerState.tokens = {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: Date.now() + 3600_000,
+        userId: 'user-1',
+        username: 'admin',
+      }
+      appCatalogCache.set(`user-1:${organizationId}`, {
+        accountId: 'user-1',
+        organizationId,
+        authorizationStatus: 'authorized',
+        appConfigVersion: 'apps-v1',
+        syncedAt: 50,
+        apps: [{
+          id: 'remote-app',
+          organizationId,
+          name: 'Private remote app',
+          description: '',
+          deliveryMode: 'remote_url',
+          remoteUrl: 'https://private.example.com/app',
+          sortOrder: 0,
+          availability: 'available',
+        }, {
+          id: 'bundle-app',
+          organizationId,
+          name: 'Private bundle app',
+          description: '',
+          deliveryMode: 'local_bundle',
+          currentRelease: {
+            version: '1.0.0',
+            runtime: 'static',
+            downloadUrl: 'https://private.example.com/app.zip',
+            checksum: 'a'.repeat(64),
+            sizeBytes: 42,
+          },
+          sortOrder: 1,
+          availability: 'available',
+        }],
+      })
+      appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+      appCatalogCacheBehavior.denyWriteError = new Error('disk unavailable')
+      adminClientBehavior.getAppCatalog = async () => {
+        throw new TestAdminError('membership removed', 'FORBIDDEN', {
+          status: 403,
+        })
+      }
+      const { syncAppCatalog } = createHarness()
+      const context = {
+        clientId: 'client-1',
+        workspaceId: null,
+        webContentsId: null,
+      }
+
+      expect(await syncAppCatalog(context, organizationId, { force: true }))
+        .toMatchObject({
+          success: false,
+          errorCode: 'FORBIDDEN',
+          accessMode: 'denied',
+        })
+      expect(appCatalogCache.get(`user-1:${organizationId}`))
+        .toMatchObject({ authorizationStatus: 'authorized' })
+      expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+
+      adminClientBehavior.getAppCatalog = async () => {
+        throw new TestAdminError('transport unavailable', temporaryErrorCode)
+      }
+      const fallback = await syncAppCatalog(
+        context,
+        organizationId,
+        { force: true },
+      )
+
+      expect(fallback).toMatchObject({
+        success: false,
+        errorCode: temporaryErrorCode,
+        accessMode: 'denied',
+        catalog: {
+          authorizationStatus: 'denied',
+          apps: [
+            { id: 'remote-app', availability: 'unavailable' },
+            { id: 'bundle-app', availability: 'unavailable' },
+          ],
+        },
+      })
+      expect(fallback.catalog).not.toHaveProperty('trustedReleases')
+      expect(fallback.catalog.apps[0]).not.toHaveProperty('remoteUrl')
+      expect(fallback.catalog.apps[1]).not.toHaveProperty('currentRelease')
+      expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+      appCatalogCacheBehavior.denyWriteError = null
+    }
   })
 
   it('treats a successful organization list as the new authorization truth', async () => {

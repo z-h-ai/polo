@@ -12,6 +12,7 @@ import type {
   LocalAppStartResult,
   LocalAppUninstallOptions,
 } from '@polo-ai/shared/protocol'
+import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
 import { normalizeCatalogSemVer } from '@polo-ai/shared/admin/semver'
 import {
   LocalAppRuntimeManager,
@@ -21,7 +22,6 @@ import {
 import { LocalAppRuntimeError } from './runtime-error'
 
 const SCOPE_SCHEMA_VERSION = 1
-const MAX_SCOPE_FIELD_LENGTH = 512
 export const STOP_CLEANUP_CONCURRENCY = 8
 const STATUS_READ_CONCURRENCY = 8
 export const PERSISTED_SCOPE_READ_CONCURRENCY = 8
@@ -70,15 +70,11 @@ const AUTHORIZED_APP_LIFECYCLE_OPERATION: ScopeOperationLifecyclePolicy = {
 }
 
 function validateScopeField(value: unknown, field: string): string {
-  if (
-    typeof value !== 'string'
-    || value.length === 0
-    || value.length > MAX_SCOPE_FIELD_LENGTH
-    || value.includes('\0')
-  ) {
+  const parsed = AdminEntityIdSchema.safeParse(value)
+  if (!parsed.success) {
     throw new LocalAppRuntimeError('INVALID_REQUEST', `${field} is invalid`)
   }
-  return value
+  return parsed.data
 }
 
 export function validateCatalogLocalAppScope(scope: unknown): CatalogLocalAppScope {
@@ -87,9 +83,6 @@ export function validateCatalogLocalAppScope(scope: unknown): CatalogLocalAppSco
   }
   const value = scope as CatalogLocalAppScope
   const catalogAppId = validateScopeField(value.catalogAppId, 'scope.catalogAppId')
-  if (catalogAppId.trim().length === 0) {
-    throw new LocalAppRuntimeError('INVALID_REQUEST', 'scope.catalogAppId is blank')
-  }
   return {
     kind: 'catalog',
     accountId: validateScopeField(value.accountId, 'scope.accountId'),

@@ -267,6 +267,8 @@ export const RPC_CHANNELS = {
   preferences: {
     READ: 'preferences:read',
     WRITE: 'preferences:write',
+    GET_HOME_RECENT_APPS: 'preferences:getHomeRecentApps',
+    SET_HOME_RECENT_APPS: 'preferences:setHomeRecentApps',
   },
   drafts: {
     GET: 'drafts:get',

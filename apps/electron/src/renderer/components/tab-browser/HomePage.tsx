@@ -4,6 +4,10 @@ import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import type {
+  HomeRecentAppKind,
+  HomeRecentAppPreference,
+} from '@polo-ai/shared/config'
 import {
   createLocalAppScopeKey,
   type LocalAppRuntimeStatus,
@@ -25,11 +29,6 @@ import {
 import { useAppCatalog } from '@/hooks/useAppCatalog'
 import { useTabShell } from '@/context/TabShellContext'
 import {
-  get as getLocalStorage,
-  KEYS,
-  set as setLocalStorage,
-} from '@/lib/local-storage'
-import {
   BUILTIN_APP_IDS,
   type AppDefinition,
 } from '../../../shared/tab-browser-types'
@@ -38,15 +37,14 @@ import {
   getHomeAppErrorCode,
   homeAppOperationErrorText,
 } from '@/lib/home-app-errors'
+import {
+  createHomeRecentContextKey,
+  loadHomeRecentApps,
+  saveHomeRecentApps,
+} from '@/lib/home-recent-apps'
 
 interface HomePageProps {
   onAddApp: () => void
-}
-
-interface RecentApp {
-  id: string
-  kind: 'builtin' | 'external' | 'organization'
-  openedAt: number
 }
 
 const MAX_RECENT_APPS = 6
@@ -74,24 +72,6 @@ export function selectOrganizationAppsForDisplay(
   })
   return [...catalog.apps, ...withdrawnWithLocalData]
     .sort((left, right) => left.sortOrder - right.sortOrder)
-}
-
-function readRecentApps(): RecentApp[] {
-  const raw = getLocalStorage<unknown>(KEYS.homeRecentApps, [])
-  if (!Array.isArray(raw)) return []
-  return raw
-    .filter((item): item is RecentApp => (
-      item
-      && typeof item === 'object'
-      && typeof item.id === 'string'
-      && ['builtin', 'external', 'organization'].includes(item.kind)
-      && typeof item.openedAt === 'number'
-    ))
-    .slice(0, MAX_RECENT_APPS)
-}
-
-function writeRecentApps(apps: RecentApp[]): void {
-  setLocalStorage(KEYS.homeRecentApps, apps.slice(0, MAX_RECENT_APPS))
 }
 
 export function formatBytes(t: TFunction, sizeBytes: number): string {
@@ -158,7 +138,8 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const { t } = useTranslation()
   const { installedApps, openApp, removeApp } = useTabShell()
   const catalog = useAppCatalog()
-  const [recentApps, setRecentApps] = useState(readRecentApps)
+  const [recentApps, setRecentApps] = useState<HomeRecentAppPreference[]>([])
+  const recentLoadGenerationRef = useRef(0)
   const [installTarget, setInstallTarget] = useState<{
     app: CatalogApp
     appConfigVersion: string
@@ -219,17 +200,37 @@ export function HomePage({ onAddApp }: HomePageProps) {
   const activeOrganization = catalog.organization?.organizationSummaries.find(
     item => item.id === catalog.organization?.activeOrganizationId,
   )
+  const recentContextKey = createHomeRecentContextKey(
+    catalog.organization?.organizationContextKey,
+  )
+
+  useEffect(() => {
+    const generation = recentLoadGenerationRef.current + 1
+    recentLoadGenerationRef.current = generation
+    setRecentApps([])
+    void loadHomeRecentApps(recentContextKey)
+      .then(apps => {
+        if (recentLoadGenerationRef.current === generation) {
+          setRecentApps(apps)
+        }
+      })
+      .catch(() => {
+        // Launcher history is non-critical; keep the current section usable.
+      })
+  }, [recentContextKey])
 
   const recordRecent = (
     id: string,
-    kind: RecentApp['kind'],
+    kind: HomeRecentAppKind,
   ) => {
     setRecentApps(current => {
       const next = [
         { id, kind, openedAt: Date.now() },
         ...current.filter(item => !(item.id === id && item.kind === kind)),
       ].slice(0, MAX_RECENT_APPS)
-      writeRecentApps(next)
+      void saveHomeRecentApps(recentContextKey, next).catch(() => {
+        // Opening an App must not fail because preference persistence failed.
+      })
       return next
     })
   }

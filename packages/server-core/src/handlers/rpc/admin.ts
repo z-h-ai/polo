@@ -1048,17 +1048,25 @@ export function registerAdminHandlers(
           async (): Promise<AppCatalogSyncResult> => {
             if (!isCurrentCatalogSync()) return supersededCatalogResult()
             const current = getCachedAppCatalog(accountId, organizationId.data)
-            if (current?.authorizationStatus === 'denied') {
+            if (
+              getAppCatalogAccessMode(accountId, organizationId.data) === 'denied'
+              || current?.authorizationStatus === 'denied'
+            ) {
               // A refresh transport failure is not new authorization evidence.
-              // Preserve an already-denied Catalog so cold renderers can recover
-              // retained local-data controls without reopening lifecycle access.
+              // The process-local deny gate is authoritative even when writing
+              // its denied snapshot failed and disk still contains an older
+              // authorized cache.
               setAppCatalogAccessMode(accountId, organizationId.data, 'denied')
               return {
                 success: false,
                 errorCode: 'NETWORK_ERROR',
                 message: tokenResult.warning ?? 'Failed to reach admin server',
-                catalog: markAppCatalogAccessDenied(current),
                 accessMode: 'denied',
+                ...(current
+                  ? {
+                      catalog: markAppCatalogAccessDenied(current),
+                    }
+                  : {}),
               }
             }
             if (current?.authorizationStatus === 'authorized') {
@@ -1377,7 +1385,14 @@ export function registerAdminHandlers(
             async (): Promise<AppCatalogSyncResult> => {
               if (!isCurrentCatalogSync()) return supersededCatalogResult()
               const current = getCachedAppCatalog(accountId, organizationId.data)
-              if (!current || current.authorizationStatus !== 'authorized') {
+              if (
+                getAppCatalogAccessMode(
+                  accountId,
+                  organizationId.data,
+                ) === 'denied'
+                || !current
+                || current.authorizationStatus !== 'authorized'
+              ) {
                 setAppCatalogAccessMode(
                   accountId,
                   organizationId.data,
@@ -1386,10 +1401,10 @@ export function registerAdminHandlers(
                 return {
                   success: false,
                   ...adminError,
+                  accessMode: 'denied',
                   ...(current
                     ? {
                         catalog: markAppCatalogAccessDenied(current),
-                        accessMode: 'denied' as const,
                       }
                     : {}),
                 }

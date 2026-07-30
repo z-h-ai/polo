@@ -45,7 +45,7 @@ function createDeferred<T>() {
 
 const scope: CatalogLocalAppScope = {
   kind: 'catalog',
-  accountId: 'account-a',
+  accountId: 'account\0a',
   organizationId: '16666666-6666-4666-8666-666666666661',
   catalogAppId: 'catalog-app',
 }
@@ -537,6 +537,7 @@ describe('Admin session and scoped local app production wiring', () => {
     for (const organizationId of [
       'tenant:creator-space',
       '组织：研发圈',
+      'organization\0creator',
       `org:${'x'.repeat(508)}`,
     ]) {
       const entityScope = { ...scope, organizationId }

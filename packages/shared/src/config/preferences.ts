@@ -23,6 +23,16 @@ export interface DiffViewerPreferences {
   disableBackground?: boolean;
 }
 
+export type HomeRecentAppKind = 'builtin' | 'external' | 'organization';
+
+export interface HomeRecentAppPreference {
+  id: string;
+  kind: HomeRecentAppKind;
+  openedAt: number;
+}
+
+export type HomeRecentAppsByContext = Record<string, HomeRecentAppPreference[]>;
+
 export interface UserPreferences {
   name?: string;
   timezone?: string;
@@ -32,6 +42,8 @@ export interface UserPreferences {
   notes?: string;
   // Diff viewer display preferences
   diffViewer?: DiffViewerPreferences;
+  // Home launcher history, isolated by a versioned account/organization key.
+  homeRecentApps?: HomeRecentAppsByContext;
   // Whether to include Co-Authored-By trailer on git commits (default: true)
   includeCoAuthoredBy?: boolean;
   // When the preferences were last updated
@@ -39,6 +51,25 @@ export interface UserPreferences {
 }
 
 const PREFERENCES_FILE = join(CONFIG_DIR, 'preferences.json');
+const MAX_HOME_RECENT_APPS = 6;
+
+function sanitizeHomeRecentApps(
+  apps: readonly HomeRecentAppPreference[],
+): HomeRecentAppPreference[] {
+  return apps
+    .filter(app => (
+      app
+      && typeof app.id === 'string'
+      && app.id.length > 0
+      && app.id.length <= 2_048
+      && ['builtin', 'external', 'organization'].includes(app.kind)
+      && Number.isFinite(app.openedAt)
+      && app.openedAt >= 0
+    ))
+    .sort((left, right) => right.openedAt - left.openedAt)
+    .slice(0, MAX_HOME_RECENT_APPS)
+    .map(app => ({ ...app }));
+}
 
 export function loadPreferences(): UserPreferences {
   try {
@@ -73,6 +104,34 @@ export function updatePreferences(updates: Partial<UserPreferences>): UserPrefer
   };
   savePreferences(updated);
   return updated;
+}
+
+export function getHomeRecentApps(
+  contextKey: string,
+): HomeRecentAppPreference[] {
+  if (!contextKey) return [];
+  return sanitizeHomeRecentApps(
+    loadPreferences().homeRecentApps?.[contextKey] ?? [],
+  );
+}
+
+export function setHomeRecentApps(
+  contextKey: string,
+  apps: readonly HomeRecentAppPreference[],
+): HomeRecentAppPreference[] {
+  if (!contextKey || contextKey.length > 4_096) {
+    throw new Error('Home recent Apps context is invalid');
+  }
+  const current = loadPreferences();
+  const sanitized = sanitizeHomeRecentApps(apps);
+  savePreferences({
+    ...current,
+    homeRecentApps: {
+      ...(current.homeRecentApps ?? {}),
+      [contextKey]: sanitized,
+    },
+  });
+  return sanitized;
 }
 
 export function getPreferencesPath(): string {
