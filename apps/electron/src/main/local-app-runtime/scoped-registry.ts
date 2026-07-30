@@ -173,8 +173,11 @@ export class ScopedLocalAppRuntimeRegistry {
   private readonly stopAccountPromises = new Map<string, Promise<void>>()
   private readonly stopOrganizationPromises = new Map<string, Promise<void>>()
   private readonly stopAppPromises = new Map<string, Promise<void>>()
+  private readonly failedAppCleanups = new Set<string>()
   private stopCleanupSlotsInUse = 0
   private readonly stopCleanupSlotWaiters: Array<() => void> = []
+  private persistedScopeReadSlotsInUse = 0
+  private readonly persistedScopeReadSlotWaiters: Array<() => void> = []
 
   constructor(options: ScopedLocalAppRuntimeRegistryOptions) {
     this.scopesDir = join(resolve(options.rootDir), 'catalog-scopes')
@@ -548,7 +551,7 @@ export class ScopedLocalAppRuntimeRegistry {
       scopesByKey.set(createCatalogLocalAppScopeKey(scope), scope)
     }
 
-    const existingCleanups = new Set<Promise<void>>()
+    const pendingCleanups = new Set<Promise<void>>()
     const newScopes: CatalogLocalAppScope[] = []
     // Bulk withdrawal invariant: every exact App gate and generation advances
     // in this synchronous loop. No scan, manager lookup, cancellation, or stop
@@ -561,32 +564,80 @@ export class ScopedLocalAppRuntimeRegistry {
       )
       const existing = this.stopAppPromises.get(appKey)
       if (existing) {
-        existingCleanups.add(existing)
+        pendingCleanups.add(existing)
       } else {
         newScopes.push(scope)
       }
     }
 
     if (newScopes.length === 0) {
-      return Promise.all(existingCleanups).then(() => {})
+      return Promise.all(pendingCleanups).then(() => {})
     }
 
-    let bulkCleanup!: Promise<void>
-    bulkCleanup = this.performStopAppScopes(newScopes).finally(() => {
-      for (const scope of newScopes) {
-        const appKey = createCatalogLocalAppScopeKey(scope)
-        if (this.stopAppPromises.get(appKey) === bulkCleanup) {
+    const cleanupControls = new Map<string, {
+      scope: CatalogLocalAppScope
+      resolve: () => void
+      reject: (error: unknown) => void
+    }>()
+    for (const scope of newScopes) {
+      const appKey = createCatalogLocalAppScopeKey(scope)
+      let resolveCleanup!: () => void
+      let rejectCleanup!: (error: unknown) => void
+      const cleanup = new Promise<void>((resolve, reject) => {
+        resolveCleanup = resolve
+        rejectCleanup = reject
+      })
+      cleanupControls.set(appKey, {
+        scope,
+        resolve: resolveCleanup,
+        reject: rejectCleanup,
+      })
+      this.stopAppPromises.set(appKey, cleanup)
+      pendingCleanups.add(cleanup)
+      void cleanup.then(() => {
+        this.failedAppCleanups.delete(appKey)
+        if (this.stopAppPromises.get(appKey) === cleanup) {
           this.stopAppPromises.delete(appKey)
         }
+      }, () => {
+        this.failedAppCleanups.add(appKey)
+        if (this.stopAppPromises.get(appKey) === cleanup) {
+          this.stopAppPromises.delete(appKey)
+        }
+      })
+    }
+
+    void this.performStopAppScopes(newScopes).then(failuresByApp => {
+      for (const [appKey, control] of cleanupControls) {
+        const failures = failuresByApp.get(appKey) ?? []
+        if (failures.length === 0) {
+          control.resolve()
+        } else {
+          control.reject(new LocalAppRuntimeError(
+            'STOP_FAILED',
+            `Failed to stop scoped local app ${control.scope.catalogAppId}`,
+            { failures },
+          ))
+        }
+      }
+    }, error => {
+      for (const control of cleanupControls.values()) {
+        control.reject(error)
       }
     })
-    for (const scope of newScopes) {
-      this.stopAppPromises.set(
-        createCatalogLocalAppScopeKey(scope),
-        bulkCleanup,
-      )
-    }
-    return Promise.all([...existingCleanups, bulkCleanup]).then(() => {})
+
+    return Promise.allSettled([...pendingCleanups]).then(results => {
+      const failures = results.flatMap(result => (
+        result.status === 'rejected' ? [result.reason] : []
+      ))
+      if (failures.length > 0) {
+        throw new LocalAppRuntimeError(
+          'STOP_FAILED',
+          `Failed to stop ${failures.length} scoped local app(s)`,
+          { failures },
+        )
+      }
+    })
   }
 
   authorizeApps(scopes: CatalogLocalAppScope[]): void {
@@ -596,7 +647,9 @@ export class ScopedLocalAppRuntimeRegistry {
       const lifecycleGeneration = this.getAppLifecycleGeneration(appKey)
       const cleanup = this.stopAppPromises.get(appKey)
       if (!cleanup) {
-        this.deniedApps.delete(appKey)
+        if (!this.failedAppCleanups.has(appKey)) {
+          this.deniedApps.delete(appKey)
+        }
         continue
       }
       void cleanup.then(() => {
@@ -725,18 +778,28 @@ export class ScopedLocalAppRuntimeRegistry {
 
   private async performStopAppScopes(
     scopes: CatalogLocalAppScope[],
-  ): Promise<void> {
+  ): Promise<Map<string, string[]>> {
     const targets = new Map(
       scopes.map(scope => [createCatalogLocalAppScopeKey(scope), scope]),
     )
-    const trackedOperations = new Set<Promise<unknown>>()
+    const failuresByApp = new Map(
+      [...targets.keys()].map(appKey => [appKey, [] as string[]]),
+    )
+    const addFailure = (appKey: string, error: unknown) => {
+      const failures = failuresByApp.get(appKey)
+      if (!failures) return
+      failures.push(error instanceof Error ? error.message : String(error))
+    }
+    const trackedOperations = new Map<Promise<unknown>, Set<string>>()
     const cancellationScopes = new Map<string, CatalogLocalAppScope>()
     for (const [appKey, scope] of targets) {
       cancellationScopes.set(appKey, scope)
       for (const [operation, trackedScope] of (
         this.appOperations.get(appKey) ?? []
       )) {
-        trackedOperations.add(operation)
+        const operationAppKeys = trackedOperations.get(operation) ?? new Set()
+        operationAppKeys.add(appKey)
+        trackedOperations.set(operation, operationAppKeys)
         cancellationScopes.set(
           createCatalogLocalAppScopeKey(trackedScope),
           trackedScope,
@@ -744,8 +807,7 @@ export class ScopedLocalAppRuntimeRegistry {
       }
     }
 
-    const failures: string[] = []
-    await this.runStopCleanupWorkers(
+    await this.runStopCleanupWorkersByScope(
       [...cancellationScopes.values()],
       async scope => {
         const appKey = createCatalogLocalAppScopeKey(scope)
@@ -755,41 +817,58 @@ export class ScopedLocalAppRuntimeRegistry {
           createCatalogRuntimeAppId(scope),
         )
       },
-      failures,
+      (scope, error) => addFailure(createCatalogLocalAppScopeKey(scope), error),
     )
 
-    const operationResults = await Promise.allSettled(trackedOperations)
-    failures.push(...operationResults.flatMap(result => {
-      if (result.status !== 'rejected') return []
+    const trackedEntries = [...trackedOperations]
+    const operationResults = await Promise.allSettled(
+      trackedEntries.map(([operation]) => operation),
+    )
+    operationResults.forEach((result, index) => {
+      if (result.status !== 'rejected') return
       const reason = result.reason
       if (
         reason instanceof LocalAppRuntimeError
         && (reason.code === 'INSTALL_CANCELLED' || reason.code === 'NOT_AUTHORIZED')
       ) {
-        return []
+        return
       }
-      return [reason instanceof Error ? reason.message : String(reason)]
-    }))
+      for (const appKey of trackedEntries[index]![1]) {
+        addFailure(appKey, reason)
+      }
+    })
 
     const organizationGroups = new Map<string, {
       accountId: string
       organizationId: string
+      appKeys: Set<string>
     }>()
-    for (const scope of scopes) {
-      organizationGroups.set(
-        createOrganizationLifecycleKey(scope.accountId, scope.organizationId),
-        {
+    for (const [appKey, scope] of targets) {
+      const organizationKey = createOrganizationLifecycleKey(
+        scope.accountId,
+        scope.organizationId,
+      )
+      const group = organizationGroups.get(organizationKey)
+      if (group) {
+        group.appKeys.add(appKey)
+      } else {
+        organizationGroups.set(organizationKey, {
           accountId: scope.accountId,
           organizationId: scope.organizationId,
-        },
-      )
+          appKeys: new Set([appKey]),
+        })
+      }
     }
     // Each account/organization is scanned exactly once for the entire bulk
     // withdrawal. Per-App scans would multiply a 10k Catalog update into 10k
     // full directory traversals.
+    const persistedGroups = [...organizationGroups.values()]
     const persistedResults = await Promise.allSettled(
-      [...organizationGroups.values()].map(group => (
-        this.readPersistedScopes(group)
+      persistedGroups.map(group => (
+        this.readPersistedScopes({
+          accountId: group.accountId,
+          organizationId: group.organizationId,
+        })
       )),
     )
     const cleanupScopes = new Map<string, CatalogLocalAppScope>()
@@ -797,20 +876,20 @@ export class ScopedLocalAppRuntimeRegistry {
       const appKey = createCatalogLocalAppScopeKey(scope)
       if (targets.has(appKey)) cleanupScopes.set(appKey, scope)
     }
-    for (const result of persistedResults) {
+    persistedResults.forEach((result, index) => {
       if (result.status === 'rejected') {
-        failures.push(result.reason instanceof Error
-          ? result.reason.message
-          : String(result.reason))
-        continue
+        for (const appKey of persistedGroups[index]!.appKeys) {
+          addFailure(appKey, result.reason)
+        }
+        return
       }
       for (const scope of result.value) {
         const appKey = createCatalogLocalAppScopeKey(scope)
         if (targets.has(appKey)) cleanupScopes.set(appKey, scope)
       }
-    }
+    })
 
-    await this.runStopCleanupWorkers(
+    await this.runStopCleanupWorkersByScope(
       [...cleanupScopes.values()],
       async scope => {
         const appKey = createCatalogLocalAppScopeKey(scope)
@@ -820,15 +899,9 @@ export class ScopedLocalAppRuntimeRegistry {
         manager.cancelInstall(createCatalogRuntimeAppId(scope))
         await manager.stop(createCatalogRuntimeAppId(scope))
       },
-      failures,
+      (scope, error) => addFailure(createCatalogLocalAppScopeKey(scope), error),
     )
-    if (failures.length > 0) {
-      throw new LocalAppRuntimeError(
-        'STOP_FAILED',
-        `Failed to stop ${failures.length} scoped local app(s)`,
-        { failures },
-      )
-    }
+    return failuresByApp
   }
 
   private async runStopCleanupWorkers(
@@ -857,6 +930,30 @@ export class ScopedLocalAppRuntimeRegistry {
     await Promise.all(workers)
   }
 
+  private async runStopCleanupWorkersByScope(
+    scopes: CatalogLocalAppScope[],
+    operation: (scope: CatalogLocalAppScope) => Promise<void>,
+    onFailure: (scope: CatalogLocalAppScope, error: unknown) => void,
+  ): Promise<void> {
+    let nextIndex = 0
+    const workers = Array.from(
+      {
+        length: Math.min(STOP_CLEANUP_CONCURRENCY, scopes.length),
+      },
+      async () => {
+        while (nextIndex < scopes.length) {
+          const scope = scopes[nextIndex++]!
+          try {
+            await this.withStopCleanupSlot(() => operation(scope))
+          } catch (error) {
+            onFailure(scope, error)
+          }
+        }
+      },
+    )
+    await Promise.all(workers)
+  }
+
   private async withStopCleanupSlot<T>(operation: () => Promise<T>): Promise<T> {
     if (this.stopCleanupSlotsInUse < STOP_CLEANUP_CONCURRENCY) {
       this.stopCleanupSlotsInUse += 1
@@ -876,6 +973,30 @@ export class ScopedLocalAppRuntimeRegistry {
         next()
       } else {
         this.stopCleanupSlotsInUse -= 1
+      }
+    }
+  }
+
+  private async withPersistedScopeReadSlot<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (this.persistedScopeReadSlotsInUse < PERSISTED_SCOPE_READ_CONCURRENCY) {
+      this.persistedScopeReadSlotsInUse += 1
+    } else {
+      // All concurrent account, organization, and App cleanup scans share this
+      // slot queue; per-scan worker limits alone do not bound aggregate I/O.
+      await new Promise<void>(resolve => {
+        this.persistedScopeReadSlotWaiters.push(resolve)
+      })
+    }
+    try {
+      return await operation()
+    } finally {
+      const next = this.persistedScopeReadSlotWaiters.shift()
+      if (next) {
+        next()
+      } else {
+        this.persistedScopeReadSlotsInUse -= 1
       }
     }
   }
@@ -1224,7 +1345,10 @@ export class ScopedLocalAppRuntimeRegistry {
 
   private async readScopeRecord(path: string): Promise<CatalogLocalAppScope | null> {
     try {
-      const raw = JSON.parse(await this.scopeRecordReader(path)) as Partial<PersistedScope>
+      const serialized = await this.withPersistedScopeReadSlot(
+        () => this.scopeRecordReader(path),
+      )
+      const raw = JSON.parse(serialized) as Partial<PersistedScope>
       if (raw.schemaVersion !== SCOPE_SCHEMA_VERSION) return null
       return validateCatalogLocalAppScope(raw.scope)
     } catch {

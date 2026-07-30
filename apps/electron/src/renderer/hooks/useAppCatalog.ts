@@ -516,15 +516,26 @@ export function useAppCatalog() {
       ) return
       if (!result.success) {
         emitAdminCatalogSessionAuthFailure(result)
-        if (isCatalogAccessDenied(result.errorCode, result.status)) {
+        const returnedCatalog = result.catalog
+        const matchingReturnedCatalog = returnedCatalog
+          && returnedCatalog.accountId === organization.accountId
+          && returnedCatalog.organizationId
+            === organization.activeOrganizationId
+          ? returnedCatalog
+          : null
+        // A persisted denied snapshot can accompany a temporary network error
+        // during cold token refresh. Its trusted accessMode is authoritative
+        // for Catalog hydration even though NETWORK_ERROR is not itself an
+        // authorization error.
+        const hasDeniedCatalogSnapshot = (
+          result.accessMode === 'denied'
+          && matchingReturnedCatalog !== null
+        )
+        if (
+          hasDeniedCatalogSnapshot
+          || isCatalogAccessDenied(result.errorCode, result.status)
+        ) {
           const deniedContextGeneration = ++contextGenerationRef.current
-          const returnedCatalog = result.catalog
-          const matchingReturnedCatalog = returnedCatalog
-            && returnedCatalog.accountId === organization.accountId
-            && returnedCatalog.organizationId
-              === organization.activeOrganizationId
-            ? returnedCatalog
-            : null
           const deniedCatalog = matchingReturnedCatalog
             ? markCatalogAccessDenied(matchingReturnedCatalog)
             : catalogRef.current

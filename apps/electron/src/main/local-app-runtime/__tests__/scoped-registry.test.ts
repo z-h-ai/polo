@@ -616,6 +616,122 @@ describe('scoped local app runtime registry', () => {
     expect(maxActiveStops).toBe(STOP_CLEANUP_CONCURRENCY)
   })
 
+  it('shares the persisted scope read limit across 1,000 concurrent organization cleanups', async () => {
+    const persistedScope = {
+      ...scope('persisted-account', 'persisted-organization'),
+      catalogAppId: 'persisted-app',
+    }
+    const persistedScopeDir = join(
+      rootDir,
+      'catalog-scopes',
+      createCatalogLocalAppScopeKey(persistedScope),
+    )
+    await mkdir(persistedScopeDir, { recursive: true })
+
+    let releaseReads!: () => void
+    const readsReleased = new Promise<void>(resolve => {
+      releaseReads = resolve
+    })
+    let reportSaturated!: () => void
+    const saturated = new Promise<void>(resolve => {
+      reportSaturated = resolve
+    })
+    let activeReads = 0
+    let maxActiveReads = 0
+    let readCount = 0
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      scopeRecordReader: async () => {
+        readCount += 1
+        activeReads += 1
+        maxActiveReads = Math.max(maxActiveReads, activeReads)
+        if (activeReads === PERSISTED_SCOPE_READ_CONCURRENCY) {
+          reportSaturated()
+        }
+        try {
+          await readsReleased
+          return JSON.stringify({
+            schemaVersion: 1,
+            scope: persistedScope,
+          })
+        } finally {
+          activeReads -= 1
+        }
+      },
+    })
+
+    const cleanups = Array.from({ length: 1_000 }, (_, index) => (
+      registry.stopOrganization('account-a', `organization-${index}`)
+    ))
+    await saturated
+    expect(maxActiveReads).toBe(PERSISTED_SCOPE_READ_CONCURRENCY)
+
+    releaseReads()
+    await Promise.all(cleanups)
+    expect(readCount).toBe(1_000)
+    expect(maxActiveReads).toBeLessThanOrEqual(
+      PERSISTED_SCOPE_READ_CONCURRENCY,
+    )
+  })
+
+  it('isolates cleanup success and reauthorization for each withdrawn App scope', async () => {
+    const failingScope = {
+      ...scope('account-a'),
+      catalogAppId: 'failing-app',
+    }
+    const healthyScope = {
+      ...scope('account-a'),
+      catalogAppId: 'healthy-app',
+    }
+    const failingRuntimeId = createCatalogRuntimeAppId(failingScope)
+    const stopped: string[] = []
+    class SelectiveManager extends LocalAppRuntimeManager {
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        stopped.push(appId)
+        if (appId === failingRuntimeId) {
+          throw new LocalAppRuntimeError(
+            'STOP_FAILED',
+            'controlled per-App stop failure',
+          )
+        }
+        return { appId, status: 'stopped' }
+      }
+
+      override async start(appId: string): Promise<LocalAppStartResult> {
+        return {
+          appId,
+          version: '1.0.0',
+          url: 'http://127.0.0.1:3460',
+          port: 3460,
+        }
+      }
+    }
+    const manager = new SelectiveManager({ rootDir })
+    const registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
+    const internals = registryInternals(registry)
+    for (const catalogScope of [failingScope, healthyScope]) {
+      const appKey = createCatalogLocalAppScopeKey(catalogScope)
+      internals.managers.set(appKey, manager)
+      internals.managerScopes.set(appKey, catalogScope)
+    }
+
+    const cleanup = registry.stopApps([failingScope, healthyScope])
+    registry.authorizeApps([failingScope, healthyScope])
+
+    await expect(cleanup).rejects.toMatchObject({ code: 'STOP_FAILED' })
+    await expect(registry.start(healthyScope)).resolves.toMatchObject({
+      appId: healthyScope.catalogAppId,
+      url: 'http://127.0.0.1:3460',
+    })
+    await expect(registry.start(failingScope)).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    expect(stopped).toEqual(expect.arrayContaining([
+      failingRuntimeId,
+      createCatalogRuntimeAppId(healthyScope),
+    ]))
+  })
+
   it('rejects an in-flight start after logout and deduplicates account cleanup', async () => {
     let resolveStart!: (value: LocalAppStartResult) => void
     let startEntered!: () => void

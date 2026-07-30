@@ -462,7 +462,7 @@ describe('HomePage round-two regressions', () => {
     })
   })
 
-  it('keeps an installed app manageable after organization access is denied', async () => {
+  it('keeps an installed app manageable from a denied NETWORK_ERROR cold snapshot', async () => {
     const deniedApp: CatalogApp = {
       id: 'denied-installed',
       organizationId: 'organization-a',
@@ -524,7 +524,7 @@ describe('HomePage round-two regressions', () => {
         ...signedOutCatalogHook().state,
         catalog,
         accessMode: 'denied',
-        errorCode: 'NOT_FOUND',
+        errorCode: 'NETWORK_ERROR',
         statuses: { [scopeKey]: status },
       },
       getStatus: () => status,

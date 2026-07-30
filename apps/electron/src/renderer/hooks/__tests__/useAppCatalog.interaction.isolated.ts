@@ -316,6 +316,7 @@ describe('useAppCatalog scoped async state', () => {
   for (const [errorCode, status] of [
     ['FORBIDDEN', 403],
     ['MEMBERSHIP_REMOVED', 409],
+    ['NETWORK_ERROR', undefined],
   ] as const) {
     it(`hydrates the first denied ${errorCode} Catalog with real local status and management`, async () => {
       const localApp = app(
