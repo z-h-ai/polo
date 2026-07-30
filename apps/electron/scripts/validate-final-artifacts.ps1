@@ -9,6 +9,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ElectronDir = Split-Path -Parent $ScriptDir
+$RootDir = Split-Path -Parent (Split-Path -Parent $ElectronDir)
+$uvLockPath = Join-Path $RootDir "scripts\uv-runtime-lock.json"
 if (-not $ReleaseDir) {
     $ReleaseDir = Join-Path $ElectronDir "release"
 }
@@ -65,6 +67,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $cliPath = Join-Path $appRoot "dist\cli\polo-cli.js"
     $serverPath = Join-Path $appRoot "dist\server\polo-server.js"
     $uvPath = Join-Path $appRoot "resources\bin\win32-$Arch\uv.exe"
+    $uvManifestPath = Join-Path $appRoot "resources\bin\win32-$Arch\runtime-manifest.json"
     $piServerPath = Join-Path $appRoot "resources\pi-agent-server\index.js"
     $sessionServerPath = Join-Path $appRoot "resources\session-mcp-server\index.js"
 
@@ -76,13 +79,34 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
         $cliPath,
         $serverPath
         $uvPath
+        $uvManifestPath
+        $uvLockPath
     )) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Installed NSIS container is missing $required"
         }
     }
+    $uvManifest = Get-Content -LiteralPath $uvManifestPath -Raw | ConvertFrom-Json
+    $uvLock = Get-Content -LiteralPath $uvLockPath -Raw | ConvertFrom-Json
+    $uvTarget = $uvLock.targets."win32-$Arch"
+    $uvHash = (Get-FileHash -LiteralPath $uvPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (
+        -not $uvTarget -or
+        $uvManifest.schemaVersion -ne 1 -or
+        $uvManifest.platform -cne "win32" -or
+        $uvManifest.arch -cne $Arch -or
+        $uvManifest.source -cne "astral-sh-release" -or
+        $uvManifest.version -cne $uvLock.version -or
+        $uvManifest.binary -cne "uv.exe" -or
+        $uvManifest.sha256 -cne $uvTarget.binarySha256 -or
+        $uvManifest.sha256 -cne $uvHash -or
+        $uvManifest.releaseAsset -cne $uvTarget.asset -or
+        $uvManifest.releaseAssetSha256 -cne $uvTarget.archiveSha256
+    ) {
+        throw "Installed NSIS pinned uv runtime manifest is invalid"
+    }
     $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $uvOutput -notmatch '^uv \d+\.\d+\.\d+') {
+    if ($LASTEXITCODE -ne 0 -or $uvOutput -cne "uv $($uvLock.version)") {
         throw "Installed NSIS uv runtime smoke failed: $uvOutput"
     }
     if ($RequireRunHelpers) {
@@ -355,11 +379,35 @@ function Get-CurrentNsisArtifactVersion([string]$Artifact, [string]$Label) {
         }
     }
     $uvPath = Join-Path $appRoot "resources\bin\win32-$Arch\uv.exe"
-    if (-not (Test-Path -LiteralPath $uvPath -PathType Leaf)) {
+    $uvManifestPath = Join-Path $appRoot "resources\bin\win32-$Arch\runtime-manifest.json"
+    if (
+        -not (Test-Path -LiteralPath $uvPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $uvManifestPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $uvLockPath -PathType Leaf)
+    ) {
         throw "$Label NSIS artifact does not contain the packaged uv runtime"
     }
+    $uvManifest = Get-Content -LiteralPath $uvManifestPath -Raw | ConvertFrom-Json
+    $uvLock = Get-Content -LiteralPath $uvLockPath -Raw | ConvertFrom-Json
+    $uvTarget = $uvLock.targets."win32-$Arch"
+    $uvHash = (Get-FileHash -LiteralPath $uvPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (
+        -not $uvTarget -or
+        $uvManifest.schemaVersion -ne 1 -or
+        $uvManifest.platform -cne "win32" -or
+        $uvManifest.arch -cne $Arch -or
+        $uvManifest.source -cne "astral-sh-release" -or
+        $uvManifest.version -cne $uvLock.version -or
+        $uvManifest.binary -cne "uv.exe" -or
+        $uvManifest.sha256 -cne $uvTarget.binarySha256 -or
+        $uvManifest.sha256 -cne $uvHash -or
+        $uvManifest.releaseAsset -cne $uvTarget.asset -or
+        $uvManifest.releaseAssetSha256 -cne $uvTarget.archiveSha256
+    ) {
+        throw "$Label NSIS pinned uv runtime manifest is invalid"
+    }
     $uvOutput = (& $uvPath --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $uvOutput -notmatch '^uv \d+\.\d+\.\d+') {
+    if ($LASTEXITCODE -ne 0 -or $uvOutput -cne "uv $($uvLock.version)") {
         throw "$Label NSIS uv runtime smoke failed: $uvOutput"
     }
     return [string]$metadataJson.version

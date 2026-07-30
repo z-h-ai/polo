@@ -23,8 +23,11 @@ import {
   downloadBun,
   downloadUv,
   getPlatformKey,
+  UV_VERSION,
+  validateUvRuntimeManifest,
   verifyUvBinaryArchitecture,
   verifySDKCopy,
+  writeUvRuntimeManifest,
   type Arch,
   type BuildConfig,
   type Platform,
@@ -117,6 +120,10 @@ export async function stageUvRuntime(
     await downloadUv(config)
   }
   verifyUvBinaryArchitecture(destination, config.platform, config.arch)
+  if (uvSource) {
+    writeUvRuntimeManifest(config, destination, 'fixture')
+  }
+  validateUvRuntimeManifest(config, { requireTrusted: !uvSource })
 
   if (
     !uvSource
@@ -128,7 +135,7 @@ export async function stageUvRuntime(
       timeout: 10_000,
       maxBuffer: 64 * 1024,
     }).trim()
-    if (!/^uv \d+\.\d+\.\d+/.test(output)) {
+    if (output !== `uv ${UV_VERSION}`) {
       throw new Error(`Unexpected uv version output: ${output}`)
     }
   }

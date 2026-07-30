@@ -39,8 +39,36 @@ function validatePackagedCli(context) {
     'windows-terminal-integration.ps1',
   );
   const bun = path.join(resourcesDir, 'vendor', 'bun', isWindows ? 'bun.exe' : 'bun');
+  const archNames = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
+  const expectedArch = archNames[context.arch];
+  const platformKey = `${context.electronPlatformName}-${expectedArch}`;
+  const uv = path.join(
+    appDir,
+    'resources',
+    'bin',
+    platformKey,
+    isWindows ? 'uv.exe' : 'uv',
+  );
+  const uvManifestPath = path.join(
+    appDir,
+    'resources',
+    'bin',
+    platformKey,
+    'runtime-manifest.json',
+  );
+  const uvLockPath = path.join(context.packager.projectDir, '..', '..', 'scripts', 'uv-runtime-lock.json');
 
-  const requiredArtifacts = [cli, server, manifestPath, cliPackagePath, wrapper, bun];
+  const requiredArtifacts = [
+    cli,
+    server,
+    manifestPath,
+    cliPackagePath,
+    wrapper,
+    bun,
+    uv,
+    uvManifestPath,
+    uvLockPath,
+  ];
   if (isWindows) requiredArtifacts.push(windowsInstallerScript);
   for (const required of requiredArtifacts) {
     if (!fs.existsSync(required)) {
@@ -83,8 +111,25 @@ function validatePackagedCli(context) {
     throw new Error('POO-14 unpacked sanitized CLI package metadata is invalid');
   }
 
-  const archNames = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
-  const expectedArch = archNames[context.arch];
+  const uvManifest = JSON.parse(fs.readFileSync(uvManifestPath, 'utf8'));
+  const uvLock = JSON.parse(fs.readFileSync(uvLockPath, 'utf8'));
+  const uvTarget = uvLock.targets?.[platformKey];
+  if (
+    !uvTarget
+    || uvManifest.schemaVersion !== 1
+    || uvManifest.platform !== context.electronPlatformName
+    || uvManifest.arch !== expectedArch
+    || uvManifest.source !== 'astral-sh-release'
+    || uvManifest.version !== uvLock.version
+    || uvManifest.binary !== (isWindows ? 'uv.exe' : 'uv')
+    || uvManifest.sha256 !== uvTarget.binarySha256
+    || uvManifest.sha256 !== sha256(uv)
+    || uvManifest.releaseAsset !== uvTarget.asset
+    || uvManifest.releaseAssetSha256 !== uvTarget.archiveSha256
+  ) {
+    throw new Error(`POO-14 unpacked target uv runtime validation failed for ${platformKey}`);
+  }
+
   const runtimeArch = spawnSync(bun, ['-e', 'process.stdout.write(process.arch)'], {
     encoding: 'utf8',
     timeout: 30_000,
@@ -106,6 +151,19 @@ function validatePackagedCli(context) {
   if (directCheck.status !== 0 || directCheck.stdout.trim() !== appVersion) {
     throw new Error(
       `POO-14 unpacked CLI execution failed: ${directCheck.stderr || directCheck.stdout}`,
+    );
+  }
+
+  const uvVersionCheck = spawnSync(uv, ['--version'], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  if (
+    uvVersionCheck.status !== 0
+    || uvVersionCheck.stdout.trim() !== `uv ${uvLock.version}`
+  ) {
+    throw new Error(
+      `POO-14 unpacked uv execution failed: ${uvVersionCheck.stderr || uvVersionCheck.stdout}`,
     );
   }
 

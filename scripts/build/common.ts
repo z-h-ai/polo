@@ -6,13 +6,17 @@ import { $ } from 'bun';
 import { execFileSync, execSync } from 'child_process';
 import {
   existsSync,
+  chmodSync,
   mkdirSync,
   rmSync,
   copyFileSync,
   cpSync,
   lstatSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  writeFileSync,
 } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
@@ -42,6 +46,40 @@ export const BUN_VERSION = 'bun-v1.3.9';
  * Update this when upgrading uv. Check latest at: https://github.com/astral-sh/uv/releases
  */
 export const UV_VERSION = '0.10.6';
+
+interface UvReleaseTarget {
+  asset: string;
+  archiveSha256: string;
+  binarySha256: string;
+}
+
+interface UvRuntimeLock {
+  schemaVersion: 1;
+  version: string;
+  targets: Record<string, UvReleaseTarget>;
+}
+
+export interface UvRuntimeManifest {
+  schemaVersion: 1;
+  platform: Platform;
+  arch: Arch;
+  source: 'astral-sh-release' | 'fixture';
+  version: string;
+  binary: string;
+  sha256: string;
+  releaseAsset: string;
+  releaseAssetSha256: string;
+}
+
+export const UV_RUNTIME_LOCK = JSON.parse(
+  readFileSync(join(import.meta.dir, '..', 'uv-runtime-lock.json'), 'utf8'),
+) as UvRuntimeLock;
+
+if (UV_RUNTIME_LOCK.schemaVersion !== 1 || UV_RUNTIME_LOCK.version !== UV_VERSION) {
+  throw new Error(
+    `uv runtime lock version mismatch: expected ${UV_VERSION}, got ${UV_RUNTIME_LOCK.version}`,
+  );
+}
 
 /**
  * Get platform key for resources/bin folder naming.
@@ -88,6 +126,143 @@ export function getUvDownloadName(platform: Platform, arch: Arch): string {
   if (platform === 'win32' && arch === 'x64') return 'uv-x86_64-pc-windows-msvc.zip';
 
   throw new Error(`Unsupported uv target: ${platform}-${arch}`);
+}
+
+export function getUvReleaseTarget(platform: Platform, arch: Arch): UvReleaseTarget {
+  const platformKey = getPlatformKey(platform, arch);
+  const target = UV_RUNTIME_LOCK.targets[platformKey];
+  if (!target) {
+    throw new Error(`uv runtime lock does not contain ${platformKey}`);
+  }
+  if (target.asset !== getUvDownloadName(platform, arch)) {
+    throw new Error(`uv runtime lock asset mismatch for ${platformKey}: ${target.asset}`);
+  }
+  return target;
+}
+
+export function sha256File(filePath: string): string {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+export function getUvRuntimeManifestPath(config: BuildConfig): string {
+  return join(
+    config.electronDir,
+    'resources',
+    'bin',
+    getPlatformKey(config.platform, config.arch),
+    'runtime-manifest.json',
+  );
+}
+
+export function writeUvRuntimeManifest(
+  config: BuildConfig,
+  binaryPath: string,
+  source: UvRuntimeManifest['source'],
+): UvRuntimeManifest {
+  const target = getUvReleaseTarget(config.platform, config.arch);
+  const manifest: UvRuntimeManifest = {
+    schemaVersion: 1,
+    platform: config.platform,
+    arch: config.arch,
+    source,
+    version: UV_VERSION,
+    binary: config.platform === 'win32' ? 'uv.exe' : 'uv',
+    sha256: sha256File(binaryPath),
+    releaseAsset: target.asset,
+    releaseAssetSha256: target.archiveSha256,
+  };
+  const manifestPath = getUvRuntimeManifestPath(config);
+  const temporaryPath = `${manifestPath}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  renameSync(temporaryPath, manifestPath);
+  return manifest;
+}
+
+export function validateUvRuntimeManifest(
+  config: BuildConfig,
+  options: { requireTrusted?: boolean } = {},
+): UvRuntimeManifest {
+  const manifestPath = getUvRuntimeManifestPath(config);
+  if (!existsSync(manifestPath)) {
+    throw new Error(`uv runtime manifest is missing: ${manifestPath}`);
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as UvRuntimeManifest;
+  const target = getUvReleaseTarget(config.platform, config.arch);
+  const binaryName = config.platform === 'win32' ? 'uv.exe' : 'uv';
+  const binaryPath = join(dirname(manifestPath), binaryName);
+  if (
+    manifest.schemaVersion !== 1
+    || manifest.platform !== config.platform
+    || manifest.arch !== config.arch
+    || manifest.version !== UV_VERSION
+    || manifest.binary !== binaryName
+    || manifest.releaseAsset !== target.asset
+    || manifest.releaseAssetSha256 !== target.archiveSha256
+    || manifest.sha256 !== sha256File(binaryPath)
+  ) {
+    throw new Error(`uv runtime manifest validation failed for ${getPlatformKey(config.platform, config.arch)}`);
+  }
+  if (options.requireTrusted) {
+    if (
+      manifest.source !== 'astral-sh-release'
+      || manifest.sha256 !== target.binarySha256
+    ) {
+      throw new Error(
+        `uv runtime is not the pinned ${UV_VERSION} release for ${getPlatformKey(config.platform, config.arch)}`,
+      );
+    }
+  }
+  return manifest;
+}
+
+export function isPinnedUvRuntime(
+  binaryPath: string,
+  platform: Platform,
+  arch: Arch,
+): boolean {
+  try {
+    verifyUvBinaryArchitecture(binaryPath, platform, arch);
+    return sha256File(binaryPath) === getUvReleaseTarget(platform, arch).binarySha256;
+  } catch {
+    return false;
+  }
+}
+
+export function installPinnedUvBinary(
+  config: BuildConfig,
+  verifiedSourcePath: string,
+): string {
+  const { platform, arch, electronDir } = config;
+  const target = getUvReleaseTarget(platform, arch);
+  verifyUvBinaryArchitecture(verifiedSourcePath, platform, arch);
+  if (sha256File(verifiedSourcePath) !== target.binarySha256) {
+    throw new Error(`uv source binary checksum mismatch for ${getPlatformKey(platform, arch)}`);
+  }
+
+  const binaryName = platform === 'win32' ? 'uv.exe' : 'uv';
+  const targetDir = join(electronDir, 'resources', 'bin', getPlatformKey(platform, arch));
+  const targetPath = join(targetDir, binaryName);
+  const replacementPath = join(
+    targetDir,
+    `.${binaryName}.${process.pid}.${Date.now()}.tmp`,
+  );
+  mkdirSync(targetDir, { recursive: true });
+  try {
+    copyFileSync(verifiedSourcePath, replacementPath);
+    if (platform !== 'win32') chmodSync(replacementPath, 0o755);
+    verifyUvBinaryArchitecture(replacementPath, platform, arch);
+    if (sha256File(replacementPath) !== target.binarySha256) {
+      throw new Error(`uv replacement checksum mismatch for ${getPlatformKey(platform, arch)}`);
+    }
+    renameSync(replacementPath, targetPath);
+    writeUvRuntimeManifest(config, targetPath, 'astral-sh-release');
+    return targetPath;
+  } finally {
+    rmSync(replacementPath, { force: true });
+  }
 }
 
 /**
@@ -255,26 +430,29 @@ function findFileRecursive(root: string, fileName: string): string | null {
  */
 export async function downloadUv(config: BuildConfig): Promise<void> {
   const { platform, arch, electronDir } = config;
-  const uvDownload = getUvDownloadName(platform, arch);
+  const releaseTarget = getUvReleaseTarget(platform, arch);
+  const uvDownload = releaseTarget.asset;
   const uvBinaryName = platform === 'win32' ? 'uv.exe' : 'uv';
   const platformKey = getPlatformKey(platform, arch);
 
   const targetDir = join(electronDir, 'resources', 'bin', platformKey);
   const targetPath = join(targetDir, uvBinaryName);
 
-  // Skip when already provisioned
-  if (existsSync(targetPath)) {
-    verifyUvBinaryArchitecture(targetPath, platform, arch);
-    console.log(`uv already present at ${targetPath}`);
+  // Reuse only an exact byte-for-byte match for the pinned release. Merely
+  // matching the target architecture is not a sufficient cache trust signal.
+  if (existsSync(targetPath) && isPinnedUvRuntime(targetPath, platform, arch)) {
+    writeUvRuntimeManifest(config, targetPath, 'astral-sh-release');
+    console.log(`uv ${UV_VERSION} verified from pinned cache at ${targetPath}`);
     return;
+  }
+  if (existsSync(targetPath)) {
+    console.log(`Replacing untrusted or stale uv cache at ${targetPath}`);
   }
 
   console.log(`Downloading uv ${UV_VERSION} for ${platformKey}...`);
 
   mkdirSync(targetDir, { recursive: true });
-  const tempDir = join(electronDir, '.uv-download-temp');
-  rmSync(tempDir, { recursive: true, force: true });
-  mkdirSync(tempDir, { recursive: true });
+  const tempDir = mkdtempSync(join(electronDir, '.uv-download-temp-'));
 
   try {
     const assetUrl = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${uvDownload}`;
@@ -296,8 +474,13 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
     if (!hashMatch) {
       throw new Error(`Unable to parse checksum from ${checksumPath}`);
     }
+    if (hashMatch[0].toLowerCase() !== releaseTarget.archiveSha256) {
+      throw new Error(
+        `uv upstream checksum differs from pinned lock for ${platformKey}`,
+      );
+    }
 
-    const isValid = await verifySha256(assetPath, hashMatch[0]);
+    const isValid = await verifySha256(assetPath, releaseTarget.archiveSha256);
     if (!isValid) {
       throw new Error('uv checksum verification failed');
     }
@@ -317,11 +500,14 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
       throw new Error(`Unable to locate ${uvBinaryName} in extracted archive`);
     }
 
-    copyFileSync(extractedUv, targetPath);
-    if (platform !== 'win32') {
-      await $`chmod +x ${targetPath}`.quiet();
+    verifyUvBinaryArchitecture(extractedUv, platform, arch);
+    if (sha256File(extractedUv) !== releaseTarget.binarySha256) {
+      throw new Error(`uv extracted binary checksum mismatch for ${platformKey}`);
     }
-    verifyUvBinaryArchitecture(targetPath, platform, arch);
+
+    // Keep the old cache in place until a complete verified replacement is
+    // ready, then atomically swap the file within the destination directory.
+    installPinnedUvBinary(config, extractedUv);
 
     console.log(`  uv installed to ${targetPath} ✓`);
   } finally {

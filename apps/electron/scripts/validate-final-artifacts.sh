@@ -97,10 +97,14 @@ validate_app_bundle() {
     *) echo "Unsupported current artifact platform: $SYSTEM_NAME" >&2; return 1 ;;
   esac
   local uv="$app_root/resources/bin/$platform_key/uv"
+  local uv_manifest="$app_root/resources/bin/$platform_key/runtime-manifest.json"
+  local uv_lock="$ELECTRON_DIR/../../scripts/uv-runtime-lock.json"
 
   for required in \
     "$bun" \
     "$uv" \
+    "$uv_manifest" \
+    "$uv_lock" \
     "$wrapper" \
     "$app_root/dist/cli/polo-cli.js" \
     "$app_root/dist/server/polo-server.js" \
@@ -117,7 +121,13 @@ validate_app_bundle() {
   fi
   local uv_version
   uv_version="$(cd "$TEMP_ROOT/clean-cwd" && "$uv" --version)"
-  printf '%s\n' "$uv_version" | grep -E '^uv [0-9]+\.[0-9]+\.[0-9]+' >/dev/null
+  local expected_uv_version
+  expected_uv_version="$(
+    "$bun" -e \
+      'process.stdout.write(JSON.parse(await Bun.file(process.argv[1]).text()).version)' \
+      "$uv_manifest"
+  )"
+  test "$uv_version" = "uv $expected_uv_version"
   if [ "$require_run_helpers" = "true" ]; then
     for required in \
       "$app_root/resources/pi-agent-server/index.js" \
@@ -136,8 +146,17 @@ validate_app_bundle() {
     import { readFileSync } from "node:fs";
     import { join } from "node:path";
     const appRoot = process.argv[1];
+    const platformKey = process.argv[2];
+    const uvLockPath = process.argv[3];
     const manifest = JSON.parse(readFileSync(join(appRoot, "dist/cli/artifact-manifest.json"), "utf8"));
     const metadata = JSON.parse(readFileSync(join(appRoot, "dist/cli/package.json"), "utf8"));
+    const runtimeManifest = JSON.parse(
+      readFileSync(join(appRoot, "resources/bin", platformKey, "runtime-manifest.json"), "utf8"),
+    );
+    const uvLock = JSON.parse(readFileSync(uvLockPath, "utf8"));
+    const uvTarget = uvLock.targets?.[platformKey];
+    const [platform, arch] = platformKey.split("-");
+    const uv = join(appRoot, "resources/bin", platformKey, "uv");
     const sha256 = path => createHash("sha256").update(readFileSync(path)).digest("hex");
     const expected = {
       cli: "dist/cli/polo-cli.js",
@@ -161,7 +180,20 @@ validate_app_bundle() {
       || metadata.bin?.["polo-ai"] !== "./polo-cli.js"
       || metadata.license !== "Apache-2.0"
     ) throw new Error("Sanitized CLI package metadata mismatch");
-  ' "$app_root"
+    if (
+      !uvTarget
+      || runtimeManifest.schemaVersion !== 1
+      || runtimeManifest.platform !== platform
+      || runtimeManifest.arch !== arch
+      || runtimeManifest.source !== "astral-sh-release"
+      || runtimeManifest.version !== uvLock.version
+      || runtimeManifest.binary !== "uv"
+      || runtimeManifest.sha256 !== uvTarget.binarySha256
+      || runtimeManifest.sha256 !== sha256(uv)
+      || runtimeManifest.releaseAsset !== uvTarget.asset
+      || runtimeManifest.releaseAssetSha256 !== uvTarget.archiveSha256
+    ) throw new Error("Pinned uv runtime manifest mismatch");
+  ' "$app_root" "$platform_key" "$uv_lock"
   )
 
   local expected_version
@@ -581,6 +613,39 @@ test_macos_command_conflict() {
   grep -F 'echo user-owned' "$conflict_launcher" >/dev/null
 }
 
+macos_running_application_state() {
+  local pid="$1"
+  /usr/bin/osascript -l JavaScript \
+    "$SCRIPT_DIR/macos-running-app-state.jxa" \
+    "$pid"
+}
+
+wait_for_macos_frontmost_state() {
+  local pid="$1"
+  local phase="$2"
+  local expected="$3"
+  local deadline=$((SECONDS + 30))
+  local state=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    state="$(macos_running_application_state "$pid" 2>&1 || true)"
+    if [ "$expected" = "true" ] \
+      && printf '%s' "$state" | grep -F '"active":true' >/dev/null \
+      && printf '%s' "$state" | grep -F '"frontmost":true' >/dev/null; then
+      echo "macos-focus-state phase=$phase pid=$pid expected=true state=$state"
+      return 0
+    fi
+    if [ "$expected" = "false" ] \
+      && printf '%s' "$state" | grep -F '"active":false' >/dev/null \
+      && printf '%s' "$state" | grep -F '"frontmost":false' >/dev/null; then
+      echo "macos-focus-state phase=$phase pid=$pid expected=false state=$state"
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "macos-focus-state phase=$phase pid=$pid expected=$expected timedOut=true state=$state" >&2
+  return 1
+}
+
 run_macos_full_e2e() {
   local test_home="$TEMP_ROOT/用户 home"
   local install_root="/Applications"
@@ -629,12 +694,15 @@ run_macos_full_e2e() {
   local initial_app_pid
   initial_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$runtime_file" | head -1)
   test -n "$initial_app_pid"
+  wait_for_macos_frontmost_state "$initial_app_pid" "cold-launch" true
+  /usr/bin/osascript -e 'tell application "Finder" to activate'
+  wait_for_macos_frontmost_state "$initial_app_pid" "background-before-focus" false
   run_fresh_shell /bin/zsh "$test_home" "polo app"
-  sleep 2
   local focused_app_pid
   focused_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$runtime_file" | head -1)
   test "$focused_app_pid" = "$initial_app_pid"
   kill -0 "$focused_app_pid"
+  wait_for_macos_frontmost_state "$focused_app_pid" "second-polo-app-focus" true
   run_fresh_shell /bin/zsh "$test_home" \
     "POLO_AI_RUNTIME_DISCOVERY_FILE='$runtime_file' polo sessions >/dev/null"
   stop_discovered_app "$runtime_file"

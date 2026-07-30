@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   truncateSync,
   writeFileSync,
@@ -14,7 +15,16 @@ import {
   stageUvRuntime,
   stagePlatformRuntimeHelpers,
 } from '../prepare-platform-runtime'
-import type { Arch, BuildConfig, Platform } from '../build/common'
+import {
+  getUvRuntimeManifestPath,
+  installPinnedUvBinary,
+  isPinnedUvRuntime,
+  sha256File,
+  validateUvRuntimeManifest,
+  type Arch,
+  type BuildConfig,
+  type Platform,
+} from '../build/common'
 
 const roots: string[] = []
 
@@ -152,7 +162,87 @@ describe('preparePlatformRuntime', () => {
       }
       const staged = await stageUvRuntime(config, fixture)
       expect(existsSync(staged)).toBe(true)
+      expect(validateUvRuntimeManifest(config)).toMatchObject({
+        schemaVersion: 1,
+        platform,
+        arch,
+        source: 'fixture',
+        binary: platform === 'win32' ? 'uv.exe' : 'uv',
+      })
     }
+  })
+
+  it('rejects a same-architecture stale or polluted uv cache', () => {
+    const root = mkdtempSync(join(tmpdir(), 'polo uv polluted cache '))
+    roots.push(root)
+    const cached = join(root, 'uv')
+    writeUvFixture(cached, 'darwin', 'arm64')
+
+    expect(isPinnedUvRuntime(cached, 'darwin', 'arm64')).toBe(false)
+  })
+
+  it('atomically replaces a polluted cache with the pinned release binary', () => {
+    const root = mkdtempSync(join(tmpdir(), 'polo uv atomic replacement '))
+    roots.push(root)
+    const electronDir = join(root, 'electron')
+    const targetDir = join(electronDir, 'resources', 'bin', 'darwin-arm64')
+    const cached = join(targetDir, 'uv')
+    const pinned = join(
+      import.meta.dir,
+      '..',
+      '..',
+      'apps',
+      'electron',
+      'resources',
+      'bin',
+      'darwin-arm64',
+      'uv',
+    )
+    mkdirSync(targetDir, { recursive: true })
+    writeUvFixture(cached, 'darwin', 'arm64')
+    const config: BuildConfig = {
+      platform: 'darwin',
+      arch: 'arm64',
+      upload: false,
+      uploadLatest: false,
+      uploadScript: false,
+      rootDir: root,
+      electronDir,
+    }
+
+    installPinnedUvBinary(config, pinned)
+
+    expect(sha256File(cached)).toBe(sha256File(pinned))
+    expect(validateUvRuntimeManifest(config, { requireTrusted: true })).toMatchObject({
+      source: 'astral-sh-release',
+      version: '0.10.6',
+      platform: 'darwin',
+      arch: 'arm64',
+    })
+  })
+
+  it('rejects a runtime manifest after its staged uv is modified', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'polo uv manifest tamper '))
+    roots.push(root)
+    const electronDir = join(root, 'electron')
+    const fixture = join(root, 'uv')
+    writeUvFixture(fixture, 'linux', 'x64')
+    const config: BuildConfig = {
+      platform: 'linux',
+      arch: 'x64',
+      upload: false,
+      uploadLatest: false,
+      uploadScript: false,
+      rootDir: root,
+      electronDir,
+    }
+    const staged = await stageUvRuntime(config, fixture)
+    expect(existsSync(getUvRuntimeManifestPath(config))).toBe(true)
+    writeFileSync(staged, Buffer.concat([Buffer.from(readFileSync(staged)), Buffer.from('polluted')]))
+
+    expect(() => validateUvRuntimeManifest(config)).toThrow(
+      'uv runtime manifest validation failed',
+    )
   })
 
   it('rejects a uv binary for the wrong architecture', async () => {

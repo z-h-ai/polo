@@ -60,7 +60,12 @@ Sentry.init({
 })
 
 // Initialize i18n for main process (menus, dialogs, etc.)
-import { setupI18n, i18n } from '@polo-ai/shared/i18n'
+import {
+  setupI18n,
+  i18n,
+  resolveSupportedLanguage,
+  translateRegistryMessage,
+} from '@polo-ai/shared/i18n'
 setupI18n()
 
 // Set anonymous machine ID for Sentry user tracking (no PII — just a hash).
@@ -236,7 +241,10 @@ if (poloCliArgIndex >= 0) {
   const bun = process.env.POLO_AI_BUN
   const entry = process.env.POLO_AI_CLI_ENTRY
   if (!bun || !entry || !existsSync(bun) || !existsSync(entry)) {
-    process.stderr.write(`Error: ${i18n.t('cli.terminalFilesMissing')}\n`)
+    const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale
+    process.stderr.write(
+      `Error: ${translateRegistryMessage(systemLocale, 'cli.terminalFilesMissing')}\n`,
+    )
     process.exit(1)
   }
   const result = spawnSync(bun, ['run', entry, ...process.argv.slice(poloCliArgIndex + 1)], {
@@ -326,13 +334,6 @@ function terminalSetupCopy() {
     ok: i18n.t('common.ok'),
     done: i18n.t('common.done'),
   }
-}
-
-function electronLocaleToSupportedLanguage(locale: string): string {
-  const base = locale.toLowerCase().split(/[-_]/)[0]
-  if (base === 'zh') return 'zh-Hans'
-  if (['de', 'en', 'es', 'hu', 'ja', 'pl'].includes(base)) return base
-  return 'en'
 }
 
 async function validateAdminSessionAfterResume(args: {
@@ -568,7 +569,7 @@ app.whenReady().then(async () => {
     return
   }
 
-  await i18n.changeLanguage(electronLocaleToSupportedLanguage(app.getLocale()))
+  await i18n.changeLanguage(resolveSupportedLanguage(app.getLocale()))
 
   // Export packaged state as env var so logger.ts (and headless Bun) don't need 'electron'
   process.env.POLO_AI_IS_PACKAGED = app.isPackaged ? 'true' : 'false'
