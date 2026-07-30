@@ -487,13 +487,17 @@ export function getTerminalIntegrationStatus(
   }
   const command = lookupAndValidateCommand(options)
   const found = command.found
+  // The packaged app prepends its internal resources/bin directory to PATH for
+  // agent sessions. That bundled wrapper is the symlink target we are about to
+  // install, not a user-owned system command conflict.
+  const externalFound = found === launcherTarget ? null : found
   const launcherExists = pathExists(launcherPath)
   const conflict = malformedProfile
     ? { code: 'profile_conflict' as const, path: malformedProfile }
     : launcherExists && !installed
       ? { code: 'launcher_conflict' as const, path: launcherPath }
-      : found && found !== launcherPath
-        ? { code: 'command_conflict' as const, path: found }
+      : externalFound && externalFound !== launcherPath
+        ? { code: 'command_conflict' as const, path: externalFound }
         : undefined
   const pathReady = blockReady
     && !staleManagedProfile

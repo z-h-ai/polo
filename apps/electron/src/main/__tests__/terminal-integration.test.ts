@@ -268,6 +268,23 @@ describe('macOS terminal integration', () => {
     })
   })
 
+  it('does not treat the packaged wrapper symlink target as a user command conflict', () => {
+    const options = setup()
+    const packagedWrapper = join(
+      options.resourcesPath,
+      'app',
+      'resources',
+      'bin',
+      'polo',
+    )
+    options.commandLookup = () => packagedWrapper
+
+    const status = installTerminalIntegration(options)
+
+    expect(status.conflict).toBeUndefined()
+    expect(status.installed).toBe(true)
+  })
+
   it('does not modify malformed managed profile markers', () => {
     const options = setup()
     const profile = join(options.homeDir!, '.zprofile')
