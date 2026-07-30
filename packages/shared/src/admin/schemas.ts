@@ -10,6 +10,10 @@ const adminToken = nonBlankString(16_384)
 const sessionLifetimeSeconds = z.number().finite().int().min(1).max(31_536_000)
 const phoneAuthLifetimeSeconds = z.number().finite().int().min(1).max(86_400)
 const phoneAuthDelaySeconds = z.number().finite().int().min(0).max(86_400)
+const httpUrl = z.string().url().max(16_384).refine(value => {
+  const protocol = new URL(value).protocol
+  return protocol === 'https:' || protocol === 'http:'
+})
 
 export const MainlandChinaPhoneSchema = z.string().regex(/^1[3-9]\d{9}$/)
 
@@ -108,6 +112,50 @@ export const ListOrganizationsResponseSchema = z.object({
     membership: OrganizationMembershipSchema,
     memberCount: z.number().int().min(0),
   })),
+})
+
+export const AppReleaseSummarySchema = z.object({
+  version: nonBlankString(128),
+  runtime: z.enum(['static', 'python', 'js']),
+  downloadUrl: httpUrl,
+  checksum: z.string().regex(/^[a-fA-F0-9]{64}$/),
+  sizeBytes: z.number().int().min(0),
+  platform: z.enum(['darwin', 'win32', 'linux']).optional(),
+  arch: z.enum(['arm64', 'x64']).optional(),
+})
+
+export const CatalogAppSchema = z.object({
+  id: entityId,
+  organizationId: entityId,
+  name: nonBlankString(256),
+  description: z.string().max(4_096),
+  iconUrl: httpUrl.optional(),
+  creatorName: z.string().max(512).optional(),
+  deliveryMode: z.enum(['remote_url', 'local_bundle']),
+  remoteUrl: httpUrl.optional(),
+  currentRelease: AppReleaseSummarySchema.optional(),
+  permissions: z.array(nonBlankString(512)).max(1_000).optional(),
+  sortOrder: z.number().int(),
+}).superRefine((app, context) => {
+  if (app.deliveryMode === 'remote_url' && !app.remoteUrl) {
+    context.addIssue({
+      code: 'custom',
+      message: 'remoteUrl is required for remote_url apps',
+      path: ['remoteUrl'],
+    })
+  }
+  if (app.deliveryMode === 'local_bundle' && !app.currentRelease) {
+    context.addIssue({
+      code: 'custom',
+      message: 'currentRelease is required for local_bundle apps',
+      path: ['currentRelease'],
+    })
+  }
+})
+
+export const AppCatalogResponseSchema = z.object({
+  appConfigVersion: nonBlankString(512),
+  apps: z.array(CatalogAppSchema).max(10_000),
 })
 
 export const CreateOrganizationResponseSchema = z.object({

@@ -121,6 +121,7 @@ export const CHANNEL_MAP = {
   saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
 
   // Local App Bundle runtime
+  'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
   'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
   'localApps.cancelInstall': invoke(RPC_CHANNELS.localApps.CANCEL_INSTALL),
   'localApps.start': invoke(RPC_CHANNELS.localApps.START),
@@ -149,6 +150,7 @@ export const CHANNEL_MAP = {
   adminLogout: invoke(RPC_CHANNELS.admin.LOGOUT),
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
   adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+  adminSyncAppCatalog: invoke(RPC_CHANNELS.admin.SYNC_APP_CATALOG),
   onAdminReauthRequired: listener('admin:reauthRequired'),
   organizationList: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
   organizationCreate: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION),

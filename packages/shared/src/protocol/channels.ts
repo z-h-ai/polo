@@ -161,6 +161,7 @@ export const RPC_CHANNELS = {
     SAVE_APPS: 'tab-browser:saveApps',
   },
   localApps: {
+    GET_HOST_INFO: 'local-apps:getHostInfo',
     INSTALL: 'local-apps:install',
     CANCEL_INSTALL: 'local-apps:cancelInstall',
     START: 'local-apps:start',
@@ -201,6 +202,7 @@ export const RPC_CHANNELS = {
     LOGOUT: 'admin:logout',
     GET_STATUS: 'admin:getStatus',
     SYNC_CONNECTIONS: 'admin:syncConnections',
+    SYNC_APP_CATALOG: 'admin:syncAppCatalog',
     LIST_ORGANIZATIONS: 'admin:listOrganizations',
     CREATE_ORGANIZATION: 'admin:createOrganization',
     PREVIEW_ORGANIZATION_JOIN: 'admin:previewOrganizationJoin',

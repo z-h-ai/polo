@@ -678,6 +678,87 @@ describe('AdminClient', () => {
       .toBe('Bearer organization-access-token');
   });
 
+  it('fetches a validated organization app catalog with version comparison', async () => {
+    mockJsonFetch({
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'app-1',
+        organizationId: 'organization-1',
+        name: 'Knowledge base',
+        description: 'Internal documentation',
+        iconUrl: 'https://cdn.example.com/icon.png',
+        creatorName: 'Acme',
+        deliveryMode: 'local_bundle',
+        permissions: ['Read files selected by you'],
+        currentRelease: {
+          version: '2.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://cdn.example.com/app.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 1024,
+          platform: 'darwin',
+          arch: 'arm64',
+          internalBuildId: 'must-not-leak',
+        },
+        sortOrder: 1,
+        groupIds: ['must-not-leak'],
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.getAppCatalog(
+      'organization-access-token',
+      'organization-1',
+      'apps-v1',
+    );
+
+    expect(result).toEqual({
+      notModified: false,
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'app-1',
+        organizationId: 'organization-1',
+        name: 'Knowledge base',
+        description: 'Internal documentation',
+        iconUrl: 'https://cdn.example.com/icon.png',
+        creatorName: 'Acme',
+        deliveryMode: 'local_bundle',
+        permissions: ['Read files selected by you'],
+        currentRelease: {
+          version: '2.0.0',
+          runtime: 'static',
+          downloadUrl: 'https://cdn.example.com/app.zip',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 1024,
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        sortOrder: 1,
+      }],
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/apps?organizationId=organization-1&version=apps-v1',
+    );
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('returns notModified for a 304 app catalog response', async () => {
+    fetchCalls = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      fetchCalls.push({ url, init: init ?? {} });
+      return new Response(null, { status: 304 });
+    }) as typeof globalThis.fetch;
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppCatalog(
+      'organization-access-token',
+      'organization-1',
+      'apps-v2',
+    )).resolves.toEqual({ notModified: true });
+  });
+
   it('accepts the POL-56 member response shape when user.phone is omitted', async () => {
     mockJsonFetch({
       members: [{

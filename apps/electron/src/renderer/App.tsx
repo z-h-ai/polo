@@ -164,6 +164,24 @@ function isQuotaExhaustedError(error: unknown): boolean {
     || /quota|额度|limit exceeded|exhausted|insufficient_quota|monthly usage|本月额度已用完/i.test(message)
 }
 
+async function stopSignedInAccountLocalApps(): Promise<void> {
+  try {
+    // Local bundles currently enter Polo exclusively through the signed-in
+    // organization catalog. Keep installations and data, but do not leave the
+    // previous account's processes running after its authorization disappears.
+    const installed = await window.electronAPI.localApps.getInstalledApps()
+    const statuses = await Promise.all(installed.map(app =>
+      window.electronAPI.localApps.getRuntimeStatus(app.appId)))
+    await Promise.allSettled(statuses
+      .filter(status => status.status === 'running' || status.status === 'starting')
+      .map(status => window.electronAPI.localApps.stop(status.appId)))
+  } catch (error) {
+    rendererLog.warn('[LocalApps] failed to stop apps while clearing admin account', {
+      error: getErrorText(error),
+    })
+  }
+}
+
 /**
  * Helper to handle background task events from the agent.
  * Updates the backgroundTasksAtomFamily based on event type.
@@ -834,6 +852,7 @@ export default function App() {
   }, [showAdminKicked])
 
   const handleAdminAuthFailure = useCallback((failure: AdminErrorLike) => {
+    void stopSignedInAccountLocalApps()
     invalidateOrganizationDeepLinkNavigation()
     clearOrganizationAccount(currentAdminUserIdRef.current, {
       preservePendingJoinToken: true,
@@ -1543,6 +1562,7 @@ export default function App() {
     try {
       const validation = await window.electronAPI.adminValidate()
       if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
+        await stopSignedInAccountLocalApps()
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
         currentAdminUserIdRef.current = null
@@ -1556,6 +1576,7 @@ export default function App() {
         status: Number(readErrorField(error, 'status')),
         message: getErrorText(error),
       })) {
+        await stopSignedInAccountLocalApps()
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
         currentAdminUserIdRef.current = null
@@ -2068,6 +2089,7 @@ export default function App() {
   const executeReset = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
     try {
+      await stopSignedInAccountLocalApps()
       await window.electronAPI.logout()
       invalidateOrganizationDeepLinkNavigation()
       // Reset all state
@@ -2105,6 +2127,7 @@ export default function App() {
   const handleAdminLogout = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
     try {
+      await stopSignedInAccountLocalApps()
       await window.electronAPI.adminLogout()
     } finally {
       invalidateOrganizationDeepLinkNavigation()

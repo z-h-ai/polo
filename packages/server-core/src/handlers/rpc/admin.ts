@@ -1,7 +1,10 @@
 import {
   AdminClient,
   AdminError,
+  getCachedAppCatalog,
   getSafeAdminErrorMessage,
+  saveAppCatalog,
+  type AppCatalogSyncResult,
   type AdminErrorCode,
   type AdminLlmConnection,
   type AdminLoginResponse,
@@ -48,6 +51,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGOUT,
   RPC_CHANNELS.admin.GET_STATUS,
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
+  RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
@@ -324,6 +328,111 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       return { success: false, ...adminError }
     }
   })
+
+  server.handle(
+    RPC_CHANNELS.admin.SYNC_APP_CATALOG,
+    async (
+      _ctx,
+      rawOrganizationId: unknown,
+      rawOptions?: unknown,
+    ): Promise<AppCatalogSyncResult> => {
+      const organizationId = OrganizationIdRpcInputSchema.safeParse(rawOrganizationId)
+      if (!organizationId.success) {
+        return {
+          success: false,
+          errorCode: 'VALIDATION_ERROR',
+          message: 'Organization id is invalid',
+        }
+      }
+      const force = Boolean(
+        rawOptions
+        && typeof rawOptions === 'object'
+        && (rawOptions as Record<string, unknown>).force === true,
+      )
+
+      const adminUrl = getAdminUrl()
+      if (!adminUrl) {
+        return {
+          success: false,
+          errorCode: 'VALIDATION_ERROR',
+          message: 'Admin URL is not configured',
+        }
+      }
+      const manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(adminUrl, manager)
+      if (!tokenResult.tokens) {
+        return {
+          success: false,
+          ...(tokenResult.authError ?? {
+            errorCode: 'UNAUTHORIZED',
+            message: 'Admin session is not logged in',
+          }),
+        }
+      }
+
+      const accountId = tokenResult.tokens.userId
+      const cached = getCachedAppCatalog(accountId, organizationId.data)
+      try {
+        const client = createAdminClient(adminUrl, manager)
+        let result = await client.getAppCatalog(
+          tokenResult.tokens.accessToken,
+          organizationId.data,
+          force ? undefined : cached?.appConfigVersion,
+        )
+        if (result.notModified && !cached) {
+          result = await client.getAppCatalog(
+            tokenResult.tokens.accessToken,
+            organizationId.data,
+          )
+        }
+        if (result.notModified) {
+          if (!cached) {
+            throw new AdminError(
+              'Admin returned not modified without a local app catalog',
+              'SERVER_ERROR',
+            )
+          }
+          return {
+            success: true,
+            catalog: cached,
+            source: 'cache',
+            refreshed: false,
+          }
+        }
+        if (result.apps.some(app => app.organizationId !== organizationId.data)) {
+          throw new AdminError(
+            'Admin app catalog contains an app from another organization',
+            'SERVER_ERROR',
+          )
+        }
+        return {
+          success: true,
+          catalog: saveAppCatalog(
+            accountId,
+            organizationId.data,
+            result,
+          ),
+          source: 'network',
+          refreshed: true,
+        }
+      } catch (error) {
+        if (cached && !isAuthFailure(error)) {
+          const adminError = toAdminRpcError(error)
+          log?.warn('[Admin] app catalog refresh failed; using cache:', adminError.message)
+          return {
+            success: true,
+            catalog: cached,
+            source: 'cache',
+            refreshed: false,
+            warning: adminError.message,
+          }
+        }
+        const adminError = toAdminRpcError(error)
+        log?.warn('[Admin] app catalog sync failed:', adminError.message)
+        return { success: false, ...adminError }
+      }
+    },
+  )
 
   server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATIONS, async () =>
     callOrganization('listOrganizations', (client, accessToken) =>

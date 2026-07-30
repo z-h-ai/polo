@@ -1,4 +1,9 @@
 import type { LlmConnection } from '../config/llm-connections.ts';
+import type {
+  LocalAppArchitecture,
+  LocalAppPlatform,
+  LocalAppRuntimeKind,
+} from '../protocol/local-apps.ts';
 
 export interface AdminUser {
   id: string;
@@ -145,6 +150,68 @@ export interface CreateOrganizationResponse {
 export interface ListOrganizationsResponse {
   organizations: OrganizationSummary[];
 }
+
+export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle';
+
+export interface AppReleaseSummary {
+  version: string;
+  runtime: LocalAppRuntimeKind;
+  downloadUrl: string;
+  checksum: string;
+  sizeBytes: number;
+  platform?: LocalAppPlatform;
+  arch?: LocalAppArchitecture;
+}
+
+export interface CatalogApp {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  iconUrl?: string;
+  creatorName?: string;
+  deliveryMode: CatalogAppDeliveryMode;
+  remoteUrl?: string;
+  currentRelease?: AppReleaseSummary;
+  permissions?: string[];
+  sortOrder: number;
+  /**
+   * Added locally when an app disappears from a refreshed catalog. Retaining
+   * the lightweight metadata lets the client explain why an installed app can
+   * no longer be launched without silently deleting it.
+   */
+  availability?: 'available' | 'withdrawn';
+}
+
+export interface AppCatalogResponse {
+  appConfigVersion: string;
+  apps: CatalogApp[];
+}
+
+export type AppCatalogFetchResult =
+  | { notModified: true }
+  | ({ notModified: false } & AppCatalogResponse);
+
+export interface AppCatalogCacheEntry extends AppCatalogResponse {
+  accountId: string;
+  organizationId: string;
+  syncedAt: number;
+}
+
+export type AppCatalogSyncResult =
+  | {
+      success: true;
+      catalog: AppCatalogCacheEntry;
+      source: 'network' | 'cache';
+      refreshed: boolean;
+      warning?: string;
+    }
+  | {
+      success: false;
+      errorCode: string;
+      message: string;
+      status?: number;
+    };
 
 export interface OrganizationJoinPreview {
   organization: Organization;

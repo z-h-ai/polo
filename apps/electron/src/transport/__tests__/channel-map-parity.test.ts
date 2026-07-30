@@ -87,6 +87,26 @@ describe('CHANNEL_MAP runtime contract', () => {
     )
   })
 
+  it('routes host metadata and app catalog sync through local-only RPC', async () => {
+    const calls: unknown[][] = []
+    const client = {
+      invoke: mock(async (...args: unknown[]) => {
+        calls.push(args)
+        return { success: true }
+      }),
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    await api.localApps.getHostInfo()
+    await api.adminSyncAppCatalog('organization-1', { force: true })
+
+    expect(calls).toEqual([
+      [RPC_CHANNELS.localApps.GET_HOST_INFO],
+      [RPC_CHANNELS.admin.SYNC_APP_CATALOG, 'organization-1', { force: true }],
+    ])
+  })
+
   it('forwards phone auth and password calls through the typed local RPC surface', async () => {
     const calls: unknown[][] = []
     const invoke = mock(async (...args: unknown[]) => {

@@ -91,6 +91,13 @@ const adminClientBehavior = {
     connections: [],
     defaultConnection: null,
   }),
+  getAppCatalog: async (
+    _accessToken: string,
+    _organizationId: string,
+    _appConfigVersion?: string,
+  ): Promise<any> => {
+    throw new Error('getAppCatalog behavior not configured')
+  },
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
   createOrganization: async (_accessToken: string, _input: unknown): Promise<any> => {
     throw new Error('createOrganization behavior not configured')
@@ -160,6 +167,23 @@ class MockAdminClient {
     return adminClientBehavior.getLlmConnections(accessToken)
   }
 
+  async getAppCatalog(
+    accessToken: string,
+    organizationId: string,
+    appConfigVersion?: string,
+  ) {
+    adminClientCalls.push({
+      method: 'getAppCatalog',
+      args: [organizationId, appConfigVersion],
+      accessToken,
+    })
+    return adminClientBehavior.getAppCatalog(
+      accessToken,
+      organizationId,
+      appConfigVersion,
+    )
+  }
+
   async listOrganizations(accessToken: string) {
     adminClientCalls.push({ method: 'listOrganizations', args: [], accessToken })
     return adminClientBehavior.listOrganizations(accessToken)
@@ -204,6 +228,7 @@ const managerState: {
 }
 
 const loggerWarn = jest.fn()
+const appCatalogCache = new Map<string, any>()
 
 const mockCredentialManager = {
   async getAdminTokens(): Promise<StoredTokens | null> {
@@ -232,6 +257,22 @@ const mockCredentialManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
+  getCachedAppCatalog: (accountId: string, organizationId: string) =>
+    appCatalogCache.get(`${accountId}:${organizationId}`) ?? null,
+  saveAppCatalog: (
+    accountId: string,
+    organizationId: string,
+    catalog: { appConfigVersion: string; apps: unknown[] },
+  ) => {
+    const entry = {
+      ...catalog,
+      accountId,
+      organizationId,
+      syncedAt: 100,
+    }
+    appCatalogCache.set(`${accountId}:${organizationId}`, entry)
+    return entry
+  },
   getSafeAdminErrorMessage: (errorCode: string, status?: number) => {
     if (typeof status === 'number' && status >= 500) {
       return 'Admin service is temporarily unavailable'
@@ -359,6 +400,7 @@ function createHarness() {
     validate: requiredHandler(handlers, RPC_CHANNELS.admin.VALIDATE),
     logout: requiredHandler(handlers, RPC_CHANNELS.admin.LOGOUT),
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+    syncAppCatalog: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_APP_CATALOG),
     listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
     previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
@@ -426,6 +468,7 @@ beforeEach(() => {
   managerState.tokens = null
   managerState.llmApiKeys = new Map()
   managerState.deletedCredentialSlugs = []
+  appCatalogCache.clear()
 
   adminClientBehavior.login = async () => ({
     accessToken: 'access-token',
@@ -485,6 +528,11 @@ beforeEach(() => {
     connections: [adminConnection()],
     defaultConnection: 'admin-anthropic',
   })
+  adminClientBehavior.getAppCatalog = async () => ({
+    notModified: false,
+    appConfigVersion: 'apps-v1',
+    apps: [],
+  })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
 })
 
@@ -510,6 +558,7 @@ describe('registerAdminHandlers', () => {
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',
       'setPassword',
+      'syncAppCatalog',
       'syncConnections',
       'updateOrganizationMember',
       'validate',
@@ -1285,6 +1334,98 @@ describe('registerAdminHandlers', () => {
     expect(managerState.deletedCredentialSlugs).toEqual(['admin-removed'])
     expect(configState.defaultConnection).toBe('admin-pi')
     expect(configState.adminConfigVersion).toBe('config-v2')
+  })
+
+  it('syncs the active organization app catalog with its independent version', async () => {
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+      displayName: 'Admin User',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [],
+    })
+    adminClientBehavior.getAppCatalog = async () => ({
+      notModified: false,
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'app-1',
+        organizationId,
+        name: 'Knowledge base',
+        description: 'Internal docs',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://kb.example.com',
+        sortOrder: 1,
+      }],
+    })
+    const { syncAppCatalog } = createHarness()
+
+    const result = await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      {},
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      source: 'network',
+      refreshed: true,
+      catalog: {
+        accountId: 'user-1',
+        organizationId,
+        appConfigVersion: 'apps-v2',
+      },
+    })
+    expect(adminClientCalls).toContainEqual({
+      method: 'getAppCatalog',
+      args: [organizationId, 'apps-v1'],
+      accessToken: 'access-token',
+    })
+  })
+
+  it('keeps the last app catalog when a non-auth refresh fails', async () => {
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    const cached = {
+      accountId: 'user-1',
+      organizationId,
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [],
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, cached)
+    adminClientBehavior.getAppCatalog = async () => {
+      throw new TestAdminError('offline', 'NETWORK_ERROR')
+    }
+    const { syncAppCatalog } = createHarness()
+
+    const result = await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      { force: true },
+    )
+
+    expect(result).toEqual({
+      success: true,
+      catalog: cached,
+      source: 'cache',
+      refreshed: false,
+      warning: 'Admin request failed',
+    })
   })
 
   it('logs out remotely and removes admin-managed connections and credentials', async () => {

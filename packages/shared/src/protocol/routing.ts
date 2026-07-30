@@ -134,6 +134,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tabBrowser.SAVE_APPS,
 
   // localApps — downloaded bundles and processes live on this device
+  RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
@@ -237,6 +238,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.LOGOUT,
   RPC_CHANNELS.admin.GET_STATUS,
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
+  RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,

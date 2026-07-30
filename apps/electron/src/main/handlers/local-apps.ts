@@ -9,6 +9,7 @@ import type { RpcServer } from '@polo-ai/server-core/transport'
 import { getLocalAppRuntimeManager } from '../local-app-runtime'
 
 export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
@@ -22,6 +23,10 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerLocalAppHandlers(server: RpcServer): void {
+  server.handle(RPC_CHANNELS.localApps.GET_HOST_INFO, () => ({
+    platform: process.platform,
+    arch: process.arch,
+  }))
   server.handle(RPC_CHANNELS.localApps.INSTALL, (ctx, request: LocalAppInstallRequest) =>
     getLocalAppRuntimeManager().install(request, { signal: ctx.signal }))
   server.handle(RPC_CHANNELS.localApps.CANCEL_INSTALL, (_ctx, appId: string) =>

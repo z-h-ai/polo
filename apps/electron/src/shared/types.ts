@@ -235,6 +235,7 @@ import type {
   OrganizationMember,
   OrganizationMembership,
   OrganizationSummary,
+  AppCatalogSyncResult,
   UpdateOrganizationMemberInput,
 } from '@polo-ai/shared/admin/types'
 export type {
@@ -487,6 +488,10 @@ export interface ElectronAPI {
 
   // Local App Bundle installation and runtime
   localApps: {
+    getHostInfo(): Promise<{
+      platform: 'darwin' | 'win32' | 'linux'
+      arch: 'arm64' | 'x64'
+    }>
     install(request: LocalAppInstallRequest): Promise<LocalAppInstalledApp>
     cancelInstall(appId: string): Promise<boolean>
     start(appId: string): Promise<LocalAppStartResult>
@@ -519,6 +524,10 @@ export interface ElectronAPI {
   adminLogout(): Promise<{ success: boolean }>
   adminGetStatus(): Promise<AdminStatusResult>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
+  adminSyncAppCatalog(
+    organizationId: string,
+    options?: { force?: boolean },
+  ): Promise<AppCatalogSyncResult>
   onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
   organizationList(): Promise<OrganizationRpcResult<{ organizations: OrganizationSummary[] }>>
   organizationCreate(input: CreateOrganizationInput): Promise<OrganizationRpcResult<CreateOrganizationResponse>>

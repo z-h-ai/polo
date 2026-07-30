@@ -79,9 +79,9 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
     }}>
       <DialogContent className="sm:max-w-[420px]">
         <DialogHeader>
-          <DialogTitle>Add app</DialogTitle>
+          <DialogTitle>Add external app</DialogTitle>
           <DialogDescription>
-            Add an internal web app or local service to the launcher.
+            Add a personal website shortcut to your Polo launcher.
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit}>
@@ -135,7 +135,7 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
           </div>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={!isValid}>Add and open</Button>
+            <Button type="submit" disabled={!isValid}>Add external app</Button>
           </DialogFooter>
         </form>
       </DialogContent>

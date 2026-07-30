@@ -14,6 +14,7 @@ import {
   type AdminValidateResponse,
   type VerifyPhoneAuthCodeInput,
   type AcceptOrganizationJoinResponse,
+  type AppCatalogFetchResult,
   type CreateOrganizationInput,
   type CreateOrganizationInvitationInput,
   type CreateOrganizationInvitationResponse,
@@ -47,6 +48,7 @@ import {
   OrganizationJoinLinkMutationResponseSchema,
   OrganizationJoinPreviewSchema,
   OrganizationMemberMutationResponseSchema,
+  AppCatalogResponseSchema,
 } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -267,6 +269,23 @@ export class AdminClient {
     return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
   }
 
+  async getAppCatalog(
+    accessToken: string,
+    organizationId: string,
+    appConfigVersion?: string,
+  ): Promise<AppCatalogFetchResult> {
+    const query = new URLSearchParams({ organizationId });
+    if (appConfigVersion) query.set('version', appConfigVersion);
+    const response = await this.request<unknown>(`/api/apps?${query.toString()}`, {
+      method: 'GET',
+      accessToken,
+      allowNotModified: true,
+    });
+    if (response === undefined) return { notModified: true };
+    const catalog = this.readSuccessResponse(response, AppCatalogResponseSchema);
+    return { notModified: false, ...catalog };
+  }
+
   async createOrganization(
     accessToken: string,
     input: CreateOrganizationInput,
@@ -405,6 +424,7 @@ export class AdminClient {
     body?: unknown;
     headers?: Record<string, string>;
     retryingAfterRefresh?: boolean;
+    allowNotModified?: boolean;
   }): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
@@ -429,6 +449,10 @@ export class AdminClient {
     }
 
     const data = await this.readJson(response);
+
+    if (response.status === 304 && options.allowNotModified) {
+      return undefined as T;
+    }
 
     if (
       response.status === 401 &&
