@@ -92,6 +92,10 @@ const adminClientBehavior = {
     defaultConnection: null,
   }),
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
+  listCreatorArtifacts: async (
+    _accessToken: string,
+    _input: unknown,
+  ): Promise<any> => ({ artifacts: [] }),
   createOrganization: async (_accessToken: string, _input: unknown): Promise<any> => {
     throw new Error('createOrganization behavior not configured')
   },
@@ -163,6 +167,15 @@ class MockAdminClient {
   async listOrganizations(accessToken: string) {
     adminClientCalls.push({ method: 'listOrganizations', args: [], accessToken })
     return adminClientBehavior.listOrganizations(accessToken)
+  }
+
+  async listCreatorArtifacts(accessToken: string, input: unknown) {
+    adminClientCalls.push({
+      method: 'listCreatorArtifacts',
+      args: [input],
+      accessToken,
+    })
+    return adminClientBehavior.listCreatorArtifacts(accessToken, input)
   }
 
   async createOrganization(accessToken: string, input: unknown) {
@@ -360,6 +373,10 @@ function createHarness() {
     logout: requiredHandler(handlers, RPC_CHANNELS.admin.LOGOUT),
     syncConnections: requiredHandler(handlers, RPC_CHANNELS.admin.SYNC_CONNECTIONS),
     listOrganizations: requiredHandler(handlers, RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
+    listCreatorArtifacts: requiredHandler(
+      handlers,
+      RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS,
+    ),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
     previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
     acceptOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN),
@@ -486,6 +503,7 @@ beforeEach(() => {
     defaultConnection: 'admin-anthropic',
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
+  adminClientBehavior.listCreatorArtifacts = async () => ({ artifacts: [] })
 })
 
 describe('registerAdminHandlers', () => {
@@ -500,6 +518,7 @@ describe('registerAdminHandlers', () => {
       'createOrganizationJoinLink',
       'getAuthConfig',
       'getPhoneAuthChallengeConfig',
+      'listCreatorArtifacts',
       'listOrganizationInvitations',
       'listOrganizationMembers',
       'listOrganizations',
@@ -613,6 +632,112 @@ describe('registerAdminHandlers', () => {
     expect(adminClientCalls.filter(call => call.accessToken).every(
       call => call.accessToken === 'organization-access-token',
     )).toBe(true)
+  })
+
+  it('does not let an in-flight Catalog response refill cache after membership refresh', async () => {
+    managerState.tokens = {
+      accessToken: 'catalog-access-token',
+      refreshToken: 'catalog-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'catalog-user',
+      username: 'catalog-user',
+    }
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    let resolveStale!: (value: { artifacts: Array<{ id: string }> }) => void
+    let markStarted!: () => void
+    const started = new Promise<void>(resolve => {
+      markStarted = resolve
+    })
+    const staleResponse = new Promise<{ artifacts: Array<{ id: string }> }>(
+      resolve => {
+        resolveStale = resolve
+      },
+    )
+    let catalogRequests = 0
+    adminClientBehavior.listCreatorArtifacts = async () => {
+      catalogRequests += 1
+      if (catalogRequests === 1) {
+        markStarted()
+        return staleResponse
+      }
+      return { artifacts: [] }
+    }
+
+    const { listCreatorArtifacts, listOrganizations } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    const input = {
+      organizationId,
+      includeDrafts: true,
+    }
+    const staleRequest = listCreatorArtifacts(context, input)
+    await started
+
+    // LIST_ORGANIZATIONS is the membership snapshot boundary. The response
+    // that began before it may finish, but must not become reusable cache data.
+    expect(await listOrganizations(context)).toMatchObject({ success: true })
+    resolveStale({ artifacts: [{ id: 'stale-private-draft' }] })
+    expect(await staleRequest).toMatchObject({
+      success: true,
+      artifacts: [{ id: 'stale-private-draft' }],
+    })
+
+    expect(await listCreatorArtifacts(context, input)).toMatchObject({
+      success: true,
+      artifacts: [],
+    })
+    expect(catalogRequests).toBe(2)
+  })
+
+  it('invalidates Catalog work that begins while a membership refresh is pending', async () => {
+    managerState.tokens = {
+      accessToken: 'catalog-access-token',
+      refreshToken: 'catalog-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'catalog-user',
+      username: 'catalog-user',
+    }
+    const organizationId = '22222222-2222-4222-8222-222222222222'
+    let markRefreshStarted!: () => void
+    let finishRefresh!: () => void
+    const refreshStarted = new Promise<void>(resolve => {
+      markRefreshStarted = resolve
+    })
+    const refreshBlocked = new Promise<void>(resolve => {
+      finishRefresh = resolve
+    })
+    adminClientBehavior.listOrganizations = async () => {
+      markRefreshStarted()
+      await refreshBlocked
+      return { organizations: [] }
+    }
+    let catalogRequests = 0
+    adminClientBehavior.listCreatorArtifacts = async () => {
+      catalogRequests += 1
+      return catalogRequests === 1
+        ? { artifacts: [{ id: 'stale-during-refresh' }] }
+        : { artifacts: [] }
+    }
+
+    const { listCreatorArtifacts, listOrganizations } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    const input = {
+      organizationId,
+      includeDrafts: true,
+    }
+    const refresh = listOrganizations(context)
+    await refreshStarted
+    expect(await listCreatorArtifacts(context, input)).toMatchObject({
+      success: true,
+      artifacts: [{ id: 'stale-during-refresh' }],
+    })
+    finishRefresh()
+    expect(await refresh).toMatchObject({ success: true })
+
+    expect(await listCreatorArtifacts(context, input)).toMatchObject({
+      success: true,
+      artifacts: [],
+    })
+    expect(catalogRequests).toBe(2)
   })
 
   it('discovers the public phone challenge issuer through the local handler', async () => {

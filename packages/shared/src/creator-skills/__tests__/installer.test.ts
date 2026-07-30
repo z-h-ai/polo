@@ -64,25 +64,31 @@ Installed content for ${version}.
 async function packageGrant(
   root: string,
   version: string,
+  options: {
+    slug?: string
+    artifactId?: string
+    organizationId?: string
+  } = {},
 ): Promise<{ bytes: Uint8Array; grant: CreatorSkillDownloadGrant }> {
+  const slug = options.slug ?? 'install-test'
   const bytes = zipSync({
-    'install-test/SKILL.md': strToU8(skillContent(version)),
-    'install-test/references/version.txt': strToU8(version),
+    [`${slug}/SKILL.md`]: strToU8(skillContent(version)),
+    [`${slug}/references/version.txt`]: strToU8(version),
   })
-  const archivePath = join(root, `${version}.zip`)
+  const archivePath = join(root, `${slug}-${version}.zip`)
   await writeFile(archivePath, bytes)
   const validated = await validateCreatorSkillArchive({
     archivePath,
-    slug: 'install-test',
+    slug,
   })
   return {
     bytes,
     grant: {
-      artifactId: 'artifact-1',
-      organizationId: 'organization-1',
-      slug: 'install-test',
+      artifactId: options.artifactId ?? 'artifact-1',
+      organizationId: options.organizationId ?? 'organization-1',
+      slug,
       version,
-      url: `https://download.invalid/${version}.zip`,
+      url: `https://download.invalid/${slug}-${version}.zip`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       archiveChecksum: validated.archiveChecksum,
       contentDigest: validated.contentDigest,
@@ -90,6 +96,14 @@ async function packageGrant(
       validationPolicy: DEFAULT_SKILL_ARCHIVE_POLICY,
     },
   }
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
 }
 
 function responseFetch(bytes: Uint8Array): typeof fetch {
@@ -170,6 +184,126 @@ describe('Creator Skill workspace installer', () => {
         lastKnownStatus: 'active',
         lastCheckedAt: '2026-07-30T00:00:00.000Z',
       })
+    })
+  })
+
+  it('serializes different-slug installs through the workspace Ledger lock', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0', {
+        slug: 'alpha-skill',
+        artifactId: 'artifact-alpha',
+      })
+      const second = await packageGrant(root, '1.0.0', {
+        slug: 'beta-skill',
+        artifactId: 'artifact-beta',
+      })
+      const firstLocked = deferred()
+      const releaseFirst = deferred()
+      const secondContended = deferred()
+      let secondLocked = false
+      const firstInstall = installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '30303030-3030-4030-8030-303030303030',
+        grant: first.grant,
+      }, {
+        fetch: responseFetch(first.bytes),
+        onLedgerMutationLocked: async () => {
+          firstLocked.resolve()
+          await releaseFirst.promise
+        },
+      })
+      await firstLocked.promise
+
+      const secondInstall = installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '31313131-3131-4131-8131-313131313131',
+        grant: second.grant,
+      }, {
+        fetch: responseFetch(second.bytes),
+        onLedgerMutationLockContended: () => secondContended.resolve(),
+        onLedgerMutationLocked: () => {
+          secondLocked = true
+        },
+      })
+      await secondContended.promise
+      expect(secondLocked).toBe(false)
+
+      releaseFirst.resolve()
+      expect((await Promise.all([firstInstall, secondInstall])).every(
+        result => result.success,
+      )).toBe(true)
+      expect((await readCreatorSkillsLedger(root)).installed.map(
+        item => item.slug,
+      )).toEqual(['alpha-skill', 'beta-skill'])
+    })
+  })
+
+  it('merges a different-slug uninstall with an in-flight safety metadata update', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0', {
+        slug: 'alpha-skill',
+        artifactId: 'artifact-alpha',
+      })
+      const second = await packageGrant(root, '1.0.0', {
+        slug: 'beta-skill',
+        artifactId: 'artifact-beta',
+      })
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '32323232-3232-4232-8232-323232323232',
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '33333334-3333-4333-8333-333333333334',
+        grant: second.grant,
+      }, { fetch: responseFetch(second.bytes) })).success).toBe(true)
+
+      const uninstallLocked = deferred()
+      const releaseUninstall = deferred()
+      const metadataContended = deferred()
+      let metadataLocked = false
+      const uninstall = uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '34343434-3434-4434-8434-343434343434',
+        slug: first.grant.slug,
+      }, {
+        onLedgerMutationLocked: async () => {
+          uninstallLocked.resolve()
+          await releaseUninstall.promise
+        },
+      })
+      await uninstallLocked.promise
+
+      const metadataUpdate = updateCreatorSkillInstallationMetadata({
+        workspaceRoot: root,
+        artifactId: second.grant.artifactId,
+        version: second.grant.version,
+        archiveChecksum: second.grant.archiveChecksum,
+        changes: {
+          lastKnownStatus: 'revoked',
+          lastCheckedAt: '2026-07-30T12:00:00.000Z',
+        },
+      }, {
+        onLedgerMutationLockContended: () => metadataContended.resolve(),
+        onLedgerMutationLocked: () => {
+          metadataLocked = true
+        },
+      })
+      await metadataContended.promise
+      expect(metadataLocked).toBe(false)
+
+      releaseUninstall.resolve()
+      expect((await uninstall).success).toBe(true)
+      expect(await metadataUpdate).toBe(true)
+      expect((await readCreatorSkillsLedger(root)).installed).toEqual([
+        expect.objectContaining({
+          slug: 'beta-skill',
+          lastKnownStatus: 'revoked',
+          lastCheckedAt: '2026-07-30T12:00:00.000Z',
+        }),
+      ])
     })
   })
 
@@ -1147,7 +1281,93 @@ describe('Creator Skill workspace installer', () => {
     })
   })
 
-  it('persists committed before deleting the transaction backup', async () => {
+  it('keeps an update rollback private from concurrent backup deletion until committed is durable', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      let failCommittedSync = false
+      let deletedDuringWindow = -1
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '35353535-3535-4535-8535-353535353535',
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        onJournalPersisted: async state => {
+          if (state !== 'ledger_committed') return
+          deletedDuringWindow = await deleteCreatorSkillBackups(root)
+          failCommittedSync = true
+        },
+        syncJournalDirectory: async () => {
+          if (!failCommittedSync) return
+          failCommittedSync = false
+          throw Object.assign(new Error('committed journal fsync failed'), {
+            code: 'EIO',
+          })
+        },
+      })
+
+      expect(deletedDuringWindow).toBe(0)
+      expect(result.success).toBe(false)
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('1.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect(await listCreatorSkillBackups(root)).toHaveLength(0)
+    })
+  })
+
+  it('keeps a clean-uninstall rollback private until committed is durable', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      let failCommittedSync = false
+      let deletedDuringWindow = -1
+      const result = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '36363636-3636-4636-8636-363636363636',
+        slug: 'install-test',
+      }, {
+        onJournalPersisted: async state => {
+          if (state !== 'ledger_committed') return
+          deletedDuringWindow = await deleteCreatorSkillBackups(root)
+          failCommittedSync = true
+        },
+        syncJournalDirectory: async () => {
+          if (!failCommittedSync) return
+          failCommittedSync = false
+          throw Object.assign(new Error('committed journal fsync failed'), {
+            code: 'EIO',
+          })
+        },
+      })
+
+      expect(deletedDuringWindow).toBe(0)
+      expect(result.success).toBe(false)
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('1.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect(await listCreatorSkillBackups(root)).toHaveLength(0)
+    })
+  })
+
+  it('publishes the transaction backup only after committed is durable', async () => {
     await withWorkspace(async root => {
       const first = await packageGrant(root, '1.0.0')
       expect((await installCreatorSkill(root, {
@@ -1172,10 +1392,19 @@ describe('Creator Skill workspace installer', () => {
             OP_FAULT_COMMITTED,
             'journal.json',
           ), 'utf8'))
-          expect(await access(journal.preserveBackupPath).then(
+          expect(await access(join(
+            root,
+            '.creator-skill-ops',
+            OP_FAULT_COMMITTED,
+            'backup',
+          )).then(
             () => true,
             () => false,
           )).toBe(true)
+          expect(await access(journal.preserveBackupPath).then(
+            () => true,
+            () => false,
+          )).toBe(false)
           throw new Error('simulated crash after committed')
         },
       })
@@ -1192,6 +1421,13 @@ describe('Creator Skill workspace installer', () => {
         '.creator-skill-ops',
         OP_FAULT_COMMITTED,
       )).then(() => true, () => false)).toBe(false)
+      expect(await listCreatorSkillBackups(root)).toEqual([
+        expect.objectContaining({
+          slug: 'install-test',
+          operation: 'update_safety_snapshot',
+          version: '1.0.0',
+        }),
+      ])
     })
   })
 
@@ -1228,7 +1464,7 @@ describe('Creator Skill workspace installer', () => {
       expect(await access(join(operationPath, 'backup')).then(
         () => true,
         () => false,
-      )).toBe(false)
+      )).toBe(true)
       const persistedJournal = JSON.parse(await readFile(
         join(operationPath, 'journal.json'),
         'utf8',
@@ -1236,8 +1472,18 @@ describe('Creator Skill workspace installer', () => {
       expect(await access(persistedJournal.preserveBackupPath).then(
         () => true,
         () => false,
-      )).toBe(true)
+      )).toBe(false)
       expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('2.0.0')
+
+      const other = await packageGrant(root, '1.0.0', {
+        slug: 'other-skill',
+        artifactId: 'artifact-other',
+      })
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '37373737-3737-4737-8737-373737373737',
+        grant: other.grant,
+      }, { fetch: responseFetch(other.bytes) })).success).toBe(true)
 
       // Model a power loss where the latest directory-entry rename is not
       // durable and recovery observes the previous checkpoint.
@@ -1252,7 +1498,16 @@ describe('Creator Skill workspace installer', () => {
         join(root, 'skills', 'install-test', 'SKILL.md'),
         'utf8',
       )).toBe(skillContent('1.0.0'))
-      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect((await readCreatorSkillsLedger(root)).installed).toEqual([
+        expect.objectContaining({
+          slug: 'install-test',
+          version: '1.0.0',
+        }),
+        expect.objectContaining({
+          slug: 'other-skill',
+          version: '1.0.0',
+        }),
+      ])
       expect(await access(operationPath).then(() => true, () => false)).toBe(false)
     })
   })

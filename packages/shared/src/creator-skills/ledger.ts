@@ -22,28 +22,31 @@ function isInstalledCreatorSkill(value: unknown): value is InstalledCreatorSkill
   return InstalledCreatorSkillSchema.safeParse(value).success
 }
 
+export function parseCreatorSkillsLedger(raw: unknown): CreatorSkillsLedger {
+  if (!raw || typeof raw !== 'object') return emptyCreatorSkillsLedger()
+  const record = raw as Record<string, unknown>
+  if (record.schemaVersion !== 1 || !Array.isArray(record.installed)) {
+    return emptyCreatorSkillsLedger()
+  }
+  const bySlug = new Map<string, InstalledCreatorSkill>()
+  for (const item of record.installed) {
+    if (isInstalledCreatorSkill(item)) {
+      bySlug.set(item.slug, InstalledCreatorSkillSchema.parse(item))
+    }
+  }
+  return {
+    schemaVersion: 1,
+    installed: [...bySlug.values()].sort((left, right) => left.slug.localeCompare(right.slug)),
+  }
+}
+
 export async function readCreatorSkillsLedger(
   workspaceRoot: string,
 ): Promise<CreatorSkillsLedger> {
   try {
-    const raw = JSON.parse(
+    return parseCreatorSkillsLedger(JSON.parse(
       await readFile(join(workspaceRoot, CREATOR_SKILLS_LEDGER_FILE), 'utf8'),
-    ) as unknown
-    if (!raw || typeof raw !== 'object') return emptyCreatorSkillsLedger()
-    const record = raw as Record<string, unknown>
-    if (record.schemaVersion !== 1 || !Array.isArray(record.installed)) {
-      return emptyCreatorSkillsLedger()
-    }
-    const bySlug = new Map<string, InstalledCreatorSkill>()
-    for (const item of record.installed) {
-      if (isInstalledCreatorSkill(item)) {
-        bySlug.set(item.slug, InstalledCreatorSkillSchema.parse(item))
-      }
-    }
-    return {
-      schemaVersion: 1,
-      installed: [...bySlug.values()].sort((left, right) => left.slug.localeCompare(right.slug)),
-    }
+    ) as unknown)
   } catch {
     return emptyCreatorSkillsLedger()
   }

@@ -23,6 +23,7 @@ import {
   validateCreatorSkillArchive,
 } from './archive'
 import {
+  parseCreatorSkillsLedger,
   readCreatorSkillsLedger,
   removeLedgerInstallation,
   replaceLedgerInstallation,
@@ -47,6 +48,8 @@ const SKILL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const BACKUP_NAME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/
 const MAX_JOURNAL_BYTES = 5 * 1024 * 1024
 const MAX_BACKUP_METADATA_BYTES = 16 * 1024
+const BACKUP_MANAGEMENT_LOCK = '__creator-skill-backups__'
+const LEDGER_MUTATION_LOCK = '__creator-skills-ledger__'
 const processQueues = new Map<string, Promise<void>>()
 const cancellationControllers = new Map<string, AbortController>()
 
@@ -101,6 +104,10 @@ export interface CreatorSkillInstallerDependencies {
   onCleanupStep?: (
     step: 'transaction_backup_removed' | 'operation_removed'
   ) => Promise<void> | void
+  /** Runs while the workspace-wide Ledger mutation lock is held in deterministic tests. */
+  onLedgerMutationLocked?: () => Promise<void> | void
+  /** Reports deterministic in-process Ledger lock contention in fault-injection tests. */
+  onLedgerMutationLockContended?: () => Promise<void> | void
 }
 
 export type CreatorSkillUninstallerDependencies = Pick<
@@ -109,6 +116,13 @@ export type CreatorSkillUninstallerDependencies = Pick<
   | 'onJournalPersisted'
   | 'syncJournalDirectory'
   | 'onCleanupStep'
+  | 'onLedgerMutationLocked'
+  | 'onLedgerMutationLockContended'
+>
+
+export type CreatorSkillMetadataUpdateDependencies = Pick<
+  CreatorSkillInstallerDependencies,
+  'onLedgerMutationLocked' | 'onLedgerMutationLockContended'
 >
 
 function errorResult(args: {
@@ -668,20 +682,33 @@ async function readLedgerSnapshot(workspaceRoot: string): Promise<string | null>
 async function restoreLedgerSnapshot(
   workspaceRoot: string,
   snapshot: string | null,
+  slug: string,
 ): Promise<void> {
-  const ledgerPath = join(workspaceRoot, 'creator-skills.json')
-  if (snapshot === null) {
-    await rm(ledgerPath, { force: true })
-    return
+  let oldInstallation: InstalledCreatorSkill | undefined
+  if (snapshot !== null) {
+    try {
+      oldInstallation = parseCreatorSkillsLedger(
+        JSON.parse(snapshot) as unknown,
+      ).installed.find(item => item.slug === slug)
+    } catch {
+      oldInstallation = undefined
+    }
   }
-  const tempPath = `${ledgerPath}.${randomUUID()}.recovery`
-  await writeFile(tempPath, snapshot, { mode: 0o600, flag: 'wx' })
-  await rename(tempPath, ledgerPath)
+  const current = await readCreatorSkillsLedger(workspaceRoot)
+  const restored = oldInstallation
+    ? replaceLedgerInstallation(current, oldInstallation)
+    : removeLedgerInstallation(current, slug)
+  if (snapshot === null && restored.installed.length === 0) {
+    await rm(join(workspaceRoot, 'creator-skills.json'), { force: true })
+  } else {
+    await writeCreatorSkillsLedger(workspaceRoot, restored)
+  }
 }
 
 async function acquireOperationLock(workspaceRoot: string, slug: string): Promise<() => Promise<void>> {
   if (
-    slug !== '__creator-skill-backups__'
+    slug !== BACKUP_MANAGEMENT_LOCK
+    && slug !== LEDGER_MUTATION_LOCK
     && !SKILL_SLUG_PATTERN.test(slug)
   ) {
     throw invalidOperationPath('Creator Skill lock slug is invalid')
@@ -714,7 +741,7 @@ async function acquireOperationLock(workspaceRoot: string, slug: string): Promis
   }
 }
 
-async function enqueue<T>(key: string, operation: () => Promise<T>): Promise<T> {
+async function acquireProcessQueueSlot(key: string): Promise<() => void> {
   const previous = processQueues.get(key) ?? Promise.resolve()
   let release!: () => void
   const current = new Promise<void>(resolvePromise => {
@@ -723,11 +750,21 @@ async function enqueue<T>(key: string, operation: () => Promise<T>): Promise<T> 
   const queued = previous.then(() => current)
   processQueues.set(key, queued)
   await previous
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    release()
+    if (processQueues.get(key) === queued) processQueues.delete(key)
+  }
+}
+
+async function enqueue<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const release = await acquireProcessQueueSlot(key)
   try {
     return await operation()
   } finally {
     release()
-    if (processQueues.get(key) === queued) processQueues.delete(key)
   }
 }
 
@@ -735,11 +772,12 @@ async function withBackupManagementLock<T>(
   workspaceRoot: string,
   operation: () => Promise<T>,
 ): Promise<T> {
-  const key = `${resolve(workspaceRoot)}\0__creator-skill-backups__`
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const key = `${canonicalWorkspace}\0${BACKUP_MANAGEMENT_LOCK}`
   return enqueue(key, async () => {
     const releaseLock = await acquireOperationLock(
-      workspaceRoot,
-      '__creator-skill-backups__',
+      canonicalWorkspace,
+      BACKUP_MANAGEMENT_LOCK,
     )
     try {
       return await operation()
@@ -747,6 +785,32 @@ async function withBackupManagementLock<T>(
       await releaseLock()
     }
   })
+}
+
+async function acquireLedgerMutationLock(
+  workspaceRoot: string,
+  onContended?: () => Promise<void> | void,
+): Promise<() => Promise<void>> {
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const key = `${canonicalWorkspace}\0${LEDGER_MUTATION_LOCK}`
+  if (processQueues.has(key)) await onContended?.()
+  const releaseQueue = await acquireProcessQueueSlot(key)
+  try {
+    const releaseFile = await acquireOperationLock(
+      canonicalWorkspace,
+      LEDGER_MUTATION_LOCK,
+    )
+    return async () => {
+      try {
+        await releaseFile()
+      } finally {
+        releaseQueue()
+      }
+    }
+  } catch (error) {
+    releaseQueue()
+    throw error
+  }
 }
 
 async function downloadArchive(args: {
@@ -963,8 +1027,47 @@ async function rollbackJournal(
   if (paths.preserveBackupPath) {
     await rm(backupMetadataPath(paths.preserveBackupPath), { force: true })
   }
-  await restoreLedgerSnapshot(workspaceRoot, journal.oldLedger)
+  await restoreLedgerSnapshot(workspaceRoot, journal.oldLedger, journal.slug)
   await rm(operationPath, { recursive: true, force: true })
+}
+
+async function publishCommittedBackup(
+  workspaceRoot: string,
+  operationPath: string,
+  journal: CreatorSkillJournal,
+): Promise<string | undefined> {
+  const paths = await deriveJournalPaths(workspaceRoot, operationPath, journal)
+  const preserveBackupPath = paths.preserveBackupPath
+  if (!preserveBackupPath) return undefined
+  return withBackupManagementLock(workspaceRoot, async () => {
+    const metadata = backupMetadataFromJournal(journal, preserveBackupPath)
+    const transactionExists = await exists(paths.transactionBackupPath)
+    const preserveExists = await exists(preserveBackupPath)
+    if (transactionExists && preserveExists) {
+      throw invalidBackupPath(
+        'Creator Skill committed backup exists in both transaction and permanent storage',
+      )
+    }
+    if (transactionExists) {
+      const backupTarget = await resolveCreatorSkillBackupTarget({
+        workspaceRoot,
+        slug: journal.slug,
+        backupId: basename(preserveBackupPath),
+        createAncestors: true,
+      })
+      if (
+        backupTarget.targetPath !== preserveBackupPath
+        || backupTarget.targetExists
+      ) {
+        throw invalidBackupPath('Creator Skill backup target is unsafe or already exists')
+      }
+      if (metadata) await writeBackupMetadata(preserveBackupPath, metadata)
+      await rename(paths.transactionBackupPath, preserveBackupPath)
+    }
+    if (!await exists(preserveBackupPath)) return undefined
+    if (metadata) await writeBackupMetadata(preserveBackupPath, metadata)
+    return preserveBackupPath
+  })
 }
 
 async function finalizeCommittedJournal(
@@ -972,11 +1075,7 @@ async function finalizeCommittedJournal(
   operationPath: string,
   journal: CreatorSkillJournal,
 ): Promise<void> {
-  const paths = await deriveJournalPaths(workspaceRoot, operationPath, journal)
-  if (paths.preserveBackupPath && await exists(paths.preserveBackupPath)) {
-    const metadata = backupMetadataFromJournal(journal, paths.preserveBackupPath)
-    if (metadata) await writeBackupMetadata(paths.preserveBackupPath, metadata)
-  }
+  await publishCommittedBackup(workspaceRoot, operationPath, journal)
   await rm(operationPath, { recursive: true, force: true })
 }
 
@@ -985,9 +1084,11 @@ export async function installCreatorSkill(
   input: CreatorSkillInstallInput,
   dependencies: CreatorSkillInstallerDependencies = {},
 ): Promise<CreatorSkillOperationResult> {
-  const key = `${resolve(workspaceRoot)}\0${input.grant.slug}`
+  const queueWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const key = `${queueWorkspace}\0${input.grant.slug}`
   return enqueue(key, async () => {
     let releaseLock: (() => Promise<void>) | undefined
+    let releaseLedgerLock: (() => Promise<void>) | undefined
     const controller = new AbortController()
     cancellationControllers.set(input.operationId, controller)
     let operationPath: string | undefined
@@ -995,8 +1096,8 @@ export async function installCreatorSkill(
     let commitStarted = false
     let committedResult: Extract<CreatorSkillOperationResult, { success: true }> | undefined
     try {
-      releaseLock = await acquireOperationLock(workspaceRoot, input.grant.slug)
-      const conflictState = await inspectConflicts(workspaceRoot, input)
+      releaseLock = await acquireOperationLock(queueWorkspace, input.grant.slug)
+      const conflictState = await inspectConflicts(queueWorkspace, input)
       const missing = confirmationsMissing(conflictState.conflicts, input)
       if (missing.length > 0) {
         return errorResult({
@@ -1009,7 +1110,10 @@ export async function installCreatorSkill(
         })
       }
 
-      const resolvedOperation = await resolveOperationPath(workspaceRoot, input.operationId)
+      const resolvedOperation = await resolveOperationPath(
+        queueWorkspace,
+        input.operationId,
+      )
       const canonicalWorkspace = resolvedOperation.workspaceRoot
       operationPath = resolvedOperation.operationPath
       const stagePath = join(operationPath, 'stage')
@@ -1066,7 +1170,12 @@ export async function installCreatorSkill(
         })
       }
 
+      releaseLedgerLock = await acquireLedgerMutationLock(
+        canonicalWorkspace,
+        dependencies.onLedgerMutationLockContended,
+      )
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
+      await dependencies.onLedgerMutationLocked?.()
       const previous = conflictState.existing
       const ignoredVersion = (
         previous
@@ -1185,28 +1294,10 @@ export async function installCreatorSkill(
       journal.state = 'ledger_committed'
       await persistJournal(journalPath, journal, dependencies)
 
-      let backupPath: string | undefined
-      if (preserveBackupPath && await exists(transactionBackupPath)) {
-        await withBackupManagementLock(canonicalWorkspace, async () => {
-          const backupTarget = await resolveCreatorSkillBackupTarget({
-            workspaceRoot: canonicalWorkspace,
-            slug: input.grant.slug,
-            backupId: basename(preserveBackupPath),
-            createAncestors: true,
-          })
-          if (
-            backupTarget.targetPath !== preserveBackupPath
-            || backupTarget.targetExists
-          ) {
-            throw invalidBackupPath('Creator Skill backup target is unsafe or already exists')
-          }
-          await rename(transactionBackupPath, preserveBackupPath)
-        })
-        backupPath = preserveBackupPath
-      }
       // `committed` is the point of no return. Persist it durably before the
-      // old transaction backup is deleted, so every earlier checkpoint can
-      // still restore both the previous directory and previous Ledger.
+      // hidden transaction backup is published to the user-managed backup
+      // directory, so every earlier checkpoint can still restore both the
+      // previous directory and previous Ledger.
       journal.state = 'committed'
       const committedJournalDurable = await writeJournal(
         journalPath,
@@ -1217,13 +1308,8 @@ export async function installCreatorSkill(
         success: true,
         operationId: input.operationId,
         installed: installation,
-        ...(backupPath ? { backupPath } : {}),
       }
       await dependencies.onJournalPersisted?.(journal.state)
-      if (preserveBackupPath) {
-        const metadata = backupMetadataFromJournal(journal, preserveBackupPath)
-        if (metadata) await writeBackupMetadata(preserveBackupPath, metadata)
-      }
       if (!committedJournalDurable) {
         // This filesystem cannot prove that the committed rename reached stable
         // storage. Keep the journal and rollback backup for startup recovery;
@@ -1232,7 +1318,14 @@ export async function installCreatorSkill(
         report(dependencies, input, 'refresh', 100, false)
         return committedResult
       }
-      if (!preserveBackupPath) {
+      const backupPath = await publishCommittedBackup(
+        canonicalWorkspace,
+        operationPath,
+        journal,
+      )
+      if (backupPath) {
+        committedResult = { ...committedResult, backupPath }
+      } else {
         await rm(transactionBackupPath, { recursive: true, force: true })
       }
       await dependencies.onCleanupStep?.('transaction_backup_removed')
@@ -1290,6 +1383,7 @@ export async function installCreatorSkill(
       })
     } finally {
       cancellationControllers.delete(input.operationId)
+      await releaseLedgerLock?.()
       await releaseLock?.()
     }
   })
@@ -1310,20 +1404,27 @@ export async function uninstallCreatorSkill(args: {
   slug: string
   forceDeleteModified?: boolean
 }, dependencies: CreatorSkillUninstallerDependencies = {}): Promise<CreatorSkillOperationResult> {
-  const key = `${resolve(args.workspaceRoot)}\0${args.slug}`
+  const queueWorkspace = await canonicalWorkspaceRoot(args.workspaceRoot)
+  const key = `${queueWorkspace}\0${args.slug}`
   return enqueue(key, async () => {
     let releaseLock: (() => Promise<void>) | undefined
+    let releaseLedgerLock: (() => Promise<void>) | undefined
     let journal: CreatorSkillJournal | undefined
     let operationPath: string | undefined
     let committedResult: Extract<CreatorSkillOperationResult, { success: true }> | undefined
     try {
-      releaseLock = await acquireOperationLock(args.workspaceRoot, args.slug)
+      releaseLock = await acquireOperationLock(queueWorkspace, args.slug)
       const resolvedOperation = await resolveOperationPath(
-        args.workspaceRoot,
+        queueWorkspace,
         args.operationId,
       )
       const canonicalWorkspace = resolvedOperation.workspaceRoot
+      releaseLedgerLock = await acquireLedgerMutationLock(
+        canonicalWorkspace,
+        dependencies.onLedgerMutationLockContended,
+      )
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
+      await dependencies.onLedgerMutationLocked?.()
       const installed = ledger.installed.find(item => item.slug === args.slug)
       if (!installed && !args.forceDeleteModified) {
         return errorResult({
@@ -1408,26 +1509,6 @@ export async function uninstallCreatorSkill(args: {
       journal.state = 'ledger_committed'
       await persistJournal(journalPath, journal, dependencies)
 
-      let backupPath: string | undefined
-      if (preserveBackupPath && await exists(transactionBackupPath)) {
-        await withBackupManagementLock(canonicalWorkspace, async () => {
-          const backupTarget = await resolveCreatorSkillBackupTarget({
-            workspaceRoot: canonicalWorkspace,
-            slug: args.slug,
-            backupId: basename(preserveBackupPath),
-            createAncestors: true,
-          })
-          if (
-            backupTarget.targetPath !== preserveBackupPath
-            || backupTarget.targetExists
-          ) {
-            throw invalidBackupPath('Creator Skill backup target is unsafe or already exists')
-          }
-          await rename(transactionBackupPath, preserveBackupPath)
-        })
-        backupPath = preserveBackupPath
-      }
-
       journal.state = 'committed'
       const committedJournalDurable = await writeJournal(
         journalPath,
@@ -1437,18 +1518,20 @@ export async function uninstallCreatorSkill(args: {
       committedResult = {
         success: true,
         operationId: args.operationId,
-        ...(backupPath ? { backupPath } : {}),
       }
       await dependencies.onJournalPersisted?.(journal.state)
-      if (preserveBackupPath) {
-        const metadata = backupMetadataFromJournal(journal, preserveBackupPath)
-        if (metadata) await writeBackupMetadata(preserveBackupPath, metadata)
-      }
       if (!committedJournalDurable) return committedResult
-      if (!preserveBackupPath) {
+      const backupPath = await publishCommittedBackup(
+        canonicalWorkspace,
+        operationPath,
+        journal,
+      )
+      if (backupPath) {
+        committedResult = { ...committedResult, backupPath }
+      } else {
         await rm(transactionBackupPath, { recursive: true, force: true })
-        await dependencies.onCleanupStep?.('transaction_backup_removed')
       }
+      await dependencies.onCleanupStep?.('transaction_backup_removed')
       await rm(operationPath, { recursive: true, force: true })
       await dependencies.onCleanupStep?.('operation_removed')
       return committedResult
@@ -1469,6 +1552,7 @@ export async function uninstallCreatorSkill(args: {
         message: record.message ?? 'Creator Skill uninstall failed',
       })
     } finally {
+      await releaseLedgerLock?.()
       await releaseLock?.()
     }
   })
@@ -1635,26 +1719,33 @@ export async function updateCreatorSkillInstallationMetadata(args: {
     InstalledCreatorSkill,
     'lastKnownStatus' | 'lastCheckedAt' | 'ignoredVersion'
   >
-}): Promise<boolean> {
-  const ledger = await readCreatorSkillsLedger(args.workspaceRoot)
+}, dependencies: CreatorSkillMetadataUpdateDependencies = {}): Promise<boolean> {
+  const queueWorkspace = await canonicalWorkspaceRoot(args.workspaceRoot)
+  const ledger = await readCreatorSkillsLedger(queueWorkspace)
   const candidate = ledger.installed.find(item =>
     item.artifactId === args.artifactId
     && item.version === args.version
     && item.archiveChecksum === args.archiveChecksum)
   if (!candidate) return false
-  const key = `${resolve(args.workspaceRoot)}\0${candidate.slug}`
+  const key = `${queueWorkspace}\0${candidate.slug}`
   return enqueue(key, async () => {
-    const releaseLock = await acquireOperationLock(args.workspaceRoot, candidate.slug)
+    const releaseLock = await acquireOperationLock(queueWorkspace, candidate.slug)
+    let releaseLedgerLock: (() => Promise<void>) | undefined
     try {
-      // Re-read after acquiring the same workspace+slug lock as install/update.
-      const currentLedger = await readCreatorSkillsLedger(args.workspaceRoot)
+      releaseLedgerLock = await acquireLedgerMutationLock(
+        queueWorkspace,
+        dependencies.onLedgerMutationLockContended,
+      )
+      // Re-read after acquiring both the workspace+slug and workspace Ledger locks.
+      const currentLedger = await readCreatorSkillsLedger(queueWorkspace)
+      await dependencies.onLedgerMutationLocked?.()
       const current = currentLedger.installed.find(item =>
         item.artifactId === args.artifactId
         && item.version === args.version
         && item.archiveChecksum === args.archiveChecksum)
       if (!current) return false
       await writeCreatorSkillsLedger(
-        args.workspaceRoot,
+        queueWorkspace,
         replaceLedgerInstallation(currentLedger, {
           ...current,
           ...args.changes,
@@ -1662,6 +1753,7 @@ export async function updateCreatorSkillInstallationMetadata(args: {
       )
       return true
     } finally {
+      await releaseLedgerLock?.()
       await releaseLock()
     }
   })
