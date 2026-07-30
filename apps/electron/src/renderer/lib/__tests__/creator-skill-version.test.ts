@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'bun:test'
-import { actionableCreatorSkillSafeVersion } from '../creator-skill-version'
+import {
+  actionableCreatorSkillSafeVersion,
+  compareStableCreatorSkillVersion,
+} from '../creator-skill-version'
+
+describe('compareStableCreatorSkillVersion', () => {
+  it('orders multi-digit major and patch components numerically', () => {
+    expect(compareStableCreatorSkillVersion('10.0.0', '2.0.0'))
+      .toBeGreaterThan(0)
+    expect(compareStableCreatorSkillVersion('2.0.0', '10.0.0'))
+      .toBeLessThan(0)
+    expect(compareStableCreatorSkillVersion('2.0.12', '2.0.9'))
+      .toBeGreaterThan(0)
+  })
+})
 
 describe('actionableCreatorSkillSafeVersion', () => {
   it('offers a lower safe version when the installed version is revoked', () => {

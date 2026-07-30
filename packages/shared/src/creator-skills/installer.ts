@@ -27,6 +27,7 @@ import {
   readCreatorSkillsLedger,
   removeLedgerInstallation,
   replaceLedgerInstallation,
+  type CreatorSkillsLedgerWriteDependencies,
   writeCreatorSkillsLedger,
 } from './ledger'
 import {
@@ -54,6 +55,7 @@ const processQueues = new Map<string, Promise<void>>()
 const cancellationControllers = new Map<string, AbortController>()
 
 export type CreatorSkillJournalState =
+  | 'preparing'
   | 'prepared'
   | 'old_backed_up'
   | 'new_installed'
@@ -108,6 +110,10 @@ export interface CreatorSkillInstallerDependencies {
   onLedgerMutationLocked?: () => Promise<void> | void
   /** Reports deterministic in-process Ledger lock contention in fault-injection tests. */
   onLedgerMutationLockContended?: () => Promise<void> | void
+  /** RPC-client ownership scope for cancellation. Defaults to the workspace id in direct calls. */
+  operationOwnerId?: string
+  /** Ledger durability fault injection used by deterministic transaction tests. */
+  ledgerWriteDependencies?: CreatorSkillsLedgerWriteDependencies
 }
 
 export type CreatorSkillUninstallerDependencies = Pick<
@@ -118,11 +124,14 @@ export type CreatorSkillUninstallerDependencies = Pick<
   | 'onCleanupStep'
   | 'onLedgerMutationLocked'
   | 'onLedgerMutationLockContended'
+  | 'ledgerWriteDependencies'
 >
 
 export type CreatorSkillMetadataUpdateDependencies = Pick<
   CreatorSkillInstallerDependencies,
-  'onLedgerMutationLocked' | 'onLedgerMutationLockContended'
+  | 'onLedgerMutationLocked'
+  | 'onLedgerMutationLockContended'
+  | 'ledgerWriteDependencies'
 >
 
 function errorResult(args: {
@@ -156,6 +165,14 @@ function errorResult(args: {
 
 function exists(path: string): Promise<boolean> {
   return access(path).then(() => true, () => false)
+}
+
+function cancellationKey(
+  workspaceRoot: string,
+  ownerId: string,
+  operationId: string,
+): string {
+  return `${workspaceRoot}\0${ownerId}\0${operationId}`
 }
 
 function invalidOperationPath(message: string): Error {
@@ -450,6 +467,36 @@ async function resolveOperationPath(
   return { ...roots, operationPath }
 }
 
+async function reserveOperationPath(
+  workspaceRoot: string,
+  operationId: string,
+): Promise<Awaited<ReturnType<typeof resolveOperationPath>>> {
+  const resolved = await resolveOperationPath(workspaceRoot, operationId)
+  try {
+    await mkdir(resolved.operationPath, {
+      recursive: false,
+      mode: 0o700,
+    })
+  } catch (error) {
+    if (
+      error
+      && typeof error === 'object'
+      && (error as { code?: string }).code === 'EEXIST'
+    ) {
+      throw Object.assign(
+        new Error('Creator Skill operationId is already reserved in this workspace'),
+        { code: 'creator_skill_operation_id_conflict' },
+      )
+    }
+    throw error
+  }
+  const canonicalOperationPath = await realpath(resolved.operationPath)
+  if (canonicalOperationPath !== resolved.operationPath) {
+    throw invalidOperationPath('Creator Skill operation directory cannot be a symbolic link')
+  }
+  return resolved
+}
+
 function validateJournalShape(
   journal: CreatorSkillJournal,
   expectedOperationId: string,
@@ -467,6 +514,7 @@ function validateJournalShape(
     || !SKILL_SLUG_PATTERN.test(journal.slug)
     || !['install', 'uninstall'].includes(journal.action)
     || ![
+      'preparing',
       'prepared',
       'old_backed_up',
       'new_installed',
@@ -999,6 +1047,10 @@ async function rollbackJournal(
   journal: CreatorSkillJournal,
 ): Promise<void> {
   const paths = await deriveJournalPaths(workspaceRoot, operationPath, journal)
+  if (journal.state === 'preparing') {
+    await rm(operationPath, { recursive: true, force: true })
+    return
+  }
   const recoverableBackupPath = await exists(paths.transactionBackupPath)
     ? paths.transactionBackupPath
     : paths.preserveBackupPath && await exists(paths.preserveBackupPath)
@@ -1090,7 +1142,13 @@ export async function installCreatorSkill(
     let releaseLock: (() => Promise<void>) | undefined
     let releaseLedgerLock: (() => Promise<void>) | undefined
     const controller = new AbortController()
-    cancellationControllers.set(input.operationId, controller)
+    const ownerId = dependencies.operationOwnerId ?? input.workspaceId
+    const controllerKey = cancellationKey(
+      queueWorkspace,
+      ownerId,
+      input.operationId,
+    )
+    let controllerRegistered = false
     let operationPath: string | undefined
     let journal: CreatorSkillJournal | undefined
     let commitStarted = false
@@ -1110,7 +1168,7 @@ export async function installCreatorSkill(
         })
       }
 
-      const resolvedOperation = await resolveOperationPath(
+      const resolvedOperation = await reserveOperationPath(
         queueWorkspace,
         input.operationId,
       )
@@ -1119,8 +1177,23 @@ export async function installCreatorSkill(
       const stagePath = join(operationPath, 'stage')
       const archivePath = join(operationPath, 'archive.zip')
       const transactionBackupPath = join(operationPath, 'backup')
-      await rm(operationPath, { recursive: true, force: true })
+      const targetPath = resolve(canonicalWorkspace, 'skills', input.grant.slug)
+      assertChildPath(resolve(canonicalWorkspace, 'skills'), targetPath, 'Creator Skill target')
+      journal = {
+        schemaVersion: 1,
+        operationId: input.operationId,
+        action: 'install',
+        slug: input.grant.slug,
+        targetPath,
+        transactionBackupPath,
+        ledgerPath: resolve(canonicalWorkspace, 'creator-skills.json'),
+        oldLedger: null,
+        state: 'preparing',
+      }
+      await persistJournal(join(operationPath, 'journal.json'), journal, dependencies)
       await mkdir(stagePath, { recursive: true, mode: 0o700 })
+      cancellationControllers.set(controllerKey, controller)
+      controllerRegistered = true
 
       report(dependencies, input, 'download', 2, true)
       const policyMax = Math.min(
@@ -1194,8 +1267,6 @@ export async function installCreatorSkill(
         lastCheckedAt: new Date().toISOString(),
         ...(ignoredVersion ? { ignoredVersion } : {}),
       }
-      const targetPath = resolve(canonicalWorkspace, 'skills', input.grant.slug)
-      assertChildPath(resolve(canonicalWorkspace, 'skills'), targetPath, 'Creator Skill target')
       await assertCanonicalPathWhenPresent(resolve(canonicalWorkspace, 'skills'), 'Workspace Skills root')
       await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
       const oldLedger = await readLedgerSnapshot(canonicalWorkspace)
@@ -1232,23 +1303,14 @@ export async function installCreatorSkill(
       const backupCreatedAt = preserveBackupPath
         ? inferBackupCreatedAt(preserveBackupPath)
         : undefined
-      journal = {
-        schemaVersion: 1,
-        operationId: input.operationId,
-        action: 'install',
-        slug: input.grant.slug,
-        targetPath,
-        transactionBackupPath,
-        ledgerPath: resolve(canonicalWorkspace, 'creator-skills.json'),
-        oldLedger,
-        state: 'prepared',
-        ...(preserveBackupPath ? { preserveBackupPath } : {}),
-        ...(backupOperation ? { backupOperation } : {}),
-        ...(conflictState.existing?.version
-          ? { backupVersion: conflictState.existing.version }
-          : {}),
-        ...(backupCreatedAt ? { backupCreatedAt } : {}),
+      journal.oldLedger = oldLedger
+      journal.state = 'prepared'
+      if (preserveBackupPath) journal.preserveBackupPath = preserveBackupPath
+      if (backupOperation) journal.backupOperation = backupOperation
+      if (conflictState.existing?.version) {
+        journal.backupVersion = conflictState.existing.version
       }
+      if (backupCreatedAt) journal.backupCreatedAt = backupCreatedAt
       const journalPath = join(operationPath, 'journal.json')
       await persistJournal(journalPath, journal, dependencies)
 
@@ -1290,6 +1352,7 @@ export async function installCreatorSkill(
       await writeCreatorSkillsLedger(
         canonicalWorkspace,
         replaceLedgerInstallation(ledger, installation),
+        dependencies.ledgerWriteDependencies,
       )
       journal.state = 'ledger_committed'
       await persistJournal(journalPath, journal, dependencies)
@@ -1382,16 +1445,30 @@ export async function installCreatorSkill(
           && code !== 'project_skill_conflict',
       })
     } finally {
-      cancellationControllers.delete(input.operationId)
+      if (
+        controllerRegistered
+        && cancellationControllers.get(controllerKey) === controller
+      ) {
+        cancellationControllers.delete(controllerKey)
+      }
       await releaseLedgerLock?.()
       await releaseLock?.()
     }
   })
 }
 
-export function cancelCreatorSkillOperation(operationId: string): boolean {
+export async function cancelCreatorSkillOperation(
+  workspaceRoot: string,
+  ownerId: string,
+  operationId: string,
+): Promise<boolean> {
   if (!UUID_PATTERN.test(operationId)) return false
-  const controller = cancellationControllers.get(operationId)
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const controller = cancellationControllers.get(cancellationKey(
+    canonicalWorkspace,
+    ownerId,
+    operationId,
+  ))
   if (!controller) return false
   controller.abort()
   return true
@@ -1444,7 +1521,11 @@ export async function uninstallCreatorSkill(args: {
         ? removeLedgerInstallation(ledger, args.slug)
         : ledger
       if (targetIdentity.kind === 'missing') {
-        await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
+        await writeCreatorSkillsLedger(
+          canonicalWorkspace,
+          nextLedger,
+          dependencies.ledgerWriteDependencies,
+        )
         return {
           success: true,
           operationId: args.operationId,
@@ -1461,7 +1542,11 @@ export async function uninstallCreatorSkill(args: {
         && installed
         && isTargetLocallyModified(targetIdentity, installed)
       ) {
-        await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
+        await writeCreatorSkillsLedger(
+          canonicalWorkspace,
+          nextLedger,
+          dependencies.ledgerWriteDependencies,
+        )
         return {
           success: true,
           operationId: args.operationId,
@@ -1469,9 +1554,11 @@ export async function uninstallCreatorSkill(args: {
         }
       }
 
-      operationPath = resolvedOperation.operationPath
-      await rm(operationPath, { recursive: true, force: true })
-      await mkdir(operationPath, { recursive: true, mode: 0o700 })
+      const reservedOperation = await reserveOperationPath(
+        canonicalWorkspace,
+        args.operationId,
+      )
+      operationPath = reservedOperation.operationPath
       const transactionBackupPath = join(operationPath, 'backup')
       const preserveBackupPath = !args.forceDeleteModified
         ? (await allocateCreatorSkillBackupTarget(
@@ -1505,7 +1592,11 @@ export async function uninstallCreatorSkill(args: {
       )
       journal.state = 'old_backed_up'
       await persistJournal(journalPath, journal, dependencies)
-      await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
+      await writeCreatorSkillsLedger(
+        canonicalWorkspace,
+        nextLedger,
+        dependencies.ledgerWriteDependencies,
+      )
       journal.state = 'ledger_committed'
       await persistJournal(journalPath, journal, dependencies)
 
@@ -1558,6 +1649,33 @@ export async function uninstallCreatorSkill(args: {
   })
 }
 
+async function cleanupAbandonedPreJournalOperation(
+  operationPath: string,
+): Promise<boolean> {
+  const entries = await readdir(operationPath, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.name === 'stage') {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) return false
+      continue
+    }
+    if (entry.name === 'archive.zip') {
+      if (!entry.isFile() || entry.isSymbolicLink()) return false
+      continue
+    }
+    if (
+      /^journal\.json\.[0-9a-f-]+\.tmp$/i.test(entry.name)
+      && entry.isFile()
+      && !entry.isSymbolicLink()
+    ) {
+      continue
+    }
+    // A backup or any unknown entry could be the only recovery material.
+    return false
+  }
+  await rm(operationPath, { recursive: true, force: true })
+  return true
+}
+
 export async function recoverCreatorSkillOperations(workspaceRoot: string): Promise<void> {
   const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
   const root = resolve(canonicalWorkspace, OP_DIRECTORY)
@@ -1584,7 +1702,13 @@ export async function recoverCreatorSkillOperations(workspaceRoot: string): Prom
     try {
       const journalPath = resolve(operationPath, 'journal.json')
       assertChildPath(operationPath, journalPath, 'Creator Skill recovery journal')
-      const journalStats = await lstat(journalPath)
+      const journalStats = await lstatIfPresent(journalPath)
+      if (!journalStats) {
+        if (await cleanupAbandonedPreJournalOperation(operationPath)) continue
+        throw invalidOperationPath(
+          'Creator Skill operation without a journal contains recovery material',
+        )
+      }
       if (!journalStats.isFile() || journalStats.size > MAX_JOURNAL_BYTES) {
         throw invalidOperationPath('Creator Skill recovery journal is oversized or invalid')
       }
@@ -1744,12 +1868,23 @@ export async function updateCreatorSkillInstallationMetadata(args: {
         && item.version === args.version
         && item.archiveChecksum === args.archiveChecksum)
       if (!current) return false
+      const changes = (
+        current.lastKnownStatus === 'revoked'
+        && args.changes.lastKnownStatus
+        && args.changes.lastKnownStatus !== 'revoked'
+      ) ? {
+          ...args.changes,
+          // A precise revoked version is terminal. A delayed active/archived
+          // response may refresh its timestamp, but can never clear the warning.
+          lastKnownStatus: 'revoked' as const,
+        } : args.changes
       await writeCreatorSkillsLedger(
         queueWorkspace,
         replaceLedgerInstallation(currentLedger, {
           ...current,
-          ...args.changes,
+          ...changes,
         }),
+        dependencies.ledgerWriteDependencies,
       )
       return true
     } finally {

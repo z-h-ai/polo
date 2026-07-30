@@ -235,12 +235,12 @@ describe('SkillInfoPage Creator Skill interactions', () => {
     await waitFor(() => expect(installInputs).toHaveLength(1))
     expect(installInputs[0]).toMatchObject({
       workspaceId: 'workspace-one',
-      sessionId: 'session-one',
       grant: {
         artifactId: installation.artifactId,
         version: '0.9.0',
       },
     })
+    expect(installInputs[0]).not.toHaveProperty('sessionId')
     expect(installInputs[0]).not.toHaveProperty('workingDirectory')
   })
 })

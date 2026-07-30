@@ -33,6 +33,7 @@ import {
   translateCreatorSkillError,
 } from '@/lib/creator-skill-errors'
 import { translateCreatorSkillValidationIssue } from '@/lib/creator-skill-validation-issues'
+import { compareStableCreatorSkillVersion } from '@/lib/creator-skill-version'
 import type {
   CreatorArtifact,
   CreatorArtifactDetail,
@@ -231,7 +232,9 @@ export function CreatorArtifactsPanel({
         setVersionDetails({})
         const published = result.versions
           .filter(item => item.status === 'published')
-          .sort((left, right) => right.version.localeCompare(left.version))
+          .sort((left, right) => (
+            compareStableCreatorSkillVersion(right.version, left.version)
+          ))
         setInstallVersion(current => (
           published.some(item => item.version === current)
             ? current
@@ -588,7 +591,6 @@ export function CreatorArtifactsPanel({
       }
       const result = await window.electronAPI.creatorSkillInstall({
         workspaceId,
-        sessionId,
         operationId: nextOperationId,
         grant: {
           artifactId: grant.artifactId,

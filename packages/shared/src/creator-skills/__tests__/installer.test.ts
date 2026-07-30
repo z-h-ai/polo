@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { strToU8, zipSync } from 'fflate'
 import { validateCreatorSkillArchive } from '../archive'
 import {
+  cancelCreatorSkillOperation,
   deleteCreatorSkillBackups,
   installCreatorSkill,
   listCreatorSkillBackups,
@@ -187,6 +188,176 @@ describe('Creator Skill workspace installer', () => {
     })
   })
 
+  it('durably journals preparing before download content is persisted', async () => {
+    await withWorkspace(async root => {
+      const packaged = await packageGrant(root, '1.0.0')
+      const fetchStarted = deferred()
+      const releaseFetch = deferred<Response>()
+      const install = installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '28282828-2828-4828-8828-282828282828',
+        grant: packaged.grant,
+      }, {
+        fetch: (async () => {
+          fetchStarted.resolve()
+          return releaseFetch.promise
+        }) as unknown as typeof fetch,
+      })
+      await fetchStarted.promise
+
+      const operationPath = join(
+        root,
+        '.creator-skill-ops',
+        '28282828-2828-4828-8828-282828282828',
+      )
+      expect(JSON.parse(await readFile(
+        join(operationPath, 'journal.json'),
+        'utf8',
+      ))).toMatchObject({
+        state: 'preparing',
+        slug: packaged.grant.slug,
+      })
+      expect(await access(join(operationPath, 'stage')).then(
+        () => true,
+        () => false,
+      )).toBe(true)
+      expect(await access(join(operationPath, 'archive.zip')).then(
+        () => true,
+        () => false,
+      )).toBe(false)
+
+      releaseFetch.resolve(new Response(packaged.bytes, {
+        status: 200,
+        headers: { 'content-length': String(packaged.bytes.byteLength) },
+      }))
+      expect((await install).success).toBe(true)
+    })
+  })
+
+  it('cleans abandoned download, extraction, and validation preparation on startup', async () => {
+    const phases = ['download', 'extract', 'validate'] as const
+    for (const [index, phase] of phases.entries()) {
+      await withWorkspace(async root => {
+        const operationId = `2929292${index}-2929-4929-8929-29292929292${index}`
+        const operationPath = join(root, '.creator-skill-ops', operationId)
+        await mkdir(operationPath, { recursive: true })
+        if (phase !== 'download') {
+          await mkdir(join(operationPath, 'stage', 'install-test'), {
+            recursive: true,
+          })
+          await writeFile(
+            join(operationPath, 'stage', 'install-test', 'SKILL.md'),
+            phase === 'extract' ? 'partial' : skillContent('1.0.0'),
+          )
+        }
+        await writeFile(join(operationPath, 'archive.zip'), `partial-${phase}`)
+
+        await recoverCreatorSkillOperations(root)
+
+        expect(await access(operationPath).then(
+          () => true,
+          () => false,
+        )).toBe(false)
+      })
+    }
+  })
+
+  it('rejects operationId replay without deleting an inherited backup', async () => {
+    await withWorkspace(async root => {
+      const operationId = '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a'
+      const operationPath = join(root, '.creator-skill-ops', operationId)
+      await mkdir(join(operationPath, 'backup'), { recursive: true })
+      await writeFile(join(operationPath, 'backup', 'sentinel.txt'), 'keep')
+      const packaged = await packageGrant(root, '1.0.0')
+
+      expect(await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId,
+        grant: packaged.grant,
+      }, {
+        fetch: responseFetch(packaged.bytes),
+      })).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_operation_id_conflict',
+      })
+      expect(await readFile(
+        join(operationPath, 'backup', 'sentinel.txt'),
+        'utf8',
+      )).toBe('keep')
+      await expect(recoverCreatorSkillOperations(root)).rejects.toMatchObject({
+        code: 'creator_skill_recovery_failed',
+      })
+      expect(await readFile(
+        join(operationPath, 'backup', 'sentinel.txt'),
+        'utf8',
+      )).toBe('keep')
+    })
+  })
+
+  it('reserves operationId across slugs and scopes cancellation to workspace and client', async () => {
+    await withWorkspace(async root => {
+      const operationId = '2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b'
+      const alpha = await packageGrant(root, '1.0.0', {
+        slug: 'alpha-skill',
+        artifactId: 'artifact-alpha',
+      })
+      const beta = await packageGrant(root, '1.0.0', {
+        slug: 'beta-skill',
+        artifactId: 'artifact-beta',
+      })
+      const fetchStarted = deferred()
+      const releaseFetch = deferred<Response>()
+      const first = installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId,
+        grant: alpha.grant,
+      }, {
+        operationOwnerId: 'client-one',
+        fetch: (async () => {
+          fetchStarted.resolve()
+          return releaseFetch.promise
+        }) as unknown as typeof fetch,
+      })
+      await fetchStarted.promise
+
+      expect(await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId,
+        grant: beta.grant,
+      }, {
+        operationOwnerId: 'client-two',
+        fetch: responseFetch(beta.bytes),
+      })).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_operation_id_conflict',
+      })
+      expect(await cancelCreatorSkillOperation(
+        root,
+        'client-two',
+        operationId,
+      )).toBe(false)
+      expect(await cancelCreatorSkillOperation(
+        root,
+        'client-one',
+        operationId,
+      )).toBe(true)
+
+      releaseFetch.resolve(new Response(alpha.bytes, {
+        status: 200,
+        headers: { 'content-length': String(alpha.bytes.byteLength) },
+      }))
+      expect(await first).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_cancelled',
+      })
+      expect(await access(join(
+        root,
+        '.creator-skill-ops',
+        operationId,
+      )).then(() => true, () => false)).toBe(false)
+    })
+  })
+
   it('serializes different-slug installs through the workspace Ledger lock', async () => {
     await withWorkspace(async root => {
       const first = await packageGrant(root, '1.0.0', {
@@ -304,6 +475,82 @@ describe('Creator Skill workspace installer', () => {
           lastCheckedAt: '2026-07-30T12:00:00.000Z',
         }),
       ])
+    })
+  })
+
+  it('keeps revoked terminal when a delayed active safety response arrives', async () => {
+    await withWorkspace(async root => {
+      const packaged = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '2c2c2c2c-2c2c-4c2c-8c2c-2c2c2c2c2c2c',
+        grant: packaged.grant,
+      }, { fetch: responseFetch(packaged.bytes) })).success).toBe(true)
+
+      expect(await updateCreatorSkillInstallationMetadata({
+        workspaceRoot: root,
+        artifactId: packaged.grant.artifactId,
+        version: packaged.grant.version,
+        archiveChecksum: packaged.grant.archiveChecksum,
+        changes: {
+          lastKnownStatus: 'revoked',
+          lastCheckedAt: '2026-07-30T10:00:00.000Z',
+        },
+      })).toBe(true)
+      expect(await updateCreatorSkillInstallationMetadata({
+        workspaceRoot: root,
+        artifactId: packaged.grant.artifactId,
+        version: packaged.grant.version,
+        archiveChecksum: packaged.grant.archiveChecksum,
+        changes: {
+          lastKnownStatus: 'active',
+          lastCheckedAt: '2026-07-30T10:01:00.000Z',
+        },
+      })).toBe(true)
+
+      expect((await readCreatorSkillsLedger(root)).installed[0]).toMatchObject({
+        lastKnownStatus: 'revoked',
+        lastCheckedAt: '2026-07-30T10:01:00.000Z',
+      })
+    })
+  })
+
+  it('rolls back directory and Ledger when Ledger durability is not confirmed', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '2d2d2d2d-2d2d-4d2d-8d2d-2d2d2d2d2d2d',
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        ledgerWriteDependencies: {
+          onStep: step => {
+            if (step === 'ledger_renamed') {
+              throw Object.assign(new Error('Ledger directory fsync interrupted'), {
+                code: 'EIO',
+              })
+            }
+          },
+        },
+      })
+
+      expect(result.success).toBe(false)
+      expect(await readFile(
+        join(root, 'skills', 'install-test', 'SKILL.md'),
+        'utf8',
+      )).toBe(skillContent('1.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version)
+        .toBe('1.0.0')
+      expect(await listCreatorSkillBackups(root)).toHaveLength(0)
     })
   })
 

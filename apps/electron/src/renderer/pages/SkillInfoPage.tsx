@@ -25,6 +25,7 @@ import {
   translateCreatorSkillError,
 } from '@/lib/creator-skill-errors'
 import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
+import { refreshCreatorSkillSafetyStatus } from '@/lib/creator-skill-safety-refresh'
 import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
@@ -152,13 +153,15 @@ export default function SkillInfoPage({
       [requestIdentity]: 'checking',
     }))
     let active = true
-    void window.electronAPI.creatorSkillGetSafetyStatus({
+    void refreshCreatorSkillSafetyStatus({
+      workspaceId,
       artifactId: creatorArtifactId,
       version: creatorInstalledVersion,
       archiveChecksum: creatorArchiveChecksum,
-    }).then(async result => {
+    }).then(refresh => {
       if (!active) return
-      if (!result.success) {
+      const result = refresh.response
+      if (!result.success || !refresh.current || !refresh.persisted) {
         setAvailableVersion(null)
         setCreatorSkillSafetyCheckStates(current => ({
           ...current,
@@ -170,18 +173,6 @@ export default function SkillInfoPage({
         ...current,
         [requestIdentity]: 'ok',
       }))
-      await window.electronAPI.creatorSkillUpdateSafetyStatus({
-        workspaceId,
-        status: {
-          artifactId: result.artifactId,
-          version: result.version,
-          archiveChecksum: result.archiveChecksum,
-          status: result.status,
-          safeVersion: result.safeVersion,
-        },
-        checkedAt: new Date().toISOString(),
-      })
-      if (!active) return
       setAvailableVersion(actionableCreatorSkillSafeVersion({
         candidate: result.safeVersion,
         installedVersion: creatorInstalledVersion,
@@ -227,8 +218,7 @@ export default function SkillInfoPage({
   }, [availableVersion, creatorInstallation, t, workspaceId])
 
   const handleUpdateCreatorSkill = useCallback(async () => {
-    const installSessionId = sessionId
-    if (!creatorInstallation || !availableVersion || !installSessionId) return
+    if (!creatorInstallation || !availableVersion || !sessionId) return
     setUpdatingCreatorSkill(true)
     try {
       const grant = await window.electronAPI.creatorSkillGetDownloadGrant({
@@ -250,7 +240,6 @@ export default function SkillInfoPage({
         setUpdateProgress(null)
         return window.electronAPI.creatorSkillInstall({
           workspaceId,
-          sessionId: installSessionId,
           operationId,
           grant: {
             artifactId: grant.artifactId,

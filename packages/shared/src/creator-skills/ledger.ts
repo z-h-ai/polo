@@ -1,9 +1,9 @@
 import {
   mkdir,
+  open,
   readFile,
   rename,
   rm,
-  writeFile,
 } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
@@ -13,6 +13,16 @@ import {
 import { InstalledCreatorSkillSchema } from './schemas'
 
 export const CREATOR_SKILLS_LEDGER_FILE = 'creator-skills.json'
+
+export type CreatorSkillsLedgerWriteStep =
+  | 'temporary_file_synced'
+  | 'ledger_renamed'
+  | 'directory_synced'
+
+export interface CreatorSkillsLedgerWriteDependencies {
+  syncDirectory?: (directoryPath: string) => Promise<void>
+  onStep?: (step: CreatorSkillsLedgerWriteStep) => Promise<void> | void
+}
 
 export function emptyCreatorSkillsLedger(): CreatorSkillsLedger {
   return { schemaVersion: 1, installed: [] }
@@ -55,22 +65,39 @@ export async function readCreatorSkillsLedger(
 export async function writeCreatorSkillsLedger(
   workspaceRoot: string,
   ledger: CreatorSkillsLedger,
+  dependencies: CreatorSkillsLedgerWriteDependencies = {},
 ): Promise<void> {
   const ledgerPath = join(workspaceRoot, CREATOR_SKILLS_LEDGER_FILE)
-  await mkdir(dirname(ledgerPath), { recursive: true })
+  const ledgerDirectory = dirname(ledgerPath)
+  await mkdir(ledgerDirectory, { recursive: true })
   const tempPath = `${ledgerPath}.${process.pid}.${crypto.randomUUID()}.tmp`
   const normalized: CreatorSkillsLedger = {
     schemaVersion: 1,
     installed: [...ledger.installed].sort((left, right) => left.slug.localeCompare(right.slug)),
   }
-  await writeFile(tempPath, `${JSON.stringify(normalized, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-    flag: 'wx',
-  })
+  let handle
   try {
+    handle = await open(tempPath, 'wx', 0o600)
+    await handle.writeFile(`${JSON.stringify(normalized, null, 2)}\n`, 'utf8')
+    await handle.sync()
+    await dependencies.onStep?.('temporary_file_synced')
+    await handle.close()
+    handle = undefined
     await rename(tempPath, ledgerPath)
+    await dependencies.onStep?.('ledger_renamed')
+    if (dependencies.syncDirectory) {
+      await dependencies.syncDirectory(ledgerDirectory)
+    } else {
+      const directoryHandle = await open(ledgerDirectory, 'r')
+      try {
+        await directoryHandle.sync()
+      } finally {
+        await directoryHandle.close()
+      }
+    }
+    await dependencies.onStep?.('directory_synced')
   } catch (error) {
+    await handle?.close().catch(() => {})
     await rm(tempPath, { force: true })
     throw error
   }

@@ -6,6 +6,16 @@ const isoDate = z.string().datetime({ offset: true })
 const checksum = z.string().regex(/^[a-f0-9]{64}$/)
 const stableSemver = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
 const skillSlug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+const localSkillBasename = z.string()
+  .min(1)
+  .max(255)
+  .refine(value => (
+    value !== '.'
+    && value !== '..'
+    && !value.includes('/')
+    && !value.includes('\\')
+    && !value.includes('\0')
+  ))
 const idempotencyKey = z.string().min(1).max(128).regex(/^[\x21-\x7E]+$/)
 export const CreatorSkillOperationIdSchema = z.string().uuid()
 
@@ -270,7 +280,7 @@ export const CreatorSkillTargetRpcInputSchema = z.object({
 
 export const DeleteSkillRpcInputSchema = z.object({
   workspaceId: entityId,
-  skillSlug,
+  skillSlug: localSkillBasename,
 }).strict()
 
 export const CreatorSkillSafetyRpcInputSchema = z.object({
@@ -281,7 +291,6 @@ export const CreatorSkillSafetyRpcInputSchema = z.object({
 
 export const CreatorSkillInstallRpcInputSchema = z.object({
   workspaceId: entityId,
-  sessionId: entityId,
   operationId: CreatorSkillOperationIdSchema,
   grant: CreatorSkillDownloadGrantSchema,
   replaceExisting: z.boolean().optional(),

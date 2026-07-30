@@ -34,6 +34,7 @@ import {
   readCreatorSkillsLedger,
 } from '@polo-ai/shared/creator-skills/ledger'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
+import { getClientActiveSession } from './client-active-session'
 
 function currentWorkspaceId(ctx: RequestContext, deps: HandlerDeps): string | null {
   if (ctx.workspaceId) return ctx.workspaceId
@@ -176,6 +177,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         invalidateSkillsCache()
       })
     }).catch(error => {
+      recoveryByWorkspaceRoot.delete(workspaceRoot)
       deps.platform.logger?.error(
         `CREATOR_SKILLS_RECOVERY: Failed for workspace ${workspaceRoot}:`,
         error,
@@ -370,21 +372,25 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       return workspaceMutationError(input.data.operationId, 'workspace_read_only')
     }
     await ensureRecovered(workspace.rootPath)
+    const activeSessionId = getClientActiveSession(ctx.clientId, workspace.id)
+    if (!activeSessionId) {
+      return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
+    }
     let workingDirectory: string | undefined
     try {
       workingDirectory = await deriveSessionWorkingDirectory(
         deps,
         workspace,
-        input.data.sessionId,
+        activeSessionId,
       )
     } catch {
       return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
     }
-    const { sessionId: _sessionId, ...installInput } = input.data
     const result = await installCreatorSkill(workspace.rootPath, {
-      ...installInput,
+      ...input.data,
       ...(workingDirectory ? { workingDirectory } : {}),
     }, {
+      operationOwnerId: ctx.clientId,
       onProgress: progress => pushTyped(
         server,
         RPC_CHANNELS.creatorSkills.PROGRESS,
@@ -411,11 +417,24 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     return result
   })
 
-  server.handle(RPC_CHANNELS.creatorSkills.CANCEL, async (_ctx, operationId: unknown) => ({
-    success: CreatorSkillOperationIdSchema.safeParse(operationId).success
-      ? cancelCreatorSkillOperation(operationId as string)
-      : false,
-  }))
+  server.handle(RPC_CHANNELS.creatorSkills.CANCEL, async (ctx, operationId: unknown) => {
+    if (!CreatorSkillOperationIdSchema.safeParse(operationId).success) {
+      return { success: false }
+    }
+    const workspaceId = currentWorkspaceId(ctx, deps)
+    const workspace = workspaceId
+      ? getBoundWorkspace(ctx, workspaceId, deps)
+      : null
+    return {
+      success: workspace
+        ? await cancelCreatorSkillOperation(
+            workspace.rootPath,
+            ctx.clientId,
+            operationId as string,
+          )
+        : false,
+    }
+  })
 
   server.handle(RPC_CHANNELS.creatorSkills.UNINSTALL, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillUninstallRpcInputSchema.safeParse(rawInput)

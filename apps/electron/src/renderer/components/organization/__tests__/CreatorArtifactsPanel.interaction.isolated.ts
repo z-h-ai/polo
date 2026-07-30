@@ -487,6 +487,36 @@ describe('CreatorArtifactsPanel', () => {
     })
   })
 
+  it('selects the highest published stable SemVer when latest is absent', async () => {
+    detailArtifact = {
+      ...skill,
+      latestPublishedVersion: undefined as never,
+    }
+    detailVersions = ['2.0.0', '10.0.0', '2.0.12'].map((version, index) => ({
+      id: `version-${index}`,
+      artifactId: skill.id,
+      version,
+      status: 'published',
+      createdAt: `2026-07-30T0${index}:00:00.000Z`,
+      uploadGeneration: 1,
+    }))
+    detailResponse = input => ({
+      success: true as const,
+      artifact: detailArtifact,
+      versions: detailVersions,
+      ...(input.version ? {
+        selectedVersion: input.version,
+        skillContent: `SKILL content for ${input.version}`,
+        fileTree: [],
+      } : {}),
+    })
+
+    renderPanel(false, 'workspace-one')
+    fireEvent.click((await screen.findByText('Review Skill')).closest('button')!)
+
+    expect(await screen.findByText('SKILL content for 10.0.0')).toBeTruthy()
+  })
+
   it('does not let an older reference response pollute the selected version', async () => {
     detailArtifact = {
       ...skill,

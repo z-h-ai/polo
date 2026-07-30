@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, it } from 'bun:test'
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -37,17 +37,29 @@ await mkdir(workspaceTwo.rootPath)
 await mkdir(workspaceCaseCollision.rootPath)
 let workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
 const sessionId = 'session-one'
+const secondSessionId = 'session-two'
 let sessionWorkspaceId = workspaceOne.id
 let sessionWorkingDirectory: string | undefined
+let secondSessionWorkingDirectory: string | undefined
 
 const [{
   RPC_CHANNELS,
 }, {
   assertCreatorSkillCommitAllowed,
   registerSkillsHandlers,
+  registerSessionsHandlers,
+  clearClientActiveSession,
 }] = await Promise.all([
   import('@polo-ai/shared/protocol'),
-  import('./skills'),
+  Promise.all([
+    import('./skills'),
+    import('./sessions'),
+    import('./client-active-session'),
+  ]).then(([skills, sessions, activeSession]) => ({
+    ...skills,
+    ...sessions,
+    ...activeSession,
+  })),
 ])
 
 const handlers = new Map<string, HandlerFn>()
@@ -76,8 +88,15 @@ const deps = {
             workspaceId: sessionWorkspaceId,
             workingDirectory: sessionWorkingDirectory,
           }
+        : requestedSessionId === secondSessionId
+          ? {
+              id: secondSessionId,
+              workspaceId: workspaceOne.id,
+              workingDirectory: secondSessionWorkingDirectory,
+            }
         : null
     ),
+    setActiveViewingSession() {},
   },
   oauthFlowStore: {},
   platform: {
@@ -102,6 +121,7 @@ const deps = {
     },
   },
 } as unknown as HandlerDeps
+registerSessionsHandlers(server, deps)
 registerSkillsHandlers(server, deps)
 
 const ctx: RequestContext = {
@@ -113,7 +133,6 @@ const ctx: RequestContext = {
 
 const installInput = {
   workspaceId: workspaceOne.id,
-  sessionId,
   operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   grant: {
     artifactId: 'artifact-one',
@@ -135,7 +154,20 @@ const installInput = {
   },
 }
 
+beforeEach(async () => {
+  clearClientActiveSession(ctx.clientId)
+  sessionWorkspaceId = workspaceOne.id
+  sessionWorkingDirectory = undefined
+  secondSessionWorkingDirectory = undefined
+  const sessionCommand = handlers.get(RPC_CHANNELS.sessions.COMMAND)!
+  await sessionCommand(ctx, sessionId, {
+    type: 'setActiveViewing',
+    workspaceId: workspaceOne.id,
+  })
+})
+
 afterAll(async () => {
+  clearClientActiveSession(ctx.clientId)
   await chmod(workspaceOne.rootPath, 0o755).catch(() => {})
   await rm(temporaryRoot, { recursive: true, force: true })
 })
@@ -289,6 +321,50 @@ describe('Creator Skill workspace RPC boundary', () => {
     } finally {
       sessionWorkingDirectory = undefined
     }
+  })
+
+  it('cannot select another session in the same workspace to bypass project conflicts', async () => {
+    const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!
+    const sessionCommand = handlers.get(RPC_CHANNELS.sessions.COMMAND)!
+    const conflictingProject = join(workspaceOne.rootPath, 'active-project')
+    await mkdir(
+      join(conflictingProject, '.agents', 'skills', installInput.grant.slug),
+      { recursive: true },
+    )
+    sessionWorkingDirectory = conflictingProject
+
+    expect(await install(ctx, {
+      ...installInput,
+      operationId: 'abababab-abab-4bab-8bab-abababababab',
+    })).toMatchObject({
+      success: false,
+      errorCode: 'project_skill_conflict',
+    })
+    expect(await install(ctx, {
+      ...installInput,
+      sessionId: secondSessionId,
+      operationId: 'acacacac-acac-4cac-8cac-acacacacacac',
+    })).toMatchObject({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+    })
+
+    await sessionCommand(ctx, secondSessionId, {
+      type: 'setActiveViewing',
+      workspaceId: workspaceOne.id,
+    })
+    const legitimatelySwitched = await install(ctx, {
+      ...installInput,
+      operationId: 'adadadad-adad-4dad-8dad-adadadadadad',
+      grant: {
+        ...installInput.grant,
+        url: 'data:application/zip;base64,AA==',
+      },
+    })
+    expect(legitimatelySwitched).toMatchObject({ success: false })
+    expect(legitimatelySwitched).not.toMatchObject({
+      errorCode: 'project_skill_conflict',
+    })
   })
 
   it('rejects existing and missing session directories outside the workspace boundary', async () => {

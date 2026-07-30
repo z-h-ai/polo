@@ -6,17 +6,79 @@
  */
 
 import { describe, it, expect, mock, beforeAll } from 'bun:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { I18nextProvider } from 'react-i18next';
+import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n';
+import type { LoadedSkill } from '../../../../shared/types';
 
 // mention-menu.tsx transitively imports pdfjs-dist via renderer component chain.
 // Vite's ?url suffix isn't supported by bun — mock before dynamic import.
 mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }));
 mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: () => ({}) }));
+mock.module('@/components/ui/skill-avatar', () => ({
+  SkillAvatar: () => createElement('span'),
+}));
 
 let isValidMentionTrigger: (text: string, position: number) => boolean;
+let InlineMentionMenu: typeof import('../mention-menu').InlineMentionMenu;
 
 beforeAll(async () => {
+  setupI18n();
   const mod = await import('../mention-menu');
   isValidMentionTrigger = mod.isValidMentionTrigger;
+  InlineMentionMenu = mod.InlineMentionMenu;
+});
+
+describe('InlineMentionMenu Creator Skill safety badge', () => {
+  it('renders a revoked candidate with destructive red semantics', async () => {
+    await i18n.changeLanguage('en');
+    const revokedSkill: LoadedSkill = {
+      slug: 'revoked-skill',
+      metadata: {
+        name: 'Revoked Skill',
+        description: 'Revoked test fixture.',
+      },
+      content: 'Instructions.',
+      path: '/workspace/skills/revoked-skill',
+      source: 'workspace',
+      creatorInstallation: {
+        artifactId: 'artifact-one',
+        organizationId: 'organization-one',
+        slug: 'revoked-skill',
+        version: '1.0.0',
+        archiveChecksum: 'a'.repeat(64),
+        contentDigest: 'b'.repeat(64),
+        installedAt: '2026-07-30T00:00:00.000Z',
+        lastKnownStatus: 'revoked',
+      },
+    };
+    const markup = renderToStaticMarkup(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(InlineMentionMenu, {
+        open: true,
+        onOpenChange: () => {},
+        sections: [{
+          id: 'skills',
+          label: 'Skills',
+          items: [{
+            id: revokedSkill.slug,
+            type: 'skill',
+            label: revokedSkill.metadata.name,
+            skill: revokedSkill,
+          }],
+        }],
+        onSelect: () => {},
+        position: { x: 0, y: 0 },
+        workspaceId: 'workspace-one',
+      }),
+    ));
+
+    expect(markup).toContain(i18n.t('creatorSkills.safety.revoked'));
+    expect(markup).toContain('bg-destructive/10');
+    expect(markup).toContain('text-destructive');
+  });
 });
 
 describe('isValidMentionTrigger', () => {

@@ -9,6 +9,7 @@ import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
 } from '@/atoms/creator-skill-safety'
+import { refreshCreatorSkillSafetyStatus } from '@/lib/creator-skill-safety-refresh'
 import type { LoadedSkill } from '../../shared/types'
 
 interface ScheduledSafetyCheck extends CreatorSkillSafetyScheduleItem {
@@ -129,12 +130,14 @@ export function useCreatorSkillSafetyMonitor(
         }))
       }
       try {
-        const result = await window.electronAPI.creatorSkillGetSafetyStatus({
+        const refresh = await refreshCreatorSkillSafetyStatus({
+          workspaceId,
           artifactId: installed.artifactId,
           version: installed.version,
           archiveChecksum: installed.archiveChecksum,
         })
-        if (!result.success || !isCurrentScope()) {
+        const result = refresh.response
+        if (!result.success || !refresh.current || !isCurrentScope()) {
           if (isCurrentScope()) {
             setSafetyCheckStates(current => ({
               ...current,
@@ -176,18 +179,7 @@ export function useCreatorSkillSafetyMonitor(
           }
           return next
         })
-        const updateResult = await window.electronAPI.creatorSkillUpdateSafetyStatus({
-          workspaceId,
-          status: {
-            artifactId: result.artifactId,
-            version: result.version,
-            archiveChecksum: result.archiveChecksum,
-            status: result.status,
-            safeVersion: result.safeVersion,
-          },
-          checkedAt: new Date().toISOString(),
-        })
-        return updateResult.success
+        return refresh.persisted
       } catch {
         if (isCurrentScope()) {
           setSafetyCheckStates(current => ({

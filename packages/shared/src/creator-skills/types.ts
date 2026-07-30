@@ -232,10 +232,8 @@ export interface CreatorSkillInstallInput {
   backupLocalChanges?: boolean
 }
 
-export interface CreatorSkillInstallRpcInput
-  extends Omit<CreatorSkillInstallInput, 'workingDirectory'> {
-  sessionId: string
-}
+export type CreatorSkillInstallRpcInput =
+  Omit<CreatorSkillInstallInput, 'workingDirectory'>
 
 export type CreatorSkillOperationResult =
   | {

@@ -1,103 +1,153 @@
-# POO-21 Reviewer Round 2 修复报告
+# POO-21 Review Round 2 修复报告
 
 ## 逐项处理结果
 
-### 1. `SKILLS_DELETE` 路径穿越可删除 workspace
+### 1. 全量测试中的 session watcher 不稳定
 
 已修复。
 
-- 将 DELETE RPC 改为单对象入参，并使用 `.strict()` 的 `DeleteSkillRpcInputSchema`；`skillSlug` 复用共享 `SkillSlugSchema`，在进入 workspace 文件操作前拒绝路径穿越、绝对路径、分隔符和未知字段。
-- `deleteSkill()` 增加纵深防御：规范化并 `realpath` workspace、skills 根目录和目标目录，逐层验证严格子目录边界，并拒绝符号链接目标后才允许递归删除。
-- Electron API 和两个 renderer 调用点同步迁移到严格对象契约。
-- 新增 schema、RPC 与底层存储回归测试，覆盖 `..`、`../x`、绝对路径、正反斜杠混合路径、未知字段和符号链接越界；每次攻击后均断言 workspace 根及外部 sentinel 仍存在。
+- watcher 测试改用每个用例独立的 client ID，避免与并行测试共享
+  `client-a/client-b` 而互相清理 watcher。
+- `afterEach` 无条件清理本用例创建的两个 watcher，再移除临时目录。
+- 正向事件断言改为有上限的条件轮询，保留负向断言的观察窗口。
+- 全量测试另外暴露出依赖安装进程树测试的 2 秒启动等待在高负载下偶发超时，
+  将该测试的有界等待扩为 5 秒；定向与最终全量均通过。
 
-关键文件：
-
-- `packages/shared/src/creator-skills/schemas.ts`
-- `packages/server-core/src/handlers/rpc/skills.ts`
-- `packages/shared/src/skills/storage.ts`
-- `apps/electron/src/shared/types.ts`
-- `apps/electron/src/renderer/components/app-shell/AppShell.tsx`
-- `apps/electron/src/renderer/pages/SkillInfoPage.tsx`
-- `packages/shared/src/creator-skills/__tests__/schemas.test.ts`
-- `packages/shared/src/skills/__tests__/storage.test.ts`
-- `packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts`
-
-### 2. 目录 fsync 不支持时过早删除 transaction backup
+### 2. 首个 journal 前退出遗留无 journal operation 目录
 
 已修复。
 
-- journal 仍先执行临时文件写入、文件 `fsync` 和原子 rename；随后把父目录 `fsync` 是否可确认作为显式耐久性结果。
-- `EINVAL`、`ENOTSUP`、`EISDIR` 不再等价于 durable success。若 committed journal 的目录项无法确认持久化，安装/更新和卸载均保留 operation journal 与可恢复 transaction backup，交由启动恢复完成清理或按仍可见的旧 checkpoint 回滚。
-- 只有 committed journal 的父目录同步成功后才删除 transaction backup 和 operation 目录。
-- 新增确定性故障注入：模拟 `ENOTSUP` 后验证 backup 保留，并模拟掉电后只恢复出 `ledger_committed` checkpoint，确认旧 Skill 与旧 Ledger 均可恢复；另覆盖 committed 落盘后、backup 删除后和 operation 目录删除后的各清理崩溃点。
+- operation 目录原子保留后立即耐久写入 `preparing` journal，再创建 stage、
+  下载、解压和校验。
+- `preparing` 恢复只清理尚未进入目录交换的 operation 私有内容，不接触正式
+  Skill 目录或 Ledger。
+- 为旧实现留下的无 journal operation 增加保守恢复：仅允许清理顶层
+  `stage/`、普通 `archive.zip` 和 journal 临时文件；出现 backup 或未知内容时
+  拒绝恢复，避免误删恢复材料。
+- recovery Promise 失败后不再永久缓存，安全修复现场后可重新恢复。
+- 新增下载中、解压中、校验中退出的启动恢复覆盖。
 
-关键文件：
+### 3. operationId 重放、跨 slug 碰撞和取消串扰
+
+已修复。
+
+- `.creator-skill-ops/<operationId>` 使用非递归原子 `mkdir` 独占保留；已存在
+  UUID 返回 `creator_skill_operation_id_conflict`，不再递归删除旧目录。
+- operationId 在 workspace 范围内唯一，两个不同 slug 使用相同 UUID 时只有
+  首个操作持有目录，后续操作被拒绝。
+- 取消控制器 key 改为 canonical workspace + RPC client + operationId，其他
+  client 无法取消该操作。
+- 新增 UUID 重放保留遗留 backup、不同 slug 碰撞和跨 client 取消测试。
+
+### 4. INSTALL 未绑定当前 RPC client/window 的 active session
+
+已修复。
+
+- server-core 新增 client 到 `workspaceId + activeSessionId` 的权威映射。
+- 映射只在经过 server-core 校验的 `setActiveViewing` session RPC 中更新；
+  client 断开时清理。
+- INSTALL RPC schema 移除 renderer 提交的 `sessionId`，server-core 只从当前
+  client 的 active session 派生项目目录，并再次校验 session/workspace 归属。
+- renderer 即使额外提交同 workspace 的其他 sessionId，也会被 strict schema
+  拒绝，不能绕过当前项目级同名 Skill 检查。
+- 新增同 workspace 两个 session 的边界测试：当前 session 有项目级冲突时阻止
+  安装；伪造无冲突 session 被拒；通过正常 active-session 切换后才按新 session
+  重新判定。
+
+### 5. Ledger 缺少 fsync 耐久协议
+
+已修复。
+
+- Ledger 改为独占创建临时文件、写入、临时文件 fsync、关闭、rename、父目录
+  fsync 的协议。
+- 文件或目录耐久确认失败会抛错，安装事务不会继续推进 journal。
+- 新增临时文件 fsync、rename 后 checkpoint、父目录 fsync 故障注入，并验证
+  安装目录和旧 Ledger 回滚。
+
+### 6. 普通 workspace Skill 被 Creator slug 规则误伤
+
+已修复。
+
+- 普通 Skill 删除 RPC 与 storage 只要求安全 basename，并继续执行路径边界、
+  symlink 和目录类型校验。
+- Creator Artifact、Creator 安装/更新/卸载 RPC 仍使用严格 kebab-case slug。
+- 新增 `foo--bar` 普通 Skill 的加载和删除兼容测试。
+
+### 7. Safety Status 并发乱序可将 revoked 回退为 active
+
+已修复。
+
+- 详情页与 AppShell monitor 统一调用按
+  `workspace + artifactId + version + archiveChecksum` 建 key 的共享刷新服务。
+- 相同精确版本的并发请求共享 single-flight；代次变化后旧响应不再写 Ledger。
+- server-core Ledger 更新增加第二道终态保护：同一精确版本已为 `revoked` 时，
+  延迟到达的 `active/archived` 只可刷新检查时间，不能回退安全状态。
+- 新增旧 active 响应晚于新 revoked 响应，以及共享单飞的确定性测试。
+
+### 8. 版本默认选择使用字符串排序
+
+已修复。
+
+- `CreatorArtifactsPanel` 改用现有稳定 SemVer 数值比较函数。
+- 覆盖 `10.0.0 > 2.0.0`、`2.0.12 > 2.0.9`，并验证缺少
+  `latestPublishedVersion` 时默认选择 `10.0.0`。
+
+### 9. 通用 @ 候选的 revoked 标记不是红色
+
+已修复。
+
+- revoked 候选改用 `bg-destructive/10 text-destructive`，其他类型徽标保持原样。
+- 新增服务端渲染断言，验证撤销文案和 destructive 语义 class。
+
+## 关键文件
 
 - `packages/shared/src/creator-skills/installer.ts`
+- `packages/shared/src/creator-skills/ledger.ts`
+- `packages/shared/src/creator-skills/schemas.ts`
+- `packages/shared/src/skills/storage.ts`
 - `packages/shared/src/creator-skills/__tests__/installer.test.ts`
-
-### 3. 跨 workspace 同 slug 的安全版本候选串用
-
-已修复。
-
-- 安全版本候选现在携带 `workspaceId`、`artifactId`、`slug`，并以三者组成的完整安装身份索引。
-- hook 每次返回前同步按当前 workspace 和当前安装的 artifact 精确选择候选，因此 workspace 切换的首次 render 也不会暴露旧候选；异步旧请求也无法覆盖另一 artifact 的候选槽位。
-- 新增两个 workspace 使用相同 slug、不同 artifactId 的切换回归测试，同时验证同 workspace 的 artifact 不匹配也不会展示候选。
-
-关键文件：
-
+- `packages/shared/src/creator-skills/__tests__/ledger.test.ts`
+- `packages/server-core/src/handlers/rpc/client-active-session.ts`
+- `packages/server-core/src/handlers/rpc/sessions.ts`
+- `packages/server-core/src/handlers/rpc/skills.ts`
+- `packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts`
+- `apps/electron/src/main/handlers/__tests__/session-watcher.test.ts`
+- `apps/electron/src/renderer/lib/creator-skill-safety-refresh.ts`
 - `apps/electron/src/renderer/hooks/useCreatorSkillSafetyMonitor.ts`
-- `apps/electron/src/renderer/hooks/__tests__/useCreatorSkillSafetyMonitor.test.ts`
+- `apps/electron/src/renderer/pages/SkillInfoPage.tsx`
+- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
+- `apps/electron/src/renderer/components/ui/mention-menu.tsx`
 
-### 4. 五个非英语 locale 的默认 changelog 仍为英文
+## 实际运行的测试与结果
 
-已修复。
-
-- 补齐德语、西班牙语、匈牙利语、日语和波兰语翻译。
-- 新增西班牙语 renderer 交互断言，验证创建首个 Skill 版本时实际显示 `Lanzamiento inicial`。
-
-关键文件：
-
-- `packages/shared/src/i18n/locales/de.json`
-- `packages/shared/src/i18n/locales/es.json`
-- `packages/shared/src/i18n/locales/hu.json`
-- `packages/shared/src/i18n/locales/ja.json`
-- `packages/shared/src/i18n/locales/pl.json`
-- `apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
-
-## 自测命令与结果
-
-- Creator Skill 定向测试：
-  - `bun test packages/shared/src/creator-skills/__tests__/installer.test.ts packages/shared/src/creator-skills/__tests__/schemas.test.ts packages/shared/src/skills/__tests__/storage.test.ts apps/electron/src/renderer/hooks/__tests__/useCreatorSkillSafetyMonitor.test.ts`
-  - 55 pass，0 fail；覆盖删除路径攻击、目录 fsync 不支持、清理故障恢复及跨 workspace/artifact 候选隔离。
-- RPC 隔离测试：
-  - `bun test ./packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts`
-  - 4 pass，0 fail。
-- Renderer 交互隔离测试：
-  - `bun test ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
-  - 4 pass，0 fail；包含西班牙语默认 changelog 断言。
-- Renderer 普通测试：
-  - `bun test apps/electron/src/renderer`
-  - 464 pass，0 fail。
-- 仓库全量测试：
-  - `bun run test`
-  - 主测试套件 4802 pass、19 skip、0 fail（4821 tests / 365 files）；随后仓库全部 `*.isolated.ts` 均执行通过。
-- 全工程类型检查：
-  - `bun run typecheck:all`
-  - core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部通过。
-- Electron production build：
-  - `bun run electron:build`
-  - main、preload、renderer、resources、assets 构建与校验通过；仅有既有 Vite outDir/chunk-size warning。
-- i18n：
-  - `bun run lint:i18n:sorted`
-  - `bun run lint:i18n:parity`
-  - `bun run lint:i18n:coverage`
-  - 全部通过；6 个翻译 locale 各 1676 keys。
-- 本次 Electron/shared 变更文件 ESLint：0 error。
-- `git diff --check`：通过。
+- `bun run test`
+  - exit 0；根测试 4850 pass、19 skip、0 fail，随后仓库全部
+    `*.isolated.ts` 均通过。
+- `bun run typecheck:all`
+  - exit 0；全部 package TypeScript 检查通过。
+- Creator Skill installer、Ledger、普通 Skill storage 定向测试
+  - 77 pass、0 fail。
+- `bun test packages/shared/src/creator-skills/__tests__/schemas.test.ts apps/electron/src/main/local-app-runtime/__tests__/manager.test.ts`
+  - 35 pass、0 fail、200 assertions。
+- `bun test packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts`
+  - 9 pass、0 fail、54 assertions。
+- Safety single-flight、SemVer、mention menu、session watcher 定向测试
+  - 28 pass、0 fail。
+- `CreatorArtifactsPanel.interaction.isolated.ts`
+  - 14 pass、0 fail、62 assertions。
+- `SkillInfoPage.creator-skill.interaction.isolated.ts`
+  - 3 pass、0 fail、13 assertions。
+- `bun run lint:electron`
+  - 0 error；存在仓库既有 111 warnings。
+- shared 本次变更文件的定向 ESLint
+  - 0 error、0 warning。
+- `git diff --check`
+  - 通过。
 
 ## 遗留问题
 
-- Reviewer Round 2 列出的 4 个问题均已修复，无已知功能遗留。
-- Electron production build 仍报告仓库既有的 Vite outDir 和大 chunk warning，本次变更未新增构建 warning。
+- Review Round 2 的 9 项 issue 均已处理，无已知功能遗留。
+- 仓库级 `bun run lint:shared` 仍会命中 5 个与本任务无关的既有
+  `craft-shared/no-inline-source-auth-check` 错误，位于 resource/source token
+  refresh 代码与测试；本任务未修改这些文件。所有本次 shared 变更文件已通过
+  定向 ESLint。

@@ -600,6 +600,16 @@ describe('deleteSkill', () => {
     expect(skillExists(workspaceRoot, 'to-delete')).toBe(false);
   });
 
+  it('loads and deletes legacy safe basenames outside Creator slug rules', () => {
+    const skillsDir = join(workspaceRoot, 'skills');
+    createSkill(skillsDir, 'foo--bar');
+
+    expect(loadWorkspaceSkills(workspaceRoot).map(skill => skill.slug))
+      .toContain('foo--bar');
+    expect(deleteSkill(workspaceRoot, 'foo--bar')).toBe(true);
+    expect(skillExists(workspaceRoot, 'foo--bar')).toBe(false);
+  });
+
   it('should return false for non-existent skill', () => {
     const result = deleteSkill(workspaceRoot, 'nonexistent');
     expect(result).toBe(false);

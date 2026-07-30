@@ -1324,7 +1324,7 @@ package = false
       'runtime/apps/demo.install-tree/data/installer-pids.json',
     )
     let pids: { root: number; child: number } | undefined
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
       try {
         pids = JSON.parse(await readFile(pidFile, 'utf8')) as { root: number; child: number }
         break

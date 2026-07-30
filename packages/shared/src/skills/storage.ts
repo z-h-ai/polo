@@ -19,7 +19,6 @@ import { isAbsolute, join, relative, resolve, sep } from 'path';
 import matter from 'gray-matter';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
-import { SkillSlugSchema } from '../creator-skills/schemas.ts';
 import {
   validateIconValue,
   findIconFile,
@@ -300,7 +299,15 @@ export function getSkillIconPath(workspaceRoot: string, slug: string): string | 
  */
 export function deleteSkill(workspaceRoot: string, slug: string): boolean {
   try {
-    if (!SkillSlugSchema.safeParse(slug).success) return false;
+    if (
+      !slug
+      || slug.length > 255
+      || slug === '.'
+      || slug === '..'
+      || slug.includes('/')
+      || slug.includes('\\')
+      || slug.includes('\0')
+    ) return false;
 
     const canonicalWorkspace = realpathSync(resolve(workspaceRoot));
     const skillsDir = getWorkspaceSkillsPath(canonicalWorkspace);
@@ -314,7 +321,8 @@ export function deleteSkill(workspaceRoot: string, slug: string): boolean {
     }
     // Refuse all directory-entry symlinks. Even though rm normally unlinks the
     // link itself, deletion must never depend on platform-specific traversal.
-    if (lstatSync(skillDir).isSymbolicLink()) return false;
+    const skillStats = lstatSync(skillDir);
+    if (skillStats.isSymbolicLink() || !skillStats.isDirectory()) return false;
     const canonicalSkillDir = realpathSync(skillDir);
     if (!isStrictChildPath(canonicalSkillsDir, canonicalSkillDir)) return false;
 
