@@ -373,7 +373,7 @@
   "dialog.terminalSetup.conflictDetail": "Polo hat den Befehl nicht überschrieben. Entferne den Befehl oder benenne ihn um und schließe die Einrichtung dann unter Einstellungen → Polo-Terminalfunktionen ab.",
   "dialog.terminalSetup.conflictMessage": "Ein anderer Terminalbefehl namens polo ist bereits vorhanden.",
   "dialog.terminalSetup.conflictTitle": "Polo-Einrichtung erfordert Aufmerksamkeit",
-  "dialog.terminalSetup.failedMessage": "Polo hat deinen vorhandenen Terminalbefehl nicht geändert.",
+  "dialog.terminalSetup.failedMessage": "Die Polo-Terminalfunktionen sind noch nicht bereit.",
   "dialog.terminalSetup.failedTitle": "Polo-Einrichtung konnte nicht abgeschlossen werden",
   "dialog.terminalSetup.newTerminal": "Öffne ein neues Terminalfenster, bevor du den polo-Befehl verwendest.",
   "dialog.terminalSetup.notNow": "Nicht jetzt",

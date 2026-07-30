@@ -209,7 +209,13 @@ describe('CliRpcClient', () => {
   it('rejects an incompatible server major version', async () => {
     server = createMockServer({ serverVersion: '2.0.0' })
     const client = new CliRpcClient(server.url, { expectedServerVersion: '1.9.0' })
-    await expect(client.connect()).rejects.toThrow('not compatible')
+    try {
+      await client.connect()
+      throw new Error('Expected an incompatible version error')
+    } catch (error) {
+      expect((error as Error).message).toContain('not compatible')
+      expect((error as Error & { code?: string }).code).toBe('VERSION_INCOMPATIBLE')
+    }
     client.destroy()
   })
 

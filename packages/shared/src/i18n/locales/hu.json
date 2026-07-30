@@ -373,7 +373,7 @@
   "dialog.terminalSetup.conflictDetail": "A Polo nem írta felül a parancsot. Távolítsd el vagy nevezd át, majd fejezd be a beállítást a Beállítások → Polo terminálfunkciók alatt.",
   "dialog.terminalSetup.conflictMessage": "Már létezik egy polo nevű terminálparancs.",
   "dialog.terminalSetup.conflictTitle": "A Polo beállítása figyelmet igényel",
-  "dialog.terminalSetup.failedMessage": "A Polo nem módosította a meglévő terminálparancsot.",
+  "dialog.terminalSetup.failedMessage": "A Polo terminálfunkciói még nem állnak készen.",
   "dialog.terminalSetup.failedTitle": "A Polo beállítása nem fejezhető be",
   "dialog.terminalSetup.newTerminal": "A polo parancs használata előtt nyiss új Terminál ablakot.",
   "dialog.terminalSetup.notNow": "Most nem",

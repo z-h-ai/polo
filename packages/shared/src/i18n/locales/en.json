@@ -373,7 +373,7 @@
   "dialog.terminalSetup.conflictDetail": "Polo did not overwrite it. Remove or rename that command, then use Settings → Polo terminal features to complete setup.",
   "dialog.terminalSetup.conflictMessage": "Another terminal command named polo already exists.",
   "dialog.terminalSetup.conflictTitle": "Polo Setup Needs Your Attention",
-  "dialog.terminalSetup.failedMessage": "Polo did not change your existing terminal command.",
+  "dialog.terminalSetup.failedMessage": "Polo terminal features are not ready yet.",
   "dialog.terminalSetup.failedTitle": "Polo Setup Could Not Be Completed",
   "dialog.terminalSetup.newTerminal": "Open a new Terminal window before using the polo command.",
   "dialog.terminalSetup.notNow": "Not Now",

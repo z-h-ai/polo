@@ -373,7 +373,7 @@
   "dialog.terminalSetup.conflictDetail": "Polo はこのコマンドを上書きしませんでした。コマンドを削除または名前変更してから、「設定 → Polo ターミナル機能」で設定を完了してください。",
   "dialog.terminalSetup.conflictMessage": "polo という名前の別のターミナルコマンドが既に存在します。",
   "dialog.terminalSetup.conflictTitle": "Polo の設定を確認してください",
-  "dialog.terminalSetup.failedMessage": "Polo は既存のターミナルコマンドを変更しませんでした。",
+  "dialog.terminalSetup.failedMessage": "Polo のターミナル機能はまだ準備できていません。",
   "dialog.terminalSetup.failedTitle": "Polo の設定を完了できませんでした",
   "dialog.terminalSetup.newTerminal": "polo コマンドを使用する前に、新しいターミナルウィンドウを開いてください。",
   "dialog.terminalSetup.notNow": "後で",

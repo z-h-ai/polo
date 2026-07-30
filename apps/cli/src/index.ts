@@ -8,7 +8,10 @@
  */
 
 import { basename, resolve } from 'path'
-import { readElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
+import {
+  readElectronRuntimeDiscovery,
+  removeElectronRuntimeDiscovery,
+} from '@polo-ai/shared/runtime-discovery'
 import { CliRpcClient } from './client.ts'
 import { version as cliVersion } from '../package.json'
 
@@ -19,6 +22,8 @@ import { version as cliVersion } from '../package.json'
 export interface CliArgs {
   url: string
   token: string
+  explicitUrl: boolean
+  explicitToken: boolean
   workspace?: string
   timeout: number
   json: boolean
@@ -46,6 +51,8 @@ export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2) // skip bun + script path
   let url = ''
   let token = ''
+  let explicitUrl = false
+  let explicitToken = false
   let workspace: string | undefined
   let timeout = 10_000
   let json = false
@@ -70,9 +77,11 @@ export function parseArgs(argv: string[]): CliArgs {
     const arg = args[i]
     switch (arg) {
       case '--url':
+        explicitUrl = true
         url = args[++i] ?? ''
         break
       case '--token':
+        explicitToken = true
         token = args[++i] ?? ''
         break
       case '--workspace':
@@ -156,7 +165,7 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!apiKey) apiKey = process.env.LLM_API_KEY ?? ''
   if (!baseUrl) baseUrl = process.env.LLM_BASE_URL ?? ''
 
-  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
+  return { url, token, explicitUrl, explicitToken, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
 }
 
 // ---------------------------------------------------------------------------
@@ -282,8 +291,19 @@ async function cmdApp(): Promise<void> {
   child.unref()
 }
 
-function applyRuntimeDiscovery(args: CliArgs): void {
-  if (args.url) return
+interface AppliedRuntimeDiscovery {
+  path: string
+  pid: number
+}
+
+function applyRuntimeDiscovery(args: CliArgs): AppliedRuntimeDiscovery | undefined {
+  if (args.explicitUrl && !args.url) {
+    throw new Error('--url requires a non-empty server URL')
+  }
+  if (args.explicitToken && !args.url) {
+    throw new Error('--token requires --url; Polo did not fall back to another server')
+  }
+  if (args.url) return undefined
 
   const result = readElectronRuntimeDiscovery({
     expectedVersion: cliVersion,
@@ -292,11 +312,12 @@ function applyRuntimeDiscovery(args: CliArgs): void {
   if (result.status === 'available') {
     args.url = result.record.url
     args.token = result.record.token
-    return
+    return { path: result.path, pid: result.record.pid }
   }
   if (result.status === 'incompatible' || result.status === 'invalid') {
     throw new Error(result.reason)
   }
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +629,96 @@ async function spawnLocalServer(args: CliArgs, opts?: { quiet?: boolean }): Prom
   return { client, stop: server.stop }
 }
 
+export interface RunConnection {
+  client: CliRpcClient
+  source: 'explicit' | 'discovery' | 'temporary'
+  stop?: () => Promise<void>
+}
+
+function createConfiguredClient(args: CliArgs): CliRpcClient {
+  return new CliRpcClient(args.url, {
+    token: args.token || undefined,
+    workspaceId: args.workspace,
+    requestTimeout: args.timeout,
+    connectTimeout: args.timeout,
+    expectedServerVersion: cliVersion,
+  })
+}
+
+function isVersionIncompatibility(error: unknown): boolean {
+  return (error as { code?: string } | undefined)?.code === 'VERSION_INCOMPATIBLE'
+}
+
+function connectionFailureMessage(
+  error: unknown,
+  discovery?: AppliedRuntimeDiscovery,
+): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!discovery || isVersionIncompatibility(error)) return message
+
+  removeElectronRuntimeDiscovery({
+    path: discovery.path,
+    expectedPid: discovery.pid,
+  })
+  return `Polo App runtime is unavailable (${message}). `
+    + 'Restart it with `polo app`, or use --url/--token to connect to another server.'
+}
+
+/**
+ * Resolve and verify the server used by `polo run`.
+ *
+ * The ordering is intentionally strict:
+ *   1. user-configured URL/token (never falls back on failure)
+ *   2. a private Electron discovery record that completes a versioned handshake
+ *   3. a temporary packaged server owned by this invocation
+ */
+export async function connectForRun(args: CliArgs): Promise<RunConnection> {
+  const hadConfiguredUrl = Boolean(args.url)
+  const discovery = applyRuntimeDiscovery(args)
+
+  if (args.url) {
+    const client = createConfiguredClient(args)
+    try {
+      await client.connect()
+      return {
+        client,
+        source: discovery ? 'discovery' : 'explicit',
+      }
+    } catch (error) {
+      client.destroy()
+      if (!discovery || hadConfiguredUrl || isVersionIncompatibility(error)) {
+        throw error
+      }
+
+      // The PID and file metadata were valid, but the endpoint did not complete
+      // a compatible handshake. Remove only the record we read, then fall back.
+      removeElectronRuntimeDiscovery({
+        path: discovery.path,
+        expectedPid: discovery.pid,
+      })
+      args.url = ''
+      args.token = ''
+      process.stderr.write(
+        'Polo App runtime is unreachable; starting a temporary server for this run.\n',
+      )
+    }
+  }
+
+  const server = await spawnLocalServer(args)
+  try {
+    await server.client.connect()
+    return {
+      client: server.client,
+      source: 'temporary',
+      stop: server.stop,
+    }
+  } catch (error) {
+    server.client.destroy()
+    await server.stop()
+    throw error
+  }
+}
+
 // ---------------------------------------------------------------------------
 // LLM connection helpers
 // ---------------------------------------------------------------------------
@@ -732,9 +843,15 @@ async function cmdRun(args: CliArgs): Promise<void> {
     process.exit(1)
   }
 
-  const server = await spawnLocalServer(args)
+  let connection: RunConnection
+  try {
+    connection = await connectForRun(args)
+  } catch (error) {
+    err(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
 
-  let client: CliRpcClient | undefined = server.client
+  let client: CliRpcClient | undefined = connection.client
   let sessionId: string | undefined
 
   const cleanup = async () => {
@@ -742,7 +859,7 @@ async function cmdRun(args: CliArgs): Promise<void> {
       await client.invoke('sessions:delete', sessionId).catch(() => {})
     }
     client?.destroy()
-    await server.stop()
+    await connection.stop?.()
   }
 
   // Signal handling — cancel + clean up on SIGINT/SIGTERM
@@ -757,11 +874,9 @@ async function cmdRun(args: CliArgs): Promise<void> {
   process.on('SIGTERM', onSignal)
 
   try {
-    await client.connect()
-
-    // A local run always has a concrete workspace. An explicit --workspace
-    // selects an existing one; otherwise the caller's directory (or
-    // --workspace-dir) is registered idempotently by rootPath.
+    // Every run has a concrete workspace, including explicit and Electron
+    // connections. An explicit --workspace selects an existing one; otherwise
+    // the caller's directory (or --workspace-dir) is registered idempotently.
     const runWorkspace = await resolveRunWorkspace(client, args)
     if (runWorkspace?.registeredPath) {
       process.stderr.write(`Workspace registered: ${runWorkspace.registeredPath}\n`)
@@ -779,8 +894,7 @@ async function cmdRun(args: CliArgs): Promise<void> {
 
     const workspaceId = runWorkspace?.id
     if (!workspaceId) {
-      err('No workspace found on server')
-      process.exit(1)
+      throw new Error('No workspace found on server')
     }
 
     const session = (await client.invoke('sessions:create', workspaceId, {
@@ -807,41 +921,20 @@ async function cmdRun(args: CliArgs): Promise<void> {
   }
 }
 
-async function cmdValidate(args: CliArgs): Promise<void> {
-  let server: LocalServer | undefined
-  let client: CliRpcClient
-
+async function cmdValidate(args: CliArgs): Promise<number> {
   // Use a generous timeout for validation steps — source creation and MCP
   // server startup can be slow on Windows.
   const validateArgs = { ...args, timeout: Math.max(args.timeout, 30_000) }
-
-  if (args.url) {
-    client = new CliRpcClient(args.url, {
-      token: args.token || undefined,
-      requestTimeout: validateArgs.timeout,
-      connectTimeout: validateArgs.timeout,
-      expectedServerVersion: cliVersion,
-    })
-  } else {
-    server = await spawnLocalServer(validateArgs, { quiet: !args.verbose })
-    client = server.client
-  }
+  const client = createConfiguredClient(validateArgs)
 
   try {
-    const exitCode = await runValidation(client, args.json, args.noSpinner, args.workspaceDir, {
+    return await runValidation(client, args.json, args.noSpinner, args.workspaceDir, {
       baseUrl: args.baseUrl,
       apiKey: args.apiKey,
       provider: args.provider,
     })
+  } finally {
     client.destroy()
-    if (server) await server.stop()
-    process.exit(exitCode)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    err(msg)
-    client.destroy()
-    if (server) await server.stop()
-    process.exit(1)
   }
 }
 
@@ -2007,7 +2100,7 @@ LLM Configuration (for 'run' command):
 
 Commands:
   app                    Start or focus the Polo desktop app
-  run <message>          Spawn server, send message, stream response, exit
+  run <message>          Reuse the App or start a temporary server, then run once
                          --workspace-dir <path>  Use directory as workspace (creates if needed)
                          --source <slug>     Enable source (repeatable)
                          --mode <mode>       Permission mode (default: allow-all)
@@ -2028,7 +2121,7 @@ Commands:
   cancel <id>            Cancel in-progress processing
   invoke <channel> [...] Raw RPC call with JSON args
   listen <channel>       Subscribe to push events (Ctrl+C to stop)
-  --validate-server      Multi-step server integration test
+  --validate-server      Multi-step test of the App or an explicit --url server
                          --verbose, -v       Show server stderr output
 
 Examples:
@@ -2073,21 +2166,21 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     return
   }
 
-  // run is self-contained — spawns its own server
+  // run alone may start a temporary server when no verified connection exists.
   if (args.command === 'run') {
     await cmdRun(args)
     return
   }
 
-  // validate can spawn its own server or use --url
-  if (args.command === 'validate') {
-    await cmdValidate(args)
-    return
-  }
-
   // Explicit --url/--token wins. Otherwise discover the private local
   // Electron endpoint written by the running desktop app.
-  applyRuntimeDiscovery(args)
+  let discovery: AppliedRuntimeDiscovery | undefined
+  try {
+    discovery = applyRuntimeDiscovery(args)
+  } catch (error) {
+    err(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
 
   // All other commands need a server URL.
   if (!args.url) {
@@ -2096,6 +2189,17 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       + 'or use --url/--token to connect to a remote server.',
     )
     process.exit(1)
+  }
+
+  if (args.command === 'validate') {
+    try {
+      const exitCode = await cmdValidate(args)
+      if (exitCode !== 0) process.exit(exitCode)
+      return
+    } catch (error) {
+      err(connectionFailureMessage(error, discovery))
+      process.exit(1)
+    }
   }
 
   const client = new CliRpcClient(args.url, {
@@ -2165,8 +2269,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         process.exit(1)
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    err(msg)
+    err(connectionFailureMessage(e, discovery))
     process.exit(1)
   } finally {
     client.destroy()

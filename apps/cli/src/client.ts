@@ -105,6 +105,9 @@ export class CliRpcClient {
                 ? `Polo CLI ${this.expectedServerVersion} is not compatible with Polo server ${envelope.serverVersion}`
                 : 'Polo server did not report a version during health validation',
             )
+            ;(err as Error & { code?: string }).code = envelope.serverVersion
+              ? 'VERSION_INCOMPATIBLE'
+              : 'SERVER_VERSION_UNVERIFIED'
             reject(err)
             this.ws?.close()
             return

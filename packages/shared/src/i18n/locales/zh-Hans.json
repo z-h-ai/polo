@@ -373,7 +373,7 @@
   "dialog.terminalSetup.conflictDetail": "Polo 没有覆盖这个命令。请先移除或重命名它，然后前往“设置 → Polo 终端功能”完成设置。",
   "dialog.terminalSetup.conflictMessage": "已存在名为 polo 的终端命令。",
   "dialog.terminalSetup.conflictTitle": "Polo 设置需要处理",
-  "dialog.terminalSetup.failedMessage": "Polo 没有更改你已有的终端命令。",
+  "dialog.terminalSetup.failedMessage": "Polo 终端功能尚未就绪。",
   "dialog.terminalSetup.failedTitle": "无法完成 Polo 设置",
   "dialog.terminalSetup.newTerminal": "请新开一个终端窗口，然后使用 polo 命令。",
   "dialog.terminalSetup.notNow": "暂不设置",

@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, mock, beforeEach } from 'bun:test'
-import { mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { writeElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
 import {
   serializeEnvelope,
   deserializeEnvelope,
@@ -17,6 +18,8 @@ interface MockServerOptions {
   connections?: unknown[]
   /** What workspaces:get returns */
   workspaces?: unknown[]
+  /** Version returned by the WebSocket handshake */
+  serverVersion?: string
 }
 
 interface MockServer {
@@ -49,7 +52,7 @@ function pushSessionEvents(
 }
 
 function createMockServer(opts?: MockServerOptions): MockServer {
-  const token = 'test-token'
+  const token = 'test-token-0123456789'
   const invokedChannels: string[] = []
   const invokeArgs: Record<string, unknown[][]> = {}
   let createSessionArgs: unknown[] | undefined
@@ -73,6 +76,7 @@ function createMockServer(opts?: MockServerOptions): MockServer {
             type: 'handshake_ack',
             clientId: 'run-test-client',
             protocolVersion: '1.0',
+            serverVersion: opts?.serverVersion ?? '0.10.0',
           }))
           return
         }
@@ -160,10 +164,12 @@ function createMockServer(opts?: MockServerOptions): MockServer {
 // ---------------------------------------------------------------------------
 
 let mockWsServer: MockServer | null = null
+let spawnCount = 0
 
 mock.module('./server-spawner.ts', () => ({
   spawnServer: async (): Promise<SpawnedServer> => {
     if (!mockWsServer) throw new Error('mockWsServer not initialized')
+    spawnCount++
     return {
       url: mockWsServer.url,
       token: mockWsServer.token,
@@ -173,7 +179,7 @@ mock.module('./server-spawner.ts', () => ({
 }))
 
 // Import main AFTER mocking
-const { parseArgs, resolveRunWorkspace } = await import('./index.ts')
+const { connectForRun, parseArgs, resolveRunWorkspace } = await import('./index.ts')
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -181,14 +187,35 @@ const { parseArgs, resolveRunWorkspace } = await import('./index.ts')
 
 describe('run command', () => {
   const roots: string[] = []
+  let previousRuntimeFile: string | undefined
+  let previousServerUrl: string | undefined
+  let previousServerToken: string | undefined
 
   beforeEach(() => {
+    previousRuntimeFile = process.env.POLO_AI_RUNTIME_DISCOVERY_FILE
+    previousServerUrl = process.env.POLO_AI_SERVER_URL
+    previousServerToken = process.env.POLO_AI_SERVER_TOKEN
+    delete process.env.POLO_AI_SERVER_URL
+    delete process.env.POLO_AI_SERVER_TOKEN
+    const runtimeRoot = join(tmpdir(), `polo-run-runtime-${crypto.randomUUID()}`)
+    roots.push(runtimeRoot)
+    process.env.POLO_AI_RUNTIME_DISCOVERY_FILE = join(runtimeRoot, 'runtime', 'electron.json')
+    spawnCount = 0
     mockWsServer = createMockServer()
   })
 
   afterEach(() => {
     mockWsServer?.close()
     mockWsServer = null
+    if (previousRuntimeFile === undefined) {
+      delete process.env.POLO_AI_RUNTIME_DISCOVERY_FILE
+    } else {
+      process.env.POLO_AI_RUNTIME_DISCOVERY_FILE = previousRuntimeFile
+    }
+    if (previousServerUrl === undefined) delete process.env.POLO_AI_SERVER_URL
+    else process.env.POLO_AI_SERVER_URL = previousServerUrl
+    if (previousServerToken === undefined) delete process.env.POLO_AI_SERVER_TOKEN
+    else process.env.POLO_AI_SERVER_TOKEN = previousServerToken
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true })
     }
@@ -222,6 +249,106 @@ describe('run command', () => {
       'run', 'test',
     ])
     expect(args.noCleanup).toBe(true)
+  })
+
+  it('uses an explicit connection and never starts a temporary server', async () => {
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--url', mockWsServer!.url,
+      '--token', mockWsServer!.token,
+      'run', 'hello',
+    ])
+
+    const connection = await connectForRun(args)
+    expect(connection.source).toBe('explicit')
+    expect(spawnCount).toBe(0)
+    connection.client.destroy()
+  })
+
+  it('does not fall back when an explicit connection fails', async () => {
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--url', 'ws://127.0.0.1:1',
+      '--token', 'explicit-token',
+      '--timeout', '200',
+      'run', 'hello',
+    ])
+
+    await expect(connectForRun(args)).rejects.toThrow()
+    expect(spawnCount).toBe(0)
+  })
+
+  it('rejects an explicit token without a URL instead of using discovery', async () => {
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--token', 'explicit-token',
+      'run', 'hello',
+    ])
+
+    await expect(connectForRun(args)).rejects.toThrow('--token requires --url')
+    expect(spawnCount).toBe(0)
+  })
+
+  it('reuses a verified Electron runtime before considering a temporary server', async () => {
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: mockWsServer!.url,
+      token: mockWsServer!.token,
+      version: '0.10.0',
+    })
+    const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
+
+    const connection = await connectForRun(args)
+    expect(connection.source).toBe('discovery')
+    expect(spawnCount).toBe(0)
+    connection.client.destroy()
+  })
+
+  it('cleans an unreachable discovery record and falls back for run only', async () => {
+    const deadServer = Bun.serve({
+      port: 0,
+      fetch: () => new Response('unused'),
+    })
+    const deadUrl = `ws://127.0.0.1:${deadServer.port}`
+    deadServer.stop(true)
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: deadUrl,
+      token: 'unreachable-token-0123456789',
+      version: '0.10.0',
+    })
+    const runtimePath = process.env.POLO_AI_RUNTIME_DISCOVERY_FILE!
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--timeout', '200',
+      'run', 'hello',
+    ])
+
+    const connection = await connectForRun(args)
+    expect(connection.source).toBe('temporary')
+    expect(spawnCount).toBe(1)
+    expect(existsSync(runtimePath)).toBe(false)
+    connection.client.destroy()
+    await connection.stop?.()
+  })
+
+  it('reports an incompatible discovered App without falling back', async () => {
+    const incompatibleServer = createMockServer({ serverVersion: '1.0.0' })
+    try {
+      writeElectronRuntimeDiscovery({
+        pid: process.pid,
+        url: incompatibleServer.url,
+        token: incompatibleServer.token,
+        // The file itself is compatible; the health handshake is authoritative.
+        version: '0.10.0',
+      })
+      const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
+
+      await expect(connectForRun(args)).rejects.toThrow('not compatible')
+      expect(spawnCount).toBe(0)
+    } finally {
+      incompatibleServer.close()
+    }
   })
 
   it('creates session with correct workspace and options', async () => {

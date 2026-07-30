@@ -373,7 +373,7 @@
   "dialog.terminalSetup.conflictDetail": "Polo no lo sobrescribió. Elimina o cambia el nombre de ese comando y luego usa Ajustes → Funciones de terminal de Polo para completar la configuración.",
   "dialog.terminalSetup.conflictMessage": "Ya existe otro comando de terminal llamado polo.",
   "dialog.terminalSetup.conflictTitle": "La configuración de Polo requiere atención",
-  "dialog.terminalSetup.failedMessage": "Polo no cambió tu comando de terminal existente.",
+  "dialog.terminalSetup.failedMessage": "Las funciones de terminal de Polo aún no están listas.",
   "dialog.terminalSetup.failedTitle": "No se pudo completar la configuración de Polo",
   "dialog.terminalSetup.newTerminal": "Abre una nueva ventana de Terminal antes de usar el comando polo.",
   "dialog.terminalSetup.notNow": "Ahora no",

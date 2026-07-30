@@ -124,9 +124,9 @@ import {
   installTerminalIntegration,
   setTerminalSetupDismissed,
   uninstallTerminalIntegration,
-  wasTerminalSetupDismissed,
   type TerminalIntegrationOptions,
 } from './terminal-integration'
+import { runTerminalOnboarding } from './terminal-onboarding'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -283,6 +283,7 @@ function terminalSetupCopy() {
     skippedTitle: i18n.t('dialog.terminalSetup.skippedTitle'),
     skippedMessage: i18n.t('dialog.terminalSetup.skippedMessage'),
     skippedDetail: i18n.t('dialog.terminalSetup.skippedDetail'),
+    retry: i18n.t('common.retry'),
     ok: i18n.t('common.ok'),
     done: i18n.t('common.done'),
   }
@@ -1199,76 +1200,12 @@ app.whenReady().then(async () => {
       if (app.isPackaged && process.platform === 'darwin') {
         const terminalOptions = terminalIntegrationOptions()
         const setupCopy = terminalSetupCopy()
-        let terminalStatus = getTerminalIntegrationStatus(terminalOptions)
-        if (terminalStatus.installed && terminalStatus.needsRepair && !terminalStatus.conflict) {
-          try {
-            terminalStatus = installTerminalIntegration(terminalOptions)
-            mainLog.info('[terminal-integration] Updated the managed Polo launcher')
-          } catch (error) {
-            mainLog.warn(
-              '[terminal-integration] Automatic launcher update failed:',
-              error instanceof Error ? error.message : String(error),
-            )
-          }
-        }
-        if (
-          (!terminalStatus.installed || terminalStatus.needsRepair)
-          && !wasTerminalSetupDismissed(terminalOptions)
-        ) {
-          const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-          if (terminalStatus.conflict) {
-            await dialog.showMessageBox(win, {
-              type: 'warning',
-              title: setupCopy.conflictTitle,
-              message: setupCopy.conflictMessage,
-              detail:
-                `${terminalStatus.conflict}\n\n`
-                + setupCopy.conflictDetail,
-              buttons: [setupCopy.ok],
-            })
-            setTerminalSetupDismissed(terminalOptions, true)
-          } else {
-            const choice = await dialog.showMessageBox(win, {
-              type: 'info',
-              title: setupCopy.setupTitle,
-              message: setupCopy.setupTitle,
-              detail: setupCopy.setupDetail,
-              buttons: [setupCopy.completeNow, setupCopy.notNow],
-              defaultId: 0,
-              cancelId: 1,
-              noLink: true,
-            })
-            if (choice.response === 0) {
-              try {
-                installTerminalIntegration(terminalOptions)
-                await dialog.showMessageBox(win, {
-                  type: 'info',
-                  title: setupCopy.completeTitle,
-                  message: setupCopy.completeMessage,
-                  detail: setupCopy.newTerminal,
-                  buttons: [setupCopy.done],
-                })
-              } catch (error) {
-                await dialog.showMessageBox(win, {
-                  type: 'error',
-                  title: setupCopy.failedTitle,
-                  message: setupCopy.failedMessage,
-                  detail: error instanceof Error ? error.message : String(error),
-                  buttons: [setupCopy.ok],
-                })
-              }
-            } else {
-              setTerminalSetupDismissed(terminalOptions, true)
-              await dialog.showMessageBox(win, {
-                type: 'warning',
-                title: setupCopy.skippedTitle,
-                message: setupCopy.skippedMessage,
-                detail: setupCopy.skippedDetail,
-                buttons: [setupCopy.ok],
-              })
-            }
-          }
-        }
+        const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+        await runTerminalOnboarding({
+          terminalOptions,
+          copy: setupCopy,
+          showMessageBox: (options) => dialog.showMessageBox(win, options),
+        })
       }
     }
 
