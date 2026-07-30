@@ -118,7 +118,17 @@ export class RemoteBrowserPaneManager implements IBrowserPaneManager {
   }
 
   async clearVisualsForSession(sessionId: string): Promise<void> {
-    await this.invoke<void>('clearVisualsForSession', [sessionId])
+    // Turn cleanup must not prevent a headless `polo run` from completing when
+    // no desktop browser host exists. Actual browser tool calls still fail
+    // loudly through invoke(); this is only best-effort visual teardown.
+    if (!this.getHostClient()) return
+    try {
+      await this.invoke<void>('clearVisualsForSession', [sessionId])
+    } catch (error) {
+      const code = (error as { code?: string } | undefined)?.code
+      if (code === 'BROWSER_NO_CAPABLE_CLIENT' || code === 'CAPABILITY_UNAVAILABLE') return
+      throw error
+    }
   }
 
   unbindAllForSession(sessionId: string): void {

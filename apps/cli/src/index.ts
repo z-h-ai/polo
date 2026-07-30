@@ -911,13 +911,6 @@ async function cmdRun(args: CliArgs): Promise<void> {
   process.on('SIGTERM', onSignal)
 
   try {
-    if (process.env.POLO_AI_E2E_RUN_PROBE === '1') {
-      await client.connect()
-      out(`Run probe connected via ${connection.source}`, false)
-      await cleanup()
-      return
-    }
-
     // Every run has a concrete workspace, including explicit and Electron
     // connections. An explicit --workspace selects an existing one; otherwise
     // the caller's directory (or --workspace-dir) is registered idempotently.

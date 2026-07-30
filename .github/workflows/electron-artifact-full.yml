@@ -83,6 +83,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Prove clean platform runtime preparation contract
+        shell: bash
+        run: |
+          rm -rf \
+            apps/electron/vendor \
+            apps/electron/node_modules/@anthropic-ai \
+            apps/electron/node_modules/@vscode \
+            apps/electron/packages
+          bun test scripts/__tests__/prepare-platform-runtime.test.ts
+          test ! -e apps/electron/vendor/bun
+
       - name: Download fixed previous Unix artifact
         if: matrix.platform != 'windows'
         shell: bash
@@ -119,6 +130,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Native Windows terminal integration tests failed"
           }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass `
+            -File apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows checked-in wrapper smoke failed"
+          }
 
       - name: Build and run macOS full lifecycle gate
         if: matrix.platform == 'macos'
@@ -130,7 +147,24 @@ jobs:
 
       - name: Build and run Linux full lifecycle gate
         if: matrix.platform == 'linux'
-        run: xvfb-run -a bun run electron:dist:dev:linux
+        shell: bash
+        run: |
+          xvfb-run -a bash -c '
+            test -n "$DISPLAY"
+            test "$DISPLAY" != ":0.0"
+            export POLO_AI_E2E_EXPECTED_DISPLAY="$DISPLAY"
+            bun run electron:dist:dev:linux
+          '
+
+      - name: Normalize validated Linux artifact name
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          if [ -f apps/electron/release/Polo-AI-x86_64.AppImage ]; then
+            mv apps/electron/release/Polo-AI-x86_64.AppImage \
+              apps/electron/release/Polo-AI-x64.AppImage
+          fi
+          test -f apps/electron/release/Polo-AI-x64.AppImage
 
       - name: Record Unix validation result
         if: matrix.platform != 'windows'

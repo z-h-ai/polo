@@ -3,7 +3,7 @@
  */
 
 import { $ } from 'bun';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import {
   existsSync,
   mkdirSync,
@@ -586,9 +586,19 @@ export function buildMcpServers(config: BuildConfig): void {
 
   mkdirSync(join(sessionDir, 'dist'), { recursive: true });
 
-  execSync(
-    `bun build ${join(sessionDir, 'src', 'index.ts')} --outfile ${sessionOut} --target node --format cjs`,
-    { cwd: rootDir, stdio: 'inherit', shell: true }
+  execFileSync(
+    process.execPath,
+    [
+      'build',
+      join(sessionDir, 'src', 'index.ts'),
+      '--outfile',
+      sessionOut,
+      '--target',
+      'node',
+      '--format',
+      'cjs',
+    ],
+    { cwd: rootDir, stdio: 'inherit' }
   );
 
   if (!existsSync(sessionOut)) {
@@ -602,9 +612,21 @@ export function buildMcpServers(config: BuildConfig): void {
   // Optional: skip if package directory is missing (e.g., not synced to OSS).
   if (existsSync(join(piDir, 'src'))) {
     mkdirSync(join(piDir, 'dist'), { recursive: true });
-    execSync(
-      `bun build ${join(piDir, 'src', 'index.ts')} --outdir ${join(piDir, 'dist')} --target bun --format esm --external koffi`,
-      { cwd: rootDir, stdio: 'inherit', shell: true }
+    execFileSync(
+      process.execPath,
+      [
+        'build',
+        join(piDir, 'src', 'index.ts'),
+        '--outdir',
+        join(piDir, 'dist'),
+        '--target',
+        'bun',
+        '--format',
+        'esm',
+        '--external',
+        'koffi',
+      ],
+      { cwd: rootDir, stdio: 'inherit' }
     );
     if (!existsSync(piOut)) {
       throw new Error(`Pi agent server output not found at ${piOut}`);

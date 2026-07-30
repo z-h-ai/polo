@@ -29,7 +29,9 @@ $testLocalAppData = Join-Path $testRoot "用户 Local AppData"
 $installDir = Join-Path $testRoot "Polo AI Install"
 $originalLocalAppData = $env:LOCALAPPDATA
 $originalUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$env:LOCALAPPDATA = $testLocalAppData
+$originalProcessPath = $env:Path
+$currentVersion = $null
+$previousVersion = $null
 
 function Invoke-Installer([string]$InstallerPath = $installer) {
     $process = Start-Process -FilePath $InstallerPath `
@@ -53,7 +55,7 @@ function Invoke-Uninstaller {
     }
 }
 
-function Test-InstalledContainer {
+function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $resourcesRoot = Join-Path $installDir "resources"
     $appRoot = Join-Path $resourcesRoot "app"
     $bun = Join-Path $resourcesRoot "vendor\bun\bun.exe"
@@ -62,10 +64,26 @@ function Test-InstalledContainer {
     $metadataPath = Join-Path $appRoot "dist\cli\package.json"
     $cliPath = Join-Path $appRoot "dist\cli\polo-cli.js"
     $serverPath = Join-Path $appRoot "dist\server\polo-server.js"
+    $piServerPath = Join-Path $appRoot "resources\pi-agent-server\index.js"
+    $sessionServerPath = Join-Path $appRoot "resources\session-mcp-server\index.js"
 
-    foreach ($required in @($bun, $launcher, $manifestPath, $metadataPath, $cliPath, $serverPath)) {
+    foreach ($required in @(
+        $bun,
+        $launcher,
+        $manifestPath,
+        $metadataPath,
+        $cliPath,
+        $serverPath
+    )) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Installed NSIS container is missing $required"
+        }
+    }
+    if ($RequireRunHelpers) {
+        foreach ($required in @($piServerPath, $sessionServerPath)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+                throw "Installed NSIS container is missing run helper $required"
+            }
         }
     }
 
@@ -101,13 +119,18 @@ function Test-InstalledContainer {
         throw "Sanitized CLI package metadata mismatch in installed NSIS container"
     }
 
-    $versionOutput = (& $launcher --version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $versionOutput -cne $manifest.version) {
-        throw "Installed NSIS launcher version smoke failed: $versionOutput"
-    }
-    $helpOutput = (& $launcher --help 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $helpOutput -notmatch [Regex]::Escape("Usage: polo ")) {
-        throw "Installed NSIS launcher help smoke failed: $helpOutput"
+    Push-Location $testLocalAppData
+    try {
+        $versionOutput = (& $launcher --version 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or $versionOutput -cne $manifest.version) {
+            throw "Installed NSIS launcher version smoke failed: $versionOutput"
+        }
+        $helpOutput = (& $launcher --help 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0 -or $helpOutput -notmatch [Regex]::Escape("Usage: polo ")) {
+            throw "Installed NSIS launcher help smoke failed: $helpOutput"
+        }
+    } finally {
+        Pop-Location
     }
     Write-Host "NSIS final-container CLI smoke passed ($($manifest.version))"
     return [string]$manifest.version
@@ -118,16 +141,18 @@ function Invoke-FreshShell {
         [Parameter(Mandatory = $true)][string]$Command,
         [hashtable]$Environment = @{}
     )
-    $binDir = Join-Path $testLocalAppData "Polo AI\bin"
     $savedPath = $env:Path
     $savedEnvironment = @{}
     try {
-        $env:Path = "$binDir;$env:SystemRoot\System32;$env:SystemRoot"
+        $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        $env:Path = (@($machinePath, $userPath) | Where-Object { $_ }) -join ";"
         foreach ($entry in $Environment.GetEnumerator()) {
             $savedEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
             [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, "Process")
         }
-        $output = & $env:ComSpec /d /c $Command 2>&1
+        $freshCommand = "cd /d `"$testLocalAppData`" && ($Command)"
+        $output = & $env:ComSpec /d /c $freshCommand 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Fresh cmd.exe failed ($LASTEXITCODE): $Command`n$($output -join "`n")"
         }
@@ -141,6 +166,42 @@ function Invoke-FreshShell {
                 "Process"
             )
         }
+    }
+}
+
+function Get-UserPathEntries {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    return @($userPath -split ";" | Where-Object { $_ } | ForEach-Object {
+        $_.Trim().TrimEnd("\")
+    })
+}
+
+function Assert-ManagedPathPresent {
+    $binDir = (Join-Path $testLocalAppData "Polo AI\bin").TrimEnd("\")
+    $matches = @(Get-UserPathEntries | Where-Object { $_ -ieq $binDir })
+    if ($matches.Count -ne 1) {
+        throw "User PATH must contain the managed Polo bin directory exactly once; found $($matches.Count)"
+    }
+    $resolved = Invoke-FreshShell "where polo"
+    $first = @($resolved -split "`r?`n")[0].Trim()
+    $expected = Join-Path $binDir "polo.cmd"
+    if ($first -ine $expected) {
+        throw "Fresh User+Machine PATH resolved Polo to '$first', expected '$expected'"
+    }
+}
+
+function Assert-FreshShellCommandAbsent {
+    $savedPath = $env:Path
+    try {
+        $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        $env:Path = (@($machinePath, $userPath) | Where-Object { $_ }) -join ";"
+        $output = & $env:ComSpec /d /c "where polo" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            throw "Polo still resolves after uninstall: $($output -join "`n")"
+        }
+    } finally {
+        $env:Path = $savedPath
     }
 }
 
@@ -173,6 +234,7 @@ function Test-UserCommandConflict {
 
     $savedLocalAppData = $env:LOCALAPPDATA
     $savedPath = $env:Path
+    $savedUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
     try {
         $env:LOCALAPPDATA = $conflictLocalAppData
         $env:Path = "$conflictBin;$savedPath"
@@ -188,6 +250,9 @@ function Test-UserCommandConflict {
         if (Test-Path -LiteralPath (Join-Path $conflictLocalAppData "Polo AI\bin\polo.cmd")) {
             throw "NSIS terminal setup installed a launcher despite a user command conflict"
         }
+        if ([Environment]::GetEnvironmentVariable("Path", "User") -cne $savedUserPath) {
+            throw "NSIS terminal setup changed User PATH despite a user command conflict"
+        }
     } finally {
         $uninstaller = Join-Path $conflictInstall "Uninstall Polo AI.exe"
         if (Test-Path -LiteralPath $uninstaller) {
@@ -196,6 +261,191 @@ function Test-UserCommandConflict {
         }
         $env:LOCALAPPDATA = $savedLocalAppData
         $env:Path = $savedPath
+        [Environment]::SetEnvironmentVariable("Path", $savedUserPath, "User")
+    }
+}
+
+function Get-SevenZipExecutable {
+    $command = Get-Command 7z.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $rootDir = Split-Path -Parent (Split-Path -Parent $ElectronDir)
+    $bundled = Join-Path $rootDir "node_modules\7zip-bin\win\x64\7za.exe"
+    if (Test-Path -LiteralPath $bundled -PathType Leaf) { return $bundled }
+    throw "Read-only NSIS metadata preflight requires 7z.exe"
+}
+
+function Expand-SevenZipArchive([string]$Archive, [string]$Destination) {
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $sevenZip = Get-SevenZipExecutable
+    $process = Start-Process -FilePath $sevenZip `
+        -ArgumentList @("x", "-y", "-o$Destination", $Archive) `
+        -PassThru -Wait -NoNewWindow
+    if ($process.ExitCode -ne 0) {
+        throw "7-Zip could not inspect $Archive (exit $($process.ExitCode))"
+    }
+}
+
+function Get-NsisArtifactVersion([string]$Artifact, [string]$Label) {
+    $extractRoot = Join-Path $testRoot "preflight-$Label"
+    Expand-SevenZipArchive $Artifact $extractRoot
+
+    for ($depth = 0; $depth -lt 2; $depth++) {
+        $metadata = Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
+            -Filter "package.json" -ErrorAction SilentlyContinue | Where-Object {
+                $_.FullName -match '[\\/]dist[\\/]cli[\\/]package\.json$'
+            } | Select-Object -First 1
+        if ($metadata) { break }
+        $nested = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
+            -Filter "*.7z" -ErrorAction SilentlyContinue)
+        foreach ($archive in $nested) {
+            $nestedDestination = "$($archive.FullName).expanded"
+            if (-not (Test-Path -LiteralPath $nestedDestination)) {
+                Expand-SevenZipArchive $archive.FullName $nestedDestination
+            }
+        }
+    }
+    if (-not $metadata) {
+        throw "$Label NSIS artifact does not contain dist\cli\package.json"
+    }
+
+    $cliDir = Split-Path -Parent $metadata.FullName
+    $appRoot = Split-Path -Parent (Split-Path -Parent $cliDir)
+    $manifestPath = Join-Path $cliDir "artifact-manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "$Label NSIS artifact does not contain artifact-manifest.json"
+    }
+    $metadataJson = Get-Content -LiteralPath $metadata.FullName -Raw | ConvertFrom-Json
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $metadataKeys = @($metadataJson.PSObject.Properties.Name | Sort-Object)
+    if (
+        ($metadataKeys -join ",") -cne "bin,license,main,name,type,version" -or
+        $metadataJson.name -cne "@polo-ai/cli" -or
+        $metadataJson.version -cne $manifest.version -or
+        $metadataJson.type -cne "module" -or
+        $metadataJson.main -cne "./polo-cli.js" -or
+        $metadataJson.bin.polo -cne "./polo-cli.js" -or
+        $metadataJson.bin."polo-ai" -cne "./polo-cli.js" -or
+        $metadataJson.license -cne "Apache-2.0"
+    ) {
+        throw "$Label NSIS sanitized CLI metadata is invalid"
+    }
+    foreach ($entry in @(
+        @{ Name = "cli"; Relative = "dist/cli/polo-cli.js" },
+        @{ Name = "cliPackage"; Relative = "dist/cli/package.json" },
+        @{ Name = "server"; Relative = "dist/server/polo-server.js" }
+    )) {
+        $record = $manifest.artifacts.($entry.Name)
+        $path = Join-Path $appRoot ($entry.Relative -replace "/", "\")
+        if ($record.path -cne $entry.Relative -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "$Label NSIS manifest path is invalid for $($entry.Name)"
+        }
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($record.sha256 -cne $hash) {
+            throw "$Label NSIS manifest checksum failed for $($entry.Name)"
+        }
+    }
+    return [string]$metadataJson.version
+}
+
+function Invoke-PackagedRunLifecycle {
+    $fixtureRoot = Join-Path $testRoot "mock provider"
+    $workspace = Join-Path $testRoot "workspace with 空格"
+    $stateFile = Join-Path $fixtureRoot "state.json"
+    $requestLog = Join-Path $fixtureRoot "requests.jsonl"
+    $providerOut = Join-Path $fixtureRoot "provider.out.log"
+    $providerErr = Join-Path $fixtureRoot "provider.err.log"
+    $runOutput = Join-Path $fixtureRoot "run-output.log"
+    $token = "polo-artifact-e2e-token-$PID-fixed"
+    $fixture = Join-Path $ElectronDir "scripts\fixtures\mock-openai-provider.ts"
+    $hostBun = (Get-Command bun.exe -ErrorAction Stop).Source
+    New-Item -ItemType Directory -Force -Path $fixtureRoot, $workspace, (Join-Path $testRoot "tmp") | Out-Null
+
+    $names = @(
+        "POLO_AI_ARTIFACT_E2E_FIXTURE",
+        "POLO_AI_ARTIFACT_E2E_ROOT",
+        "POLO_AI_E2E_MOCK_STATE",
+        "POLO_AI_E2E_MOCK_LOG",
+        "POLO_AI_E2E_MOCK_TOKEN"
+    )
+    $saved = @{}
+    foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
+    try {
+        $env:POLO_AI_ARTIFACT_E2E_FIXTURE = "1"
+        $env:POLO_AI_ARTIFACT_E2E_ROOT = $fixtureRoot
+        $env:POLO_AI_E2E_MOCK_STATE = $stateFile
+        $env:POLO_AI_E2E_MOCK_LOG = $requestLog
+        $env:POLO_AI_E2E_MOCK_TOKEN = $token
+        $provider = Start-Process -FilePath $hostBun `
+            -ArgumentList @("run", $fixture) `
+            -RedirectStandardOutput $providerOut `
+            -RedirectStandardError $providerErr `
+            -PassThru -WindowStyle Hidden
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        while (-not (Test-Path -LiteralPath $stateFile) -and
+            -not $provider.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 200
+        }
+        if (-not (Test-Path -LiteralPath $stateFile)) {
+            throw "Mock provider did not start: $(Get-Content $providerErr -Raw -ErrorAction SilentlyContinue)"
+        }
+        $baseUrl = (Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json).baseUrl
+        $command = "polo run --provider openai --model gpt-4o --api-key `"$token`" " +
+            "--base-url `"$baseUrl`" --workspace-dir `"$workspace`" --timeout 60000 " +
+            "--send-timeout 60000 `"hello`" > `"$runOutput`" 2>&1"
+        Invoke-FreshShell $command @{
+            TEMP = (Join-Path $testRoot "tmp")
+            TMP = (Join-Path $testRoot "tmp")
+        } | Out-Null
+        $output = Get-Content -LiteralPath $runOutput -Raw
+        $requests = Get-Content -LiteralPath $requestLog -Raw
+        if ($output -notmatch "artifact run completed" -or
+            $output -notmatch "Workspace registered:" -or
+            $output -notmatch "Server ready: ws://127\.0\.0\.1:" -or
+            $requests -notmatch '"sawHello":true') {
+            throw "Packaged polo run did not complete its real lifecycle: $output"
+        }
+        $workspaceEscaped = [Regex]::Escape($workspace)
+        $configContainsWorkspace = Get-ChildItem -LiteralPath $testLocalAppData -Recurse -File `
+            -Filter "config.json" -ErrorAction SilentlyContinue | Where-Object {
+                (Get-Content -LiteralPath $_.FullName -Raw) -match $workspaceEscaped
+            }
+        if (-not $configContainsWorkspace) {
+            throw "polo run did not persist its workspace registration"
+        }
+        if (Get-ChildItem -LiteralPath (Join-Path $testRoot "tmp") -Directory `
+            -Filter "polo-run-server-*" -ErrorAction SilentlyContinue) {
+            throw "polo run left its temporary server runtime behind"
+        }
+        $sessionResidue = Get-ChildItem -LiteralPath $testLocalAppData -Recurse -Directory `
+            -ErrorAction SilentlyContinue | Where-Object {
+                $_.FullName -match '[\\/]sessions[\\/][^\\/]+'
+            } | Select-Object -First 1
+        if ($sessionResidue) {
+            throw "polo run left its temporary session behind: $($sessionResidue.FullName)"
+        }
+        $portMatch = [Regex]::Match($output, 'Server ready: ws://127\.0\.0\.1:(\d+)')
+        if (-not $portMatch.Success) {
+            throw "polo run did not report its temporary loopback port"
+        }
+        $tcp = [Net.Sockets.TcpClient]::new()
+        try {
+            $connect = $tcp.ConnectAsync("127.0.0.1", [int]$portMatch.Groups[1].Value)
+            if ($connect.Wait(1000) -and $tcp.Connected) {
+                throw "polo run left its temporary loopback port open"
+            }
+        } catch [System.AggregateException] {
+            # Refused/closed is the expected result.
+        } finally {
+            $tcp.Dispose()
+        }
+    } finally {
+        if ($provider -and -not $provider.HasExited) {
+            Stop-Process -Id $provider.Id -Force -ErrorAction SilentlyContinue
+            $provider.WaitForExit()
+        }
+        foreach ($name in $names) {
+            [Environment]::SetEnvironmentVariable($name, $saved[$name], "Process")
+        }
     }
 }
 
@@ -205,17 +455,15 @@ function Test-FullLifecycle {
     $runtimeFile = Join-Path $testLocalAppData "Polo AI\runtime\electron.json"
 
     Invoke-Installer $PreviousArtifact
-    $previousVersion = Test-InstalledContainer
-    if ((Invoke-FreshShell "polo --version") -cne $previousVersion) {
+    $installedPreviousVersion = Test-InstalledContainer $false
+    if ($installedPreviousVersion -cne $previousVersion) {
+        throw "Installed previous version differs from preflight metadata"
+    }
+    Assert-ManagedPathPresent
+    if ((Invoke-FreshShell "polo --version") -cne $installedPreviousVersion) {
         throw "Fresh shell did not resolve the previous installed Polo version"
     }
     Invoke-FreshShell "polo --help | findstr /C:`"Usage: polo `" >nul" | Out-Null
-    $runProbe = Invoke-FreshShell `
-        "polo run `"packaged headless probe`"" `
-        @{ POLO_AI_E2E_RUN_PROBE = "1" }
-    if ($runProbe -notmatch "Run probe connected via temporary") {
-        throw "Installed polo run did not exercise its temporary server: $runProbe"
-    }
 
     $originalLauncherContent = Get-Content -LiteralPath $launcher -Raw
     Add-Content -LiteralPath $launcher -Value "rem user modification"
@@ -226,14 +474,16 @@ function Test-FullLifecycle {
     [IO.File]::WriteAllText($launcher, $originalLauncherContent)
 
     Invoke-Installer
-    $currentVersion = Test-InstalledContainer
-    if ($previousVersion -ceq $currentVersion) {
-        throw "Previous artifact version must differ from current artifact ($currentVersion)"
+    $installedCurrentVersion = Test-InstalledContainer
+    if ($installedCurrentVersion -cne $currentVersion) {
+        throw "Installed current version differs from preflight metadata"
     }
-    if ((Invoke-FreshShell "polo --version") -cne $currentVersion) {
+    Assert-ManagedPathPresent
+    if ((Invoke-FreshShell "polo --version") -cne $installedCurrentVersion) {
         throw "Fresh shell did not resolve the upgraded Polo version"
     }
     Invoke-FreshShell "polo --help | findstr /C:`"Usage: polo `" >nul" | Out-Null
+    Invoke-PackagedRunLifecycle
     Test-UserCommandConflict
 
     Invoke-FreshShell "polo app" @{
@@ -253,11 +503,28 @@ function Test-FullLifecycle {
     if ($userPath -and @($userPath -split ";") -contains (Split-Path -Parent $launcher)) {
         throw "NSIS uninstall left the managed Polo PATH entry behind"
     }
+    if ($userPath -cne $originalUserPath) {
+        throw "NSIS uninstall changed PATH entries not owned by Polo"
+    }
+    Assert-FreshShellCommandAbsent
     Write-Host "Full NSIS real install/discovery/cross-version upgrade/ownership/uninstall E2E passed"
 }
 
+New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
+if ($Mode -eq "Full") {
+    $previousVersion = Get-NsisArtifactVersion $PreviousArtifact "previous"
+    $currentVersion = Get-NsisArtifactVersion $installer "current"
+    if (-not $previousVersion -or -not $currentVersion) {
+        throw "Unable to read previous/current sanitized CLI versions"
+    }
+    if ($previousVersion -ceq $currentVersion) {
+        throw "Previous artifact version must differ from current artifact ($currentVersion)"
+    }
+    Write-Host "Read-only NSIS lifecycle preflight passed ($previousVersion -> $currentVersion)"
+}
+
+$env:LOCALAPPDATA = $testLocalAppData
 try {
-    New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     if ($Mode -eq "Full") {
         Test-FullLifecycle
     } else {
@@ -271,6 +538,7 @@ try {
     Write-Host "Final Windows artifact validation passed ($Mode)"
 } finally {
     [Environment]::SetEnvironmentVariable("Path", $originalUserPath, "User")
+    $env:Path = $originalProcessPath
     $env:LOCALAPPDATA = $originalLocalAppData
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

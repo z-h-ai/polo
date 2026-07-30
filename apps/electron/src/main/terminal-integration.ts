@@ -19,6 +19,7 @@ import type {
   TerminalIntegrationErrorCode,
   TerminalIntegrationErrorPayload,
   TerminalIntegrationOperation,
+  TerminalIntegrationStatus,
 } from '../shared/types'
 
 const BLOCK_START = '# >>> Polo CLI >>>'
@@ -56,34 +57,7 @@ export function toTerminalIntegrationErrorPayload(
   }
 }
 
-export interface TerminalIntegrationStatus {
-  supported: boolean
-  installed: boolean
-  pathReady: boolean
-  needsRepair: boolean
-  statusCode:
-    | 'managed_by_installer'
-    | 'profile_conflict'
-    | 'launcher_conflict'
-    | 'command_conflict'
-    | 'ready'
-    | 'repair_required'
-    | 'not_installed'
-  statusParams?: { path?: string }
-  conflict?: {
-    code: 'profile_conflict' | 'launcher_conflict' | 'command_conflict'
-    path: string
-  }
-  launcherPath: string
-  launcherTarget?: string
-  profilePath?: string
-  managedProfiles?: string[]
-  shellCheck?: {
-    status: 'ok' | 'timeout' | 'failed'
-    timeoutMs: number
-    outputTruncated?: boolean
-  }
-}
+export type { TerminalIntegrationStatus } from '../shared/types'
 
 export interface TerminalIntegrationOptions {
   platform?: NodeJS.Platform
