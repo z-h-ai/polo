@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { writeElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
+import type { ErrorCode } from '@polo-ai/shared/protocol'
 import {
   serializeEnvelope,
   deserializeEnvelope,
@@ -20,6 +21,8 @@ interface MockServerOptions {
   workspaces?: unknown[]
   /** Version returned by the WebSocket handshake */
   serverVersion?: string
+  /** RPC errors returned after a successful handshake, keyed by channel. */
+  requestErrors?: Record<string, { code: ErrorCode; message: string }>
 }
 
 interface MockServer {
@@ -86,6 +89,17 @@ function createMockServer(opts?: MockServerOptions): MockServer {
           invokedChannels.push(ch)
           if (!invokeArgs[ch]) invokeArgs[ch] = []
           invokeArgs[ch].push(envelope.args ?? [])
+
+          const requestError = opts?.requestErrors?.[ch]
+          if (requestError) {
+            ws.send(serializeEnvelope({
+              id: envelope.id,
+              type: 'response',
+              channel: ch,
+              error: requestError,
+            }))
+            return
+          }
 
           let result: unknown
           switch (ch) {
@@ -173,13 +187,19 @@ mock.module('./server-spawner.ts', () => ({
     return {
       url: mockWsServer.url,
       token: mockWsServer.token,
+      runtimeDir: join(tmpdir(), 'mock-polo-run-server'),
       stop: async () => {},
     }
   },
 }))
 
 // Import main AFTER mocking
-const { connectForRun, parseArgs, resolveRunWorkspace } = await import('./index.ts')
+const {
+  connectForRun,
+  main,
+  parseArgs,
+  resolveRunWorkspace,
+} = await import('./index.ts')
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -302,6 +322,43 @@ describe('run command', () => {
     expect(connection.source).toBe('discovery')
     expect(spawnCount).toBe(0)
     connection.client.destroy()
+  })
+
+  it('preserves healthy discovery after a post-handshake handler error', async () => {
+    mockWsServer?.close()
+    mockWsServer = createMockServer({
+      requestErrors: {
+        'missing:handler': {
+          code: 'CHANNEL_NOT_FOUND',
+          message: 'No handler for: missing:handler',
+        },
+      },
+    })
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: mockWsServer.url,
+      token: mockWsServer.token,
+      version: '0.10.0',
+    })
+    const runtimePath = process.env.POLO_AI_RUNTIME_DISCOVERY_FILE!
+    const originalExit = process.exit
+    let caught: unknown
+    try {
+      process.exit = ((code?: number) => {
+        throw Object.assign(new Error(`process.exit(${code})`), { exitCode: code })
+      }) as typeof process.exit
+      await main([
+        'bun', 'index.ts',
+        'invoke', 'missing:handler',
+      ])
+    } catch (error) {
+      caught = error
+    } finally {
+      process.exit = originalExit
+    }
+
+    expect((caught as { exitCode?: number })?.exitCode).toBe(1)
+    expect(existsSync(runtimePath)).toBe(true)
   })
 
   it('cleans an unreachable discovery record and falls back for run only', async () => {

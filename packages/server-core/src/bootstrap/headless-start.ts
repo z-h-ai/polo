@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs'
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs'
 import { uptime as osUptime } from 'node:os'
 import { join } from 'node:path'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
@@ -119,7 +119,16 @@ export function generateServerToken(): string {
 // Startup lock file
 // ---------------------------------------------------------------------------
 
-const LOCK_FILE = join(CONFIG_DIR, '.server.lock')
+/**
+ * Server-process coordination is intentionally separate from user config.
+ *
+ * Normal long-lived servers keep the historical CONFIG_DIR lock. A temporary
+ * `polo run` server supplies a private POLO_AI_SERVER_RUNTIME_DIR so multiple
+ * invocations can share the user's config and credentials without contending
+ * on the long-lived Electron/server lock.
+ */
+const SERVER_RUNTIME_DIR = process.env.POLO_AI_SERVER_RUNTIME_DIR || CONFIG_DIR
+const LOCK_FILE = join(SERVER_RUNTIME_DIR, '.server.lock')
 
 interface LockPayload {
   pid: number
@@ -169,6 +178,10 @@ function isLockFromPreviousBoot(startedAt: number): boolean {
 }
 
 function acquireServerLock(logger: PlatformServices['logger']): void {
+  if (!existsSync(SERVER_RUNTIME_DIR)) {
+    mkdirSync(SERVER_RUNTIME_DIR, { recursive: true, mode: 0o700 })
+  }
+
   if (existsSync(LOCK_FILE)) {
     try {
       const content = readFileSync(LOCK_FILE, 'utf-8')

@@ -649,7 +649,7 @@ function isVersionIncompatibility(error: unknown): boolean {
   return (error as { code?: string } | undefined)?.code === 'VERSION_INCOMPATIBLE'
 }
 
-function connectionFailureMessage(
+function handshakeFailureMessage(
   error: unknown,
   discovery?: AppliedRuntimeDiscovery,
 ): string {
@@ -662,6 +662,31 @@ function connectionFailureMessage(
   })
   return `Polo App runtime is unavailable (${message}). `
     + 'Restart it with `polo app`, or use --url/--token to connect to another server.'
+}
+
+/**
+ * Resolve and complete the handshake for commands that require a long-lived
+ * server. Discovery cleanup is deliberately confined to this handshake phase:
+ * once this function returns, RPC/argument/permission/business failures must
+ * not invalidate a healthy Electron discovery record.
+ */
+export async function connectForCommand(args: CliArgs): Promise<CliRpcClient> {
+  const discovery = applyRuntimeDiscovery(args)
+  if (!args.url) {
+    throw new Error(
+      'Polo App is not running. Start it with `polo app`, '
+      + 'or use --url/--token to connect to a remote server.',
+    )
+  }
+
+  const client = createConfiguredClient(args)
+  try {
+    await client.connect()
+    return client
+  } catch (error) {
+    client.destroy()
+    throw new Error(handshakeFailureMessage(error, discovery))
+  }
 }
 
 /**
@@ -921,21 +946,12 @@ async function cmdRun(args: CliArgs): Promise<void> {
   }
 }
 
-async function cmdValidate(args: CliArgs): Promise<number> {
-  // Use a generous timeout for validation steps — source creation and MCP
-  // server startup can be slow on Windows.
-  const validateArgs = { ...args, timeout: Math.max(args.timeout, 30_000) }
-  const client = createConfiguredClient(validateArgs)
-
-  try {
-    return await runValidation(client, args.json, args.noSpinner, args.workspaceDir, {
-      baseUrl: args.baseUrl,
-      apiKey: args.apiKey,
-      provider: args.provider,
-    })
-  } finally {
-    client.destroy()
-  }
+async function cmdValidate(client: CliRpcClient, args: CliArgs): Promise<number> {
+  return runValidation(client, args.json, args.noSpinner, args.workspaceDir, {
+    baseUrl: args.baseUrl,
+    apiKey: args.apiKey,
+    provider: args.provider,
+  })
 }
 
 async function cmdCancel(client: CliRpcClient, args: CliArgs): Promise<void> {
@@ -2172,43 +2188,31 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     return
   }
 
-  // Explicit --url/--token wins. Otherwise discover the private local
-  // Electron endpoint written by the running desktop app.
-  let discovery: AppliedRuntimeDiscovery | undefined
+  // Explicit --url/--token wins. Otherwise discover and handshake with the
+  // private local Electron endpoint. Only this phase may clean stale discovery.
+  const connectionArgs = args.command === 'validate'
+    ? { ...args, timeout: Math.max(args.timeout, 30_000) }
+    : args
+  let client: CliRpcClient
   try {
-    discovery = applyRuntimeDiscovery(args)
+    client = await connectForCommand(connectionArgs)
   } catch (error) {
     err(error instanceof Error ? error.message : String(error))
     process.exit(1)
   }
 
-  // All other commands need a server URL.
-  if (!args.url) {
-    err(
-      'Polo App is not running. Start it with `polo app`, '
-      + 'or use --url/--token to connect to a remote server.',
-    )
-    process.exit(1)
-  }
-
   if (args.command === 'validate') {
     try {
-      const exitCode = await cmdValidate(args)
+      const exitCode = await cmdValidate(client, args)
       if (exitCode !== 0) process.exit(exitCode)
       return
     } catch (error) {
-      err(connectionFailureMessage(error, discovery))
+      err(error instanceof Error ? error.message : String(error))
       process.exit(1)
+    } finally {
+      client.destroy()
     }
   }
-
-  const client = new CliRpcClient(args.url, {
-    token: args.token || undefined,
-    workspaceId: args.workspace,
-    requestTimeout: args.timeout,
-    connectTimeout: args.timeout,
-    expectedServerVersion: cliVersion,
-  })
 
   try {
     switch (args.command) {
@@ -2269,7 +2273,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         process.exit(1)
     }
   } catch (e) {
-    err(connectionFailureMessage(e, discovery))
+    err(e instanceof Error ? e.message : String(e))
     process.exit(1)
   } finally {
     client.destroy()

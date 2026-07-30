@@ -5,7 +5,8 @@
  * and `POLO_AI_SERVER_TOKEN=` lines, and returns a handle to stop the server.
  */
 
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import type { Subprocess } from 'bun'
 import { version as cliVersion } from '../package.json'
@@ -17,6 +18,8 @@ import { version as cliVersion } from '../package.json'
 export interface SpawnedServer {
   url: string
   token: string
+  /** Private lock/runtime namespace owned by this temporary server. */
+  runtimeDir: string
   stop: () => Promise<void>
 }
 
@@ -84,22 +87,41 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   const startupTimeout = opts?.startupTimeout ?? 30_000
   const token = crypto.randomUUID()
   const bunExecutable = resolveBunExecutable()
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'polo-run-server-'))
+  if (process.platform !== 'win32') chmodSync(runtimeDir, 0o700)
+  let runtimeCleaned = false
+  const cleanupRuntime = () => {
+    if (runtimeCleaned) return
+    runtimeCleaned = true
+    rmSync(runtimeDir, { recursive: true, force: true })
+  }
 
   // Strip CLAUDECODE to avoid the Claude Agent SDK's nesting guard rejecting
   // subprocess launches when the CLI is invoked from within a Claude Code session.
   const { CLAUDECODE: _, ...parentEnv } = process.env
-  const proc: Subprocess = Bun.spawn([bunExecutable, 'run', serverEntry], {
-    env: {
-      ...parentEnv,
-      ...inferPackagedEnvironment(serverEntry),
-      ...opts?.env,
-      POLO_AI_SERVER_TOKEN: token,
-      POLO_AI_RPC_PORT: '0',
-      POLO_AI_RPC_HOST: '127.0.0.1',
-    },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
+  let proc: Subprocess
+  try {
+    proc = Bun.spawn([bunExecutable, 'run', serverEntry], {
+      env: {
+        ...parentEnv,
+        ...inferPackagedEnvironment(serverEntry),
+        ...opts?.env,
+        // Keep POLO_AI_CONFIG_DIR inherited so the user's workspaces and
+        // credentials remain available. Only the server lock/runtime is private.
+        POLO_AI_SERVER_RUNTIME_DIR: runtimeDir,
+        POLO_AI_SERVER_TOKEN: token,
+        POLO_AI_RPC_PORT: '0',
+        POLO_AI_RPC_HOST: '127.0.0.1',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+  } catch (error) {
+    cleanupRuntime()
+    throw error
+  }
+
+  const exited = proc.exited.finally(cleanupRuntime)
 
   // Pipe server stderr to our stderr so --debug logs are visible (unless quiet)
   if (proc.stderr && !opts?.quiet) {
@@ -122,11 +144,13 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   return new Promise<SpawnedServer>((resolve, reject) => {
     const timer = setTimeout(() => {
       proc.kill()
+      void exited
       reject(new Error(`Server did not start within ${startupTimeout}ms`))
     }, startupTimeout)
 
     let url = ''
     let buffer = ''
+    let stopped = false
 
     const processLines = () => {
       const lines = buffer.split('\n')
@@ -144,9 +168,12 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
           resolve({
             url,
             token,
+            runtimeDir,
             stop: async () => {
-              proc.kill('SIGTERM')
-              await proc.exited
+              if (stopped) return
+              stopped = true
+              if (proc.exitCode === null) proc.kill('SIGTERM')
+              await exited
             },
           })
           return
@@ -171,6 +198,7 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
       // If we get here without resolving, the process exited before printing the URL
       clearTimeout(timer)
       if (!url) {
+        cleanupRuntime()
         reject(new Error('Server process exited before printing POLO_AI_SERVER_URL'))
       }
     })()

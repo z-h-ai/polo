@@ -65,6 +65,7 @@ export class CliRpcClient {
   /** Connect to the server and complete the handshake. Returns the assigned clientId. */
   async connect(): Promise<string> {
     if (this._destroyed) throw new Error('Client destroyed')
+    if (this._connected && this._clientId) return this._clientId
 
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
