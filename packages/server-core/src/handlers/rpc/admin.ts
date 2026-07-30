@@ -1093,7 +1093,12 @@ export function registerAdminHandlers(
           requestContext,
         )
         const requestedAppConfigVersion = (
-          !force && cached?.authorizationStatus === 'authorized'
+          !force
+          && cached?.authorizationStatus === 'authorized'
+          && getAppCatalogAccessMode(
+            accountId,
+            organizationId.data,
+          ) !== 'denied'
         )
           ? cached.appConfigVersion
           : undefined
@@ -1102,33 +1107,6 @@ export function registerAdminHandlers(
           organizationId.data,
           requestedAppConfigVersion,
         )
-        if (result.notModified && requestedAppConfigVersion === undefined) {
-          const rejected = await sessions.mutateIfCurrent(
-            manager,
-            requestContext.session,
-            async (): Promise<AppCatalogSyncResult> => {
-              if (!isCurrentCatalogSync()) return supersededCatalogResult()
-              const deniedCatalog = denyCatalogScope(
-                accountId,
-                organizationId.data,
-              )
-              return {
-                success: false,
-                errorCode: 'SERVER_ERROR',
-                message: 'Admin returned not modified for a full Catalog request',
-                ...(deniedCatalog
-                  ? {
-                      catalog: deniedCatalog,
-                      accessMode: 'denied' as const,
-                    }
-                  : {}),
-              }
-            },
-          )
-          return rejected.applied
-            ? rejected.value!
-            : staleAdminSessionResult()
-        }
         if (
           !result.notModified
           && result.apps.some(app => app.organizationId !== organizationId.data)
@@ -1144,20 +1122,45 @@ export function registerAdminHandlers(
             requestContext.session,
             async (): Promise<AppCatalogSyncResult> => {
               if (!isCurrentCatalogSync()) return supersededCatalogResult()
-              if (!cached) {
-                throw new AdminError(
-                  'Admin returned not modified without a local app catalog',
-                  'SERVER_ERROR',
+              const currentCatalog = getCachedAppCatalog(
+                accountId,
+                organizationId.data,
+              )
+              if (
+                force
+                || requestedAppConfigVersion === undefined
+                || currentCatalog?.authorizationStatus !== 'authorized'
+                || currentCatalog.appConfigVersion
+                  !== requestedAppConfigVersion
+                || getAppCatalogAccessMode(
+                  accountId,
+                  organizationId.data,
+                ) === 'denied'
+              ) {
+                const deniedCatalog = denyCatalogScope(
+                  accountId,
+                  organizationId.data,
                 )
+                return {
+                  success: false,
+                  errorCode: 'SERVER_ERROR',
+                  message: 'Admin returned not modified for an ineligible Catalog request',
+                  ...(deniedCatalog
+                    ? {
+                        catalog: deniedCatalog,
+                        accessMode: 'denied' as const,
+                      }
+                    : {}),
+                }
               }
               setAppCatalogAccessMode(accountId, organizationId.data, 'online')
               return {
                 success: true as const,
-                catalog: cached,
+                catalog: currentCatalog,
                 source: 'cache' as const,
                 refreshed: false,
                 accessMode: 'online' as const,
-                ...(cached.warnings?.length
+                ...(currentCatalog.warnings?.length
                   ? { warningCode: 'INVALID_SEMVER' }
                   : {}),
               }

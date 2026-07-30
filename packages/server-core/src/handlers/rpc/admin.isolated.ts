@@ -2464,6 +2464,63 @@ describe('registerAdminHandlers', () => {
     expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
   })
 
+  it('rechecks the process access gate before accepting a versioned 304', async () => {
+    const organizationId = 'organization-versioned-304-race'
+    managerState.tokens = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'user-1',
+      username: 'admin',
+    }
+    appCatalogCache.set(`user-1:${organizationId}`, {
+      accountId: 'user-1',
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: 'apps-v1',
+      syncedAt: 50,
+      apps: [{
+        id: 'private-app',
+        organizationId,
+        name: 'Private app',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://private.example.com',
+        sortOrder: 0,
+        availability: 'available',
+      }],
+    })
+    appCatalogAccess.set(`user-1:${organizationId}`, 'online')
+    adminClientBehavior.getAppCatalog = async (
+      _accessToken,
+      _requestedOrganizationId,
+      requestedVersion,
+    ) => {
+      expect(requestedVersion).toBe('apps-v1')
+      appCatalogAccess.set(`user-1:${organizationId}`, 'denied')
+      return { notModified: true }
+    }
+    const { syncAppCatalog } = createHarness()
+
+    const result = await syncAppCatalog(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      organizationId,
+      {},
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'SERVER_ERROR',
+      accessMode: 'denied',
+      catalog: {
+        authorizationStatus: 'denied',
+        apps: [{ id: 'private-app', availability: 'unavailable' }],
+      },
+    })
+    expect(result.catalog.apps[0]).not.toHaveProperty('remoteUrl')
+    expect(appCatalogAccess.get(`user-1:${organizationId}`)).toBe('denied')
+  })
+
   it('rejects reuse of a Catalog id with a different delivery mode', async () => {
     const organizationId = '12222222-2222-4222-8222-222222222222'
     managerState.tokens = {

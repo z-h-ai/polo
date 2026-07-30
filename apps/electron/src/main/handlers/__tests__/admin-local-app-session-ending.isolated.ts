@@ -1082,6 +1082,72 @@ describe('Admin session and scoped local app production wiring', () => {
     expect(managerFactoryCalls()).toBe(0)
   })
 
+  it('keeps a failed persisted denial closed when the next Catalog response is 304', async () => {
+    catalog = {
+      ...createCatalog(),
+      apps: [
+        ...createCatalog().apps,
+        {
+          id: 'remote-app',
+          organizationId: scope.organizationId,
+          name: 'Private Remote App',
+          description: '',
+          deliveryMode: 'remote_url' as const,
+          remoteUrl: 'https://private.example.com/app',
+          availability: 'available' as const,
+          sortOrder: 1,
+        },
+      ],
+    }
+    const { handlers, context } = await createAuthorizationHarness()
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: true, accessMode: 'online' })
+    denyCatalogCacheError = new Error('disk full')
+    getAppCatalogAdmin = async () => {
+      throw new TestAdminError('organization unavailable', 'NOT_FOUND', {
+        status: 404,
+      })
+    }
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: false, errorCode: 'NOT_FOUND' })
+    expect(catalog.authorizationStatus).toBe('authorized')
+    expect(accessMode).toBe('denied')
+
+    const requestedVersions: Array<string | undefined> = []
+    getAppCatalogAdmin = async (
+      _accessToken,
+      _organizationId,
+      appConfigVersion,
+    ) => {
+      requestedVersions.push(appConfigVersion)
+      return { notModified: true }
+    }
+    const retry = await sync(context, scope.organizationId, {})
+
+    expect(requestedVersions).toEqual([undefined])
+    expect(retry).toMatchObject({
+      success: false,
+      errorCode: 'SERVER_ERROR',
+      accessMode: 'denied',
+      catalog: {
+        authorizationStatus: 'denied',
+        apps: [
+          { id: scope.catalogAppId, availability: 'unavailable' },
+          { id: 'remote-app', availability: 'unavailable' },
+        ],
+      },
+    })
+    expect(retry.catalog.apps[0]).not.toHaveProperty('currentRelease')
+    expect(retry.catalog.apps[1]).not.toHaveProperty('remoteUrl')
+    expect(retry.catalog).not.toHaveProperty('trustedReleases')
+    expect(accessMode).toBe('denied')
+    expect(catalog.authorizationStatus).toBe('authorized')
+    expect(catalog.apps[0]).toHaveProperty('currentRelease')
+    expect(catalog.apps[1]).toHaveProperty('remoteUrl')
+  })
+
   it('denies lifecycle access when membership-removal cache persistence fails', async () => {
     const {
       handlers,
