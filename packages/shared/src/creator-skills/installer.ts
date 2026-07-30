@@ -53,6 +53,7 @@ export type CreatorSkillJournalState =
   | 'old_backed_up'
   | 'new_installed'
   | 'ledger_committed'
+  | 'detaching'
   | 'committed'
 
 interface CreatorSkillJournal {
@@ -87,6 +88,14 @@ export interface CreatorSkillInstallerDependencies {
     step: 'transaction_backup_removed' | 'operation_removed'
   ) => Promise<void> | void
 }
+
+export type CreatorSkillUninstallerDependencies = Pick<
+  CreatorSkillInstallerDependencies,
+  | 'beforeCommitSnapshot'
+  | 'onJournalPersisted'
+  | 'syncJournalDirectory'
+  | 'onCleanupStep'
+>
 
 function errorResult(args: {
   operationId: string
@@ -305,7 +314,14 @@ function validateJournalShape(
     || !UUID_PATTERN.test(journal.operationId)
     || !SKILL_SLUG_PATTERN.test(journal.slug)
     || !['install', 'uninstall'].includes(journal.action)
-    || !['prepared', 'old_backed_up', 'new_installed', 'ledger_committed', 'committed']
+    || ![
+      'prepared',
+      'old_backed_up',
+      'new_installed',
+      'ledger_committed',
+      'detaching',
+      'committed',
+    ]
       .includes(journal.state)
     || (journal.oldLedger !== null && typeof journal.oldLedger !== 'string')
     || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES
@@ -765,11 +781,20 @@ async function rollbackJournal(
     : paths.preserveBackupPath && await exists(paths.preserveBackupPath)
       ? paths.preserveBackupPath
       : undefined
+  const detachedTargetAlreadyRestored = (
+    journal.action === 'uninstall'
+    && journal.state === 'detaching'
+    && !recoverableBackupPath
+    && await exists(paths.targetPath)
+  )
   // A directory rename can be durable before the following journal update.
   // Once old_backed_up is persisted, targetPath may therefore already contain
   // the promoted stage even though new_installed was never recorded. The same
   // applies to the prepared -> old_backed_up window when a backup is present.
-  if (recoverableBackupPath || journal.state !== 'prepared') {
+  if (
+    !detachedTargetAlreadyRestored
+    && (recoverableBackupPath || journal.state !== 'prepared')
+  ) {
     await rm(paths.targetPath, { recursive: true, force: true })
   }
   if (recoverableBackupPath) {
@@ -900,15 +925,12 @@ export async function installCreatorSkill(
         await rm(operationPath, { recursive: true, force: true })
         return lateLocalChangesResult(input, conflictState.conflictDetails)
       }
-      const preCommitLocalModified = isTargetLocallyModified(
-        preCommitTargetIdentity,
-        conflictState.existing,
-      )
-      let preserveBackupPath = (
-        preCommitTargetIdentity.kind !== 'missing'
-        && input.backupLocalChanges
-        && (conflictState.localModified || preCommitLocalModified || changedDuringPreparation)
-      )
+      // A process can keep writing through an open file descriptor after the
+      // directory is renamed. Every replaced directory is therefore moved to
+      // a permanent, user-managed backup before transaction cleanup. Limiting
+      // this to directories that were already known to be modified would leave
+      // post-rename writes vulnerable to silent deletion.
+      let preserveBackupPath = preCommitTargetIdentity.kind !== 'missing'
         ? (await resolveCreatorSkillBackupTarget({
             workspaceRoot: canonicalWorkspace,
             slug: input.grant.slug,
@@ -1024,8 +1046,8 @@ export async function installCreatorSkill(
       }
       if (!preserveBackupPath) {
         await rm(transactionBackupPath, { recursive: true, force: true })
-        await dependencies.onCleanupStep?.('transaction_backup_removed')
       }
+      await dependencies.onCleanupStep?.('transaction_backup_removed')
       await rm(operationPath, { recursive: true, force: true })
       await dependencies.onCleanupStep?.('operation_removed')
 
@@ -1099,7 +1121,7 @@ export async function uninstallCreatorSkill(args: {
   operationId: string
   slug: string
   forceDeleteModified?: boolean
-}): Promise<CreatorSkillOperationResult> {
+}, dependencies: CreatorSkillUninstallerDependencies = {}): Promise<CreatorSkillOperationResult> {
   const key = `${resolve(args.workspaceRoot)}\0${args.slug}`
   return enqueue(key, async () => {
     let releaseLock: (() => Promise<void>) | undefined
@@ -1127,27 +1149,19 @@ export async function uninstallCreatorSkill(args: {
       assertChildPath(resolve(canonicalWorkspace, 'skills'), targetPath, 'Creator Skill target')
       await assertCanonicalPathWhenPresent(resolve(canonicalWorkspace, 'skills'), 'Workspace Skills root')
       await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
-      let modified = false
-      if (installed && await exists(targetPath)) {
-        try {
-          modified = (
-            await scanCreatorSkillDirectory(targetPath)
-          ).contentDigest !== installed.contentDigest
-        } catch {
-          modified = true
-        }
-      }
+      const targetIdentity = await inspectCreatorSkillTarget(targetPath)
+      await dependencies.beforeCommitSnapshot?.()
       const nextLedger = installed
         ? removeLedgerInstallation(ledger, args.slug)
         : ledger
-      if (modified && !args.forceDeleteModified) {
+      if (targetIdentity.kind === 'missing') {
         await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
         return {
           success: true,
           operationId: args.operationId,
-          detached: true,
         }
       }
+      const detachInsteadOfDeleting = !args.forceDeleteModified
 
       operationPath = resolvedOperation.operationPath
       await rm(operationPath, { recursive: true, force: true })
@@ -1165,18 +1179,55 @@ export async function uninstallCreatorSkill(args: {
         state: 'prepared',
       }
       const journalPath = join(operationPath, 'journal.json')
-      await writeJournal(journalPath, journal)
+      await persistJournal(journalPath, journal, dependencies)
       if (await exists(targetPath)) await rename(targetPath, transactionBackupPath)
       journal.state = 'old_backed_up'
-      await writeJournal(journalPath, journal)
+      await persistJournal(journalPath, journal, dependencies)
       await writeCreatorSkillsLedger(canonicalWorkspace, nextLedger)
       journal.state = 'ledger_committed'
-      await writeJournal(journalPath, journal)
+      await persistJournal(journalPath, journal, dependencies)
+
+      if (detachInsteadOfDeleting) {
+        // There is no portable way to prove that an editor no longer holds an
+        // open descriptor to the renamed directory. Make the non-destructive
+        // uninstall path explicit in the journal, then restore that same inode
+        // as a regular workspace Skill before committing the Ledger detach.
+        journal.state = 'detaching'
+        const detachCheckpointDurable = await persistJournal(
+          journalPath,
+          journal,
+          dependencies,
+        )
+        if (!detachCheckpointDurable) {
+          throw Object.assign(
+            new Error('Creator Skill detach checkpoint is not durable'),
+            { code: 'creator_skill_uninstall_failed' },
+          )
+        }
+        if (await exists(transactionBackupPath)) {
+          await rename(transactionBackupPath, targetPath)
+        }
+      }
+
       journal.state = 'committed'
-      const committedJournalDurable = await writeJournal(journalPath, journal)
-      committedResult = { success: true, operationId: args.operationId }
+      const committedJournalDurable = await writeJournal(
+        journalPath,
+        journal,
+        dependencies.syncJournalDirectory,
+      )
+      committedResult = {
+        success: true,
+        operationId: args.operationId,
+        ...(detachInsteadOfDeleting ? { detached: true } : {}),
+      }
+      await dependencies.onJournalPersisted?.(journal.state)
       if (!committedJournalDurable) return committedResult
+      if (!detachInsteadOfDeleting) {
+        await rm(transactionBackupPath, { recursive: true, force: true })
+        await dependencies.onCleanupStep?.('transaction_backup_removed')
+      }
       await rm(operationPath, { recursive: true, force: true })
+      await dependencies.onCleanupStep?.('operation_removed')
       return committedResult
     } catch (error) {
       if (journal?.state === 'committed' && committedResult) {

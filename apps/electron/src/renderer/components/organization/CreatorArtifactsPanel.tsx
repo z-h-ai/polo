@@ -32,6 +32,7 @@ import {
   creatorSkillErrorDiagnostic,
   translateCreatorSkillError,
 } from '@/lib/creator-skill-errors'
+import { translateCreatorSkillValidationIssue } from '@/lib/creator-skill-validation-issues'
 import type {
   CreatorArtifact,
   CreatorArtifactDetail,
@@ -115,10 +116,15 @@ export function CreatorArtifactsPanel({
   const [revokeReason, setRevokeReason] = useState('')
   const requestGeneration = useRef(0)
   const detailRequestGeneration = useRef(0)
+  const referenceRequestGeneration = useRef(0)
   const selectedIdRef = useRef(selectedId)
   const organizationIdRef = useRef(organizationId)
+  const detailArtifactIdRef = useRef(detail?.artifact.id ?? null)
+  const installVersionRef = useRef(installVersion)
   selectedIdRef.current = selectedId
   organizationIdRef.current = organizationId
+  detailArtifactIdRef.current = detail?.artifact.id ?? null
+  installVersionRef.current = installVersion
 
   const loadArtifacts = useCallback(async () => {
     const generation = ++requestGeneration.current
@@ -172,6 +178,9 @@ export function CreatorArtifactsPanel({
       || selectedIdRef.current !== artifactId
     ) return
     const generation = ++detailRequestGeneration.current
+    referenceRequestGeneration.current += 1
+    setReferencePreview(null)
+    setReferenceLoading(null)
     const isCurrentRequest = () => (
       generation === detailRequestGeneration.current
       && organizationIdRef.current === requestedOrganizationId
@@ -208,7 +217,6 @@ export function CreatorArtifactsPanel({
         reference: result.reference,
       })
       setVersionDetails({})
-      setReferencePreview(null)
       const published = result.versions
         .filter(item => item.status === 'published')
         .sort((left, right) => right.version.localeCompare(left.version))
@@ -305,6 +313,12 @@ export function CreatorArtifactsPanel({
       detailRequestGeneration.current += 1
     }
   }, [artifacts, loadDetail, organizationId, selectedId])
+
+  useEffect(() => {
+    referenceRequestGeneration.current += 1
+    setReferencePreview(null)
+    setReferenceLoading(null)
+  }, [installVersion, organizationId, selectedId])
 
   useEffect(() => {
     if (!workspaceId) {
@@ -588,28 +602,51 @@ export function CreatorArtifactsPanel({
 
   const previewReference = async (path: string) => {
     if (!detail || !installVersion || !path.startsWith('references/')) return
+    const requested = {
+      organizationId,
+      artifactId: detail.artifact.id,
+      version: installVersion,
+      path,
+    }
+    const generation = ++referenceRequestGeneration.current
+    const isCurrentRequest = () => (
+      generation === referenceRequestGeneration.current
+      && organizationIdRef.current === requested.organizationId
+      && selectedIdRef.current === requested.artifactId
+      && detailArtifactIdRef.current === requested.artifactId
+      && installVersionRef.current === requested.version
+    )
     setReferenceLoading(path)
     setError(null)
     try {
       const result = await window.electronAPI.creatorArtifactGet({
-        organizationId,
-        artifactId: detail.artifact.id,
-        version: installVersion,
-        referencePath: path,
+        organizationId: requested.organizationId,
+        artifactId: requested.artifactId,
+        version: requested.version,
+        referencePath: requested.path,
       })
+      if (!isCurrentRequest()) return
       if (!result.success) {
         setError(resultMessage(t, result))
         return
       }
-      if (!result.reference || result.reference.path !== path) {
+      if (
+        result.artifact.id !== requested.artifactId
+        || result.artifact.organizationId !== requested.organizationId
+        || result.selectedVersion !== requested.version
+        || !result.reference
+        || result.reference.path !== requested.path
+      ) {
         setError(t('creatorSkills.errors.reference_unavailable'))
         return
       }
       setReferencePreview(result.reference)
     } catch {
-      setError(t('creatorSkills.errors.reference_unavailable'))
+      if (isCurrentRequest()) {
+        setError(t('creatorSkills.errors.reference_unavailable'))
+      }
     } finally {
-      setReferenceLoading(null)
+      if (isCurrentRequest()) setReferenceLoading(null)
     }
   }
 
@@ -872,8 +909,10 @@ export function CreatorArtifactsPanel({
                   <Select
                     value={installVersion}
                     onValueChange={value => {
+                      referenceRequestGeneration.current += 1
                       setInstallVersion(value)
                       setReferencePreview(null)
+                      setReferenceLoading(null)
                     }}
                   >
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1070,10 +1109,12 @@ export function CreatorArtifactsPanel({
                       ? <XCircle className="mt-0.5 size-3.5 shrink-0" />
                       : <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />}
                     <span>
-                      <strong>{item.path || 'ZIP'}</strong>
+                      <strong>
+                        {item.path || t('creatorSkills.validation.archiveRoot')}
+                      </strong>
                       {item.field ? ` · ${item.field}` : ''}
                       {' — '}
-                      {item.message}
+                      {translateCreatorSkillValidationIssue(t, item.code)}
                     </span>
                   </div>
                 ))}

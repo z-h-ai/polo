@@ -3,6 +3,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rm,
@@ -44,6 +45,11 @@ const OP_LATE_DOWNLOAD_EDIT = '12121212-1212-4212-8212-121212121212'
 const OP_LATE_SAFETY_EDIT = '13131313-1313-4313-8313-131313131313'
 const OP_LATE_JOURNAL_EDIT = '14141414-1414-4414-8414-141414141414'
 const OP_POST_JOURNAL_EDIT = '15151515-1515-4515-8515-151515151515'
+const OP_OPEN_HANDLE_OLD_BACKED_UP = '16161616-1616-4616-8616-161616161616'
+const OP_OPEN_HANDLE_NEW_INSTALLED = '17171717-1717-4717-8717-171717171717'
+const OP_OPEN_HANDLE_LEDGER_COMMITTED = '18181818-1818-4818-8818-181818181818'
+const OP_OPEN_HANDLE_COMMITTED = '19191919-1919-4919-8919-191919191919'
+const OP_OPEN_HANDLE_CLEANUP = '20202020-2020-4020-8020-202020202020'
 
 function skillContent(version: string): string {
   return `---
@@ -481,6 +487,180 @@ describe('Creator Skill workspace installer', () => {
     })
   })
 
+  it('keeps open-handle writes from every post-rename update window', async () => {
+    const cases = [
+      {
+        operationId: OP_OPEN_HANDLE_OLD_BACKED_UP,
+        journalState: 'old_backed_up',
+      },
+      {
+        operationId: OP_OPEN_HANDLE_NEW_INSTALLED,
+        journalState: 'new_installed',
+      },
+      {
+        operationId: OP_OPEN_HANDLE_LEDGER_COMMITTED,
+        journalState: 'ledger_committed',
+      },
+      {
+        operationId: OP_OPEN_HANDLE_COMMITTED,
+        journalState: 'committed',
+      },
+      {
+        operationId: OP_OPEN_HANDLE_CLEANUP,
+        cleanupStep: 'operation_removed',
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      await withWorkspace(async root => {
+        const first = await packageGrant(root, '1.0.0')
+        expect((await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: OP_BASE,
+          grant: first.grant,
+        }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+        const oldFilePath = join(
+          root,
+          'skills',
+          'install-test',
+          'references',
+          'version.txt',
+        )
+        const oldFileHandle = await open(oldFilePath, 'a')
+        const marker = `late-${testCase.operationId}`
+        const writeLateEdit = async () => {
+          await oldFileHandle.writeFile(`\n${marker}`)
+          await oldFileHandle.sync()
+        }
+        try {
+          const next = await packageGrant(root, '2.0.0')
+          const result = await installCreatorSkill(root, {
+            workspaceId: 'workspace-1',
+            operationId: testCase.operationId,
+            grant: next.grant,
+            replaceExisting: true,
+          }, {
+            fetch: responseFetch(next.bytes),
+            onJournalPersisted: async state => {
+              if ('journalState' in testCase && state === testCase.journalState) {
+                await writeLateEdit()
+              }
+            },
+            onCleanupStep: async step => {
+              if ('cleanupStep' in testCase && step === testCase.cleanupStep) {
+                await writeLateEdit()
+              }
+            },
+          })
+
+          expect(result.success).toBe(true)
+        } finally {
+          await oldFileHandle.close()
+        }
+
+        const backups = await listCreatorSkillBackups(root)
+        expect(backups).toHaveLength(1)
+        expect(await readFile(join(
+          root,
+          'skill-backups',
+          backups[0]!.slug,
+          backups[0]!.backupId,
+          'references',
+          'version.txt',
+        ), 'utf8')).toContain(marker)
+        expect(await readFile(
+          join(root, 'skills', 'install-test', 'references', 'version.txt'),
+          'utf8',
+        )).toBe('2.0.0')
+      })
+    }
+  })
+
+  it('detaches instead of deleting writes from every safe-uninstall window', async () => {
+    const cases = [
+      {
+        operationId: '21212121-2121-4121-8121-212121212121',
+        afterScan: true,
+      },
+      {
+        operationId: '22222223-2222-4222-8222-222222222223',
+        journalState: 'old_backed_up',
+      },
+      {
+        operationId: '23232323-2323-4323-8323-232323232323',
+        journalState: 'ledger_committed',
+      },
+      {
+        operationId: '24242424-2424-4424-8424-242424242424',
+        journalState: 'committed',
+      },
+      {
+        operationId: '25252525-2525-4525-8525-252525252525',
+        cleanupStep: 'operation_removed',
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      await withWorkspace(async root => {
+        const first = await packageGrant(root, '1.0.0')
+        expect((await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: OP_BASE,
+          grant: first.grant,
+        }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+        const oldFilePath = join(
+          root,
+          'skills',
+          'install-test',
+          'references',
+          'version.txt',
+        )
+        const oldFileHandle = await open(oldFilePath, 'a')
+        const marker = `late-uninstall-${testCase.operationId}`
+        const writeLateEdit = async () => {
+          await oldFileHandle.writeFile(`\n${marker}`)
+          await oldFileHandle.sync()
+        }
+        try {
+          const result = await uninstallCreatorSkill({
+            workspaceRoot: root,
+            workspaceId: 'workspace-1',
+            operationId: testCase.operationId,
+            slug: 'install-test',
+          }, {
+            beforeCommitSnapshot: async () => {
+              if ('afterScan' in testCase) await writeLateEdit()
+            },
+            onJournalPersisted: async state => {
+              if ('journalState' in testCase && state === testCase.journalState) {
+                await writeLateEdit()
+              }
+            },
+            onCleanupStep: async step => {
+              if ('cleanupStep' in testCase && step === testCase.cleanupStep) {
+                await writeLateEdit()
+              }
+            },
+          })
+
+          expect(result).toMatchObject({ success: true, detached: true })
+        } finally {
+          await oldFileHandle.close()
+        }
+
+        expect(await readFile(oldFilePath, 'utf8')).toContain(marker)
+        expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
+        expect(await access(join(
+          root,
+          '.creator-skill-ops',
+          testCase.operationId,
+        )).then(() => true, () => false)).toBe(false)
+      })
+    }
+  })
+
   it('rejects backup deletion through a symlink ancestor outside the workspace', async () => {
     await withWorkspace(async root => {
       const outside = await mkdtemp(join(tmpdir(), 'creator-skill-backup-outside-'))
@@ -716,6 +896,53 @@ describe('Creator Skill workspace installer', () => {
     })
   })
 
+  it('keeps a restored detached directory when recovery sees the pre-commit checkpoint', async () => {
+    await withWorkspace(async root => {
+      const operationId = '26262626-2626-4626-8626-262626262626'
+      const operationPath = join(root, '.creator-skill-ops', operationId)
+      const targetPath = join(root, 'skills', 'install-test')
+      const oldInstallation = {
+        artifactId: 'artifact-old',
+        organizationId: 'organization-1',
+        slug: 'install-test',
+        version: '1.0.0',
+        archiveChecksum: 'a'.repeat(64),
+        contentDigest: 'b'.repeat(64),
+        installedAt: '2026-07-30T00:00:00.000Z',
+      }
+      const oldLedger = `${JSON.stringify({
+        schemaVersion: 1,
+        installed: [oldInstallation],
+      }, null, 2)}\n`
+      await mkdir(operationPath, { recursive: true })
+      await mkdir(targetPath, { recursive: true })
+      await writeFile(join(targetPath, 'SKILL.md'), 'restored detached content')
+      await writeFile(join(root, 'creator-skills.json'), JSON.stringify({
+        schemaVersion: 1,
+        installed: [],
+      }))
+      await writeFile(join(operationPath, 'journal.json'), JSON.stringify({
+        schemaVersion: 1,
+        operationId,
+        action: 'uninstall',
+        slug: 'install-test',
+        targetPath,
+        transactionBackupPath: join(operationPath, 'backup'),
+        ledgerPath: join(root, 'creator-skills.json'),
+        oldLedger,
+        state: 'detaching',
+      }))
+
+      await recoverCreatorSkillOperations(root)
+
+      expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8'))
+        .toBe('restored detached content')
+      expect((await readCreatorSkillsLedger(root)).installed[0])
+        .toMatchObject({ artifactId: 'artifact-old', version: '1.0.0' })
+      expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
   it('rejects operationId traversal before touching the derived operation path', async () => {
     await withWorkspace(async root => {
       const outside = join(root, 'outside-operation')
@@ -843,12 +1070,16 @@ describe('Creator Skill workspace installer', () => {
         fetch: responseFetch(next.bytes),
         onJournalPersisted: async state => {
           if (state !== 'committed') return
-          expect(await access(join(
+          const journal = JSON.parse(await readFile(join(
             root,
             '.creator-skill-ops',
             OP_FAULT_COMMITTED,
-            'backup',
-          )).then(() => true, () => false)).toBe(true)
+            'journal.json',
+          ), 'utf8'))
+          expect(await access(journal.preserveBackupPath).then(
+            () => true,
+            () => false,
+          )).toBe(true)
           throw new Error('simulated crash after committed')
         },
       })
@@ -899,6 +1130,14 @@ describe('Creator Skill workspace installer', () => {
 
       expect(result.success).toBe(true)
       expect(await access(join(operationPath, 'backup')).then(
+        () => true,
+        () => false,
+      )).toBe(false)
+      const persistedJournal = JSON.parse(await readFile(
+        join(operationPath, 'journal.json'),
+        'utf8',
+      ))
+      expect(await access(persistedJournal.preserveBackupPath).then(
         () => true,
         () => false,
       )).toBe(true)

@@ -37,7 +37,12 @@ await mkdir(workspaceTwo.rootPath)
 await mkdir(workspaceCaseCollision.rootPath)
 let workspaceOrder = [workspaceOne, workspaceTwo, workspaceCaseCollision]
 
-const [{ RPC_CHANNELS }, { registerSkillsHandlers }] = await Promise.all([
+const [{
+  RPC_CHANNELS,
+}, {
+  assertCreatorSkillCommitAllowed,
+  registerSkillsHandlers,
+}] = await Promise.all([
   import('@polo-ai/shared/protocol'),
   import('./skills'),
 ])
@@ -123,6 +128,34 @@ afterAll(async () => {
 })
 
 describe('Creator Skill workspace RPC boundary', () => {
+  it('allows an already-authorized archived install but blocks revocation and feature shutdown', () => {
+    expect(() => assertCreatorSkillCommitAllowed({
+      success: true,
+      creatorSkillArtifacts: true,
+      status: 'active',
+    })).not.toThrow()
+    expect(() => assertCreatorSkillCommitAllowed({
+      success: true,
+      creatorSkillArtifacts: true,
+      status: 'archived',
+    })).not.toThrow()
+    expect(() => assertCreatorSkillCommitAllowed({
+      success: true,
+      creatorSkillArtifacts: true,
+      status: 'revoked',
+    })).toThrow(expect.objectContaining({
+      code: 'artifact_version_revoked',
+    }))
+    expect(() => assertCreatorSkillCommitAllowed({
+      success: true,
+      creatorSkillArtifacts: false,
+      status: 'active',
+      errorCode: 'creator_skill_feature_disabled',
+    })).toThrow(expect.objectContaining({
+      code: 'creator_skill_feature_disabled',
+    }))
+  })
+
   it('binds target and mutations to the connection workspace', async () => {
     const getTarget = handlers.get(RPC_CHANNELS.creatorSkills.GET_TARGET)!
     const install = handlers.get(RPC_CHANNELS.creatorSkills.INSTALL)!

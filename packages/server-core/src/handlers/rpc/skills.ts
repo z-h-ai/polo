@@ -82,6 +82,29 @@ function workspaceMutationError(
   }
 }
 
+export function assertCreatorSkillCommitAllowed(check: {
+  success?: boolean
+  creatorSkillArtifacts?: boolean
+  status?: 'active' | 'revoked' | 'archived'
+  errorCode?: string
+}): void {
+  if (!check.success || check.creatorSkillArtifacts !== true) {
+    throw Object.assign(new Error('Creator Skill distribution is disabled'), {
+      code: check.errorCode ?? 'creator_skill_feature_disabled',
+    })
+  }
+  if (check.status === 'revoked') {
+    throw Object.assign(new Error('This Creator Skill version has been revoked'), {
+      code: 'artifact_version_revoked',
+    })
+  }
+  if (check.status !== 'active' && check.status !== 'archived') {
+    throw Object.assign(new Error('Creator Skill safety status is unavailable'), {
+      code: 'artifact_not_published',
+    })
+  }
+}
+
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
   RPC_CHANNELS.skills.GET_FILES,
@@ -320,22 +343,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
           status?: 'active' | 'revoked' | 'archived'
           errorCode?: string
         }
-        if (!check.success || check.creatorSkillArtifacts !== true) {
-          throw Object.assign(new Error('Creator Skill distribution is disabled'), {
-            code: check.errorCode ?? 'creator_skill_feature_disabled',
-          })
-        }
-        if (check.status !== 'active') {
-          throw Object.assign(new Error(
-            check.status === 'revoked'
-              ? 'This Creator Skill version has been revoked'
-              : 'This Creator Skill is archived',
-          ), {
-            code: check.status === 'revoked'
-              ? 'artifact_version_revoked'
-              : 'artifact_not_published',
-          })
-        }
+        assertCreatorSkillCommitAllowed(check)
       },
     })
     if (result.success) {

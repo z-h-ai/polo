@@ -395,6 +395,137 @@ describe('CreatorArtifactsPanel', () => {
     })
   })
 
+  it('does not let an older reference response pollute the selected version', async () => {
+    detailArtifact = {
+      ...skill,
+      latestPublishedVersion: '2.0.0',
+    }
+    detailVersions = [
+      {
+        id: 'version-one',
+        artifactId: skill.id,
+        version: '1.0.0',
+        status: 'published',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        uploadGeneration: 1,
+      },
+      {
+        id: 'version-two',
+        artifactId: skill.id,
+        version: '2.0.0',
+        status: 'published',
+        createdAt: '2026-07-30T01:00:00.000Z',
+        uploadGeneration: 1,
+      },
+    ]
+    const oldReference = deferred<Record<string, unknown>>()
+    const currentReference = deferred<Record<string, unknown>>()
+    detailResponse = input => {
+      const selected = input.version as string | undefined
+      if (!selected) {
+        return {
+          success: true,
+          artifact: detailArtifact,
+          versions: detailVersions,
+        }
+      }
+      if (input.referencePath) {
+        return selected === '1.0.0'
+          ? oldReference.promise
+          : currentReference.promise
+      }
+      return {
+        success: true,
+        artifact: detailArtifact,
+        versions: detailVersions,
+        selectedVersion: selected,
+        skillContent: `SKILL content for ${selected}`,
+        fileTree: [{
+          path: `references/version-${selected}.txt`,
+          size: 10,
+        }],
+      }
+    }
+
+    renderPanel(false, 'workspace-one')
+    fireEvent.click((await screen.findByText('Review Skill')).closest('button')!)
+    await screen.findByText('references/version-2.0.0.txt')
+
+    const selectVersion = async (version: string) => {
+      fireEvent.pointerDown(screen.getByRole('combobox'), {
+        button: 0,
+        buttons: 1,
+        ctrlKey: false,
+        pointerType: 'mouse',
+      })
+      fireEvent.click(await screen.findByRole('option', { name: version }))
+    }
+
+    await selectVersion('1.0.0')
+    await screen.findByText('references/version-1.0.0.txt')
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as text' }))
+
+    await selectVersion('2.0.0')
+    await screen.findByText('references/version-2.0.0.txt')
+    fireEvent.click(screen.getByRole('button', { name: 'Preview as text' }))
+
+    await act(async () => {
+      currentReference.resolve({
+        success: true,
+        artifact: detailArtifact,
+        versions: detailVersions,
+        selectedVersion: '2.0.0',
+        reference: {
+          path: 'references/version-2.0.0.txt',
+          content: 'Current reference content',
+        },
+      })
+    })
+    expect(await screen.findByText('Current reference content')).toBeTruthy()
+
+    await act(async () => {
+      oldReference.resolve({
+        success: true,
+        artifact: detailArtifact,
+        versions: detailVersions,
+        selectedVersion: '1.0.0',
+        reference: {
+          path: 'references/version-1.0.0.txt',
+          content: 'Stale reference content',
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText('Current reference content')).toBeTruthy()
+      expect(screen.queryByText('Stale reference content')).toBeNull()
+    })
+  })
+
+  it('localizes validation codes and keeps backend messages diagnostic-only', async () => {
+    await i18n.changeLanguage('es')
+    detailVersions = [{
+      id: 'version-draft',
+      artifactId: skill.id,
+      version: '1.0.0',
+      status: 'validation_failed',
+      createdAt: '2026-07-30T00:00:00.000Z',
+      uploadGeneration: 1,
+      validationIssues: [{
+        code: 'path_traversal',
+        severity: 'error',
+        path: '',
+        message: 'Backend English path traversal detail',
+      }],
+    }]
+
+    renderPanel(true)
+    fireEvent.click((await screen.findByText('Review Skill')).closest('button')!)
+
+    expect(await screen.findByText('Archivo de Skill')).toBeTruthy()
+    expect(await screen.findByText(/recorrido fuera de la raíz/)).toBeTruthy()
+    expect(screen.queryByText('Backend English path traversal detail')).toBeNull()
+  })
+
   it('ignores an older artifact detail response that arrives after a newer selection', async () => {
     const secondSkill = {
       ...skill,
