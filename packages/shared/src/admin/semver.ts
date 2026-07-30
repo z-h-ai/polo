@@ -10,7 +10,10 @@ const CATALOG_SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
 
 function parseCatalogSemVer(version: string): ParsedCatalogSemVer | null {
-  const normalized = version.trim().replace(/^v(?=\d)/i, '')
+  // Catalog versions are signed metadata. Do not normalize whitespace here:
+  // every layer must reject the same non-SemVer bytes instead of silently
+  // accepting a renderer-only or cache-only variant.
+  const normalized = version.replace(/^v(?=\d)/i, '')
   const match = CATALOG_SEMVER_PATTERN.exec(normalized)
   if (!match) return null
   return {

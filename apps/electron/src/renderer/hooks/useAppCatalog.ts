@@ -144,6 +144,9 @@ export function useAppCatalog() {
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
   const contextKeyRef = useRef<string | null>(organizationContextKey)
   contextKeyRef.current = organizationContextKey
+  // Context generation invalidates lifecycle results only when account/org
+  // authorization changes. Sync generation is intentionally separate so an
+  // ordinary same-context Catalog refresh cannot discard a successful start.
   const contextGenerationRef = useRef(0)
   const syncGenerationRef = useRef(0)
   const operationsRef = useRef(new Map<string, Promise<unknown>>())
@@ -270,6 +273,9 @@ export function useAppCatalog() {
       for (const scopeKey of failedScopeKeys) {
         const previousStatus = current.statuses[scopeKey]
         if (previousStatus) {
+          // A later 10,000-item chunk may fail after earlier chunks succeeded.
+          // Preserve the last known value per failed scope instead of replacing
+          // installed withdrawn apps with an invented not-installed status.
           nextStatuses[scopeKey] = previousStatus
         }
       }
@@ -477,6 +483,8 @@ export function useAppCatalog() {
       || status.status === 'starting'
       || status.installationStatus !== undefined
     ))
+    // The 500ms loop is only for a bounded active set. Full Catalog state is
+    // loaded once or after operations, never polled item-by-item.
     .slice(0, BUSY_RUNTIME_STATUS_LIMIT)
     .flatMap(([scopeKey, status]) => (
       status.scope?.kind === 'catalog'

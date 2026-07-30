@@ -1530,6 +1530,7 @@ describe('registerAdminHandlers', () => {
       success: true,
       user: { id: 'account-b' },
     })
+    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
     finishCleanup.resolve()
 
     expect(await staleLogout).toEqual({
@@ -1700,7 +1701,7 @@ describe('registerAdminHandlers', () => {
     expect(appCatalogAccess.get('account-b:organization-b')).toBe('online')
   })
 
-  it('fails closed without replacing credentials when old-account cleanup fails', async () => {
+  it('commits the replacement session even when old-account cleanup fails', async () => {
     managerState.tokens = {
       accessToken: 'account-a-token',
       refreshToken: 'account-a-refresh',
@@ -1717,13 +1718,20 @@ describe('registerAdminHandlers', () => {
       { clientId: 'client-1', workspaceId: null, webContentsId: null },
       'admin',
       'secret',
-    )).toMatchObject({ success: false })
+    )).toMatchObject({
+      success: true,
+      user: { id: 'user-1' },
+    })
     expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
     expect(managerState.tokens).toMatchObject({
-      userId: 'account-a',
-      accessToken: 'account-a-token',
+      userId: 'user-1',
+      accessToken: 'access-token',
     })
-    expect(adminClientCalls.map(call => call.method)).toEqual(['login'])
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'login',
+      'getLlmConnections',
+    ])
+    expect(loggerWarn).toHaveBeenCalled()
   })
 
   it('syncs transit-encrypted admin api keys into credential storage as plaintext', async () => {

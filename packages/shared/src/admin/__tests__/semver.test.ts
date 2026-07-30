@@ -7,7 +7,7 @@ import {
 
 describe('Catalog strict SemVer 2.0', () => {
   it('normalizes the compatibility v prefix and accepts valid prerelease/build data', () => {
-    expect(normalizeCatalogSemVer(' v1.2.3-rc.1+build.5 ')).toBe(
+    expect(normalizeCatalogSemVer('v1.2.3-rc.1+build.5')).toBe(
       '1.2.3-rc.1+build.5',
     )
     expect(isValidCatalogSemVer('V0.0.0')).toBe(true)
@@ -38,6 +38,10 @@ describe('Catalog strict SemVer 2.0', () => {
       '1.0.0-01',
       '1.0.0-alpha..1',
       'release-1',
+      ' 1.2.3',
+      '1.2.3 ',
+      '\t1.2.3',
+      '1.2.3\n',
     ]) {
       expect(normalizeCatalogSemVer(version)).toBeNull()
       expect(compareCatalogSemVer(version, '1.0.0')).toBeNull()

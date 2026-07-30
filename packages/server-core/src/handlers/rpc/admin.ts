@@ -121,6 +121,10 @@ class AdminSessionCoordinator {
   private mutationTail: Promise<void> = Promise.resolve()
   private loginAttempt = 0
   private endingSession: AdminSessionSnapshot | null = null
+  private readonly accountCleanups = new Map<string, {
+    generation: number
+    promise: Promise<void>
+  }>()
 
   constructor(
     private readonly closeCatalogAuthorization: (accountId: string) => void,
@@ -151,12 +155,44 @@ class AdminSessionCoordinator {
     return attempt === this.loginAttempt
   }
 
-  advanceGeneration(): void {
+  advanceGeneration(): number {
     this.generation += 1
+    return this.generation
   }
 
   closeAuthorizationForEnding(accountId: string): void {
     this.closeCatalogAuthorization(accountId)
+  }
+
+  getOrStartAccountCleanup(
+    accountId: string,
+    cleanupGeneration: number,
+    operation: () => void | Promise<void>,
+  ): Promise<void> {
+    const existing = this.accountCleanups.get(accountId)
+    if (existing) return existing.promise
+
+    let operationResult: Promise<void>
+    try {
+      operationResult = Promise.resolve(operation())
+    } catch (error) {
+      operationResult = Promise.reject(error)
+    }
+    let trackedPromise!: Promise<void>
+    trackedPromise = operationResult.finally(() => {
+      const current = this.accountCleanups.get(accountId)
+      if (
+        current?.generation === cleanupGeneration
+        && current.promise === trackedPromise
+      ) {
+        this.accountCleanups.delete(accountId)
+      }
+    })
+    this.accountCleanups.set(accountId, {
+      generation: cleanupGeneration,
+      promise: trackedPromise,
+    })
+    return trackedPromise
   }
 
   createSnapshot(tokens: StoredAdminTokens): AdminSessionSnapshot {
@@ -1387,7 +1423,11 @@ async function endAdminSession(
     )
   }
   try {
-    await deps?.onAdminSessionEnding?.(expected.tokens.userId)
+    await sessions.getOrStartAccountCleanup(
+      expected.tokens.userId,
+      ending.generation,
+      () => deps?.onAdminSessionEnding?.(expected.tokens.userId),
+    )
   } catch (error) {
     deps?.platform.logger.warn(
       '[Admin] local app cleanup failed while ending the session; continuing fail-closed cleanup:',
@@ -1437,10 +1477,22 @@ async function completeAdminLogin(args: {
 
     // Advancing before the first cleanup await makes every older request
     // stale for the full account-transition window.
-    args.sessions.advanceGeneration()
+    const transitionGeneration = args.sessions.advanceGeneration()
     if (previousTokens && switchingAccounts) {
       args.sessions.closeAuthorizationForEnding(previousTokens.userId)
-      await args.deps.onAdminSessionEnding?.(previousTokens.userId)
+      // The coordinator deduplicates this against an already-running logout
+      // cleanup. Starting it under the transition lock gates account A
+      // immediately, but deliberately not awaiting it lets account B commit.
+      void args.sessions.getOrStartAccountCleanup(
+        previousTokens.userId,
+        transitionGeneration,
+        () => args.deps.onAdminSessionEnding?.(previousTokens.userId),
+      ).catch(error => {
+        args.deps.platform.logger.warn(
+          '[Admin] previous account cleanup failed during login replacement:',
+          error instanceof Error ? error.message : String(error),
+        )
+      })
       await deleteAdminManagedConnections(
         args.manager,
         previousAdminConnectionSlugs,

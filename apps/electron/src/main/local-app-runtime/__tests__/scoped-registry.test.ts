@@ -313,7 +313,7 @@ describe('scoped local app runtime registry', () => {
     expect(cleanupFinished).toBe(true)
   })
 
-  it('waits for an in-flight start before stopping its process', async () => {
+  it('rejects an in-flight start after logout and deduplicates account cleanup', async () => {
     let resolveStart!: (value: LocalAppStartResult) => void
     let startEntered!: () => void
     const started = new Promise<void>(resolve => {
@@ -342,6 +342,7 @@ describe('scoped local app runtime registry', () => {
     const start = registry.start(accountScope)
     await started
     const cleanup = registry.stopAccount('account-a')
+    const duplicateCleanup = registry.stopAccount('account-a')
     await Promise.resolve()
     expect(calls).toEqual(['start'])
 
@@ -351,8 +352,8 @@ describe('scoped local app runtime registry', () => {
       url: 'http://127.0.0.1:3456',
       port: 3456,
     })
-    await start
-    await cleanup
+    await expect(start).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    await Promise.all([cleanup, duplicateCleanup])
     expect(calls).toEqual(['start', 'stop'])
   })
 
@@ -425,5 +426,30 @@ describe('scoped local app runtime registry', () => {
       appId: '应用.App-ID',
       scope: catalogScope,
     })
+  })
+
+  it('rejects whitespace-padded Catalog versions before creating a runtime manager', async () => {
+    let managerCount = 0
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => {
+        managerCount += 1
+        return new LocalAppRuntimeManager(options)
+      },
+    })
+
+    for (const version of [' 1.0.0', '1.0.0 ']) {
+      await expect(registry.install({
+        scope: scope('account-a'),
+        version,
+        downloadUrl: 'https://example.com/app.zip',
+        checksum: 'a'.repeat(64),
+        sizeBytes: 1,
+        platform: 'darwin',
+        arch: 'arm64',
+      })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    }
+
+    expect(managerCount).toBe(0)
   })
 })

@@ -12,6 +12,7 @@ import type {
   LocalAppStartResult,
   LocalAppUninstallOptions,
 } from '@polo-ai/shared/protocol'
+import { normalizeCatalogSemVer } from '@polo-ai/shared/admin/semver'
 import {
   LocalAppRuntimeManager,
   type LocalAppRuntimeLogger,
@@ -126,6 +127,7 @@ export class ScopedLocalAppRuntimeRegistry {
     Promise<LocalAppRuntimeManager | null>
   >()
   private readonly sessionEndingAccounts = new Set<string>()
+  private readonly accountLifecycleGenerations = new Map<string, number>()
   private readonly accountOperations = new Map<
     string,
     Map<Promise<unknown>, CatalogLocalAppScope>
@@ -145,6 +147,12 @@ export class ScopedLocalAppRuntimeRegistry {
     request: ScopedCatalogInstallRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<LocalAppInstalledApp> {
+    if (!normalizeCatalogSemVer(request.version)) {
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'Catalog local app version must be strict SemVer',
+      )
+    }
     return this.runTrackedScopeOperation(request.scope, async scope => {
       const manager = await this.getManager(scope)
       this.assertAccountSessionActive(scope.accountId)
@@ -397,6 +405,10 @@ export class ScopedLocalAppRuntimeRegistry {
     this.sessionEndingAccounts.add(safeAccountId)
     const existingStop = this.stopAccountPromises.get(safeAccountId)
     if (existingStop) return existingStop
+    this.accountLifecycleGenerations.set(
+      safeAccountId,
+      this.getAccountLifecycleGeneration(safeAccountId) + 1,
+    )
     const stopPromise = this.performStopAccount(safeAccountId)
       .finally(() => {
         if (this.stopAccountPromises.get(safeAccountId) === stopPromise) {
@@ -416,6 +428,10 @@ export class ScopedLocalAppRuntimeRegistry {
       )
     }
     this.sessionEndingAccounts.delete(safeAccountId)
+    this.accountLifecycleGenerations.set(
+      safeAccountId,
+      this.getAccountLifecycleGeneration(safeAccountId) + 1,
+    )
   }
 
   private async performStopAccount(safeAccountId: string): Promise<void> {
@@ -499,6 +515,10 @@ export class ScopedLocalAppRuntimeRegistry {
     }
   }
 
+  private getAccountLifecycleGeneration(accountId: string): number {
+    return this.accountLifecycleGenerations.get(accountId) ?? 0
+  }
+
   private runTrackedScopeOperation<T>(
     rawScope: CatalogLocalAppScope,
     operation: (scope: CatalogLocalAppScope) => Promise<T>,
@@ -513,9 +533,14 @@ export class ScopedLocalAppRuntimeRegistry {
     operation: () => Promise<T>,
   ): Promise<T> {
     const accounts = new Map<string, CatalogLocalAppScope>()
+    const lifecycleGenerations = new Map<string, number>()
     for (const scope of scopes) {
       this.assertAccountSessionActive(scope.accountId)
       if (!accounts.has(scope.accountId)) accounts.set(scope.accountId, scope)
+      lifecycleGenerations.set(
+        scope.accountId,
+        this.getAccountLifecycleGeneration(scope.accountId),
+      )
     }
     let trackedPromise!: Promise<T>
     trackedPromise = Promise.resolve()
@@ -524,6 +549,24 @@ export class ScopedLocalAppRuntimeRegistry {
           this.assertAccountSessionActive(accountId)
         }
         return operation()
+      })
+      .then(result => {
+        // Entry authorization is insufficient: logout may begin while a
+        // manager call is pending. The captured lifecycle generation makes
+        // that late result permanently stale even if the account later resumes.
+        for (const accountId of accounts.keys()) {
+          this.assertAccountSessionActive(accountId)
+          if (
+            this.getAccountLifecycleGeneration(accountId)
+            !== lifecycleGenerations.get(accountId)
+          ) {
+            throw new LocalAppRuntimeError(
+              'NOT_AUTHORIZED',
+              'The Admin session changed during the local app operation',
+            )
+          }
+        }
+        return result
       })
       .finally(() => {
         for (const accountId of accounts.keys()) {

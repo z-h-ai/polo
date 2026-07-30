@@ -135,6 +135,25 @@ describe('app catalog cache', () => {
     expect(saved.warnings).toEqual([])
   })
 
+  it('does not trust whitespace-padded release versions', () => {
+    saveAppCatalog('account-a', 'organization-1', {
+      appConfigVersion: 'v1',
+      apps: [bundleApp('app-a', '1.2.0')],
+    }, 100)
+
+    for (const version of [' 1.3.0', '1.3.0 ']) {
+      const refreshed = saveAppCatalog('account-a', 'organization-1', {
+        appConfigVersion: version,
+        apps: [bundleApp('app-a', version)],
+      }, 200)
+      expect(refreshed.trustedReleases?.['app-a']?.version).toBe('1.2.0')
+      expect(refreshed.warnings).toEqual([{
+        code: 'invalid_semver',
+        catalogAppId: 'app-a',
+      }])
+    }
+  })
+
   it('migrates a valid v1 release into trusted release metadata', () => {
     writeFileSync(join(configDir, 'admin-app-catalog.json'), JSON.stringify({
       schemaVersion: 1,
