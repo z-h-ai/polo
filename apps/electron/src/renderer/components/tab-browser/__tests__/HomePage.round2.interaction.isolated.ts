@@ -8,6 +8,10 @@ import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
 import {
   BUILTIN_APP_DEFINITIONS,
 } from '../../../../shared/tab-browser-types'
+import {
+  KEYS,
+  set as setLocalStorage,
+} from '@/lib/local-storage'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -15,6 +19,7 @@ setupI18n()
 const openApp = jest.fn()
 const removeApp = jest.fn(async () => {})
 let appCatalogHook: any
+let installedApps = [...BUILTIN_APP_DEFINITIONS]
 
 function signedOutCatalogHook() {
   return {
@@ -55,7 +60,7 @@ appCatalogHook = signedOutCatalogHook()
 
 mock.module('@/context/TabShellContext', () => ({
   useTabShell: () => ({
-    installedApps: BUILTIN_APP_DEFINITIONS,
+    installedApps,
     openApp,
     removeApp,
   }),
@@ -71,6 +76,7 @@ const {
   render,
   screen,
   waitFor,
+  within,
 } = await import('@testing-library/react')
 const { HomePage } = await import('../HomePage')
 const {
@@ -83,6 +89,7 @@ beforeEach(async () => {
   openApp.mockClear()
   removeApp.mockClear()
   appCatalogHook = signedOutCatalogHook()
+  installedApps = [...BUILTIN_APP_DEFINITIONS]
   await i18n.changeLanguage('en')
 })
 
@@ -113,6 +120,46 @@ describe('HomePage round-two regressions', () => {
 
     fireEvent.click(screen.getByText('Pro Buddy'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
+  })
+
+  it('keeps non-recent built-ins discoverable on a signed-out returning profile', () => {
+    installedApps = [
+      ...BUILTIN_APP_DEFINITIONS,
+      {
+        id: 'external-recent',
+        name: 'External Recent',
+        url: 'https://external.example.com',
+        type: 'webapp',
+        createdAt: 1,
+        order: 3,
+      },
+    ]
+    setLocalStorage(KEYS.homeRecentApps, [
+      {
+        id: BUILTIN_APP_DEFINITIONS[0]!.id,
+        kind: 'builtin',
+        openedAt: 2,
+      },
+      {
+        id: 'external-recent',
+        kind: 'external',
+        openedAt: 1,
+      },
+    ])
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    const launcher = screen.getByTestId('builtin-app-launcher')
+    expect(within(launcher).queryByText('Pro Buddy')).toBeNull()
+    expect(within(launcher).getByText('Kanban')).toBeTruthy()
+    expect(within(launcher).getByText('AirDrop')).toBeTruthy()
+
+    fireEvent.click(within(launcher).getByText('Kanban'))
+    expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[1])
   })
 
   it('maps operation and catalog codes through the active non-English locale', async () => {

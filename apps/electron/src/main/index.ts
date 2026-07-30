@@ -768,6 +768,18 @@ app.whenReady().then(async () => {
               accountId,
               organizationId,
             ),
+            onAdminCatalogAppsWithdrawn: (
+              accountId: string,
+              organizationId: string,
+              catalogAppIds: readonly string[],
+            ) => getScopedLocalAppRuntimeRegistry().stopApps(
+              catalogAppIds.map(catalogAppId => ({
+                kind: 'catalog' as const,
+                accountId,
+                organizationId,
+                catalogAppId,
+              })),
+            ),
             getRetainedCatalogAppIds: (
               accountId: string,
               organizationId: string,

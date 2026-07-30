@@ -394,6 +394,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
 
     return entries.slice(0, MAX_RECENT_APPS)
   })()
+  const remainingBuiltinApps = builtinApps.filter(app => (
+    !resolvedRecent.some(item => item.key === `builtin:${app.id}`)
+  ))
 
   return (
     <main
@@ -421,7 +424,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
               />
             ))}
           </div>
-          {resolvedRecent.length === 0 && (
+          {remainingBuiltinApps.length > 0 && (
             <div
               className="rounded-xl border border-foreground/10 bg-foreground/2 p-4"
               data-testid="builtin-app-launcher"
@@ -431,7 +434,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
                 {t('homeApps.builtin.description')}
               </p>
               <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6">
-                {builtinApps.map(app => (
+                {remainingBuiltinApps.map(app => (
                   <AppIcon
                     key={app.id}
                     app={app}

@@ -364,6 +364,73 @@ describe('scoped local app runtime registry', () => {
     expect(calls).toEqual(['start', 'stop'])
   })
 
+  it('fences only the withdrawn full app scope within one organization', async () => {
+    const withdrawnScope = {
+      ...scope('account-a'),
+      catalogAppId: 'withdrawn-app',
+    }
+    const retainedScope = {
+      ...scope('account-a'),
+      catalogAppId: 'retained-app',
+    }
+    let bothStartsEntered!: () => void
+    const bothStarted = new Promise<void>(resolve => {
+      bothStartsEntered = resolve
+    })
+    const starts = new Map<string, {
+      resolve(value: LocalAppStartResult): void
+    }>()
+    const stopped: string[] = []
+    class TrackingManager extends LocalAppRuntimeManager {
+      override start(appId: string): Promise<LocalAppStartResult> {
+        let resolve!: (value: LocalAppStartResult) => void
+        const result = new Promise<LocalAppStartResult>(resolveResult => {
+          resolve = resolveResult
+        })
+        starts.set(appId, { resolve })
+        if (starts.size === 2) bothStartsEntered()
+        return result
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        stopped.push(appId)
+        return { appId, status: 'stopped' }
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => new TrackingManager(options),
+    })
+    const withdrawnStart = registry.start(withdrawnScope)
+    const retainedStart = registry.start(retainedScope)
+    const withdrawnRuntimeId = createCatalogRuntimeAppId(withdrawnScope)
+    const retainedRuntimeId = createCatalogRuntimeAppId(retainedScope)
+    await bothStarted
+
+    const cleanup = registry.stopApps([withdrawnScope])
+    starts.get(retainedRuntimeId)!.resolve({
+      appId: retainedRuntimeId,
+      version: '1.0.0',
+      url: 'http://127.0.0.1:3458',
+      port: 3458,
+    })
+    await expect(retainedStart).resolves.toMatchObject({
+      url: 'http://127.0.0.1:3458',
+    })
+
+    starts.get(withdrawnRuntimeId)!.resolve({
+      appId: withdrawnRuntimeId,
+      version: '1.0.0',
+      url: 'http://127.0.0.1:3459',
+      port: 3459,
+    })
+    await expect(withdrawnStart).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    await cleanup
+    expect(stopped).toEqual([withdrawnRuntimeId])
+  })
+
   it('rejects an in-flight start after logout and deduplicates account cleanup', async () => {
     let resolveStart!: (value: LocalAppStartResult) => void
     let startEntered!: () => void

@@ -1096,6 +1096,38 @@ export function registerAdminHandlers(
                   : {}),
               }
             }
+            const currentCatalog = getCachedAppCatalog(
+              accountId,
+              organizationId.data,
+            )
+            const nextAvailableAppIds = new Set(result.apps.map(app => app.id))
+            const withdrawnLocalAppIds = (currentCatalog?.apps ?? [])
+              .filter(app => (
+                app.deliveryMode === 'local_bundle'
+                && (
+                  app.availability === undefined
+                  || app.availability === 'available'
+                )
+                && !nextAvailableAppIds.has(app.id)
+              ))
+              .map(app => app.id)
+            if (withdrawnLocalAppIds.length > 0) {
+              // This host callback must advance every exact app lifecycle
+              // generation synchronously. Cache commit follows only after that
+              // fence exists, so an already-entered manager result cannot race
+              // the new withdrawn authorization truth.
+              const cleanup = deps.onAdminCatalogAppsWithdrawn?.(
+                accountId,
+                organizationId.data,
+                withdrawnLocalAppIds,
+              )
+              void cleanup?.catch(error => {
+                log?.warn(
+                  '[Admin] withdrawn Catalog app cleanup failed:',
+                  error instanceof Error ? error.message : String(error),
+                )
+              })
+            }
             const savedCatalog = saveAppCatalog(
               accountId,
               organizationId.data,

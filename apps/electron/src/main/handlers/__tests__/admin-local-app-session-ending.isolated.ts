@@ -203,7 +203,36 @@ mock.module('@polo-ai/shared/admin', () => ({
     : null,
   listCachedAppCatalogs: (accountId: string) =>
     accountId === scope.accountId ? [catalog] : [],
-  saveAppCatalog: () => catalog,
+  saveAppCatalog: (
+    accountId: string,
+    organizationId: string,
+    response: {
+      appConfigVersion: string
+      apps: AppCatalogCacheEntry['apps']
+    },
+  ) => {
+    const visibleIds = new Set(response.apps.map(app => app.id))
+    const withdrawnApps = [
+      ...(catalog.withdrawnApps ?? []).filter(app => !visibleIds.has(app.id)),
+      ...catalog.apps
+        .filter(app => !visibleIds.has(app.id))
+        .map(app => ({ ...app, availability: 'withdrawn' as const })),
+    ]
+    catalog = {
+      ...catalog,
+      accountId,
+      organizationId,
+      authorizationStatus: 'authorized',
+      appConfigVersion: response.appConfigVersion,
+      syncedAt: Date.now(),
+      apps: response.apps.map(app => ({
+        ...app,
+        availability: 'available' as const,
+      })),
+      withdrawnApps,
+    }
+    return catalog
+  },
   getAppCatalogAccessMode: (accountId: string) =>
     deniedAccounts.has(accountId) ? 'denied' : accessMode ?? 'offline',
   setAppCatalogAccessMode: (
@@ -298,6 +327,11 @@ function registerProductionHandlers(
       accountId: string,
       organizationId: string,
     ) => Promise<void>
+    onAdminCatalogAppsWithdrawn?: (
+      accountId: string,
+      organizationId: string,
+      catalogAppIds: readonly string[],
+    ) => Promise<void>
   } = {},
 ) {
   const handlers = new Map<string, HandlerFn>()
@@ -345,6 +379,17 @@ function registerProductionHandlers(
     onAdminCatalogScopeDenied: options.onAdminCatalogScopeDenied
       ?? ((accountId: string, organizationId: string) =>
         runtimeRegistry!.stopOrganization(accountId, organizationId)),
+    onAdminCatalogAppsWithdrawn: options.onAdminCatalogAppsWithdrawn
+      ?? ((
+        accountId: string,
+        organizationId: string,
+        catalogAppIds: readonly string[],
+      ) => runtimeRegistry!.stopApps(catalogAppIds.map(catalogAppId => ({
+        kind: 'catalog',
+        accountId,
+        organizationId,
+        catalogAppId,
+      })))),
     onAdminSessionStarted: (accountId: string) =>
       runtimeRegistry!.resumeAccount(accountId),
   } satisfies HandlerDeps
@@ -709,6 +754,192 @@ describe('Admin session and scoped local app production wiring', () => {
     })
     await processStopped.promise
     expect(calls).toEqual(['start', 'stop'])
+  })
+
+  it('fences an entered start when a successful Catalog refresh withdraws that app', async () => {
+    const startEntered = createDeferred<void>()
+    const finishStart = createDeferred<LocalAppStartResult>()
+    const processStopped = createDeferred<void>()
+    const calls: string[] = []
+    class DeferredStartManager extends LocalAppRuntimeManager {
+      override start(appId: string): Promise<LocalAppStartResult> {
+        calls.push('start')
+        startEntered.resolve()
+        return finishStart.promise
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        processStopped.resolve()
+        return { appId, status: 'stopped' }
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-app-withdrawn-start-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new DeferredStartManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [],
+    })
+    const { handlers, context } = registerProductionHandlers(root)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+
+    const pendingStart = start(context, scope)
+    await startEntered.promise
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({
+        success: true,
+        catalog: {
+          appConfigVersion: 'catalog-v2',
+          apps: [],
+          withdrawnApps: [{ id: scope.catalogAppId }],
+        },
+      })
+
+    finishStart.resolve({
+      appId: createCatalogRuntimeAppId(scope),
+      version: '1.0.0',
+      url: 'http://127.0.0.1:4672',
+      port: 4672,
+    })
+    await expect(pendingStart).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    await processStopped.promise
+    expect(calls).toEqual(['start', 'stop'])
+  })
+
+  it('keeps an entered start valid when a successful refresh retains that app', async () => {
+    const startEntered = createDeferred<void>()
+    const finishStart = createDeferred<LocalAppStartResult>()
+    const calls: string[] = []
+    class DeferredStartManager extends LocalAppRuntimeManager {
+      override start(): Promise<LocalAppStartResult> {
+        calls.push('start')
+        startEntered.resolve()
+        return finishStart.promise
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        return { appId, status: 'stopped' }
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-app-retained-start-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new DeferredStartManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    const { availability: _availability, ...networkApp } = catalog.apps[0]!
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [networkApp],
+    })
+    const { handlers, context } = registerProductionHandlers(root)
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+
+    const pendingStart = start(context, scope)
+    await startEntered.promise
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({
+        success: true,
+        catalog: {
+          appConfigVersion: 'catalog-v2',
+          apps: [{ id: scope.catalogAppId }],
+        },
+      })
+
+    finishStart.resolve({
+      appId: createCatalogRuntimeAppId(scope),
+      version: '1.0.0',
+      url: 'http://127.0.0.1:4673',
+      port: 4673,
+    })
+    await expect(pendingStart).resolves.toMatchObject({
+      url: 'http://127.0.0.1:4673',
+    })
+    expect(calls).toEqual(['start'])
+  })
+
+  it('cancels an entered install when a successful Catalog refresh withdraws that app', async () => {
+    const installEntered = createDeferred<void>()
+    const finishInstall = createDeferred<LocalAppInstalledApp>()
+    const processStopped = createDeferred<void>()
+    const calls: string[] = []
+    class DeferredInstallManager extends LocalAppRuntimeManager {
+      override install(): Promise<LocalAppInstalledApp> {
+        calls.push('install')
+        installEntered.resolve()
+        return finishInstall.promise
+      }
+
+      override cancelInstall(): boolean {
+        calls.push('cancel-install')
+        finishInstall.reject(new LocalAppRuntimeError(
+          'INSTALL_CANCELLED',
+          'Catalog app was withdrawn',
+        ))
+        return true
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        calls.push('stop')
+        processStopped.resolve()
+        return { appId, status: 'stopped' }
+      }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'polo-app-withdrawn-install-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new DeferredInstallManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [],
+    })
+    const { handlers, context } = registerProductionHandlers(root)
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+
+    const pendingInstall = install(context, installRequest())
+    const installOutcome = pendingInstall.then(
+      () => ({ success: true as const }),
+      (error: unknown) => ({ success: false as const, error }),
+    )
+    await installEntered.promise
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({
+        success: true,
+        catalog: { apps: [] },
+      })
+
+    await expect(installOutcome).resolves.toMatchObject({
+      success: false,
+      error: { code: 'NOT_AUTHORIZED' },
+    })
+    await processStopped.promise
+    expect(calls).toEqual([
+      'install',
+      'cancel-install',
+      'cancel-install',
+      'stop',
+    ])
   })
 
   it('cancels an entered install when Catalog returns NOT_FOUND', async () => {

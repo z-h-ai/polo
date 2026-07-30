@@ -49,6 +49,16 @@ export interface HandlerDeps<
     organizationId: string,
   ) => Promise<void>
   /**
+   * Host-owned app authorization fence. Invocation must synchronously
+   * invalidate in-flight lifecycle commits for exactly these full Catalog
+   * scopes before returning the slow app-scoped stop/cancel cleanup promise.
+   */
+  onAdminCatalogAppsWithdrawn?: (
+    accountId: string,
+    organizationId: string,
+    catalogAppIds: readonly string[],
+  ) => Promise<void>
+  /**
    * Returns Catalog business ids that still have local installation or
    * runtime data and therefore must survive withdrawn tombstone pruning.
    */
