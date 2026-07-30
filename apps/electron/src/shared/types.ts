@@ -321,10 +321,21 @@ export interface TerminalIntegrationStatus {
   installed: boolean
   pathReady: boolean
   needsRepair: boolean
-  conflict?: string
+  statusCode:
+    | 'managed_by_installer'
+    | 'profile_conflict'
+    | 'launcher_conflict'
+    | 'command_conflict'
+    | 'ready'
+    | 'repair_required'
+    | 'not_installed'
+  statusParams?: { path?: string }
+  conflict?: {
+    code: 'profile_conflict' | 'launcher_conflict' | 'command_conflict'
+    path: string
+  }
   launcherPath: string
   profilePath?: string
-  message: string
 }
 
 export interface ElectronAPI {

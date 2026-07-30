@@ -85,7 +85,12 @@ import { setSearchPlatform, setImageProcessor } from '@polo-ai/server-core/servi
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
-import { getWorkspaces, getWorkspaceByNameOrId, loadStoredConfig, addWorkspace, saveConfig } from '@polo-ai/shared/config'
+import {
+  addWorkspace,
+  getWorkspaces,
+  getWorkspaceByNameOrId,
+  initializeStoredConfigIfMissing,
+} from '@polo-ai/shared/config'
 import { getDefaultWorkspacesDir } from '@polo-ai/shared/workspaces'
 import { initializeDocs } from '@polo-ai/shared/docs'
 import { initializeReleaseNotes } from '@polo-ai/shared/release-notes'
@@ -463,9 +468,11 @@ async function createInitialWindows(): Promise<void> {
   // If no workspaces exist, create default "My Workspace" on first run
   if (workspaces.length === 0) {
     // Ensure config file exists (addWorkspace requires it)
-    if (!loadStoredConfig()) {
-      saveConfig({ workspaces: [], activeWorkspaceId: null, activeSessionId: null })
-    }
+    initializeStoredConfigIfMissing({
+      workspaces: [],
+      activeWorkspaceId: null,
+      activeSessionId: null,
+    })
     const defaultPath = join(getDefaultWorkspacesDir(), 'my-workspace')
     addWorkspace({ rootPath: defaultPath, name: 'My Workspace' })
     workspaces = getWorkspaces() // Refresh after creation

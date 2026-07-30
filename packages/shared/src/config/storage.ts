@@ -14,7 +14,11 @@ import { extractWorkspaceSlugFromPath } from '../utils/workspace-slug.ts';
 import { initializeDocs } from '../docs/index.ts';
 import { expandPath, toPortablePath, getBundledAssetsDir } from '../utils/paths.ts';
 import { debug } from '../utils/debug.ts';
-import { readJsonFileSync } from '../utils/files.ts';
+import {
+  atomicWriteFileSync,
+  readJsonFileSync,
+  withCrossProcessFileLockSync,
+} from '../utils/files.ts';
 import { CONFIG_DIR } from './paths.ts';
 import type { StoredAttachment, StoredMessage } from '@polo-ai/core/types';
 import type { Plan } from '../agent/plan-types.ts';
@@ -111,6 +115,7 @@ export interface StoredConfig {
 
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 const CONFIG_DEFAULTS_FILE = join(CONFIG_DIR, 'config-defaults.json');
+const CONFIG_TRANSACTION_LOCK = join(CONFIG_DIR, '.config.transaction.lock');
 
 // Track if config-defaults have been synced this session (prevents re-sync on hot reload)
 let configDefaultsSynced = false;
@@ -241,7 +246,7 @@ export function ensureConfigDir(): void {
   configDirInitialized = true;
 }
 
-export function loadStoredConfig(): StoredConfig | null {
+function loadStoredConfigFromDisk(): StoredConfig | null {
   try {
     if (!existsSync(CONFIG_FILE)) {
       return null;
@@ -284,12 +289,15 @@ export function loadStoredConfig(): StoredConfig | null {
   }
 }
 
+export function loadStoredConfig(): StoredConfig | null {
+  return loadStoredConfigFromDisk();
+}
+
 // Legacy credential helpers removed - use connection-aware credential lookup instead:
 // - getAnthropicApiKey() → credentialManager.getLlmApiKey(connectionSlug)
 // - getClaudeOAuthToken() → credentialManager.getLlmOAuth(connectionSlug)
 
-export function saveConfig(config: StoredConfig): void {
-  ensureConfigDir();
+function writeConfigUnlocked(config: StoredConfig): void {
   const defaults = loadConfigDefaults();
 
   // Convert paths to portable form (~ prefix) for cross-machine compatibility
@@ -306,7 +314,45 @@ export function saveConfig(config: StoredConfig): void {
     })),
   };
 
-  writeFileSync(CONFIG_FILE, JSON.stringify(storageConfig, null, 2), 'utf-8');
+  atomicWriteFileSync(
+    CONFIG_FILE,
+    JSON.stringify(storageConfig, null, 2),
+    0o600,
+  );
+}
+
+/**
+ * Re-read, mutate, and atomically persist global config under a dedicated
+ * cross-process transaction lock. Callers must keep the callback synchronous
+ * so the complete read-modify-write sequence remains inside the lock.
+ */
+export function updateStoredConfig<T>(
+  update: (config: StoredConfig) => T,
+): T | undefined {
+  ensureConfigDir();
+  return withCrossProcessFileLockSync(CONFIG_TRANSACTION_LOCK, () => {
+    const config = loadStoredConfigFromDisk();
+    if (!config) return undefined;
+    const result = update(config);
+    writeConfigUnlocked(config);
+    return result;
+  });
+}
+
+export function saveConfig(config: StoredConfig): void {
+  ensureConfigDir();
+  withCrossProcessFileLockSync(CONFIG_TRANSACTION_LOCK, () => {
+    writeConfigUnlocked(config);
+  });
+}
+
+export function initializeStoredConfigIfMissing(initial: StoredConfig): boolean {
+  ensureConfigDir();
+  return withCrossProcessFileLockSync(CONFIG_TRANSACTION_LOCK, () => {
+    if (loadStoredConfigFromDisk()) return false;
+    writeConfigUnlocked(initial);
+    return true;
+  });
 }
 
 // Legacy updateApiKey() removed - use setupLlmConnection IPC handler instead.
@@ -334,10 +380,9 @@ export function getNotificationsEnabled(): boolean {
  * Set whether desktop notifications are enabled.
  */
 export function setNotificationsEnabled(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.notificationsEnabled = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.notificationsEnabled = enabled;
+  });
 }
 
 /**
@@ -357,10 +402,9 @@ export function getAutoCapitalisation(): boolean {
  * Set whether auto-capitalisation is enabled.
  */
 export function setAutoCapitalisation(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.autoCapitalisation = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.autoCapitalisation = enabled;
+  });
 }
 
 /**
@@ -380,10 +424,9 @@ export function getSendMessageKey(): 'enter' | 'cmd-enter' {
  * Set the key combination used to send messages.
  */
 export function setSendMessageKey(key: 'enter' | 'cmd-enter'): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.sendMessageKey = key;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.sendMessageKey = key;
+  });
 }
 
 /**
@@ -402,10 +445,9 @@ export function getSpellCheck(): boolean {
  * Set whether spell check is enabled in the input.
  */
 export function setSpellCheck(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.spellCheck = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.spellCheck = enabled;
+  });
 }
 
 /**
@@ -425,10 +467,9 @@ export function getKeepAwakeWhileRunning(): boolean {
  * Set whether screen should stay awake while sessions are running.
  */
 export function setKeepAwakeWhileRunning(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.keepAwakeWhileRunning = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.keepAwakeWhileRunning = enabled;
+  });
 }
 
 /**
@@ -448,10 +489,9 @@ export function getRichToolDescriptions(): boolean {
  * Set whether rich tool descriptions are enabled.
  */
 export function setRichToolDescriptions(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.richToolDescriptions = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.richToolDescriptions = enabled;
+  });
 }
 
 /**
@@ -468,10 +508,9 @@ export function getExtendedPromptCache(): boolean {
  * Set whether extended prompt cache (1h TTL) is enabled.
  */
 export function setExtendedPromptCache(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.extendedPromptCache = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.extendedPromptCache = enabled;
+  });
 }
 
 /**
@@ -492,10 +531,9 @@ export function getBrowserToolEnabled(): boolean {
  * Set whether the built-in browser tool is enabled.
  */
 export function setBrowserToolEnabled(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.browserToolEnabled = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.browserToolEnabled = enabled;
+  });
 
   // Clear session tool caches so all sessions pick up the change immediately.
   // Lazy import to avoid circular dependency (storage ← session-scoped-tools ← storage).
@@ -520,10 +558,9 @@ export function getAllowRemoteEvaluate(): boolean {
 }
 
 export function setAllowRemoteEvaluate(allowed: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.allowRemoteEvaluate = allowed;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.allowRemoteEvaluate = allowed;
+  });
 }
 
 /**
@@ -542,10 +579,9 @@ export function getEnable1MContext(): boolean {
  * Set whether 1M context window is enabled.
  */
 export function setEnable1MContext(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.enable1MContext = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.enable1MContext = enabled;
+  });
 }
 
 /**
@@ -564,10 +600,9 @@ export function getRtkEnabled(): boolean {
  * Set whether rtk Bash-output compression is enabled.
  */
 export function setRtkEnabled(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.rtkEnabled = enabled;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.rtkEnabled = enabled;
+  });
 }
 
 /**
@@ -585,13 +620,14 @@ export function getGitBashPath(): string | undefined {
  * Returns false if the config could not be loaded (path not persisted).
  */
 export function setGitBashPath(path: string): boolean {
-  const config = loadStoredConfig();
-  if (!config) {
+  const persisted = updateStoredConfig(config => {
+    config.gitBashPath = path;
+    return true;
+  });
+  if (persisted === undefined) {
     console.warn('[storage] Failed to persist Git Bash path: config could not be loaded');
     return false;
   }
-  config.gitBashPath = path;
-  saveConfig(config);
   return true;
 }
 
@@ -600,10 +636,9 @@ export function setGitBashPath(path: string): boolean {
  * Used when the stored path is stale or invalid.
  */
 export function clearGitBashPath(): void {
-  const config = loadStoredConfig();
-  if (!config || !config.gitBashPath) return;
-  delete config.gitBashPath;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    delete config.gitBashPath;
+  });
 }
 
 // Note: getDefaultWorkingDirectory/setDefaultWorkingDirectory removed
@@ -631,14 +666,13 @@ export function getAdminUrl(): string | undefined {
  * Persist admin server URL.
  */
 export function setAdminUrl(adminUrl: string | undefined): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  if (adminUrl) {
-    config.adminUrl = adminUrl;
-  } else {
-    delete config.adminUrl;
-  }
-  saveConfig(config);
+  updateStoredConfig(config => {
+    if (adminUrl) {
+      config.adminUrl = adminUrl;
+    } else {
+      delete config.adminUrl;
+    }
+  });
 }
 
 /**
@@ -653,14 +687,13 @@ export function getAdminConfigVersion(): string | undefined {
  * Persist latest admin config version observed by the client.
  */
 export function setAdminConfigVersion(adminConfigVersion: string | undefined): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  if (adminConfigVersion) {
-    config.adminConfigVersion = adminConfigVersion;
-  } else {
-    delete config.adminConfigVersion;
-  }
-  saveConfig(config);
+  updateStoredConfig(config => {
+    if (adminConfigVersion) {
+      config.adminConfigVersion = adminConfigVersion;
+    } else {
+      delete config.adminConfigVersion;
+    }
+  });
 }
 
 /**
@@ -668,16 +701,15 @@ export function setAdminConfigVersion(adminConfigVersion: string | undefined): v
  * Deletes config file and credentials file.
  */
 export async function clearAllConfig(): Promise<void> {
-  // Delete config file
-  if (existsSync(CONFIG_FILE)) {
-    rmSync(CONFIG_FILE);
-  }
+  withCrossProcessFileLockSync(CONFIG_TRANSACTION_LOCK, () => {
+    if (existsSync(CONFIG_FILE)) rmSync(CONFIG_FILE);
+  });
 
-  // Delete credentials file
   const credentialsFile = join(CONFIG_DIR, 'credentials.enc');
-  if (existsSync(credentialsFile)) {
-    rmSync(credentialsFile);
-  }
+  const credentialsLock = join(CONFIG_DIR, '.credentials.transaction.lock');
+  withCrossProcessFileLockSync(credentialsLock, () => {
+    if (existsSync(credentialsFile)) rmSync(credentialsFile);
+  });
 
   // Optionally: Delete workspace data (conversations)
   const workspacesDir = join(CONFIG_DIR, 'workspaces');
@@ -766,23 +798,19 @@ export function updateWorkspaceRemoteServer(
   workspaceId: string,
   remoteServer: { url: string; token: string; remoteWorkspaceId: string },
 ): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  const ws = config.workspaces.find(w => w.id === workspaceId);
-  if (!ws) throw new Error('Workspace not found');
-  ws.remoteServer = remoteServer;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    const ws = config.workspaces.find(w => w.id === workspaceId);
+    if (!ws) throw new Error('Workspace not found');
+    ws.remoteServer = remoteServer;
+  });
 }
 
 export function setActiveWorkspace(workspaceId: string): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
-  const workspace = config.workspaces.find(w => w.id === workspaceId);
-  if (!workspace) return;
-
-  config.activeWorkspaceId = workspaceId;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    if (config.workspaces.some(w => w.id === workspaceId)) {
+      config.activeWorkspaceId = workspaceId;
+    }
+  });
 }
 
 /**
@@ -802,12 +830,17 @@ export async function switchWorkspaceAtomic(workspaceId: string): Promise<{ work
   // Get or create the latest session for this workspace
   const session = await getOrCreateLatestSession(workspace.rootPath);
 
-  // Update active workspace in config
-  config.activeWorkspaceId = workspaceId;
-  workspace.lastAccessedAt = Date.now();
-  saveConfig(config);
+  // Re-read under the config transaction after the async session operation.
+  const updatedWorkspace = updateStoredConfig(latestConfig => {
+    const latestWorkspace = latestConfig.workspaces.find(w => w.id === workspaceId);
+    if (!latestWorkspace) return null;
+    latestConfig.activeWorkspaceId = workspaceId;
+    latestWorkspace.lastAccessedAt = Date.now();
+    return { ...latestWorkspace };
+  });
+  if (!updatedWorkspace) return null;
 
-  return { workspace, session };
+  return { workspace: updatedWorkspace, session };
 }
 
 /**
@@ -815,51 +848,42 @@ export async function switchWorkspaceAtomic(workspaceId: string): Promise<{ work
  * @param workspace - Workspace data (must include rootPath)
  */
 export function addWorkspace(workspace: Omit<Workspace, 'id' | 'createdAt' | 'slug'>): Workspace {
-  const config = loadStoredConfig();
-  if (!config) {
-    throw new Error('No config found');
-  }
+  const result = updateStoredConfig(config => {
+    const slug = extractWorkspaceSlugFromPath(workspace.rootPath, '');
 
-  const slug = extractWorkspaceSlugFromPath(workspace.rootPath, '');
+    // Check if workspace with same rootPath already exists
+    const existing = config.workspaces.find(w => w.rootPath === workspace.rootPath);
+    if (existing) {
+      const updated: Workspace = {
+        ...existing,
+        ...workspace,
+        slug,
+        id: existing.id,
+        createdAt: existing.createdAt,
+      };
+      config.workspaces[config.workspaces.indexOf(existing)] = updated;
+      return updated;
+    }
 
-  // Check if workspace with same rootPath already exists
-  const existing = config.workspaces.find(w => w.rootPath === workspace.rootPath);
-  if (existing) {
-    // Update existing workspace with new settings
-    const updated: Workspace = {
-      ...existing,
+    const newWorkspace: Workspace = {
       ...workspace,
       slug,
-      id: existing.id,
-      createdAt: existing.createdAt,
+      id: generateWorkspaceId(),
+      createdAt: Date.now(),
     };
-    const existingIndex = config.workspaces.indexOf(existing);
-    config.workspaces[existingIndex] = updated;
-    saveConfig(config);
-    return updated;
-  }
 
-  const newWorkspace: Workspace = {
-    ...workspace,
-    slug,
-    id: generateWorkspaceId(),
-    createdAt: Date.now(),
-  };
+    if (!isValidWorkspace(newWorkspace.rootPath)) {
+      createWorkspaceAtPath(newWorkspace.rootPath, newWorkspace.name);
+    }
 
-  // Create workspace folder structure if it doesn't exist
-  if (!isValidWorkspace(newWorkspace.rootPath)) {
-    createWorkspaceAtPath(newWorkspace.rootPath, newWorkspace.name);
-  }
-
-  config.workspaces.push(newWorkspace);
-
-  // If this is the only workspace, make it active
-  if (config.workspaces.length === 1) {
-    config.activeWorkspaceId = newWorkspace.id;
-  }
-
-  saveConfig(config);
-  return newWorkspace;
+    config.workspaces.push(newWorkspace);
+    if (config.workspaces.length === 1) {
+      config.activeWorkspaceId = newWorkspace.id;
+    }
+    return newWorkspace;
+  });
+  if (!result) throw new Error('No config found');
+  return result;
 }
 
 /**
@@ -868,56 +892,39 @@ export function addWorkspace(workspace: Omit<Workspace, 'id' | 'createdAt' | 'sl
  * Call this on app startup.
  */
 export function syncWorkspaces(): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
   const discoveredPaths = discoverWorkspacesInDefaultLocation();
-  const trackedPaths = new Set(config.workspaces.map(w => w.rootPath));
-
-  let added = false;
-  for (const rootPath of discoveredPaths) {
-    if (trackedPaths.has(rootPath)) continue;
-
-    // Load the workspace config to get name
-    const wsConfig = loadWorkspaceConfig(rootPath);
-    if (!wsConfig) continue;
-
-    const newWorkspace: Workspace = {
-      id: wsConfig.id || generateWorkspaceId(),
-      name: wsConfig.name,
-      slug: extractWorkspaceSlugFromPath(rootPath, ''),
-      rootPath,
-      createdAt: wsConfig.createdAt || Date.now(),
-    };
-
-    config.workspaces.push(newWorkspace);
-    added = true;
-  }
-
-  if (added) {
-    // If no active workspace, set to first
+  updateStoredConfig(config => {
+    const trackedPaths = new Set(config.workspaces.map(w => w.rootPath));
+    for (const rootPath of discoveredPaths) {
+      if (trackedPaths.has(rootPath)) continue;
+      const wsConfig = loadWorkspaceConfig(rootPath);
+      if (!wsConfig) continue;
+      config.workspaces.push({
+        id: wsConfig.id || generateWorkspaceId(),
+        name: wsConfig.name,
+        slug: extractWorkspaceSlugFromPath(rootPath, ''),
+        rootPath,
+        createdAt: wsConfig.createdAt || Date.now(),
+      });
+      trackedPaths.add(rootPath);
+    }
     if (!config.activeWorkspaceId && config.workspaces.length > 0) {
       config.activeWorkspaceId = config.workspaces[0]!.id;
     }
-    saveConfig(config);
-  }
+  });
 }
 
 export async function removeWorkspace(workspaceId: string): Promise<boolean> {
-  const config = loadStoredConfig();
-  if (!config) return false;
-
-  const index = config.workspaces.findIndex(w => w.id === workspaceId);
-  if (index === -1) return false;
-
-  config.workspaces.splice(index, 1);
-
-  // If we removed the active workspace, switch to first available
-  if (config.activeWorkspaceId === workspaceId) {
-    config.activeWorkspaceId = config.workspaces[0]?.id || null;
-  }
-
-  saveConfig(config);
+  const removed = updateStoredConfig(config => {
+    const index = config.workspaces.findIndex(w => w.id === workspaceId);
+    if (index === -1) return false;
+    config.workspaces.splice(index, 1);
+    if (config.activeWorkspaceId === workspaceId) {
+      config.activeWorkspaceId = config.workspaces[0]?.id || null;
+    }
+    return true;
+  }) ?? false;
+  if (!removed) return false;
 
   // Clean up credential store credentials for this workspace
   const manager = getCredentialManager();
@@ -1559,10 +1566,9 @@ export function getColorTheme(): string {
  * Set the color theme ID.
  */
 export function setColorTheme(themeId: string): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.colorTheme = themeId;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.colorTheme = themeId;
+  });
 }
 
 // ============================================
@@ -1583,10 +1589,9 @@ export function getDismissedUpdateVersion(): string | null {
  * Pass the version string to dismiss notifications for that version.
  */
 export function setDismissedUpdateVersion(version: string): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.dismissedUpdateVersion = version;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.dismissedUpdateVersion = version;
+  });
 }
 
 /**
@@ -1594,10 +1599,9 @@ export function setDismissedUpdateVersion(version: string): void {
  * Call this when a new version is released (or on successful update).
  */
 export function clearDismissedUpdateVersion(): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  delete config.dismissedUpdateVersion;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    delete config.dismissedUpdateVersion;
+  });
 }
 
 // ============================================
@@ -2233,9 +2237,6 @@ function migrateModelDefaultsToConnections(config: StoredConfig): boolean {
  * After migration, the legacy fields are deleted since they are no longer used.
  */
 export function migrateLegacyLlmConnectionsConfig(): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
   const normalizeModelList = (models?: Array<{ id: string } | string>): string[] => {
     if (!models) return [];
     return models
@@ -2287,6 +2288,7 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     return changed;
   };
 
+  updateStoredConfig(config => {
   // Already migrated - llmConnections array exists
   if (config.llmConnections !== undefined) {
     // Clean up any remaining legacy fields from previous runs
@@ -2357,9 +2359,9 @@ export function migrateLegacyLlmConnectionsConfig(): void {
       needsSave = true;
     }
 
-    if (needsSave) {
-      saveConfig(config);
-    }
+    // updateStoredConfig persists atomically after this callback. Keep the
+    // flag calculation because it documents which migrations changed state.
+    void needsSave;
     return;
   }
 
@@ -2477,7 +2479,7 @@ export function migrateLegacyLlmConnectionsConfig(): void {
   backfillAllConnectionModels(config);
   migrateModelDefaultsToConnections(config);
 
-  saveConfig(config);
+  });
 }
 
 /**
@@ -2489,39 +2491,28 @@ export function migrateLegacyLlmConnectionsConfig(): void {
  * Called on app startup alongside other migrations.
  */
 export function migrateOrphanedDefaultConnections(): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  if (!config.llmConnections || config.llmConnections.length === 0) return;
+  updateStoredConfig(config => {
+    if (!config.llmConnections || config.llmConnections.length === 0) return;
+    ensureDefaultLlmConnection(config);
 
-  let changed = false;
-
-  // Fix global default if it points to a non-existent connection
-  if (ensureDefaultLlmConnection(config)) {
-    changed = true;
-  }
-
-  // Fix workspace defaults that point to non-existent connections
-  try {
-    const workspaces = getWorkspaces();
-    for (const ws of workspaces) {
-      const wsConfig = loadWorkspaceConfig(ws.rootPath);
-      if (wsConfig?.defaults?.defaultLlmConnection) {
-        const exists = config.llmConnections.some(
-          c => c.slug === wsConfig.defaults!.defaultLlmConnection
-        );
-        if (!exists) {
-          delete wsConfig.defaults.defaultLlmConnection;
-          saveWorkspaceConfig(ws.rootPath, wsConfig);
+    // Fix workspace defaults that point to non-existent connections
+    try {
+      for (const ws of config.workspaces) {
+        const wsConfig = loadWorkspaceConfig(ws.rootPath);
+        if (wsConfig?.defaults?.defaultLlmConnection) {
+          const exists = config.llmConnections!.some(
+            c => c.slug === wsConfig.defaults!.defaultLlmConnection
+          );
+          if (!exists) {
+            delete wsConfig.defaults.defaultLlmConnection;
+            saveWorkspaceConfig(ws.rootPath, wsConfig);
+          }
         }
       }
+    } catch (error) {
+      console.error('Failed to clean up workspace default connection references:', error);
     }
-  } catch (error) {
-    console.error('Failed to clean up workspace default connection references:', error);
-  }
-
-  if (changed) {
-    saveConfig(config);
-  }
+  });
 }
 
 /**
@@ -2637,30 +2628,18 @@ export function getLlmConnection(slug: string): LlmConnection | null {
  * @returns true if added, false if slug already exists
  */
 export function addLlmConnection(connection: LlmConnection): boolean {
-  const config = loadStoredConfig();
-  if (!config) return false;
-
-  // Initialize array if not yet migrated (safe default for write operations)
-  if (!config.llmConnections) {
-    config.llmConnections = [];
-  }
-
-  // Check for duplicate slug
-  if (config.llmConnections.some(c => c.slug === connection.slug)) {
-    return false;
-  }
-
-  // Add connection with timestamp
-  config.llmConnections.push({
-    ...connection,
-    createdAt: connection.createdAt || Date.now(),
-  });
-
-  // Ensure default is set after adding first connection
-  ensureDefaultLlmConnection(config);
-
-  saveConfig(config);
-  return true;
+  return updateStoredConfig(config => {
+    if (!config.llmConnections) config.llmConnections = [];
+    if (config.llmConnections.some(c => c.slug === connection.slug)) {
+      return false;
+    }
+    config.llmConnections.push({
+      ...connection,
+      createdAt: connection.createdAt || Date.now(),
+    });
+    ensureDefaultLlmConnection(config);
+    return true;
+  }) ?? false;
 }
 
 /**
@@ -2670,8 +2649,7 @@ export function addLlmConnection(connection: LlmConnection): boolean {
  * @returns true if updated, false if not found
  */
 export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConnection, 'slug'>>): boolean {
-  const config = loadStoredConfig();
-  if (!config) return false;
+  return updateStoredConfig(config => {
 
   // No connections means nothing to update
   if (!config.llmConnections || config.llmConnections.length === 0) {
@@ -2748,8 +2726,8 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
     }
   }
 
-  saveConfig(config);
   return true;
+  }) ?? false;
 }
 
 /**
@@ -2758,26 +2736,20 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
  * @returns true if deleted, false if not found
  */
 export function deleteLlmConnection(slug: string): boolean {
-  const config = loadStoredConfig();
-  if (!config) return false;
-
-  // No connections means nothing to delete
-  if (!config.llmConnections || config.llmConnections.length === 0) {
-    return false;
-  }
-
-  const connections = config.llmConnections;
-  const index = connections.findIndex(c => c.slug === slug);
-  if (index === -1) return false;
-
-  connections.splice(index, 1);
-
-  // If deleted connection was the default, reset to first remaining or clear
-  if (config.defaultLlmConnection === slug) {
-    config.defaultLlmConnection = connections.length > 0 ? connections[0]!.slug : undefined;
-  }
-
-  saveConfig(config);
+  const deleted = updateStoredConfig(config => {
+    if (!config.llmConnections || config.llmConnections.length === 0) {
+      return false;
+    }
+    const connections = config.llmConnections;
+    const index = connections.findIndex(c => c.slug === slug);
+    if (index === -1) return false;
+    connections.splice(index, 1);
+    if (config.defaultLlmConnection === slug) {
+      config.defaultLlmConnection = connections.length > 0 ? connections[0]!.slug : undefined;
+    }
+    return true;
+  }) ?? false;
+  if (!deleted) return false;
 
   // Clean up workspace references to the deleted connection (non-blocking)
   try {
@@ -2828,22 +2800,13 @@ export function getDefaultLlmConnection(): string | null {
  * @returns true if set, false if connection not found
  */
 export function setDefaultLlmConnection(slug: string): boolean {
-  const config = loadStoredConfig();
-  if (!config) return false;
-
-  // No connections means nothing to set as default
-  if (!config.llmConnections || config.llmConnections.length === 0) {
-    return false;
-  }
-
-  // Verify connection exists
-  if (!config.llmConnections.some(c => c.slug === slug)) {
-    return false;
-  }
-
-  config.defaultLlmConnection = slug;
-  saveConfig(config);
-  return true;
+  return updateStoredConfig(config => {
+    if (!config.llmConnections?.some(c => c.slug === slug)) {
+      return false;
+    }
+    config.defaultLlmConnection = slug;
+    return true;
+  }) ?? false;
 }
 
 /**
@@ -2865,12 +2828,10 @@ export function getDefaultThinkingLevel(): ThinkingLevel {
  * @returns true if persisted, false if config could not be loaded
  */
 export function setDefaultThinkingLevel(level: ThinkingLevel): boolean {
-  const config = loadStoredConfig();
-  if (!config) return false;
-
-  config.defaultThinkingLevel = level;
-  saveConfig(config);
-  return true;
+  return updateStoredConfig(config => {
+    config.defaultThinkingLevel = level;
+    return true;
+  }) ?? false;
 }
 
 /**
@@ -2878,17 +2839,10 @@ export function setDefaultThinkingLevel(level: ThinkingLevel): boolean {
  * @param slug - Connection slug
  */
 export function touchLlmConnection(slug: string): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
-  // No connections means nothing to touch
-  if (!config.llmConnections) return;
-
-  const connection = config.llmConnections.find(c => c.slug === slug);
-  if (connection) {
-    connection.lastUsedAt = Date.now();
-    saveConfig(config);
-  }
+  updateStoredConfig(config => {
+    const connection = config.llmConnections?.find(c => c.slug === slug);
+    if (connection) connection.lastUsedAt = Date.now();
+  });
 }
 
 // ============================================
@@ -2927,19 +2881,14 @@ export function getNetworkProxySettings(): NetworkProxySettings | undefined {
  * Deletes the key when disabled and all proxy fields are empty.
  */
 export function setNetworkProxySettings(settings: NetworkProxySettings): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
   const normalized = normalizeNetworkProxySettings(settings);
-
-  // Remove the key entirely when proxy is disabled and all fields are blank
-  if (!normalized.enabled && !normalized.httpProxy && !normalized.httpsProxy && !normalized.noProxy) {
-    delete config.networkProxy;
-  } else {
-    config.networkProxy = normalized;
-  }
-
-  saveConfig(config);
+  updateStoredConfig(config => {
+    if (!normalized.enabled && !normalized.httpProxy && !normalized.httpsProxy && !normalized.noProxy) {
+      delete config.networkProxy;
+    } else {
+      config.networkProxy = normalized;
+    }
+  });
 }
 
 // ============================================
@@ -2951,14 +2900,13 @@ export function isSetupDeferred(): boolean {
 }
 
 export function setSetupDeferred(deferred: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  if (deferred) {
-    config.setupDeferred = true;
-  } else {
-    delete config.setupDeferred;
-  }
-  saveConfig(config);
+  updateStoredConfig(config => {
+    if (deferred) {
+      config.setupDeferred = true;
+    } else {
+      delete config.setupDeferred;
+    }
+  });
 }
 
 // ============================================
@@ -3033,14 +2981,11 @@ export function getServerConfig(): ServerConfig {
  * Auto-generates a stable auth token on first enable if none exists.
  */
 export function setServerConfig(serverConfig: ServerConfig): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
   // Generate a stable token when first enabled (or if token is missing)
   if (serverConfig.enabled && !serverConfig.token) {
     serverConfig.token = randomUUID();
   }
-
-  config.serverConfig = serverConfig;
-  saveConfig(config);
+  updateStoredConfig(config => {
+    config.serverConfig = serverConfig;
+  });
 }

@@ -1,5 +1,20 @@
-import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdtempSync, renameSync } from 'fs';
-import { extname, basename, resolve, join, relative } from 'path';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+  mkdtempSync,
+} from 'fs';
+import { randomUUID } from 'crypto';
+import { extname, basename, dirname, resolve, join, relative } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
 
@@ -33,15 +48,179 @@ export function readJsonFileSync<T = unknown>(filePath: string): T {
  * This prevents partial writes from corrupting the file on crash/interrupt.
  * Uses write-to-temp-then-rename pattern which is atomic on POSIX systems.
  */
-export function atomicWriteFileSync(filePath: string, data: string): void {
-  const tmpPath = filePath + '.tmp';
+export function atomicWriteFileSync(
+  filePath: string,
+  data: string | Uint8Array,
+  mode?: number,
+): void {
+  const parentDir = dirname(filePath);
+  mkdirSync(parentDir, { recursive: true });
+  const tmpPath = join(
+    parentDir,
+    `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  const targetMode = mode ?? (
+    existsSync(filePath) ? statSync(filePath).mode & 0o777 : undefined
+  );
+  let fd: number | undefined;
   try {
-    writeFileSync(tmpPath, data);
+    fd = openSync(tmpPath, 'wx', targetMode);
+    writeFileSync(fd, data);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
     renameSync(tmpPath, filePath);
+    if (targetMode !== undefined) chmodSync(filePath, targetMode);
   } catch (error) {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch {}
+    }
     // Clean up temp file if rename failed
     try { unlinkSync(tmpPath); } catch {}
     throw error;
+  }
+}
+
+interface FileLockOwner {
+  pid: number;
+  nonce: string;
+  createdAt: number;
+}
+
+const LOCK_OWNER_FILE = 'owner.json';
+const LOCK_RETRY_MS = 10;
+const LOCK_TIMEOUT_MS = 15_000;
+const INCOMPLETE_LOCK_GRACE_MS = 2_000;
+const syncWaitBuffer = new Int32Array(new SharedArrayBuffer(4));
+
+function sleepSync(milliseconds: number): void {
+  Atomics.wait(syncWaitBuffer, 0, 0, milliseconds);
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function readLockOwner(lockDir: string): FileLockOwner | null {
+  try {
+    const value = readJsonFileSync<Partial<FileLockOwner>>(
+      join(lockDir, LOCK_OWNER_FILE),
+    );
+    if (
+      Number.isInteger(value.pid)
+      && typeof value.nonce === 'string'
+      && typeof value.createdAt === 'number'
+    ) {
+      return value as FileLockOwner;
+    }
+  } catch {
+    // A process can be between mkdir and writing owner.json.
+  }
+  return null;
+}
+
+function recoverAbandonedLock(lockDir: string): boolean {
+  let observedOwner: FileLockOwner | null = null;
+  let ageMs = 0;
+  try {
+    observedOwner = readLockOwner(lockDir);
+    ageMs = Date.now() - statSync(lockDir).mtimeMs;
+  } catch {
+    return true;
+  }
+
+  if (observedOwner ? processIsAlive(observedOwner.pid) : ageMs < INCOMPLETE_LOCK_GRACE_MS) {
+    return false;
+  }
+
+  const quarantine = `${lockDir}.stale.${process.pid}.${randomUUID()}`;
+  try {
+    renameSync(lockDir, quarantine);
+  } catch {
+    return true;
+  }
+
+  // The rename is atomic. Verify that the quarantined directory is still the
+  // abandoned owner we inspected before removing it.
+  const quarantinedOwner = readLockOwner(quarantine);
+  if (
+    observedOwner
+    && (
+      quarantinedOwner?.pid !== observedOwner.pid
+      || quarantinedOwner?.nonce !== observedOwner.nonce
+    )
+  ) {
+    try {
+      if (!existsSync(lockDir)) renameSync(quarantine, lockDir);
+    } catch {
+      // A different contender now owns the canonical path. Leave the
+      // quarantine in place rather than deleting an owner we did not inspect.
+    }
+    return true;
+  }
+
+  rmSync(quarantine, { recursive: true, force: true });
+  return true;
+}
+
+/**
+ * Run a synchronous read-modify-write transaction under a portable
+ * cross-process directory lock. The lock is distinct from server lifecycle
+ * locks and is recovered when its owner process no longer exists.
+ */
+export function withCrossProcessFileLockSync<T>(
+  lockDir: string,
+  operation: () => T,
+  timeoutMs = LOCK_TIMEOUT_MS,
+): T {
+  mkdirSync(dirname(lockDir), { recursive: true, mode: 0o700 });
+  const owner: FileLockOwner = {
+    pid: process.pid,
+    nonce: randomUUID(),
+    createdAt: Date.now(),
+  };
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    try {
+      mkdirSync(lockDir, { mode: 0o700 });
+      atomicWriteFileSync(
+        join(lockDir, LOCK_OWNER_FILE),
+        JSON.stringify(owner),
+        0o600,
+      );
+      break;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') {
+        // mkdir succeeded but owner metadata failed.
+        const currentOwner = readLockOwner(lockDir);
+        if (!currentOwner || currentOwner.nonce === owner.nonce) {
+          rmSync(lockDir, { recursive: true, force: true });
+        }
+        throw error;
+      }
+      recoverAbandonedLock(lockDir);
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for file transaction lock: ${lockDir}`);
+      }
+      sleepSync(LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return operation();
+  } finally {
+    const currentOwner = readLockOwner(lockDir);
+    if (currentOwner?.nonce === owner.nonce) {
+      rmSync(lockDir, { recursive: true, force: true });
+    }
   }
 }
 

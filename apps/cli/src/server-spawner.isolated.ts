@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
@@ -121,7 +129,7 @@ describe('packaged server resolution', () => {
     expect(resolveBunExecutable()).toBe('/opt/Polo AI/vendor/bun/bun')
   })
 
-  it('runs two temporary servers with private locks while sharing user config', async () => {
+  it('keeps concurrent workspace, connection, and credential mutations transactional', async () => {
     const { configDir, globalLock } = await prepareSharedConfig()
 
     const first = await spawnServer({
@@ -147,11 +155,83 @@ describe('packaged server resolution', () => {
     expect(existsSync(join(configDir, 'config.json'))).toBe(true)
     expect(existsSync(globalLock)).toBe(true)
 
+    const firstClient = new CliRpcClient(first.url, {
+      token: first.token,
+      expectedServerVersion: '0.10.0',
+    })
     const secondClient = new CliRpcClient(second.url, {
       token: second.token,
       expectedServerVersion: '0.10.0',
     })
+    await firstClient.connect()
     await secondClient.connect()
+
+    const configFile = join(configDir, 'config.json')
+    const parseFailures: unknown[] = []
+    let monitorConfig = true
+    const parseMonitor = (async () => {
+      while (monitorConfig) {
+        try {
+          JSON.parse(readFileSync(configFile, 'utf8'))
+        } catch (error) {
+          parseFailures.push(error)
+        }
+        await Bun.sleep(1)
+      }
+    })()
+
+    const firstWorkspacePath = join(configDir, 'workspace-run-a')
+    const secondWorkspacePath = join(configDir, 'workspace-run-b')
+    const mutationResults = await Promise.all([
+      firstClient.invoke('workspaces:create', firstWorkspacePath, 'run-a'),
+      secondClient.invoke('workspaces:create', secondWorkspacePath, 'run-b'),
+      firstClient.invoke('settings:setupLlmConnection', {
+        slug: 'anthropic-api-2',
+        credential: 'sk-concurrent-run-a',
+      }),
+      secondClient.invoke('settings:setupLlmConnection', {
+        slug: 'anthropic-api-3',
+        credential: 'sk-concurrent-run-b',
+      }),
+    ])
+    monitorConfig = false
+    await parseMonitor
+    expect(parseFailures).toEqual([])
+    expect(mutationResults.slice(2)).toEqual([
+      { success: true },
+      { success: true },
+    ])
+
+    const persistedConfig = JSON.parse(readFileSync(configFile, 'utf8')) as {
+      workspaces: Array<{ rootPath: string }>
+      llmConnections: Array<{ slug: string }>
+    }
+    expect(persistedConfig.workspaces.map(workspace => workspace.rootPath)).toEqual(
+      expect.arrayContaining([firstWorkspacePath, secondWorkspacePath]),
+    )
+    expect(persistedConfig.llmConnections.map(connection => connection.slug)).toEqual(
+      expect.arrayContaining(['shared-test', 'anthropic-api-2', 'anthropic-api-3']),
+    )
+    expect(statSync(configFile).mode & 0o777).toBe(0o600)
+    expect(existsSync(join(configDir, '.config.transaction.lock'))).toBe(false)
+    expect(existsSync(join(configDir, '.credentials.transaction.lock'))).toBe(false)
+    expect(
+      readdirSync(configDir).filter(name => name.endsWith('.tmp')),
+    ).toEqual([])
+
+    const { SecureStorageBackend } = await import(
+      '../../../packages/shared/src/credentials/backends/secure-storage'
+    )
+    const persistedCredentials = new SecureStorageBackend({ credentialsDir: configDir })
+    expect(await persistedCredentials.get({
+      type: 'llm_api_key',
+      connectionSlug: 'anthropic-api-2',
+    })).toEqual(expect.objectContaining({ value: 'sk-concurrent-run-a' }))
+    expect(await persistedCredentials.get({
+      type: 'llm_api_key',
+      connectionSlug: 'anthropic-api-3',
+    })).toEqual(expect.objectContaining({ value: 'sk-concurrent-run-b' }))
+
     const sharedConnections = await secondClient.invoke(
       'LLM_Connection:listWithStatus',
     ) as Array<{ slug: string; isAuthenticated: boolean }>
@@ -165,6 +245,7 @@ describe('packaged server resolution', () => {
     expect(existsSync(second.runtimeDir)).toBe(true)
     expect(secondClient.isConnected).toBe(true)
 
+    firstClient.destroy()
     secondClient.destroy()
     await second.stop()
     expect(existsSync(second.runtimeDir)).toBe(false)

@@ -147,7 +147,11 @@ describe('macOS terminal integration', () => {
     mkdirSync(join(launcher, '..'), { recursive: true })
     writeFileSync(launcher, '#!/bin/sh\necho other\n')
 
-    expect(() => installTerminalIntegration(options)).toThrow('did not overwrite')
+    const status = installTerminalIntegration(options)
+    expect(status.conflict).toEqual({
+      code: 'launcher_conflict',
+      path: launcher,
+    })
     expect(readFileSync(launcher, 'utf8')).toContain('echo other')
   })
 
@@ -169,7 +173,10 @@ describe('macOS terminal integration', () => {
     const options = setup()
     options.commandLookup = () => '/opt/tools/polo'
     const status = getTerminalIntegrationStatus(options)
-    expect(status.conflict).toBe('/opt/tools/polo')
+    expect(status.conflict).toEqual({
+      code: 'command_conflict',
+      path: '/opt/tools/polo',
+    })
   })
 
   it('does not modify malformed managed profile markers', () => {
@@ -179,8 +186,11 @@ describe('macOS terminal integration', () => {
     const malformed = 'export EDITOR=vim\n# <<< Polo CLI <<<\n# >>> Polo CLI >>>\n'
     writeFileSync(profile, malformed)
 
-    expect(() => installTerminalIntegration(options)).toThrow('malformed')
+    const status = installTerminalIntegration(options)
     expect(readFileSync(profile, 'utf8')).toBe(malformed)
-    expect(getTerminalIntegrationStatus(options).conflict).toContain('Malformed Polo configuration')
+    expect(status.conflict).toEqual({
+      code: 'profile_conflict',
+      path: profile,
+    })
   })
 })

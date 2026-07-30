@@ -43,8 +43,8 @@ function status(overrides?: Partial<TerminalIntegrationStatus>): TerminalIntegra
     installed: false,
     pathReady: false,
     needsRepair: false,
+    statusCode: 'not_installed',
     launcherPath: '/Users/test/.local/bin/polo',
-    message: 'Not installed',
     ...overrides,
   }
 }
@@ -90,7 +90,7 @@ describe('terminal onboarding', () => {
         install: () => status({
           installed: true,
           needsRepair: true,
-          message: 'polo --version verification failed',
+          statusCode: 'repair_required',
         }),
         wasDismissed: () => false,
         setDismissed: (_options, value) => dismissed.push(value),
@@ -113,7 +113,7 @@ describe('terminal onboarding', () => {
       installed: true,
       pathReady: true,
       needsRepair: false,
-      message: 'Ready',
+      statusCode: 'ready',
     })
 
     const result = await runTerminalOnboarding({
@@ -129,7 +129,7 @@ describe('terminal onboarding', () => {
         install: () => {
           installs++
           return installs === 1
-            ? status({ installed: true, needsRepair: true, message: 'Verification failed' })
+            ? status({ installed: true, needsRepair: true, statusCode: 'repair_required' })
             : ready
         },
         wasDismissed: () => false,
@@ -151,7 +151,11 @@ describe('terminal onboarding', () => {
     let installs = 0
     let dismissed = false
     const dialogs: MessageBoxOptions[] = []
-    const conflict = status({ conflict: '/opt/tools/polo' })
+    const conflict = status({
+      conflict: { code: 'command_conflict', path: '/opt/tools/polo' },
+      statusCode: 'command_conflict',
+      statusParams: { path: '/opt/tools/polo' },
+    })
 
     const result = await runTerminalOnboarding({
       terminalOptions,

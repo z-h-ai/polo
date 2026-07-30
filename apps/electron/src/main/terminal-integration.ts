@@ -22,10 +22,21 @@ export interface TerminalIntegrationStatus {
   installed: boolean
   pathReady: boolean
   needsRepair: boolean
-  conflict?: string
+  statusCode:
+    | 'managed_by_installer'
+    | 'profile_conflict'
+    | 'launcher_conflict'
+    | 'command_conflict'
+    | 'ready'
+    | 'repair_required'
+    | 'not_installed'
+  statusParams?: { path?: string }
+  conflict?: {
+    code: 'profile_conflict' | 'launcher_conflict' | 'command_conflict'
+    path: string
+  }
   launcherPath: string
   profilePath?: string
-  message: string
 }
 
 export interface TerminalIntegrationOptions {
@@ -177,7 +188,7 @@ export function getTerminalIntegrationStatus(
       pathReady: false,
       needsRepair: false,
       launcherPath,
-      message: 'Terminal setup is managed by the platform installer.',
+      statusCode: 'managed_by_installer',
     }
   }
 
@@ -198,10 +209,12 @@ export function getTerminalIntegrationStatus(
   const found = lookupCommand(options)
   const launcherExecutable = installed && isExecutable(launcherPath)
   const conflict = malformedProfile
-    ? `Malformed Polo configuration in ${profile.path}`
-    : found && found !== launcherPath
-      ? found
-      : undefined
+    ? { code: 'profile_conflict' as const, path: profile.path }
+    : launcher && !installed
+      ? { code: 'launcher_conflict' as const, path: launcherPath }
+      : found && found !== launcherPath
+        ? { code: 'command_conflict' as const, path: found }
+        : undefined
   const pathReady = blockReady
     && found === launcherPath
     && launcherExecutable
@@ -215,15 +228,15 @@ export function getTerminalIntegrationStatus(
       ? !blockReady || !launcherCurrent || !launcherExecutable || !pathReady
       : existsSync(launcherPath) || malformedProfile,
     conflict,
+    statusCode: conflict?.code
+      ?? (installed && pathReady
+        ? 'ready'
+        : installed
+          ? 'repair_required'
+          : 'not_installed'),
+    statusParams: conflict ? { path: conflict.path } : undefined,
     launcherPath,
     profilePath: profile.path,
-    message: conflict
-      ? `Another command named polo already exists at ${conflict}. It was not changed.`
-      : installed && pathReady
-        ? 'Polo terminal features are ready.'
-        : installed
-          ? 'Polo is installed. Open a new Terminal window to use it.'
-          : 'Polo terminal features are not installed.',
   }
 }
 
@@ -234,16 +247,11 @@ export function installTerminalIntegration(
     throw new Error('In-app terminal setup is currently available on macOS only')
   }
 
+  const currentStatus = getTerminalIntegrationStatus(options)
+  if (currentStatus.conflict) return currentStatus
+
   const launcherPath = getLauncherPath(options)
   const existingLauncher = read(launcherPath)
-  if (existingLauncher && !isManagedLauncher(existingLauncher)) {
-    throw new Error(`Another file already exists at ${launcherPath}; Polo did not overwrite it.`)
-  }
-
-  const found = lookupCommand(options)
-  if (found && found !== launcherPath) {
-    throw new Error(`Another command named polo already exists at ${found}; Polo did not overwrite it.`)
-  }
 
   const profile = getProfile(options)
   const currentProfile = read(profile.path)

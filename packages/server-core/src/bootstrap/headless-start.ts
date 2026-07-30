@@ -2,7 +2,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from '
 import { uptime as osUptime } from 'node:os'
 import { join } from 'node:path'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
-import { ensureConfigDir, loadStoredConfig, saveConfig } from '@polo-ai/shared/config'
+import { ensureConfigDir, initializeStoredConfigIfMissing } from '@polo-ai/shared/config'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { WsRpcServer, type WsRpcTlsOptions } from '../transport/server'
@@ -254,17 +254,15 @@ function bootstrapConfigArtifacts(platform: PlatformServices): void {
 }
 
 function ensureGlobalConfigExists(platform: PlatformServices): void {
-  const config = loadStoredConfig()
-  if (config) {
-    platform.logger.info('[bootstrap] Global config found')
-    return
-  }
-
-  saveConfig({
+  const created = initializeStoredConfigIfMissing({
     workspaces: [],
     activeWorkspaceId: null,
     activeSessionId: null,
   })
+  if (!created) {
+    platform.logger.info('[bootstrap] Global config found')
+    return
+  }
   platform.logger.info('[bootstrap] Initialized missing global config')
 }
 

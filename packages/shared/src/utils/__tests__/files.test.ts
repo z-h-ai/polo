@@ -1,9 +1,20 @@
 import { describe, test, expect, afterEach } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Buffer } from 'node:buffer'
-import { getFileType, getMimeType, readFileAttachment } from '../files'
+import {
+  getFileType,
+  getMimeType,
+  readFileAttachment,
+  withCrossProcessFileLockSync,
+} from '../files'
 
 const cleanups: Array<() => void> = []
 
@@ -96,5 +107,31 @@ describe('readFileAttachment — audio fixture', () => {
     expect(att?.type).toBe('text')
     expect(att?.text).toBe('hello world')
     expect(att?.base64).toBeUndefined()
+  })
+})
+
+describe('cross-process file transaction lock', () => {
+  test('releases the lock after a mutation throws', () => {
+    const dir = makeTmp()
+    const lockDir = join(dir, '.config.transaction.lock')
+    expect(() => withCrossProcessFileLockSync(lockDir, () => {
+      throw new Error('mutation failed')
+    })).toThrow('mutation failed')
+    expect(existsSync(lockDir)).toBe(false)
+    expect(withCrossProcessFileLockSync(lockDir, () => 'recovered')).toBe('recovered')
+  })
+
+  test('recovers a lock left by a process that exited', () => {
+    const dir = makeTmp()
+    const lockDir = join(dir, '.credentials.transaction.lock')
+    mkdirSync(lockDir)
+    writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+      pid: 2_147_483_647,
+      nonce: 'abandoned-owner',
+      createdAt: Date.now() - 60_000,
+    }))
+
+    expect(withCrossProcessFileLockSync(lockDir, () => 'recovered')).toBe('recovered')
+    expect(existsSync(lockDir)).toBe(false)
   })
 })

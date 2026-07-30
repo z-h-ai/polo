@@ -32,6 +32,7 @@ import {
   SettingsInput,
 } from '@/components/settings'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
+import { getTerminalIntegrationStatusMessage } from '@/lib/terminal-integration-status'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -344,8 +345,7 @@ export default function AppSettingsPage() {
                         ? t("settings.terminalFeatures.installed")
                         : t("settings.terminalFeatures.notInstalled")}
                       description={terminalError
-                        ?? terminalStatus.message
-                        ?? t("settings.terminalFeatures.newTerminalHint")}
+                        ?? getTerminalIntegrationStatusMessage(terminalStatus, t)}
                     >
                       <div className="flex items-center gap-2">
                         {terminalStatus.installed && (

@@ -33,7 +33,7 @@ import {
   createHash,
 } from 'crypto';
 import { execSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, unlinkSync } from 'fs';
 import { hostname, userInfo, homedir } from 'os';
 import { join } from 'path';
 
@@ -41,6 +41,10 @@ import type { CredentialBackend } from './types.ts';
 import type { CredentialId, StoredCredential } from '../types.ts';
 import { credentialIdToAccount, accountToCredentialId } from '../types.ts';
 import { CONFIG_DIR } from '../../config/paths.ts';
+import {
+  atomicWriteFileSync,
+  withCrossProcessFileLockSync,
+} from '../../utils/files.ts';
 
 const DEFAULT_CREDENTIALS_DIR = join(homedir(), '.polo-ai');
 
@@ -130,6 +134,7 @@ export class SecureStorageBackend implements CredentialBackend {
 
   private readonly credentialsDir: string;
   private readonly credentialsFile: string;
+  private readonly transactionLock: string;
   private readonly legacyCredentialsFile: string;
   private readonly allowLegacyPathMigration: boolean;
   private cachedStore: CredentialStore | null = null;
@@ -139,6 +144,10 @@ export class SecureStorageBackend implements CredentialBackend {
   constructor(options: SecureStorageBackendOptions = {}) {
     this.credentialsDir = options.credentialsDir ?? CONFIG_DIR;
     this.credentialsFile = join(this.credentialsDir, 'credentials.enc');
+    this.transactionLock = join(
+      this.credentialsDir,
+      '.credentials.transaction.lock',
+    );
     this.legacyCredentialsFile = join(
       options.legacyCredentialsDir ?? DEFAULT_CREDENTIALS_DIR,
       'credentials.enc',
@@ -160,25 +169,23 @@ export class SecureStorageBackend implements CredentialBackend {
   }
 
   async set(id: CredentialId, credential: StoredCredential): Promise<void> {
-    let store = await this.loadStore();
-
-    if (!store) {
-      // Initialize new store
-      store = {
-        version: 1,
-        credentials: {},
-        metadata: {
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      };
-    }
-
-    const key = credentialIdToAccount(id);
-    store.credentials[key] = credential;
-    store.metadata.updatedAt = Date.now();
-
-    await this.saveStore(store);
+    withCrossProcessFileLockSync(this.transactionLock, () => {
+      let store = this.loadStoreSyncUnlocked();
+      if (!store) {
+        store = {
+          version: 1,
+          credentials: {},
+          metadata: {
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        };
+      }
+      const key = credentialIdToAccount(id);
+      store.credentials[key] = credential;
+      store.metadata.updatedAt = Date.now();
+      this.saveStoreSyncUnlocked(store);
+    });
   }
 
   async delete(id: CredentialId): Promise<boolean> {
@@ -186,17 +193,16 @@ export class SecureStorageBackend implements CredentialBackend {
   }
 
   deleteSync(id: CredentialId): boolean {
-    const store = this.loadStoreSync();
-    if (!store) return false;
-
-    const key = credentialIdToAccount(id);
-    if (!(key in store.credentials)) return false;
-
-    delete store.credentials[key];
-    store.metadata.updatedAt = Date.now();
-
-    this.saveStoreSync(store);
-    return true;
+    return withCrossProcessFileLockSync(this.transactionLock, () => {
+      const store = this.loadStoreSyncUnlocked();
+      if (!store) return false;
+      const key = credentialIdToAccount(id);
+      if (!(key in store.credentials)) return false;
+      delete store.credentials[key];
+      store.metadata.updatedAt = Date.now();
+      this.saveStoreSyncUnlocked(store);
+      return true;
+    });
   }
 
   async list(filter?: Partial<CredentialId>): Promise<CredentialId[]> {
@@ -226,9 +232,16 @@ export class SecureStorageBackend implements CredentialBackend {
   }
 
   private loadStoreSync(): CredentialStore | null {
-    // Return cached store if available
-    if (this.cachedStore) return this.cachedStore;
+    return withCrossProcessFileLockSync(
+      this.transactionLock,
+      () => this.loadStoreSyncUnlocked(),
+    );
+  }
 
+  private loadStoreSyncUnlocked(): CredentialStore | null {
+    // Always re-read inside the transaction. A cache populated before another
+    // process committed would otherwise recreate the lost-update race.
+    this.cachedStore = null;
     const instanceFileExists = existsSync(this.credentialsFile);
     if (instanceFileExists) {
       return this.loadStoreFromFile(this.credentialsFile, true);
@@ -248,7 +261,7 @@ export class SecureStorageBackend implements CredentialBackend {
         false,
       );
       if (legacyStore) {
-        this.saveStoreSync(legacyStore);
+        this.saveStoreSyncUnlocked(legacyStore);
         return legacyStore;
       }
     }
@@ -282,7 +295,10 @@ export class SecureStorageBackend implements CredentialBackend {
     // Parse header
     // const flags = fileData.readUInt32LE(MAGIC_SIZE); // Reserved for future use
     const salt = fileData.subarray(MAGIC_SIZE + FLAGS_SIZE, MAGIC_SIZE + FLAGS_SIZE + SALT_SIZE);
-    this.salt = salt;
+    if (!this.salt?.equals(salt)) {
+      this.encryptionKey = null;
+    }
+    this.salt = Buffer.from(salt);
 
     // Extract encrypted data
     const encryptedData = fileData.subarray(HEADER_SIZE);
@@ -304,7 +320,7 @@ export class SecureStorageBackend implements CredentialBackend {
     if (store) {
       // Migration: re-save with new stable key so future loads use hardware UUID
       this.cachedStore = store;
-      this.saveStoreSync(store);
+      this.saveStoreSyncUnlocked(store);
       return store;
     }
 
@@ -332,11 +348,7 @@ export class SecureStorageBackend implements CredentialBackend {
     }
   }
 
-  private async saveStore(store: CredentialStore): Promise<void> {
-    this.saveStoreSync(store);
-  }
-
-  private saveStoreSync(store: CredentialStore): void {
+  private saveStoreSyncUnlocked(store: CredentialStore): void {
     // Ensure directory exists
     if (!existsSync(this.credentialsDir)) {
       mkdirSync(this.credentialsDir, { recursive: true, mode: 0o700 });
@@ -370,7 +382,7 @@ export class SecureStorageBackend implements CredentialBackend {
     const fileData = Buffer.concat([header, iv, authTag, ciphertext]);
 
     // Write with restrictive permissions (owner read/write only)
-    writeFileSync(this.credentialsFile, fileData, { mode: 0o600 });
+    atomicWriteFileSync(this.credentialsFile, fileData, 0o600);
     this.cachedStore = store;
   }
 
