@@ -289,18 +289,22 @@ describe('useAppCatalog scoped async state', () => {
     unsubscribe()
   })
 
-  it('clears a previously cached catalog when a later sync returns NOT_FOUND', async () => {
-    const remoteApp: CatalogApp = {
-      ...app('organization-a', 'remote-app'),
-      deliveryMode: 'remote_url',
-      remoteUrl: 'https://stale.example.com',
-      currentRelease: undefined,
-    }
+  it('keeps denied installed app data manageable after a later NOT_FOUND', async () => {
+    const localApp = app('organization-a', 'installed-app')
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+    })))
     let syncCount = 0
     syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
       syncCount += 1
       return syncCount === 1
-        ? syncResult('organization-a', 'cached', [remoteApp])
+        ? syncResult('organization-a', 'cached', [localApp])
         : {
             success: false,
             errorCode: 'NOT_FOUND',
@@ -310,19 +314,70 @@ describe('useAppCatalog scoped async state', () => {
     })
     const { result } = renderHook(() => useAppCatalog())
     await waitFor(() => {
-      expect(result.current.state.catalog?.apps[0]?.id).toBe('remote-app')
+      expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
+        .toBe('running')
     })
-    const staleRemoteApp = result.current.state.catalog!.apps[0]!
-
     await act(async () => {
       await result.current.sync(true)
     })
 
-    expect(result.current.state.catalog).toBeNull()
+    expect(result.current.state.catalog).toMatchObject({
+      authorizationStatus: 'denied',
+      apps: [{
+        id: 'installed-app',
+        availability: 'unavailable',
+      }],
+    })
     expect(result.current.state.accessMode).toBe('denied')
     expect(result.current.state.errorCode).toBe('NOT_FOUND')
-    expect(result.current.state.statuses).toEqual({})
-    await expect(result.current.resolveRemoteUrl(staleRemoteApp)).rejects.toThrow()
+    expect(result.current.getStatus(result.current.state.catalog!.apps[0]!)?.status)
+      .toBe('running')
+    await expect(result.current.start(result.current.state.catalog!.apps[0]!))
+      .rejects.toThrow()
+    expect(startLocalApp).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.stop(result.current.state.catalog!.apps[0]!)
+    })
+    expect(stopLocalApp).toHaveBeenCalled()
+  })
+
+  it('discards a start result that returns after organization access is denied', async () => {
+    const pendingStart = deferred<LocalAppStartResult>()
+    startLocalApp = mock(() => pendingStart.promise)
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.appConfigVersion).toBe('initial')
+    })
+    const localApp = result.current.state.catalog!.apps[0]!
+    let start!: Promise<LocalAppStartResult>
+    act(() => {
+      start = result.current.start(localApp)
+    })
+    await waitFor(() => {
+      expect(startLocalApp).toHaveBeenCalledTimes(1)
+    })
+
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
+      success: false,
+      errorCode: 'NOT_FOUND',
+      message: 'Organization is unavailable',
+      status: 404,
+    }))
+    await act(async () => {
+      await result.current.sync(true)
+    })
+    await act(async () => {
+      pendingStart.resolve({
+        appId: localApp.id,
+        scope: result.current.scopeForApp(result.current.state.catalog!.apps[0]!),
+        version: '1.0.0',
+        url: 'http://127.0.0.1:9999',
+        port: 9999,
+      })
+      await expect(start).rejects.toThrow()
+    })
+
+    expect(result.current.state.catalog?.authorizationStatus).toBe('denied')
   })
 
   it('retries a superseded startup sync until the no-cache caller receives the committed catalog', async () => {

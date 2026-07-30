@@ -50,6 +50,10 @@ export function denyAppCatalogAccessForAccount(accountId: string): void {
   }
 }
 
+export function isAppCatalogAccessDeniedForAccount(accountId: string): boolean {
+  return deniedAccounts.has(accountId)
+}
+
 export function resumeAppCatalogAccessForAccount(accountId: string): void {
   deniedAccounts.delete(accountId)
 }

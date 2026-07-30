@@ -46,16 +46,20 @@ export function primaryActionFor(
   statusLoading = false,
 ): CatalogPrimaryAction {
   if (statusLoading) return 'unavailable'
-  if (app.availability !== 'available' || !compatible) return 'unavailable'
+  if (app.availability !== 'available') return 'unavailable'
   if (app.deliveryMode === 'remote_url') return 'open'
   if (!status || status.status === 'not_installed') {
-    return offline || status?.versionError === 'invalid_semver'
+    return offline || !compatible || status?.versionError === 'invalid_semver'
       ? 'unavailable'
       : 'install'
   }
   if (status.installationStatus) return 'cancel'
   if (status.status === 'downloading' || status.status === 'installing') return 'cancel'
   if (offline && status.status === 'broken') return 'unavailable'
+  // Platform/architecture describe the new Catalog Release, not the already
+  // installed version. Keep the last usable version launchable, but never
+  // offer an incompatible update.
+  if (!compatible) return status.status === 'broken' ? 'retry' : 'open'
   if (status.versionError === 'invalid_semver') return 'open'
   if (status.availableRelease) return offline ? 'open' : 'update'
   if (status.status === 'update_available') return offline ? 'open' : 'update'

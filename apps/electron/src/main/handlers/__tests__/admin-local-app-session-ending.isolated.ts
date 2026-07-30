@@ -237,6 +237,8 @@ mock.module('@polo-ai/shared/admin', () => ({
   },
   getAppCatalogAccessMode: (accountId: string) =>
     deniedAccounts.has(accountId) ? 'denied' : accessMode ?? 'offline',
+  isAppCatalogAccessDeniedForAccount: (accountId: string) =>
+    deniedAccounts.has(accountId),
   setAppCatalogAccessMode: (
     _accountId: string,
     _organizationId: string,
@@ -839,11 +841,45 @@ describe('Admin session and scoped local app production wiring', () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-app-withdrawn-save-failure-'))
     temporaryRoots.push(root)
     let managerFactoryCalls = 0
+    const managerCalls: string[] = []
+    class RetainedDataManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus> {
+        return {
+          appId,
+          status: 'installed',
+          currentVersion: '1.0.0',
+        }
+      }
+
+      override async getLogs(): Promise<string> {
+        managerCalls.push('logs')
+        return 'retained logs'
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        managerCalls.push('stop')
+        return { appId, status: 'stopped', currentVersion: '1.0.0' }
+      }
+
+      override async uninstall(): Promise<void> {
+        managerCalls.push('uninstall')
+      }
+
+      override async start(appId: string): Promise<LocalAppStartResult> {
+        managerCalls.push('start')
+        return {
+          appId,
+          version: '1.0.0',
+          url: 'http://127.0.0.1:4674',
+          port: 4674,
+        }
+      }
+    }
     runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
       rootDir: root,
       managerFactory: options => {
         managerFactoryCalls += 1
-        return new LocalAppRuntimeManager(options)
+        return new RetainedDataManager(options)
       },
     })
     tokens = createSignedInTokens()
@@ -878,6 +914,49 @@ describe('Admin session and scoped local app production wiring', () => {
       installRequest(),
     )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     expect(managerFactoryCalls).toBe(0)
+
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS)!(
+      context,
+      scope,
+    )).resolves.toMatchObject({ status: 'not_installed' })
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
+      context,
+      scope,
+    )).resolves.toBe('retained logs')
+    await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
+      context,
+      scope,
+    )).resolves.toMatchObject({ status: 'stopped' })
+    await expect(handlers.get(RPC_CHANNELS.localApps.UNINSTALL)!(
+      context,
+      scope,
+      { preserveData: true },
+    )).resolves.toBeUndefined()
+    await expect(runtimeRegistry.getRetainedCatalogAppIds(
+      scope.accountId,
+      scope.organizationId,
+    )).resolves.toEqual(new Set([scope.catalogAppId]))
+    expect(managerFactoryCalls).toBe(1)
+    expect(managerCalls).toEqual(['logs', 'stop', 'uninstall'])
+
+    const { availability: _availability, ...networkApp } = catalog.apps[0]!
+    saveCatalogError = null
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v3',
+      apps: [networkApp],
+    })
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({
+        success: true,
+        catalog: {
+          appConfigVersion: 'catalog-v3',
+          apps: [{ id: scope.catalogAppId }],
+        },
+      })
+    await expect(handlers.get(RPC_CHANNELS.localApps.START)!(context, scope))
+      .resolves.toMatchObject({ url: 'http://127.0.0.1:4674' })
+    expect(managerCalls).toEqual(['logs', 'stop', 'uninstall', 'start'])
   })
 
   it('keeps an entered start valid when a successful refresh retains that app', async () => {

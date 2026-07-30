@@ -94,18 +94,25 @@ function writeRecentApps(apps: RecentApp[]): void {
   setLocalStorage(KEYS.homeRecentApps, apps.slice(0, MAX_RECENT_APPS))
 }
 
-function formatBytes(t: TFunction, sizeBytes: number): string {
+export function formatBytes(t: TFunction, sizeBytes: number): string {
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
     return t('homeApps.install.unknownSize')
   }
-  const units = ['B', 'KB', 'MB', 'GB']
+  const unitKeys = [
+    'homeApps.install.sizeUnit.bytes',
+    'homeApps.install.sizeUnit.kilobytes',
+    'homeApps.install.sizeUnit.megabytes',
+    'homeApps.install.sizeUnit.gigabytes',
+  ] as const
   let size = sizeBytes
   let unit = 0
-  while (size >= 1024 && unit < units.length - 1) {
+  while (size >= 1024 && unit < unitKeys.length - 1) {
     size /= 1024
     unit += 1
   }
-  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`
+  return `${
+    size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)
+  } ${t(unitKeys[unit]!)}`
 }
 
 function catalogTabDefinition(

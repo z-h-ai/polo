@@ -169,6 +169,23 @@ function isCatalogAccessDenied(
   )
 }
 
+export function markCatalogAccessDenied(
+  catalog: AppCatalogCacheEntry,
+): AppCatalogCacheEntry {
+  return {
+    ...catalog,
+    authorizationStatus: 'denied',
+    apps: catalog.apps.map(app => ({
+      ...app,
+      availability: 'unavailable',
+    })),
+    withdrawnApps: (catalog.withdrawnApps ?? []).map(app => ({
+      ...app,
+      availability: 'unavailable',
+    })),
+  }
+}
+
 export type CatalogVersionComparison =
   | { strategy: 'semver'; order: -1 | 0 | 1 }
   | { strategy: 'invalid'; order: null; reason: 'invalid_semver' }
@@ -522,20 +539,33 @@ export function useAppCatalog() {
       if (!result.success) {
         emitAdminAuthFailure(normalizeAdminError(result))
         if (isCatalogAccessDenied(result.errorCode, result.status)) {
-          catalogRef.current = null
+          const deniedContextGeneration = ++contextGenerationRef.current
+          const deniedCatalog = catalogRef.current
+            ? markCatalogAccessDenied(catalogRef.current)
+            : null
+          catalogRef.current = deniedCatalog
           setState(current => ({
             ...current,
-            catalog: null,
+            catalog: deniedCatalog,
             loading: false,
             refreshing: false,
             warningCode: null,
             errorCode: result.errorCode || 'request_failed',
-            statusErrorCode: null,
-            statusErrorScopeKeys: {},
             statusLoadingScopeKeys: {},
             accessMode: 'denied',
-            statuses: {},
           }))
+          if (deniedCatalog) {
+            await refreshRuntimeStatuses(
+              getAppCatalogApps(deniedCatalog),
+              undefined,
+              {
+                contextKey,
+                contextGeneration: deniedContextGeneration,
+                catalog: deniedCatalog,
+              },
+              'replace',
+            )
+          }
           return
         }
         setState(current => ({
@@ -597,20 +627,33 @@ export function useAppCatalog() {
       ) return
       const errorCode = getHomeAppErrorCode(error) ?? 'request_failed'
       if (isCatalogAccessDenied(errorCode)) {
-        catalogRef.current = null
+        const deniedContextGeneration = ++contextGenerationRef.current
+        const deniedCatalog = catalogRef.current
+          ? markCatalogAccessDenied(catalogRef.current)
+          : null
+        catalogRef.current = deniedCatalog
         setState(current => ({
           ...current,
-          catalog: null,
+          catalog: deniedCatalog,
           loading: false,
           refreshing: false,
           warningCode: null,
           errorCode,
-          statusErrorCode: null,
-          statusErrorScopeKeys: {},
           statusLoadingScopeKeys: {},
           accessMode: 'denied',
-          statuses: {},
         }))
+        if (deniedCatalog) {
+          await refreshRuntimeStatuses(
+            getAppCatalogApps(deniedCatalog),
+            undefined,
+            {
+              contextKey,
+              contextGeneration: deniedContextGeneration,
+              catalog: deniedCatalog,
+            },
+            'replace',
+          )
+        }
       } else {
         setState(current => ({
           ...current,

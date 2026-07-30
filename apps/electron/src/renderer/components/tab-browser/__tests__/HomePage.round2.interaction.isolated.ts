@@ -78,7 +78,7 @@ const {
   waitFor,
   within,
 } = await import('@testing-library/react')
-const { HomePage } = await import('../HomePage')
+const { formatBytes, HomePage } = await import('../HomePage')
 const {
   catalogStateMessage,
   homeAppOperationErrorText,
@@ -191,6 +191,19 @@ describe('HomePage round-two regressions', () => {
       'INVALID_SEMVER',
       'warning',
     )).not.toContain(secret)
+  })
+
+  it('formats install sizes through locale unit keys', async () => {
+    await i18n.changeLanguage('en')
+    expect(formatBytes(i18n.t.bind(i18n), 512)).toBe('512 B')
+    expect(formatBytes(i18n.t.bind(i18n), 1024 ** 3)).toBe('1.0 GB')
+
+    await i18n.changeLanguage('zh-Hans')
+    expect(formatBytes(i18n.t.bind(i18n), 512)).toBe('512 字节')
+    expect(formatBytes(i18n.t.bind(i18n), 1024 ** 2)).toBe('1.0 MB')
+
+    await i18n.changeLanguage('de')
+    expect(formatBytes(i18n.t.bind(i18n), 1)).toBe('1 Byte')
   })
 
   it('revalidates a stale remote URL through main before opening a WebView', async () => {
@@ -438,6 +451,102 @@ describe('HomePage round-two regressions', () => {
       expect(screen.getByText('View logs')).toBeTruthy()
       expect(screen.getByText('Uninstall')).toBeTruthy()
       expect(screen.getByText('Stop')).toBeTruthy()
+    })
+  })
+
+  it('keeps an installed app manageable after organization access is denied', async () => {
+    const deniedApp: CatalogApp = {
+      id: 'denied-installed',
+      organizationId: 'organization-a',
+      name: 'Denied Installed',
+      description: '',
+      deliveryMode: 'local_bundle',
+      currentRelease: {
+        version: '2.0.0',
+        runtime: 'static',
+        downloadUrl: 'https://example.com/app.zip',
+        checksum: 'a'.repeat(64),
+        sizeBytes: 1024,
+      },
+      sortOrder: 0,
+      availability: 'unavailable',
+    }
+    const catalog: AppCatalogCacheEntry = {
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      appConfigVersion: 'denied',
+      authorizationStatus: 'denied',
+      apps: [deniedApp],
+      syncedAt: 1,
+    }
+    const scopeKey = createLocalAppScopeKey({
+      kind: 'catalog',
+      accountId: catalog.accountId,
+      organizationId: catalog.organizationId,
+      catalogAppId: deniedApp.id,
+    })
+    const status = {
+      appId: deniedApp.id,
+      scope: {
+        kind: 'catalog' as const,
+        accountId: catalog.accountId,
+        organizationId: catalog.organizationId,
+        catalogAppId: deniedApp.id,
+      },
+      status: 'running' as const,
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+    }
+    const stop = jest.fn(async () => {})
+    const uninstall = jest.fn(async () => {})
+    const getLogs = jest.fn(async () => 'retained log output')
+    appCatalogHook = {
+      ...signedOutCatalogHook(),
+      organization: {
+        accountId: catalog.accountId,
+        activeOrganizationId: catalog.organizationId,
+        organizationContextKey: 'account-a:organization-a',
+        organizationSummaries: [{
+          id: catalog.organizationId,
+          type: 'enterprise',
+          name: 'Organization A',
+        }],
+      },
+      state: {
+        ...signedOutCatalogHook().state,
+        catalog,
+        accessMode: 'denied',
+        errorCode: 'NOT_FOUND',
+        statuses: { [scopeKey]: status },
+      },
+      getStatus: () => status,
+      scopeKeyForApp: () => scopeKey,
+      stop,
+      uninstall,
+      getLogs,
+    }
+
+    render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+
+    expect(screen.getByText('Denied Installed')).toBeTruthy()
+    expect(screen.getByText('Access removed by your organization')).toBeTruthy()
+    expect(screen.getByTestId('organization-app-action-denied-installed')
+      .hasAttribute('disabled')).toBe(true)
+
+    const management = screen.getByLabelText('More actions for Denied Installed')
+    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
+    await waitFor(() => {
+      expect(screen.getByText('Stop')).toBeTruthy()
+      expect(screen.getByText('View logs')).toBeTruthy()
+      expect(screen.getByText('Uninstall')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByText('Stop'))
+    await waitFor(() => {
+      expect(stop).toHaveBeenCalledWith(deniedApp)
     })
   })
 

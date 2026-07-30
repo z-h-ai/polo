@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import {
   denyAppCatalogAccessForAccount,
   getAppCatalogAccessMode,
+  isAppCatalogAccessDeniedForAccount,
   resetAppCatalogAccessModesForTests,
   resumeAppCatalogAccessForAccount,
   setAppCatalogAccessMode,
@@ -20,6 +21,8 @@ describe('app catalog account access gate', () => {
     denyAppCatalogAccessForAccount('account-a')
     setAppCatalogAccessMode('account-a', 'organization-a', 'online')
 
+    expect(isAppCatalogAccessDeniedForAccount('account-a')).toBe(true)
+    expect(isAppCatalogAccessDeniedForAccount('account-b')).toBe(false)
     expect(getAppCatalogAccessMode('account-a', 'organization-a')).toBe(
       'denied',
     )
@@ -32,6 +35,7 @@ describe('app catalog account access gate', () => {
 
     resumeAppCatalogAccessForAccount('account-a')
 
+    expect(isAppCatalogAccessDeniedForAccount('account-a')).toBe(false)
     expect(getAppCatalogAccessMode('account-a', 'organization-a')).toBe(
       'online',
     )

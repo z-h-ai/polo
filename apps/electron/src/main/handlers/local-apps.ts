@@ -2,6 +2,7 @@ import {
   getAppCatalogAccessMode,
   getAppCatalogApps,
   getCachedAppCatalog,
+  isAppCatalogAccessDeniedForAccount,
   type AppReleaseSummary,
   type CatalogApp,
 } from '@polo-ai/shared/admin'
@@ -50,7 +51,11 @@ function requireRendererCatalogScope(reference: unknown): CatalogLocalAppScope {
 
 async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promise<void> {
   const tokens = await getCredentialManager().getAdminTokens()
-  if (!tokens || tokens.userId !== scope.accountId) {
+  if (
+    !tokens
+    || tokens.userId !== scope.accountId
+    || isAppCatalogAccessDeniedForAccount(scope.accountId)
+  ) {
     throw new LocalAppRuntimeError(
       'NOT_AUTHORIZED',
       'The local app belongs to a different or signed-out account',
@@ -58,38 +63,50 @@ async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promis
   }
 }
 
-interface AuthorizedCatalogApp {
+interface CatalogAppReference {
   app: CatalogApp
   appConfigVersion: string
   accessMode: 'online' | 'offline' | 'denied'
 }
 
-async function requireCatalogDataAccess(
+async function requireCatalogAppReference(
   scope: CatalogLocalAppScope,
-): Promise<AuthorizedCatalogApp> {
+): Promise<CatalogAppReference> {
   await requireTrustedCatalogAccount(scope)
   const catalog = getCachedAppCatalog(scope.accountId, scope.organizationId)
   const app = catalog
     ? getAppCatalogApps(catalog).find(candidate => candidate.id === scope.catalogAppId)
     : undefined
   const accessMode = getAppCatalogAccessMode(scope.accountId, scope.organizationId)
+  if (!catalog || !app) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'This organization app is not present in the current account cache',
+    )
+  }
+  return { app, appConfigVersion: catalog.appConfigVersion, accessMode }
+}
+
+async function requireCatalogDataAccess(
+  scope: CatalogLocalAppScope,
+): Promise<CatalogAppReference> {
+  const reference = await requireCatalogAppReference(scope)
+  const catalog = getCachedAppCatalog(scope.accountId, scope.organizationId)
   if (
-    !catalog
-    || catalog.authorizationStatus !== 'authorized'
-    || !app
-    || accessMode === 'denied'
+    catalog?.authorizationStatus !== 'authorized'
+    || reference.accessMode === 'denied'
   ) {
     throw new LocalAppRuntimeError(
       'NOT_AUTHORIZED',
       'This organization app session is no longer authorized',
     )
   }
-  return { app, appConfigVersion: catalog.appConfigVersion, accessMode }
+  return reference
 }
 
 async function requireAuthorizedCatalogEntry(
   scope: CatalogLocalAppScope,
-): Promise<AuthorizedCatalogApp> {
+): Promise<CatalogAppReference> {
   const authorized = await requireCatalogDataAccess(scope)
   if (authorized.app.availability !== 'available') {
     throw new LocalAppRuntimeError(
@@ -102,7 +119,7 @@ async function requireAuthorizedCatalogEntry(
 
 async function requireAuthorizedCatalogApp(
   scope: CatalogLocalAppScope,
-): Promise<AuthorizedCatalogApp> {
+): Promise<CatalogAppReference> {
   const { app, appConfigVersion, accessMode } = await requireAuthorizedCatalogEntry(scope)
   if (app.deliveryMode !== 'local_bundle') {
     throw new LocalAppRuntimeError(
@@ -119,6 +136,21 @@ async function withCatalogScope<T>(
 ): Promise<T> {
   const reference = requireRendererCatalogScope(rawReference)
   await requireCatalogDataAccess(reference)
+  return catalogOperation(reference)
+}
+
+async function withCatalogManagementScope<T>(
+  rawReference: unknown,
+  catalogOperation: (scope: CatalogLocalAppScope) => Promise<T>,
+): Promise<T> {
+  const reference = requireRendererCatalogScope(rawReference)
+  const { app } = await requireCatalogAppReference(reference)
+  if (app.deliveryMode !== 'local_bundle') {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'Remote URL apps do not have local runtime data',
+    )
+  }
   return catalogOperation(reference)
 }
 
@@ -330,7 +362,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
   server.handle(
     RPC_CHANNELS.localApps.CANCEL_INSTALL,
-    (_ctx, reference: unknown) => withCatalogScope(
+    (_ctx, reference: unknown) => withCatalogManagementScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().cancelInstall(scope),
     ),
@@ -355,7 +387,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     ))
 
   server.handle(RPC_CHANNELS.localApps.STOP, (_ctx, reference: unknown) =>
-    withCatalogScope(
+    withCatalogManagementScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().stop(scope),
     ))
@@ -379,7 +411,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   server.handle(
     RPC_CHANNELS.localApps.UNINSTALL,
     (_ctx, reference: unknown, options?: LocalAppUninstallOptions) =>
-      withCatalogScope(
+      withCatalogManagementScope(
         reference,
         scope => getScopedLocalAppRuntimeRegistry().uninstall(scope, options),
       ),
@@ -419,7 +451,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
   server.handle(
     RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
-    (_ctx, reference: unknown) => withCatalogScope(
+    (_ctx, reference: unknown) => withCatalogManagementScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().getInstalledApps(scope),
     ),
@@ -427,7 +459,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
   server.handle(
     RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
-    (_ctx, reference: unknown) => withCatalogScope(
+    (_ctx, reference: unknown) => withCatalogManagementScope(
       reference,
       scope => getScopedLocalAppRuntimeRegistry().getRuntimeStatus(scope),
     ),
@@ -451,10 +483,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
       const scopes = rawRequest.scopes.map(requireRendererCatalogScope)
       const first = scopes[0]!
-      const tokens = await getCredentialManager().getAdminTokens()
-      if (!tokens || tokens.userId !== first.accountId) {
-        throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Catalog status account is not signed in')
-      }
+      await requireTrustedCatalogAccount(first)
       if (scopes.some(scope => (
         scope.accountId !== first.accountId
         || scope.organizationId !== first.organizationId
@@ -467,16 +496,11 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
       // Deliberately one cache read for the entire 10,000-item batch.
       const catalog = getCachedAppCatalog(first.accountId, first.organizationId)
-      const accessMode = getAppCatalogAccessMode(
-        first.accountId,
-        first.organizationId,
-      )
-      if (
-        !catalog
-        || catalog.authorizationStatus !== 'authorized'
-        || accessMode === 'denied'
-      ) {
-        throw new LocalAppRuntimeError('NOT_AUTHORIZED', 'Catalog authorization is unavailable')
+      if (!catalog) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Catalog data is unavailable for this account and organization',
+        )
       }
       const localApps = new Map(getAppCatalogApps(catalog)
         .filter(app => app.deliveryMode === 'local_bundle')
@@ -484,7 +508,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       if (scopes.some(scope => !localApps.has(scope.catalogAppId))) {
         throw new LocalAppRuntimeError(
           'NOT_AUTHORIZED',
-          'A batch status scope is not present in the authorized Catalog',
+          'A batch status scope is not present in the account Catalog cache',
         )
       }
       const statuses = await getScopedLocalAppRuntimeRegistry()
@@ -519,7 +543,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   server.handle(
     RPC_CHANNELS.localApps.GET_LOGS,
     (_ctx, reference: unknown, options?: LocalAppLogsOptions) =>
-      withCatalogScope(
+      withCatalogManagementScope(
         reference,
         scope => getScopedLocalAppRuntimeRegistry().getLogs(scope, options),
       ),

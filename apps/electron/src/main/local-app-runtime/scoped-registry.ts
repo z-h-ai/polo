@@ -54,6 +54,21 @@ export interface ScopedCatalogInstallRequest {
   arch: LocalAppArchitecture
 }
 
+interface ScopeOperationLifecyclePolicy {
+  organization: boolean
+  app: boolean
+}
+
+const ACCOUNT_SCOPED_OPERATION: ScopeOperationLifecyclePolicy = {
+  organization: false,
+  app: false,
+}
+
+const AUTHORIZED_APP_LIFECYCLE_OPERATION: ScopeOperationLifecyclePolicy = {
+  organization: true,
+  app: true,
+}
+
 function validateScopeField(value: unknown, field: string): string {
   if (
     typeof value !== 'string'
@@ -180,102 +195,134 @@ export class ScopedLocalAppRuntimeRegistry {
         'Catalog local app version must be strict SemVer',
       )
     }
-    return this.runTrackedScopeOperation(request.scope, async scope => {
-      const manager = await this.getManager(scope)
-      this.assertAccountSessionActive(scope.accountId)
-      const runtimeAppId = createCatalogRuntimeAppId(scope)
-      const { scope: _scope, ...release } = request
-      const managerRequest: LocalAppInstallRequest = {
-        ...release,
-        appId: runtimeAppId,
-        expectedManifestAppId: scope.catalogAppId,
-      }
-      const installed = await manager.install(
-        managerRequest,
-        options,
-      )
-      return attachScope(installed, scope)
-    })
+    return this.runTrackedScopeOperation(
+      request.scope,
+      AUTHORIZED_APP_LIFECYCLE_OPERATION,
+      async scope => {
+        const manager = await this.getManager(scope)
+        this.assertAccountSessionActive(scope.accountId)
+        const runtimeAppId = createCatalogRuntimeAppId(scope)
+        const { scope: _scope, ...release } = request
+        const managerRequest: LocalAppInstallRequest = {
+          ...release,
+          appId: runtimeAppId,
+          expectedManifestAppId: scope.catalogAppId,
+        }
+        const installed = await manager.install(
+          managerRequest,
+          options,
+        )
+        return attachScope(installed, scope)
+      },
+    )
   }
 
   async cancelInstall(scope: CatalogLocalAppScope): Promise<boolean> {
-    return this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getManager(safeScope)
-      this.assertAccountSessionActive(safeScope.accountId)
-      return manager.cancelInstall(createCatalogRuntimeAppId(safeScope))
-    })
+    return this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        this.assertAccountSessionActive(safeScope.accountId)
+        return manager.cancelInstall(createCatalogRuntimeAppId(safeScope))
+      },
+    )
   }
 
   async start(scope: CatalogLocalAppScope): Promise<LocalAppStartResult> {
-    return this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getManager(safeScope)
-      this.assertAccountSessionActive(safeScope.accountId)
-      return attachScope(
-        await manager.start(createCatalogRuntimeAppId(safeScope)),
-        safeScope,
-      )
-    })
+    return this.runTrackedScopeOperation(
+      scope,
+      AUTHORIZED_APP_LIFECYCLE_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        this.assertAccountSessionActive(safeScope.accountId)
+        return attachScope(
+          await manager.start(createCatalogRuntimeAppId(safeScope)),
+          safeScope,
+        )
+      },
+    )
   }
 
   async stop(scope: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus> {
-    return this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getManager(safeScope)
-      this.assertAccountSessionActive(safeScope.accountId)
-      return attachScope(
-        await manager.stop(createCatalogRuntimeAppId(safeScope)),
-        safeScope,
-      )
-    })
+    return this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        this.assertAccountSessionActive(safeScope.accountId)
+        return attachScope(
+          await manager.stop(createCatalogRuntimeAppId(safeScope)),
+          safeScope,
+        )
+      },
+    )
   }
 
   async restart(scope: CatalogLocalAppScope): Promise<LocalAppStartResult> {
-    return this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getManager(safeScope)
-      this.assertAccountSessionActive(safeScope.accountId)
-      return attachScope(
-        await manager.restart(createCatalogRuntimeAppId(safeScope)),
-        safeScope,
-      )
-    })
+    return this.runTrackedScopeOperation(
+      scope,
+      AUTHORIZED_APP_LIFECYCLE_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        this.assertAccountSessionActive(safeScope.accountId)
+        return attachScope(
+          await manager.restart(createCatalogRuntimeAppId(safeScope)),
+          safeScope,
+        )
+      },
+    )
   }
 
   async uninstall(
     scope: CatalogLocalAppScope,
     options?: LocalAppUninstallOptions,
   ): Promise<void> {
-    await this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getManager(safeScope)
-      this.assertAccountSessionActive(safeScope.accountId)
-      await manager.uninstall(createCatalogRuntimeAppId(safeScope), options)
-    })
+    await this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        this.assertAccountSessionActive(safeScope.accountId)
+        await manager.uninstall(createCatalogRuntimeAppId(safeScope), options)
+      },
+    )
   }
 
   async setAvailableRelease(
     scope: CatalogLocalAppScope,
     release: LocalAppAvailableRelease | null,
   ): Promise<LocalAppRuntimeStatus> {
-    return this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getManager(safeScope)
-      this.assertAccountSessionActive(safeScope.accountId)
-      return attachScope(
-        await manager.setAvailableRelease(
-          createCatalogRuntimeAppId(safeScope),
-          release,
-        ),
-        safeScope,
-      )
-    })
+    return this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        this.assertAccountSessionActive(safeScope.accountId)
+        return attachScope(
+          await manager.setAvailableRelease(
+            createCatalogRuntimeAppId(safeScope),
+            release,
+          ),
+          safeScope,
+        )
+      },
+    )
   }
 
   async getInstalledApps(
     scope: CatalogLocalAppScope,
   ): Promise<LocalAppInstalledApp[]> {
-    return this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getExistingManager(safeScope)
-      if (!manager) return []
-      return (await manager.getInstalledApps())
-        .map(app => attachScope(app, safeScope))
-    })
+    return this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getExistingManager(safeScope)
+        if (!manager) return []
+        return (await manager.getInstalledApps())
+          .map(app => attachScope(app, safeScope))
+      },
+    )
   }
 
   async getRuntimeStatus(
@@ -294,32 +341,36 @@ export class ScopedLocalAppRuntimeRegistry {
       )
     }
     const scopes = rawScopes.map(validateCatalogLocalAppScope)
-    return this.runTrackedScopesOperation(scopes, async () => {
-      const statuses = new Array<LocalAppRuntimeStatus>(scopes.length)
-      let nextIndex = 0
-      const workers = Array.from(
-        { length: Math.min(STATUS_READ_CONCURRENCY, scopes.length) },
-        async () => {
-          while (nextIndex < scopes.length) {
-            const index = nextIndex++
-            const scope = scopes[index]!
-            const manager = await this.getExistingManager(scope)
-            statuses[index] = manager
-              ? attachScope(
-                  await manager.getRuntimeStatus(createCatalogRuntimeAppId(scope)),
-                  scope,
-                )
-              : {
-                  appId: scope.catalogAppId,
-                  scope,
-                  status: 'not_installed',
-                }
-          }
-        },
-      )
-      await Promise.all(workers)
-      return statuses
-    })
+    return this.runTrackedScopesOperation(
+      scopes,
+      ACCOUNT_SCOPED_OPERATION,
+      async () => {
+        const statuses = new Array<LocalAppRuntimeStatus>(scopes.length)
+        let nextIndex = 0
+        const workers = Array.from(
+          { length: Math.min(STATUS_READ_CONCURRENCY, scopes.length) },
+          async () => {
+            while (nextIndex < scopes.length) {
+              const index = nextIndex++
+              const scope = scopes[index]!
+              const manager = await this.getExistingManager(scope)
+              statuses[index] = manager
+                ? attachScope(
+                    await manager.getRuntimeStatus(createCatalogRuntimeAppId(scope)),
+                    scope,
+                  )
+                : {
+                    appId: scope.catalogAppId,
+                    scope,
+                    status: 'not_installed',
+                  }
+            }
+          },
+        )
+        await Promise.all(workers)
+        return statuses
+      },
+    )
   }
 
   async isInstalledAndReady(scope: CatalogLocalAppScope): Promise<boolean> {
@@ -421,10 +472,14 @@ export class ScopedLocalAppRuntimeRegistry {
     scope: CatalogLocalAppScope,
     options?: { tail?: number },
   ): Promise<string> {
-    return this.runTrackedScopeOperation(scope, async safeScope => {
-      const manager = await this.getManager(safeScope)
-      return manager.getLogs(createCatalogRuntimeAppId(safeScope), options)
-    })
+    return this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getManager(safeScope)
+        return manager.getLogs(createCatalogRuntimeAppId(safeScope), options)
+      },
+    )
   }
 
   async stopAccount(accountId: string): Promise<void> {
@@ -707,20 +762,28 @@ export class ScopedLocalAppRuntimeRegistry {
 
   private runTrackedScopeOperation<T>(
     rawScope: CatalogLocalAppScope,
+    lifecyclePolicy: ScopeOperationLifecyclePolicy,
     operation: (scope: CatalogLocalAppScope) => Promise<T>,
   ): Promise<T> {
     const scope = validateCatalogLocalAppScope(rawScope)
     this.assertAccountSessionActive(scope.accountId)
-    this.assertOrganizationSessionActive(
-      scope.accountId,
-      scope.organizationId,
+    if (lifecyclePolicy.organization) {
+      this.assertOrganizationSessionActive(
+        scope.accountId,
+        scope.organizationId,
+      )
+    }
+    if (lifecyclePolicy.app) this.assertAppSessionActive(scope)
+    return this.runTrackedScopesOperation(
+      [scope],
+      lifecyclePolicy,
+      () => operation(scope),
     )
-    this.assertAppSessionActive(scope)
-    return this.runTrackedScopesOperation([scope], () => operation(scope))
   }
 
   private runTrackedScopesOperation<T>(
     scopes: CatalogLocalAppScope[],
+    lifecyclePolicy: ScopeOperationLifecyclePolicy,
     operation: () => Promise<T>,
   ): Promise<T> {
     const accounts = new Map<string, CatalogLocalAppScope>()
@@ -731,33 +794,39 @@ export class ScopedLocalAppRuntimeRegistry {
     const appLifecycleGenerations = new Map<string, number>()
     for (const scope of scopes) {
       this.assertAccountSessionActive(scope.accountId)
-      this.assertOrganizationSessionActive(
-        scope.accountId,
-        scope.organizationId,
-      )
-      this.assertAppSessionActive(scope)
+      if (lifecyclePolicy.organization) {
+        this.assertOrganizationSessionActive(
+          scope.accountId,
+          scope.organizationId,
+        )
+      }
+      if (lifecyclePolicy.app) this.assertAppSessionActive(scope)
       if (!accounts.has(scope.accountId)) accounts.set(scope.accountId, scope)
       accountLifecycleGenerations.set(
         scope.accountId,
         this.getAccountLifecycleGeneration(scope.accountId),
       )
-      const organizationKey = createOrganizationLifecycleKey(
-        scope.accountId,
-        scope.organizationId,
-      )
-      if (!organizations.has(organizationKey)) {
-        organizations.set(organizationKey, scope)
+      if (lifecyclePolicy.organization) {
+        const organizationKey = createOrganizationLifecycleKey(
+          scope.accountId,
+          scope.organizationId,
+        )
+        if (!organizations.has(organizationKey)) {
+          organizations.set(organizationKey, scope)
+        }
+        organizationLifecycleGenerations.set(
+          organizationKey,
+          this.getOrganizationLifecycleGeneration(organizationKey),
+        )
       }
-      organizationLifecycleGenerations.set(
-        organizationKey,
-        this.getOrganizationLifecycleGeneration(organizationKey),
-      )
-      const appKey = createCatalogLocalAppScopeKey(scope)
-      if (!apps.has(appKey)) apps.set(appKey, scope)
-      appLifecycleGenerations.set(
-        appKey,
-        this.getAppLifecycleGeneration(appKey),
-      )
+      if (lifecyclePolicy.app) {
+        const appKey = createCatalogLocalAppScopeKey(scope)
+        if (!apps.has(appKey)) apps.set(appKey, scope)
+        appLifecycleGenerations.set(
+          appKey,
+          this.getAppLifecycleGeneration(appKey),
+        )
+      }
     }
     const assertCapturedLifecycleIsCurrent = () => {
       for (const accountId of accounts.keys()) {
@@ -807,9 +876,10 @@ export class ScopedLocalAppRuntimeRegistry {
         return operation()
       })
       .then(result => {
-        // Entry authorization is insufficient: logout may begin while a
-        // manager call is pending. Account and organization generations make
-        // late results permanently stale even after either fence is released.
+        // Install/start/restart capture every authorization fence because their
+        // late success can create executable state. Data-management operations
+        // deliberately capture only the account fence so withdrawn/denied
+        // installs remain inspectable, stoppable, and removable.
         assertCapturedLifecycleIsCurrent()
         return result
       }, error => {

@@ -504,10 +504,10 @@ describe('scoped local app runtime registry', () => {
     })
     await cleanup
     await expect(registry.getRuntimeStatus(withdrawnScope))
+      .resolves.toMatchObject({ appId: withdrawnScope.catalogAppId })
+    await expect(registry.start(withdrawnScope))
       .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
     registry.authorizeApps([withdrawnScope])
-    await expect(registry.getRuntimeStatus(withdrawnScope))
-      .resolves.toMatchObject({ appId: withdrawnScope.catalogAppId })
     expect(stopped).toEqual([withdrawnRuntimeId])
   })
 

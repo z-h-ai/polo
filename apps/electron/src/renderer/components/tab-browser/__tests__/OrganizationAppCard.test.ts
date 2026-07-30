@@ -85,6 +85,28 @@ describe('OrganizationAppCard invalid version state', () => {
       .toBe('homeApps.status.updateAvailable')
   })
 
+  it('opens an installed old version when the new Release is incompatible', () => {
+    const status: LocalAppRuntimeStatus = {
+      appId: app.id,
+      status: 'update_available',
+      currentVersion: '1.0.0',
+      availableRelease: { version: '2.0.0' },
+    }
+
+    expect(primaryActionFor(app, status, false, false)).toBe('open')
+    expect(primaryActionFor(app, status, false, true)).toBe('open')
+  })
+
+  it('disables only a fresh install when its Release is incompatible', () => {
+    const status: LocalAppRuntimeStatus = {
+      appId: app.id,
+      status: 'not_installed',
+    }
+
+    expect(primaryActionFor(app, status, false, false)).toBe('unavailable')
+    expect(primaryActionFor(app, undefined, false, false)).toBe('unavailable')
+  })
+
   it('does not expose a raw runtime error message for a broken app', () => {
     const status: LocalAppRuntimeStatus = {
       appId: app.id,

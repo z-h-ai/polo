@@ -14,6 +14,7 @@ export {
 export {
   denyAppCatalogAccessForAccount,
   getAppCatalogAccessMode,
+  isAppCatalogAccessDeniedForAccount,
   resetAppCatalogAccessModesForTests,
   resumeAppCatalogAccessForAccount,
   setAppCatalogAccessMode,

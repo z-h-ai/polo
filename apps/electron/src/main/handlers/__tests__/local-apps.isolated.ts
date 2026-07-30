@@ -14,6 +14,7 @@ type Handler = (
 
 let signedInAccountId: string | null = 'account-a'
 let accessMode: 'online' | 'offline' | 'denied' = 'online'
+let accountAccessDenied = false
 let catalog: AppCatalogCacheEntry = createCatalog(1)
 
 const getCachedAppCatalog = mock(() => catalog)
@@ -83,6 +84,7 @@ const scopedRegistry = {
 mock.module('@polo-ai/shared/admin', () => ({
   getCachedAppCatalog,
   getAppCatalogAccessMode,
+  isAppCatalogAccessDeniedForAccount: () => accountAccessDenied,
   getAppCatalogApps: (entry: AppCatalogCacheEntry) => [
     ...entry.apps,
     ...(entry.withdrawnApps ?? []),
@@ -186,6 +188,7 @@ describe('local app main-process authorization boundary', () => {
   beforeEach(() => {
     signedInAccountId = 'account-a'
     accessMode = 'online'
+    accountAccessDenied = false
     catalog = createCatalog(1)
     handlers.clear()
     for (const handlerMock of [
@@ -539,6 +542,7 @@ describe('local app main-process authorization boundary', () => {
 
   it('fails every public Catalog app RPC while session-ending access is denied', async () => {
     accessMode = 'denied'
+    accountAccessDenied = true
     const calls: Array<[string, ...unknown[]]> = [
       [
         RPC_CHANNELS.localApps.INSTALL,
@@ -621,7 +625,79 @@ describe('local app main-process authorization boundary', () => {
       .rejects.toThrow('installed and prepared')
   })
 
-  it('retains a full-directory tombstone but rejects its launch and status access', async () => {
+  it('keeps denied installed apps manageable while lifecycle RPCs fail closed', async () => {
+    catalog = {
+      ...catalog,
+      authorizationStatus: 'denied',
+      apps: catalog.apps.map(app => ({
+        ...app,
+        availability: 'unavailable',
+      })),
+    }
+    accessMode = 'denied'
+    scopedStatuses.mockImplementation(async scopes => scopes.map(item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+    })))
+
+    const deniedScope = scope()
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES)!(
+      context,
+      { scopes: [deniedScope] },
+    )).resolves.toMatchObject([{
+      appId: deniedScope.catalogAppId,
+      status: 'running',
+    }])
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS)!(
+      context,
+      deniedScope,
+    )).resolves.toMatchObject({ appId: deniedScope.catalogAppId })
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
+      context,
+      deniedScope,
+    )).resolves.toBe('')
+    await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
+      context,
+      deniedScope,
+    )).resolves.toMatchObject({ status: 'stopped' })
+    await expect(handlers.get(RPC_CHANNELS.localApps.UNINSTALL)!(
+      context,
+      deniedScope,
+      { preserveData: true },
+    )).resolves.toBeUndefined()
+
+    for (const channel of [
+      RPC_CHANNELS.localApps.START,
+      RPC_CHANNELS.localApps.RESTART,
+      RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+    ]) {
+      await expect(handlers.get(channel)!(context, deniedScope, null))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+    await expect(handlers.get(RPC_CHANNELS.localApps.INSTALL)!(
+      context,
+      {
+        scope: deniedScope,
+        appConfigVersion: catalog.appConfigVersion,
+        permissions: [],
+        release: confirmedRelease(),
+      },
+    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+
+    expect(scopedRegistry.stop).toHaveBeenCalledWith(deniedScope)
+    expect(scopedRegistry.getLogs).toHaveBeenCalledWith(deniedScope, undefined)
+    expect(scopedRegistry.uninstall).toHaveBeenCalledWith(
+      deniedScope,
+      { preserveData: true },
+    )
+    expect(scopedStart).not.toHaveBeenCalled()
+    expect(scopedInstall).not.toHaveBeenCalled()
+  })
+
+  it('retains a full-directory tombstone with status access but rejects launch', async () => {
     const withdrawn = {
       ...catalog.apps[0]!,
       availability: 'withdrawn' as const,
