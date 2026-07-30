@@ -109,6 +109,13 @@ let startLocalApp = mock(async (
   url: 'http://127.0.0.1:9876',
   port: 9876,
 }))
+let stopLocalApp = mock(async (
+  scope: CatalogLocalAppScope,
+): Promise<LocalAppRuntimeStatus> => ({
+  appId: scope.catalogAppId,
+  scope,
+  status: 'stopped',
+}))
 let installLocalApp = mock(async (
   _request: LocalAppCatalogInstallRequest,
 ): Promise<void> => {})
@@ -178,6 +185,13 @@ beforeEach(() => {
     url: 'http://127.0.0.1:9876',
     port: 9876,
   }))
+  stopLocalApp = mock(async (
+    scope: CatalogLocalAppScope,
+  ): Promise<LocalAppRuntimeStatus> => ({
+    appId: scope.catalogAppId,
+    scope,
+    status: 'stopped',
+  }))
   installLocalApp = mock(async (
     _request: LocalAppCatalogInstallRequest,
   ): Promise<void> => {})
@@ -210,6 +224,7 @@ beforeEach(() => {
           installLocalApp(request),
         cancelInstall: (scope: CatalogLocalAppScope) => cancelInstall(scope),
         start: (scope: CatalogLocalAppScope) => startLocalApp(scope),
+        stop: (scope: CatalogLocalAppScope) => stopLocalApp(scope),
         resolveRemoteUrl: async (scope: CatalogLocalAppScope) => ({
           appId: scope.catalogAppId,
           scope,
@@ -475,6 +490,58 @@ describe('useAppCatalog scoped async state', () => {
 
     expect(startResult).toMatchObject({ url: localUrl })
     expect(startLocalApp).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends stop once while start for the same scope is still pending', async () => {
+    const pendingStart = deferred<LocalAppStartResult>()
+    startLocalApp = mock(() => pendingStart.promise)
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.apps).toHaveLength(1)
+    })
+    const catalogApp = result.current.state.catalog!.apps[0]!
+
+    let started!: Promise<LocalAppStartResult>
+    act(() => {
+      started = result.current.start(catalogApp)
+    })
+    await waitFor(() => {
+      expect(startLocalApp).toHaveBeenCalledTimes(1)
+    })
+
+    let stopped!: Promise<void>
+    act(() => {
+      stopped = result.current.stop(catalogApp)
+    })
+    await waitFor(() => {
+      expect(stopLocalApp).toHaveBeenCalledTimes(1)
+    })
+    await act(async () => {
+      await stopped
+    })
+
+    await act(async () => {
+      pendingStart.resolve({
+        appId: catalogApp.id,
+        scope: {
+          kind: 'catalog',
+          accountId: 'account-a',
+          organizationId: 'organization-a',
+          catalogAppId: catalogApp.id,
+        },
+        version: '1.0.0',
+        url: 'http://127.0.0.1:9912',
+        port: 9912,
+      })
+      await started
+    })
+
+    expect(stopLocalApp).toHaveBeenCalledWith(expect.objectContaining({
+      accountId: 'account-a',
+      organizationId: 'organization-a',
+      catalogAppId: 'shared-app-id',
+    }))
+    expect(stopLocalApp).toHaveBeenCalledTimes(1)
   })
 
   it('cancels an in-flight install through an independent cancellation channel', async () => {

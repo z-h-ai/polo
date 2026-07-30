@@ -10,7 +10,7 @@ describe('Catalog strict SemVer 2.0', () => {
     expect(normalizeCatalogSemVer('v1.2.3-rc.1+build.5')).toBe(
       '1.2.3-rc.1+build.5',
     )
-    expect(isValidCatalogSemVer('V0.0.0')).toBe(true)
+    expect(isValidCatalogSemVer('v0.0.0')).toBe(true)
   })
 
   it('compares numeric identifiers as strings beyond JavaScript safe integers', () => {
@@ -38,6 +38,7 @@ describe('Catalog strict SemVer 2.0', () => {
       '1.0.0-01',
       '1.0.0-alpha..1',
       'release-1',
+      'V1.2.3',
       ' 1.2.3',
       '1.2.3 ',
       '\t1.2.3',

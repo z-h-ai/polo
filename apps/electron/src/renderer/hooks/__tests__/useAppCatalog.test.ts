@@ -62,6 +62,11 @@ describe('organization app catalog version comparison', () => {
       order: null,
       reason: 'invalid_semver',
     })
+    expect(compareCatalogVersions('V2.0.0', '1.0.0')).toEqual({
+      strategy: 'invalid',
+      order: null,
+      reason: 'invalid_semver',
+    })
   })
 })
 

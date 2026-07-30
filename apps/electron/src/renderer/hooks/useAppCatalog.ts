@@ -643,16 +643,23 @@ export function useAppCatalog() {
 
   const runExclusive = useCallback(<T,>(
     scopeKey: string,
+    operationKind: 'install' | 'start' | 'stop' | 'uninstall',
     operation: () => Promise<T>,
   ): Promise<T> => {
-    const existing = operationsRef.current.get(scopeKey) as Promise<T> | undefined
+    // Only identical lifecycle commands are single-flight. A stop must remain
+    // able to cross an entered start so the main process can serialize and
+    // stop the process as soon as startup completes.
+    const operationKey = JSON.stringify([scopeKey, operationKind])
+    const existing = operationsRef.current.get(operationKey) as
+      | Promise<T>
+      | undefined
     if (existing) return existing
     const promise = operation().finally(() => {
-      if (operationsRef.current.get(scopeKey) === promise) {
-        operationsRef.current.delete(scopeKey)
+      if (operationsRef.current.get(operationKey) === promise) {
+        operationsRef.current.delete(operationKey)
       }
     })
-    operationsRef.current.set(scopeKey, promise)
+    operationsRef.current.set(operationKey, promise)
     return promise
   }, [])
 
@@ -684,7 +691,7 @@ export function useAppCatalog() {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
-    return runExclusive(scopeKey, async () => {
+    return runExclusive(scopeKey, 'install', async () => {
       const release = app.currentRelease
       if (!release || !state.host) {
         throw new Error(i18n.t('homeApps.errors.releaseUnavailable'))
@@ -759,7 +766,7 @@ export function useAppCatalog() {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
-    return runExclusive(scopeKey, async () => {
+    return runExclusive(scopeKey, 'start', async () => {
       if (app.availability !== 'available') {
         throw new Error(i18n.t('homeApps.errors.unavailable'))
       }
@@ -796,7 +803,7 @@ export function useAppCatalog() {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
-    return runExclusive(scopeKey, async () => {
+    return runExclusive(scopeKey, 'stop', async () => {
       await window.electronAPI.localApps.stop(scope)
       requireCurrent(snapshot)
       await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')
@@ -807,7 +814,7 @@ export function useAppCatalog() {
     const snapshot = currentSnapshotForApp(app)
     const scope = scopeForCatalogApp(snapshot.catalog, app)
     const scopeKey = createLocalAppScopeKey(scope)
-    return runExclusive(scopeKey, async () => {
+    return runExclusive(scopeKey, 'uninstall', async () => {
       await window.electronAPI.localApps.uninstall(scope, { preserveData })
       requireCurrent(snapshot)
       await refreshRuntimeStatuses([app], undefined, snapshot, 'merge')

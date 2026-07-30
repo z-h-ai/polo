@@ -428,7 +428,7 @@ describe('scoped local app runtime registry', () => {
     })
   })
 
-  it('rejects whitespace-padded Catalog versions before creating a runtime manager', async () => {
+  it('rejects padded and uppercase-V Catalog versions before creating a runtime manager', async () => {
     let managerCount = 0
     const registry = new ScopedLocalAppRuntimeRegistry({
       rootDir,
@@ -438,7 +438,7 @@ describe('scoped local app runtime registry', () => {
       },
     })
 
-    for (const version of [' 1.0.0', '1.0.0 ']) {
+    for (const version of [' 1.0.0', '1.0.0 ', 'V1.0.0']) {
       await expect(registry.install({
         scope: scope('account-a'),
         version,

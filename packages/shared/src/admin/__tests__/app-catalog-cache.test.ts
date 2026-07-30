@@ -135,13 +135,13 @@ describe('app catalog cache', () => {
     expect(saved.warnings).toEqual([])
   })
 
-  it('does not trust whitespace-padded release versions', () => {
+  it('does not trust padded or uppercase-V release versions', () => {
     saveAppCatalog('account-a', 'organization-1', {
       appConfigVersion: 'v1',
       apps: [bundleApp('app-a', '1.2.0')],
     }, 100)
 
-    for (const version of [' 1.3.0', '1.3.0 ']) {
+    for (const version of [' 1.3.0', '1.3.0 ', 'V1.3.0']) {
       const refreshed = saveAppCatalog('account-a', 'organization-1', {
         appConfigVersion: version,
         apps: [bundleApp('app-a', version)],

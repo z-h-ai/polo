@@ -8,6 +8,7 @@ import type { AppCatalogCacheEntry } from '@polo-ai/shared/admin'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type {
   CatalogLocalAppScope,
+  LocalAppCatalogInstallRequest,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
@@ -44,13 +45,42 @@ function createDeferred<T>() {
 const scope: CatalogLocalAppScope = {
   kind: 'catalog',
   accountId: 'account-a',
-  organizationId: 'organization-a',
+  organizationId: '16666666-6666-4666-8666-666666666661',
   catalogAppId: 'catalog-app',
 }
 let tokens: StoredTokens | null = null
 let accessMode: 'online' | 'offline' | 'denied' = 'online'
 let runtimeRegistry: ScopedLocalAppRuntimeRegistry | null = null
 let remoteLogout: (accessToken: string) => Promise<void> = async () => {}
+let refreshAdmin: (refreshToken: string) => Promise<{
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+}> = async () => ({
+  accessToken: 'refreshed-access',
+  refreshToken: 'refreshed-refresh',
+  expiresIn: 3_600,
+})
+let validateAdmin: (accessToken: string) => Promise<unknown> = async () => ({
+  valid: true,
+  user: {
+    id: scope.accountId,
+    username: 'account-a',
+    displayName: null,
+    role: 'member',
+    groupIds: [],
+  },
+  configVersion: 'catalog-v1',
+})
+let getAppCatalogAdmin: (
+  accessToken: string,
+  organizationId: string,
+  appConfigVersion?: string,
+) => Promise<unknown> = async () => ({ notModified: true })
+let listOrganizationsAdmin: (accessToken: string) => Promise<unknown> =
+  async () => ({ organizations: [] })
+let tokensExpired = false
+let denyCatalogCacheError: Error | null = null
 let catalog = createCatalog()
 const temporaryRoots: string[] = []
 
@@ -94,8 +124,28 @@ class TestAdminError extends Error {
 class TestAdminClient {
   constructor(_adminUrl: string) {}
 
+  refresh(refreshToken: string): Promise<unknown> {
+    return refreshAdmin(refreshToken)
+  }
+
+  validate(accessToken: string): Promise<unknown> {
+    return validateAdmin(accessToken)
+  }
+
   logout(accessToken: string): Promise<void> {
     return remoteLogout(accessToken)
+  }
+
+  getAppCatalog(
+    accessToken: string,
+    organizationId: string,
+    appConfigVersion?: string,
+  ): Promise<unknown> {
+    return getAppCatalogAdmin(accessToken, organizationId, appConfigVersion)
+  }
+
+  listOrganizations(accessToken: string): Promise<unknown> {
+    return listOrganizationsAdmin(accessToken)
   }
 }
 
@@ -113,7 +163,7 @@ const credentialManager = {
   },
   async deleteLlmCredentials(): Promise<void> {},
   isExpired(): boolean {
-    return false
+    return tokensExpired
   },
   async list(): Promise<string[]> {
     return []
@@ -164,6 +214,7 @@ mock.module('@polo-ai/shared/admin', () => ({
     if (accountId === scope.accountId) accessMode = 'denied'
   },
   denyCachedAppCatalogAuthorization: () => {
+    if (denyCatalogCacheError) throw denyCatalogCacheError
     catalog = {
       ...catalog,
       authorizationStatus: 'denied',
@@ -203,17 +254,141 @@ const { registerAdminHandlers } = await import(
 )
 const { registerLocalAppHandlers } = await import('../local-apps')
 
+function createSignedInTokens(): StoredTokens {
+  return {
+    accessToken: 'account-a-access',
+    refreshToken: 'account-a-refresh',
+    expiresAt: Date.now() + 60_000,
+    userId: scope.accountId,
+    username: 'account-a',
+  }
+}
+
+function installRequest(): LocalAppCatalogInstallRequest {
+  const release = catalog.apps[0]!.currentRelease!
+  return {
+    scope,
+    appConfigVersion: catalog.appConfigVersion,
+    permissions: [],
+    release: {
+      version: release.version,
+      checksum: release.checksum,
+      sizeBytes: release.sizeBytes,
+      platform: release.platform ?? null,
+      arch: release.arch ?? null,
+    },
+  }
+}
+
+function registerProductionHandlers(root: string) {
+  const handlers = new Map<string, HandlerFn>()
+  const server = {
+    handle(channel, handler) {
+      handlers.set(channel, handler)
+    },
+    push() {},
+    async invokeClient() {
+      return null
+    },
+    hasClientCapability() {
+      return false
+    },
+    findClientsWithCapability() {
+      return []
+    },
+  } satisfies RpcServer
+  const deps = {
+    sessionManager: {} as HandlerDeps['sessionManager'],
+    oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
+    platform: {
+      appRootPath: root,
+      resourcesPath: root,
+      isPackaged: false,
+      appVersion: '0.0.0-test',
+      isDebugMode: true,
+      logger: {
+        info() {},
+        warn() {},
+        error() {},
+        debug() {},
+      },
+      imageProcessor: {
+        async getMetadata() {
+          return null
+        },
+        async process() {
+          return Buffer.from('')
+        },
+      },
+    },
+    onAdminSessionEnding: (accountId: string) =>
+      runtimeRegistry!.stopAccount(accountId),
+    onAdminSessionStarted: (accountId: string) =>
+      runtimeRegistry!.resumeAccount(accountId),
+  } satisfies HandlerDeps
+  registerAdminHandlers(server, deps)
+  registerLocalAppHandlers(server)
+  return {
+    handlers,
+    context: {
+      clientId: 'renderer',
+      workspaceId: null,
+      webContentsId: null,
+      signal: new AbortController().signal,
+    },
+  }
+}
+
+async function createAuthorizationHarness() {
+  const root = await mkdtemp(join(tmpdir(), 'polo-admin-authorization-'))
+  temporaryRoots.push(root)
+  let managerFactoryCalls = 0
+  runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+    rootDir: root,
+    managerFactory: () => {
+      managerFactoryCalls += 1
+      throw new Error('authorization test must not create a runtime manager')
+    },
+  })
+  tokens = createSignedInTokens()
+  accessMode = 'denied'
+  return {
+    ...registerProductionHandlers(root),
+    managerFactoryCalls: () => managerFactoryCalls,
+  }
+}
+
 afterEach(async () => {
   runtimeRegistry = null
   tokens = null
   accessMode = 'online'
   remoteLogout = async () => {}
+  refreshAdmin = async () => ({
+    accessToken: 'refreshed-access',
+    refreshToken: 'refreshed-refresh',
+    expiresIn: 3_600,
+  })
+  validateAdmin = async () => ({
+    valid: true,
+    user: {
+      id: scope.accountId,
+      username: 'account-a',
+      displayName: null,
+      role: 'member',
+      groupIds: [],
+    },
+    configVersion: 'catalog-v1',
+  })
+  getAppCatalogAdmin = async () => ({ notModified: true })
+  listOrganizationsAdmin = async () => ({ organizations: [] })
+  tokensExpired = false
+  denyCatalogCacheError = null
   catalog = createCatalog()
   await Promise.all(temporaryRoots.splice(0).map(root =>
     rm(root, { recursive: true, force: true })))
 })
 
-describe('Admin logout and scoped local app production wiring', () => {
+describe('Admin session and scoped local app production wiring', () => {
   it('fences an entered start before slow remote logout and stops its process', async () => {
     const startEntered = createDeferred<void>()
     const finishStart = createDeferred<LocalAppStartResult>()
@@ -244,13 +419,7 @@ describe('Admin logout and scoped local app production wiring', () => {
       rootDir: root,
       managerFactory: options => new DeferredStartManager(options),
     })
-    tokens = {
-      accessToken: 'account-a-access',
-      refreshToken: 'account-a-refresh',
-      expiresAt: Date.now() + 60_000,
-      userId: scope.accountId,
-      username: 'account-a',
-    }
+    tokens = createSignedInTokens()
     const remoteLogoutStarted = createDeferred<void>()
     const finishRemoteLogout = createDeferred<void>()
     let remoteLogoutCompleted = false
@@ -260,60 +429,7 @@ describe('Admin logout and scoped local app production wiring', () => {
       remoteLogoutCompleted = true
     }
 
-    const handlers = new Map<string, HandlerFn>()
-    const server = {
-      handle(channel, handler) {
-        handlers.set(channel, handler)
-      },
-      push() {},
-      async invokeClient() {
-        return null
-      },
-      hasClientCapability() {
-        return false
-      },
-      findClientsWithCapability() {
-        return []
-      },
-    } satisfies RpcServer
-    const deps = {
-      sessionManager: {} as HandlerDeps['sessionManager'],
-      oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
-      platform: {
-        appRootPath: root,
-        resourcesPath: root,
-        isPackaged: false,
-        appVersion: '0.0.0-test',
-        isDebugMode: true,
-        logger: {
-          info() {},
-          warn() {},
-          error() {},
-          debug() {},
-        },
-        imageProcessor: {
-          async getMetadata() {
-            return null
-          },
-          async process() {
-            return Buffer.from('')
-          },
-        },
-      },
-      onAdminSessionEnding: (accountId: string) =>
-        runtimeRegistry!.stopAccount(accountId),
-      onAdminSessionStarted: (accountId: string) =>
-        runtimeRegistry!.resumeAccount(accountId),
-    } satisfies HandlerDeps
-    registerAdminHandlers(server, deps)
-    registerLocalAppHandlers(server)
-
-    const context = {
-      clientId: 'renderer',
-      workspaceId: null,
-      webContentsId: null,
-      signal: new AbortController().signal,
-    }
+    const { handlers, context } = registerProductionHandlers(root)
     const start = handlers.get(RPC_CHANNELS.localApps.START)!
     const logout = handlers.get(RPC_CHANNELS.admin.LOGOUT)!
 
@@ -339,5 +455,118 @@ describe('Admin logout and scoped local app production wiring', () => {
     finishRemoteLogout.resolve()
     await expect(pendingLogout).resolves.toEqual({ success: true })
     expect(tokens).toBeNull()
+  })
+
+  it('downgrades online Catalog access when token refresh is offline', async () => {
+    const {
+      handlers,
+      context,
+      managerFactoryCalls,
+    } = await createAuthorizationHarness()
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+    const validate = handlers.get(RPC_CHANNELS.admin.VALIDATE)!
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: true, accessMode: 'online' })
+    expect(accessMode).toBe('online')
+
+    tokensExpired = true
+    refreshAdmin = async () => {
+      throw new TestAdminError('network unavailable', 'NETWORK_ERROR')
+    }
+    await expect(validate(context)).resolves.toMatchObject({
+      loggedIn: true,
+      offline: true,
+    })
+    expect(accessMode).toBe('offline')
+    await expect(install(context, installRequest())).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    expect(managerFactoryCalls()).toBe(0)
+  })
+
+  it('downgrades online Catalog access when validation is offline', async () => {
+    const {
+      handlers,
+      context,
+      managerFactoryCalls,
+    } = await createAuthorizationHarness()
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+    const validate = handlers.get(RPC_CHANNELS.admin.VALIDATE)!
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: true, accessMode: 'online' })
+    validateAdmin = async () => {
+      throw new TestAdminError('network unavailable', 'NETWORK_ERROR')
+    }
+    await expect(validate(context)).resolves.toMatchObject({
+      loggedIn: true,
+      offline: true,
+    })
+
+    expect(accessMode).toBe('offline')
+    await expect(install(context, installRequest())).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    expect(managerFactoryCalls()).toBe(0)
+  })
+
+  it('denies lifecycle access when NOT_FOUND cache persistence fails', async () => {
+    const {
+      handlers,
+      context,
+      managerFactoryCalls,
+    } = await createAuthorizationHarness()
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: true, accessMode: 'online' })
+    denyCatalogCacheError = new Error('disk full')
+    getAppCatalogAdmin = async () => {
+      throw new TestAdminError('organization unavailable', 'NOT_FOUND', {
+        status: 404,
+      })
+    }
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: false, errorCode: 'NOT_FOUND' })
+
+    expect(catalog.authorizationStatus).toBe('authorized')
+    expect(accessMode).toBe('denied')
+    await expect(install(context, installRequest())).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    expect(managerFactoryCalls()).toBe(0)
+  })
+
+  it('denies lifecycle access when membership-removal cache persistence fails', async () => {
+    const {
+      handlers,
+      context,
+      managerFactoryCalls,
+    } = await createAuthorizationHarness()
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+    const listOrganizations = handlers.get(
+      RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
+    )!
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({ success: true, accessMode: 'online' })
+    denyCatalogCacheError = new Error('disk full')
+    listOrganizationsAdmin = async () => ({ organizations: [] })
+    await expect(listOrganizations(context)).resolves.toMatchObject({
+      success: true,
+      organizations: [],
+    })
+
+    expect(catalog.authorizationStatus).toBe('authorized')
+    expect(accessMode).toBe('denied')
+    await expect(install(context, installRequest())).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+    expect(managerFactoryCalls()).toBe(0)
   })
 })

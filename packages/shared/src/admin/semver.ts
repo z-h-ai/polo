@@ -13,7 +13,7 @@ function parseCatalogSemVer(version: string): ParsedCatalogSemVer | null {
   // Catalog versions are signed metadata. Do not normalize whitespace here:
   // every layer must reject the same non-SemVer bytes instead of silently
   // accepting a renderer-only or cache-only variant.
-  const normalized = version.replace(/^v(?=\d)/i, '')
+  const normalized = version.replace(/^v(?=\d)/, '')
   const match = CATALOG_SEMVER_PATTERN.exec(normalized)
   if (!match) return null
   return {
@@ -44,9 +44,10 @@ function comparePrereleaseIdentifiers(
 }
 
 /**
- * Normalizes the Catalog version compatibility prefix while enforcing strict
- * SemVer 2.0 syntax. Numeric identifiers are deliberately kept as strings so
- * versions larger than Number.MAX_SAFE_INTEGER remain valid and comparable.
+ * Normalizes the exact lowercase Catalog compatibility prefix `v` while
+ * enforcing strict SemVer 2.0 syntax. Numeric identifiers are deliberately
+ * kept as strings so versions larger than Number.MAX_SAFE_INTEGER remain
+ * valid and comparable.
  */
 export function normalizeCatalogSemVer(version: string): string | null {
   return parseCatalogSemVer(version)?.normalized ?? null

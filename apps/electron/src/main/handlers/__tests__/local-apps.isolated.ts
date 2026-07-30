@@ -385,7 +385,7 @@ describe('local app main-process authorization boundary', () => {
     )
   })
 
-  it('rejects whitespace-padded SemVer consistently in the main process', async () => {
+  it('rejects padded and uppercase-V SemVer consistently in the main process', async () => {
     const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
     const setAvailableRelease = handlers.get(
       RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
@@ -416,6 +416,36 @@ describe('local app main-process authorization boundary', () => {
       release: {
         ...confirmedRelease(),
         version: ' 1.2.3',
+      },
+    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(scopedInstall).not.toHaveBeenCalled()
+
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      currentRelease: {
+        ...catalog.apps[0]!.currentRelease!,
+        version: 'V1.2.3',
+      },
+    }
+    scopedRegistry.getRuntimeStatus.mockResolvedValueOnce({
+      appId: '应用.App-ID',
+      scope: scope(),
+      status: 'installed',
+      currentVersion: '1.0.0',
+    })
+
+    await expect(setAvailableRelease(context, scope(), null)).resolves.toMatchObject({
+      versionError: 'invalid_semver',
+    })
+    expect(scopedRegistry.setAvailableRelease).not.toHaveBeenCalled()
+
+    await expect(install(context, {
+      scope: scope(),
+      appConfigVersion: 'version-1',
+      permissions: [],
+      release: {
+        ...confirmedRelease(),
+        version: 'V1.2.3',
       },
     })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     expect(scopedInstall).not.toHaveBeenCalled()

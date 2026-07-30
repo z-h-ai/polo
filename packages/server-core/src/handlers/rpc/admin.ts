@@ -408,6 +408,44 @@ export function registerAdminHandlers(
       )
     }
   }
+  const catalogOrganizationIdsForAccount = (accountId: string) => {
+    const organizationIds = new Set(
+      listCachedAppCatalogs(accountId).map(cached => cached.organizationId),
+    )
+    const scopePrefix = `${accountId}\0`
+    for (const scopeKey of appCatalogAuthorizationEpochByScope.keys()) {
+      if (scopeKey.startsWith(scopePrefix)) {
+        organizationIds.add(scopeKey.slice(scopePrefix.length))
+      }
+    }
+    return organizationIds
+  }
+  const markCatalogAccessOfflineForAccount = (accountId: string) => {
+    for (const organizationId of catalogOrganizationIdsForAccount(accountId)) {
+      if (getAppCatalogAccessMode(accountId, organizationId) === 'online') {
+        setAppCatalogAccessMode(accountId, organizationId, 'offline')
+      }
+    }
+  }
+  const denyCatalogScope = (
+    accountId: string,
+    organizationId: string,
+  ) => {
+    const scopeKey = appCatalogScopeKey(accountId, organizationId)
+    // The in-memory epoch and gate are the security boundary. Persistence is
+    // recovery metadata and must never keep a previously-online process open
+    // when a denied-cache write fails.
+    advanceAppCatalogAuthorizationEpoch(scopeKey)
+    setAppCatalogAccessMode(accountId, organizationId, 'denied')
+    try {
+      denyCachedAppCatalogAuthorization(accountId, organizationId)
+    } catch (error) {
+      log?.warn(
+        '[Admin] failed to persist denied Catalog cache:',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
   const sessions = new AdminSessionCoordinator(
     closeCatalogAuthorizationForAccount,
   )
@@ -698,12 +736,15 @@ export function registerAdminHandlers(
       const committed = await sessions.mutateIfCurrent(
         manager,
         tokenResult.session,
-        async () => ({
-          loggedIn: true as const,
-          user: adminUserFromStoredTokens(tokenResult.tokens),
-          configVersion: getAdminConfigVersion() ?? 'offline',
-          offline: true as const,
-        }),
+        async () => {
+          markCatalogAccessOfflineForAccount(tokenResult.tokens.userId)
+          return {
+            loggedIn: true as const,
+            user: adminUserFromStoredTokens(tokenResult.tokens),
+            configVersion: getAdminConfigVersion() ?? 'offline',
+            offline: true as const,
+          }
+        },
       )
       return committed.applied
         ? committed.value!
@@ -778,12 +819,17 @@ export function registerAdminHandlers(
         const committed = await sessions.mutateIfCurrent(
           manager,
           requestContext.session,
-          async () => ({
-            loggedIn: true as const,
-            user: adminUserFromStoredTokens(requestContext.session.tokens),
-            configVersion: getAdminConfigVersion() ?? 'offline',
-            offline: true as const,
-          }),
+          async () => {
+            markCatalogAccessOfflineForAccount(
+              requestContext.session.tokens.userId,
+            )
+            return {
+              loggedIn: true as const,
+              user: adminUserFromStoredTokens(requestContext.session.tokens),
+              configVersion: getAdminConfigVersion() ?? 'offline',
+              offline: true as const,
+            }
+          },
         )
         return committed.applied
           ? committed.value!
@@ -1079,15 +1125,7 @@ export function registerAdminHandlers(
             requestContext.session,
             async (): Promise<AppCatalogSyncResult> => {
               if (!isCurrentCatalogSync()) return supersededCatalogResult()
-              denyCachedAppCatalogAuthorization(
-                accountId,
-                organizationId.data,
-              )
-              setAppCatalogAccessMode(
-                accountId,
-                organizationId.data,
-                'denied',
-              )
+              denyCatalogScope(accountId, organizationId.data)
               return { success: false, ...adminError }
             },
           )
@@ -1152,28 +1190,10 @@ export function registerAdminHandlers(
           ))
           .map(organization => organization.id))
         const accountId = session.tokens.userId
-        const scopedOrganizationIds = new Set(
-          listCachedAppCatalogs(accountId).map(cached => cached.organizationId),
-        )
-        const scopePrefix = `${accountId}\0`
-        for (const scopeKey of appCatalogAuthorizationEpochByScope.keys()) {
-          if (scopeKey.startsWith(scopePrefix)) {
-            scopedOrganizationIds.add(scopeKey.slice(scopePrefix.length))
-          }
-        }
+        const scopedOrganizationIds = catalogOrganizationIdsForAccount(accountId)
         for (const organizationId of scopedOrganizationIds) {
           if (activeOrganizationIds.has(organizationId)) continue
-          const scopeKey = appCatalogScopeKey(accountId, organizationId)
-          advanceAppCatalogAuthorizationEpoch(scopeKey)
-          denyCachedAppCatalogAuthorization(
-            accountId,
-            organizationId,
-          )
-          setAppCatalogAccessMode(
-            accountId,
-            organizationId,
-            'denied',
-          )
+          denyCatalogScope(accountId, organizationId)
         }
       },
     )

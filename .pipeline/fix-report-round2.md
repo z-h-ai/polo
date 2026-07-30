@@ -1,92 +1,77 @@
-# POL-51 Reviewer 第 2 轮修复报告
+# POL-51 第 2 轮 Review 修复报告
 
-## 逐条问题处理结果
+## 每条 issue 的处理结果
 
-### 1. 会话结束清理失败必须继续 fail closed
+### 1. VALIDATE 受限离线返回未关闭既有在线 Catalog 安装权限
 
-- 已修复。`endAdminSession` 现在捕获并记录 `onAdminSessionEnding` 的本地进程停止失败，随后仍在最终 generation CAS 内推进会话代次、拒绝该账号的 Catalog 授权与 access mode，并删除快照凭据。
-- CAS 内的二次连接清理失败也不会阻断凭据删除；失败会记录为清理警告，退出结果仍完成本地 fail-closed 收口。
-- 覆盖过期 token 刷新 401、Catalog 403 和正常退出三条可信会话结束链路；均验证本地停止抛错后凭据已删除、Catalog 已 denied。
-- remote URL 解析补充 Catalog 自身 `authorizationStatus = denied` 的回归，确保即使 access mode 残留为 online 也不能打开旧组织 URL。
+已修复。
 
-### 2. App 与 Home 启动同步竞态
+- 两条受限离线路径（过期 token 刷新网络失败、未过期 token 校验网络失败）都在最终 `mutateIfCurrent` session CAS 内枚举当前账号已缓存或已注册的 Catalog scope。
+- 仅将仍为 `online` 的 scope 原子降级为 `offline`，不会把已经 `denied` 的 scope 重新开放。
+- 新增真实 Admin handler、Local Apps handler 与 scoped runtime registry 接线测试：先完成 online Catalog sync，再触发两类离线 VALIDATE；紧接着公开 INSTALL 均返回 `NOT_AUTHORIZED`，runtime manager 创建次数为 0。
 
-- 已修复。主进程对被新请求替代的 Catalog 同步统一返回显式 `REQUEST_SUPERSEDED`，不再把当时缓存伪装为本次成功结果。
-- `useAppCatalog` 遇到 `REQUEST_SUPERSEDED` 会在当前账号、组织和 generation 仍匹配时重读最终提交目录；重试次数有明确上限，组织或账号切换后立即丢弃旧 continuation。
-- 覆盖无缓存启动竞态和已有缓存刷新竞态，均验证 Home 最终收到后发请求提交的目录，而不是停留在空目录或旧缓存。
+### 2. renderer 按 scope 复用不同生命周期操作的在途 Promise
 
-### 3. withdrawn tombstone 优先保留本地数据
+已修复。
 
-- 已修复。Catalog 保存接口接收必须保留的 withdrawn Catalog ID 集合，裁剪 10,000 条 tombstone 时先保留这些 ID，再用其余候选填满容量。
-- Electron 主进程在提交新 Catalog 前，从 scoped runtime registry 按 `accountId + organizationId` 读取确有安装或运行数据的 Catalog ID，并传给缓存层；读取按 10,000 scope 分批，未物化、无安装记录的 scope 不会被误保留。
-- 当必须保留的本地数据项本身超过缓存契约上限时显式失败，不会静默丢弃已安装项。
-- 覆盖“10,000 tombstone 已满 + 新撤下项 + 原裁剪候选已安装”，并验证 scoped registry 只返回确有本地安装数据的 ID。
+- `useAppCatalog` 的生命周期 single-flight key 改为完整 scope key 加 operation kind（install/start/stop/uninstall）。
+- 相同 scope 的重复同类操作继续去重，但 STOP 不再复用在途 START Promise，可真实发送到主进程并由主进程生命周期队列串行处理。
+- 新增 deferred START 确定性测试：START 未完成时调用 STOP，断言 STOP RPC 在 START resolve 前已发送且只发送一次。
 
-### 4. 首次状态批次失败时保留 withdrawn 管理入口
+### 3. 严格 SemVer 错误接受大写 `V` 前缀
 
-- 已修复。首页选择 withdrawn App 时，同时接受可信本地状态或该完整 scope 的状态读取失败标记；首次读取失败不再把可能已安装的 tombstone 从页面过滤。
-- 状态未知的 withdrawn Bundle 以“状态不可用”的禁用卡片展示，主启动操作保持禁用，但仍提供停止、日志和卸载入口以及页面级重试。
-- 覆盖首次批次失败、无已缓存 renderer 状态但实际保留的 withdrawn App，验证卡片、禁用主操作、重试提示和三项本地管理入口均存在。
+已修复。
 
-### 5. IPC wire-format 快照
+- shared 唯一解析实现移除大小写不敏感标志，只兼容精确小写单个前导 `v`。
+- shared parser、Catalog cache、主进程、renderer 和 scoped runtime 五层测试都新增大写 `V` 拒绝用例。
+- 原有小写 `v`、大数字标识符、prerelease、第四段和首尾空白契约保持不变。
 
-- 已修复。`local-apps:resolveRemoteUrl` 已加入排序后的 IPC channel 快照。
-- 快照回归验证通道总数为 351。
+### 4. 明确失权时缓存写失败可能保留内存 online 门禁
 
-### 6. 全量测试
+已修复。
 
-- 已修复 Reviewer 报告中的 2 个失败测试，并重新执行完整 `bun run test`。
-- 常规测试阶段结果为 4782 pass、19 skip、0 fail，共 4801 tests / 363 files。
-- 命令后半段逐文件运行的全部 `*.isolated.ts` 测试也通过，完整命令退出码为 0。
+- 新增统一 fail-closed scope denial：先推进 authorization epoch，再将内存 access mode 设置为 `denied`，最后才尝试持久化 denied cache。
+- denied cache 写失败只记录告警，不再中断内存授权关闭，也不会让 RPC 返回路径恢复在线。
+- Catalog `NOT_FOUND` 与组织列表确认成员移除均复用该顺序。
+- 新增两条缓存写失败生产接线测试：缓存仍显示旧 authorized 元数据时，内存门禁已为 denied，公开 INSTALL 立即返回 `NOT_AUTHORIZED`，runtime manager 创建次数为 0。
 
 ## 关键文件
 
 - `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-- `packages/server-core/src/handlers/handler-deps.ts`
-- `packages/shared/src/admin/app-catalog-cache.ts`
-- `packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
-- `apps/electron/src/main/index.ts`
-- `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
-- `apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
-- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
 - `apps/electron/src/renderer/hooks/useAppCatalog.ts`
 - `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
-- `apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
-- `apps/electron/src/shared/__tests__/ipc-channels.test.ts`
+- `packages/shared/src/admin/semver.ts`
+- `packages/shared/src/admin/__tests__/semver.test.ts`
+- `packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+- `apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
+- `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.test.ts`
+- `.pipeline/fix-report-round2.md`
 
-## 自测结果
+## 自测命令与结果
 
-- `bun run test`
-  - 完整通过，退出码 0。
-  - 常规阶段：4782 pass、19 skip、0 fail，4801 tests / 363 files。
-  - 后半段全部 isolated 测试逐文件通过。
-- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 44 pass，0 fail。
+- `bun test ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+  - 结果：5 pass，0 fail。
 - `bun test ./apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
-  - 13 pass，0 fail。
-- `bun test ./apps/electron/src/renderer/components/tab-browser/__tests__/HomePage.round2.interaction.isolated.ts`
-  - 6 pass，0 fail。
-- Catalog cache、scoped registry 与 IPC channel 联合回归
-  - 26 pass，0 fail；IPC 通道精确为 351。
+  - 结果：16 pass，0 fail。
+- `bun test ./packages/shared/src/admin/__tests__/semver.test.ts ./packages/shared/src/admin/__tests__/app-catalog-cache.test.ts ./apps/electron/src/renderer/hooks/__tests__/useAppCatalog.test.ts ./apps/electron/src/main/local-app-runtime/__tests__/scoped-registry.test.ts`
+  - 结果：36 pass，0 fail。
 - `bun test ./apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
-  - 9 pass，0 fail。
+  - 结果：17 pass，0 fail。
+- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
+  - 结果：50 pass，0 fail。
 - `bun run typecheck:all`
-  - 通过。
-- `bun run lint:i18n:parity`
-  - 通过，6 个 locale 各 1706 keys。
-- `bun run lint:i18n:sorted`
-  - 通过。
-- `bun run lint:i18n:coverage`
-  - 通过。
-- 变更文件定向 ESLint
-  - 0 error；3 个测试环境既有 `localStorage` 规则 warning。
+  - 结果：通过。
+- `cd apps/electron && bunx eslint src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts src/main/handlers/__tests__/local-apps.isolated.ts src/main/local-app-runtime/__tests__/scoped-registry.test.ts src/renderer/hooks/useAppCatalog.ts src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts src/renderer/hooks/__tests__/useAppCatalog.test.ts`
+  - 结果：通过，0 error。
+- `bun run electron:build:main`
+  - 结果：主进程构建并校验通过。
+- `bun run test`
+  - 结果：全量非 isolated 测试 4792 pass、19 skip、0 fail；随后全部 isolated 测试通过，包含本轮新增授权和 renderer 竞态回归。
 - `git diff --check`
-  - 通过。
+  - 结果：通过。
 
 ## 遗留问题
 
-- SemVer 三份实现仍按 Reviewer 第 1 轮报告中的风险判断保留，未在本轮阻断修复中扩大重构范围。
-- 无其他已知阻断问题。
+无本轮遗留问题。
