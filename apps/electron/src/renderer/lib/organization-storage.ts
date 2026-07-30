@@ -5,6 +5,7 @@ const ACTIVE_ORGANIZATION_PREFIX = 'polo-active-organization:'
 const VERIFIED_ORGANIZATION_CONTEXT_PREFIX = 'polo-verified-organization-context:'
 const UNAVAILABLE_ORGANIZATION_PREFIX = 'polo-unavailable-organization:'
 const PENDING_JOIN_TOKEN_KEY = 'polo-pending-organization-join-token'
+const ORGANIZATION_SCOPED_STORAGE_PREFIX = 'polo-organization:v2:'
 
 function activeOrganizationKey(accountId: string): string {
   return `${ACTIVE_ORGANIZATION_PREFIX}${accountId}`
@@ -242,7 +243,9 @@ export function createOrganizationContextKey(
   accountId: string,
   organizationId: string,
 ): string {
-  return `${accountId}:${organizationId}`
+  // Admin entity IDs may contain colons and Unicode. JSON tuple encoding keeps
+  // account/organization boundaries unambiguous for every renderer fence.
+  return JSON.stringify([accountId, organizationId])
 }
 
 export function createOrganizationScopedStorageKey(
@@ -250,7 +253,11 @@ export function createOrganizationScopedStorageKey(
   organizationId: string,
   namespace: string,
 ): string {
-  return `polo-organization:${createOrganizationContextKey(accountId, organizationId)}:${namespace}`
+  // No v1 key is currently persisted by production callers. Start the
+  // collision-free format at v2 so a future reader can identify its encoding.
+  return `${ORGANIZATION_SCOPED_STORAGE_PREFIX}${
+    createOrganizationContextKey(accountId, organizationId)
+  }:${namespace}`
 }
 
 export function createOrganizationJoinDeepLink(token: string): string {

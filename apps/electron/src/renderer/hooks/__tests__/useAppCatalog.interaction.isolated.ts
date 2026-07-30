@@ -19,6 +19,7 @@ import type {
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
+import { createOrganizationContextKey } from '@/lib/organization-storage'
 
 GlobalRegistrator.register()
 
@@ -64,9 +65,10 @@ function catalog(
   organizationId: string,
   appConfigVersion: string,
   apps: CatalogApp[] = [app(organizationId)],
+  accountId = 'account-a',
 ): AppCatalogCacheEntry {
   return {
-    accountId: 'account-a',
+    accountId,
     organizationId,
     appConfigVersion,
     authorizationStatus: 'authorized',
@@ -79,10 +81,11 @@ function syncResult(
   organizationId: string,
   version: string,
   apps?: CatalogApp[],
+  accountId?: string,
 ): Extract<AppCatalogSyncResult, { success: true }> {
   return {
     success: true,
-    catalog: catalog(organizationId, version, apps),
+    catalog: catalog(organizationId, version, apps, accountId),
     source: 'network',
     refreshed: true,
     accessMode: 'online',
@@ -139,11 +142,14 @@ let setAvailableRelease = mock(async (
   status: 'not_installed',
 }))
 
-function organization(organizationId: string) {
+function organization(organizationId: string, accountId = 'account-a') {
   return {
-    accountId: 'account-a',
+    accountId,
     activeOrganizationId: organizationId,
-    organizationContextKey: `account-a:${organizationId}`,
+    organizationContextKey: createOrganizationContextKey(
+      accountId,
+      organizationId,
+    ),
     organizationSummaries: [{
       id: organizationId,
       type: 'creator_space' as const,
@@ -615,15 +621,196 @@ describe('useAppCatalog scoped async state', () => {
     ])
   })
 
+  it('discards a Catalog response across legacy-colliding contexts', async () => {
+    const accountA = 'account:west'
+    const organizationAId = '组织'
+    const accountB = 'account'
+    const organizationBId = 'west:组织'
+    expect(`${accountA}:${organizationAId}`)
+      .toBe(`${accountB}:${organizationBId}`)
+
+    const catalogA = deferred<AppCatalogSyncResult>()
+    syncCatalog = mock((
+      organizationId: string,
+      _options?: { force?: boolean },
+    ) => (
+      organizationId === organizationAId
+        ? catalogA.promise
+        : Promise.resolve(syncResult(
+            organizationBId,
+            'current-b',
+            undefined,
+            accountB,
+          ))
+    ))
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ) => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'installed',
+      currentVersion: '1.0.0',
+    })))
+    organizationContext = organization(organizationAId, accountA)
+    const { result, rerender } = renderHook(() => useAppCatalog())
+
+    organizationContext = organization(organizationBId, accountB)
+    rerender()
+    await waitFor(() => {
+      expect(result.current.state.catalog).toMatchObject({
+        accountId: accountB,
+        organizationId: organizationBId,
+        appConfigVersion: 'current-b',
+      })
+      expect(Object.values(result.current.state.statuses)).toEqual([
+        expect.objectContaining({
+          status: 'installed',
+          scope: expect.objectContaining({
+            accountId: accountB,
+            organizationId: organizationBId,
+          }),
+        }),
+      ])
+    })
+
+    await act(async () => {
+      catalogA.resolve(syncResult(
+        organizationAId,
+        'stale-a',
+        undefined,
+        accountA,
+      ))
+      await catalogA.promise
+    })
+
+    expect(result.current.state.catalog).toMatchObject({
+      accountId: accountB,
+      organizationId: organizationBId,
+      appConfigVersion: 'current-b',
+    })
+    expect(Object.values(result.current.state.statuses)).toEqual([
+      expect.objectContaining({
+        status: 'installed',
+        scope: expect.objectContaining({
+          accountId: accountB,
+          organizationId: organizationBId,
+        }),
+      }),
+    ])
+  })
+
+  it('discards a status response across legacy-colliding contexts', async () => {
+    const accountA = 'account:west'
+    const organizationAId = '组织'
+    const accountB = 'account'
+    const organizationBId = 'west:组织'
+    const statusA = deferred<LocalAppRuntimeStatus[]>()
+    syncCatalog = mock(async (
+      organizationId: string,
+      _options?: { force?: boolean },
+    ) => syncResult(
+      organizationId,
+      `catalog-${organizationId}`,
+      undefined,
+      organizationId === organizationAId ? accountA : accountB,
+    ))
+    getRuntimeStatuses = mock((
+      request: { scopes: CatalogLocalAppScope[] },
+    ) => (
+      request.scopes[0]?.accountId === accountA
+        ? statusA.promise
+        : Promise.resolve(request.scopes.map(scope => ({
+            appId: scope.catalogAppId,
+            scope,
+            status: 'installed' as const,
+            currentVersion: '1.0.0',
+          })))
+    ))
+    organizationContext = organization(organizationAId, accountA)
+    const { result, rerender } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog).toMatchObject({
+        accountId: accountA,
+        organizationId: organizationAId,
+      })
+      expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
+    })
+
+    organizationContext = organization(organizationBId, accountB)
+    rerender()
+    await waitFor(() => {
+      expect(result.current.state.catalog).toMatchObject({
+        accountId: accountB,
+        organizationId: organizationBId,
+      })
+      expect(Object.values(result.current.state.statuses)).toEqual([
+        expect.objectContaining({
+          status: 'installed',
+          scope: expect.objectContaining({
+            accountId: accountB,
+            organizationId: organizationBId,
+          }),
+        }),
+      ])
+    })
+
+    await act(async () => {
+      statusA.resolve([{
+        appId: 'shared-app-id',
+        scope: {
+          kind: 'catalog',
+          accountId: accountA,
+          organizationId: organizationAId,
+          catalogAppId: 'shared-app-id',
+        },
+        status: 'running',
+        currentVersion: '1.0.0',
+        runningVersion: '1.0.0',
+      }])
+      await statusA.promise
+    })
+
+    expect(result.current.state.catalog).toMatchObject({
+      accountId: accountB,
+      organizationId: organizationBId,
+    })
+    expect(Object.values(result.current.state.statuses)).toEqual([
+      expect.objectContaining({
+        status: 'installed',
+        scope: expect.objectContaining({
+          accountId: accountB,
+          organizationId: organizationBId,
+        }),
+      }),
+    ])
+  })
+
   it('does not deduplicate the same app id across organizations and rejects the stale operation', async () => {
+    const accountA = 'account:west'
+    const organizationAId = '组织'
+    const accountB = 'account'
+    const organizationBId = 'west:组织'
     const startA = deferred<LocalAppStartResult>()
     const startB = deferred<LocalAppStartResult>()
     startLocalApp = mock((scope: CatalogLocalAppScope) => (
-      scope.organizationId === 'organization-a' ? startA.promise : startB.promise
+      scope.accountId === accountA ? startA.promise : startB.promise
     ))
+    syncCatalog = mock(async (
+      organizationId: string,
+      _options?: { force?: boolean },
+    ) => syncResult(
+      organizationId,
+      `catalog-${organizationId}`,
+      undefined,
+      organizationId === organizationAId ? accountA : accountB,
+    ))
+    organizationContext = organization(organizationAId, accountA)
     const { result, rerender } = renderHook(() => useAppCatalog())
     await waitFor(() => {
-      expect(result.current.state.catalog?.organizationId).toBe('organization-a')
+      expect(result.current.state.catalog).toMatchObject({
+        accountId: accountA,
+        organizationId: organizationAId,
+      })
     })
 
     let promiseA!: Promise<LocalAppStartResult>
@@ -631,10 +818,13 @@ describe('useAppCatalog scoped async state', () => {
       promiseA = result.current.start(result.current.state.catalog!.apps[0]!)
     })
 
-    organizationContext = organization('organization-b')
+    organizationContext = organization(organizationBId, accountB)
     rerender()
     await waitFor(() => {
-      expect(result.current.state.catalog?.organizationId).toBe('organization-b')
+      expect(result.current.state.catalog).toMatchObject({
+        accountId: accountB,
+        organizationId: organizationBId,
+      })
     })
 
     let promiseB!: Promise<LocalAppStartResult>
@@ -646,8 +836,8 @@ describe('useAppCatalog scoped async state', () => {
         appId: 'shared-app-id',
         scope: {
           kind: 'catalog',
-          accountId: 'account-a',
-          organizationId: 'organization-b',
+          accountId: accountB,
+          organizationId: organizationBId,
           catalogAppId: 'shared-app-id',
         },
         version: '1.0.0',
@@ -660,8 +850,8 @@ describe('useAppCatalog scoped async state', () => {
       appId: 'shared-app-id',
       scope: {
         kind: 'catalog',
-        accountId: 'account-a',
-        organizationId: 'organization-a',
+        accountId: accountA,
+        organizationId: organizationAId,
         catalogAppId: 'shared-app-id',
       },
       version: '1.0.0',
@@ -671,9 +861,17 @@ describe('useAppCatalog scoped async state', () => {
 
     await expect(promiseA).rejects.toThrow()
     expect(startLocalApp).toHaveBeenCalledTimes(2)
-    expect(startLocalApp.mock.calls.map(call => call[0].organizationId))
-      .toEqual(['organization-a', 'organization-b'])
-    expect(result.current.state.catalog?.organizationId).toBe('organization-b')
+    expect(startLocalApp.mock.calls.map(call => [
+      call[0].accountId,
+      call[0].organizationId,
+    ])).toEqual([
+      [accountA, organizationAId],
+      [accountB, organizationBId],
+    ])
+    expect(result.current.state.catalog).toMatchObject({
+      accountId: accountB,
+      organizationId: organizationBId,
+    })
   })
 
   it('keeps a successful start result when the same organization refreshes', async () => {

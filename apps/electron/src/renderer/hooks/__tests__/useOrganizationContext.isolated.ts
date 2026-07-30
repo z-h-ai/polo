@@ -9,6 +9,8 @@ const { useOrganizationContextState } = await import('../useOrganizationContext'
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 const {
   clearPendingOrganizationJoinToken,
+  createOrganizationContextKey,
+  createOrganizationScopedStorageKey,
   getStoredActiveOrganizationId,
   getUnavailableOrganizationTombstone,
   getVerifiedOrganizationContext,
@@ -182,7 +184,7 @@ describe('useOrganizationContextState', () => {
     expect(result.current.activeOrganizationId).toBe(organizations[1].id)
     expect(result.current.organizationMembershipRole).toBe('member')
     expect(result.current.organizationContextKey).toBe(
-      `account-1:${organizations[1].id}`,
+      createOrganizationContextKey('account-1', organizations[1].id),
     )
     expect(getStoredActiveOrganizationId('account-1')).toBe(organizations[1].id)
     expect(getStoredActiveOrganizationId('account-2')).toBeNull()
@@ -699,5 +701,37 @@ describe('useOrganizationContextState', () => {
       organizations.map(item => item.name),
     )
     expect(result.current.flowState).toBe('ready')
+  })
+
+  it('uses collision-free context keys for colon, Unicode, and long entity IDs', () => {
+    const collidingLegacyPairs = [
+      ['account:west', '组织'],
+      ['account', 'west:组织'],
+    ] as const
+    const first = createOrganizationContextKey(...collidingLegacyPairs[0])
+    const second = createOrganizationContextKey(...collidingLegacyPairs[1])
+
+    expect(first).not.toBe(second)
+    expect(JSON.parse(first)).toEqual(collidingLegacyPairs[0])
+    expect(JSON.parse(second)).toEqual(collidingLegacyPairs[1])
+    expect(createOrganizationScopedStorageKey(
+      ...collidingLegacyPairs[0],
+      'recent-apps',
+    )).not.toBe(createOrganizationScopedStorageKey(
+      ...collidingLegacyPairs[1],
+      'recent-apps',
+    ))
+    expect(createOrganizationScopedStorageKey(
+      ...collidingLegacyPairs[0],
+      'recent-apps',
+    )).toStartWith('polo-organization:v2:')
+
+    const longAccountId = `账号:${'a'.repeat(509)}`
+    const longOrganizationId = `组织:${'界'.repeat(509)}`
+    const longKey = createOrganizationContextKey(
+      longAccountId,
+      longOrganizationId,
+    )
+    expect(JSON.parse(longKey)).toEqual([longAccountId, longOrganizationId])
   })
 })

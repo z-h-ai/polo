@@ -12,6 +12,7 @@ import {
   KEYS,
   set as setLocalStorage,
 } from '@/lib/local-storage'
+import { createOrganizationContextKey } from '@/lib/organization-storage'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -690,6 +691,126 @@ describe('HomePage round-two regressions', () => {
     expect(screen.queryByText('stale App A logs')).toBeNull()
     expect(getLogs).toHaveBeenNthCalledWith(1, appA)
     expect(getLogs).toHaveBeenNthCalledWith(2, appB)
+  })
+
+  it('closes deferred logs when switching between legacy-colliding contexts', async () => {
+    const accountA = 'account:west'
+    const organizationAId = '组织'
+    const accountB = 'account'
+    const organizationBId = 'west:组织'
+    expect(`${accountA}:${organizationAId}`)
+      .toBe(`${accountB}:${organizationBId}`)
+
+    const pendingLogs = createDeferred<string>()
+    const brokenApp = (
+      accountId: string,
+      organizationId: string,
+    ): {
+      app: CatalogApp
+      hook: any
+    } => {
+      const app: CatalogApp = {
+        id: 'shared-broken-app',
+        organizationId,
+        name: `Broken ${accountId}`,
+        description: '',
+        deliveryMode: 'local_bundle',
+        sortOrder: 0,
+        availability: 'available',
+      }
+      const catalog: AppCatalogCacheEntry = {
+        accountId,
+        organizationId,
+        appConfigVersion: `catalog-${accountId}`,
+        authorizationStatus: 'authorized',
+        apps: [app],
+        syncedAt: 1,
+      }
+      const scopeKey = createLocalAppScopeKey({
+        kind: 'catalog',
+        accountId,
+        organizationId,
+        catalogAppId: app.id,
+      })
+      const status = {
+        appId: app.id,
+        scope: {
+          kind: 'catalog' as const,
+          accountId,
+          organizationId,
+          catalogAppId: app.id,
+        },
+        status: 'broken' as const,
+        currentVersion: '1.0.0',
+        error: {
+          code: 'START_FAILED',
+          message: 'health check failed',
+        },
+      }
+      return {
+        app,
+        hook: {
+          ...signedOutCatalogHook(),
+          organization: {
+            accountId,
+            activeOrganizationId: organizationId,
+            organizationContextKey: createOrganizationContextKey(
+              accountId,
+              organizationId,
+            ),
+            organizationSummaries: [{
+              id: organizationId,
+              type: 'enterprise',
+              name: organizationId,
+            }],
+          },
+          state: {
+            ...signedOutCatalogHook().state,
+            catalog,
+            accessMode: 'online',
+            statuses: { [scopeKey]: status },
+          },
+          getStatus: () => status,
+          scopeKeyForApp: () => scopeKey,
+          getLogs: () => pendingLogs.promise,
+        },
+      }
+    }
+    const contextA = brokenApp(accountA, organizationAId)
+    const contextB = brokenApp(accountB, organizationBId)
+    expect(contextA.hook.organization.organizationContextKey)
+      .not.toBe(contextB.hook.organization.organizationContextKey)
+
+    appCatalogHook = contextA.hook
+    const view = render(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+    fireEvent.pointerDown(
+      screen.getByLabelText(`More actions for ${contextA.app.name}`),
+      { button: 0, ctrlKey: false },
+    )
+    await waitFor(() => expect(screen.getByText('View logs')).toBeTruthy())
+    fireEvent.click(screen.getByText('View logs'))
+    expect(screen.getByText(`${contextA.app.name} logs`)).toBeTruthy()
+
+    appCatalogHook = contextB.hook
+    view.rerender(createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(HomePage, { onAddApp: () => {} }),
+    ))
+    await waitFor(() => {
+      expect(screen.queryByText(`${contextA.app.name} logs`)).toBeNull()
+    })
+
+    await act(async () => {
+      pendingLogs.resolve('stale account A logs')
+      await pendingLogs.promise
+    })
+    expect(screen.queryByText('stale account A logs')).toBeNull()
+    expect(screen.getByText(contextB.app.name)).toBeTruthy()
   })
 
   it('segments a maximum catalog and excludes withdrawn apps without local data', () => {
