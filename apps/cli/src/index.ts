@@ -1816,29 +1816,35 @@ Usage: polo [options] <command> [args...]
 
 Compatibility: polo-ai is retained as an alias for polo.
 
-Connection:
+One-shot execution:
+  run <message...>       Run with streaming Polo text or stream-json output
+  exec [PROMPT]          Run non-interactively (safe permissions by default)
+  exec resume <id>       Continue a persistent CLI Thread
+  exec resume --last     Continue the most recently used matching Thread
+  exec sessions          List persistent CLI exec Threads
+  exec delete <id>       Delete an inactive CLI exec Thread
+
+  Each run or exec invocation starts an independent CLI runtime, even while
+  Electron is running. CLI Threads are stored outside Electron sessions.
+
+Execution options:
+  -C, --cd <path>        Agent working directory only; does not register a workspace
+  --workspace <id>       Configuration workspace (sources, skills, permissions)
+  --provider <name>      LLM provider
+  -m, --model <id>       Model to use
+  --api-key <key>        Invocation-only API key
+  --base-url <url>       Invocation-only custom API endpoint
+  --json                 JSONL events for exec
+  --yolo                 Use Polo allow-all application permissions
+  --ephemeral            Delete the CLI Thread after completion
+
+Remote server connection (legacy RPC commands):
   --url <ws[s]://...>    Server URL (default: $POLO_AI_SERVER_URL)
   --token <secret>       Auth token (default: $POLO_AI_SERVER_TOKEN)
-  --workspace <id>       Workspace ID (auto-detected if omitted)
   --timeout <ms>         Request timeout (default: 10000)
   --tls-ca <path>        Custom CA cert for self-signed TLS
-  --json                 Raw JSON output for scripting
 
-LLM Configuration (for 'run' command):
-  --provider <name>      LLM provider (default: anthropic, or $LLM_PROVIDER)
-                         Supported: anthropic, openai, google, openrouter, groq, mistral, deepseek, xai, ...
-  --model <id>           Model to use (or $LLM_MODEL)
-  --api-key <key>        API key (or $LLM_API_KEY, or provider-specific e.g. $OPENAI_API_KEY)
-  --base-url <url>       Custom API endpoint (or $LLM_BASE_URL)
-
-Commands:
-  run <message>          Spawn server, send message, stream response, exit
-                         --workspace-dir <path>  Use directory as workspace (creates if needed)
-                         --source <slug>     Enable source (repeatable)
-                         --mode <mode>       Permission mode (default: allow-all)
-                         --output-format     text or stream-json (default: text)
-                         --no-cleanup        Keep session after completion
-                         --server-entry      Path to server/index.ts
+Remote RPC commands:
   ping                   Verify connectivity (clientId + latency)
   health                 Check credential store health
   versions               Show server runtime versions
@@ -1857,18 +1863,17 @@ Commands:
                          --verbose, -v       Show server stderr output
 
 Examples:
+  polo exec --yolo --json "hello"
+  polo exec -C ./my-project "Summarize this repo"
+  polo exec resume --last "Continue"
+  polo exec sessions
+  polo exec delete 550e8400-e29b-41d4-a716-446655440000
   polo run "What files are in the current directory?"
   polo run --source craft-kb "Summarize today's daily note"
-  polo run --workspace-dir .github/agents --source craft-public "Read the doc"
   polo run --provider openai --model gpt-4o "Summarize this repo"
-  OPENAI_API_KEY=sk-... polo run --provider openai "Hello"
-  GOOGLE_API_KEY=... polo run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... polo run --provider deepseek --model deepseek-v4-flash "Hello"
   echo "Analyze this code" | polo run
   polo ping
-  polo sessions
   polo send abc-123 "What files are in the current directory?"
-  echo "Summarize this" | polo send abc-123
   polo --validate-server
   polo invoke system:homeDir
   polo --json workspaces | jq '.[].name'

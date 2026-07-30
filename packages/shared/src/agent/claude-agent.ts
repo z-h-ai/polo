@@ -89,6 +89,7 @@ import type {
 } from './backend/types.ts';
 import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { join as joinPath } from 'node:path';
 import {
   isExistingDirectory,
   extractSdkReportedBinaryPath,
@@ -172,6 +173,7 @@ export function resolveClaudeThinkingOptions(args: {
 export interface ClaudeAgentConfig {
   workspace: Workspace;
   session?: Session;           // Current session (primary isolation boundary)
+  sessionStorage?: BackendConfig['sessionStorage'];
   mcpToken?: string;           // Override token (for testing)
   model?: string;
   thinkingLevel?: ThinkingLevel; // Initial thinking level (defaults to 'medium')
@@ -515,6 +517,24 @@ export class ClaudeAgent extends BaseAgent {
     return this.config.workspace.rootPath;
   }
 
+  private getInvocationDefaultOptions(): Partial<Options> {
+    const credentialIsolation = this.sessionStorage.owner === 'cli';
+    const privateHome = credentialIsolation
+      ? joinPath(
+          this.sessionStorage.getSessionPath(
+            this.config.workspace.rootPath,
+            this.modeSessionId,
+          ),
+          'meta',
+          'claude-home',
+        )
+      : undefined;
+    return getDefaultOptions(this.config.envOverrides, {
+      credentialIsolation,
+      privateHome,
+    });
+  }
+
   // Callback for permission requests - set by application to receive permission prompts
   public onPermissionRequest: ((request: {
     requestId: string;
@@ -569,6 +589,7 @@ export class ClaudeAgent extends BaseAgent {
       provider: 'anthropic',
       workspace: config.workspace,
       session: config.session,
+      sessionStorage: config.sessionStorage,
       model,
       thinkingLevel: config.thinkingLevel,
       mcpToken: config.mcpToken,
@@ -1021,7 +1042,7 @@ export class ClaudeAgent extends BaseAgent {
       const resolvedCwd = this.resolveSpawnCwd({ isRetry: _isRetry, sessionId });
 
       const options: Options = {
-        ...getDefaultOptions(this.config.envOverrides),
+        ...this.getInvocationDefaultOptions(),
         model: effectiveModel,
         // Capture stderr from SDK subprocess for error diagnostics
         // This helps identify why sessions fail with "process exited with code 1"
@@ -2819,7 +2840,7 @@ This is a branched conversation. All prior messages in this conversation are par
     const model = this.config.miniModel;
 
     const options = {
-      ...getDefaultOptions(this.config.envOverrides),
+      ...this.getInvocationDefaultOptions(),
       model,
       maxTurns: 1,
       systemPrompt: 'Reply with ONLY the requested text. No explanation.', // Minimal - no Claude Code preset
@@ -2948,7 +2969,7 @@ This is a branched conversation. All prior messages in this conversation are par
     const model = request.model ?? this.config.miniModel ?? getDefaultSummarizationModel();
 
     const options = {
-      ...getDefaultOptions(this.config.envOverrides),
+      ...this.getInvocationDefaultOptions(),
       model,
       // Reasoning-model outputs (Opus 4.7 extended thinking) can span multiple SDK-counted
       // turns even with no tools exposed. Tool surface here is empty, so no tool-use loop risk.

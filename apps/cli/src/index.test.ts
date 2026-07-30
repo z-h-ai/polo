@@ -31,6 +31,12 @@ describe('top-level CLI help', () => {
     expect(output).toContain('Compatibility: polo-ai is retained as an alias for polo.')
     expect(output.match(/polo-ai/g)).toHaveLength(1)
     expect(output).not.toContain('polo-ai run')
+    expect(output).toContain('exec resume <id>')
+    expect(output).toContain('exec sessions')
+    expect(output).toContain('exec delete <id>')
+    expect(output).toContain('independent CLI runtime')
+    expect(output).toContain('does not register a workspace')
+    expect(output).not.toContain('Use directory as workspace (creates if needed)')
   })
 
   it('never routes run with legacy server options to the old full server', async () => {

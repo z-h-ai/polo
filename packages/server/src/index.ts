@@ -33,7 +33,11 @@ import { enableDebug } from '@polo-ai/shared/utils/debug'
 import { bootstrapServer, startHealthHttpServer, generateServerToken } from '@polo-ai/server-core/bootstrap'
 import { validateSession, createWebuiHandler, nodeHttpAdapter } from '@polo-ai/server-core/webui'
 import type { WebuiHandler } from '@polo-ai/server-core/webui'
-import { getCredentialManager, setInvocationCredential } from '@polo-ai/shared/credentials'
+import {
+  getCredentialManager,
+  setInvocationCredential,
+  type StoredCredential,
+} from '@polo-ai/shared/credentials'
 import {
   getWorkspaces,
   setInvocationLlmConnections,
@@ -70,7 +74,7 @@ if (isCliOneShot && process.platform !== 'win32') {
   process.umask(0o077)
 }
 let cliRuntimeConfig: CliRuntimeConfig | undefined
-let cliInvocationApiKey: string | undefined
+let cliInvocationCredential: StoredCredential | undefined
 let cliOwnerConfig: {
   pid: number
   ownerFile: string
@@ -92,14 +96,14 @@ async function readCliBootstrapFromParentPipe(): Promise<void> {
   const line = buffer.slice(0, buffer.indexOf('\n'))
   const parsed = JSON.parse(line) as {
     runtimeConfig?: CliRuntimeConfig
-    apiKey?: string
+    credential?: StoredCredential
     owner?: typeof cliOwnerConfig
   }
   if (!parsed.runtimeConfig || !parsed.owner) {
     throw new Error('Incomplete CLI runtime bootstrap payload')
   }
   cliRuntimeConfig = parsed.runtimeConfig
-  cliInvocationApiKey = parsed.apiKey
+  cliInvocationCredential = parsed.credential
   cliOwnerConfig = parsed.owner
   cliParentDeath = (async () => {
     while (true) {
@@ -129,10 +133,13 @@ if (isCliOneShot) {
   cliRuntimeConfig = runtimeConfig
   if (runtimeConfig.connection) {
     setInvocationLlmConnections([runtimeConfig.connection], runtimeConfig.connection.slug)
-    if (cliInvocationApiKey) {
+    if (cliInvocationCredential) {
       setInvocationCredential(
-        { type: 'llm_api_key', connectionSlug: runtimeConfig.connection.slug },
-        { value: cliInvocationApiKey },
+        {
+          type: runtimeConfig.connection.authType === 'oauth' ? 'llm_oauth' : 'llm_api_key',
+          connectionSlug: runtimeConfig.connection.slug,
+        },
+        cliInvocationCredential,
       )
     }
   }
@@ -302,7 +309,15 @@ const instance = await (async () => {
         ? new SessionManager({
             profile: 'cli-one-shot',
             sessionStorage: new RootedSessionStorage(cliRuntimeConfig!.sessionsRoot, {
-              secrets: [cliInvocationApiKey],
+              secrets: cliInvocationCredential
+                ? [
+                    cliInvocationCredential.value,
+                    cliInvocationCredential.refreshToken,
+                    cliInvocationCredential.clientSecret,
+                    cliInvocationCredential.idToken,
+                    cliInvocationCredential.awsSessionToken,
+                  ]
+                : [],
               controlledRoot: cliRuntimeConfig!.controlledRoot,
             }),
             workspace: cliRuntimeConfig!.workspace,
@@ -326,6 +341,7 @@ const instance = await (async () => {
         }
         return {
           sessionManager,
+          sessionStorage: sessionManager.sessionStorage,
           platform,
           oauthFlowStore,
           messagingRegistry: messagingHandle?.registry,

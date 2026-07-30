@@ -77,10 +77,39 @@ export interface CliThreadLease {
   release(): Promise<void>
 }
 
+interface CliThreadStateLockRecord {
+  lockId: string
+  /** Backward-compatible alias used by the round-2 takeover lock. */
+  takeoverId?: string
+  operation: 'acquire' | 'heartbeat' | 'release' | 'delete' | 'stale-cleanup'
+  pid: number
+  processIdentity: string
+  createdAt: number
+}
+
+interface CliThreadDeletingMarker {
+  version: 1
+  deletionId: string
+  markedAt: number
+  initiatorPid: number
+  initiatorProcessIdentity: string
+  owner?: CliThreadOwner
+  lastHeartbeatAt: number
+}
+
+interface CliThreadStateLock {
+  lockId: string
+  path: string
+  release(): Promise<void>
+}
+
 const DIRECTORY_MODE = 0o700
 const FILE_MODE = 0o600
 const ACTIVE_LEASE_WINDOW_MS = 15_000
 const STALE_EPHEMERAL_MS = 10 * 60_000
+const THREAD_STATE_LOCK_STALE_MS = 60_000
+const THREAD_STATE_LOCK_FILE = '.owner.takeover.lock'
+const THREAD_DELETING_FILE = 'deleting.json'
 
 function configRoot(): string {
   return resolve(process.env.POLO_AI_CONFIG_DIR || join(homedir(), '.polo-ai'))
@@ -275,6 +304,130 @@ function recordFor(directory: string, metadata: CliThreadMetadata): CliThreadRec
   }
 }
 
+function stateLockPath(record: CliThreadRecord): string {
+  return join(record.directory, THREAD_STATE_LOCK_FILE)
+}
+
+function deletingMarkerPath(record: CliThreadRecord): string {
+  return join(record.directory, THREAD_DELETING_FILE)
+}
+
+async function acquireThreadStateLock(
+  record: CliThreadRecord,
+  operation: CliThreadStateLockRecord['operation'],
+): Promise<CliThreadStateLock> {
+  const root = getCliSessionsRoot()
+  await assertCanonicalControlledPath(root, record.directory)
+  const path = stateLockPath(record)
+  const processIdentity = getProcessBirthIdentity(process.pid)
+  if (!processIdentity) {
+    throw new Error(`Could not verify CLI process birth identity for pid ${process.pid}`)
+  }
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lockId = crypto.randomUUID()
+    const value: CliThreadStateLockRecord = {
+      lockId,
+      takeoverId: lockId,
+      operation,
+      pid: process.pid,
+      processIdentity,
+      createdAt: Date.now(),
+    }
+    let handle: Awaited<ReturnType<typeof open>> | undefined
+    try {
+      handle = await open(path, 'wx', FILE_MODE)
+      await handle.writeFile(JSON.stringify(value, null, 2), 'utf-8')
+      await handle.sync()
+      await handle.close()
+      handle = undefined
+      if (process.platform !== 'win32') await chmod(path, FILE_MODE)
+
+      let released = false
+      return {
+        lockId,
+        path,
+        async release() {
+          if (released) return
+          released = true
+          const current = await readJson<CliThreadStateLockRecord>(path).catch(() => null)
+          const currentId = current?.lockId ?? current?.takeoverId
+          if (currentId === lockId) {
+            await unlinkControlledFile(root, path).catch(error => {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+            })
+          }
+        },
+      }
+    } catch (error) {
+      await handle?.close().catch(() => {})
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+
+      await assertCanonicalControlledPath(root, path)
+      const [observed, info] = await Promise.all([
+        readJson<CliThreadStateLockRecord>(path).catch(() => null),
+        stat(path).catch(() => null),
+      ])
+      const observedId = observed?.lockId ?? observed?.takeoverId
+      const createdAt = Number.isFinite(observed?.createdAt)
+        ? observed!.createdAt
+        : info?.mtimeMs ?? Date.now()
+      const hasProcessIdentity = !!observed
+        && Number.isInteger(observed.pid)
+        && observed.pid > 0
+        && typeof observed.processIdentity === 'string'
+        && observed.processIdentity.length > 0
+      const holderExists = hasProcessIdentity
+        && processIdentityMatches(observed.pid, observed.processIdentity)
+      if (
+        !hasProcessIdentity
+        || holderExists
+        || Date.now() - createdAt <= THREAD_STATE_LOCK_STALE_MS
+      ) {
+        throw new Error(
+          `Thread ${record.metadata.threadId} state transition is already in progress`,
+        )
+      }
+
+      // Recover only a safely expired lock whose exact observed identity was
+      // moved. The atomic rename is the filesystem CAS boundary; if another
+      // contender already replaced it, the moved identity check fails closed.
+      const stalePath = join(
+        record.directory,
+        `.${THREAD_STATE_LOCK_FILE}.stale.${observedId ?? 'unknown'}.${crypto.randomUUID()}`,
+      )
+      try {
+        await rename(path, stalePath)
+      } catch (renameError) {
+        if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw renameError
+      }
+      const moved = await readJson<CliThreadStateLockRecord>(stalePath).catch(() => null)
+      const movedId = moved?.lockId ?? moved?.takeoverId
+      if (movedId !== observedId) {
+        if (!existsSync(path)) await rename(stalePath, path).catch(() => {})
+        throw new Error(
+          `Thread ${record.metadata.threadId} state lock changed during recovery`,
+        )
+      }
+      await unlinkControlledFile(root, stalePath)
+    }
+  }
+
+  throw new Error(`Thread ${record.metadata.threadId} state transition could not be acquired`)
+}
+
+async function assertThreadStateLock(
+  record: CliThreadRecord,
+  stateLock: CliThreadStateLock,
+): Promise<void> {
+  const current = await readJson<CliThreadStateLockRecord>(stateLock.path)
+  const currentId = current.lockId ?? current.takeoverId
+  if (currentId !== stateLock.lockId) {
+    throw new Error(`Thread ${record.metadata.threadId} state lock was lost`)
+  }
+}
+
 export async function createCliThread(input: {
   origin: CliThreadOrigin
   configurationScopeId: string
@@ -373,81 +526,27 @@ export async function acquireCliThreadLease(
     heartbeatAt: now,
   }
 
+  const stateLock = await acquireThreadStateLock(record, 'acquire')
   try {
-    await writeFile(ownerFile, JSON.stringify(owner, null, 2), { flag: 'wx', mode: FILE_MODE })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    await assertCanonicalControlledPath(root, ownerFile)
-    const observedOwner = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
-    if (observedOwner && isOwnerActive(observedOwner)) {
+    if (existsSync(deletingMarkerPath(record))) {
+      await assertCanonicalControlledPath(root, deletingMarkerPath(record))
+      throw new Error(`Thread ${record.metadata.threadId} is being deleted`)
+    }
+    const currentOwner = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
+    if (currentOwner && isOwnerActive(currentOwner)) {
       throw new Error(`Thread ${record.metadata.threadId} is already active`)
     }
-
-    // Only one contender may inspect and replace a stale owner. The lock is
-    // acquired with O_EXCL and the observed lease is checked again while held,
-    // so a delayed contender can never rename a newly installed live owner.
-    const takeoverFile = join(record.directory, '.owner.takeover.lock')
-    const takeoverId = crypto.randomUUID()
-    let takeoverHandle: Awaited<ReturnType<typeof open>> | undefined
-    try {
-      takeoverHandle = await open(takeoverFile, 'wx', FILE_MODE)
-      await takeoverHandle.writeFile(JSON.stringify({
-        takeoverId,
-        pid: process.pid,
-        processIdentity: cliProcessIdentity,
-        createdAt: Date.now(),
-      }), 'utf-8')
-      await takeoverHandle.sync()
-    } catch (takeoverError) {
-      await takeoverHandle?.close().catch(() => {})
-      if ((takeoverError as NodeJS.ErrnoException).code !== 'EEXIST') {
-        await unlinkControlledFile(root, takeoverFile).catch(() => {})
-      }
-      if ((takeoverError as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new Error(`Thread ${record.metadata.threadId} lease takeover is already in progress`)
-      }
-      throw takeoverError
+    if (
+      currentOwner
+      && options.purpose !== 'clone-source'
+      && record.metadata.origin === 'cli-exec'
+      && record.metadata.status !== 'interrupted'
+    ) {
+      await updateCliThread(record, { status: 'interrupted', lastUsedAt: Date.now() })
     }
-    await takeoverHandle.close()
-    if (process.platform !== 'win32') await chmod(takeoverFile, FILE_MODE)
-
-    try {
-      const currentOwner = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
-      if (currentOwner && isOwnerActive(currentOwner)) {
-        throw new Error(`Thread ${record.metadata.threadId} is already active`)
-      }
-      if (
-        observedOwner
-        && currentOwner
-        && currentOwner.leaseId !== observedOwner.leaseId
-      ) {
-        throw new Error(`Thread ${record.metadata.threadId} lease changed during takeover`)
-      }
-      if (
-        options.purpose !== 'clone-source'
-        && record.metadata.origin === 'cli-exec'
-        && record.metadata.status !== 'interrupted'
-      ) {
-        await updateCliThread(record, { status: 'interrupted', lastUsedAt: Date.now() })
-      }
-      if (currentOwner) {
-        // Keep owner.json present throughout the replacement. Removing it even
-        // briefly would let another process win the initial O_EXCL create path
-        // without observing the takeover lock.
-        await atomicWriteJson(ownerFile, owner)
-      } else {
-        await writeFile(ownerFile, JSON.stringify(owner, null, 2), {
-          flag: 'wx',
-          mode: FILE_MODE,
-        })
-      }
-    } finally {
-      const takeover = await readJson<{ takeoverId?: string }>(takeoverFile)
-        .catch(() => null)
-      if (takeover?.takeoverId === takeoverId) {
-        await unlinkControlledFile(root, takeoverFile)
-      }
-    }
+    await atomicWriteJson(ownerFile, owner)
+  } finally {
+    await stateLock.release()
   }
   if (process.platform !== 'win32') await chmod(ownerFile, FILE_MODE)
 
@@ -463,19 +562,39 @@ export async function acquireCliThreadLease(
         owner.serverProcessIdentity = server.processIdentity
       }
       owner.heartbeatAt = Date.now()
-      const current = await readJson<CliThreadOwner>(ownerFile)
-      if (current.leaseId !== owner.leaseId) {
-        throw new Error(`Thread ${record.metadata.threadId} lease was lost`)
+      const heartbeatLock = await acquireThreadStateLock(record, 'heartbeat')
+      try {
+        if (existsSync(deletingMarkerPath(record))) {
+          throw new Error(`Thread ${record.metadata.threadId} is being deleted`)
+        }
+        const current = await readJson<CliThreadOwner>(ownerFile)
+        if (current.leaseId !== owner.leaseId) {
+          throw new Error(`Thread ${record.metadata.threadId} lease was lost`)
+        }
+        await atomicWriteJson(ownerFile, owner)
+      } finally {
+        await heartbeatLock.release()
       }
-      await atomicWriteJson(ownerFile, owner)
     },
     async release() {
       if (released) return
       released = true
-      if (existsSync(ownerFile)) await assertCanonicalControlledPath(root, ownerFile)
-      const current = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
-      if (current?.leaseId === owner.leaseId) {
-        await unlinkControlledFile(root, ownerFile)
+      if (!existsSync(record.directory)) return
+      let releaseLock: CliThreadStateLock
+      try {
+        releaseLock = await acquireThreadStateLock(record, 'release')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+        throw error
+      }
+      try {
+        if (existsSync(ownerFile)) await assertCanonicalControlledPath(root, ownerFile)
+        const current = await readJson<CliThreadOwner>(ownerFile).catch(() => null)
+        if (current?.leaseId === owner.leaseId) {
+          await unlinkControlledFile(root, ownerFile)
+        }
+      } finally {
+        await releaseLock.release()
       }
     },
   }
@@ -532,6 +651,7 @@ export async function listCliThreads(): Promise<CliThreadRecord[]> {
 
 export async function isCliThreadActive(record: CliThreadRecord): Promise<boolean> {
   await assertCanonicalControlledPath(getCliSessionsRoot(), record.directory)
+  if (existsSync(deletingMarkerPath(record))) return true
   if (existsSync(record.ownerFile)) {
     await assertCanonicalControlledPath(getCliSessionsRoot(), record.ownerFile)
   }
@@ -570,30 +690,94 @@ export async function cloneCliThreadEphemeral(source: CliThreadRecord): Promise<
   }
 }
 
-async function moveThreadToTrash(record: CliThreadRecord): Promise<string> {
+async function moveThreadToTrash(
+  record: CliThreadRecord,
+  stateLock: CliThreadStateLock,
+): Promise<string> {
   const root = getCliSessionsRoot()
   assertControlledPath(root, record.directory)
   await assertCanonicalControlledPath(root, record.directory)
+  await assertThreadStateLock(record, stateLock)
   const trashRoot = join(root, 'trash')
   await ensurePrivateDir(trashRoot)
   await assertCanonicalControlledPath(root, trashRoot)
   const target = join(trashRoot, `${record.metadata.threadId}.${crypto.randomUUID()}`)
   assertControlledPath(root, target)
+  // Re-check ownership and the durable deleting state immediately before the
+  // atomic move while the shared state lock is still held.
+  await assertThreadStateLock(record, stateLock)
+  if (!existsSync(deletingMarkerPath(record))) {
+    throw new Error(`Thread ${record.metadata.threadId} is not marked deleting`)
+  }
   await rename(record.directory, target)
   await assertCanonicalControlledPath(root, target)
   return target
 }
 
-export async function deleteCliThread(record: CliThreadRecord): Promise<void> {
+async function writeDeletingMarker(
+  record: CliThreadRecord,
+  owner: CliThreadOwner | null,
+  now = Date.now(),
+): Promise<CliThreadDeletingMarker> {
+  const processIdentity = getProcessBirthIdentity(process.pid)
+  if (!processIdentity) {
+    throw new Error(`Could not verify CLI process birth identity for pid ${process.pid}`)
+  }
+  const marker: CliThreadDeletingMarker = {
+    version: 1,
+    deletionId: crypto.randomUUID(),
+    markedAt: now,
+    initiatorPid: process.pid,
+    initiatorProcessIdentity: processIdentity,
+    owner: owner ?? undefined,
+    lastHeartbeatAt: owner?.heartbeatAt ?? record.metadata.lastUsedAt,
+  }
+  await atomicWriteJson(deletingMarkerPath(record), marker)
+  return marker
+}
+
+export async function deleteCliThread(
+  record: CliThreadRecord,
+  options: { expectedLeaseId?: string } = {},
+): Promise<void> {
   const root = getCliSessionsRoot()
   await assertCanonicalControlledPath(root, record.directory)
-  if (existsSync(record.ownerFile)) await assertCanonicalControlledPath(root, record.ownerFile)
-  const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
-  if (owner && isOwnerActive(owner)) {
-    throw new Error(`Thread ${record.metadata.threadId} is active and cannot be deleted`)
+  const stateLock = await acquireThreadStateLock(record, 'delete')
+  let trash: string | undefined
+  try {
+    if (existsSync(record.ownerFile)) await assertCanonicalControlledPath(root, record.ownerFile)
+    const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
+    if (options.expectedLeaseId && owner?.leaseId !== options.expectedLeaseId) {
+      throw new Error(`Thread ${record.metadata.threadId} lease changed before deletion`)
+    }
+    if (
+      owner
+      && isOwnerActive(owner)
+      && owner.leaseId !== options.expectedLeaseId
+    ) {
+      throw new Error(`Thread ${record.metadata.threadId} is active and cannot be deleted`)
+    }
+
+    const existingMarker = await readJson<CliThreadDeletingMarker>(
+      deletingMarkerPath(record),
+    ).catch(() => null)
+    if (
+      existingMarker
+      && processIdentityMatches(
+        existingMarker.initiatorPid,
+        existingMarker.initiatorProcessIdentity,
+      )
+      && existingMarker.initiatorPid !== process.pid
+    ) {
+      throw new Error(`Thread ${record.metadata.threadId} deletion is already in progress`)
+    }
+    if (!existingMarker) await writeDeletingMarker(record, owner)
+    trash = await moveThreadToTrash(record, stateLock)
+  } finally {
+    if (!trash) await stateLock.release()
   }
-  const trash = await moveThreadToTrash(record)
-  await assertCanonicalControlledPath(getCliSessionsRoot(), trash)
+  if (!trash) throw new Error(`Thread ${record.metadata.threadId} deletion did not complete`)
+  await assertCanonicalControlledPath(root, trash)
   await rm(trash, { recursive: true, force: true })
 }
 
@@ -619,14 +803,50 @@ export async function cleanupStaleEphemeralThreads(now = Date.now()): Promise<nu
   try {
     for (const record of await listCliThreads()) {
       if (record.metadata.persistence !== 'ephemeral') continue
-      const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
-      if (!owner) continue
-      const cliExists = processIdentityMatches(owner.cliPid, owner.cliProcessIdentity)
-      const runtimeExists = processIdentityMatches(owner.serverPid, owner.serverProcessIdentity)
-      const leaseExpired = now - owner.heartbeatAt > ACTIVE_LEASE_WINDOW_MS
-      if (cliExists || runtimeExists || !leaseExpired) continue
-      if (now - owner.heartbeatAt <= STALE_EPHEMERAL_MS) continue
-      const trash = await moveThreadToTrash(record).catch(() => null)
+      let stateLock: CliThreadStateLock
+      try {
+        stateLock = await acquireThreadStateLock(record, 'stale-cleanup')
+      } catch {
+        continue
+      }
+      let trash: string | undefined
+      try {
+        const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
+        const marker = await readJson<CliThreadDeletingMarker>(
+          deletingMarkerPath(record),
+        ).catch(() => null)
+        const evidence = owner ?? marker?.owner
+        const cliExists = evidence
+          ? processIdentityMatches(evidence.cliPid, evidence.cliProcessIdentity)
+          : false
+        const runtimeExists = evidence
+          ? processIdentityMatches(evidence.serverPid, evidence.serverProcessIdentity)
+          : false
+        const markerInitiatorExists = !!marker && processIdentityMatches(
+          marker.initiatorPid,
+          marker.initiatorProcessIdentity,
+        )
+        const lastHeartbeatAt = evidence?.heartbeatAt
+          ?? marker?.lastHeartbeatAt
+          ?? record.metadata.lastUsedAt
+        const leaseExpired = !evidence
+          || now - evidence.heartbeatAt > ACTIVE_LEASE_WINDOW_MS
+        if (
+          cliExists
+          || runtimeExists
+          || markerInitiatorExists
+          || !leaseExpired
+          || now - lastHeartbeatAt <= STALE_EPHEMERAL_MS
+        ) {
+          continue
+        }
+        if (!marker) await writeDeletingMarker(record, owner, now)
+        trash = await moveThreadToTrash(record, stateLock)
+      } catch {
+        // Another state transition won, or the Thread failed containment checks.
+      } finally {
+        if (!trash) await stateLock.release()
+      }
       if (!trash) continue
       await assertCanonicalControlledPath(root, trash)
       await rm(trash, { recursive: true, force: true })

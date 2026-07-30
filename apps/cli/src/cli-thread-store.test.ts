@@ -247,6 +247,83 @@ describe('CLI Thread store', () => {
     }
   }, 30_000)
 
+  it('recovers an orphaned takeover lock only after its identity and safety window expire', async () => {
+    const record = await createExecThread()
+    const staleAt = Date.now() - 15 * 60_000
+    await writeFile(join(record.directory, '.owner.takeover.lock'), JSON.stringify({
+      takeoverId: crypto.randomUUID(),
+      lockId: crypto.randomUUID(),
+      operation: 'acquire',
+      pid: 2_147_483_647,
+      processIdentity: 'missing-takeover-owner',
+      createdAt: staleAt,
+    }))
+
+    const lease = await acquireCliThreadLease(record)
+    expect(lease.owner.leaseId).toBeTruthy()
+    await lease.release()
+  })
+
+  it('reclaims an ownerless expired ephemeral Thread left in the pre-delete window', async () => {
+    const record = await createCliThread({
+      origin: 'cli-exec',
+      configurationScopeId: 'workspace-1',
+      configurationWorkspacePath: root,
+      workingDirectory: root,
+      persistence: 'ephemeral',
+    })
+    await updateCliThread(record, { lastUsedAt: Date.now() - 11 * 60_000 })
+
+    expect(await cleanupStaleEphemeralThreads()).toBe(1)
+    expect(await locateCliThread(record.metadata.threadId)).toBeNull()
+  })
+
+  it('serializes delete and acquire so they can never both succeed', async () => {
+    const workerFixture = join(
+      import.meta.dir,
+      '__fixtures__',
+      'thread-state-race-worker.ts',
+    )
+
+    for (let round = 0; round < 30; round++) {
+      const record = await createExecThread()
+      const barrier = join(root, `state-race-barrier-${round}`)
+      await mkdir(barrier)
+      const workers = (['acquire', 'delete'] as const).map((action, index) =>
+        Bun.spawn([
+          'bun',
+          'run',
+          workerFixture,
+          root,
+          record.metadata.threadId,
+          barrier,
+          action,
+          String(index),
+        ], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: { ...process.env, POLO_AI_CONFIG_DIR: root },
+        }),
+      )
+      const readyDeadline = Date.now() + 10_000
+      while ((await readdir(barrier)).filter(name => name.endsWith('.ready')).length < 2) {
+        if (Date.now() >= readyDeadline) throw new Error('workers did not reach state race barrier')
+        await Bun.sleep(5)
+      }
+      await writeFile(join(barrier, 'start'), '')
+      const results = await Promise.all(workers.map(async worker => {
+        const [exitCode, stdout, stderr] = await Promise.all([
+          worker.exited,
+          new Response(worker.stdout).text(),
+          new Response(worker.stderr).text(),
+        ])
+        expect(exitCode, stderr).toBe(0)
+        return JSON.parse(stdout.trim()) as { action: string; status: string }
+      }))
+      expect(results.filter(result => result.status === 'succeeded')).toHaveLength(1)
+    }
+  }, 60_000)
+
   it('only reclaims expired ephemeral Threads with dead owners', async () => {
     const ephemeral = await createCliThread({
       origin: 'cli-exec',

@@ -20,6 +20,10 @@ import {
   type LlmConnection,
   type Workspace,
 } from '@polo-ai/shared/config'
+import {
+  getCredentialManager,
+  type StoredCredential,
+} from '@polo-ai/shared/credentials'
 import { RootedSessionStorage, type SessionHeader } from '@polo-ai/shared/sessions'
 import { CliRpcClient } from './client.ts'
 import {
@@ -277,6 +281,65 @@ function resolveInvocationApiKey(args: ExecutionArgs, provider?: string): string
   return envKey ? process.env[envKey] : undefined
 }
 
+function canonicalConnectionBaseUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const parsed = new URL(normalizeCredentialFreeBaseUrl(value))
+  parsed.hash = ''
+  parsed.searchParams.sort()
+  if (parsed.pathname.length > 1) {
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '')
+  }
+  return parsed.toString()
+}
+
+function connectionMatchesInvocationIdentity(
+  connection: LlmConnection,
+  args: Pick<ExecutionArgs, 'provider' | 'baseUrl'>,
+): boolean {
+  if (args.provider) {
+    const providers = new Set([
+      connection.providerType,
+      connection.type,
+      connection.piAuthProvider,
+    ].filter((value): value is string => !!value))
+    if (!providers.has(args.provider)) return false
+  }
+  if (args.baseUrl) {
+    if (
+      canonicalConnectionBaseUrl(connection.baseUrl)
+      !== canonicalConnectionBaseUrl(args.baseUrl)
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+async function resolveInvocationCredential(
+  args: ExecutionArgs,
+  provider: string | undefined,
+  identity: LlmConnection | undefined,
+  includeStoredIdentity: boolean,
+): Promise<StoredCredential | undefined> {
+  const invocation = resolveInvocationApiKey(args, provider)
+  if (invocation) return { value: invocation }
+  if (!identity || !includeStoredIdentity) return undefined
+  const manager = getCredentialManager()
+  if (identity.authType === 'oauth') {
+    const oauth = await manager.getLlmOAuth(identity.slug)
+    return oauth
+      ? {
+          value: oauth.accessToken,
+          refreshToken: oauth.refreshToken,
+          expiresAt: oauth.expiresAt,
+          idToken: oauth.idToken,
+        }
+      : undefined
+  }
+  const apiKey = await manager.getLlmApiKey(identity.slug)
+  return apiKey ? { value: apiKey } : undefined
+}
+
 function makeInvocationConnection(input: {
   slug: string
   provider: string
@@ -320,38 +383,72 @@ export async function resolveConnection(
   args: ExecutionArgs,
   record: CliThreadRecord,
   scope: ConfigurationScope,
-): Promise<{ connection?: LlmConnection; apiKey?: string; model?: string }> {
+): Promise<{
+  connection?: LlmConnection
+  apiKey?: string
+  credential?: StoredCredential
+  model?: string
+}> {
   const config = loadStoredConfigReadonly()
   const workspaceDefault = await loadWorkspaceConnectionDefault(scope)
   const defaultSlug = workspaceDefault || config?.defaultLlmConnection
   const defaultConnection = config?.llmConnections?.find(connection => connection.slug === defaultSlug)
     ?? config?.llmConnections?.[0]
   const saved = record.metadata.connection
-  const selectedConnection = defaultConnection
+  const configuredConnections = config?.llmConnections ?? []
+  const orderedConnections = defaultConnection
+    ? [
+        defaultConnection,
+        ...configuredConnections.filter(connection => connection.slug !== defaultConnection.slug),
+      ]
+    : configuredConnections
+  const hasExplicitIdentity = !!(args.provider || args.baseUrl)
+  const explicitIdentity = hasExplicitIdentity
+    ? orderedConnections.find(connection =>
+        connectionMatchesInvocationIdentity(connection, args)
+      )
+    : undefined
+  const savedIdentity = saved?.slug
+    ? configuredConnections.find(connection => connection.slug === saved.slug)
+    : undefined
+  const selectedConnection = explicitIdentity
+    ?? (!hasExplicitIdentity ? savedIdentity ?? defaultConnection : undefined)
   const provider = args.provider
-    ?? saved?.provider
+    ?? (!hasExplicitIdentity ? saved?.provider : undefined)
     ?? selectedConnection?.piAuthProvider
+    ?? selectedConnection?.providerType
   const baseUrlCandidate = args.baseUrl
-    ?? saved?.baseUrl
+    ?? (!hasExplicitIdentity ? saved?.baseUrl : undefined)
     ?? selectedConnection?.baseUrl
   const baseUrl = baseUrlCandidate
     ? normalizeCredentialFreeBaseUrl(baseUrlCandidate)
     : undefined
   const model = args.model
-    ?? saved?.model
+    ?? (!hasExplicitIdentity ? saved?.model : undefined)
     ?? selectedConnection?.defaultModel
-  const hasExplicitConnectionOverride = !!(args.provider || args.baseUrl || args.apiKey)
+  const hasExplicitConnectionOverride = !!(args.provider || args.baseUrl)
   // A Thread's persisted non-secret snapshot precedes mutable current
   // defaults, even when a config connection with the same slug still exists.
-  const needsSavedSyntheticConnection = !!saved
-  const needsSyntheticConnection = hasExplicitConnectionOverride
+  const needsSavedSyntheticConnection = !hasExplicitConnectionOverride && !!saved
+  const needsSyntheticConnection = (hasExplicitConnectionOverride && !explicitIdentity)
     || needsSavedSyntheticConnection
-    || (!!args.apiKey && !selectedConnection)
+    || (!selectedConnection && !!args.apiKey)
   if (!needsSyntheticConnection && selectedConnection) {
-    const connection = { ...selectedConnection, baseUrl }
+    const connection = {
+      ...selectedConnection,
+      baseUrl,
+      defaultModel: model,
+    }
+    const credential = await resolveInvocationCredential(
+      args,
+      connection.piAuthProvider ?? connection.providerType,
+      selectedConnection,
+      hasExplicitIdentity,
+    )
     return {
       connection,
-      apiKey: resolveInvocationApiKey(args, connection.piAuthProvider),
+      apiKey: credential?.value,
+      credential,
       model,
     }
   }
@@ -360,6 +457,12 @@ export async function resolveConnection(
   const effectiveProvider = provider || 'anthropic'
   const slug = saved?.slug || `cli-${record.metadata.threadId}`
   const retainSavedConnectionShape = !!saved && !hasExplicitConnectionOverride
+  const credential = await resolveInvocationCredential(
+    args,
+    effectiveProvider,
+    savedIdentity,
+    hasExplicitIdentity,
+  )
   return {
     connection: makeInvocationConnection({
       slug,
@@ -370,9 +473,23 @@ export async function resolveConnection(
       authType: retainSavedConnectionShape ? saved.authType : undefined,
       customEndpoint: retainSavedConnectionShape ? saved.customEndpoint : undefined,
     }),
-    apiKey: resolveInvocationApiKey(args, effectiveProvider),
+    apiKey: credential?.value,
+    credential,
     model,
   }
+}
+
+function credentialSecretValues(
+  credential: StoredCredential | undefined,
+): Array<string | undefined> {
+  if (!credential) return []
+  return [
+    credential.value,
+    credential.refreshToken,
+    credential.clientSecret,
+    credential.idToken,
+    credential.awsSessionToken,
+  ]
 }
 
 async function atomicWriteLastMessage(path: string, message: string): Promise<void> {
@@ -708,14 +825,19 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         }
       }
 
-      // Phase 3: release ownership, then apply Thread retention. This block is
-      // idempotent through cleanupPromise and the lease/delete implementations.
+      // Phase 3: ephemeral retention enters deleting and moves to trash while
+      // the final lease evidence is still durable. Persistent Threads release
+      // ownership normally. Both paths are serialized by the Thread state lock.
       try {
-        await lease?.release()
         if (record?.metadata.persistence === 'ephemeral' && (lease || ownsNewThread)) {
-          await deleteCliThread(record)
+          await deleteCliThread(record, {
+            expectedLeaseId: lease?.owner.leaseId,
+          })
+        } else {
+          await lease?.release()
         }
       } catch (error) {
+        await lease?.release().catch(() => {})
         cleanupError = error instanceof Error ? error : new Error(String(error))
         result = { status: 'failed', finalMessage: '', error: cleanupError }
       }
@@ -749,7 +871,10 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
     }
     adapter = new ExecEventAdapter({
       json: args.kind !== 'run' && args.json,
-      secrets: [args.apiKey, resolvedConnection.apiKey],
+      secrets: [
+        args.apiKey,
+        ...credentialSecretValues(resolvedConnection.credential),
+      ],
     })
 
     const snapshotRoot = await createConfigurationSnapshot(record, scope)
@@ -762,8 +887,13 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
         POLO_AI_RUNTIME_PROFILE: 'cli-one-shot',
         POLO_AI_CONFIG_DIR: snapshotRoot,
         POLO_AI_SHARED_CREDENTIALS_DIR: configRoot(),
+        HOME: snapshotRoot,
+        USERPROFILE: snapshotRoot,
       },
-      secrets: [args.apiKey, resolvedConnection.apiKey],
+      secrets: [
+        args.apiKey,
+        ...credentialSecretValues(resolvedConnection.credential),
+      ],
       bootstrapPayload: {
         runtimeConfig: {
           sessionsRoot: record.sessionsRoot,
@@ -771,7 +901,7 @@ async function executeTurn(args: ExecutionArgs, prompt: string): Promise<number>
           workspace,
           connection: resolvedConnection.connection,
         },
-        apiKey: resolvedConnection.apiKey,
+        credential: resolvedConnection.credential,
         owner: {
           pid: process.pid,
           ownerFile: record.ownerFile,

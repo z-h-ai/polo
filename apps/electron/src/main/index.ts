@@ -747,6 +747,7 @@ app.whenReady().then(async () => {
           })
           return {
             sessionManager: sm,
+            sessionStorage: sm.sessionStorage,
             platform: p,
             windowManager: windowManager ?? undefined,
             browserPaneManager: browserPaneManager ?? undefined,

@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline'
-import { unlink, writeFile } from 'node:fs/promises'
+import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
+import { dirname, resolve } from 'node:path'
 import { getProcessBirthIdentity } from '../cli-thread-store.ts'
 
 const input = createInterface({ input: process.stdin })
@@ -9,9 +10,16 @@ input.close()
 const bootstrap = JSON.parse(bootstrapLine) as {
   owner?: { ownerFile?: string }
 }
-const mode = process.env.POLO_TEST_FAILURE_MODE || 'hang'
+const ownerFile = bootstrap.owner?.ownerFile
+const fixtureConfig = ownerFile
+  ? JSON.parse(await readFile(
+      resolve(dirname(ownerFile), '..', '..', '..', '..', '.polo-lifecycle-fixture.json'),
+      'utf-8',
+    ).catch(() => '{}')) as { mode?: string; runtimeInfoFile?: string }
+  : {}
+const mode = fixtureConfig.mode || 'hang'
 
-const runtimeInfoFile = process.env.POLO_TEST_RUNTIME_INFO_FILE
+const runtimeInfoFile = fixtureConfig.runtimeInfoFile
 if (runtimeInfoFile) {
   await writeFile(runtimeInfoFile, JSON.stringify({
     pid: process.pid,
@@ -59,7 +67,6 @@ const server = Bun.serve({
       if (mode === 'disconnect') {
         setTimeout(() => socket.close(), 10)
       } else if (mode === 'heartbeat') {
-        const ownerFile = bootstrap.owner?.ownerFile
         if (ownerFile) void unlink(ownerFile).catch(() => {})
       }
     },

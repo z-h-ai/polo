@@ -16,9 +16,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
+import { chmodSync, mkdirSync } from 'node:fs';
 import type { AgentEvent } from '@polo-ai/core/types';
 import type { FileAttachment } from '../utils/files.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
+import { createSafeRuntimeEnvironment } from '../utils/runtime-env.ts';
 
 import type {
   BackendConfig,
@@ -26,6 +28,38 @@ import type {
   ChatOptions,
   SdkMcpServerConfig,
 } from './backend/types.ts';
+
+export function buildPiSubprocessEnvironment(input: {
+  invocationScoped: boolean;
+  privateHome?: string;
+  envOverrides?: Record<string, string>;
+  awsEnv?: Record<string, string>;
+  sessionDir?: string;
+  debug?: boolean;
+}): NodeJS.ProcessEnv {
+  if (input.invocationScoped) {
+    if (!input.privateHome) {
+      throw new Error('Invocation-scoped Pi runtime requires a private home');
+    }
+    mkdirSync(input.privateHome, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') chmodSync(input.privateHome, 0o700);
+    return createSafeRuntimeEnvironment(process.env, {
+      HOME: input.privateHome,
+      USERPROFILE: input.privateHome,
+      ...(input.sessionDir ? { POLO_AI_SESSION_DIR: input.sessionDir } : {}),
+      POLO_AI_DEBUG: input.debug ? '1' : '0',
+    });
+  }
+
+  return {
+    ...process.env,
+    ...getProxyEnvVars(),
+    ...input.envOverrides,
+    ...input.awsEnv,
+    ...(input.sessionDir ? { POLO_AI_SESSION_DIR: input.sessionDir } : {}),
+    POLO_AI_DEBUG: input.debug ? '1' : '0',
+  };
+}
 import { AbortReason } from './backend/types.ts';
 import { getBackendRuntime } from './backend/internal/driver-types.ts';
 import { SourceActivationDrainController } from './source-activation-drain.ts';
@@ -456,21 +490,24 @@ export class PiAgent extends BaseAgent {
     // IAM material is never placed in a CLI model subprocess. Desktop keeps
     // the existing provider-native environment behavior.
     const awsEnv = invocationScoped ? {} : this.buildAwsEnv(piAuth, runtime);
+    const debugEnv =
+      (process.argv.includes('--debug') || process.env.POLO_AI_DEBUG === '1') ? '1' : '0';
+    const childEnv = buildPiSubprocessEnvironment({
+      invocationScoped,
+      privateHome: invocationScoped
+        ? join(sessionDir || this.config.workspace.rootPath, 'meta', 'pi-home')
+        : undefined,
+      envOverrides: this.config.envOverrides,
+      awsEnv,
+      sessionDir,
+      debug: debugEnv === '1',
+    });
 
     // Spawn the subprocess
     const child = spawn(nodePath, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        ...getProxyEnvVars(),
-        ...this.config.envOverrides,
-        ...awsEnv,
-        // Pass session dir for cross-process toolMetadataStore
-        ...(sessionDir ? { POLO_AI_SESSION_DIR: sessionDir } : {}),
-        // Propagate debug mode
-        POLO_AI_DEBUG: (process.argv.includes('--debug') || process.env.POLO_AI_DEBUG === '1') ? '1' : '0',
-      },
+      env: childEnv,
     });
 
     this.subprocess = child;

@@ -56,6 +56,10 @@ async function readJsonLine(proc: Subprocess, timeoutMs = 20_000): Promise<Recor
 async function runLifecycleFailure(mode: 'disconnect' | 'heartbeat') {
   const root = await mkdtemp(join(tmpdir(), `polo-${mode}-failure-`))
   tempDirs.push(root)
+  await writeFile(
+    join(root, '.polo-lifecycle-fixture.json'),
+    JSON.stringify({ mode }),
+  )
   const proc = Bun.spawn([
     'bun',
     'run',
@@ -73,7 +77,6 @@ async function runLifecycleFailure(mode: 'disconnect' | 'heartbeat') {
     env: {
       ...process.env,
       POLO_AI_CONFIG_DIR: root,
-      POLO_TEST_FAILURE_MODE: mode,
     },
   })
   processes.push(proc)
@@ -99,6 +102,7 @@ describe('server spawner process integration', () => {
   it('drains noisy stderr, bounds diagnostics, and removes invocation secrets from child env', async () => {
     const secret = 'server-spawner-secret-value-123456'
     process.env.POLO_FAKE_API_KEY = secret
+    process.env.COMPANY_SSO_REFRESH_MATERIAL = 'unknown-oauth-refresh-secret'
     try {
       const server = await spawnServer({
         serverEntry: join(import.meta.dir, '__fixtures__', 'noisy-server.ts'),
@@ -112,9 +116,12 @@ describe('server spawner process integration', () => {
       const diagnostics = server.diagnostics()
       expect(diagnostics.length).toBeLessThanOrEqual(16 * 1024)
       expect(diagnostics).not.toContain(secret)
+      expect(diagnostics).not.toContain('unknown-oauth-refresh-secret')
       expect(diagnostics).toContain('credential=missing')
+      expect(diagnostics).toContain('custom-oauth=missing')
     } finally {
       delete process.env.POLO_FAKE_API_KEY
+      delete process.env.COMPANY_SSO_REFRESH_MATERIAL
     }
   }, 20_000)
 
@@ -278,6 +285,10 @@ describe('server spawner process integration', () => {
       const root = await mkdtemp(join(tmpdir(), 'polo-sigquit-'))
       tempDirs.push(root)
       const runtimeInfo = join(root, 'runtime-info.json')
+      await writeFile(
+        join(root, '.polo-lifecycle-fixture.json'),
+        JSON.stringify({ mode: 'hang', runtimeInfoFile: runtimeInfo }),
+      )
       const command = [
         'bun',
         'run',
@@ -297,8 +308,6 @@ describe('server spawner process integration', () => {
         env: {
           ...process.env,
           POLO_AI_CONFIG_DIR: root,
-          POLO_TEST_FAILURE_MODE: 'hang',
-          POLO_TEST_RUNTIME_INFO_FILE: runtimeInfo,
         },
       })
       processes.push(proc)
@@ -402,6 +411,10 @@ describe('server spawner process integration', () => {
       activeSessionId: null,
       llmConnections: [],
     }))
+    await writeFile(
+      join(root, '.polo-lifecycle-fixture.json'),
+      JSON.stringify({ mode: 'disconnect' }),
+    )
 
     const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
     process.env.POLO_AI_CONFIG_DIR = root
@@ -435,7 +448,6 @@ describe('server spawner process integration', () => {
         env: {
           ...process.env,
           POLO_AI_CONFIG_DIR: root,
-          POLO_TEST_FAILURE_MODE: 'disconnect',
         },
       })
       const [exitCode, stdout, stderr] = await Promise.all([

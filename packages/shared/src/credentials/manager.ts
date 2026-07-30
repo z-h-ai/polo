@@ -159,6 +159,13 @@ export class CredentialManager {
     }
 
     await this.writeBackend.set(id, credential);
+    const invocationKey = invocationCredentialKey(id);
+    if (invocationCredentials.has(invocationKey)) {
+      // OAuth refreshes are the one permitted shared write during a CLI
+      // invocation. Keep the process-local overlay aligned with the atomic
+      // shared update so later reads in the same Thread see the rotated token.
+      invocationCredentials.set(invocationKey, { ...credential });
+    }
     debug(`[CredentialManager] Saved ${id.type} to ${this.writeBackend.name}`);
   }
 

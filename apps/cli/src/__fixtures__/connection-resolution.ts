@@ -25,6 +25,15 @@ await writeFile(join(configRoot, 'config.json'), JSON.stringify({
     piAuthProvider: 'anthropic',
     defaultModel: 'current-default-model',
     createdAt: 1,
+  }, {
+    slug: 'stored-openai',
+    name: 'Stored OpenAI identity',
+    providerType: 'pi',
+    authType: 'api_key',
+    piAuthProvider: 'openai',
+    baseUrl: 'https://api.example.test/v1/',
+    defaultModel: 'stored-openai-model',
+    createdAt: 1,
   }],
 }))
 process.env.POLO_AI_CONFIG_DIR = configRoot
@@ -69,4 +78,54 @@ if (resolved.connection?.providerType !== 'pi_compat') throw new Error('saved co
 if (resolved.connection?.customEndpoint?.api !== 'openai-completions') throw new Error('saved endpoint protocol was not preserved')
 if (resolved.model !== 'saved-model') throw new Error('saved model was not preserved')
 if (resolved.apiKey !== 'invocation-env-secret') throw new Error('invocation environment credential lost precedence')
+
+delete process.env.OPENAI_API_KEY
+const { getCredentialManager } = await import('@polo-ai/shared/credentials')
+const { createCliThread, updateCliThread } = await import('../cli-thread-store.ts')
+const storedSecret = 'stored-manager-secret-123456'
+await getCredentialManager().setLlmApiKey('stored-openai', storedSecret)
+const explicitRecord = await createCliThread({
+  origin: 'cli-exec',
+  configurationScopeId: 'global',
+  configurationWorkspacePath: configRoot,
+  workingDirectory: configRoot,
+  persistence: 'persistent',
+  connection: {
+    provider: 'openai',
+    baseUrl: 'https://api.example.test/v1',
+  },
+})
+const explicitResolved = await resolveConnection(
+  parseExecutionArgs([
+    'bun',
+    'index.ts',
+    'exec',
+    '--provider',
+    'openai',
+    '--base-url',
+    'https://api.example.test/v1',
+    'hello',
+  ]),
+  explicitRecord,
+  { id: 'global', path: configRoot },
+)
+if (explicitResolved.connection?.slug !== 'stored-openai') {
+  throw new Error(`configured identity was not matched: ${explicitResolved.connection?.slug}`)
+}
+if (explicitResolved.apiKey !== storedSecret) {
+  throw new Error('stored credential manager value was not resolved')
+}
+await updateCliThread(explicitRecord, {
+  connection: {
+    slug: explicitResolved.connection.slug,
+    provider: explicitResolved.connection.piAuthProvider,
+    model: explicitResolved.model,
+    baseUrl: explicitResolved.connection.baseUrl,
+    connectionType: explicitResolved.connection.providerType,
+    authType: explicitResolved.connection.authType,
+    customEndpoint: explicitResolved.connection.customEndpoint,
+  },
+})
+const metadata = await Bun.file(join(explicitRecord.directory, 'thread.json')).text()
+if (metadata.includes(storedSecret)) throw new Error('stored credential leaked into Thread metadata')
 process.stdout.write('ok\n')

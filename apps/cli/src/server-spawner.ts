@@ -7,28 +7,8 @@
 
 import { resolve, join } from 'node:path'
 import type { Subprocess } from 'bun'
+import { createSafeRuntimeEnvironment } from '@polo-ai/shared/utils'
 import { getProcessBirthIdentity } from './cli-thread-store.ts'
-
-const BLOCKED_CHILD_CREDENTIAL_ENV = new Set([
-  'ANTHROPIC_API_KEY',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'OPENAI_API_KEY',
-  'GOOGLE_API_KEY',
-  'OPENROUTER_API_KEY',
-  'GROQ_API_KEY',
-  'MISTRAL_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'XAI_API_KEY',
-  'CEREBRAS_API_KEY',
-  'HUGGINGFACE_API_KEY',
-  'LLM_API_KEY',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_SESSION_TOKEN',
-  'GITHUB_TOKEN',
-  'GH_TOKEN',
-  'NPM_TOKEN',
-])
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,25 +68,14 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   const token = crypto.randomUUID()
   const startedAt = Date.now()
 
-  // Strip CLAUDECODE to avoid the Claude Agent SDK's nesting guard rejecting
-  // subprocess launches when the CLI is invoked from within a Claude Code session.
-  const { CLAUDECODE: _, ...rawParentEnv } = process.env
   const secrets = (opts?.secrets ?? []).filter((value): value is string => !!value)
-  const parentEnv = Object.fromEntries(
-    Object.entries(rawParentEnv).filter(([key, value]) =>
-      value !== undefined
-      && !BLOCKED_CHILD_CREDENTIAL_ENV.has(key)
-      && !secrets.some(secret => value.includes(secret)),
-    ),
-  )
   const proc: Subprocess = Bun.spawn(['bun', 'run', serverEntry], {
-    env: {
-      ...parentEnv,
+    env: createSafeRuntimeEnvironment(process.env, {
       ...opts?.env,
       POLO_AI_SERVER_TOKEN: token,
       POLO_AI_RPC_PORT: '0',
       POLO_AI_RPC_HOST: '127.0.0.1',
-    },
+    }),
     stdout: 'pipe',
     stderr: 'pipe',
     stdin: 'pipe',
