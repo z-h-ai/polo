@@ -344,6 +344,7 @@
   "creatorSkills.artifact.create": "Create Skill draft",
   "creatorSkills.artifact.manageWebApp": "Manage Web App",
   "creatorSkills.artifact.slug": "Skill slug",
+  "creatorSkills.artifact.slugPlaceholder": "mi-skill",
   "creatorSkills.artifact.type": "Work type",
   "creatorSkills.artifact.type.skill": "Skill",
   "creatorSkills.artifact.type.web_app": "Web App",

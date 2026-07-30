@@ -11,7 +11,15 @@ mock.module('@polo-ai/ui', () => ({
   Spinner: () => createElement('span', { 'data-testid': 'spinner' }),
 }))
 
-const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
+const {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} = await import('@testing-library/react')
 const { CreatorArtifactsPanel } = await import('../CreatorArtifactsPanel')
 
 const organizationId = 'organization-one'
@@ -38,7 +46,18 @@ const skill = {
   latestPublishedVersion: '1.0.0',
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 let listInput: unknown
+let artifactListResponse: (
+  input: Record<string, unknown>,
+) => Promise<Record<string, unknown>> | Record<string, unknown>
 let detailVersions: Array<Record<string, unknown>>
 let detailArtifact: typeof skill
 let detailInputs: Array<Record<string, unknown>>
@@ -52,6 +71,10 @@ let installResponse: (
 beforeEach(async () => {
   await i18n.changeLanguage('en')
   listInput = undefined
+  artifactListResponse = () => ({
+    success: true as const,
+    artifacts: [webApp, skill],
+  })
   detailVersions = []
   detailArtifact = skill
   detailInputs = []
@@ -80,10 +103,7 @@ beforeEach(async () => {
       }),
       creatorArtifactList: async (input: unknown) => {
         listInput = input
-        return {
-          success: true as const,
-          artifacts: [webApp, skill],
-        }
+        return artifactListResponse(input as Record<string, unknown>)
       },
       creatorArtifactGet: async (input: Record<string, unknown>) => {
         detailInputs.push(input)
@@ -129,16 +149,28 @@ afterEach(() => {
   cleanup()
 })
 
-function renderPanel(canManage: boolean, workspaceId: string | null = null) {
-  return render(createElement(
+function panelTree(
+  canManage: boolean,
+  workspaceId: string | null = null,
+  panelOrganizationId = organizationId,
+) {
+  return createElement(
     I18nextProvider,
     { i18n },
     createElement(CreatorArtifactsPanel, {
-      organizationId,
+      organizationId: panelOrganizationId,
       canManage,
       workspaceId,
     }),
-  ))
+  )
+}
+
+function renderPanel(
+  canManage: boolean,
+  workspaceId: string | null = null,
+  panelOrganizationId = organizationId,
+) {
+  return render(panelTree(canManage, workspaceId, panelOrganizationId))
 }
 
 describe('CreatorArtifactsPanel', () => {
@@ -178,6 +210,22 @@ describe('CreatorArtifactsPanel', () => {
       const input = document.querySelector('#creator-skill-changelog') as HTMLInputElement | null
       expect(input?.value).toBe('Lanzamiento inicial')
     })
+  })
+
+  it('renders the Skill slug placeholder through the active locale', async () => {
+    await i18n.changeLanguage('es')
+    renderPanel(true)
+    const typeSelect = await screen.findByTestId('creator-artifact-type-select')
+    fireEvent.pointerDown(typeSelect, {
+      button: 0,
+      buttons: 1,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    })
+    fireEvent.click(await screen.findByRole('option', { name: 'Skill' }))
+
+    expect((document.querySelector('#creator-skill-slug') as HTMLInputElement).placeholder)
+      .toBe('mi-skill')
   })
 
   it('localizes workspace mutation errors without a server message', async () => {
@@ -344,6 +392,128 @@ describe('CreatorArtifactsPanel', () => {
       artifactId: skill.id,
       version: '1.0.0',
       referencePath: 'references/version-1.0.0.txt',
+    })
+  })
+
+  it('ignores an older artifact detail response that arrives after a newer selection', async () => {
+    const secondSkill = {
+      ...skill,
+      id: 'skill-two',
+      slug: 'second-skill',
+      name: 'Second Skill',
+    }
+    artifactListResponse = () => ({
+      success: true as const,
+      artifacts: [skill, secondSkill],
+    })
+    const firstDetail = deferred<Record<string, unknown>>()
+    const secondDetail = deferred<Record<string, unknown>>()
+    detailResponse = input => (
+      input.artifactId === skill.id
+        ? firstDetail.promise
+        : secondDetail.promise
+    )
+
+    renderPanel(false)
+    await waitFor(() => {
+      expect(detailInputs).toContainEqual({
+        organizationId,
+        artifactId: skill.id,
+      })
+    })
+    fireEvent.click(screen.getByText('Second Skill').closest('button')!)
+    await waitFor(() => {
+      expect(detailInputs).toContainEqual({
+        organizationId,
+        artifactId: secondSkill.id,
+      })
+    })
+
+    await act(async () => {
+      secondDetail.resolve({
+        success: true,
+        artifact: secondSkill,
+        versions: [],
+      })
+    })
+    const detailPanel = screen.getByTestId('creator-artifact-detail')
+    expect(within(detailPanel).getByRole('heading', { name: 'Second Skill' })).toBeTruthy()
+
+    await act(async () => {
+      firstDetail.resolve({
+        success: true,
+        artifact: skill,
+        versions: [],
+      })
+    })
+    await waitFor(() => {
+      expect(within(detailPanel).getByRole('heading', { name: 'Second Skill' })).toBeTruthy()
+      expect(within(detailPanel).queryByRole('heading', { name: 'Review Skill' })).toBeNull()
+    })
+  })
+
+  it('ignores an old organization detail response after the panel changes organizations', async () => {
+    const nextOrganizationId = 'organization-two'
+    const nextOrganizationSkill = {
+      ...skill,
+      organizationId: nextOrganizationId,
+      id: 'organization-two-skill',
+      slug: 'organization-two-skill',
+      name: 'Organization Two Skill',
+    }
+    artifactListResponse = input => ({
+      success: true as const,
+      artifacts: input.organizationId === nextOrganizationId
+        ? [nextOrganizationSkill]
+        : [skill],
+    })
+    const oldDetail = deferred<Record<string, unknown>>()
+    const nextDetail = deferred<Record<string, unknown>>()
+    detailResponse = input => (
+      input.organizationId === nextOrganizationId
+        ? nextDetail.promise
+        : oldDetail.promise
+    )
+
+    const view = renderPanel(false)
+    await waitFor(() => {
+      expect(detailInputs).toContainEqual({
+        organizationId,
+        artifactId: skill.id,
+      })
+    })
+    view.rerender(panelTree(false, null, nextOrganizationId))
+    await waitFor(() => {
+      expect(detailInputs).toContainEqual({
+        organizationId: nextOrganizationId,
+        artifactId: nextOrganizationSkill.id,
+      })
+    })
+
+    await act(async () => {
+      nextDetail.resolve({
+        success: true,
+        artifact: nextOrganizationSkill,
+        versions: [],
+      })
+    })
+    const detailPanel = screen.getByTestId('creator-artifact-detail')
+    expect(within(detailPanel).getByRole('heading', {
+      name: 'Organization Two Skill',
+    })).toBeTruthy()
+
+    await act(async () => {
+      oldDetail.resolve({
+        success: true,
+        artifact: skill,
+        versions: [],
+      })
+    })
+    await waitFor(() => {
+      expect(within(detailPanel).getByRole('heading', {
+        name: 'Organization Two Skill',
+      })).toBeTruthy()
+      expect(within(detailPanel).queryByRole('heading', { name: 'Review Skill' })).toBeNull()
     })
   })
 })

@@ -76,6 +76,8 @@ export interface CreatorSkillInstallerDependencies {
     version: string
     archiveChecksum: string
   }) => Promise<void>
+  /** Runs immediately before the final target identity snapshot in deterministic race tests. */
+  beforeCommitSnapshot?: () => Promise<void> | void
   /** Transaction checkpoint hook used by deterministic crash/fault tests. */
   onJournalPersisted?: (state: CreatorSkillJournalState) => Promise<void> | void
   /** Overrides directory fsync for deterministic durability tests. */
@@ -623,6 +625,7 @@ async function inspectConflicts(
   conflicts: CreatorSkillInstallConflict[]
   existing?: InstalledCreatorSkill
   localModified: boolean
+  targetIdentity: CreatorSkillTargetIdentity
   conflictDetails: CreatorSkillConflictDetails
 }> {
   const slug = input.grant.slug
@@ -638,17 +641,9 @@ async function inspectConflicts(
   }
   const ledger = await readCreatorSkillsLedger(workspaceRoot)
   const existing = ledger.installed.find(item => item.slug === slug)
-  const targetExists = await exists(targetPath)
-  let localModified = false
-  if (existing && targetExists) {
-    try {
-      localModified = (
-        await scanCreatorSkillDirectory(targetPath)
-      ).contentDigest !== existing.contentDigest
-    } catch {
-      localModified = true
-    }
-  }
+  const targetIdentity = await inspectCreatorSkillTarget(targetPath)
+  const targetExists = targetIdentity.kind !== 'missing'
+  const localModified = isTargetLocallyModified(targetIdentity, existing)
 
   const conflicts: CreatorSkillInstallConflict[] = []
   const existingIdentities: CreatorSkillConflictDetails['existing'] = []
@@ -683,6 +678,7 @@ async function inspectConflicts(
     conflicts,
     ...(existing ? { existing } : {}),
     localModified,
+    targetIdentity,
     conflictDetails: {
       existing: existingIdentities,
       incoming: {
@@ -694,6 +690,57 @@ async function inspectConflicts(
       },
     },
   }
+}
+
+interface CreatorSkillTargetIdentity {
+  kind: 'missing' | 'scanned' | 'unreadable'
+  contentDigest?: string
+}
+
+async function inspectCreatorSkillTarget(
+  targetPath: string,
+): Promise<CreatorSkillTargetIdentity> {
+  if (!await exists(targetPath)) return { kind: 'missing' }
+  try {
+    const scanned = await scanCreatorSkillDirectory(targetPath)
+    return {
+      kind: 'scanned',
+      contentDigest: scanned.contentDigest,
+    }
+  } catch {
+    return { kind: 'unreadable' }
+  }
+}
+
+function targetIdentitiesEqual(
+  left: CreatorSkillTargetIdentity,
+  right: CreatorSkillTargetIdentity,
+): boolean {
+  return left.kind === right.kind
+    && left.contentDigest === right.contentDigest
+}
+
+function isTargetLocallyModified(
+  identity: CreatorSkillTargetIdentity,
+  existing?: InstalledCreatorSkill,
+): boolean {
+  if (!existing || identity.kind === 'missing') return Boolean(existing)
+  return identity.kind !== 'scanned'
+    || identity.contentDigest !== existing.contentDigest
+}
+
+function lateLocalChangesResult(
+  input: CreatorSkillInstallInput,
+  conflictDetails: CreatorSkillConflictDetails,
+): CreatorSkillOperationResult {
+  return errorResult({
+    operationId: input.operationId,
+    stage: 'prepare',
+    errorCode: 'creator_skill_conflict',
+    message: 'The existing Skill changed while the update was being prepared',
+    conflicts: ['local_changes'],
+    conflictDetails,
+  })
 }
 
 function confirmationsMissing(
@@ -843,7 +890,25 @@ export async function installCreatorSkill(
       await assertCanonicalPathWhenPresent(resolve(canonicalWorkspace, 'skills'), 'Workspace Skills root')
       await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
       const oldLedger = await readLedgerSnapshot(canonicalWorkspace)
-      const preserveBackupPath = conflictState.localModified
+      await dependencies.beforeCommitSnapshot?.()
+      const preCommitTargetIdentity = await inspectCreatorSkillTarget(targetPath)
+      const changedDuringPreparation = !targetIdentitiesEqual(
+        conflictState.targetIdentity,
+        preCommitTargetIdentity,
+      )
+      if (changedDuringPreparation && !input.backupLocalChanges) {
+        await rm(operationPath, { recursive: true, force: true })
+        return lateLocalChangesResult(input, conflictState.conflictDetails)
+      }
+      const preCommitLocalModified = isTargetLocallyModified(
+        preCommitTargetIdentity,
+        conflictState.existing,
+      )
+      let preserveBackupPath = (
+        preCommitTargetIdentity.kind !== 'missing'
+        && input.backupLocalChanges
+        && (conflictState.localModified || preCommitLocalModified || changedDuringPreparation)
+      )
         ? (await resolveCreatorSkillBackupTarget({
             workspaceRoot: canonicalWorkspace,
             slug: input.grant.slug,
@@ -871,6 +936,34 @@ export async function installCreatorSkill(
       await mkdir(dirname(targetPath), { recursive: true })
       if (await exists(targetPath)) {
         await rename(targetPath, transactionBackupPath)
+      }
+      const capturedTargetIdentity = await inspectCreatorSkillTarget(transactionBackupPath)
+      const changedAtRename = !targetIdentitiesEqual(
+        preCommitTargetIdentity,
+        capturedTargetIdentity,
+      )
+      if (changedAtRename && !input.backupLocalChanges) {
+        await rollbackJournal(canonicalWorkspace, operationPath, journal)
+        return lateLocalChangesResult(input, conflictState.conflictDetails)
+      }
+      const capturedLocalModified = isTargetLocallyModified(
+        capturedTargetIdentity,
+        conflictState.existing,
+      )
+      if (
+        !preserveBackupPath
+        && capturedTargetIdentity.kind !== 'missing'
+        && input.backupLocalChanges
+        && (capturedLocalModified || changedDuringPreparation || changedAtRename)
+      ) {
+        preserveBackupPath = (await resolveCreatorSkillBackupTarget({
+          workspaceRoot: canonicalWorkspace,
+          slug: input.grant.slug,
+          backupId: creatorSkillBackupTimestamp(),
+          createAncestors: true,
+        })).targetPath
+        journal.preserveBackupPath = preserveBackupPath
+        await persistJournal(journalPath, journal, dependencies)
       }
       journal.state = 'old_backed_up'
       await persistJournal(journalPath, journal, dependencies)

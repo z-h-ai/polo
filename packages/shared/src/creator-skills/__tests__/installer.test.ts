@@ -40,6 +40,10 @@ const OP_FAULT_STAGE_PROMOTED = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const OP_UNSUPPORTED_DIRECTORY_SYNC = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const OP_FAULT_BACKUP_REMOVED = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const OP_FAULT_OPERATION_REMOVED = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const OP_LATE_DOWNLOAD_EDIT = '12121212-1212-4212-8212-121212121212'
+const OP_LATE_SAFETY_EDIT = '13131313-1313-4313-8313-131313131313'
+const OP_LATE_JOURNAL_EDIT = '14141414-1414-4414-8414-141414141414'
+const OP_POST_JOURNAL_EDIT = '15151515-1515-4515-8515-151515151515'
 
 function skillContent(version: string): string {
   return `---
@@ -328,6 +332,152 @@ describe('Creator Skill workspace installer', () => {
       })
       expect(forced).toMatchObject({ success: true })
       expect(await access(skillPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('rejects local edits made while the update archive is downloading', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const lateEditPath = join(root, 'skills', 'install-test', 'late-download-edit.txt')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_LATE_DOWNLOAD_EDIT,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: (async () => {
+          await writeFile(lateEditPath, 'keep this download-window edit')
+          return new Response(next.bytes, {
+            status: 200,
+            headers: { 'content-length': String(next.bytes.byteLength) },
+          })
+        }) as unknown as typeof fetch,
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_conflict',
+        conflicts: ['local_changes'],
+      })
+      expect(await readFile(lateEditPath, 'utf8')).toBe('keep this download-window edit')
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect(await listCreatorSkillBackups(root)).toHaveLength(0)
+    })
+  })
+
+  it('rejects local edits made by the final safety-check window', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const lateEditPath = join(root, 'skills', 'install-test', 'late-safety-edit.txt')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_LATE_SAFETY_EDIT,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        assertCommitAllowed: async () => {
+          await writeFile(lateEditPath, 'keep this safety-window edit')
+        },
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_conflict',
+        conflicts: ['local_changes'],
+      })
+      expect(await readFile(lateEditPath, 'utf8')).toBe('keep this safety-window edit')
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect(await listCreatorSkillBackups(root)).toHaveLength(0)
+    })
+  })
+
+  it('backs up the latest old directory snapshot when a pre-journal edit was confirmed', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const lateEditPath = join(root, 'skills', 'install-test', 'late-journal-edit.txt')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_LATE_JOURNAL_EDIT,
+        grant: next.grant,
+        replaceExisting: true,
+        backupLocalChanges: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        beforeCommitSnapshot: async () => {
+          await writeFile(lateEditPath, 'preserve this pre-journal edit')
+        },
+      })
+
+      expect(result.success).toBe(true)
+      const backups = await listCreatorSkillBackups(root)
+      expect(backups).toHaveLength(1)
+      expect(await readFile(join(
+        root,
+        'skill-backups',
+        backups[0]!.slug,
+        backups[0]!.backupId,
+        'late-journal-edit.txt',
+      ), 'utf8')).toBe('preserve this pre-journal edit')
+      expect(await access(lateEditPath).then(() => true, () => false)).toBe(false)
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('2.0.0')
+    })
+  })
+
+  it('rolls back an unconfirmed edit made after the prepared journal was persisted', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const lateEditPath = join(root, 'skills', 'install-test', 'post-journal-edit.txt')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_POST_JOURNAL_EDIT,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        onJournalPersisted: async state => {
+          if (state === 'prepared') {
+            await writeFile(lateEditPath, 'keep this post-journal edit')
+          }
+        },
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_conflict',
+        conflicts: ['local_changes'],
+      })
+      expect(await readFile(lateEditPath, 'utf8')).toBe('keep this post-journal edit')
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      expect(await listCreatorSkillBackups(root)).toHaveLength(0)
     })
   })
 

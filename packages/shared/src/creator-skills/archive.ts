@@ -10,6 +10,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { basename, extname, join, resolve, sep } from 'node:path'
+import { inflateSync } from 'node:zlib'
 import yauzl, { type Entry, type ZipFile } from 'yauzl'
 import {
   DEFAULT_SKILL_ARCHIVE_POLICY,
@@ -26,6 +27,33 @@ import {
 
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const MAX_ICON_DIMENSION = 4_096
+const MAX_ICON_PIXELS = 16_777_216
+const MAX_ICON_DECODED_BYTES = 64 * 1024 * 1024
+const MAX_PNG_CHUNKS = 1_024
+const PNG_CHANNELS = new Map([
+  [0, 1],
+  [2, 3],
+  [3, 1],
+  [4, 2],
+  [6, 4],
+])
+const PNG_ALLOWED_BIT_DEPTHS = new Map<number, ReadonlySet<number>>([
+  [0, new Set([1, 2, 4, 8, 16])],
+  [2, new Set([8, 16])],
+  [3, new Set([1, 2, 4, 8])],
+  [4, new Set([8, 16])],
+  [6, new Set([8, 16])],
+])
+const CRC32_TABLE = Array.from({ length: 256 }, (_, value) => {
+  let crc = value
+  for (let bit = 0; bit < 8; bit += 1) {
+    crc = (crc & 1) === 1
+      ? 0xedb88320 ^ (crc >>> 1)
+      : crc >>> 1
+  }
+  return crc >>> 0
+})
 const EXECUTABLE_MAGICS = [
   Buffer.from([0x7f, 0x45, 0x4c, 0x46]), // ELF
   Buffer.from([0x4d, 0x5a]), // PE / DOS
@@ -236,6 +264,18 @@ function inspectArchiveDirectory(
     }
     const directory = kind === 'directory'
     const ignored = isPackagingNoise(normalizedPath)
+    if (ignored) {
+      warnings.push(issue(
+        'packaging_noise_removed',
+        normalizedPath.replace(/\/$/, ''),
+        'Known packaging noise was ignored',
+        undefined,
+        undefined,
+        'warning',
+      ))
+      normalizedEntries.push({ entry, normalizedPath, directory, ignored })
+      continue
+    }
     if (!directory) {
       fileCount += 1
       declaredExpandedBytes += entry.uncompressedSize
@@ -260,18 +300,6 @@ function inspectArchiveDirectory(
           [issue('max_expanded_bytes_exceeded', normalizedPath, `Expanded archive must be at most ${policy.maxExpandedBytes} bytes`)],
         )
       }
-    }
-    if (ignored) {
-      warnings.push(issue(
-        'packaging_noise_removed',
-        normalizedPath.replace(/\/$/, ''),
-        'Known packaging noise was ignored',
-        undefined,
-        undefined,
-        'warning',
-      ))
-      normalizedEntries.push({ entry, normalizedPath, directory, ignored })
-      continue
     }
 
     const comparable = normalizedPath.replace(/\/$/, '')
@@ -522,6 +550,194 @@ function isExecutableBinary(data: Buffer): boolean {
   return EXECUTABLE_MAGICS.some(magic => startsWith(data, magic))
 }
 
+function pngCrc32(type: Buffer, data: Buffer): number {
+  let crc = 0xffffffff
+  for (const part of [type, data]) {
+    for (const byte of part) {
+      crc = CRC32_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8)
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function invalidPngIcon(path: string, message: string): CreatorSkillArchiveError {
+  return new CreatorSkillArchiveError(
+    'invalid_skill_archive',
+    'icon.png is not a valid PNG image',
+    [issue('invalid_icon_format', path, message)],
+  )
+}
+
+function pngPasses(
+  width: number,
+  height: number,
+  interlace: number,
+): Array<{ width: number; height: number }> {
+  if (interlace === 0) return [{ width, height }]
+  const adam7Passes: Array<readonly [number, number, number, number]> = [
+    [0, 0, 8, 8],
+    [4, 0, 8, 8],
+    [0, 4, 4, 8],
+    [2, 0, 4, 4],
+    [0, 2, 2, 4],
+    [1, 0, 2, 2],
+    [0, 1, 1, 2],
+  ]
+  return adam7Passes.map(([startX, startY, stepX, stepY]) => ({
+    width: width <= startX ? 0 : Math.ceil((width - startX) / stepX),
+    height: height <= startY ? 0 : Math.ceil((height - startY) / stepY),
+  })).filter(pass => pass.width > 0 && pass.height > 0)
+}
+
+function validatePngIcon(data: Buffer, path: string): void {
+  if (!startsWith(data, PNG_SIGNATURE)) {
+    throw invalidPngIcon(path, 'The package icon must be a PNG file')
+  }
+
+  let offset = PNG_SIGNATURE.length
+  let chunkCount = 0
+  let seenHeader = false
+  let seenPalette = false
+  let seenImageData = false
+  let imageDataEnded = false
+  let seenEnd = false
+  let width = 0
+  let height = 0
+  let bitDepth = 0
+  let colorType = 0
+  let interlace = 0
+  let paletteEntries = 0
+  const imageData: Buffer[] = []
+
+  while (offset < data.length) {
+    chunkCount += 1
+    if (chunkCount > MAX_PNG_CHUNKS) {
+      throw invalidPngIcon(path, `PNG must contain at most ${MAX_PNG_CHUNKS} chunks`)
+    }
+    if (seenEnd || data.length - offset < 12) {
+      throw invalidPngIcon(path, 'PNG contains trailing or truncated chunk data')
+    }
+    const length = data.readUInt32BE(offset)
+    const chunkEnd = offset + 12 + length
+    if (chunkEnd > data.length) {
+      throw invalidPngIcon(path, 'PNG contains a truncated chunk')
+    }
+    const type = data.subarray(offset + 4, offset + 8)
+    const typeName = type.toString('ascii')
+    if (!/^[A-Za-z]{4}$/.test(typeName)) {
+      throw invalidPngIcon(path, 'PNG contains an invalid chunk type')
+    }
+    const chunkData = data.subarray(offset + 8, offset + 8 + length)
+    const expectedCrc = data.readUInt32BE(offset + 8 + length)
+    if (pngCrc32(type, chunkData) !== expectedCrc) {
+      throw invalidPngIcon(path, `PNG chunk ${typeName} failed its CRC check`)
+    }
+    if (!seenHeader && typeName !== 'IHDR') {
+      throw invalidPngIcon(path, 'PNG must start with an IHDR chunk')
+    }
+
+    if (typeName === 'IHDR') {
+      if (seenHeader || length !== 13) {
+        throw invalidPngIcon(path, 'PNG must contain one 13-byte IHDR chunk')
+      }
+      seenHeader = true
+      width = chunkData.readUInt32BE(0)
+      height = chunkData.readUInt32BE(4)
+      bitDepth = chunkData[8]!
+      colorType = chunkData[9]!
+      const compression = chunkData[10]!
+      const filter = chunkData[11]!
+      interlace = chunkData[12]!
+      const allowedDepths = PNG_ALLOWED_BIT_DEPTHS.get(colorType)
+      if (
+        width === 0
+        || height === 0
+        || width > MAX_ICON_DIMENSION
+        || height > MAX_ICON_DIMENSION
+        || width * height > MAX_ICON_PIXELS
+      ) {
+        throw invalidPngIcon(
+          path,
+          `PNG dimensions must be within ${MAX_ICON_DIMENSION}×${MAX_ICON_DIMENSION} and ${MAX_ICON_PIXELS} pixels`,
+        )
+      }
+      if (
+        !allowedDepths?.has(bitDepth)
+        || compression !== 0
+        || filter !== 0
+        || (interlace !== 0 && interlace !== 1)
+      ) {
+        throw invalidPngIcon(path, 'PNG uses unsupported or invalid image parameters')
+      }
+    } else if (typeName === 'PLTE') {
+      if (seenPalette || seenImageData || length === 0 || length > 768 || length % 3 !== 0) {
+        throw invalidPngIcon(path, 'PNG contains an invalid PLTE chunk')
+      }
+      seenPalette = true
+      paletteEntries = length / 3
+    } else if (typeName === 'IDAT') {
+      if (imageDataEnded) {
+        throw invalidPngIcon(path, 'PNG IDAT chunks must be consecutive')
+      }
+      seenImageData = true
+      imageData.push(chunkData)
+    } else if (typeName === 'IEND') {
+      if (!seenImageData || length !== 0) {
+        throw invalidPngIcon(path, 'PNG must end with an empty IEND chunk after image data')
+      }
+      seenEnd = true
+    } else {
+      if (seenImageData) imageDataEnded = true
+      if ((type[0]! & 0x20) === 0) {
+        throw invalidPngIcon(path, `PNG contains unsupported critical chunk ${typeName}`)
+      }
+    }
+    offset = chunkEnd
+  }
+
+  if (!seenHeader || !seenImageData || !seenEnd || offset !== data.length) {
+    throw invalidPngIcon(path, 'PNG is incomplete or missing its IEND chunk')
+  }
+  if (colorType === 3 && (!seenPalette || paletteEntries > 2 ** bitDepth)) {
+    throw invalidPngIcon(path, 'Indexed PNG images require a valid palette')
+  }
+  if ((colorType === 0 || colorType === 4) && seenPalette) {
+    throw invalidPngIcon(path, 'Grayscale PNG images cannot contain a palette')
+  }
+
+  const channels = PNG_CHANNELS.get(colorType)!
+  const bitsPerPixel = channels * bitDepth
+  const passes = pngPasses(width, height, interlace)
+  const decodedBytes = passes.reduce((total, pass) => (
+    total + pass.height * (1 + Math.ceil((pass.width * bitsPerPixel) / 8))
+  ), 0)
+  if (decodedBytes > MAX_ICON_DECODED_BYTES) {
+    throw invalidPngIcon(path, 'PNG decoded data exceeds the resource limit')
+  }
+
+  let decoded: Buffer
+  try {
+    decoded = inflateSync(Buffer.concat(imageData), {
+      maxOutputLength: decodedBytes,
+    })
+  } catch {
+    throw invalidPngIcon(path, 'PNG image data could not be decoded safely')
+  }
+  if (decoded.length !== decodedBytes) {
+    throw invalidPngIcon(path, 'PNG decoded data length does not match its dimensions')
+  }
+  let decodedOffset = 0
+  for (const pass of passes) {
+    const rowBytes = Math.ceil((pass.width * bitsPerPixel) / 8)
+    for (let row = 0; row < pass.height; row += 1) {
+      if (decoded[decodedOffset]! > 4) {
+        throw invalidPngIcon(path, 'PNG contains an invalid scanline filter')
+      }
+      decodedOffset += 1 + rowBytes
+    }
+  }
+}
+
 function isEmojiIcon(value: string): boolean {
   if (/^https?:\/\//i.test(value) || value.includes('/') || value.includes('\\')) return false
   if (value.length > 64 || !/\p{Extended_Pictographic}/u.test(value)) return false
@@ -699,15 +915,8 @@ export async function validateCreatorSkillArchive(args: {
           [issue('executable_binary', archiveEntry.normalizedPath, 'ELF, PE, and Mach-O binaries are rejected')],
         )
       }
-      if (
-        archiveEntry.normalizedPath === `${args.slug}/icon.png`
-        && !startsWith(data, PNG_SIGNATURE)
-      ) {
-        throw new CreatorSkillArchiveError(
-          'invalid_skill_archive',
-          'icon.png is not a PNG image',
-          [issue('invalid_icon_format', archiveEntry.normalizedPath, 'The package icon must be a PNG file')],
-        )
+      if (archiveEntry.normalizedPath === `${args.slug}/icon.png`) {
+        validatePngIcon(data, archiveEntry.normalizedPath)
       }
       if (archiveEntry.normalizedPath === `${args.slug}/SKILL.md`) {
         const content = data.toString('utf8')

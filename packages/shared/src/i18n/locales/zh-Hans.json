@@ -344,6 +344,7 @@
   "creatorSkills.artifact.create": "新建 Skill 草稿",
   "creatorSkills.artifact.manageWebApp": "管理 Web App",
   "creatorSkills.artifact.slug": "Skill slug",
+  "creatorSkills.artifact.slugPlaceholder": "my-skill",
   "creatorSkills.artifact.type": "作品类型",
   "creatorSkills.artifact.type.skill": "Skill",
   "creatorSkills.artifact.type.web_app": "Web App",

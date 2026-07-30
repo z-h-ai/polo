@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { deflateSync } from 'node:zlib'
 import { strToU8, zipSync } from 'fflate'
 import {
   CreatorSkillArchiveError,
@@ -9,6 +10,7 @@ import {
   scanCreatorSkillDirectory,
   validateCreatorSkillArchive,
 } from '../archive'
+import { DEFAULT_SKILL_ARCHIVE_POLICY } from '../types'
 
 const VALID_SKILL = `---
 name: Review Helper
@@ -22,6 +24,55 @@ alwaysAllow:
 
 Review the selected change carefully.
 `
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const CRC32_TABLE = Array.from({ length: 256 }, (_, value) => {
+  let crc = value
+  for (let bit = 0; bit < 8; bit += 1) {
+    crc = (crc & 1) === 1
+      ? 0xedb88320 ^ (crc >>> 1)
+      : crc >>> 1
+  }
+  return crc >>> 0
+})
+
+function crc32(parts: Buffer[]): number {
+  let crc = 0xffffffff
+  for (const part of parts) {
+    for (const byte of part) {
+      crc = CRC32_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8)
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function pngChunk(typeName: string, data: Buffer): Buffer {
+  const type = Buffer.from(typeName, 'ascii')
+  const chunk = Buffer.alloc(12 + data.length)
+  chunk.writeUInt32BE(data.length, 0)
+  type.copy(chunk, 4)
+  data.copy(chunk, 8)
+  chunk.writeUInt32BE(crc32([type, data]), 8 + data.length)
+  return chunk
+}
+
+function validPng(width = 1, height = 1, includeEnd = true): Buffer {
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8
+  header[9] = 6
+  const scanlines = Buffer.alloc(height * (1 + width * 4))
+  for (let row = 0; row < height; row += 1) {
+    scanlines[row * (1 + width * 4)] = 0
+  }
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', deflateSync(scanlines)),
+    ...(includeEnd ? [pngChunk('IEND', Buffer.alloc(0))] : []),
+  ])
+}
 
 async function writeZip(
   root: string,
@@ -182,6 +233,52 @@ describe('Creator Skill archive validation', () => {
     })
   })
 
+  it('fully validates icon PNG structure, CRC, termination, and dimensions', async () => {
+    await withTemp(async root => {
+      const validIconArchive = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL,
+        'review-helper/icon.png': validPng(),
+      }, 'valid-icon.zip')
+      expect((await validateCreatorSkillArchive({
+        archivePath: validIconArchive,
+        slug: 'review-helper',
+      })).manifest.map(item => item.path)).toContain('icon.png')
+
+      const badCrc = Buffer.from(validPng())
+      badCrc[29] = badCrc[29]! ^ 0xff
+      const truncatedChunk = Buffer.concat([
+        PNG_SIGNATURE,
+        Buffer.from([0, 0, 0, 13]),
+        Buffer.from('IHDR'),
+        Buffer.alloc(4),
+      ])
+      const invalidIcons: Array<[string, Buffer]> = [
+        ['signature-only', Buffer.concat([PNG_SIGNATURE, Buffer.from('garbage')])],
+        ['truncated-chunk', truncatedChunk],
+        ['missing-iend', validPng(1, 1, false)],
+        ['bad-crc', badCrc],
+        ['oversized-dimensions', validPng(4_097, 1)],
+      ]
+
+      for (const [name, icon] of invalidIcons) {
+        const archivePath = await writeZip(root, {
+          'review-helper/SKILL.md': VALID_SKILL,
+          'review-helper/icon.png': icon,
+        }, `${name}.zip`)
+        await expect(validateCreatorSkillArchive({
+          archivePath,
+          slug: 'review-helper',
+        })).rejects.toMatchObject({
+          code: 'invalid_skill_archive',
+          issues: [{
+            code: 'invalid_icon_format',
+            path: 'review-helper/icon.png',
+          }],
+        })
+      }
+    })
+  })
+
   it('rejects file and directory type conflicts before extraction', async () => {
     await withTemp(async root => {
       const archivePath = await writeZip(root, {
@@ -246,6 +343,52 @@ describe('Creator Skill archive validation', () => {
         code: 'archive_policy_exceeded',
         issues: [{ code: 'max_entry_count_exceeded' }],
       })
+    })
+  })
+
+  it('excludes packaging noise from configured file-count and expanded-size limits', async () => {
+    await withTemp(async root => {
+      const skillBytes = Buffer.byteLength(VALID_SKILL)
+      const noiseEntries = Object.fromEntries(
+        Array.from({ length: 200 }, (_, index) => [
+          `__MACOSX/noise-${index}/.DS_Store`,
+          new Uint8Array(),
+        ]),
+      )
+      const manyNoiseArchive = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL,
+        ...noiseEntries,
+      }, 'many-noise-files.zip')
+      const manyNoise = await validateCreatorSkillArchive({
+        archivePath: manyNoiseArchive,
+        slug: 'review-helper',
+        policy: {
+          ...DEFAULT_SKILL_ARCHIVE_POLICY,
+          maxFileCount: 1,
+        },
+      })
+      expect(manyNoise.manifest.map(item => item.path)).toEqual(['SKILL.md'])
+      expect(manyNoise.warnings).toHaveLength(200)
+
+      const largeNoiseArchive = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL,
+        '__MACOSX/large/.DS_Store': Buffer.alloc(skillBytes * 10),
+      }, 'large-noise-file.zip')
+      const largeNoise = await validateCreatorSkillArchive({
+        archivePath: largeNoiseArchive,
+        slug: 'review-helper',
+        policy: {
+          ...DEFAULT_SKILL_ARCHIVE_POLICY,
+          maxFileCount: 1,
+          maxFileBytes: skillBytes,
+          maxExpandedBytes: skillBytes,
+        },
+      })
+      expect(largeNoise.manifest.map(item => item.path)).toEqual(['SKILL.md'])
+      expect(largeNoise.warnings).toMatchObject([{
+        code: 'packaging_noise_removed',
+        severity: 'warning',
+      }])
     })
   })
 })

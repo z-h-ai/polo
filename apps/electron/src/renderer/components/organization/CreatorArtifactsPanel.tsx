@@ -114,6 +114,11 @@ export function CreatorArtifactsPanel({
   } | null>(null)
   const [revokeReason, setRevokeReason] = useState('')
   const requestGeneration = useRef(0)
+  const detailRequestGeneration = useRef(0)
+  const selectedIdRef = useRef(selectedId)
+  const organizationIdRef = useRef(organizationId)
+  selectedIdRef.current = selectedId
+  organizationIdRef.current = organizationId
 
   const loadArtifacts = useCallback(async () => {
     const generation = ++requestGeneration.current
@@ -161,16 +166,37 @@ export function CreatorArtifactsPanel({
   }, [canManage, organizationId, t])
 
   const loadDetail = useCallback(async (artifactId: string) => {
+    const requestedOrganizationId = organizationId
+    if (
+      organizationIdRef.current !== requestedOrganizationId
+      || selectedIdRef.current !== artifactId
+    ) return
+    const generation = ++detailRequestGeneration.current
+    const isCurrentRequest = () => (
+      generation === detailRequestGeneration.current
+      && organizationIdRef.current === requestedOrganizationId
+      && selectedIdRef.current === artifactId
+    )
     setDetailLoading(true)
+    setDetail(current => current?.artifact.id === artifactId ? current : null)
     setError(null)
     try {
       const result = await window.electronAPI.creatorArtifactGet({
-        organizationId,
+        organizationId: requestedOrganizationId,
         artifactId,
       })
+      if (!isCurrentRequest()) return
       if (!result.success) {
         setDetail(null)
         setError(resultMessage(t, result))
+        return
+      }
+      if (
+        result.artifact.id !== artifactId
+        || result.artifact.organizationId !== requestedOrganizationId
+      ) {
+        setDetail(null)
+        setError(t('creatorSkills.errors.unknown'))
         return
       }
       setDetail({
@@ -205,6 +231,7 @@ export function CreatorArtifactsPanel({
           : '',
       )
     } catch (caught) {
+      if (!isCurrentRequest()) return
       emitAdminAuthFailure(
         caught && typeof caught === 'object'
           ? caught as { code?: string; errorCode?: string; status?: number }
@@ -213,7 +240,7 @@ export function CreatorArtifactsPanel({
       setDetail(null)
       setError(t('creatorSkills.errors.unknown'))
     } finally {
-      setDetailLoading(false)
+      if (isCurrentRequest()) setDetailLoading(false)
     }
   }, [organizationId, t])
 
@@ -264,13 +291,20 @@ export function CreatorArtifactsPanel({
 
   useEffect(() => {
     const selected = artifacts.find(item => item.id === selectedId)
-    if (selected?.type === 'skill') {
+    if (
+      selected?.type === 'skill'
+      && selected.organizationId === organizationId
+    ) {
       void loadDetail(selected.id)
     } else {
+      detailRequestGeneration.current += 1
       setDetail(null)
       setDetailLoading(false)
     }
-  }, [artifacts, loadDetail, selectedId])
+    return () => {
+      detailRequestGeneration.current += 1
+    }
+  }, [artifacts, loadDetail, organizationId, selectedId])
 
   useEffect(() => {
     if (!workspaceId) {
@@ -661,7 +695,7 @@ export function CreatorArtifactsPanel({
           <div className="space-y-2 rounded-xl border border-border/60 p-3">
             <Label>{t('creatorSkills.artifact.type')}</Label>
             <Select
-              value={newArtifactType ?? undefined}
+              value={newArtifactType ?? ''}
               onValueChange={value => setNewArtifactType(value as 'web_app' | 'skill')}
             >
               <SelectTrigger data-testid="creator-artifact-type-select">
@@ -684,7 +718,7 @@ export function CreatorArtifactsPanel({
                 <Input
                   id="creator-skill-slug"
                   value={slug}
-                  placeholder="my-skill"
+                  placeholder={t('creatorSkills.artifact.slugPlaceholder')}
                   onChange={event => setSlug(event.target.value)}
                 />
                 <Button
