@@ -1,4 +1,19 @@
 import type { LlmConnection } from '../config/llm-connections.ts';
+export type {
+  CreatorArtifact,
+  CreatorArtifactCapability,
+  CreatorArtifactCatalogPage,
+  CreatorArtifactDetail,
+  CreatorArtifactVersion,
+  CreatorSkillDownloadGrant,
+  CreatorSkillSafetyStatus,
+  CreatorSkillUploadGrant,
+  CreateCreatorArtifactInput,
+  CreateCreatorArtifactVersionInput,
+  SkillArchivePolicy,
+  SkillValidationIssue,
+  SkillVersionMetadata,
+} from '../creator-skills/types.ts';
 
 export interface AdminUser {
   id: string;
@@ -264,6 +279,23 @@ export type AdminErrorCode =
   | 'phone_mismatch'
   | 'last_owner_required'
   | 'duplicate_request'
+  | 'creator_skill_feature_disabled'
+  | 'creator_skill_upload_cancelled'
+  | 'artifact_type_not_allowed'
+  | 'artifact_not_found'
+  | 'artifact_slug_conflict'
+  | 'artifact_not_deletable'
+  | 'version_not_deletable'
+  | 'invalid_skill_archive'
+  | 'skill_validation_failed'
+  | 'archive_policy_exceeded'
+  | 'version_conflict'
+  | 'artifact_not_published'
+  | 'artifact_version_revoked'
+  | 'artifact_access_denied'
+  | 'upload_expired'
+  | 'checksum_mismatch'
+  | 'content_digest_mismatch'
   | PhoneAuthErrorCode;
 
 export interface AdminErrorDetails {

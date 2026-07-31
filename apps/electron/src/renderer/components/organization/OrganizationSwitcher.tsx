@@ -1,4 +1,4 @@
-import { Building2, Check, ChevronDown, Settings2, Sparkles } from 'lucide-react'
+import { Building2, Check, ChevronDown, Package, Settings2, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TopBarButton } from '@/components/ui/TopBarButton'
 import {
@@ -71,6 +71,12 @@ export function OrganizationSwitcher({ compact = false }: { compact?: boolean })
           )
         })}
         <StyledDropdownMenuSeparator />
+        {active.type === 'creator_space' ? (
+          <StyledDropdownMenuItem onClick={organization.onManageOrganization}>
+            <Package className="size-3.5" />
+            {t('creatorSkills.artifacts.title')}
+          </StyledDropdownMenuItem>
+        ) : null}
         {canManage ? (
           <StyledDropdownMenuItem onClick={organization.onManageOrganization}>
             <Settings2 className="size-3.5" />

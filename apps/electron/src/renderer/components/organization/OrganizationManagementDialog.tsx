@@ -42,11 +42,14 @@ import type {
   OrganizationJoinLink,
   OrganizationMember,
 } from '../../../shared/types'
+import { CreatorArtifactsPanel } from './CreatorArtifactsPanel'
 
 interface OrganizationManagementDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onOrganizationsChanged: () => Promise<unknown>
+  workspaceId?: string | null
+  sessionId?: string | null
 }
 
 interface GeneratedLink {
@@ -68,6 +71,8 @@ export function OrganizationManagementDialog({
   open,
   onOpenChange,
   onOrganizationsChanged,
+  workspaceId,
+  sessionId,
 }: OrganizationManagementDialogProps) {
   const { t } = useTranslation()
   const organization = useOrganizationContext()
@@ -346,14 +351,33 @@ export function OrganizationManagementDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue={isOwner ? 'members' : 'invitations'} className="min-h-0">
-          <TabsList className="grid w-full grid-cols-2">
+        <Tabs
+          defaultValue={active.type === 'creator_space'
+            ? 'artifacts'
+            : isOwner ? 'members' : 'invitations'}
+          className="min-h-0"
+        >
+          <TabsList className={`grid w-full ${active.type === 'creator_space' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            {active.type === 'creator_space' ? (
+              <TabsTrigger value="artifacts">{t('creatorSkills.artifacts.title')}</TabsTrigger>
+            ) : null}
             <TabsTrigger value="members">{t('organization.manage.members')}</TabsTrigger>
             <TabsTrigger value="invitations">
               {t('organization.manage.invitations')}
               {activeInvitationCount > 0 ? ` (${activeInvitationCount})` : ''}
             </TabsTrigger>
           </TabsList>
+
+          {active.type === 'creator_space' ? (
+            <TabsContent value="artifacts" className="max-h-[62vh] overflow-auto">
+              <CreatorArtifactsPanel
+                organizationId={active.id}
+                canManage={canManage}
+                workspaceId={workspaceId ?? null}
+                sessionId={sessionId ?? null}
+              />
+            </TabsContent>
+          ) : null}
 
           <TabsContent value="members" className="max-h-[58vh] overflow-auto">
             {loading ? (

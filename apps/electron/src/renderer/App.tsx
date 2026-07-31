@@ -2586,6 +2586,8 @@ export default function App() {
                 open={organizationManagementOpen}
                 onOpenChange={setOrganizationManagementOpen}
                 onOrganizationsChanged={organization.refreshOrganizations}
+                workspaceId={windowWorkspaceId}
+                sessionId={sessionSelection.selected}
               />
             ) : null}
           </MaybeOrganizationProvider>

@@ -20,6 +20,10 @@ import { safeJsonParse, readJsonFileSync } from '../utils/files.ts';
 import { EntityColorSchema } from '../colors/validate.ts';
 import { THINKING_LEVEL_IDS } from '../agent/thinking-levels.ts';
 import { isValidProviderAuthCombination } from './llm-connections.ts';
+import {
+  PortableSkillMetadataSchema,
+  validatePortableSkillContent,
+} from '../creator-skills/skill-content.ts';
 
 // ============================================================
 // Config Directory
@@ -663,19 +667,13 @@ export function validateAllSources(workspaceId: string): ValidationResult {
 // Skill Validators
 // ============================================================
 
-import matter from 'gray-matter';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
 import { basename, extname } from 'path';
 
 /**
  * Schema for skill metadata (SKILL.md frontmatter)
  */
-export const SkillMetadataSchema = z.object({
-  name: z.string().min(1, "Add a 'name' field with a human-readable title (e.g., 'Git Commit Helper')"),
-  description: z.string().min(1, "Add a 'description' field explaining what this skill does and when to use it (1-2 sentences)"),
-  globs: z.array(z.string()).optional(),
-  alwaysAllow: z.array(z.string()).optional(),
-});
+export const SkillMetadataSchema = PortableSkillMetadataSchema;
 
 /**
  * Find icon file in skill directory
@@ -797,68 +795,7 @@ export function validateSkill(workspaceRoot: string, slug: string): ValidationRe
  * @param slug - The skill slug (folder name), used for slug format validation
  */
 export function validateSkillContent(markdownContent: string, slug: string): ValidationResult {
-  const file = `skills/${slug}/SKILL.md`;
-  const errors: ValidationIssue[] = [];
-
-  // 1. Validate slug format
-  if (!/^[a-z0-9-]+$/.test(slug)) {
-    const suggestedSlug = slug
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .replace(/-+/g, '-');
-    errors.push({
-      file: `skills/${slug}`,
-      path: 'slug',
-      message: 'Slug must be lowercase alphanumeric with hyphens',
-      severity: 'error',
-      suggestion: `Rename folder to '${suggestedSlug || 'valid-slug-name'}'`,
-    });
-  }
-
-  // 2. Parse frontmatter
-  let frontmatter: unknown;
-  let body: string;
-  try {
-    const parsed = matter(markdownContent);
-    frontmatter = parsed.data;
-    body = parsed.content;
-  } catch (e) {
-    return {
-      valid: false,
-      errors: [{
-        file,
-        path: 'frontmatter',
-        message: `Invalid YAML frontmatter: ${e instanceof Error ? e.message : 'Unknown error'}`,
-        severity: 'error',
-        suggestion: 'See ~/.polo-ai/docs/skills.md for SKILL.md format reference',
-      }],
-      warnings: [],
-    };
-  }
-
-  // 3. Validate frontmatter schema
-  const metaResult = SkillMetadataSchema.safeParse(frontmatter);
-  if (!metaResult.success) {
-    errors.push(...zodErrorToIssues(metaResult.error, file));
-  }
-
-  // 4. Check content is not empty
-  if (!body || body.trim().length === 0) {
-    errors.push({
-      file,
-      path: 'content',
-      message: 'Skill content is empty (nothing after frontmatter)',
-      severity: 'error',
-      suggestion: 'Add instructions after the frontmatter describing what the skill should do',
-    });
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings: [],  // Icon/folder warnings skipped in content-only validation
-  };
+  return validatePortableSkillContent(markdownContent, slug);
 }
 
 /**

@@ -237,6 +237,42 @@ import type {
   OrganizationSummary,
   UpdateOrganizationMemberInput,
 } from '@polo-ai/shared/admin/types'
+import type {
+  CreatorArtifact,
+  CreatorArtifactCapability,
+  CreatorArtifactCatalogPage,
+  CreatorArtifactDetail,
+  CreatorSkillUploadGrant,
+  CreatorArtifactVersion,
+  CreatorSkillBackup,
+  CreatorSkillConflictDetails,
+  CreatorSkillDownloadGrant,
+  CreatorSkillInstallConflict,
+  CreatorSkillInstallIdentity,
+  CreatorSkillInstallRpcInput,
+  CreatorSkillOperationProgress,
+  CreatorSkillOperationResult,
+  CreatorSkillSafetyStatus,
+  SkillValidationIssue,
+} from '@polo-ai/shared/creator-skills'
+export type {
+  CreatorArtifact,
+  CreatorArtifactCapability,
+  CreatorArtifactCatalogPage,
+  CreatorArtifactDetail,
+  CreatorSkillUploadGrant,
+  CreatorArtifactVersion,
+  CreatorSkillBackup,
+  CreatorSkillConflictDetails,
+  CreatorSkillDownloadGrant,
+  CreatorSkillInstallConflict,
+  CreatorSkillInstallIdentity,
+  CreatorSkillInstallRpcInput,
+  CreatorSkillOperationProgress,
+  CreatorSkillOperationResult,
+  CreatorSkillSafetyStatus,
+  SkillValidationIssue,
+} from '@polo-ai/shared/creator-skills'
 export type {
   CreateOrganizationInput,
   CreateOrganizationInvitationInput,
@@ -257,6 +293,7 @@ export interface AdminRpcErrorPayload {
   message?: string
   status?: number
   retryAfter?: number
+  validationIssues?: SkillValidationIssue[]
 }
 
 export type AdminLoginResult =
@@ -552,6 +589,139 @@ export interface ElectronAPI {
     memberId: string,
     reason?: string,
   ): Promise<OrganizationRpcResult<{ membership: OrganizationMembership }>>
+  creatorArtifactGetCapabilities(): Promise<OrganizationRpcResult<CreatorArtifactCapability>>
+  creatorArtifactList(input: {
+    organizationId: string
+    type?: 'web_app' | 'skill'
+    includeDrafts?: boolean
+    cursor?: string
+  }): Promise<OrganizationRpcResult<CreatorArtifactCatalogPage>>
+  creatorArtifactGet(input: {
+    organizationId: string
+    artifactId: string
+    version?: string
+    referencePath?: string
+  }): Promise<OrganizationRpcResult<CreatorArtifactDetail>>
+  creatorArtifactCreate(input: {
+    organizationId: string
+    type: 'skill'
+    slug: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ artifact: CreatorArtifact; replayed?: boolean }>>
+  creatorArtifactDeleteDraft(input: {
+    organizationId: string
+    artifactId: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ artifact: CreatorArtifact; replayed?: boolean }>>
+  creatorArtifactCreateVersion(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+    changelog?: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  creatorArtifactCreateUploadGrant(input: {
+    organizationId: string
+    artifactId: string
+    versionId: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{
+    grant: CreatorSkillUploadGrant
+  }>>
+  creatorArtifactCompleteUpload(input: {
+    organizationId: string
+    artifactId: string
+    versionId: string
+    uploadGeneration: number
+    sizeBytes: number
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{
+    version: CreatorArtifactVersion
+    replayed?: boolean
+  }>>
+  creatorArtifactPublishVersion(input: {
+    organizationId: string
+    artifactId: string
+    versionId: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  creatorArtifactDeleteVersionDraft(input: {
+    organizationId: string
+    artifactId: string
+    versionId: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  creatorArtifactSetArchived(input: {
+    organizationId: string
+    artifactId: string
+    archived: boolean
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ artifact: CreatorArtifact; replayed?: boolean }>>
+  creatorArtifactRevokeVersion(input: {
+    organizationId: string
+    artifactId: string
+    versionId: string
+    reason: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  creatorSkillGetDownloadGrant(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+  }): Promise<OrganizationRpcResult<CreatorSkillDownloadGrant>>
+  creatorSkillGetSafetyStatus(input: {
+    artifactId: string
+    version: string
+    archiveChecksum: string
+  }): Promise<OrganizationRpcResult<CreatorSkillSafetyStatus>>
+  creatorSkillGetTarget(input: { workspaceId: string }): Promise<
+    | {
+        success: true
+        workspaceId: string
+        name: string
+        path: string
+        writable: boolean
+      }
+    | { success: false; errorCode: string }
+  >
+  creatorSkillInstall(input: CreatorSkillInstallRpcInput): Promise<CreatorSkillOperationResult>
+  creatorSkillCancel(operationId: string): Promise<{ success: boolean }>
+  creatorSkillUninstall(input: {
+    workspaceId: string
+    operationId: string
+    slug: string
+    forceDeleteModified?: boolean
+    forceDeleteCredential?: string
+  }): Promise<CreatorSkillOperationResult>
+  creatorSkillListBackups(input: { workspaceId: string }): Promise<
+    { success: true; backups: CreatorSkillBackup[] }
+    | { success: false; errorCode: string }
+  >
+  creatorSkillDeleteBackups(input: {
+    workspaceId: string
+    backup?: {
+      slug: string
+      backupId: string
+    }
+  }): Promise<
+    { success: true; deleted: number }
+    | { success: false; errorCode: string }
+  >
+  creatorSkillUpdateSafetyStatus(input: {
+    workspaceId: string
+    status: CreatorSkillSafetyStatus
+    checkedAt: string
+  }): Promise<{ success: boolean; errorCode?: string }>
+  creatorSkillIgnoreVersion(input: {
+    workspaceId: string
+    artifactId: string
+    version: string
+    archiveChecksum: string
+    ignoredVersion: string
+  }): Promise<{ success: boolean; errorCode?: string }>
+  onCreatorSkillProgress(
+    callback: (progress: CreatorSkillOperationProgress) => void,
+  ): () => void
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>
@@ -646,7 +816,14 @@ export interface ElectronAPI {
   // Skills
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
-  deleteSkill(workspaceId: string, skillSlug: string): Promise<void>
+  deleteSkill(input: {
+    workspaceId: string
+    skillSlug: string
+  }): Promise<{
+    managed: boolean
+    detached: boolean
+    forceDeleteCredential?: string
+  }>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
 

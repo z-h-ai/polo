@@ -10,6 +10,7 @@ const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
+import { bindClientActiveSession } from './client-active-session'
 
 interface ClientSessionWatchState {
   watcher: import('fs').FSWatcher
@@ -295,7 +296,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Session commands - consolidated handler for session operations
   server.handle(RPC_CHANNELS.sessions.COMMAND, async (
-    _ctx,
+    ctx,
     sessionId: string,
     command: import('@polo-ai/shared/protocol').SessionCommand
   ) => {
@@ -317,7 +318,29 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       case 'markUnread':
         return sessionManager.markSessionUnread(sessionId)
       case 'setActiveViewing':
-        // Track which session user is actively viewing (for unread state machine)
+        {
+          const activeWorkspaceId = ctx.workspaceId
+            ?? (
+              ctx.webContentsId === null
+                ? null
+                : deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+            )
+          const session = await sessionManager.getSession(sessionId)
+          if (
+            !activeWorkspaceId
+            || command.workspaceId !== activeWorkspaceId
+            || session?.workspaceId !== activeWorkspaceId
+          ) {
+            throw Object.assign(
+              new Error('Active session does not belong to the RPC client workspace'),
+              { code: 'workspace_context_mismatch' },
+            )
+          }
+          // This server-owned client binding is the authority used by
+          // session-scoped mutations such as Creator Skill installation.
+          bindClientActiveSession(ctx.clientId, activeWorkspaceId, sessionId)
+        }
+        // Track which session user is actively viewing (for unread state machine).
         return sessionManager.setActiveViewingSession(sessionId, command.workspaceId)
       case 'setPermissionMode':
         return sessionManager.setSessionPermissionMode(sessionId, command.mode)

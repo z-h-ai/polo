@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { FadingText } from '@/components/ui/fading-text'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import type { LoadedSkill, LoadedSource, FileSearchResult } from '../../../shared/types'
 import { AGENTS_PLUGIN_NAME } from '@polo-ai/shared/skills/types'
 
@@ -54,6 +55,7 @@ const MENU_ITEM_STYLE = 'flex cursor-pointer select-none items-center gap-3 roun
 const MENU_ITEM_SELECTED = 'bg-foreground/5'
 // Type badge shown to the right of each item label (e.g. "Skill", "Source")
 const MENU_TYPE_BADGE = 'rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0'
+const MENU_REVOKED_BADGE = 'bg-destructive/10 text-destructive'
 
 // ============================================================================
 // Path utilities
@@ -359,8 +361,19 @@ export function InlineMentionMenu({
                   <div className="flex-1 min-w-0">
                     <span className="truncate block">{item.label}</span>
                   </div>
-                  <span className={MENU_TYPE_BADGE}>
-                    {item.type === 'skill' ? t('common.skill') : t('common.source')}
+                  <span className={cn(
+                    MENU_TYPE_BADGE,
+                    item.type === 'skill'
+                      && item.skill?.creatorInstallation?.lastKnownStatus === 'revoked'
+                      && MENU_REVOKED_BADGE,
+                  )}>
+                    {item.type === 'skill' && item.skill?.creatorInstallation?.lastKnownStatus === 'revoked'
+                      ? t('creatorSkills.safety.revoked')
+                      : item.type === 'skill'
+                        && item.skill
+                        && creatorSkillHasStaleSafetyStatus(item.skill)
+                        ? t('creatorSkills.safety.stale')
+                        : item.type === 'skill' ? t('common.skill') : t('common.source')}
                   </span>
                 </>
               )}

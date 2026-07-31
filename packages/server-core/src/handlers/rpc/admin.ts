@@ -21,6 +21,20 @@ import {
   VerifyPhoneAuthCodeRpcInputSchema,
 } from '@polo-ai/shared/admin/schemas'
 import {
+  CreateCreatorArtifactRpcInputSchema,
+  CreatorArtifactArchiveRpcInputSchema,
+  CreatorArtifactIdRpcInputSchema,
+  CreatorArtifactListRpcInputSchema,
+  CreatorArtifactRevokeRpcInputSchema,
+  CreatorArtifactUploadCompleteRpcInputSchema,
+  CreatorArtifactUploadGrantRpcInputSchema,
+  CreatorArtifactVersionRpcInputSchema,
+  CreatorSkillArchiveError,
+  CreatorSkillDownloadRpcInputSchema,
+  CreatorSkillSafetyRpcInputSchema,
+  CreateCreatorArtifactVersionRpcInputSchema,
+} from '@polo-ai/shared/creator-skills'
+import {
   addLlmConnection,
   deleteLlmConnection,
   getAdminConfigVersion,
@@ -60,6 +74,20 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK,
   RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER,
   RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER,
+  RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES,
+  RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS,
+  RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT,
+  RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT,
+  RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_DRAFT,
+  RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT_VERSION,
+  RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT,
+  RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD,
+  RPC_CHANNELS.admin.PUBLISH_CREATOR_ARTIFACT_VERSION,
+  RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_VERSION_DRAFT,
+  RPC_CHANNELS.admin.SET_CREATOR_ARTIFACT_ARCHIVED,
+  RPC_CHANNELS.admin.REVOKE_CREATOR_ARTIFACT_VERSION,
+  RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT,
+  RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
 ] as const
 
 type StoredAdminTokens = NonNullable<Awaited<ReturnType<CredentialManager['getAdminTokens']>>>
@@ -71,13 +99,18 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   const log = deps.platform.logger
   const callOrganization = async <T extends object>(
     operation: string,
-    callback: (client: AdminClient, accessToken: string) => Promise<T>,
+    callback: (
+      client: AdminClient,
+      accessToken: string,
+      userId: string,
+    ) => Promise<T>,
   ) => {
     try {
       const adminUrl = requireAdminUrl()
       const manager = getCredentialManager()
       const tokenResult = await ensureValidTokens(adminUrl, manager)
       if (!tokenResult.tokens) {
+        invalidateAllCreatorArtifactCaches()
         return {
           success: false as const,
           ...(tokenResult.authError ?? {
@@ -89,6 +122,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       const result = await callback(
         createAdminClient(adminUrl, manager),
         tokenResult.tokens.accessToken,
+        tokenResult.tokens.userId,
       )
       return { success: true as const, ...result }
     } catch (error) {
@@ -109,6 +143,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       const manager = getCredentialManager()
       const client = createAdminClient(adminUrl, manager)
       const login = await client.login(input.data.identifier, input.data.password)
+      invalidateAllCreatorArtifactCaches()
       await completeAdminLogin({
         adminUrl,
         manager,
@@ -185,6 +220,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
         const manager = getCredentialManager()
         const login = await createAdminClient(adminUrl, manager)
           .verifyPhoneAuthCode(input.data)
+        invalidateAllCreatorArtifactCaches()
         await completeAdminLogin({
           adminUrl,
           manager,
@@ -237,12 +273,14 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.admin.VALIDATE, async () => {
     const adminUrl = getAdminUrl()
     if (!adminUrl) {
+      invalidateAllCreatorArtifactCaches()
       return { loggedIn: false }
     }
 
     const manager = getCredentialManager()
     const tokenResult = await ensureValidTokens(adminUrl, manager)
     if (!tokenResult.tokens) {
+      invalidateAllCreatorArtifactCaches()
       if (tokenResult.authError) {
         return { loggedIn: false, ...tokenResult.authError }
       }
@@ -253,6 +291,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       const client = createAdminClient(adminUrl, manager)
       const validation = await client.validate(tokenResult.tokens.accessToken)
       if (!validation.valid) {
+        invalidateAllCreatorArtifactCaches()
         await manager.deleteAdminTokens()
         return { loggedIn: false }
       }
@@ -272,6 +311,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
     } catch (error) {
       if (isAuthFailure(error)) {
+        invalidateAllCreatorArtifactCaches()
         await manager.deleteAdminTokens()
         return { loggedIn: false, ...toAdminRpcError(error) }
       }
@@ -280,6 +320,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.admin.LOGOUT, async () => {
+    invalidateAllCreatorArtifactCaches()
     const adminUrl = getAdminUrl()
     const manager = getCredentialManager()
     const tokens = await manager.getAdminTokens()
@@ -326,8 +367,16 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.admin.LIST_ORGANIZATIONS, async () =>
-    callOrganization('listOrganizations', (client, accessToken) =>
-      client.listOrganizations(accessToken)))
+    callOrganization('listOrganizations', async (client, accessToken, userId) => {
+      // Organization refresh is also the membership-change boundary. Never
+      // reuse catalog pages captured before the refreshed membership snapshot.
+      invalidateCreatorArtifactCache(userId)
+      const organizations = await client.listOrganizations(accessToken)
+      // Also invalidate requests that began while the membership refresh was
+      // in flight, before its authoritative response became visible.
+      invalidateCreatorArtifactCache(userId)
+      return organizations
+    }))
 
   server.handle(RPC_CHANNELS.admin.CREATE_ORGANIZATION, async (_ctx, rawInput: unknown) => {
     const input = CreateOrganizationRpcInputSchema.safeParse(rawInput)
@@ -429,13 +478,20 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       if (!organizationId.success || !memberId.success || !input.success) {
         return adminInputError('VALIDATION_ERROR')
       }
-      return callOrganization('updateOrganizationMember', (client, accessToken) =>
-        client.updateOrganizationMember(
+      return callOrganization('updateOrganizationMember', async (
+        client,
+        accessToken,
+        userId,
+      ) => {
+        const result = await client.updateOrganizationMember(
           accessToken,
           organizationId.data,
           memberId.data,
           input.data,
-        ))
+        )
+        invalidateCreatorArtifactCache(userId, organizationId.data)
+        return result
+      })
     },
   )
 
@@ -455,15 +511,263 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       if (!organizationId.success || !memberId.success || !input.success) {
         return adminInputError('VALIDATION_ERROR')
       }
-      return callOrganization('removeOrganizationMember', (client, accessToken) =>
-        client.removeOrganizationMember(
+      return callOrganization('removeOrganizationMember', async (
+        client,
+        accessToken,
+        userId,
+      ) => {
+        const result = await client.removeOrganizationMember(
           accessToken,
           organizationId.data,
           memberId.data,
           input.data.reason,
-        ))
+        )
+        invalidateCreatorArtifactCache(userId, organizationId.data)
+        return result
+      })
     },
   )
+
+  server.handle(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES, async () =>
+    callOrganization('getCreatorArtifactCapabilities', (client, accessToken) =>
+      client.getCreatorArtifactCapabilities(accessToken)))
+
+  server.handle(RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactListRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization(
+      'listCreatorArtifacts',
+      async (client, accessToken, userId) => {
+        const key = [
+          userId,
+          input.data.organizationId,
+          input.data.type ?? '',
+          input.data.includeDrafts ? 'drafts' : 'published',
+          input.data.cursor ?? '',
+        ].join('\0')
+        const cached = creatorArtifactCatalogCache.get(key)
+        if (cached && cached.expiresAt > Date.now()) return cached.value
+        const generation = creatorArtifactCacheGeneration(
+          userId,
+          input.data.organizationId,
+        )
+        const value = await client.listCreatorArtifacts(accessToken, input.data)
+        if (creatorArtifactCacheGenerationMatches(
+          userId,
+          input.data.organizationId,
+          generation,
+        )) {
+          creatorArtifactCatalogCache.set(key, {
+            expiresAt: Date.now() + CREATOR_ARTIFACT_CACHE_TTL_MS,
+            value,
+          })
+        }
+        return value
+      },
+    )
+  })
+
+  server.handle(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactIdRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('getCreatorArtifact', (client, accessToken) =>
+      client.getCreatorArtifact(
+        accessToken,
+        input.data.organizationId,
+        input.data.artifactId,
+        input.data.version,
+        input.data.referencePath,
+      ))
+  })
+
+  server.handle(RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT, async (_ctx, rawInput: unknown) => {
+    const input = CreateCreatorArtifactRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('createCreatorArtifact', async (client, accessToken, userId) => {
+      const result = await client.createCreatorArtifact(accessToken, input.data)
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  server.handle(RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_DRAFT, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactVersionRpcInputSchema.omit({ versionId: true })
+      .safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('deleteCreatorArtifactDraft', async (client, accessToken, userId) => {
+      const result = await client.deleteCreatorArtifactDraft(
+        accessToken,
+        input.data.organizationId,
+        input.data.artifactId,
+        input.data.idempotencyKey,
+      )
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  server.handle(RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT_VERSION, async (_ctx, rawInput: unknown) => {
+    const input = CreateCreatorArtifactVersionRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('createCreatorArtifactVersion', async (client, accessToken, userId) => {
+      const result = await client.createCreatorArtifactVersion(accessToken, input.data)
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  // Archive bytes must never traverse Electron's main/server-core process.
+  // This handler only issues a narrow, short-lived object-storage grant; the
+  // renderer uploads its user-selected File directly and can abort the PUT.
+  server.handle(RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactUploadGrantRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('createCreatorSkillUploadGrant', async (client, accessToken) => ({
+      grant: await client.createCreatorSkillUploadGrant(accessToken, input.data),
+    }))
+  })
+
+  server.handle(RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactUploadCompleteRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('completeCreatorSkillUpload', async (client, accessToken, userId) => {
+      const completed = await client.completeCreatorSkillUpload(accessToken, input.data)
+      const archiveChecksum = completed.version.archiveChecksum
+      if (!archiveChecksum) {
+        throw new AdminError(
+          'Admin service did not calculate the uploaded archive checksum',
+          'checksum_mismatch',
+        )
+      }
+      const result = await client.triggerCreatorSkillValidation(accessToken, {
+        artifactId: input.data.artifactId,
+        versionId: input.data.versionId,
+        uploadGeneration: input.data.uploadGeneration,
+        archiveChecksum,
+        idempotencyKey: input.data.idempotencyKey,
+      })
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  server.handle(RPC_CHANNELS.admin.PUBLISH_CREATOR_ARTIFACT_VERSION, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactVersionRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('publishCreatorArtifactVersion', async (client, accessToken, userId) => {
+      const result = await client.publishCreatorArtifactVersion(accessToken, input.data)
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  server.handle(RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_VERSION_DRAFT, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactVersionRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('deleteCreatorArtifactVersionDraft', async (client, accessToken, userId) => {
+      const result = await client.deleteCreatorArtifactVersionDraft(accessToken, input.data)
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  server.handle(RPC_CHANNELS.admin.SET_CREATOR_ARTIFACT_ARCHIVED, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactArchiveRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('setCreatorArtifactArchived', async (client, accessToken, userId) => {
+      const result = await client.setCreatorArtifactArchived(accessToken, input.data)
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  server.handle(RPC_CHANNELS.admin.REVOKE_CREATOR_ARTIFACT_VERSION, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactRevokeRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('revokeCreatorArtifactVersion', async (client, accessToken, userId) => {
+      const result = await client.revokeCreatorArtifactVersion(accessToken, input.data)
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
+  })
+
+  server.handle(RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT, async (_ctx, rawInput: unknown) => {
+    const input = CreatorSkillDownloadRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('getCreatorSkillDownloadGrant', (client, accessToken) =>
+      client.getCreatorSkillDownloadGrant(accessToken, input.data))
+  })
+
+  server.handle(RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS, async (_ctx, rawInput: unknown) => {
+    const input = CreatorSkillSafetyRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('getCreatorSkillSafetyStatus', (client, accessToken) =>
+      client.getCreatorSkillSafetyStatus(accessToken, input.data))
+  })
+}
+
+const CREATOR_ARTIFACT_CACHE_TTL_MS = 30_000
+const creatorArtifactCatalogCache = new Map<string, {
+  expiresAt: number
+  value: Awaited<ReturnType<AdminClient['listCreatorArtifacts']>>
+}>()
+let creatorArtifactGlobalGeneration = 0
+const creatorArtifactUserGenerations = new Map<string, number>()
+const creatorArtifactOrganizationGenerations = new Map<string, number>()
+
+interface CreatorArtifactCacheGeneration {
+  global: number
+  user: number
+  organization: number
+}
+
+function creatorArtifactCacheGeneration(
+  userId: string,
+  organizationId: string,
+): CreatorArtifactCacheGeneration {
+  return {
+    global: creatorArtifactGlobalGeneration,
+    user: creatorArtifactUserGenerations.get(userId) ?? 0,
+    organization: creatorArtifactOrganizationGenerations
+      .get(`${userId}\0${organizationId}`) ?? 0,
+  }
+}
+
+function creatorArtifactCacheGenerationMatches(
+  userId: string,
+  organizationId: string,
+  generation: CreatorArtifactCacheGeneration,
+): boolean {
+  const current = creatorArtifactCacheGeneration(userId, organizationId)
+  return current.global === generation.global
+    && current.user === generation.user
+    && current.organization === generation.organization
+}
+
+function invalidateAllCreatorArtifactCaches(): void {
+  creatorArtifactGlobalGeneration += 1
+  creatorArtifactCatalogCache.clear()
+  creatorArtifactUserGenerations.clear()
+  creatorArtifactOrganizationGenerations.clear()
+}
+
+function invalidateCreatorArtifactCache(userId: string, organizationId?: string): void {
+  if (organizationId) {
+    const scope = `${userId}\0${organizationId}`
+    creatorArtifactOrganizationGenerations.set(
+      scope,
+      (creatorArtifactOrganizationGenerations.get(scope) ?? 0) + 1,
+    )
+  } else {
+    creatorArtifactUserGenerations.set(
+      userId,
+      (creatorArtifactUserGenerations.get(userId) ?? 0) + 1,
+    )
+  }
+  const prefix = organizationId ? `${userId}\0${organizationId}\0` : `${userId}\0`
+  for (const key of creatorArtifactCatalogCache.keys()) {
+    if (key.startsWith(prefix)) creatorArtifactCatalogCache.delete(key)
+  }
 }
 
 function requireAdminUrl(): string {
@@ -764,6 +1068,7 @@ function toAdminRpcError(error: unknown): {
   message: string
   status?: number
   retryAfter?: number
+  validationIssues?: import('@polo-ai/shared/creator-skills').SkillValidationIssue[]
 } {
   if (error instanceof AdminError) {
     return {
@@ -776,6 +1081,13 @@ function toAdminRpcError(error: unknown): {
         && error.details.retryAfter <= 86_400
         ? { retryAfter: error.details.retryAfter }
         : {}),
+    }
+  }
+  if (error instanceof CreatorSkillArchiveError) {
+    return {
+      errorCode: error.code,
+      message: getSafeAdminErrorMessage(error.code),
+      validationIssues: error.issues,
     }
   }
   if (error instanceof Error) {

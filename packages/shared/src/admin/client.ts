@@ -27,6 +27,17 @@ import {
   type OrganizationMember,
   type OrganizationMembership,
   type UpdateOrganizationMemberInput,
+  type CreatorArtifact,
+  type CreatorArtifactCapability,
+  type CreatorArtifactCatalogPage,
+  type CreatorArtifactDetail,
+  type CreatorArtifactVersion,
+  type CreatorSkillDownloadGrant,
+  type CreatorSkillSafetyStatus,
+  type CreatorSkillUploadGrant,
+  type CreateCreatorArtifactInput,
+  type CreateCreatorArtifactVersionInput,
+  type SkillArchivePolicy,
 } from './types.ts';
 import type { ZodType } from 'zod';
 import {
@@ -47,6 +58,16 @@ import {
   OrganizationJoinLinkMutationResponseSchema,
   OrganizationJoinPreviewSchema,
   OrganizationMemberMutationResponseSchema,
+  CreatorArtifactCapabilitySchema,
+  CreatorArtifactCatalogPageSchema,
+  CreatorArtifactDetailSchema,
+  CreatorArtifactMutationResponseSchema,
+  CreatorArtifactVersionMutationResponseSchema,
+  CreatorSkillDownloadGrantSchema,
+  CreatorSkillSafetyStatusBatchSchema,
+  CreatorSkillSafetyStatusSchema,
+  CreatorSkillUploadGrantSchema,
+  SkillArchivePolicySchema,
 } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -81,6 +102,23 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'phone_mismatch',
   'last_owner_required',
   'duplicate_request',
+  'creator_skill_feature_disabled',
+  'creator_skill_upload_cancelled',
+  'artifact_type_not_allowed',
+  'artifact_not_found',
+  'artifact_slug_conflict',
+  'artifact_not_deletable',
+  'version_not_deletable',
+  'invalid_skill_archive',
+  'skill_validation_failed',
+  'archive_policy_exceeded',
+  'version_conflict',
+  'artifact_not_published',
+  'artifact_version_revoked',
+  'artifact_access_denied',
+  'upload_expired',
+  'checksum_mismatch',
+  'content_digest_mismatch',
 ]);
 
 const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
@@ -126,6 +164,23 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   phone_mismatch: 'This invitation is assigned to a different phone number',
   last_owner_required: 'The only active owner cannot be changed or removed',
   duplicate_request: 'This request is already being processed',
+  creator_skill_feature_disabled: 'Creator Skill publishing and distribution are disabled',
+  creator_skill_upload_cancelled: 'Creator Skill upload was cancelled',
+  artifact_type_not_allowed: 'This artifact type is not allowed',
+  artifact_not_found: 'Creator artifact was not found',
+  artifact_slug_conflict: 'This Skill slug is already in use in the Creator Space',
+  artifact_not_deletable: 'A published artifact can only be archived',
+  version_not_deletable: 'Published and revoked versions cannot be deleted',
+  invalid_skill_archive: 'The Skill ZIP is not valid',
+  skill_validation_failed: 'SKILL.md validation failed',
+  archive_policy_exceeded: 'The Skill ZIP exceeds the platform archive policy',
+  version_conflict: 'The version must be higher than the latest published version',
+  artifact_not_published: 'This Creator artifact is not published',
+  artifact_version_revoked: 'This Creator Skill version has been revoked',
+  artifact_access_denied: 'You do not have access to this Creator artifact',
+  upload_expired: 'The upload address has expired',
+  checksum_mismatch: 'The downloaded ZIP failed its checksum check',
+  content_digest_mismatch: 'The extracted Skill content failed its integrity check',
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
@@ -397,6 +452,317 @@ export class AdminClient {
       },
     );
     return this.readSuccessResponse(response, OrganizationMemberMutationResponseSchema);
+  }
+
+  async getCreatorArtifactCapabilities(
+    accessToken: string,
+  ): Promise<CreatorArtifactCapability> {
+    const response = await this.request<unknown>('/api/capabilities', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, CreatorArtifactCapabilitySchema);
+  }
+
+  async listCreatorArtifacts(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      type?: 'web_app' | 'skill';
+      includeDrafts?: boolean;
+      cursor?: string;
+    },
+  ): Promise<CreatorArtifactCatalogPage> {
+    const search = new URLSearchParams();
+    if (input.type) search.set('type', input.type);
+    if (input.includeDrafts) search.set('includeDrafts', 'true');
+    if (input.cursor) search.set('cursor', input.cursor);
+    search.set('capability', 'creatorSkillArtifacts');
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(input.organizationId)}/artifacts?${search}`,
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactCatalogPageSchema);
+  }
+
+  async getCreatorArtifact(
+    accessToken: string,
+    organizationId: string,
+    artifactId: string,
+    version?: string,
+    referencePath?: string,
+  ): Promise<CreatorArtifactDetail> {
+    const search = new URLSearchParams();
+    if (version) search.set('version', version);
+    if (referencePath) search.set('referencePath', referencePath);
+    const suffix = search.size > 0 ? `?${search}` : '';
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(artifactId)}${suffix}`,
+      { method: 'GET', accessToken },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactDetailSchema);
+  }
+
+  async createCreatorArtifact(
+    accessToken: string,
+    input: CreateCreatorArtifactInput,
+  ): Promise<{ artifact: CreatorArtifact; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(input.organizationId)}/artifacts`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+        body: { type: input.type, slug: input.slug },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactMutationResponseSchema);
+  }
+
+  async deleteCreatorArtifactDraft(
+    accessToken: string,
+    organizationId: string,
+    artifactId: string,
+    idempotencyKey: string,
+  ): Promise<{ artifact: CreatorArtifact; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(artifactId)}`,
+      {
+        method: 'DELETE',
+        accessToken,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactMutationResponseSchema);
+  }
+
+  async createCreatorArtifactVersion(
+    accessToken: string,
+    input: CreateCreatorArtifactVersionInput,
+  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+        body: {
+          version: input.version,
+          ...(input.changelog ? { changelog: input.changelog } : {}),
+        },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+  }
+
+  async getCreatorSkillArchivePolicy(
+    accessToken: string,
+  ): Promise<SkillArchivePolicy> {
+    const response = await this.request<unknown>('/api/artifact-policies/skill', {
+      method: 'GET',
+      accessToken,
+    });
+    return this.readSuccessResponse(response, SkillArchivePolicySchema);
+  }
+
+  async createCreatorSkillUploadGrant(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      artifactId: string;
+      versionId: string;
+      idempotencyKey: string;
+    },
+  ): Promise<CreatorSkillUploadGrant> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/uploads`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorSkillUploadGrantSchema);
+  }
+
+  async completeCreatorSkillUpload(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      artifactId: string;
+      versionId: string;
+      uploadGeneration: number;
+      sizeBytes: number;
+      idempotencyKey: string;
+    },
+  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/uploads/${input.uploadGeneration}/complete`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+        body: {
+          sizeBytes: input.sizeBytes,
+        },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+  }
+
+  async triggerCreatorSkillValidation(
+    accessToken: string,
+    input: {
+      artifactId: string;
+      versionId: string;
+      uploadGeneration: number;
+      archiveChecksum: string;
+      idempotencyKey: string;
+    },
+  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/validate`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+        body: {
+          uploadGeneration: input.uploadGeneration,
+          archiveChecksum: input.archiveChecksum,
+        },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+  }
+
+  async publishCreatorArtifactVersion(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      artifactId: string;
+      versionId: string;
+      idempotencyKey: string;
+    },
+  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/publish`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+  }
+
+  async deleteCreatorArtifactVersionDraft(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      artifactId: string;
+      versionId: string;
+      idempotencyKey: string;
+    },
+  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}`,
+      {
+        method: 'DELETE',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+  }
+
+  async setCreatorArtifactArchived(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      artifactId: string;
+      archived: boolean;
+      idempotencyKey: string;
+    },
+  ): Promise<{ artifact: CreatorArtifact; replayed?: boolean }> {
+    const action = input.archived ? 'archive' : 'restore';
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/${action}`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactMutationResponseSchema);
+  }
+
+  async revokeCreatorArtifactVersion(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      artifactId: string;
+      versionId: string;
+      reason: string;
+      idempotencyKey: string;
+    },
+  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/revoke`,
+      {
+        method: 'POST',
+        accessToken,
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+        body: { reason: input.reason },
+      },
+    );
+    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+  }
+
+  async getCreatorSkillDownloadGrant(
+    accessToken: string,
+    input: {
+      organizationId: string;
+      artifactId: string;
+      version: string;
+    },
+  ): Promise<CreatorSkillDownloadGrant> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/download`,
+      { method: 'POST', accessToken },
+    );
+    return this.readSuccessResponse(response, CreatorSkillDownloadGrantSchema);
+  }
+
+  async getCreatorSkillSafetyStatus(
+    accessToken: string,
+    input: {
+      artifactId: string;
+      version: string;
+      archiveChecksum: string;
+    },
+  ): Promise<CreatorSkillSafetyStatus> {
+    const response = await this.request<unknown>(
+      '/api/installed-artifacts/status',
+      {
+        method: 'POST',
+        accessToken,
+        body: { installations: [input] },
+      },
+    );
+    const parsed = this.readSuccessResponse(
+      response,
+      CreatorSkillSafetyStatusBatchSchema,
+    );
+    const status = parsed.statuses[0];
+    if (
+      !status
+      || status.artifactId !== input.artifactId
+      || status.version !== input.version
+      || status.archiveChecksum !== input.archiveChecksum
+    ) {
+      throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    }
+    return CreatorSkillSafetyStatusSchema.parse(status);
   }
 
   private async request<T>(path: string, options: {
