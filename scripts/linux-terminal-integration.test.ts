@@ -52,6 +52,7 @@ interface Fixture {
   poloPath: string
   compatPath: string
   statePath: string
+  profilePath: string
 }
 
 function fixture(): Fixture {
@@ -77,11 +78,12 @@ function fixture(): Fixture {
     poloPath: join(binDir, 'polo'),
     compatPath: join(binDir, 'polo-ai'),
     statePath: join(root, '.polo-ai', 'terminal-integration-linux.state'),
+    profilePath: join(root, '.zprofile'),
   }
 }
 
 function runHelper(
-  mode: 'preflight' | 'install' | 'uninstall',
+  mode: 'preflight' | 'install' | 'verify-uninstall' | 'path-entry-owned' | 'uninstall',
   value: Fixture,
 ): ReturnType<typeof Bun.spawnSync> {
   const args = [
@@ -93,7 +95,7 @@ function runHelper(
     '--bin-dir',
     value.binDir,
   ]
-  if (mode !== 'uninstall') {
+  if (mode === 'preflight' || mode === 'install') {
     args.push(
       '--version',
       '0.10.0',
@@ -103,8 +105,14 @@ function runHelper(
       value.compatTarget,
     )
   }
-  if (mode === 'install') args.push('--path-entry-owned', 'true')
-  return Bun.spawnSync(args, { stdout: 'pipe', stderr: 'pipe' })
+  if (mode === 'install') {
+    args.push('--path-entry-owned', 'true', '--profile-path', value.profilePath)
+  }
+  return Bun.spawnSync(args, {
+    env: { ...process.env, HOME: value.root },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
 }
 
 function install(value: Fixture): void {
@@ -119,18 +127,19 @@ afterEach(() => {
 })
 
 describe('Linux terminal integration ownership', () => {
-  it('records schema 3 path, target, content hash, and identity before safe uninstall', () => {
+  it('records schema 4 path, target, profile, content hash, and identity before safe uninstall', () => {
     const value = fixture()
     install(value)
 
     expect(lstatSync(value.poloPath).isSymbolicLink()).toBe(true)
     expect(readlinkSync(value.poloPath)).toBe(realpathSync(value.poloTarget))
     const state = readFileSync(value.statePath, 'utf8')
-    expect(state).toContain('schemaVersion=3\n')
+    expect(state).toContain('schemaVersion=4\n')
     expect(state).toContain('owner=com.poloai.terminal-integration\n')
     expect(state).toContain('format=managed-symlink-v1\n')
     expect(state).toMatch(/polo_sha256=[0-9a-f]{64}/)
     expect(state).toMatch(/polo_identity=[0-9a-f]{64}/)
+    expect(state).toContain('profile_path_b64=')
 
     expect(runHelper('uninstall', value).exitCode).toBe(0)
     expect(existsSync(value.poloPath)).toBe(false)
@@ -157,6 +166,41 @@ describe('Linux terminal integration ownership', () => {
 
     expect(runHelper('uninstall', value).exitCode).toBe(2)
     expect(lstatSync(value.poloPath).isSymbolicLink()).toBe(true)
+  })
+
+  it('revalidates ownership inside install and never overwrites direct user files', () => {
+    const direct = fixture()
+    writeFileSync(direct.poloPath, '#!/bin/sh\necho user-polo\n')
+    writeFileSync(direct.compatPath, '#!/bin/sh\necho user-compat\n')
+
+    const directResult = runHelper('install', direct)
+
+    expect(directResult.exitCode).not.toBe(0)
+    expect(readFileSync(direct.poloPath, 'utf8')).toContain('user-polo')
+    expect(readFileSync(direct.compatPath, 'utf8')).toContain('user-compat')
+    expect(existsSync(direct.statePath)).toBe(false)
+  })
+
+  it('rejects a launcher replaced after preflight and preserves the replacement', () => {
+    const value = fixture()
+    install(value)
+    expect(runHelper('preflight', value).exitCode).toBe(0)
+    rmSync(value.poloPath)
+    writeFileSync(value.poloPath, '#!/bin/sh\necho replaced-after-preflight\n')
+
+    const result = runHelper('install', value)
+
+    expect(result.exitCode).not.toBe(0)
+    expect(readFileSync(value.poloPath, 'utf8')).toContain('replaced-after-preflight')
+  })
+
+  it('keeps normal repair and verified uninstall working', () => {
+    const value = fixture()
+    install(value)
+    expect(runHelper('install', value).exitCode).toBe(0)
+    expect(runHelper('verify-uninstall', value).exitCode).toBe(0)
+    expect(runHelper('path-entry-owned', value).stdout.toString().trim()).toBe('true')
+    expect(runHelper('uninstall', value).exitCode).toBe(0)
   })
 
   it('migrates only the exact pre-POO-14 Linux GUI launcher template', () => {

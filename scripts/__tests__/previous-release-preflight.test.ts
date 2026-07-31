@@ -35,7 +35,7 @@ printf 'git %s\\n' "$*" >> "$POLO_TEST_CALLS"
 case "$1" in
   fetch) exit 0 ;;
   rev-list) printf '${commit}\\n' ;;
-  show) printf '{\\n  "version": "0.9.0"\\n}\\n' ;;
+  show) printf '{\\n  "version": "%s"\\n}\\n' "$PREVIOUS_RELEASE_VERSION" ;;
   *) exit 64 ;;
 esac
 `,
@@ -48,8 +48,8 @@ if [ "$1" = "release" ] && [ "$2" = "view" ]; then
   while [ "$#" -gt 0 ]; do
     if [ "$1" = "--json" ]; then
       case "$2" in
-        tagName) printf 'v0.9.0\\n' ;;
-        url) printf 'https://github.com/z-h-ai/polo/releases/tag/v0.9.0\\n' ;;
+        tagName) printf '%s\\n' "$PREVIOUS_RELEASE_TAG" ;;
+        url) printf 'https://github.com/z-h-ai/polo/releases/tag/%s\\n' "$PREVIOUS_RELEASE_TAG" ;;
         isDraft) printf 'false\\n' ;;
       esac
       exit 0
@@ -169,5 +169,66 @@ describe('previous release runner-only preflight', () => {
     expect(existsSync(value.calls)).toBe(false)
     expect(existsSync(value.artifact)).toBe(false)
     expect(existsSync(value.output)).toBe(false)
+  })
+
+  it('accepts anchored semver prerelease and build tags', () => {
+    const value = fixture()
+    const env = envFor(value)
+    env.PREVIOUS_RELEASE_TAG = 'v0.9.0-rc.1+build.7'
+    env.PREVIOUS_RELEASE_VERSION = '0.9.0-rc.1+build.7'
+
+    const result = Bun.spawnSync(
+      [
+        'bash',
+        script,
+        '--platform',
+        'macos',
+        '--artifact-name',
+        'Polo-AI-x64.zip',
+        '--output',
+        value.output,
+      ],
+      { cwd: repoRoot, env, stdout: 'pipe', stderr: 'pipe' },
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(readFileSync(value.output, 'utf8')).tag).toBe(
+      'v0.9.0-rc.1+build.7',
+    )
+  })
+
+  it('rejects malformed or unanchored semantic tags before provenance access', () => {
+    for (const tag of [
+      'v1x.2y.3z',
+      'v1.2.3evil',
+      'v1.2.3-',
+      'v1.2.3+',
+      'v1.2.3-alpha..1',
+      'v1.2.3+build..1',
+      'v01.2.3',
+      'v1.02.3',
+      'v1.2.03',
+      'v1.2.3-01',
+    ]) {
+      const value = fixture()
+      const env = envFor(value)
+      env.PREVIOUS_RELEASE_TAG = tag
+      const result = Bun.spawnSync(
+        [
+          'bash',
+          script,
+          '--platform',
+          'macos',
+          '--artifact-name',
+          'Polo-AI-x64.zip',
+          '--output',
+          value.output,
+        ],
+        { cwd: repoRoot, env, stdout: 'pipe', stderr: 'pipe' },
+      )
+      expect(result.exitCode).not.toBe(0)
+      expect(existsSync(value.calls)).toBe(false)
+      expect(existsSync(value.output)).toBe(false)
+    }
   })
 })

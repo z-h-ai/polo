@@ -133,6 +133,53 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
     expect(appResult.stdout.toString()).toContain('bundled=run')
     expect(appResult.stdout.toString()).toContain('polo-cli.js app')
 
+    const repairResult = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(repairResult.exitCode).toBe(0)
+    expect(lstatSync(installedPolo).isSymbolicLink()).toBe(true)
+
+    const statePath = join(home, '.polo-ai', 'terminal-integration-linux.state')
+    const profilePath = join(home, '.zprofile')
+    const currentPackage = join(home, '.polo-ai', 'app', 'current', 'resources', 'app', 'package.json')
+    const appImagePath = join(home, '.polo-ai', 'app', 'Polo-AI-x64.AppImage')
+    const originalState = readFileSync(statePath, 'utf8')
+    const originalProfile = readFileSync(profilePath, 'utf8')
+    const originalPackage = readFileSync(currentPackage, 'utf8')
+    const originalAppImage = readFileSync(appImagePath, 'utf8')
+
+    writeFileSync(statePath, 'schemaVersion=3\nowner=attacker\n')
+    const corruptUninstall = Bun.spawnSync(
+      ['bash', join(import.meta.dir, 'uninstall-app.sh')],
+      { env, stdout: 'pipe', stderr: 'pipe' },
+    )
+    expect(corruptUninstall.exitCode).toBe(2)
+    expect(existsSync(installedPolo)).toBe(true)
+    expect(readFileSync(profilePath, 'utf8')).toBe(originalProfile)
+    expect(readFileSync(currentPackage, 'utf8')).toBe(originalPackage)
+    expect(readFileSync(appImagePath, 'utf8')).toBe(originalAppImage)
+    writeFileSync(statePath, originalState)
+
+    writeFileSync(profilePath, `${originalProfile}# >>> Polo CLI >>>\n`)
+    const malformedUpgrade = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(malformedUpgrade.exitCode).not.toBe(0)
+    expect(readFileSync(currentPackage, 'utf8')).toBe(originalPackage)
+    expect(readFileSync(appImagePath, 'utf8')).toBe(originalAppImage)
+    expect(readFileSync(statePath, 'utf8')).toBe(originalState)
+    expect(lstatSync(installedPolo).isSymbolicLink()).toBe(true)
+    writeFileSync(profilePath, originalProfile)
+
+    const userProfile = join(home, '.bash_profile')
+    const userProfileContent =
+      'export USER_SETTING=1\n# >>> Polo CLI >>>\n'
+      + 'export PATH="$HOME/.local/bin:$PATH"\n# <<< Polo CLI <<<\n'
+    writeFileSync(userProfile, userProfileContent)
     const uninstallResult = Bun.spawnSync(
       ['bash', join(import.meta.dir, 'uninstall-app.sh')],
       { env, stdout: 'pipe', stderr: 'pipe' },
@@ -141,5 +188,6 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
     expect(existsSync(installedPolo)).toBe(false)
     expect(existsSync(installedCompat)).toBe(false)
     expect(existsSync(join(home, '.polo-ai', 'app'))).toBe(false)
+    expect(readFileSync(userProfile, 'utf8')).toBe(userProfileContent)
   })
 })

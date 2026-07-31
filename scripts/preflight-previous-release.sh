@@ -19,6 +19,11 @@ fail() {
   exit 1
 }
 
+is_semver() {
+  local value="$1"
+  [[ "$value" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+}
+
 for name in \
   GITHUB_REPOSITORY \
   PREVIOUS_RELEASE_TAG \
@@ -33,11 +38,10 @@ done
 
 [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
   || fail "Invalid repository contract."
-case "$PREVIOUS_RELEASE_TAG" in
-  v[0-9]*.[0-9]*.[0-9]*) ;;
-  *) fail "Previous release must be a semantic immutable tag." ;;
-esac
-[[ "$PREVIOUS_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$ ]] \
+[[ "$PREVIOUS_RELEASE_TAG" == v* ]] \
+  && is_semver "${PREVIOUS_RELEASE_TAG#v}" \
+  || fail "Previous release must be a semantic immutable tag."
+is_semver "$PREVIOUS_RELEASE_VERSION" \
   || fail "Invalid previous release version."
 case "$PREVIOUS_RELEASE_COMMIT_SHA" in
   *[!0-9a-fA-F]*|"") fail "Invalid previous commit SHA." ;;

@@ -27,10 +27,11 @@ foreach ($name in @(
 if ($env:GITHUB_REPOSITORY -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
     Fail "Invalid repository contract."
 }
-if ($env:PREVIOUS_RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') {
+$semverPattern = '(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
+if ($env:PREVIOUS_RELEASE_TAG -notmatch "^v$semverPattern`$") {
     Fail "Previous release must be a semantic immutable tag."
 }
-if ($env:PREVIOUS_RELEASE_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') {
+if ($env:PREVIOUS_RELEASE_VERSION -notmatch "^$semverPattern`$") {
     Fail "Invalid previous release version."
 }
 if ($env:PREVIOUS_RELEASE_COMMIT_SHA -notmatch '^[0-9a-fA-F]{40}$') {

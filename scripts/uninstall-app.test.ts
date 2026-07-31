@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -47,13 +47,12 @@ describe('macOS/Linux terminal cleanup', () => {
       stderr: 'pipe',
     })
 
-    expect(result.exitCode).toBe(0)
+    expect(result.exitCode).toBe(2)
     expect(existsSync(polo)).toBe(true)
     expect(existsSync(legacy)).toBe(true)
     expect(result.stderr.toString()).toContain('ownership state and its verifier are unavailable')
     expect(readFileSync(profile, 'utf8')).toContain('export EDITOR=vim')
-    expect(readFileSync(profile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
-    expect(readdirSync(home).some((name) => name.startsWith('.zprofile.polo-backup-'))).toBe(true)
+    expect(readFileSync(profile, 'utf8')).toContain('# >>> Polo CLI >>>')
   })
 
   it('preserves an unrelated polo command', () => {
@@ -67,12 +66,12 @@ describe('macOS/Linux terminal cleanup', () => {
       stderr: 'pipe',
     })
 
-    expect(result.exitCode).toBe(0)
+    expect(result.exitCode).toBe(2)
     expect(readFileSync(polo, 'utf8')).toContain('unrelated')
     expect(result.stderr.toString()).toContain('ownership state and its verifier are unavailable')
   })
 
-  it('removes the managed block from Bash login fallback files', () => {
+  it('preserves a PATH block when launcher ownership cannot be verified', () => {
     const home = createHome()
     const bashLogin = join(home, '.bash_login')
     writeFileSync(
@@ -89,6 +88,6 @@ describe('macOS/Linux terminal cleanup', () => {
 
     expect(result.exitCode).toBe(0)
     expect(readFileSync(bashLogin, 'utf8')).toContain('export LANG=en_US.UTF-8')
-    expect(readFileSync(bashLogin, 'utf8')).not.toContain('# >>> Polo CLI >>>')
+    expect(readFileSync(bashLogin, 'utf8')).toContain('# >>> Polo CLI >>>')
   })
 })

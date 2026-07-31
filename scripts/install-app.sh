@@ -22,24 +22,17 @@ error() { printf "%b\n" "${RED}x${NC} $1"; exit 1; }
 PATH_BLOCK_START="# >>> Polo CLI >>>"
 PATH_BLOCK_END="# <<< Polo CLI <<<"
 
-configure_managed_path() {
+managed_profile_path() {
     local shell_name
     local profile_path
-    local path_line
-    local start_count
-    local end_count
-    local profile_tmp
-    local profile_mode=""
 
     shell_name="${SHELL##*/}"
     case "$shell_name" in
         fish)
             profile_path="$HOME/.config/fish/conf.d/polo.fish"
-            path_line='fish_add_path -g "$HOME/.local/bin"'
             ;;
         zsh)
             profile_path="$HOME/.zprofile"
-            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
         bash)
             # Bash login shells read only the first existing file in this
@@ -52,13 +45,64 @@ configure_managed_path() {
             else
                 profile_path="$HOME/.profile"
             fi
-            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
         *)
             profile_path="$HOME/.profile"
-            path_line='export PATH="$HOME/.local/bin:$PATH"'
             ;;
     esac
+    printf '%s\n' "$profile_path"
+}
+
+managed_path_line() {
+    case "$1" in
+        */.config/fish/conf.d/polo.fish) printf '%s\n' 'fish_add_path -g "$HOME/.local/bin"' ;;
+        *) printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' ;;
+    esac
+}
+
+validate_managed_path() {
+    local profile_path="$1"
+    local path_line
+    local start_count
+    local end_count
+
+    [ -e "$profile_path" ] || return 0
+    [ -f "$profile_path" ] && [ ! -L "$profile_path" ] || {
+        warn "Polo PATH profile is not a regular owned file: $profile_path"
+        return 1
+    }
+    path_line="$(managed_path_line "$profile_path")"
+    start_count=$(grep -Fxc "$PATH_BLOCK_START" "$profile_path" 2>/dev/null || true)
+    end_count=$(grep -Fxc "$PATH_BLOCK_END" "$profile_path" 2>/dev/null || true)
+    if [ "$start_count" -ne "$end_count" ] || [ "$start_count" -gt 1 ]; then
+        warn "Malformed Polo PATH block in $profile_path. It was not changed."
+        return 1
+    fi
+    if [ "$start_count" -eq 1 ] && ! awk \
+        -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" -v path_line="$path_line" '
+        $0 == start { start_line = NR; next }
+        $0 == end { end_line = NR; next }
+        start_line && !end_line {
+            managed_lines++
+            if ($0 != path_line) invalid = 1
+        }
+        END { exit !(start_line && end_line && start_line < end_line && managed_lines == 1 && !invalid) }
+    ' "$profile_path"; then
+        warn "Malformed Polo PATH block in $profile_path. It was not changed."
+        return 1
+    fi
+}
+
+configure_managed_path() {
+    local profile_path="${MANAGED_PROFILE_PATH:-}"
+    local path_line
+    local start_count
+    local profile_tmp
+    local profile_mode=""
+
+    [ -n "$profile_path" ] || profile_path="$(managed_profile_path)"
+    path_line="$(managed_path_line "$profile_path")"
+    validate_managed_path "$profile_path" || return 1
 
     mkdir -p "$(dirname "$profile_path")"
     if [ ! -e "$profile_path" ]; then
@@ -67,18 +111,6 @@ configure_managed_path() {
     fi
 
     start_count=$(grep -Fxc "$PATH_BLOCK_START" "$profile_path" 2>/dev/null || true)
-    end_count=$(grep -Fxc "$PATH_BLOCK_END" "$profile_path" 2>/dev/null || true)
-    if [ "$start_count" -ne "$end_count" ] || [ "$start_count" -gt 1 ]; then
-        error "Malformed Polo PATH block in $profile_path. It was not changed."
-    fi
-    if [ "$start_count" -eq 1 ] && ! awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
-        $0 == start { start_line = NR }
-        $0 == end { end_line = NR }
-        END { exit !(start_line && end_line && start_line < end_line) }
-    ' "$profile_path"; then
-        error "Malformed Polo PATH block in $profile_path. It was not changed."
-    fi
-
     profile_tmp="$(dirname "$profile_path")/.polo-profile.$$"
     profile_mode=$(stat -c '%a' "$profile_path" 2>/dev/null || true)
     awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
@@ -99,6 +131,21 @@ configure_managed_path() {
         info "Configured terminal command in $profile_path"
     else
         rm -f "$profile_tmp"
+    fi
+}
+
+restore_managed_profile() {
+    local profile_path="$1"
+    local profile_backup="$2"
+    local profile_existed="$3"
+    local restore_tmp
+
+    if [ "$profile_existed" = true ]; then
+        restore_tmp="$(dirname "$profile_path")/.polo-profile-restore.$$"
+        cp -p "$profile_backup" "$restore_tmp"
+        mv -f "$restore_tmp" "$profile_path"
+    elif [ -e "$profile_path" ] && validate_managed_path "$profile_path"; then
+        rm -f "$profile_path"
     fi
 }
 
@@ -457,8 +504,28 @@ else
         --staged-polo "$staged_polo" \
         --staged-compat "$staged_compat"
 
-    # No installed App/runtime/PATH mutation occurs until the ownership
-    # preflight above has verified both commands.
+    # Validate and snapshot the selected login profile before any App/runtime
+    # mutation. A malformed or user-replaced profile aborts the transaction.
+    MANAGED_PROFILE_PATH="$(managed_profile_path)"
+    validate_managed_path "$MANAGED_PROFILE_PATH" \
+        || error "Polo terminal setup found a conflicting shell profile. The existing installation was not changed."
+    profile_backup="$APP_DIR/.profile.previous.$$"
+    profile_existed=false
+    if [ -e "$MANAGED_PROFILE_PATH" ]; then
+        cp -p "$MANAGED_PROFILE_PATH" "$profile_backup"
+        profile_existed=true
+    fi
+
+    rollback_linux_app() {
+        rm -rf "$EXTRACTED_INSTALL_PATH"
+        rm -f "$APPIMAGE_INSTALL_PATH"
+        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
+        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
+        restore_managed_profile "$MANAGED_PROFILE_PATH" "$profile_backup" "$profile_existed"
+    }
+
+    # No installed App/runtime/PATH mutation occurs until ownership and the
+    # selected profile have both passed their read-only preflight.
     if pgrep -f "Polo-AI.*AppImage" >/dev/null 2>&1; then
         info "Stopping Polo AI..."
         pkill -f "Polo-AI.*AppImage" 2>/dev/null || true
@@ -482,27 +549,35 @@ else
     fi
     chmod +x "$APPIMAGE_INSTALL_PATH"
 
-    path_entry_owned=false
-    case ":$PATH:" in
-        *":$INSTALL_DIR:"*) ;;
-        *) path_entry_owned=true ;;
-    esac
+    # Configure PATH while the old App backups are still available. If this
+    # fails, neither launchers nor ownership state have been changed yet.
+    if ! configure_managed_path; then
+        rollback_linux_app
+        error "Failed to configure Polo terminal PATH. The previous installation was restored."
+    fi
+
+    path_entry_owned=true
     installed_helper="$EXTRACTED_INSTALL_PATH/resources/app/resources/scripts/linux-terminal-integration.sh"
+    previous_args=()
+    if [ -d "$current_backup" ]; then
+        previous_args=(--previous-current "$current_backup")
+    fi
     if ! bash "$installed_helper" install \
         --app-dir "$APP_DIR" \
         --bin-dir "$INSTALL_DIR" \
         --version "$packaged_version" \
-        --path-entry-owned "$path_entry_owned"; then
-        rm -rf "$EXTRACTED_INSTALL_PATH"
-        rm -f "$APPIMAGE_INSTALL_PATH"
-        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
-        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
-        error "Failed to install Polo terminal integration."
+        --path-entry-owned "$path_entry_owned" \
+        --profile-path "$MANAGED_PROFILE_PATH" \
+        "${previous_args[@]}"; then
+        rollback_linux_app
+        error "Failed to install Polo terminal integration. The previous installation and profile were restored."
     fi
+
+    # The helper performs final launcher/state verification before returning.
+    # Until it succeeds, the previous App and profile remain available.
     rm -rf "$current_backup"
     rm -f "$appimage_backup"
-
-    configure_managed_path
+    rm -f "$profile_backup"
 
     # Migrate old installation
     OLD_APPIMAGE="$INSTALL_DIR/Polo-AI-x64.AppImage"
