@@ -379,7 +379,7 @@ verify_moved_candidate() {
 
 install_links_transaction() {
   local previous_current="$1"
-  local transaction_dir state_candidate polo_candidate compat_candidate state_hash=""
+  local transaction_dir state_candidate polo_candidate compat_candidate state_hash="" new_state_hash=""
 
   transaction_dir="$(mktemp -d "$state_root/.terminal-install.XXXXXX")"
   chmod 700 "$transaction_dir"
@@ -433,6 +433,22 @@ install_links_transaction() {
 
   if ! write_state_no_clobber "$state_file" "$version" "$polo_path" "$polo_target" \
     "$compat_path" "$compat_target" "$path_entry_owned" "$profile_path"; then
+    [ ! -e "$state_file" ] && [ ! -L "$state_file" ] \
+      && [ -e "$state_candidate" ] && mv "$state_candidate" "$state_file"
+    restore_candidate "$compat_path" "$compat_candidate" "$compat_target" || true
+    restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
+    rm -rf "$transaction_dir"
+    return 1
+  fi
+  new_state_hash="$(sha256_file "$state_file")"
+
+  if ! load_state "$state_file" \
+    || ! verify_owned_link "$polo_path" "$STATE_POLO_PATH" "$STATE_POLO_TARGET" "$STATE_POLO_SHA" \
+    || ! verify_owned_link "$compat_path" "$STATE_COMPAT_PATH" "$STATE_COMPAT_TARGET" "$STATE_COMPAT_SHA"; then
+    if [ -f "$state_file" ] && [ ! -L "$state_file" ] \
+      && [ "$(sha256_file "$state_file")" = "$new_state_hash" ]; then
+      rm -f "$state_file"
+    fi
     [ ! -e "$state_file" ] && [ ! -L "$state_file" ] \
       && [ -e "$state_candidate" ] && mv "$state_candidate" "$state_file"
     restore_candidate "$compat_path" "$compat_candidate" "$compat_target" || true
@@ -596,13 +612,6 @@ case "$mode" in
     assert_replaceable "$state_status" "$polo_path" polo "$previous_current"
     assert_replaceable "$state_status" "$compat_path" compat "$previous_current"
     install_links_transaction "$previous_current"
-    load_state "$state_file" \
-      && verify_owned_link "$polo_path" "$STATE_POLO_PATH" "$STATE_POLO_TARGET" "$STATE_POLO_SHA" \
-      && verify_owned_link "$compat_path" "$STATE_COMPAT_PATH" "$STATE_COMPAT_TARGET" "$STATE_COMPAT_SHA" \
-      || {
-        warn "Polo terminal integration failed final ownership verification."
-        exit 2
-      }
     ;;
   verify-uninstall)
     if ! assert_uninstallable; then
