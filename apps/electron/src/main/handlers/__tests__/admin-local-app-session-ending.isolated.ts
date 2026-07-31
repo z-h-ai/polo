@@ -919,7 +919,7 @@ describe('Admin session and scoped local app production wiring', () => {
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       scope,
-    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    )).resolves.toBe('retained organization logs')
     await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
       context,
       scope,
@@ -1039,7 +1039,7 @@ describe('Admin session and scoped local app production wiring', () => {
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       scope,
-    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    )).resolves.toBe('removed organization logs')
     await expect(handlers.get(RPC_CHANNELS.localApps.STOP)!(
       context,
       scope,

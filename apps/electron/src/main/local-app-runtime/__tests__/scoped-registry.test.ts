@@ -305,6 +305,60 @@ describe('scoped local app runtime registry', () => {
     expect(managerCount).toBe(1)
   })
 
+  it('reads retained logs only from an existing persisted installation', async () => {
+    const installedScope = scope('account-a')
+    const scopeDir = join(
+      rootDir,
+      'catalog-scopes',
+      createCatalogLocalAppScopeKey(installedScope),
+    )
+    await mkdir(join(
+      scopeDir,
+      'apps',
+      createCatalogRuntimeAppId(installedScope),
+    ), { recursive: true })
+    await Promise.all([
+      writeFile(join(scopeDir, 'scope.json'), JSON.stringify({
+        schemaVersion: 1,
+        scope: installedScope,
+      })),
+      writeFile(join(
+        scopeDir,
+        'apps',
+        createCatalogRuntimeAppId(installedScope),
+        'metadata.json',
+      ), '{}'),
+    ])
+    let managerCount = 0
+    class TrackingManager extends LocalAppRuntimeManager {
+      override async getRetainedManagementLogs(
+        appId: string,
+        options?: { tail?: number },
+      ): Promise<string> {
+        expect(appId).toBe(createCatalogRuntimeAppId(installedScope))
+        expect(options).toEqual({ tail: 40 })
+        return 'retained logs'
+      }
+    }
+    const registry = new ScopedLocalAppRuntimeRegistry({
+      rootDir,
+      managerFactory: options => {
+        managerCount += 1
+        return new TrackingManager(options)
+      },
+    })
+
+    await expect(registry.getRetainedManagementLogs(
+      installedScope,
+      { tail: 40 },
+    )).resolves.toBe('retained logs')
+    await expect(registry.getRetainedManagementLogs({
+      ...installedScope,
+      catalogAppId: 'not-installed',
+    })).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    expect(managerCount).toBe(1)
+  })
+
   it('returns every requested status through the 10,000 item contract', async () => {
     const registry = new ScopedLocalAppRuntimeRegistry({ rootDir })
     for (const count of [1_000, 1_001, 10_000]) {

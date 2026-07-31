@@ -647,8 +647,12 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     (_ctx, reference: unknown, options?: LocalAppLogsOptions) =>
       withCatalogManagementScope(
         reference,
-        scope => getScopedLocalAppRuntimeRegistry()
-          .getFailureRecoveryLogs(scope, options),
+        (scope, catalogReference) => {
+          const registry = getScopedLocalAppRuntimeRegistry()
+          return catalogReference.canAccessDeliveryMetadata
+            ? registry.getFailureRecoveryLogs(scope, options)
+            : registry.getRetainedManagementLogs(scope, options)
+        },
       ),
   )
 }

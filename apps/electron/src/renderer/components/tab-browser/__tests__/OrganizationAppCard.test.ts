@@ -122,9 +122,9 @@ describe('OrganizationAppCard invalid version state', () => {
       .toBe('homeApps.errors.openGeneric')
   })
 
-  it('does not expose logs for healthy installed or running apps', () => {
+  it('does not expose logs for healthy authorized installed or running apps', () => {
     for (const runtimeStatus of ['installed', 'running', 'stopped'] as const) {
-      expect(canViewOrganizationAppLogs({
+      expect(canViewOrganizationAppLogs(app, {
         appId: app.id,
         status: runtimeStatus,
         currentVersion: '1.0.0',
@@ -134,7 +134,7 @@ describe('OrganizationAppCard invalid version state', () => {
 
   it('exposes logs only for broken failure recovery regardless of member role', () => {
     for (const _role of ['member', 'manager', 'owner'] as const) {
-      expect(canViewOrganizationAppLogs({
+      expect(canViewOrganizationAppLogs(app, {
         appId: app.id,
         status: 'broken',
         currentVersion: '1.0.0',
@@ -186,6 +186,35 @@ describe('OrganizationAppCard invalid version state', () => {
       .toBe('unavailable')
     expect(statusText(translate, withdrawnApp, status, true))
       .toBe('homeApps.status.withdrawn')
-    expect(canViewOrganizationAppLogs(status)).toBe(false)
+    expect(canViewOrganizationAppLogs(withdrawnApp, status)).toBe(true)
+  })
+
+  it('exposes retained logs for every installed-like denied and withdrawn state', () => {
+    for (const availability of ['withdrawn', 'unavailable'] as const) {
+      const retainedApp: CatalogApp = { ...app, availability }
+      for (
+        const runtimeStatus of [
+          'installed',
+          'running',
+          'stopped',
+          'broken',
+          'update_available',
+        ] as const
+      ) {
+        expect(canViewOrganizationAppLogs(retainedApp, {
+          appId: app.id,
+          status: runtimeStatus,
+          currentVersion: '1.0.0',
+        })).toBe(true)
+      }
+      expect(canViewOrganizationAppLogs(retainedApp, {
+        appId: app.id,
+        status: 'not_installed',
+      })).toBe(false)
+      expect(canViewOrganizationAppLogs(retainedApp, {
+        appId: app.id,
+        status: 'broken',
+      })).toBe(false)
+    }
   })
 })

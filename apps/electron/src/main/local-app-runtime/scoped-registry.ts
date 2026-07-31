@@ -497,6 +497,29 @@ export class ScopedLocalAppRuntimeRegistry {
     )
   }
 
+  async getRetainedManagementLogs(
+    scope: CatalogLocalAppScope,
+    options?: { tail?: number },
+  ): Promise<string> {
+    return this.runTrackedScopeOperation(
+      scope,
+      ACCOUNT_SCOPED_OPERATION,
+      async safeScope => {
+        const manager = await this.getExistingManager(safeScope)
+        if (!manager) {
+          throw new LocalAppRuntimeError(
+            'NOT_AUTHORIZED',
+            'Organization app logs require a retained local installation',
+          )
+        }
+        return manager.getRetainedManagementLogs(
+          createCatalogRuntimeAppId(safeScope),
+          options,
+        )
+      },
+    )
+  }
+
   async stopAccount(accountId: string): Promise<void> {
     const safeAccountId = validateScopeField(accountId, 'accountId')
     this.sessionEndingAccounts.add(safeAccountId)

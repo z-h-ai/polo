@@ -128,11 +128,25 @@ export function statusText(
 }
 
 export function canViewOrganizationAppLogs(
+  app: CatalogApp,
   status: LocalAppRuntimeStatus | undefined,
 ): boolean {
-  // Logs can contain runtime paths, configuration, and user data. Keep this
-  // recovery affordance role-independent and expose it only after a failure.
-  return status?.status === 'broken'
+  if (!status || app.deliveryMode !== 'local_bundle') return false
+  const retained = app.availability === 'withdrawn'
+    || app.availability === 'unavailable'
+  if (status.status === 'broken') {
+    return !retained || Boolean(status.currentVersion)
+  }
+  if (!retained || !status.currentVersion) return false
+  // Healthy runtime logs remain hidden for ordinary authorized Apps. Once an
+  // App is withdrawn or denied, retained local-data management intentionally
+  // includes a bounded log tail alongside STOP and UNINSTALL.
+  return [
+    'installed',
+    'running',
+    'stopped',
+    'update_available',
+  ].includes(status.status)
 }
 
 function actionLabel(t: TFunction, action: CatalogPrimaryAction): string {
@@ -192,7 +206,7 @@ export function OrganizationAppCard({
     && app.availability === 'withdrawn'
     && statusUnavailable
   )
-  const logsAvailable = canViewOrganizationAppLogs(status)
+  const logsAvailable = canViewOrganizationAppLogs(app, status)
   const progress = status?.progress?.percent
 
   return (

@@ -624,12 +624,107 @@ describe('HomePage round-two regressions', () => {
     await waitFor(() => {
       expect(screen.getByText('Stop')).toBeTruthy()
       expect(screen.getByText('Uninstall')).toBeTruthy()
-      expect(screen.queryByText('View logs')).toBeNull()
+      expect(screen.getByText('View logs')).toBeTruthy()
     })
+    fireEvent.click(screen.getByText('View logs'))
+    await waitFor(() => {
+      expect(screen.getByText('retained log output')).toBeTruthy()
+    })
+    expect(getLogs).toHaveBeenCalledWith(deniedApp)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
+    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
     fireEvent.click(screen.getByText('Stop'))
     await waitFor(() => {
       expect(stop).toHaveBeenCalledWith(deniedApp)
     })
+  })
+
+  it('shows retained log management for denied and withdrawn installed-like states', async () => {
+    for (const availability of ['unavailable', 'withdrawn'] as const) {
+      for (
+        const runtimeStatus of [
+          'installed',
+          'running',
+          'stopped',
+          'broken',
+          'update_available',
+        ] as const
+      ) {
+        const retainedApp: CatalogApp = {
+          id: `${availability}-${runtimeStatus}`,
+          organizationId: 'organization-a',
+          name: `${availability} ${runtimeStatus}`,
+          description: '',
+          deliveryMode: 'local_bundle',
+          sortOrder: 0,
+          availability,
+        }
+        const catalog: AppCatalogCacheEntry = {
+          accountId: 'account-a',
+          organizationId: 'organization-a',
+          appConfigVersion: 'retained-logs',
+          authorizationStatus: availability === 'unavailable'
+            ? 'denied'
+            : 'authorized',
+          apps: availability === 'unavailable' ? [retainedApp] : [],
+          withdrawnApps: availability === 'withdrawn' ? [retainedApp] : [],
+          syncedAt: 1,
+        }
+        const status = {
+          appId: retainedApp.id,
+          scope: {
+            kind: 'catalog' as const,
+            accountId: catalog.accountId,
+            organizationId: catalog.organizationId,
+            catalogAppId: retainedApp.id,
+          },
+          status: runtimeStatus,
+          currentVersion: '1.0.0',
+        }
+        const scopeKey = createLocalAppScopeKey(status.scope)
+        appCatalogHook = {
+          ...signedOutCatalogHook(),
+          organization: {
+            accountId: catalog.accountId,
+            activeOrganizationId: catalog.organizationId,
+            organizationContextKey: createOrganizationContextKey(
+              catalog.accountId,
+              catalog.organizationId,
+            ),
+            organizationSummaries: [{
+              id: catalog.organizationId,
+              type: 'enterprise',
+              name: 'Organization A',
+            }],
+          },
+          state: {
+            ...signedOutCatalogHook().state,
+            catalog,
+            accessMode: availability === 'unavailable' ? 'denied' : 'online',
+            statuses: { [scopeKey]: status },
+          },
+          getStatus: () => status,
+          scopeKeyForApp: () => scopeKey,
+          getLogs: jest.fn(async () => 'retained logs'),
+        }
+
+        render(createElement(
+          I18nextProvider,
+          { i18n },
+          createElement(HomePage, { onAddApp: () => {} }),
+        ))
+        const management = screen.getByLabelText(
+          `More actions for ${retainedApp.name}`,
+        )
+        fireEvent.pointerDown(management, { button: 0, ctrlKey: false })
+        await waitFor(() => {
+          expect(screen.getByText('View logs')).toBeTruthy()
+        })
+        cleanup()
+      }
+    }
   })
 
   it('keeps deferred log results isolated by full App scope and request generation', async () => {

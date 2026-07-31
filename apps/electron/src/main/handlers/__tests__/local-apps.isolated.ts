@@ -82,6 +82,27 @@ const scopedFailureRecoveryLogs = mock(async (
   }
   return ''
 })
+const scopedRetainedManagementLogs = mock(async (
+  scope: CatalogLocalAppScope,
+  _options?: { tail?: number },
+) => {
+  const status = await scopedRuntimeStatus(scope)
+  if (
+    !status.currentVersion
+    || ![
+      'installed',
+      'running',
+      'stopped',
+      'broken',
+      'update_available',
+    ].includes(status.status)
+  ) {
+    throw Object.assign(new Error('Logs require a retained installation'), {
+      code: 'NOT_AUTHORIZED',
+    })
+  }
+  return ''
+})
 const isInstalledAndReady = mock(async () => true)
 const assertAppAuthorized = mock(() => {
   if (appAccessDenied) {
@@ -113,6 +134,7 @@ const scopedRegistry = {
   getRuntimeStatuses: scopedStatuses,
   getLogs: mock(async () => ''),
   getFailureRecoveryLogs: scopedFailureRecoveryLogs,
+  getRetainedManagementLogs: scopedRetainedManagementLogs,
   isInstalledAndReady,
 }
 
@@ -243,6 +265,7 @@ describe('local app main-process authorization boundary', () => {
       scopedRegistry.setAvailableRelease,
       scopedRegistry.getLogs,
       scopedFailureRecoveryLogs,
+      scopedRetainedManagementLogs,
     ]) {
       handlerMock.mockClear()
     }
@@ -804,7 +827,11 @@ describe('local app main-process authorization boundary', () => {
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       deniedScope,
-    )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    )).resolves.toBe('')
+    expect(scopedRetainedManagementLogs).toHaveBeenCalledWith(
+      deniedScope,
+      undefined,
+    )
     const stopped = await handlers.get(RPC_CHANNELS.localApps.STOP)!(
       context,
       deniedScope,
@@ -840,7 +867,7 @@ describe('local app main-process authorization boundary', () => {
     )).rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
 
     expect(scopedRegistry.stop).toHaveBeenCalledWith(deniedScope)
-    expect(scopedFailureRecoveryLogs).toHaveBeenCalledWith(
+    expect(scopedRetainedManagementLogs).toHaveBeenCalledWith(
       deniedScope,
       undefined,
     )
@@ -915,7 +942,7 @@ describe('local app main-process authorization boundary', () => {
     })
   })
 
-  it('allows logs only for a trusted broken runtime status', async () => {
+  it('allows bounded logs for retained denied and withdrawn installations', async () => {
     const getLogs = handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!
     for (const runtimeStatus of ['installed', 'running', 'stopped'] as const) {
       scopedRuntimeStatus.mockResolvedValueOnce({
@@ -937,15 +964,62 @@ describe('local app main-process authorization boundary', () => {
       })),
     }
     accessMode = 'denied'
+    for (
+      const runtimeStatus of [
+        'installed',
+        'running',
+        'stopped',
+        'broken',
+        'update_available',
+      ] as const
+    ) {
+      scopedRuntimeStatus.mockResolvedValueOnce({
+        appId: scope().catalogAppId,
+        scope: scope(),
+        status: runtimeStatus,
+        currentVersion: '1.0.0',
+      })
+      await expect(getLogs(context, scope(), { tail: 20 })).resolves.toBe('')
+    }
+
+    const withdrawnApp = {
+      ...catalog.apps[0]!,
+      availability: 'withdrawn' as const,
+    }
+    catalog = {
+      ...catalog,
+      authorizationStatus: 'authorized',
+      apps: [],
+      withdrawnApps: [withdrawnApp],
+    }
+    accessMode = 'online'
+    for (
+      const runtimeStatus of [
+        'installed',
+        'running',
+        'stopped',
+        'broken',
+        'update_available',
+      ] as const
+    ) {
+      scopedRuntimeStatus.mockResolvedValueOnce({
+        appId: scope().catalogAppId,
+        scope: scope(),
+        status: runtimeStatus,
+        currentVersion: '1.0.0',
+      })
+      await expect(getLogs(context, scope(), { tail: 20 })).resolves.toBe('')
+    }
+
     scopedRuntimeStatus.mockResolvedValueOnce({
       appId: scope().catalogAppId,
       scope: scope(),
-      status: 'installed',
-      currentVersion: '1.0.0',
+      status: 'not_installed',
     })
-    await expect(getLogs(context, scope()))
+    await expect(getLogs(context, scope(), { tail: 20 }))
       .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
 
+    catalog = createCatalog(1)
     scopedRuntimeStatus.mockResolvedValueOnce({
       appId: scope().catalogAppId,
       scope: scope(),
@@ -957,8 +1031,13 @@ describe('local app main-process authorization boundary', () => {
       },
     })
     await expect(getLogs(context, scope(), { tail: 20 })).resolves.toBe('')
-    expect(scopedFailureRecoveryLogs).toHaveBeenCalledTimes(5)
+    expect(scopedFailureRecoveryLogs).toHaveBeenCalledTimes(4)
     expect(scopedFailureRecoveryLogs).toHaveBeenLastCalledWith(
+      scope(),
+      { tail: 20 },
+    )
+    expect(scopedRetainedManagementLogs).toHaveBeenCalledTimes(11)
+    expect(scopedRetainedManagementLogs).toHaveBeenLastCalledWith(
       scope(),
       { tail: 20 },
     )

@@ -785,6 +785,53 @@ export class LocalAppRuntimeManager {
     return logs
   }
 
+  async getRetainedManagementLogs(
+    appId: string,
+    options: LocalAppLogsOptions = {},
+  ): Promise<string> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    const capturedGeneration = this.getRuntimeStateGeneration(safeAppId)
+    const assertStableRetainedInstallation = async (): Promise<void> => {
+      if (
+        this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs require a retained local installation',
+        )
+      }
+      const status = await this.getRuntimeStatus(safeAppId)
+      if (
+        !status.currentVersion
+        || ![
+          'installed',
+          'running',
+          'stopped',
+          'broken',
+          'update_available',
+        ].includes(status.status)
+        || this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs require a retained local installation',
+        )
+      }
+    }
+
+    await assertStableRetainedInstallation()
+    const logs = await this.getLogs(safeAppId, options)
+    // A retained-data read must not cross an install/start/stop generation:
+    // once lifecycle state changes, the caller must request a fresh bounded
+    // tail under the new state instead of receiving a stale log snapshot.
+    await assertStableRetainedInstallation()
+    return logs
+  }
+
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     if (this.shutdownPromise) return this.shutdownPromise

@@ -626,6 +626,68 @@ describe('LocalAppRuntimeManager', () => {
     })
   })
 
+  it('limits retained-management logs to stable installed-like states', async () => {
+    let runtimeStatus: LocalAppRuntimeStatus = {
+      appId: 'retained-app',
+      status: 'installed',
+      currentVersion: '1.0.0',
+    }
+    const logRequests: Array<{ appId: string; tail?: number }> = []
+    class RetainedLogManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(): Promise<LocalAppRuntimeStatus> {
+        return runtimeStatus
+      }
+
+      override async getLogs(
+        appId: string,
+        options: { tail?: number } = {},
+      ): Promise<string> {
+        logRequests.push({ appId, ...options })
+        return 'bounded retained log output'
+      }
+    }
+    const runtime = new RetainedLogManager({
+      rootDir: join(testRoot, 'retained-logs'),
+      platform,
+      arch: architecture,
+      fetch: stableFetch,
+    })
+    manager = runtime
+
+    for (
+      const status of [
+        'installed',
+        'running',
+        'stopped',
+        'broken',
+        'update_available',
+      ] as const
+    ) {
+      runtimeStatus = {
+        appId: 'retained-app',
+        status,
+        currentVersion: '1.0.0',
+      }
+      await expect(runtime.getRetainedManagementLogs(
+        'retained-app',
+        { tail: 25 },
+      )).resolves.toBe('bounded retained log output')
+    }
+
+    for (const status of ['not_installed', 'starting', 'installing'] as const) {
+      runtimeStatus = {
+        appId: 'retained-app',
+        status,
+      }
+      await expect(runtime.getRetainedManagementLogs('retained-app'))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+    expect(logRequests).toEqual(Array.from({ length: 5 }, () => ({
+      appId: 'retained-app',
+      tail: 25,
+    })))
+  })
+
   it('serializes stop against an in-flight start and leaves no running process', async () => {
     const bundleDir = await writeBundle(
       'demo.start-stop',
