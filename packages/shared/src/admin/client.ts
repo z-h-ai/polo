@@ -62,6 +62,8 @@ import {
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
   CreatorArtifactMutationResponseSchema,
+  CreatorArtifactVersionCreatedResponseSchema,
+  CreatorArtifactVersionSchema,
   CreatorArtifactVersionMutationResponseSchema,
   CreatorSkillDownloadGrantSchema,
   CreatorSkillSafetyStatusBatchSchema,
@@ -543,7 +545,11 @@ export class AdminClient {
   async createCreatorArtifactVersion(
     accessToken: string,
     input: CreateCreatorArtifactVersionInput,
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<{
+    version: CreatorArtifactVersion;
+    upload: CreatorSkillUploadGrant;
+    replayed?: boolean;
+  }> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions`,
       {
@@ -556,7 +562,7 @@ export class AdminClient {
         },
       },
     );
-    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+    return this.readSuccessResponse(response, CreatorArtifactVersionCreatedResponseSchema);
   }
 
   async getCreatorSkillArchivePolicy(
@@ -574,12 +580,12 @@ export class AdminClient {
     input: {
       organizationId: string;
       artifactId: string;
-      versionId: string;
+      version: string;
       idempotencyKey: string;
     },
   ): Promise<CreatorSkillUploadGrant> {
     const response = await this.request<unknown>(
-      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/uploads`,
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/uploads`,
       {
         method: 'POST',
         accessToken,
@@ -594,49 +600,48 @@ export class AdminClient {
     input: {
       organizationId: string;
       artifactId: string;
-      versionId: string;
+      version: string;
       uploadGeneration: number;
       sizeBytes: number;
       idempotencyKey: string;
     },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<CreatorArtifactVersion> {
     const response = await this.request<unknown>(
-      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/uploads/${input.uploadGeneration}/complete`,
-      {
-        method: 'POST',
-        accessToken,
-        headers: { 'Idempotency-Key': input.idempotencyKey },
-        body: {
-          sizeBytes: input.sizeBytes,
-        },
-      },
-    );
-    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
-  }
-
-  async triggerCreatorSkillValidation(
-    accessToken: string,
-    input: {
-      artifactId: string;
-      versionId: string;
-      uploadGeneration: number;
-      archiveChecksum: string;
-      idempotencyKey: string;
-    },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
-    const response = await this.request<unknown>(
-      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/validate`,
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/upload-complete`,
       {
         method: 'POST',
         accessToken,
         headers: { 'Idempotency-Key': input.idempotencyKey },
         body: {
           uploadGeneration: input.uploadGeneration,
-          archiveChecksum: input.archiveChecksum,
+          sizeBytes: input.sizeBytes,
         },
       },
     );
-    return this.readSuccessResponse(response, CreatorArtifactVersionMutationResponseSchema);
+    return this.readSuccessResponse(response, CreatorArtifactVersionSchema);
+  }
+
+  async triggerCreatorSkillValidation(
+    accessToken: string,
+    input: {
+      artifactId: string;
+      version: string;
+    },
+  ): Promise<CreatorArtifactVersion> {
+    const response = await this.request<unknown>(
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/validate`,
+      {
+        method: 'POST',
+        accessToken,
+      },
+    );
+    // POL-59 returns the validated artifact alongside the version and
+    // validation diagnostics. The desktop transport keeps the version as its
+    // stable operation result and deliberately strips the extra fields.
+    return this.readSuccessResponse(
+      response,
+      CreatorArtifactVersionMutationResponseSchema,
+    ).version;
   }
 
   async publishCreatorArtifactVersion(
@@ -644,12 +649,12 @@ export class AdminClient {
     input: {
       organizationId: string;
       artifactId: string;
-      versionId: string;
+      version: string;
       idempotencyKey: string;
     },
   ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
-      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/publish`,
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/publish`,
       {
         method: 'POST',
         accessToken,
@@ -664,12 +669,12 @@ export class AdminClient {
     input: {
       organizationId: string;
       artifactId: string;
-      versionId: string;
+      version: string;
       idempotencyKey: string;
     },
   ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
-      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}`,
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}`,
       {
         method: 'DELETE',
         accessToken,
@@ -705,13 +710,13 @@ export class AdminClient {
     input: {
       organizationId: string;
       artifactId: string;
-      versionId: string;
+      version: string;
       reason: string;
       idempotencyKey: string;
     },
   ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
-      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.versionId)}/revoke`,
+      `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/revoke`,
       {
         method: 'POST',
         accessToken,

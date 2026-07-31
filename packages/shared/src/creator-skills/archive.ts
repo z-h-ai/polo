@@ -4,12 +4,13 @@ import {
   chmod,
   lstat,
   mkdir,
+  realpath,
   readFile,
   readdir,
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { basename, extname, join, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { inflateSync } from 'node:zlib'
 import yauzl, { type Entry, type ZipFile } from 'yauzl'
 import {
@@ -122,6 +123,55 @@ function issue(
     ...(field ? { field } : {}),
     message,
     ...(suggestion ? { suggestion } : {}),
+  }
+}
+
+async function prepareSafeExtractionPath(
+  destination: string,
+  outputPath: string,
+  archivePath: string,
+): Promise<void> {
+  const destinationStat = await lstat(destination).catch(() => undefined)
+  if (!destinationStat?.isDirectory() || destinationStat.isSymbolicLink()) {
+    throw new CreatorSkillArchiveError(
+      'invalid_skill_archive',
+      'Archive extraction staging directory is unsafe',
+      [issue('unsafe_extraction_target', archivePath, 'Extraction staging directory must be a real directory')],
+    )
+  }
+
+  const parent = dirname(outputPath)
+  await mkdir(parent, { recursive: true, mode: 0o755 })
+  const canonicalDestination = await realpath(destination)
+  const canonicalParent = await realpath(parent)
+  const outsideDestination = relative(canonicalDestination, canonicalParent)
+  if (
+    outsideDestination === '..'
+    || outsideDestination.startsWith(`..${sep}`)
+    || resolve(canonicalDestination, outsideDestination) !== canonicalParent
+  ) {
+    throw new CreatorSkillArchiveError(
+      'invalid_skill_archive',
+      'Archive extraction escaped the staging directory',
+      [issue('path_traversal', archivePath, 'Unsafe extraction target')],
+    )
+  }
+
+  // `mkdir(..., { recursive })` follows symlinks. Inspect every component
+  // after it has been created so a local replacement cannot redirect a ZIP
+  // entry outside the isolated staging directory.
+  const relativeParent = relative(destination, parent)
+  let current = destination
+  for (const segment of relativeParent.split(sep).filter(Boolean)) {
+    current = join(current, segment)
+    const currentStat = await lstat(current).catch(() => undefined)
+    if (!currentStat?.isDirectory() || currentStat.isSymbolicLink()) {
+      throw new CreatorSkillArchiveError(
+        'invalid_skill_archive',
+        'Archive extraction encountered a link or non-directory ancestor',
+        [issue('unsafe_extraction_target', archivePath, 'Extraction target contains an unsafe ancestor')],
+      )
+    }
   }
 }
 
@@ -896,7 +946,16 @@ export async function validateCreatorSkillArchive(args: {
               [issue('path_traversal', archiveEntry.normalizedPath, 'Unsafe extraction target')],
             )
           }
+          await prepareSafeExtractionPath(destination, outputDir, archiveEntry.normalizedPath)
           await mkdir(outputDir, { recursive: true, mode: 0o755 })
+          const outputDirStat = await lstat(outputDir).catch(() => undefined)
+          if (!outputDirStat?.isDirectory() || outputDirStat.isSymbolicLink()) {
+            throw new CreatorSkillArchiveError(
+              'invalid_skill_archive',
+              'Archive extraction encountered an unsafe directory',
+              [issue('unsafe_extraction_target', archiveEntry.normalizedPath, 'Extraction target must be a real directory')],
+            )
+          }
           await chmod(outputDir, 0o755)
         }
         continue
@@ -980,8 +1039,16 @@ export async function validateCreatorSkillArchive(args: {
             [issue('path_traversal', archiveEntry.normalizedPath, 'Unsafe extraction target')],
           )
         }
-        await mkdir(resolve(outputPath, '..'), { recursive: true, mode: 0o755 })
+        await prepareSafeExtractionPath(destination, outputPath, archiveEntry.normalizedPath)
         await writeFile(outputPath, data, { mode: 0o644, flag: 'wx' })
+        const outputStat = await lstat(outputPath).catch(() => undefined)
+        if (!outputStat?.isFile() || outputStat.isSymbolicLink()) {
+          throw new CreatorSkillArchiveError(
+            'invalid_skill_archive',
+            'Archive extraction encountered an unsafe file',
+            [issue('unsafe_extraction_target', archiveEntry.normalizedPath, 'Extraction target must be a regular file')],
+          )
+        }
         await chmod(outputPath, 0o644)
       }
     }

@@ -3,7 +3,12 @@ import { HARD_SKILL_ARCHIVE_POLICY } from './types.ts'
 
 const entityId = z.string().trim().min(1).max(512)
 const isoDate = z.string().datetime({ offset: true })
-const checksum = z.string().regex(/^[a-f0-9]{64}$/)
+// POL-59 persists the archive checksum in a fixed-width, algorithm-labelled
+// column. Accept that transport representation (including SQL padding) while
+// exposing the canonical 64-character digest to desktop integrity code.
+const checksum = z.string().trim().transform(value => (
+  value.toLowerCase().replace(/^sha256:/, '')
+)).pipe(z.string().regex(/^[a-f0-9]{64}$/))
 const stableSemver = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
 const skillSlug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
 const localSkillBasename = z.string()
@@ -18,12 +23,16 @@ const localSkillBasename = z.string()
   ))
 const idempotencyKey = z.string().min(1).max(128).regex(/^[\x21-\x7E]+$/)
 export const CreatorSkillOperationIdSchema = z.string().uuid()
+const nonnegativeSafeInteger = z.union([
+  z.number().int().nonnegative(),
+  z.string().regex(/^\d+$/).transform(value => Number(value)),
+]).refine(value => Number.isSafeInteger(value) && value >= 0)
 
 // Prisma serializes nullable columns as JSON null. The desktop DTO uses
 // optional fields, so normalize the documented nullable Admin representation
 // here while still rejecting malformed non-null values.
 function nullableOptional<T extends z.ZodType>(schema: T) {
-  return schema.nullish().transform(value => value ?? undefined)
+  return schema.nullish().transform(value => value ?? undefined).optional()
 }
 
 export const SkillArchivePolicySchema = z.object({
@@ -86,7 +95,7 @@ export const CreatorArtifactVersionSchema = z.object({
   id: entityId,
   artifactId: entityId,
   version: stableSemver,
-  changelog: z.string().max(2_000).optional(),
+  changelog: nullableOptional(z.string().max(2_000)),
   status: z.enum([
     'upload_pending',
     'uploaded',
@@ -97,22 +106,22 @@ export const CreatorArtifactVersionSchema = z.object({
     'revoked',
     'expired',
   ]),
-  archiveChecksum: checksum.optional(),
-  contentDigest: checksum.optional(),
-  sizeBytes: z.number().int().nonnegative().optional(),
+  archiveChecksum: nullableOptional(checksum),
+  contentDigest: nullableOptional(checksum),
+  sizeBytes: nullableOptional(nonnegativeSafeInteger),
   createdAt: isoDate,
-  publishedAt: isoDate.optional(),
-  publishedByUserId: entityId.optional(),
-  revokedAt: isoDate.optional(),
-  revokedByUserId: entityId.optional(),
-  revocationReason: z.string().max(2_000).optional(),
-  validationPolicy: SkillArchivePolicySchema.optional(),
+  publishedAt: nullableOptional(isoDate),
+  publishedByUserId: nullableOptional(entityId),
+  revokedAt: nullableOptional(isoDate),
+  revokedByUserId: nullableOptional(entityId),
+  revocationReason: nullableOptional(z.string().max(2_000)),
+  validationPolicy: nullableOptional(SkillArchivePolicySchema),
   uploadGeneration: z.number().int().nonnegative(),
-  validatorVersion: z.string().max(128).optional(),
-  validatedArchiveChecksum: checksum.optional(),
-  validatedAt: isoDate.optional(),
-  metadata: SkillVersionMetadataSchema.optional(),
-  validationIssues: z.array(SkillValidationIssueSchema).max(10_000).optional(),
+  validatorVersion: nullableOptional(z.string().max(128)),
+  validatedArchiveChecksum: nullableOptional(checksum),
+  validatedAt: nullableOptional(isoDate),
+  metadata: nullableOptional(SkillVersionMetadataSchema),
+  validationIssues: nullableOptional(z.array(SkillValidationIssueSchema).max(10_000)),
 })
 
 export const CreatorArtifactCapabilitySchema = z.object({
@@ -127,7 +136,7 @@ export const CreatorArtifactCatalogPageSchema = z.object({
 export const CreatorArtifactDetailSchema = z.object({
   artifact: CreatorArtifactSchema,
   versions: z.array(CreatorArtifactVersionSchema),
-  selectedVersion: stableSemver.optional(),
+  selectedVersion: nullableOptional(stableSemver),
   // Zod's string max is measured in UTF-16 code units, while the archive
   // policy is expressed in bytes.  Keep the transport boundary aligned with
   // the absolute archive limit and validate the actual UTF-8 representation.
@@ -171,6 +180,12 @@ export const CreatorSkillUploadGrantSchema = z.object({
   headers: z.record(z.string(), z.string().max(8_192)).optional(),
   expiresAt: isoDate,
   uploadGeneration: z.number().int().positive(),
+})
+
+export const CreatorArtifactVersionCreatedResponseSchema = z.object({
+  version: CreatorArtifactVersionSchema,
+  upload: CreatorSkillUploadGrantSchema,
+  replayed: z.boolean().optional(),
 })
 
 export const CreatorSkillManifestEntrySchema = z.object({
@@ -264,7 +279,7 @@ export const CreateCreatorArtifactVersionRpcInputSchema = z.object({
 export const CreatorArtifactVersionRpcInputSchema = z.object({
   organizationId: entityId,
   artifactId: entityId,
-  versionId: entityId,
+  version: stableSemver,
   idempotencyKey,
 }).strict()
 
@@ -278,7 +293,7 @@ export const CreatorArtifactArchiveRpcInputSchema = z.object({
 export const CreatorArtifactUploadGrantRpcInputSchema = z.object({
   organizationId: entityId,
   artifactId: entityId,
-  versionId: entityId,
+  version: stableSemver,
   idempotencyKey,
 }).strict()
 

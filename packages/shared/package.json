@@ -33,7 +33,10 @@
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
     "./skills": "./src/skills/index.ts",
-    "./creator-skills": "./src/creator-skills/index.ts",
+    "./creator-skills": {
+      "types": "./src/creator-skills/index.ts",
+      "default": "./src/creator-skills/index.js"
+    },
     "./creator-skills/archive": "./src/creator-skills/archive.ts",
     "./creator-skills/fixtures": "./src/creator-skills/fixtures.ts",
     "./creator-skills/schemas": "./src/creator-skills/schemas.ts",

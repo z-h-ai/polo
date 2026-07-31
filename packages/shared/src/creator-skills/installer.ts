@@ -1844,6 +1844,11 @@ export async function installCreatorSkill(
       journal.state = 'new_installed'
       await persistJournal(journalPath, journal, dependencies)
       await assertPromotedTargetIdentity(targetPath, promotedDirectoryIdentity)
+      // The journal write is another asynchronous checkpoint. Do not let a
+      // same-inode rewrite, an added file, or a file/directory swap between
+      // that checkpoint and the Ledger commit turn tampered content into a
+      // managed installation.
+      await assertDirectoryMatchesPublishedGrant(targetPath, input.grant)
 
       await writeCreatorSkillsLedger(
         canonicalWorkspace,

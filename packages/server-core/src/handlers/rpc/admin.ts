@@ -591,7 +591,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_DRAFT, async (_ctx, rawInput: unknown) => {
-    const input = CreatorArtifactVersionRpcInputSchema.omit({ versionId: true })
+    const input = CreatorArtifactVersionRpcInputSchema.omit({ version: true })
       .safeParse(rawInput)
     if (!input.success) return adminInputError('VALIDATION_ERROR')
     return callOrganization('deleteCreatorArtifactDraft', async (client, accessToken, userId) => {
@@ -616,9 +616,8 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     })
   })
 
-  // Archive bytes must never traverse Electron's main/server-core process.
-  // This handler only issues a narrow, short-lived object-storage grant; the
-  // renderer uploads its user-selected File directly and can abort the PUT.
+  // The renderer owns the selected File and PUTs it directly. This RPC only
+  // renews a short-lived grant and never receives archive bytes.
   server.handle(RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT, async (_ctx, rawInput: unknown) => {
     const input = CreatorArtifactUploadGrantRpcInputSchema.safeParse(rawInput)
     if (!input.success) return adminInputError('VALIDATION_ERROR')
@@ -632,7 +631,7 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (!input.success) return adminInputError('VALIDATION_ERROR')
     return callOrganization('completeCreatorSkillUpload', async (client, accessToken, userId) => {
       const completed = await client.completeCreatorSkillUpload(accessToken, input.data)
-      const archiveChecksum = completed.version.archiveChecksum
+      const archiveChecksum = completed.archiveChecksum
       if (!archiveChecksum) {
         throw new AdminError(
           'Admin service did not calculate the uploaded archive checksum',
@@ -641,13 +640,10 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
       const result = await client.triggerCreatorSkillValidation(accessToken, {
         artifactId: input.data.artifactId,
-        versionId: input.data.versionId,
-        uploadGeneration: input.data.uploadGeneration,
-        archiveChecksum,
-        idempotencyKey: input.data.idempotencyKey,
+        version: input.data.version,
       })
       invalidateCreatorArtifactCache(userId, input.data.organizationId)
-      return result
+      return { version: result }
     })
   })
 
@@ -753,11 +749,13 @@ function invalidateAllCreatorArtifactCaches(): void {
 
 function invalidateCreatorArtifactCache(userId: string, organizationId?: string): void {
   if (organizationId) {
-    const scope = `${userId}\0${organizationId}`
-    creatorArtifactOrganizationGenerations.set(
-      scope,
-      (creatorArtifactOrganizationGenerations.get(scope) ?? 0) + 1,
-    )
+    // Publication and membership changes alter what every member may see.
+    // A per-actor eviction leaves a recently cached member catalog showing a
+    // stale role view after an owner changes that member's role.
+    creatorArtifactGlobalGeneration += 1
+    creatorArtifactCatalogCache.clear()
+    creatorArtifactOrganizationGenerations.clear()
+    return
   } else {
     creatorArtifactUserGenerations.set(
       userId,

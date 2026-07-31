@@ -293,6 +293,7 @@ async function createVersion(
   changelog: string,
 ): Promise<{
   versionId: string
+  version: string
   upload: {
     method: 'PUT'
     url: string
@@ -304,6 +305,13 @@ async function createVersion(
   const versionResult = await rendererAdminCall<{
     success: boolean
     version?: { id: string }
+    upload?: {
+      method: 'PUT'
+      url: string
+      headers?: Record<string, string>
+      expiresAt: string
+      uploadGeneration: number
+    }
   }>('creatorArtifactCreateVersion', {
     organizationId,
     artifactId,
@@ -311,34 +319,16 @@ async function createVersion(
     changelog,
     idempotencyKey: `creator-skill-version-${randomUUID()}`,
   })
-  if (!versionResult.success || !versionResult.version?.id) {
+  if (!versionResult.success || !versionResult.version?.id || !versionResult.upload) {
     throw new Error(`Failed to create version ${version}`)
   }
-  const uploadResult = await rendererAdminCall<{
-    success: boolean
-    grant?: {
-      method: 'PUT'
-      url: string
-      headers?: Record<string, string>
-      expiresAt: string
-      uploadGeneration: number
-    }
-  }>('creatorArtifactCreateUploadGrant', {
-    organizationId,
-    artifactId,
-    versionId: versionResult.version.id,
-    idempotencyKey: `creator-skill-upload-${randomUUID()}`,
-  })
-  if (!uploadResult.success || !uploadResult.grant) {
-    throw new Error(`Failed to create upload grant for version ${version}`)
-  }
-  return { versionId: versionResult.version.id, upload: uploadResult.grant }
+  return { versionId: versionResult.version.id, version, upload: versionResult.upload }
 }
 
 async function uploadVersion(
   organizationId: string,
   artifactId: string,
-  versionId: string,
+  version: string,
   archiveContent: string,
   upload: {
     method: 'PUT'
@@ -379,7 +369,7 @@ async function uploadVersion(
   }>('creatorArtifactCompleteUpload', {
     organizationId,
     artifactId,
-    versionId,
+    version,
     uploadGeneration: upload.uploadGeneration,
     sizeBytes: archive.length,
     idempotencyKey: `creator-skill-complete-${randomUUID()}`,
@@ -452,7 +442,7 @@ async function attemptMemberAccessBeforePublish(
 async function publishVersion(
   organizationId: string,
   artifactId: string,
-  versionId: string,
+  version: string,
 ): Promise<void> {
   const result = await rendererAdminCall<{
     success: boolean
@@ -460,7 +450,7 @@ async function publishVersion(
   }>('creatorArtifactPublishVersion', {
     organizationId,
     artifactId,
-    versionId,
+    version,
     idempotencyKey: `creator-skill-publish-${randomUUID()}`,
   })
   if (!result.success || !result.version?.id) {
@@ -588,7 +578,7 @@ async function run(): Promise<void> {
   const versionOnePackage = await uploadVersion(
     organization.id,
     artifact.id,
-    versionOne.versionId,
+    versionOne.version,
     CREATOR_SKILL_FIXTURE_CONTENT,
     versionOne.upload,
   )
@@ -626,7 +616,7 @@ async function run(): Promise<void> {
       throw new Error('Manager could not see the draft artifact')
     }
   }
-  await publishVersion(organization.id, artifact.id, versionOne.versionId)
+  await publishVersion(organization.id, artifact.id, versionOne.version)
 
   logStep('manager-visible')
   {
@@ -740,6 +730,10 @@ async function run(): Promise<void> {
     validationPolicy: downloadGrantOne.validationPolicy,
   })
 
+  // Publishing remains a manager operation; the member that installed the
+  // first release must not be able to create the update.
+  await logout()
+  await login('alice', 'alice-password-123')
   const versionTwo = await createVersion(
     organization.id,
     artifact.id,
@@ -753,13 +747,15 @@ async function run(): Promise<void> {
   await uploadVersion(
     organization.id,
     artifact.id,
-    versionTwo.versionId,
+    versionTwo.version,
     updatedContent,
     versionTwo.upload,
   )
   await waitForValidatedVersion(organization.id, artifact.id, '1.1.0')
-  await publishVersion(organization.id, artifact.id, versionTwo.versionId)
+  await publishVersion(organization.id, artifact.id, versionTwo.version)
 
+  await logout()
+  await login('bob', 'bob-password-123')
   const downloadGrantTwo = await rendererAdminCall<{
     success: boolean
     artifactId?: string
