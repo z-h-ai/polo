@@ -9,6 +9,7 @@ import {
   readlinkSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -329,6 +330,100 @@ restore_managed_profile "$MANAGED_PROFILE_PATH" "$profile_backup" "$profile_exis
 })
 
 describe('Linux AppImage installer lifecycle', () => {
+  it('rejects unowned current and AppImage leaves without touching user data', () => {
+    for (const kind of ['regular', 'symlink'] as const) {
+      const home = createHome()
+      const fakeBin = join(home, 'fake-bin')
+      const artifact = join(home, 'Polo-AI-x64.AppImage')
+      const binDir = join(home, '.local', 'bin')
+      const appDir = join(home, '.polo-ai', 'app')
+      const currentPath = join(appDir, 'current')
+      const appImagePath = join(appDir, 'Polo-AI-x64.AppImage')
+      const externalDir = join(home, 'user-runtime')
+      const externalAppImage = join(home, 'user.AppImage')
+
+      mkdirSync(fakeBin, { recursive: true })
+      mkdirSync(appDir, { recursive: true })
+      mkdirSync(externalDir, { recursive: true })
+      writeFileSync(join(externalDir, 'keep.txt'), 'user-runtime\n')
+      writeFileSync(externalAppImage, 'user-appimage\n')
+      if (kind === 'symlink') {
+        symlinkSync(externalDir, currentPath)
+        symlinkSync(externalAppImage, appImagePath)
+      }
+      else {
+        mkdirSync(currentPath)
+        writeFileSync(join(currentPath, 'keep.txt'), 'user-current\n')
+        writeFileSync(appImagePath, 'user-managed-leaf\n')
+      }
+      writeFileSync(
+        join(fakeBin, 'uname'),
+        '#!/bin/sh\ncase "$1" in -m) printf "x86_64\\n" ;; *) printf "Linux\\n" ;; esac\n',
+      )
+      writeFileSync(join(fakeBin, 'pgrep'), '#!/bin/sh\nexit 1\n')
+      writeFileSync(join(fakeBin, 'fusermount'), '#!/bin/sh\nexit 0\n')
+      for (const file of ['uname', 'pgrep', 'fusermount']) {
+        chmodSync(join(fakeBin, file), 0o755)
+      }
+      writeFileSync(
+        artifact,
+        `#!/bin/bash
+set -e
+[ "\${1:-}" = "--appimage-extract" ] || exit 64
+root="$PWD/squashfs-root/resources"
+mkdir -p "$root/app/resources/bin" "$root/app/resources/scripts"
+mkdir -p "$root/vendor/bun" "$root/app/dist/cli" "$root/app/dist/server"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo" "$root/app/resources/bin/polo"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-ai" "$root/app/resources/bin/polo-ai"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-messages.sh" "$root/app/resources/bin/polo-messages.sh"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/linux-terminal-integration.sh" "$root/app/resources/scripts/linux-terminal-integration.sh"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/atomic-rename-no-replace.ts" "$root/app/resources/scripts/atomic-rename-no-replace.ts"
+chmod +x "$root/app/resources/bin/polo" "$root/app/resources/bin/polo-ai" "$root/app/resources/scripts/linux-terminal-integration.sh"
+printf '{\\n  "version": "0.10.0"\\n}\\n' > "$root/app/package.json"
+printf '#!/bin/sh\\nexit 0\\n' > "$root/vendor/bun/bun"
+chmod +x "$root/vendor/bun/bun"
+printf 'cli\\n' > "$root/app/dist/cli/polo-cli.js"
+printf 'server\\n' > "$root/app/dist/server/polo-server.js"
+`,
+      )
+      chmodSync(artifact, 0o755)
+      const result = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
+        env: {
+          ...process.env,
+          HOME: home,
+          SHELL: '/bin/zsh',
+          PATH: `${fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+          POLO_AI_INSTALL_ARTIFACT: artifact,
+          POLO_AI_BIN_DIR: binDir,
+          POLO_TEST_SOURCE_ROOT: join(import.meta.dir, '..'),
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+
+      expect(result.exitCode).not.toBe(0)
+      expect(readFileSync(join(externalDir, 'keep.txt'), 'utf8')).toBe('user-runtime\n')
+      expect(readFileSync(externalAppImage, 'utf8')).toBe('user-appimage\n')
+      if (kind === 'symlink') {
+        expect(lstatSync(currentPath).isSymbolicLink()).toBe(true)
+        expect(lstatSync(appImagePath).isSymbolicLink()).toBe(true)
+        expect(readdirSync(externalDir)).toEqual(['keep.txt'])
+      }
+      else {
+        expect(readFileSync(join(currentPath, 'keep.txt'), 'utf8')).toBe('user-current\n')
+        expect(readFileSync(appImagePath, 'utf8')).toBe('user-managed-leaf\n')
+      }
+      expect(existsSync(join(home, '.zprofile'))).toBe(false)
+      expect(existsSync(join(home, '.polo-ai', 'terminal-integration-linux.state'))).toBe(false)
+      expect(existsSync(join(binDir, 'polo'))).toBe(false)
+      expect(
+        readdirSync(appDir).filter((name) =>
+          name.startsWith('.install-transaction.')
+          || name.startsWith('.profile-transaction.')),
+      ).toEqual([])
+    }
+  })
+
   it('rolls back every App/runtime backup, publication, and chmod failure point', () => {
     for (const failurePoint of [
       'current-backup',
@@ -414,10 +509,33 @@ mkdir -p "$root/app/resources/bin" "$root/app/resources/scripts"
 mkdir -p "$root/vendor/bun" "$root/app/dist/cli" "$root/app/dist/server"
 cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo" "$root/app/resources/bin/polo"
 cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-ai" "$root/app/resources/bin/polo-ai"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-messages.sh" "$root/app/resources/bin/polo-messages.sh"
 cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/linux-terminal-integration.sh" "$root/app/resources/scripts/linux-terminal-integration.sh"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/atomic-rename-no-replace.ts" "$root/app/resources/scripts/atomic-rename-no-replace.ts"
 chmod +x "$root/app/resources/bin/polo" "$root/app/resources/bin/polo-ai" "$root/app/resources/scripts/linux-terminal-integration.sh"
 printf '{\\n  "version": "0.10.0"\\n}\\n' > "$root/app/package.json"
-printf '#!/bin/sh\\nexit 0\\n' > "$root/vendor/bun/bun"
+cat > "$root/vendor/bun/bun" <<'BUN_WRAPPER'
+#!/bin/bash
+set -eu
+if [ "\${1:-}" = run ] && [[ "\${2:-}" == */atomic-rename-no-replace.ts ]]; then
+  fail=false
+  case "\${POLO_TEST_FAIL_POINT:-}" in
+    current-publish)
+      [[ "\${3:-}" == */squashfs-root && "\${4:-}" == */current ]] && fail=true
+      ;;
+    appimage-publish)
+      [[ "\${3:-}" == */downloads/Polo-AI-x64.AppImage && "\${4:-}" == */Polo-AI-x64.AppImage ]] && fail=true
+      ;;
+  esac
+  if [ "$fail" = true ] && [ ! -e "$POLO_TEST_FAILURE_FLAG" ]; then
+    : > "$POLO_TEST_FAILURE_FLAG"
+    printf 'injected %s failure\\n' "$POLO_TEST_FAIL_POINT" >&2
+    exit 73
+  fi
+  exec "$POLO_TEST_REAL_BUN" "$@"
+fi
+exit 0
+BUN_WRAPPER
 chmod +x "$root/vendor/bun/bun"
 printf 'cli\\n' > "$root/app/dist/cli/polo-cli.js"
 printf 'server\\n' > "$root/app/dist/server/polo-server.js"
@@ -432,6 +550,7 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
         POLO_AI_INSTALL_ARTIFACT: artifact,
         POLO_AI_BIN_DIR: binDir,
         POLO_TEST_SOURCE_ROOT: join(import.meta.dir, '..'),
+        POLO_TEST_REAL_BUN: process.execPath,
         POLO_TEST_FAILURE_FLAG: failureFlag,
         POLO_TEST_INSTALLED_APPIMAGE: appImagePath,
       }
@@ -518,10 +637,12 @@ mkdir -p "$root/app/resources/bin" "$root/app/resources/scripts"
 mkdir -p "$root/vendor/bun" "$root/app/dist/cli" "$root/app/dist/server"
 cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo" "$root/app/resources/bin/polo"
 cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-ai" "$root/app/resources/bin/polo-ai"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-messages.sh" "$root/app/resources/bin/polo-messages.sh"
 cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/linux-terminal-integration.sh" "$root/app/resources/scripts/linux-terminal-integration.sh"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/atomic-rename-no-replace.ts" "$root/app/resources/scripts/atomic-rename-no-replace.ts"
 chmod +x "$root/app/resources/bin/polo" "$root/app/resources/bin/polo-ai" "$root/app/resources/scripts/linux-terminal-integration.sh"
 printf '{\\n  "version": "0.10.0"\\n}\\n' > "$root/app/package.json"
-printf '#!/bin/sh\\nprintf "bundled=%%s\\\\n" "$*"\\nexit 19\\n' > "$root/vendor/bun/bun"
+printf '#!/bin/sh\\nif [ "\${1:-}" = run ] && [[ "\${2:-}" == */atomic-rename-no-replace.ts ]]; then exec "$POLO_TEST_REAL_BUN" "$@"; fi\\nprintf "bundled=%%s\\\\n" "$*"\\nexit 19\\n' > "$root/vendor/bun/bun"
 chmod +x "$root/vendor/bun/bun"
 printf 'cli\\n' > "$root/app/dist/cli/polo-cli.js"
 printf 'server\\n' > "$root/app/dist/server/polo-server.js"
@@ -536,6 +657,7 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
       POLO_AI_INSTALL_ARTIFACT: artifact,
       POLO_AI_BIN_DIR: binDir,
       POLO_TEST_SOURCE_ROOT: join(import.meta.dir, '..'),
+      POLO_TEST_REAL_BUN: process.execPath,
     }
 
     const installResult = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {

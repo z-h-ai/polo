@@ -10,7 +10,15 @@ const manifestPath = join(electronDir, 'dist', 'cli', 'artifact-manifest.json')
 const cliPackagePath = join(electronDir, 'dist', 'cli', 'package.json')
 const unixWrapper = join(electronDir, 'resources', 'bin', 'polo')
 const windowsWrapper = join(electronDir, 'resources', 'bin', 'polo.cmd')
+const unixMessages = join(electronDir, 'resources', 'bin', 'polo-messages.sh')
+const windowsMessages = join(electronDir, 'resources', 'bin', 'polo-messages.cmd')
 const windowsInstaller = join(electronDir, 'resources', 'scripts', 'windows-terminal-integration.ps1')
+const atomicRenameHelper = join(
+  electronDir,
+  'resources',
+  'scripts',
+  'atomic-rename-no-replace.ts',
+)
 const nsisInclude = join(electronDir, 'build', 'installer.nsh')
 
 for (const path of [
@@ -20,7 +28,10 @@ for (const path of [
   cliPackagePath,
   unixWrapper,
   windowsWrapper,
+  unixMessages,
+  windowsMessages,
   windowsInstaller,
+  atomicRenameHelper,
   nsisInclude,
 ]) {
   if (!existsSync(path)) throw new Error(`Required packaged artifact is missing: ${path}`)

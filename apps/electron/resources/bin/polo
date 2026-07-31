@@ -25,43 +25,25 @@ CLI="$APP_ROOT/dist/cli/polo-cli.js"
 SERVER="$APP_ROOT/dist/server/polo-server.js"
 
 POLO_LOCALE="${POLO_AI_LOCALE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-en}}}}"
-case "$POLO_LOCALE" in
-  zh|zh[_-]*)
-    RUNTIME_MISSING="错误：Polo 内置运行时缺失。请重新安装 Polo。"
-    TERMINAL_FILES_MISSING="错误：Polo 终端文件缺失。请重新安装 Polo。"
-    ;;
-  de|de[_-]*)
-    RUNTIME_MISSING="Fehler: Die gebündelte Polo-Laufzeit fehlt. Installiere Polo erneut."
-    TERMINAL_FILES_MISSING="Fehler: Polo-Terminaldateien fehlen. Installiere Polo erneut."
-    ;;
-  es|es[_-]*)
-    RUNTIME_MISSING="Error: Falta el entorno de ejecución incluido de Polo. Reinstala Polo."
-    TERMINAL_FILES_MISSING="Error: Faltan los archivos de terminal de Polo. Reinstala Polo."
-    ;;
-  hu|hu[_-]*)
-    RUNTIME_MISSING="Hiba: A Polo beépített futtatókörnyezete hiányzik. Telepítsd újra a Polót."
-    TERMINAL_FILES_MISSING="Hiba: A Polo terminálfájljai hiányoznak. Telepítsd újra a Polót."
-    ;;
-  ja|ja[_-]*)
-    RUNTIME_MISSING="エラー: Polo の内蔵ランタイムがありません。Polo を再インストールしてください。"
-    TERMINAL_FILES_MISSING="エラー: Polo のターミナルファイルがありません。Polo を再インストールしてください。"
-    ;;
-  pl|pl[_-]*)
-    RUNTIME_MISSING="Błąd: Brakuje dołączonego środowiska uruchomieniowego Polo. Zainstaluj Polo ponownie."
-    TERMINAL_FILES_MISSING="Błąd: Brakuje plików terminala Polo. Zainstaluj Polo ponownie."
-    ;;
-  *)
-    RUNTIME_MISSING="Error: Polo's bundled runtime is missing. Reinstall Polo."
-    TERMINAL_FILES_MISSING="Error: Polo terminal files are missing. Reinstall Polo."
-    ;;
-esac
+MESSAGES="$BIN_DIR/polo-messages.sh"
+if [ ! -f "$MESSAGES" ]; then
+  printf '%s\n' '[POLO_E_TERMINAL_FILES_MISSING]' >&2
+  exit 1
+fi
+. "$MESSAGES"
+polo_load_wrapper_messages "$POLO_LOCALE"
+
+if [ "${POLO_AI_DEPRECATED_SHIM:-}" = "1" ]; then
+  printf '%s\n' "[POLO_W_DEPRECATED_COMMAND] $POLO_MSG_DEPRECATED" >&2
+  unset POLO_AI_DEPRECATED_SHIM
+fi
 
 if [ ! -x "$BUN" ]; then
-  printf '%s\n' "[POLO_E_BUNDLED_RUNTIME_MISSING] $RUNTIME_MISSING" >&2
+  printf '%s\n' "[POLO_E_BUNDLED_RUNTIME_MISSING] $POLO_MSG_RUNTIME" >&2
   exit 1
 fi
 if [ ! -f "$CLI" ] || [ ! -f "$SERVER" ]; then
-  printf '%s\n' "[POLO_E_TERMINAL_FILES_MISSING] $TERMINAL_FILES_MISSING" >&2
+  printf '%s\n' "[POLO_E_TERMINAL_FILES_MISSING] $POLO_MSG_FILES" >&2
   exit 1
 fi
 

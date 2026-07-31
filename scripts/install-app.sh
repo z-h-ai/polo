@@ -695,7 +695,11 @@ else
     STAGED_PACKAGE_HASH=""
     STAGED_POLO_HASH=""
     STAGED_COMPAT_HASH=""
+    STAGED_MESSAGES_HASH=""
     STAGED_HELPER_HASH=""
+    STAGED_ATOMIC_HELPER_HASH=""
+    transaction_atomic_helper=""
+    transaction_bun=""
 
     cleanup_linux_stage() {
         [ -z "${extraction_temp:-}" ] || rm -rf "$extraction_temp"
@@ -710,11 +714,23 @@ else
     extracted_root="$extraction_temp/squashfs-root"
     staged_polo="$extracted_root/resources/app/resources/bin/polo"
     staged_compat="$extracted_root/resources/app/resources/bin/polo-ai"
+    staged_messages="$extracted_root/resources/app/resources/bin/polo-messages.sh"
     staged_helper="$extracted_root/resources/app/resources/scripts/linux-terminal-integration.sh"
+    staged_atomic_helper="$extracted_root/resources/app/resources/scripts/atomic-rename-no-replace.ts"
+    staged_bun="$extracted_root/resources/vendor/bun/bun"
     staged_package="$extracted_root/resources/app/package.json"
-    for required in "$staged_polo" "$staged_compat" "$staged_helper" "$staged_package"; do
+    for required in \
+        "$staged_polo" \
+        "$staged_compat" \
+        "$staged_messages" \
+        "$staged_helper" \
+        "$staged_atomic_helper" \
+        "$staged_bun" \
+        "$staged_package"; do
         [ -f "$required" ] || error "Required packaged terminal file is missing: $required"
+        [ ! -L "$required" ] || error "Required packaged terminal file is a symlink: $required"
     done
+    [ -x "$staged_bun" ] || error "Required packaged Bun runtime is not executable: $staged_bun"
     packaged_version=$(
         sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
             "$staged_package" | head -1
@@ -723,7 +739,9 @@ else
     STAGED_PACKAGE_HASH="$(profile_sha256 "$staged_package")"
     STAGED_POLO_HASH="$(profile_sha256 "$staged_polo")"
     STAGED_COMPAT_HASH="$(profile_sha256 "$staged_compat")"
+    STAGED_MESSAGES_HASH="$(profile_sha256 "$staged_messages")"
     STAGED_HELPER_HASH="$(profile_sha256 "$staged_helper")"
+    STAGED_ATOMIC_HELPER_HASH="$(profile_sha256 "$staged_atomic_helper")"
     APPIMAGE_AFTER_HASH="$(profile_sha256 "$appimage_path")"
 
     existing_polo=$(command -v polo 2>/dev/null || true)
@@ -737,6 +755,9 @@ else
         --version "$packaged_version" \
         --staged-polo "$staged_polo" \
         --staged-compat "$staged_compat"
+    bash "$staged_helper" preflight-app-runtime \
+        --app-dir "$APP_DIR" \
+        --bin-dir "$INSTALL_DIR"
 
     # Validate and snapshot the selected login profile before any App/runtime
     # mutation. A malformed or user-replaced profile aborts the transaction.
@@ -751,6 +772,25 @@ else
     transaction_helper="$install_transaction_dir/linux-terminal-integration.sh"
     cp "$staged_helper" "$transaction_helper"
     chmod 700 "$transaction_helper"
+    transaction_atomic_helper="$install_transaction_dir/atomic-rename-no-replace.ts"
+    cp "$staged_atomic_helper" "$transaction_atomic_helper"
+    chmod 600 "$transaction_atomic_helper"
+    transaction_bun="$install_transaction_dir/bun"
+    /bin/ln "$staged_bun" "$transaction_bun"
+    chmod 700 "$transaction_bun"
+
+    atomic_move_no_replace() {
+        "$transaction_bun" run "$transaction_atomic_helper" "$1" "$2"
+    }
+
+    restore_app_candidate_no_replace() {
+        local candidate="$1"
+        local destination="$2"
+
+        [ -e "$candidate" ] || [ -L "$candidate" ] || return 0
+        [ ! -e "$destination" ] && [ ! -L "$destination" ] || return 1
+        atomic_move_no_replace "$candidate" "$destination"
+    }
 
     if ! begin_managed_profile_transaction "$APP_DIR"; then
         rm -rf "$install_transaction_dir"
@@ -761,6 +801,8 @@ else
         local profile_rollback_ok=true
         local terminal_rollback_ok=true
         local app_rollback_ok=true
+        local current_installed="$install_transaction_dir/current.installed"
+        local appimage_installed="$install_transaction_dir/Polo-AI.installed"
 
         if [ -f "$terminal_transaction_dir/INSTALL_PENDING" ]; then
             bash "$transaction_helper" rollback-install \
@@ -773,12 +815,17 @@ else
         restore_managed_profile "$MANAGED_PROFILE_PATH" "$profile_backup" "$profile_existed" \
             || profile_rollback_ok=false
 
-        if [ -n "$CURRENT_AFTER_IDENTITY" ] \
-            && [ -d "$EXTRACTED_INSTALL_PATH" ] \
-            && [ ! -L "$EXTRACTED_INSTALL_PATH" ] \
-            && [ "$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")" = "$CURRENT_AFTER_IDENTITY" ] \
-            && [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json")" = "$STAGED_PACKAGE_HASH" ]; then
-            rm -rf "$EXTRACTED_INSTALL_PATH"
+        if [ -n "$CURRENT_AFTER_IDENTITY" ]; then
+            if atomic_move_no_replace "$EXTRACTED_INSTALL_PATH" "$current_installed" \
+                && [ -d "$current_installed" ] \
+                && [ ! -L "$current_installed" ] \
+                && [ "$(profile_filesystem_identity "$current_installed")" = "$CURRENT_AFTER_IDENTITY" ] \
+                && [ "$(profile_sha256 "$current_installed/resources/app/package.json")" = "$STAGED_PACKAGE_HASH" ]; then
+                :
+            else
+                restore_app_candidate_no_replace "$current_installed" "$EXTRACTED_INSTALL_PATH" || true
+                app_rollback_ok=false
+            fi
         elif [ "$current_existed" = true ] \
             && [ ! -e "$current_backup" ] \
             && [ -d "$EXTRACTED_INSTALL_PATH" ] \
@@ -786,16 +833,19 @@ else
             && [ "$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")" = "$CURRENT_BEFORE_IDENTITY" ] \
             && [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json")" = "$CURRENT_BEFORE_PACKAGE_HASH" ]; then
             :
-        elif [ -e "$EXTRACTED_INSTALL_PATH" ] || [ -L "$EXTRACTED_INSTALL_PATH" ]; then
-            app_rollback_ok=false
         fi
 
-        if [ -n "$APPIMAGE_AFTER_IDENTITY" ] \
-            && [ -f "$APPIMAGE_INSTALL_PATH" ] \
-            && [ ! -L "$APPIMAGE_INSTALL_PATH" ] \
-            && [ "$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_IDENTITY" ] \
-            && [ "$(profile_sha256 "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_HASH" ]; then
-            rm -f "$APPIMAGE_INSTALL_PATH"
+        if [ -n "$APPIMAGE_AFTER_IDENTITY" ]; then
+            if atomic_move_no_replace "$APPIMAGE_INSTALL_PATH" "$appimage_installed" \
+                && [ -f "$appimage_installed" ] \
+                && [ ! -L "$appimage_installed" ] \
+                && [ "$(profile_filesystem_identity "$appimage_installed")" = "$APPIMAGE_AFTER_IDENTITY" ] \
+                && [ "$(profile_sha256 "$appimage_installed")" = "$APPIMAGE_AFTER_HASH" ]; then
+                :
+            else
+                restore_app_candidate_no_replace "$appimage_installed" "$APPIMAGE_INSTALL_PATH" || true
+                app_rollback_ok=false
+            fi
         elif [ "$appimage_existed" = true ] \
             && [ ! -e "$appimage_backup" ] \
             && [ -f "$APPIMAGE_INSTALL_PATH" ] \
@@ -803,8 +853,6 @@ else
             && [ "$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_BEFORE_IDENTITY" ] \
             && [ "$(profile_sha256 "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_BEFORE_HASH" ]; then
             :
-        elif [ -e "$APPIMAGE_INSTALL_PATH" ] || [ -L "$APPIMAGE_INSTALL_PATH" ]; then
-            app_rollback_ok=false
         fi
 
         if [ "$current_existed" = true ]; then
@@ -812,8 +860,7 @@ else
                 if [ -L "$current_backup" ] \
                     || [ "$(profile_filesystem_identity "$current_backup")" != "$CURRENT_BEFORE_IDENTITY" ] \
                     || [ "$(profile_sha256 "$current_backup/resources/app/package.json")" != "$CURRENT_BEFORE_PACKAGE_HASH" ] \
-                    || [ -e "$EXTRACTED_INSTALL_PATH" ] \
-                    || ! mv "$current_backup" "$EXTRACTED_INSTALL_PATH"; then
+                    || ! restore_app_candidate_no_replace "$current_backup" "$EXTRACTED_INSTALL_PATH"; then
                     app_rollback_ok=false
                 fi
             elif [ ! -d "$EXTRACTED_INSTALL_PATH" ] \
@@ -828,8 +875,7 @@ else
                 if [ -L "$appimage_backup" ] \
                     || [ "$(profile_filesystem_identity "$appimage_backup")" != "$APPIMAGE_BEFORE_IDENTITY" ] \
                     || [ "$(profile_sha256 "$appimage_backup")" != "$APPIMAGE_BEFORE_HASH" ] \
-                    || [ -e "$APPIMAGE_INSTALL_PATH" ] \
-                    || ! mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"; then
+                    || ! restore_app_candidate_no_replace "$appimage_backup" "$APPIMAGE_INSTALL_PATH"; then
                     app_rollback_ok=false
                 fi
             elif [ ! -f "$APPIMAGE_INSTALL_PATH" ] \
@@ -843,6 +889,8 @@ else
         if [ "$terminal_rollback_ok" = true ] \
             && [ "$profile_rollback_ok" = true ] \
             && [ "$app_rollback_ok" = true ]; then
+            rm -rf "$current_installed"
+            rm -f "$appimage_installed"
             rm -rf "$install_transaction_dir"
             LINUX_INSTALL_TRANSACTION_ACTIVE=false
             return 0
@@ -883,30 +931,49 @@ else
         sleep 2
     fi
 
-    if [ -d "$EXTRACTED_INSTALL_PATH" ] && [ ! -L "$EXTRACTED_INSTALL_PATH" ]; then
+    if [ -e "$EXTRACTED_INSTALL_PATH" ] || [ -L "$EXTRACTED_INSTALL_PATH" ]; then
+        [ -d "$EXTRACTED_INSTALL_PATH" ] && [ ! -L "$EXTRACTED_INSTALL_PATH" ] \
+            || error "Polo cannot replace an unverified current runtime path."
+        [ -f "$EXTRACTED_INSTALL_PATH/resources/app/package.json" ] \
+            && [ ! -L "$EXTRACTED_INSTALL_PATH/resources/app/package.json" ] \
+            || error "Polo cannot verify the existing current runtime."
         current_existed=true
         CURRENT_BEFORE_IDENTITY="$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")"
         CURRENT_BEFORE_PACKAGE_HASH="$(
             profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json"
         )"
     fi
-    if [ -f "$APPIMAGE_INSTALL_PATH" ] && [ ! -L "$APPIMAGE_INSTALL_PATH" ]; then
+    if [ -e "$APPIMAGE_INSTALL_PATH" ] || [ -L "$APPIMAGE_INSTALL_PATH" ]; then
+        [ -f "$APPIMAGE_INSTALL_PATH" ] && [ ! -L "$APPIMAGE_INSTALL_PATH" ] \
+            || error "Polo cannot replace an unverified AppImage path."
         appimage_existed=true
         APPIMAGE_BEFORE_IDENTITY="$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")"
         APPIMAGE_BEFORE_HASH="$(profile_sha256 "$APPIMAGE_INSTALL_PATH")"
     fi
     if [ "$current_existed" = true ]; then
         mv "$EXTRACTED_INSTALL_PATH" "$current_backup"
-        [ "$(profile_filesystem_identity "$current_backup")" = "$CURRENT_BEFORE_IDENTITY" ]
+        if [ ! -d "$current_backup" ] \
+            || [ -L "$current_backup" ] \
+            || [ "$(profile_filesystem_identity "$current_backup")" != "$CURRENT_BEFORE_IDENTITY" ] \
+            || [ "$(profile_sha256 "$current_backup/resources/app/package.json")" != "$CURRENT_BEFORE_PACKAGE_HASH" ]; then
+            restore_app_candidate_no_replace "$current_backup" "$EXTRACTED_INSTALL_PATH" || true
+            error "Polo detected a concurrent change while claiming the current runtime."
+        fi
     fi
     if [ "$appimage_existed" = true ]; then
         mv "$APPIMAGE_INSTALL_PATH" "$appimage_backup"
-        [ "$(profile_filesystem_identity "$appimage_backup")" = "$APPIMAGE_BEFORE_IDENTITY" ]
+        if [ ! -f "$appimage_backup" ] \
+            || [ -L "$appimage_backup" ] \
+            || [ "$(profile_filesystem_identity "$appimage_backup")" != "$APPIMAGE_BEFORE_IDENTITY" ] \
+            || [ "$(profile_sha256 "$appimage_backup")" != "$APPIMAGE_BEFORE_HASH" ]; then
+            restore_app_candidate_no_replace "$appimage_backup" "$APPIMAGE_INSTALL_PATH" || true
+            error "Polo detected a concurrent change while claiming the AppImage."
+        fi
     fi
 
-    mv "$extracted_root" "$EXTRACTED_INSTALL_PATH"
+    atomic_move_no_replace "$extracted_root" "$EXTRACTED_INSTALL_PATH"
     CURRENT_AFTER_IDENTITY="$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")"
-    mv "$appimage_path" "$APPIMAGE_INSTALL_PATH"
+    atomic_move_no_replace "$appimage_path" "$APPIMAGE_INSTALL_PATH"
     APPIMAGE_AFTER_IDENTITY="$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")"
     chmod +x "$APPIMAGE_INSTALL_PATH"
 
@@ -940,7 +1007,9 @@ else
     [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json")" = "$STAGED_PACKAGE_HASH" ]
     [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/bin/polo")" = "$STAGED_POLO_HASH" ]
     [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/bin/polo-ai")" = "$STAGED_COMPAT_HASH" ]
+    [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/bin/polo-messages.sh")" = "$STAGED_MESSAGES_HASH" ]
     [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/scripts/linux-terminal-integration.sh")" = "$STAGED_HELPER_HASH" ]
+    [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/scripts/atomic-rename-no-replace.ts")" = "$STAGED_ATOMIC_HELPER_HASH" ]
     [ -x "$APPIMAGE_INSTALL_PATH" ] && [ ! -L "$APPIMAGE_INSTALL_PATH" ]
     [ "$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_IDENTITY" ]
     [ "$(profile_sha256 "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_HASH" ]

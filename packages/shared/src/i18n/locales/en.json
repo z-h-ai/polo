@@ -265,6 +265,8 @@
   "chatInput.placeholder.sidebar": "Press {{key}} + B to toggle the sidebar",
   "chatInput.placeholder.typeMessage": "Type a message...",
   "chatInput.placeholder.workOn": "What would you like to work on?",
+  "cli.bundledRuntimeMissing": "Polo's bundled runtime is missing. Reinstall Polo.",
+  "cli.deprecatedCommand": "'polo-ai' is deprecated; use 'polo' instead.",
   "cli.runtimeDiscovery.error.directory_owner": "The Polo runtime directory is not owned by the current user.",
   "cli.runtimeDiscovery.error.directory_permissions": "The Polo runtime directory permissions must be 0700.",
   "cli.runtimeDiscovery.error.file_owner": "The Polo runtime file is not owned by the current user.",

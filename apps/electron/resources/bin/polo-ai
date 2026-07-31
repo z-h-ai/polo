@@ -1,9 +1,4 @@
 #!/bin/sh
 # Compatibility shim. Planned removal: Polo 1.0.
-POLO_LOCALE="${POLO_AI_LOCALE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-en}}}}"
-case "$POLO_LOCALE" in
-  zh|zh[_-]*) WARNING="警告：“polo-ai”已弃用；请改用“polo”。" ;;
-  *) WARNING="Warning: 'polo-ai' is deprecated; use 'polo' instead." ;;
-esac
-printf '%s\n' "[POLO_W_DEPRECATED_COMMAND] $WARNING" >&2
+export POLO_AI_DEPRECATED_SHIM=1
 exec "$(dirname "$0")/polo" "$@"

@@ -28,6 +28,7 @@ class PoloWrapperSmokeTests(unittest.TestCase):
             directory.mkdir(parents=True, exist_ok=True)
         shutil.copy2(BIN_DIR / "polo", self.bin / "polo")
         shutil.copy2(BIN_DIR / "polo-ai", self.bin / "polo-ai")
+        shutil.copy2(BIN_DIR / "polo-messages.sh", self.bin / "polo-messages.sh")
         self.cli.write_text("fixture cli\n", encoding="utf-8")
         self.server.write_text("fixture server\n", encoding="utf-8")
         self.runtime.write_text(

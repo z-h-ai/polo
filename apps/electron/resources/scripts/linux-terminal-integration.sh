@@ -1061,6 +1061,49 @@ assert_uninstallable() {
   return 1
 }
 
+assert_app_runtime_replaceable() {
+  local current_path="$app_dir/current"
+  local appimage_path="$app_dir/Polo-AI-x64.AppImage"
+  local current_present="false"
+  local appimage_present="false"
+
+  if [ -e "$current_path" ] || [ -L "$current_path" ]; then
+    [ -d "$current_path" ] && [ ! -L "$current_path" ] || {
+      printf "Polo cannot replace %s because it is not a verified managed runtime directory.\n" "$current_path" >&2
+      return 1
+    }
+    current_present="true"
+  fi
+  if [ -e "$appimage_path" ] || [ -L "$appimage_path" ]; then
+    [ -f "$appimage_path" ] && [ ! -L "$appimage_path" ] || {
+      printf "Polo cannot replace %s because it is not a verified managed AppImage.\n" "$appimage_path" >&2
+      return 1
+    }
+    appimage_present="true"
+  fi
+
+  [ "$current_present" = "true" ] || [ "$appimage_present" = "true" ] || return 0
+
+  if [ "$current_present" = "true" ]; then
+    [ "$appimage_present" = "true" ] || return 1
+    case "$state_status" in valid|legacy) ;; *) return 1 ;; esac
+    [ "$STATE_POLO_TARGET" = "$polo_target" ] \
+      && [ "$STATE_COMPAT_TARGET" = "$compat_target" ] \
+      && verify_owned_link "$polo_path" "$STATE_POLO_PATH" "$STATE_POLO_TARGET" "$STATE_POLO_SHA" \
+      && verify_owned_link "$compat_path" "$STATE_COMPAT_PATH" "$STATE_COMPAT_TARGET" "$STATE_COMPAT_SHA" \
+      && [ -f "$current_path/resources/app/package.json" ] \
+      && [ ! -L "$current_path/resources/app/package.json" ]
+    return
+  fi
+
+  # The only accepted state without an extracted runtime is the exact
+  # pre-POO-14 AppImage + launcher layout. An AppImage at the managed leaf
+  # without that immutable historical launcher proof belongs to the user.
+  [ "$state_status" = "missing" ] || return 1
+  is_exact_historical_file "$polo_path" polo \
+    || is_exact_historical_file "$compat_path" compat
+}
+
 case "$mode" in
   preflight)
     [ -n "$version" ] && [ -f "$staged_polo" ] && [ -f "$staged_compat" ] || {
@@ -1069,6 +1112,9 @@ case "$mode" in
     }
     assert_replaceable "$state_status" "$polo_path" polo
     assert_replaceable "$state_status" "$compat_path" compat
+    ;;
+  preflight-app-runtime)
+    assert_app_runtime_replaceable
     ;;
   install)
     [ -n "$version" ] && [ -f "$polo_target" ] && [ -f "$compat_target" ] || {

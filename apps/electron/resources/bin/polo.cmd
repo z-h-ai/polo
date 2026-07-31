@@ -23,11 +23,15 @@ set "POLO_LOCALE=%POLO_AI_LOCALE%"
 if not defined POLO_LOCALE set "POLO_LOCALE=%LC_ALL%"
 if not defined POLO_LOCALE set "POLO_LOCALE=%LC_MESSAGES%"
 if not defined POLO_LOCALE set "POLO_LOCALE=%LANG%"
-set "POLO_MSG_RUNTIME=Error: Polo's bundled runtime is missing. Reinstall Polo."
-set "POLO_MSG_FILES=Error: Polo terminal files are missing. Reinstall Polo."
-if /I "%POLO_LOCALE:~0,2%"=="zh" (
-  set "POLO_MSG_RUNTIME=错误：Polo 内置运行时缺失。请重新安装 Polo。"
-  set "POLO_MSG_FILES=错误：Polo 终端文件缺失。请重新安装 Polo。"
+set "POLO_MESSAGES=%POLO_AI_APP_ROOT%\resources\bin\polo-messages.cmd"
+if not exist "%POLO_MESSAGES%" (
+  echo [POLO_E_TERMINAL_FILES_MISSING] 1>&2
+  exit /b 1
+)
+call "%POLO_MESSAGES%" "%POLO_LOCALE%"
+if "%POLO_AI_DEPRECATED_SHIM%"=="1" (
+  echo [POLO_W_DEPRECATED_COMMAND] %POLO_MSG_DEPRECATED% 1>&2
+  set "POLO_AI_DEPRECATED_SHIM="
 )
 
 if not exist "%POLO_AI_BUN%" (

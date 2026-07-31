@@ -172,7 +172,9 @@ validate_app_bundle() {
   local app_root="$resources_root/app"
   local bun="$resources_root/vendor/bun/bun"
   local wrapper="$app_root/resources/bin/polo"
+  local wrapper_messages="$app_root/resources/bin/polo-messages.sh"
   local linux_terminal_helper="$app_root/resources/scripts/linux-terminal-integration.sh"
+  local atomic_rename_helper="$app_root/resources/scripts/atomic-rename-no-replace.ts"
   local manifest="$app_root/dist/cli/artifact-manifest.json"
   local cli_package="$app_root/dist/cli/package.json"
   local platform_key
@@ -191,6 +193,7 @@ validate_app_bundle() {
     "$uv_manifest" \
     "$uv_lock" \
     "$wrapper" \
+    "$wrapper_messages" \
     "$app_root/dist/cli/polo-cli.js" \
     "$app_root/dist/server/polo-server.js" \
     "$manifest" \
@@ -201,8 +204,11 @@ validate_app_bundle() {
     fi
   done
   if [ "$SYSTEM_NAME" = "Linux" ] \
-    && { [ ! -f "$linux_terminal_helper" ] || [ ! -x "$linux_terminal_helper" ]; }; then
-    echo "$label is missing the executable Linux terminal ownership helper: $linux_terminal_helper" >&2
+    && { [ ! -f "$linux_terminal_helper" ] \
+      || [ ! -x "$linux_terminal_helper" ] \
+      || [ ! -f "$atomic_rename_helper" ] \
+      || [ -L "$atomic_rename_helper" ]; }; then
+    echo "$label is missing a trusted Linux terminal transaction helper" >&2
     return 1
   fi
   if [ ! -x "$uv" ]; then

@@ -265,6 +265,8 @@
   "chatInput.placeholder.sidebar": "Pulsa {{key}} + B para mostrar/ocultar la barra lateral",
   "chatInput.placeholder.typeMessage": "Escribe un mensaje...",
   "chatInput.placeholder.workOn": "¿En qué te gustaría trabajar?",
+  "cli.bundledRuntimeMissing": "Falta el entorno de ejecución incluido de Polo. Reinstala Polo.",
+  "cli.deprecatedCommand": "«polo-ai» está obsoleto; usa «polo» en su lugar.",
   "cli.runtimeDiscovery.error.directory_owner": "El directorio de ejecución de Polo no pertenece al usuario actual.",
   "cli.runtimeDiscovery.error.directory_permissions": "Los permisos del directorio de ejecución de Polo deben ser 0700.",
   "cli.runtimeDiscovery.error.file_owner": "El archivo de ejecución de Polo no pertenece al usuario actual.",

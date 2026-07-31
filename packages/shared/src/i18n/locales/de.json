@@ -265,6 +265,8 @@
   "chatInput.placeholder.sidebar": "{{key}} + B drücken, um die Seitenleiste ein-/auszublenden",
   "chatInput.placeholder.typeMessage": "Nachricht eingeben...",
   "chatInput.placeholder.workOn": "Woran möchten Sie arbeiten?",
+  "cli.bundledRuntimeMissing": "Die gebündelte Polo-Laufzeit fehlt. Installiere Polo erneut.",
+  "cli.deprecatedCommand": "Der Befehl „polo-ai“ ist veraltet; verwende stattdessen „polo“.",
   "cli.runtimeDiscovery.error.directory_owner": "Das Polo-Laufzeitverzeichnis gehört nicht dem aktuellen Benutzer.",
   "cli.runtimeDiscovery.error.directory_permissions": "Die Berechtigungen des Polo-Laufzeitverzeichnisses müssen 0700 sein.",
   "cli.runtimeDiscovery.error.file_owner": "Die Polo-Laufzeitdatei gehört nicht dem aktuellen Benutzer.",

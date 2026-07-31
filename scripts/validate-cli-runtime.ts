@@ -33,6 +33,10 @@ if (process.platform !== 'win32') {
   copyFileSync(server, join(packagedApp, 'dist', 'server', 'polo-server.js'))
   const packagedWrapper = join(packagedBin, 'polo')
   copyFileSync(join(root, 'apps', 'electron', 'resources', 'bin', 'polo'), packagedWrapper)
+  copyFileSync(
+    join(root, 'apps', 'electron', 'resources', 'bin', 'polo-messages.sh'),
+    join(packagedApp, 'resources', 'bin', 'polo-messages.sh'),
+  )
   chmodSync(packagedWrapper, 0o755)
   const installedLauncher = join(userBin, 'polo')
   symlinkSync(packagedWrapper, installedLauncher)

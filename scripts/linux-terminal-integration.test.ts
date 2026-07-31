@@ -42,6 +42,14 @@ const canonicalCompat = join(
   'bin',
   'polo-ai',
 )
+const canonicalMessages = join(
+  repoRoot,
+  'apps',
+  'electron',
+  'resources',
+  'bin',
+  'polo-messages.sh',
+)
 const roots: string[] = []
 
 interface Fixture {
@@ -68,6 +76,7 @@ function fixture(): Fixture {
   const compatTarget = join(wrapperDir, 'polo-ai')
   copyFileSync(canonicalPolo, poloTarget)
   copyFileSync(canonicalCompat, compatTarget)
+  copyFileSync(canonicalMessages, join(wrapperDir, 'polo-messages.sh'))
   chmodSync(poloTarget, 0o755)
   chmodSync(compatTarget, 0o755)
   const profilePath = join(root, '.zprofile')

@@ -24,6 +24,7 @@ $serverPath = Join-Path $appRoot "dist\server\polo-server.js"
 $packagePath = Join-Path $appRoot "package.json"
 $launcherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo.cmd"
 $legacyLauncherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo-ai.cmd"
+$messageTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo-messages.cmd"
 
 function Write-AtomicUtf8([string]$Path, [string]$Content) {
     $parent = Split-Path -Parent $Path
@@ -165,7 +166,8 @@ function Assert-PackagedArtifacts {
         $serverPath,
         $packagePath,
         $launcherTemplate,
-        $legacyLauncherTemplate
+        $legacyLauncherTemplate,
+        $messageTemplate
     )) {
         if (-not (Test-Path $required)) {
             throw "Required Polo artifact not found: $required"

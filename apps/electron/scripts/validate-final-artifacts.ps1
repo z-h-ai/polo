@@ -125,10 +125,12 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $installedExe = Join-Path $installDir "Polo AI.exe"
     $piServerPath = Join-Path $appRoot "resources\pi-agent-server\index.js"
     $sessionServerPath = Join-Path $appRoot "resources\session-mcp-server\index.js"
+    $wrapperMessages = Join-Path $appRoot "resources\bin\polo-messages.cmd"
 
     foreach ($required in @(
         $bun,
         $launcher,
+        $wrapperMessages,
         $manifestPath,
         $metadataPath,
         $cliPath,

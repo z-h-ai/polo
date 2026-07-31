@@ -39,6 +39,8 @@ files:
   - resources/bin/polo.cmd
   - resources/bin/polo-ai
   - resources/bin/polo-ai.cmd
+  - resources/bin/polo-messages.sh
+  - resources/bin/polo-messages.cmd
   - resources/bin/pdf-tool
   - resources/bin/pdf-tool.cmd
   - resources/bin/xlsx-tool

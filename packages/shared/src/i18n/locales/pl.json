@@ -265,6 +265,8 @@
   "chatInput.placeholder.sidebar": "Naciśnij {{key}} + B, aby przełączyć pasek boczny",
   "chatInput.placeholder.typeMessage": "Napisz wiadomość...",
   "chatInput.placeholder.workOn": "Nad czym chcesz pracować?",
+  "cli.bundledRuntimeMissing": "Brakuje dołączonego środowiska uruchomieniowego Polo. Zainstaluj Polo ponownie.",
+  "cli.deprecatedCommand": "Polecenie „polo-ai” jest przestarzałe; użyj zamiast niego „polo”.",
   "cli.runtimeDiscovery.error.directory_owner": "Katalog środowiska uruchomieniowego Polo nie należy do bieżącego użytkownika.",
   "cli.runtimeDiscovery.error.directory_permissions": "Uprawnienia katalogu środowiska uruchomieniowego Polo muszą wynosić 0700.",
   "cli.runtimeDiscovery.error.file_owner": "Plik środowiska uruchomieniowego Polo nie należy do bieżącego użytkownika.",

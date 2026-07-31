@@ -32,6 +32,12 @@ function validatePackagedCli(context) {
   const manifestPath = path.join(appDir, 'dist', 'cli', 'artifact-manifest.json');
   const cliPackagePath = path.join(appDir, 'dist', 'cli', 'package.json');
   const wrapper = path.join(appDir, 'resources', 'bin', isWindows ? 'polo.cmd' : 'polo');
+  const wrapperMessages = path.join(
+    appDir,
+    'resources',
+    'bin',
+    isWindows ? 'polo-messages.cmd' : 'polo-messages.sh',
+  );
   const windowsInstallerScript = path.join(
     appDir,
     'resources',
@@ -43,6 +49,12 @@ function validatePackagedCli(context) {
     'resources',
     'scripts',
     'linux-terminal-integration.sh',
+  );
+  const atomicRenameHelper = path.join(
+    appDir,
+    'resources',
+    'scripts',
+    'atomic-rename-no-replace.ts',
   );
   const bun = path.join(resourcesDir, 'vendor', 'bun', isWindows ? 'bun.exe' : 'bun');
   const archNames = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
@@ -70,13 +82,16 @@ function validatePackagedCli(context) {
     manifestPath,
     cliPackagePath,
     wrapper,
+    wrapperMessages,
     bun,
     uv,
     uvManifestPath,
     uvLockPath,
   ];
   if (isWindows) requiredArtifacts.push(windowsInstallerScript);
-  if (context.electronPlatformName === 'linux') requiredArtifacts.push(linuxInstallerScript);
+  if (context.electronPlatformName === 'linux') {
+    requiredArtifacts.push(linuxInstallerScript, atomicRenameHelper);
+  }
   for (const required of requiredArtifacts) {
     if (!fs.existsSync(required)) {
       throw new Error(`POO-14 unpacked CLI validation failed; missing: ${required}`);

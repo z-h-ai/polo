@@ -265,6 +265,8 @@
   "chatInput.placeholder.sidebar": "按 {{key}} + B 切换侧栏",
   "chatInput.placeholder.typeMessage": "输入消息...",
   "chatInput.placeholder.workOn": "想做什么?",
+  "cli.bundledRuntimeMissing": "Polo 内置运行时缺失，请重新安装 Polo。",
+  "cli.deprecatedCommand": "“polo-ai”已弃用，请改用“polo”。",
   "cli.runtimeDiscovery.error.directory_owner": "Polo 运行时目录不属于当前用户。",
   "cli.runtimeDiscovery.error.directory_permissions": "Polo 运行时目录权限必须为 0700。",
   "cli.runtimeDiscovery.error.file_owner": "Polo 运行时文件不属于当前用户。",

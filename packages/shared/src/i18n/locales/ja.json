@@ -265,6 +265,8 @@
   "chatInput.placeholder.sidebar": "{{key}} + B でサイドバーを切り替え",
   "chatInput.placeholder.typeMessage": "メッセージを入力...",
   "chatInput.placeholder.workOn": "何に取り組みますか？",
+  "cli.bundledRuntimeMissing": "Polo の内蔵ランタイムがありません。Polo を再インストールしてください。",
+  "cli.deprecatedCommand": "「polo-ai」は非推奨です。代わりに「polo」を使用してください。",
   "cli.runtimeDiscovery.error.directory_owner": "Polo ランタイムディレクトリの所有者が現在のユーザーではありません。",
   "cli.runtimeDiscovery.error.directory_permissions": "Polo ランタイムディレクトリの権限は 0700 である必要があります。",
   "cli.runtimeDiscovery.error.file_owner": "Polo ランタイムファイルの所有者が現在のユーザーではありません。",

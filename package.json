@@ -59,7 +59,7 @@
     "electron:build:preload": "bun run scripts/electron-build-preload.ts",
     "electron:build:renderer": "bun run scripts/electron-build-renderer.ts",
     "electron:build:resources": "bun run scripts/electron-build-resources.ts",
-    "electron:build:cli": "bun run scripts/build-cli-artifacts.ts",
+    "electron:build:cli": "bun run scripts/generate-wrapper-messages.ts && bun run scripts/build-cli-artifacts.ts",
     "electron:validate:cli": "bun run scripts/validate-cli-artifacts.ts",
     "electron:validate:cli:runtime": "bun run scripts/validate-cli-runtime.ts",
     "electron:validate:artifacts:unix": "bash apps/electron/scripts/validate-final-artifacts.sh",

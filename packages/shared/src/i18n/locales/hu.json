@@ -265,6 +265,8 @@
   "chatInput.placeholder.sidebar": "Nyomd meg: {{key}} + B az oldalsáv be/kikapcsolásához",
   "chatInput.placeholder.typeMessage": "Írj egy üzenetet...",
   "chatInput.placeholder.workOn": "Min szeretnél dolgozni?",
+  "cli.bundledRuntimeMissing": "A Polo beépített futtatókörnyezete hiányzik. Telepítsd újra a Polót.",
+  "cli.deprecatedCommand": "A „polo-ai” elavult; használd helyette a „polo” parancsot.",
   "cli.runtimeDiscovery.error.directory_owner": "A Polo futásidejű könyvtára nem az aktuális felhasználó tulajdona.",
   "cli.runtimeDiscovery.error.directory_permissions": "A Polo futásidejű könyvtár jogosultságának 0700-nak kell lennie.",
   "cli.runtimeDiscovery.error.file_owner": "A Polo futásidejű fájlja nem az aktuális felhasználó tulajdona.",
