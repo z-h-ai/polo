@@ -887,17 +887,28 @@ describe('AdminClient', () => {
     });
   });
 
-  it('queries exact installed identities through the minimal batch safety endpoint', async () => {
+  it('derives Creator Skill safety from the published artifact detail contract', async () => {
     mockJsonFetch({
-      statuses: [{
+      artifact: {
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      },
+      versions: [{
+        id: 'version-1',
         artifactId: 'artifact-1',
         version: '1.0.0',
+        status: 'published',
         archiveChecksum: 'a'.repeat(64),
-        status: 'revoked',
-        safeVersion: '1.1.0',
-        internalReason: 'must-not-leak',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        uploadGeneration: 1,
       }],
-      organization: 'must-not-leak',
     });
     const client = new AdminClient('https://admin.example.com');
     const input = {
@@ -911,14 +922,13 @@ describe('AdminClient', () => {
       input,
     )).toEqual({
       ...input,
-      status: 'revoked',
-      safeVersion: '1.1.0',
+      status: 'active',
     });
     expect(fetchCalls[0]!.url).toBe(
-      'https://admin.example.com/api/installed-artifacts/status',
+      'https://admin.example.com/api/artifacts/artifact-1?version=1.0.0',
     );
-    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
-      installations: [input],
-    }));
+    expect(fetchCalls[0]!.init.method).toBe('GET');
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer creator-access-token');
   });
 });

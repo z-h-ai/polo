@@ -111,6 +111,7 @@ function createHandlerDependencies(): HandlerDeps {
         error: (...args: unknown[]) => console.error(...args),
         debug: () => {},
       },
+      getAdminAccessToken: () => adminAccessToken,
       systemDarkMode: () => false,
       imageProcessor: {
         getMetadata: async () => null,

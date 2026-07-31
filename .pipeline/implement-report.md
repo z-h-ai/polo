@@ -1,29 +1,31 @@
 # POO-21 Implement Report
 
 ## Change Summary
-- Added `packages/shared/scripts/verify-creator-skills-package.ts` to:
-  - rebuild the creator-skills dist boundary
-  - pack `@polo-ai/shared` into a tarball
--  - validate the packed manifest rejects private creator-skills source/tests and keeps the public boundary pinned to `dist/creator-skills`
-  - create a temporary Admin snapshot from an exact git commit
-  - regenerate the consumer lockfile deterministically for the tarball dependency
-  - install the tarball through frozen `npm ci`
-  - prove a `next dev --turbopack` route can import the exact public creator-skills subpaths
-- Added `packages/shared/package.json` script `test:creator-skills-package`.
-- Added `packages/shared/src/creator-skills/.npmignore` to keep the private creator-skills source tree out of the published tarball while preserving the existing package-root `src/**` surface for unrelated exports.
+- Fixed the merged-worktree Electron Creator Skill install path so the real download fetch uses the current Admin auth token instead of relying on a stale credential cache.
+- Normalized the Admin download origin check so `localhost` and `127.0.0.1` loopback URLs share the same authenticated fetch path.
+- Added a live-token bridge from the Electron E2E harness into the server-core runtime via `PlatformServices.getAdminAccessToken`.
+- Kept the shared Admin safety-status fix from the prior commit so the client now derives safety from the published artifact detail contract.
 
 ## Key Files
-- `packages/shared/scripts/verify-creator-skills-package.ts`
-- `packages/shared/package.json`
-- `packages/shared/src/creator-skills/.npmignore`
+- `packages/server-core/src/handlers/rpc/skills.ts`
+- `packages/server-core/src/runtime/platform.ts`
+- `apps/electron/e2e/creator-skill/main.ts`
+- `packages/shared/src/admin/client.ts`
+- `packages/shared/src/admin/__tests__/client.test.ts`
 
 ## Self-Test Results
-- `bun run test:creator-skills-package` passed.
-- `bun test src/creator-skills/__tests__/package-exports.test.ts` passed.
-- The temp Admin proof started `next dev --turbopack` and `GET /shared-skill-proof` returned `200`.
-- The tarball dry-run showed no private `src/creator-skills/**` source/test files beyond the subtree's packaging-control `.npmignore`.
-- The route imported both `@polo-ai/shared/creator-skills` and `@polo-ai/shared/creator-skills/fixtures` from the packed tarball, and runtime resolution pointed at `dist/creator-skills/*.cjs`.
+- `bun test packages/shared/src/admin/__tests__/client.test.ts` passed.
+- `bun test ./packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts` passed.
+- `bun run scripts/electron-creator-skill-e2e.ts` passed against a real isolated Admin server.
+- Final E2E evidence: `creator_skill_e2e_pass` with `progressStages: ["download","validate","prepare","commit","refresh"]`, `skillsChangedCount: 3`, and `backupsCount: 2`.
+
+## Verification Environment
+- Admin server: `bun run dev` in `/Users/wow/project/z-h-ai/polo-admin-dir/dev`
+- Admin DB: `postgresql://postgres:postgres@localhost:5432/polo_admin_test`
+- Admin secret: `JWT_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+- DB reset/seed commands:
+  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/polo_admin_test bun run scripts/reset-test-db.ts`
+  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/polo_admin_test bun run scripts/seed-test-db.ts`
 
 ## Remaining Issues
-- None in the POO worktree.
-- The temp Admin copy emitted non-blocking Prisma/DATABASE_URL bootstrap warnings during Next startup, but they did not prevent the route compile or the successful `200` response.
+- None for POO-21 in this worktree.
