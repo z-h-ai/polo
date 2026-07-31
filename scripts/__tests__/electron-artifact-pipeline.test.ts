@@ -150,7 +150,24 @@ describe('Electron final artifact validation pipeline', () => {
     expect(unixPreviousPreflight).toContain('Previous release version must differ from current')
     expect(windowsPreviousPreflight).toContain('Previous release version must differ from current')
     expect(unixPreviousPreflight).toContain('is_semver')
-    expect(workflow).toContain("semver_pattern='^")
+    const semverPattern = read('scripts/strict-semver-pattern.txt').trim()
+    expect(semverPattern.startsWith('^')).toBe(true)
+    expect(semverPattern.endsWith('$')).toBe(true)
+    for (const consumer of [
+      workflow,
+      unixPreviousPreflight,
+      windowsPreviousPreflight,
+    ]) {
+      expect(consumer).toContain('strict-semver-pattern.txt')
+    }
+    expect(read('scripts/strict-semver.ts')).toContain(
+      "'./strict-semver-pattern.txt'",
+    )
+    expect(read('scripts/validate-previous-release-contract.ts')).toContain(
+      "from './strict-semver'",
+    )
+    expect(workflow).not.toContain("semver_pattern='^")
+    expect(windowsPreviousPreflight).not.toContain("$semverPattern = '(?:")
     expect(workflow).not.toContain('v[0-9]*.[0-9]*.[0-9]*)')
     expect(workflow).toContain('windows-terminal-integration.test.ps1')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_TEAM_ID')

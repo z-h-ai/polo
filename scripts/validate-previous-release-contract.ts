@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import { isStrictSemver, parseStrictSemverTag } from './strict-semver'
 
 export interface PreviousReleaseContractInput {
   repository: string
@@ -38,8 +39,6 @@ export interface VerifiedPreviousReleaseContract {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/
-const TAG_PATTERN = /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -51,13 +50,19 @@ export function validatePreviousReleaseContract(
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository)) {
     throw new Error(`Invalid previous release repository: ${input.repository}`)
   }
-  if (!TAG_PATTERN.test(input.tag)) {
+  if (!parseStrictSemverTag(input.tag)) {
     throw new Error(`Previous release tag must be an immutable semantic tag: ${input.tag}`)
   }
-  if (
-    !VERSION_PATTERN.test(input.expectedVersion)
-    || input.resolvedVersion !== input.expectedVersion
-  ) {
+  for (const [name, version] of [
+    ['expectedVersion', input.expectedVersion],
+    ['resolvedVersion', input.resolvedVersion],
+    ['currentVersion', input.currentVersion],
+  ] as const) {
+    if (!isStrictSemver(version)) {
+      throw new Error(`Invalid strict SemVer ${name}: ${version}`)
+    }
+  }
+  if (input.resolvedVersion !== input.expectedVersion) {
     throw new Error(
       `Previous release version mismatch: expected ${input.expectedVersion}, `
       + `resolved ${input.resolvedVersion}`,

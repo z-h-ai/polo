@@ -209,10 +209,46 @@ describe('previous release runner-only preflight', () => {
       'v1.02.3',
       'v1.2.03',
       'v1.2.3-01',
+      'v1.2.3+build.7tail!',
     ]) {
       const value = fixture()
       const env = envFor(value)
       env.PREVIOUS_RELEASE_TAG = tag
+      const result = Bun.spawnSync(
+        [
+          'bash',
+          script,
+          '--platform',
+          'macos',
+          '--artifact-name',
+          'Polo-AI-x64.zip',
+          '--output',
+          value.output,
+        ],
+        { cwd: repoRoot, env, stdout: 'pipe', stderr: 'pipe' },
+      )
+      expect(result.exitCode).not.toBe(0)
+      expect(existsSync(value.calls)).toBe(false)
+      expect(existsSync(value.output)).toBe(false)
+    }
+  })
+
+  it('rejects malformed pinned versions before provenance access', () => {
+    for (const version of [
+      '01.2.3',
+      '1.02.3',
+      '1.2.03',
+      '1.2.3-01',
+      '1.2.3-',
+      '1.2.3+',
+      '1.2.3-alpha..1',
+      '1.2.3+build..1',
+      '1x2x3',
+      '1.2.3evil',
+    ]) {
+      const value = fixture()
+      const env = envFor(value)
+      env.PREVIOUS_RELEASE_VERSION = version
       const result = Bun.spawnSync(
         [
           'bash',

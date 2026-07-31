@@ -19,9 +19,12 @@ fail() {
   exit 1
 }
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+semver_pattern="$(tr -d '\r\n' < "$script_dir/strict-semver-pattern.txt")"
+
 is_semver() {
   local value="$1"
-  [[ "$value" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+  [[ "$value" =~ $semver_pattern ]]
 }
 
 for name in \
@@ -95,7 +98,11 @@ current_version="$(
 )"
 [ "$resolved_version" = "$PREVIOUS_RELEASE_VERSION" ] \
   || fail "Previous tag package version does not match the pinned version."
-[ -n "$current_version" ] && [ "$resolved_version" != "$current_version" ] \
+is_semver "$resolved_version" \
+  || fail "Resolved previous release package version is not strict SemVer."
+is_semver "$current_version" \
+  || fail "Current Electron package version is not strict SemVer."
+[ "$resolved_version" != "$current_version" ] \
   || fail "Previous release version must differ from current $current_version."
 
 mkdir -p "$(dirname "$POLO_AI_PREVIOUS_ARTIFACT")" "$(dirname "$output")"

@@ -27,11 +27,14 @@ foreach ($name in @(
 if ($env:GITHUB_REPOSITORY -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
     Fail "Invalid repository contract."
 }
-$semverPattern = '(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
-if ($env:PREVIOUS_RELEASE_TAG -notmatch "^v$semverPattern`$") {
+$semverPattern = (Get-Content `
+    -LiteralPath (Join-Path $PSScriptRoot "strict-semver-pattern.txt") `
+    -Raw).Trim()
+if (-not $env:PREVIOUS_RELEASE_TAG.StartsWith("v") `
+    -or $env:PREVIOUS_RELEASE_TAG.Substring(1) -notmatch $semverPattern) {
     Fail "Previous release must be a semantic immutable tag."
 }
-if ($env:PREVIOUS_RELEASE_VERSION -notmatch "^$semverPattern`$") {
+if ($env:PREVIOUS_RELEASE_VERSION -notmatch $semverPattern) {
     Fail "Invalid previous release version."
 }
 if ($env:PREVIOUS_RELEASE_COMMIT_SHA -notmatch '^[0-9a-fA-F]{40}$') {
@@ -73,6 +76,12 @@ $resolvedVersion = [string]$previousPackage.version
 $currentVersion = [string]$currentPackage.version
 if ($resolvedVersion -cne $env:PREVIOUS_RELEASE_VERSION) {
     Fail "Previous tag package version does not match the pinned version."
+}
+if ($resolvedVersion -notmatch $semverPattern) {
+    Fail "Resolved previous release package version is not strict SemVer."
+}
+if ($currentVersion -notmatch $semverPattern) {
+    Fail "Current Electron package version is not strict SemVer."
 }
 if ($resolvedVersion -ceq $currentVersion) {
     Fail "Previous release version must differ from current $currentVersion."
