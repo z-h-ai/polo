@@ -1,222 +1,144 @@
-# POO-14 第 2 轮修复报告
+# POO-14 第 2 轮 Reviewer 修复报告
 
-## 结果摘要
+## 变更摘要
 
-本轮已完成 reviewer 指出的三项代码修复，并创建代码提交：
+本轮完成两处 Linux shell profile 提交竞态修复：
 
-- `80d3f3ff66edf4ebdd2fd30a69c4381dc27c352e` — `POO-14: 收紧发布签名与终端所有权`
+- uninstall 不再在最终 hash 校验后用 `mv -f` 覆盖 profile。受管 profile 现在先以原子 rename claim，再对 claim 的 filesystem identity 与完整 hash 做提交后校验，最后用 hard-link no-replace 发布清理后的 profile。
+- install/upgrade 的 PATH 配置、backup 与失败回滚使用同一套 snapshot、identity、hash、claim 和 no-replace 原语。回滚只会替换本事务实际生成且身份完全匹配的 profile。
+- 任一阶段发现 regular file、symlink、rename 或内容更新竞态时，用户版本保持原位；旧 profile snapshot、未恢复 candidate 和 mode `0600` journal 保存在 mode `0700` quarantine 中，并返回可操作路径。
+- 外层 installer/uninstaller 会收到非零结果，恢复 App/launcher/state 中仍可安全恢复的部分，并阻止删除 App。
 
-macOS arm64 development DMG/ZIP 已从该代码提交重建，最终容器 smoke 通过。该产物明确为 ad-hoc、无 Team ID 的开发产物，只属于 development smoke，不计作 release/full acceptance。
+代码提交：
 
-生产签名 secrets、可信且版本不同的 previous release 三平台产物以及 Windows/Linux 原生 runner 不在本机环境中，因此本报告不声称已完成 Windows/Linux 原生 full，也不声称已有真实 previous→current 三平台成功证据。正式 workflow 已把这些输入设为 fail-fast 的发布契约，仍需外部 release/nightly runner 产出可审计 full logs。
+- `d1753a0 POO-14: 封闭 Linux profile 提交竞态`
 
-## 逐 issue 处理结果
+## Issue 1：uninstall profile 最终提交 TOCTOU
 
-### 1. release/full 签名身份验收
+处理结果：
 
-已修复。
+1. 卸载开始时记录绑定 profile 的完整 SHA-256 与 filesystem identity，并复制一份验证后的 `profile.owned` snapshot。
+2. launcher 与 state 被隔离后，helper 再次验证 profile 内容、identity、state 和 launcher snapshot。
+3. profile 提交采用两阶段 CAS：
+   - 原子 rename 当前 profile 到 `profile.claimed`；
+   - 对 claimed inode 再校验 regular-file、非 symlink、filesystem identity 和完整 hash；
+   - 从验证 snapshot 生成移除 Polo block 的新文件；
+   - 使用 hard link no-replace 发布到原路径，不执行覆盖式 rename。
+4. claim 或 publication 期间出现并发 regular file/symlink 时，no-replace 失败且不会覆盖用户文件。
+5. claim 后发现 rename/replacement/in-place content update 时，并发版本按 no-replace 恢复到原路径；旧 profile snapshot 留在 quarantine。
+6. profile 冲突时 helper 恢复仍可恢复的 `polo`、`polo-ai` 和 ownership state，写入 `ROLLBACK_REQUIRED`，返回 exit 2。真实 `uninstall-app.sh` 因此保留 App。
 
-- 新增共享的 `scripts/release-signing-contract.ts`，把 release/full 身份检查与 development smoke 分离。
-- macOS full 必须由 CI 明确提供且不得为空：
-  - `POLO_AI_RELEASE_MACOS_TEAM_ID`
-  - `POLO_AI_RELEASE_MACOS_APP_REQUIREMENT`
-  - `POLO_AI_RELEASE_MACOS_UV_REQUIREMENT`
-- macOS full 对最终 DMG/ZIP 内的 App 与嵌套 `uv` 校验：
-  - `codesign --verify --strict`；
-  - App 与 `uv` 的 Team ID 均与契约完全一致；
-  - App 与 `uv` 的 designated requirement 均与契约完全一致；
-  - `spctl` 返回 `Notarized Developer ID`；
-  - `xcrun stapler validate` 通过。
-- Windows full 必须由 CI 明确提供且不得为空：
-  - `POLO_AI_RELEASE_WINDOWS_PUBLISHER`
-  - `POLO_AI_RELEASE_WINDOWS_THUMBPRINT`
-- Windows full 对当前 NSIS installer、解包 App、解包 `uv`、安装后 App 和安装后 `uv` 校验 Authenticode `Valid`、Publisher 完全匹配及 SHA-1 thumbprint 完全匹配。
-- macOS/Windows full 的预期身份、观察身份、签名/公证/stapling 状态与时间写入 JSONL audit；workflow 把 audit、commit SHA、artifact hash 与 full log 作为 blocking artifact 上传。
-- `.github/workflows/electron-artifact-full.yml` 已改用正式 `electron:dist:mac|win|linux`，不再用 dev dist 冒充 full；macOS notarization 在正式构建开启，只有显式 `--dev` 才关闭。
-- smoke 日志明确输出 `acceptance=development-only`；ad-hoc/unsigned 不会产生 release acceptance audit。
+确定性回归覆盖：
 
-回归覆盖了：
+- Reviewer 同类的最终 claim 窗口内容更新；
+- regular-file replacement；
+- symlink replacement；
+- rename 后创建新文件；
+- 同 inode 内容更新；
+- 清理后 profile publication 时并发 regular file/symlink；
+- 真实外层 uninstall 收到冲突后保留 AppImage、`current`、launcher 和 state。
 
-- 缺失 expected identity；
-- macOS ad-hoc/no-Team-ID；
-- 错误 Team ID、App requirement、`uv` requirement、公证和 stapling；
-- 正确 macOS identity；
-- 错误 Windows Publisher、thumbprint、signature status；
-- 正确 Windows identity；
-- JSONL audit 写入。
+## Issue 2：install/upgrade rollback 覆盖并发 profile
 
-### 2. macOS launcher 所有权
+处理结果：
 
-已修复。
+1. App/runtime 修改前创建 mode `0700` profile transaction directory。
+2. backup 阶段记录原 profile 的 filesystem identity 与完整 hash；复制后同时验证 backup 与原路径 snapshot，关闭 backup-copy 窗口。
+3. PATH 配置从 verified backup 生成候选文件：
+   - 已有 profile 先原子 claim，再校验 claim identity/hash；
+   - 原 profile 不存在时要求路径在提交时仍不存在；
+   - 候选通过 hard-link no-replace 发布；
+   - 记录本事务实际发布 profile 的 identity/hash；
+   - 持久备份使用随机唯一名称和 no-replace hard link。
+4. helper failure 后的 profile rollback 先原子 claim 当前 profile，再确认它与本事务发布的 identity/hash 完全一致；只有匹配时才以 no-replace 恢复旧 snapshot。
+5. 即使 PATH 配置是 no-op，rollback 也会核对 profile 是否仍与 transaction snapshot 相同。Reviewer 复现中的 launcher conflict + `concurrent-profile-update` 因此被识别为并发用户更新，不再被旧备份覆盖。
+6. profile 不匹配时：
+   - 保留当前用户版本；
+   - 恢复旧 AppImage 与 `current`；
+   - 保留旧 profile snapshot 和 journal；
+   - 输出 quarantine 路径并返回失败。
 
-- ownership state 升级为 schema 3，记录固定 owner、launcher format、App version、launcher path、launcher target、更新时间及 SHA-256 launcher identity。
-- identity hash 绑定 owner、format、version、path 与 target；读取时同时校验版本格式、时间、字段完整性和 hash。
-- 同 target symlink 本身不再构成所有权。删除/替换必须满足：
-  - 当前路径与 state 中的 launcher path 完全一致；
-  - 当前 symlink 解出的 target 与 state 中的 target 完全一致；
-  - owner、format、version 与 identity 可验证。
-- 缺失、损坏、不完整或 identity 被篡改的 state 均不会授权删除 launcher，且会保留冲突现场。
-- schema 1/2 只作为历史 Polo state marker 迁移：要求有效时间、历史 profile marker 信息，以及当前 symlink 与历史 state 中 path/target 完全一致；迁移/修复后写为 schema 3。
-- 更早的无 state launcher 只接受严格完整内容匹配的 Polo 历史 managed launcher，不使用 substring 或仅 target 匹配。
-- App 移动后，已验证历史或当前 ownership 可修复到新 bundle target；正常安装、修复与卸载保持可用。
+确定性回归覆盖：
 
-回归覆盖了用户自建同 target symlink、state 缺失、坏 JSON、不完整旧 state、被篡改 identity、用户替换 target、App 路径移动、历史 state 迁移、正常安装/修复/卸载与 shell profile 清理。
-
-### 3. packaged wrapper 本地化
-
-已修复。
-
-- `polo`、`polo.cmd` 内置不依赖外部 runtime 的最小 locale table。
-- `polo-ai`、`polo-ai.cmd` 的弃用提示使用同样的最小 locale 判定。
-- 支持 `POLO_AI_LOCALE`、locale 环境变量中的 zh/zh-CN 变体；其他 locale 稳定回退英文。
-- runtime/CLI/server 缺失分别输出稳定错误码：
-  - `POLO_E_BUNDLED_RUNTIME_MISSING`
-  - `POLO_E_TERMINAL_FILES_MISSING`
-- compatibility warning 使用 `POLO_W_DEPRECATED_COMMAND`。
-- Windows installer 生成的 `polo.cmd`/compat shim 与 checked-in wrapper 保持同一契约。
-- wrapper 仍然自相对解析 App、Bun、CLI/server，不引入系统 Node/Bun 或外部 locale 文件依赖。
-
-POSIX 真实 wrapper smoke 使用含空格和非 ASCII 的 fixture root，验证了参数、环境、退出码、zh-CN 与 fallback。Windows 原生等价测试已写入正式 workflow，但本机没有 Windows/PowerShell，未声称原生执行。
+- backup copy 临界区内容更新；
+- configure claim 阶段 regular/symlink/rename/content update；
+- configure publication 阶段 regular file/symlink；
+- helper launcher failure 同时写 profile；
+- rollback claim 阶段 regular/symlink/rename/content update；
+- 正常首次安装、repair、upgrade、rollback 与卸载。
 
 ## 关键文件
 
-- `scripts/release-signing-contract.ts`
-- `scripts/__tests__/release-signing-contract.test.ts`
-- `apps/electron/scripts/validate-final-artifacts.sh`
-- `apps/electron/scripts/validate-final-artifacts.ps1`
-- `.github/workflows/electron-artifact-full.yml`
-- `apps/electron/electron-builder.yml`
-- `scripts/electron-dist.ts`
-- `apps/electron/src/main/terminal-integration.ts`
-- `apps/electron/src/main/__tests__/terminal-integration.test.ts`
-- `apps/electron/resources/bin/polo`
-- `apps/electron/resources/bin/polo.cmd`
-- `apps/electron/resources/bin/polo-ai`
-- `apps/electron/resources/bin/polo-ai.cmd`
-- `apps/electron/resources/scripts/windows-terminal-integration.ps1`
-- `apps/electron/resources/scripts/tests/test_polo_wrapper_smoke.py`
-- `apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1`
-- `scripts/__tests__/packaged-wrapper-i18n.test.ts`
-- `scripts/__tests__/electron-artifact-pipeline.test.ts`
-- `scripts/__tests__/electron-dist.test.ts`
+- `apps/electron/resources/scripts/linux-terminal-integration.sh`
+- `scripts/install-app.sh`
+- `scripts/linux-terminal-integration.test.ts`
+- `scripts/install-app-shell.test.ts`
 - `apps/electron/resources/release-notes/next.md`
 
 ## 自测命令与真实结果
 
-### 全量与静态门禁
-
-- `bun run test`
-  - 通过。
-  - 主套件：`4885 pass / 19 skip / 0 fail`，`4904 tests / 378 files`。
-  - 随后的全部 isolated suites 通过，包括 server concurrency、file-lock races、CLI server spawner 与 Electron isolated interaction suites。
-- `bun run typecheck:all`
-  - 通过。
-- `bun run lint:shared`
-  - 通过，`0 errors / 9 warnings`；warning 为仓库既有 unused eslint-disable。
-- `bun run lint:electron`
-  - 通过，`0 errors / 114 warnings`；warning 为仓库既有 hook/localStorage 等 warning。
-- `bun run lint:i18n:parity`
-  - 通过，`6 locales / 每个 1642 keys`。
-- `bun run lint:i18n:coverage`
-  - 通过。
-- `bun run lint:i18n:sorted`
-  - 通过。
-- `bun run test:doc-tools`
-  - 通过，`23 tests`。
-- `bun run electron:build`
-  - 通过；CLI、server、main、preload、renderer、resources 和 sanitized metadata/manifest 校验均成功。
-- `bun run electron:validate:cli:runtime`
-  - 通过；packaged CLI/server discovery、自相对 symlink launcher、空格与非 ASCII 路径验证成功。
-
 ### 针对性回归
 
-执行：
+```bash
+bash -n apps/electron/resources/scripts/linux-terminal-integration.sh \
+  scripts/install-app.sh scripts/uninstall-app.sh
 
-```text
-bun test scripts/__tests__/release-signing-contract.test.ts \
-  scripts/__tests__/packaged-wrapper-i18n.test.ts \
-  scripts/__tests__/electron-artifact-pipeline.test.ts \
-  scripts/__tests__/electron-dist.test.ts \
-  apps/electron/src/main/__tests__/terminal-integration.test.ts \
-  apps/electron/scripts/windows-terminal-integration.test.ts
-```
-
-结果：`46 pass / 0 fail / 339 expect()`。
-
-其他：
-
-- `python3 -m unittest apps.electron.resources.scripts.tests.test_polo_wrapper_smoke`
-  - `4 tests` 通过。
-- `bash -n apps/electron/scripts/validate-final-artifacts.sh apps/electron/resources/bin/polo apps/electron/resources/bin/polo-ai`
-  - 通过。
-- Ruby `YAML.safe_load` 解析 `.github/workflows/electron-artifact-full.yml`
-  - 通过。
-- `git diff --check`
-  - 通过。
-- macOS full 在未提供 release identity 时的 fail-fast 复核
-  - 返回码 `1`；
-  - 输出：`Full macOS validation requires the release Team ID and App/uv designated requirements`；
-  - 发生于 mount/install/profile 等写操作之前。
-
-## macOS arm64 development 最终产物证据
-
-构建命令：
-
-```text
-bun run electron:dist:dev:mac --arch=arm64
-```
-
-显式最终容器复核：
-
-```text
-bun run electron:validate:artifacts:unix -- \
-  --mode smoke \
-  --release-dir apps/electron/release \
-  --arch arm64
+bun test scripts/linux-terminal-integration.test.ts \
+  scripts/install-app-shell.test.ts \
+  scripts/uninstall-app.test.ts
 ```
 
 结果：
 
-- DMG final-container CLI smoke 通过，版本 `0.10.0`。
-- ZIP final-container CLI smoke 通过，版本 `0.10.0`。
-- 日志明确标记 `mode=smoke acceptance=development-only`。
+- shell syntax：通过。
+- Linux terminal ownership、installer、uninstaller：`27 pass / 0 fail / 330 expect()`。
 
-产物基于代码提交 `80d3f3ff66edf4ebdd2fd30a69c4381dc27c352e` 构建：
+### 全量门禁
 
-- `apps/electron/release/Polo-AI-arm64.dmg`
-  - 时间：`2026-07-30T16:32:26-0700`
-  - 大小：`278466412` bytes
-  - SHA-256：`2783399c04dded29711e50227d85771b62b9cfbd5ad80d7b2cfb2ca6ca45ed38`
-- `apps/electron/release/Polo-AI-arm64.zip`
-  - 时间：`2026-07-30T16:32:54-0700`
-  - 大小：`268800640` bytes
-  - SHA-256：`a9929f7b70ebbdb00d29e792e0d60d724cd971af9ad5c4c1da27cbe32144e906`
+```bash
+bun run test
+bun run typecheck:all
+bun run lint:shared
+bun run lint:electron
+bun run lint:i18n:parity
+bun run lint:i18n:sorted
+bun run lint:i18n:coverage
+bun run test:doc-tools
+bun run electron:build
+bun run electron:validate:cli:runtime
+git diff --check
+```
 
-签名观察：
+真实结果：
 
-- App：`Signature=adhoc`、`TeamIdentifier=not set`。
-- 嵌套 `uv`：`Signature=adhoc`、`TeamIdentifier=not set`。
-- packaged `uv --version`：`uv 0.10.6 (a91bcf268 2026-02-24)`。
+- `bun run test`：退出码 0。
+  - 主套件：`4912 pass / 19 skip / 0 fail / 12258 expect()`，380 files。
+  - server concurrency、file-lock races、CLI server spawner、Electron/UI isolated suites 全部通过。
+- `bun run typecheck:all`：通过。
+- `bun run lint:shared`：退出码 0，`0 errors / 9 warnings`；均为既有 unused eslint-disable warning。
+- `bun run lint:electron`：退出码 0，`0 errors / 114 warnings`；均为既有 warning。
+- i18n parity：通过，6 locales、每个 1642 keys；sorted 与 coverage 均通过。
+- doc-tools：23 tests passed。
+- Electron build：通过；CLI/server/main/preload/renderer/resources 均构建成功，sanitized CLI artifact 版本 `0.10.0`。
+- packaged runtime validation：通过；packaged server discovery、自相对 symlink launcher、空格及非 ASCII 路径均通过。
+- `git diff --check`：通过。
 
-以上签名只证明 development smoke 的容器和可执行性，不是生产签名、公证或 release acceptance。
+## 竞态、回滚与残留检查
 
-## 残留检查
+- uninstall 对抗测试确认每类 profile 竞态都返回冲突，用户 regular file/symlink/rename/content update 保留，launcher/state 恢复，quarantine 与 journal 可定位。
+- profile publication 的 regular file/symlink 占用测试确认 hard-link no-replace 不覆盖目标，旧 claimed profile 留在 quarantine。
+- installer backup、configure、helper failure 和 rollback 四类临界区均有确定性注入测试。
+- Reviewer 的完整 installer 复现路径已覆盖：upgrade 在第一个 launcher 提交点写入 `concurrent-profile-update` 并制造 launcher 冲突；结果为用户 profile 保留、旧 App/current/state 恢复、launcher/profile 两个 quarantine 均存在并带 journal。
+- 正常首次安装、repair/upgrade、legacy ownership migration 和正常卸载继续通过。
+- 测试与构建结束后：
+  - 未发现本 worktree 相关 Electron、Polo server、mock provider 或 CLI 子进程；
+  - 未发现 Polo/Bun/Electron 相关监听端口；
+  - 未发现 `.terminal-install.*`、`.terminal-uninstall.*`、`.profile-transaction.*` 或相关 E2E 临时目录；
+  - 未发现 `~/.polo-ai/runtime/electron.json`。
 
-- 未发现本 worktree 启动的 `electron-builder`、App、packaged server 或 mock provider 残留进程。
-- 未发现 Polo/Bun/Electron 相关监听端口。
-- 未发现 `polo-final-artifact.*`、`polo-run-server-*`、wrapper/terminal fixture 等临时目录残留。
-- 未发现 `~/.polo-ai/runtime/electron.json`。
-- 未发现残留 Polo DMG mount。
-- 当前仍运行的 Ultra-Coding runner/wait 进程属于本 implement session 编排基础设施，不是产品 App/server 残留。
+## 外部 release evidence 缺口
 
-## 未闭合的外部 release evidence
-
-以下必须由带真实资产与 secrets 的正式 release/nightly 三平台 workflow 完成，本机没有条件伪造或替代：
-
-- 可信、固定、版本不同且包含 macOS ZIP、Windows NSIS、Linux AppImage 与历史 Unix installer 的 pre-POO-14 release 输入；
-- Apple Developer ID、预期 Team ID/designated requirements、公证与 stapling 的真实 full 结果；
-- Windows 预期 Publisher/thumbprint、真实 Authenticode 签名及 Windows 原生安装/PATH/ownership/升级/卸载结果；
-- Linux 原生 AppImage 安装、Xvfb discovery、`polo app/run/sessions`、升级与卸载结果；
-- 三平台 previous→current full logs、audit JSONL、commit SHA 与 artifact SHA-256 上传证据。
-
-workflow 对上述字段和资产均 fail-fast，且 full job 使用正式 dist 入口并把验证结果作为 blocking upload gate。是否具备实际 secrets/历史 release assets 以及对应 runner 的成功记录，需由外部 CI/reviewer 核验；本报告不声称通过。
+- 本轮在 macOS arm64 宿主完成源码全量测试、Electron build 和 packaged runtime validation；未声称执行 Linux 原生 AppImage/Xvfb full，也未声称执行 Windows NSIS/PowerShell native full。
+- 本轮是 Linux shell profile transaction 修复，没有重建 macOS DMG/ZIP；既有 development artifact 早于本轮提交，不能作为本轮代码或 production acceptance 证据。
+- production release 仍需正式三平台 runner、可信且版本不同的 previous release assets、Apple/Windows 生产签名与公证 secrets，产出可审计 verified contract、artifact hashes 和 install/upgrade/discovery/run/sessions/uninstall full logs。
+- 仓库现有 release/full fail-fast、签名身份和 previous-release provenance 契约未被放宽；本报告不虚报外部 runner 或生产签名结果。
