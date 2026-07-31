@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const root = join(import.meta.dir, '..')
-const electronDist = join(root, 'apps', 'electron', 'dist')
+const electronDist = process.env.POLO_AI_CLI_ARTIFACT_OUTPUT_DIR
+  ? resolve(process.env.POLO_AI_CLI_ARTIFACT_OUTPUT_DIR)
+  : join(root, 'apps', 'electron', 'dist')
 const cliDir = join(electronDist, 'cli')
 const serverDir = join(electronDist, 'server')
 const cliEntry = join(root, 'apps', 'cli', 'src', 'index.ts')
@@ -99,7 +101,6 @@ writeFileSync(join(cliDir, 'artifact-manifest.json'), `${JSON.stringify({
   schemaVersion: 1,
   version: versions[0]!.version,
   runtime: 'bun',
-  generatedAt: new Date().toISOString(),
   artifacts: {
     cli: { path: 'dist/cli/polo-cli.js', sha256: sha256(cliPath) },
     cliPackage: { path: 'dist/cli/package.json', sha256: sha256(cliPackagePath) },
