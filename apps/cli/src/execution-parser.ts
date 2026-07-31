@@ -392,13 +392,25 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
     throw new UsageError('unsupported option for exec: --send-timeout (exec has no total execution timeout)')
   }
 
-  if (args.kind === 'help' || args.kind === 'version') return args
+  // Help/version must not bypass command-specific validation. In particular,
+  // `exec sessions --api-key secret --help` is still an invalid management
+  // command, rather than a successful help invocation that silently accepts
+  // an invocation credential.
+  const requestedTerminalKind = args.kind === 'help' || args.kind === 'version'
+    ? args.kind
+    : undefined
 
   if (command === 'run') {
+    if (requestedTerminalKind) return args
     if (args.last) throw new UsageError('unsupported option for run: --last')
     args.prompt = positionals.join(' ')
     return args
   }
+
+  // Continue parsing exec subcommands even when a terminal help/version flag
+  // was supplied. The requested terminal behavior is dispatched only after a
+  // recognised management subcommand has passed its option whitelist.
+  args.kind = 'exec'
 
   const hasReservedLocator = positionalsBeforeSeparator === undefined || positionalsBeforeSeparator > 0
 
@@ -450,15 +462,20 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
   if (args.kind === 'sessions' || args.kind === 'delete') {
     if (positionals.length > 0) throw new UsageError(`unexpected argument: ${positionals[0]}`)
     const allowedOptions = args.kind === 'sessions'
-      ? new Set(['--workspace', '-C', '--cd', '--json', '--color'])
-      : new Set(['--json', '--color'])
+      ? new Set(['--workspace', '-C', '--cd', '--json', '--color', '-h', '--help', '-V', '--version'])
+      : new Set(['--json', '--color', '-h', '--help', '-V', '--version'])
     const unsupportedOption = [...providedOptions]
       .find(option => !allowedOptions.has(option))
     if (unsupportedOption) {
       throw new UsageError(`unsupported option for exec ${args.kind}: ${unsupportedOption}`)
     }
+    if (requestedTerminalKind) {
+      return { ...args, kind: requestedTerminalKind }
+    }
     return args
   }
+
+  if (requestedTerminalKind) return { ...args, kind: requestedTerminalKind }
 
   if (positionals.length > 1) {
     throw new UsageError(`exec accepts one prompt argument; unexpected argument: ${positionals[1]}`)

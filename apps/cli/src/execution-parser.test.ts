@@ -121,6 +121,24 @@ describe('execution parser', () => {
     }
   })
 
+  it('validates management options before dispatching help or version', () => {
+    const id = '123e4567-e89b-12d3-a456-426614174000'
+    const cases: Array<[string[], string]> = [
+      [argv('exec', 'sessions', '--api-key', 'secret-value', '--help'), '--api-key'],
+      [argv('exec', 'sessions', '--yolo', '--version'), '--yolo'],
+      [argv('exec', 'delete', id, '--model', 'gpt-5', '--help'), '--model'],
+      [argv('exec', 'delete', id, '--yolo', '--version'), '--yolo'],
+    ]
+    for (const [value, option] of cases) {
+      expect(() => parseExecutionArgs(value)).toThrow(
+        `unsupported option for exec ${value.includes('sessions') ? 'sessions' : 'delete'}: ${option}`,
+      )
+    }
+
+    expect(parseExecutionArgs(argv('exec', 'sessions', '--help')).kind).toBe('help')
+    expect(parseExecutionArgs(argv('exec', 'delete', id, '--version')).kind).toBe('version')
+  })
+
   it('rejects unknown, unsupported, missing, conflicting and extra args', () => {
     const cases = [
       argv('exec', '--wat', 'hello'),

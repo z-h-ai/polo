@@ -85,6 +85,10 @@ describe('top-level CLI help', () => {
       ['exec', 'sessions', '--api-key', 'secret-value'],
       ['exec', 'delete', id, '--provider', 'openai'],
       ['exec', 'delete', id, '--base-url', 'https://example.test'],
+      ['exec', 'sessions', '--api-key', 'secret-value', '--help'],
+      ['exec', 'sessions', '--yolo', '--version'],
+      ['exec', 'delete', id, '--model', 'gpt-5', '--help'],
+      ['exec', 'delete', id, '--yolo', '--version'],
     ]) {
       const proc = Bun.spawn([
         'bun',
