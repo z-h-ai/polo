@@ -6,6 +6,29 @@ const nonBlankString = (maxLength: number) =>
     .max(maxLength)
     .refine(value => value.trim().length > 0)
 
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index)
+    if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+      const next = value.charCodeAt(index + 1)
+      if (
+        index + 1 >= value.length
+        || next < 0xDC00
+        || next > 0xDFFF
+      ) return false
+      index += 1
+    } else if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+      return false
+    }
+  }
+  return true
+}
+
+export const AdminEntityIdSchema = nonBlankString(512).refine(
+  isWellFormedUnicode,
+  'Entity id must contain well-formed Unicode',
+)
+
 const adminToken = nonBlankString(16_384)
 const sessionLifetimeSeconds = z.number().finite().int().min(1).max(31_536_000)
 const phoneAuthLifetimeSeconds = z.number().finite().int().min(1).max(86_400)
@@ -27,11 +50,11 @@ export function isValidMainlandChinaPhone(value: string): boolean {
  * can leave AdminClient and reach local RPC consumers.
  */
 export const AdminUserSchema = z.object({
-  id: nonBlankString(512),
+  id: AdminEntityIdSchema,
   username: nonBlankString(512),
   displayName: z.string().max(2_048).nullable(),
   role: nonBlankString(128),
-  groupIds: z.array(nonBlankString(512)).max(10_000),
+  groupIds: z.array(AdminEntityIdSchema).max(10_000),
 })
 
 const AdminSessionSchema = z.object({
@@ -71,7 +94,6 @@ export const SetAdminPasswordResponseSchema = z.object({
   success: z.literal(true),
 })
 
-export const AdminEntityIdSchema = nonBlankString(512)
 const entityId = AdminEntityIdSchema
 const organizationDate = z.string().datetime({ offset: true })
 

@@ -3,8 +3,9 @@ import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { CONFIG_DIR } from '../config/paths.ts'
 import {
-  AppReleaseSummarySchema,
+  AdminEntityIdSchema,
   AppCatalogResponseSchema,
+  AppReleaseSummarySchema,
   CatalogAppSchema,
 } from './schemas.ts'
 import type {
@@ -13,6 +14,7 @@ import type {
   AppReleaseSummary,
   CatalogApp,
 } from './types.ts'
+import { createOrganizationContextKey } from './context-key.ts'
 import { isValidCatalogSemVer } from './semver.ts'
 
 const CACHE_SCHEMA_VERSION = 3
@@ -23,8 +25,8 @@ const CachedCatalogAppSchema = CatalogAppSchema.and(z.object({
 }))
 
 const AppCatalogCacheEntryV1Schema = AppCatalogResponseSchema.safeExtend({
-  accountId: z.string().min(1).max(512),
-  organizationId: z.string().min(1).max(512),
+  accountId: AdminEntityIdSchema,
+  organizationId: AdminEntityIdSchema,
   authorizationStatus: z.enum(['authorized', 'denied']).default('authorized'),
   syncedAt: z.number().int().min(0),
   apps: z.array(CachedCatalogAppSchema).max(MAX_CACHED_APPS),
@@ -34,7 +36,7 @@ const AppCatalogCacheEntryV2Schema = AppCatalogCacheEntryV1Schema.safeExtend({
   trustedReleases: z.record(z.string(), AppReleaseSummarySchema).default({}),
   warnings: z.array(z.object({
     code: z.literal('invalid_semver'),
-    catalogAppId: z.string().min(1).max(512),
+    catalogAppId: AdminEntityIdSchema,
   })).max(MAX_CACHED_APPS).default([]),
 })
 
@@ -76,7 +78,30 @@ function cachePath(): string {
 }
 
 function cacheKey(accountId: string, organizationId: string): string {
-  return `${encodeURIComponent(accountId)}:${encodeURIComponent(organizationId)}`
+  return createOrganizationContextKey(accountId, organizationId)
+}
+
+function canonicalizeCacheEntryKeys(
+  entries: Record<string, AppCatalogCacheEntry>,
+): Record<string, AppCatalogCacheEntry> {
+  const canonicalEntries: Record<string, AppCatalogCacheEntry> = {}
+  for (const entry of Object.values(entries)) {
+    const key = cacheKey(entry.accountId, entry.organizationId)
+    const existing = canonicalEntries[key]
+    // Legacy cache keys are an implementation detail. Re-key from the
+    // structured scope, and keep authorization fail-closed if a damaged cache
+    // contains duplicate records for the same account/organization tuple.
+    if (
+      !existing
+      || (existing.authorizationStatus !== 'denied'
+        && entry.authorizationStatus === 'denied')
+      || (existing.authorizationStatus === entry.authorizationStatus
+        && entry.syncedAt >= existing.syncedAt)
+    ) {
+      canonicalEntries[key] = entry
+    }
+  }
+  return canonicalEntries
 }
 
 function emptyCache(): AppCatalogCacheFile {
@@ -177,7 +202,11 @@ function readCache(): AppCatalogCacheFile {
     const candidate = parsed.success
       ? parsed.data
       : migrateLegacyCache(raw) ?? emptyCache()
-    value = AppCatalogCacheFileSchema.parse(candidate)
+    const validated = AppCatalogCacheFileSchema.parse(candidate)
+    value = {
+      ...validated,
+      entries: canonicalizeCacheEntryKeys(validated.entries),
+    }
   } catch {
     value = emptyCache()
   }

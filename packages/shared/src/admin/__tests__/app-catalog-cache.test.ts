@@ -82,6 +82,59 @@ describe('app catalog cache', () => {
     expect(getCachedAppCatalog('account-b', 'organization-1')).toBeNull()
   })
 
+  it('uses canonical tuple keys and migrates legacy encoded keys in memory', () => {
+    const accountId = '账号:\0a'
+    const organizationId = '组织:\0b'
+    saveAppCatalog(accountId, organizationId, {
+      appConfigVersion: 'v1',
+      apps: [{
+        ...remoteApp('app-a'),
+        organizationId,
+      }],
+    }, 100)
+
+    const path = join(configDir, 'admin-app-catalog.json')
+    const persisted = JSON.parse(readFileSync(path, 'utf8')) as {
+      entries: Record<string, unknown>
+    }
+    const entry = Object.values(persisted.entries)[0]
+    persisted.entries = {
+      [`${encodeURIComponent(accountId)}:${encodeURIComponent(organizationId)}`]:
+        entry,
+    }
+    writeFileSync(path, JSON.stringify(persisted), 'utf8')
+    resetAppCatalogMemoryCacheForTests()
+
+    expect(getCachedAppCatalog(accountId, organizationId)).toMatchObject({
+      accountId,
+      organizationId,
+      appConfigVersion: 'v1',
+    })
+    expect(saveAppCatalog(accountId, organizationId, {
+      appConfigVersion: 'v2',
+      apps: [{
+        ...remoteApp('app-a'),
+        organizationId,
+      }],
+    }).appConfigVersion).toBe('v2')
+
+    const migrated = JSON.parse(readFileSync(path, 'utf8')) as {
+      entries: Record<string, unknown>
+    }
+    expect(Object.keys(migrated.entries)).toEqual([
+      JSON.stringify([accountId, organizationId]),
+    ])
+  })
+
+  it('does not throw while defensively addressing malformed surrogate input', () => {
+    expect(() => getCachedAppCatalog('\uD800', 'organization-1')).not.toThrow()
+    expect(getCachedAppCatalog('\uD800', 'organization-1')).toBeNull()
+    expect(() => saveAppCatalog('\uD800', 'organization-1', {
+      appConfigVersion: 'v1',
+      apps: [],
+    })).toThrow()
+  })
+
   it('retains withdrawn metadata without keeping it launchable', () => {
     saveAppCatalog('account-a', 'organization-1', {
       appConfigVersion: 'v1',

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  AdminEntityIdSchema,
+  AdminLoginResponseSchema,
   AppCatalogResponseSchema,
   CatalogOrganizationIdRpcInputSchema,
   DeniedAppCatalogSnapshotSchema,
@@ -132,6 +134,37 @@ describe('Catalog organization entity id RPC contract', () => {
     expect(OrganizationIdRpcInputSchema.safeParse(
       '11111111-1111-4111-8111-111111111111',
     ).success).toBe(true)
+  })
+
+  it('accepts valid surrogate pairs and rejects unpaired UTF-16 surrogates', () => {
+    for (const entityId of ['account-🚀', '\uD83D\uDE80']) {
+      expect(AdminEntityIdSchema.safeParse(entityId).success).toBe(true)
+      expect(CatalogOrganizationIdRpcInputSchema.safeParse(entityId).success)
+        .toBe(true)
+    }
+    for (const entityId of [
+      '\uD800',
+      '\uDC00',
+      `prefix-\uD800`,
+      `prefix-\uDC00-suffix`,
+      '\uD800x\uDC00',
+    ]) {
+      expect(AdminEntityIdSchema.safeParse(entityId).success).toBe(false)
+      expect(CatalogOrganizationIdRpcInputSchema.safeParse(entityId).success)
+        .toBe(false)
+    }
+    expect(AdminLoginResponseSchema.safeParse({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: '\uD800',
+        username: 'malformed-account',
+        displayName: null,
+        role: 'member',
+        groupIds: [],
+      },
+    }).success).toBe(false)
   })
 
   it('strictly rejects delivery capability fields in denied snapshots', () => {

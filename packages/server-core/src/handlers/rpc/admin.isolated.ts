@@ -2330,6 +2330,25 @@ describe('registerAdminHandlers', () => {
     )
   })
 
+  it('rejects malformed UTF-16 organization ids before Catalog cache access', async () => {
+    const { syncAppCatalog } = createHarness()
+    const context = {
+      clientId: 'client-1',
+      workspaceId: null,
+      webContentsId: null,
+    }
+
+    for (const organizationId of ['\uD800', '\uDC00', `org-\uD800`]) {
+      expect(await syncAppCatalog(context, organizationId, { force: true }))
+        .toEqual({
+          success: false,
+          errorCode: 'VALIDATION_ERROR',
+          message: 'Organization id is invalid',
+        })
+    }
+    expect(adminClientCalls).toEqual([])
+  })
+
   it('keeps denied Catalog delivery capabilities closed after an unexpected 304', async () => {
     const organizationId = 'organization:denied\0snapshot'
     managerState.tokens = {
