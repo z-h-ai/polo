@@ -34,13 +34,17 @@
     "./sources/types": "./src/sources/types.ts",
     "./skills": "./src/skills/index.ts",
     "./creator-skills": {
-      "types": "./src/creator-skills/index.ts",
-      "default": "./src/creator-skills/index.js"
+      "types": "./creator-skills.d.ts",
+      "node": "./creator-skills.js",
+      "import": "./creator-skills.js",
+      "default": "./creator-skills.js"
     },
-    "./creator-skills/archive": "./src/creator-skills/archive.ts",
-    "./creator-skills/fixtures": "./src/creator-skills/fixtures.ts",
-    "./creator-skills/schemas": "./src/creator-skills/schemas.ts",
-    "./creator-skills/skill-content": "./src/creator-skills/skill-content.ts",
+    "./creator-skills/fixtures": {
+      "types": "./creator-skills/fixtures.d.ts",
+      "node": "./creator-skills/fixtures.js",
+      "import": "./creator-skills/fixtures.js",
+      "default": "./creator-skills/fixtures.js"
+    },
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",

@@ -1,27 +1,32 @@
 # POO-21 Implement Report
 
 ## Scope
-- Completed the shared creator-skill contract surface and the creator-skill Electron E2E flow in the current worktree.
-- Kept the shared admin schema surface aligned with the creator-skill response shapes used by the renderer and server-core.
-- Added a bundler-facing creator-skill entrypoint while keeping the TS source as the type surface.
+- Repaired the shared creator-skill type surface so a clean polo-admin TypeScript consumer can typecheck without TS5097.
+- Fixed the stale server-core admin RPC test to match the supported archive-less upload-grant contract.
+- Drove the shared package through the admin consumer, Electron build/typecheck gates, and the creator-skill contract test.
+- Investigated the Electron creator-skill E2E loopback against isolated admin Postgres and loopback dev server.
 
 ## Changes
-- Updated the shared admin schema exports so `CreatorArtifactVersionCreatedResponseSchema` and `CreatorArtifactVersionSchema` are part of the public admin surface.
-- Kept the shared admin client aligned with the creator-skill version-create response that now returns the upload grant in one call.
-- Hardened the creator-skill archive/install path and schema normalization so archive checksums, nullable fields, and extraction safety stay consistent.
-- Updated the Electron creator-skill harness to drive the real version/upload/publish/download/install lifecycle with the returned upload grant.
-- Added a JS creator-skill package entrypoint for bundlers while leaving the TS source as the `types` contract.
+- Updated `packages/server-core/src/handlers/rpc/admin.test.ts` so the upload-grant test uses the current `version` field, asserts the archive-less grant flow, and matches the live validation call shape.
+- Reworked `packages/shared/package.json` and the shared creator-skill files so `@polo-ai/shared/creator-skills` has a clean runtime/type surface for the admin consumer.
+- Added self-contained public declaration files for creator-skills and fixtures, plus package-root wrapper files to keep the shared package consumable from a clean linked admin worktree.
+- Kept `design-demos/` untouched.
 
 ## Validation
 - `bun run typecheck:shared` - passed
 - `cd apps/electron && bun run typecheck` - passed
 - `bun run electron:build` - passed
-- `bun test packages/shared/src/creator-skills/__tests__/package-exports.test.ts packages/shared/src/creator-skills/__tests__/schemas.test.ts packages/shared/src/admin/__tests__/client.test.ts` - passed
+- `bun test packages/server-core/src/handlers/rpc/admin.test.ts` - passed
+- `cd /Users/wow/project/z-h-ai/polo-admin-dir/dev && bun run typecheck` - passed
 - `cd /Users/wow/project/z-h-ai/polo-admin-dir/dev && bun run test -- tests/creator-skills.contract.test.ts` - passed
-- `POO21_ADMIN_BASE_URL=http://127.0.0.1:3001 bun run electron:e2e:creator-skill` - passed against the isolated admin Postgres test DB and disposable storage root
 - `git diff --check` - passed
+- `bun run electron:e2e:creator-skill` - failed repeatedly against isolated admin Postgres/loopback
+
+## E2E Blocker
+- The Electron creator-skill E2E reaches login and organization join, then fails on `POST /api/organizations/<id>/artifacts` with `Admin service is temporarily unavailable`.
+- The admin dev server logs consistently show `Module not found: Can't resolve '@polo-ai/shared/creator-skills'` from `src/lib/creator-skills/contracts.ts` and `src/lib/creator-skills/service.ts`.
+- I tried multiple package export wiring variants, including bundled public files, root wrapper files, and `node`/`import` export conditions. The clean TypeScript consumer stayed green, but Next/Turbopack still rejected the runtime route import.
 
 ## Notes
-- `design-demos/` was left untouched.
-- The live creator-skill proof used the admin repo's isolated test database and a webpack dev server on port `3001`.
+- The isolated admin test DB was reset and seeded during verification.
 - No push was performed.

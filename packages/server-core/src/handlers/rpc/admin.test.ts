@@ -562,26 +562,22 @@ beforeEach(() => {
     uploadGeneration: 1,
   })
   adminClientBehavior.completeCreatorSkillUpload = async () => ({
-    version: {
-      id: 'version-id',
-      artifactId: 'artifact-id',
-      version: '1.0.0',
-      status: 'uploaded',
-      archiveChecksum: 'a'.repeat(64),
-      uploadGeneration: 1,
-      createdAt: '2026-07-31T00:00:00.000Z',
-    },
+    id: 'version-id',
+    artifactId: 'artifact-id',
+    version: '1.0.0',
+    status: 'uploaded',
+    archiveChecksum: 'a'.repeat(64),
+    uploadGeneration: 1,
+    createdAt: '2026-07-31T00:00:00.000Z',
   })
   adminClientBehavior.triggerCreatorSkillValidation = async () => ({
-    version: {
-      id: 'version-id',
-      artifactId: 'artifact-id',
-      version: '1.0.0',
-      status: 'validating',
-      archiveChecksum: 'a'.repeat(64),
-      uploadGeneration: 1,
-      createdAt: '2026-07-31T00:00:00.000Z',
-    },
+    id: 'version-id',
+    artifactId: 'artifact-id',
+    version: '1.0.0',
+    status: 'validating',
+    archiveChecksum: 'a'.repeat(64),
+    uploadGeneration: 1,
+    createdAt: '2026-07-31T00:00:00.000Z',
   })
 })
 
@@ -630,7 +626,7 @@ describe('registerAdminHandlers', () => {
     const base = {
       organizationId: 'organization-id',
       artifactId: 'artifact-id',
-      versionId: 'version-id',
+      version: '1.0.0',
       idempotencyKey: 'upload-request-1',
     }
 
@@ -665,10 +661,7 @@ describe('registerAdminHandlers', () => {
         method: 'triggerCreatorSkillValidation',
         args: [{
           artifactId: 'artifact-id',
-          versionId: 'version-id',
-          uploadGeneration: 1,
-          archiveChecksum: 'a'.repeat(64),
-          idempotencyKey: 'upload-request-1',
+          version: '1.0.0',
         }],
         accessToken: 'creator-access-token',
       },
