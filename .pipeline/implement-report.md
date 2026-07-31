@@ -1,35 +1,24 @@
 # POO-21 Implement Report
 
 ## Change Summary
-
-- Replaced the checked-in creator-skills shadow tree with a reproducible package boundary under `packages/shared/dist/creator-skills`.
-- Added a dedicated creator-skills build path that bundles runtime JS to CommonJS `.cjs` files and emits matching declaration files from the TS sources.
-- Updated `@polo-ai/shared` exports so `@polo-ai/shared/creator-skills` and `@polo-ai/shared/creator-skills/fixtures` resolve to the same dist artifacts for TypeScript, Node, and downstream bundlers.
-- Removed the old checked-in wrapper files under `packages/shared/creator-skills*` and `packages/shared/src/creator-skills/*.js`.
-- Added package-export smoke coverage that resolves the public subpaths and asserts the dist targets.
-- Normalized the packed package manifest so the tarball does not depend on monorepo-only `workspace:*` entries.
+- Added `packages/shared/scripts/verify-creator-skills-package.ts` to:
+  - rebuild the creator-skills dist boundary
+  - pack `@polo-ai/shared` into a tarball
+  - verify the tarball includes the public creator-skills subpaths
+  - create a temporary Admin source copy
+  - install the tarball into that clean consumer
+  - prove a `next dev --turbopack` route can import the exact public creator-skills subpaths
+- Added `packages/shared/package.json` script `test:creator-skills-package`.
 
 ## Key Files
-
+- `packages/shared/scripts/verify-creator-skills-package.ts`
 - `packages/shared/package.json`
-- `packages/shared/scripts/build-creator-skills.ts`
-- `packages/shared/tsconfig.creator-skills.json`
-- `packages/shared/src/creator-skills/__tests__/package-exports.test.ts`
-- `packages/shared/dist/creator-skills/index.cjs`
-- `packages/shared/dist/creator-skills/fixtures.cjs`
-- `packages/shared/dist/creator-skills/index.d.ts`
-- `packages/shared/dist/creator-skills/fixtures.d.ts`
 
-## Validation
-
-- `cd packages/shared && bun run build:creator-skills`
-- `cd packages/shared && bun test src/creator-skills/__tests__/*.test.ts`
-- Clean consumer smoke:
-  - `npm pack` from `packages/shared`
-  - extracted the tarball into a throwaway temp project under `node_modules/@polo-ai/shared`
-  - imported `@polo-ai/shared/creator-skills` and `@polo-ai/shared/creator-skills/fixtures`
-  - verified Node resolved the public subpaths to `dist/creator-skills/index.cjs` and `dist/creator-skills/fixtures.cjs`
+## Self-Test Results
+- `bun run test:creator-skills-package` passed.
+- The temp Admin proof started `next dev --turbopack` and `GET /shared-skill-proof` returned `200`.
+- The route imported both `@polo-ai/shared/creator-skills` and `@polo-ai/shared/creator-skills/fixtures` from the packed tarball.
 
 ## Remaining Issues
-
-- None.
+- None in the POO worktree.
+- The temp Admin copy emitted non-blocking Prisma/DATABASE_URL bootstrap warnings during Next startup, but they did not prevent the route compile or the successful `200` response.
