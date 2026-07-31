@@ -59,6 +59,12 @@ case "$(uname -s)" in
   Linux)
     if [ -n "$APPIMAGE" ]; then
       export POLO_AI_APPIMAGE="$APPIMAGE"
+    else
+      INSTALLED_APPIMAGE_DIR=$(CDPATH= cd -- "$RESOURCES_ROOT/../.." && pwd)
+      INSTALLED_APPIMAGE="$INSTALLED_APPIMAGE_DIR/Polo-AI-x64.AppImage"
+      if [ -x "$INSTALLED_APPIMAGE" ]; then
+        export POLO_AI_APPIMAGE="$INSTALLED_APPIMAGE"
+      fi
     fi
     ;;
 esac

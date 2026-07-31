@@ -2,8 +2,16 @@
 chcp 65001 >nul 2>&1
 setlocal
 rem Polo CLI launcher (managed by Polo AI)
+set "POLO_AI_INSTALL_ROOT_FILE=%~dp0polo-install-root.txt"
+if not exist "%POLO_AI_INSTALL_ROOT_FILE%" goto packaged_layout
+set /p POLO_AI_RESOURCES_ROOT=<"%POLO_AI_INSTALL_ROOT_FILE%"
+for %%I in ("%POLO_AI_RESOURCES_ROOT%") do set "POLO_AI_RESOURCES_ROOT=%%~fI"
+set "POLO_AI_APP_ROOT=%POLO_AI_RESOURCES_ROOT%\app"
+goto root_ready
+:packaged_layout
 for %%I in ("%~dp0..\..") do set "POLO_AI_APP_ROOT=%%~fI"
 for %%I in ("%POLO_AI_APP_ROOT%\..") do set "POLO_AI_RESOURCES_ROOT=%%~fI"
+:root_ready
 set "POLO_AI_BUN=%POLO_AI_RESOURCES_ROOT%\vendor\bun\bun.exe"
 set "POLO_AI_SERVER_ENTRY=%POLO_AI_APP_ROOT%\dist\server\polo-server.js"
 set "POLO_AI_CLI_ENTRY=%POLO_AI_APP_ROOT%\dist\cli\polo-cli.js"

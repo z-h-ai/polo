@@ -38,6 +38,12 @@ function validatePackagedCli(context) {
     'scripts',
     'windows-terminal-integration.ps1',
   );
+  const linuxInstallerScript = path.join(
+    appDir,
+    'resources',
+    'scripts',
+    'linux-terminal-integration.sh',
+  );
   const bun = path.join(resourcesDir, 'vendor', 'bun', isWindows ? 'bun.exe' : 'bun');
   const archNames = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
   const expectedArch = archNames[context.arch];
@@ -70,6 +76,7 @@ function validatePackagedCli(context) {
     uvLockPath,
   ];
   if (isWindows) requiredArtifacts.push(windowsInstallerScript);
+  if (context.electronPlatformName === 'linux') requiredArtifacts.push(linuxInstallerScript);
   for (const required of requiredArtifacts) {
     if (!fs.existsSync(required)) {
       throw new Error(`POO-14 unpacked CLI validation failed; missing: ${required}`);

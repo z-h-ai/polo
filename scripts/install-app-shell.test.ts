@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -53,5 +61,85 @@ describe('Linux shell PATH setup', () => {
     expect(result.exitCode).toBe(0)
     expect(readFileSync(bashLogin, 'utf8')).toContain('# >>> Polo CLI >>>')
     expect(existsSync(join(home, '.profile'))).toBe(false)
+  })
+})
+
+describe('Linux AppImage installer lifecycle', () => {
+  it('installs the packaged canonical wrappers and removes only verified ownership', () => {
+    const home = createHome()
+    const fakeBin = join(home, 'fake-bin')
+    const artifact = join(home, 'Polo-AI-x64.AppImage')
+    const binDir = join(home, '.local', 'bin')
+    mkdirSync(fakeBin, { recursive: true })
+    writeFileSync(
+      join(fakeBin, 'uname'),
+      '#!/bin/sh\ncase "$1" in -m) printf "x86_64\\n" ;; *) printf "Linux\\n" ;; esac\n',
+    )
+    writeFileSync(join(fakeBin, 'pgrep'), '#!/bin/sh\nexit 1\n')
+    writeFileSync(join(fakeBin, 'fusermount'), '#!/bin/sh\nexit 0\n')
+    for (const file of ['uname', 'pgrep', 'fusermount']) {
+      chmodSync(join(fakeBin, file), 0o755)
+    }
+    writeFileSync(
+      artifact,
+      `#!/bin/bash
+set -e
+[ "\${1:-}" = "--appimage-extract" ] || exit 64
+root="$PWD/squashfs-root/resources"
+mkdir -p "$root/app/resources/bin" "$root/app/resources/scripts"
+mkdir -p "$root/vendor/bun" "$root/app/dist/cli" "$root/app/dist/server"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo" "$root/app/resources/bin/polo"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-ai" "$root/app/resources/bin/polo-ai"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/linux-terminal-integration.sh" "$root/app/resources/scripts/linux-terminal-integration.sh"
+chmod +x "$root/app/resources/bin/polo" "$root/app/resources/bin/polo-ai" "$root/app/resources/scripts/linux-terminal-integration.sh"
+printf '{\\n  "version": "0.10.0"\\n}\\n' > "$root/app/package.json"
+printf '#!/bin/sh\\nprintf "bundled=%%s\\\\n" "$*"\\nexit 19\\n' > "$root/vendor/bun/bun"
+chmod +x "$root/vendor/bun/bun"
+printf 'cli\\n' > "$root/app/dist/cli/polo-cli.js"
+printf 'server\\n' > "$root/app/dist/server/polo-server.js"
+`,
+    )
+    chmodSync(artifact, 0o755)
+    const env = {
+      ...process.env,
+      HOME: home,
+      SHELL: '/bin/zsh',
+      PATH: `${fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+      POLO_AI_INSTALL_ARTIFACT: artifact,
+      POLO_AI_BIN_DIR: binDir,
+      POLO_TEST_SOURCE_ROOT: join(import.meta.dir, '..'),
+    }
+
+    const installResult = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(installResult.exitCode).toBe(0)
+    const installedPolo = join(binDir, 'polo')
+    const installedCompat = join(binDir, 'polo-ai')
+    expect(lstatSync(installedPolo).isSymbolicLink()).toBe(true)
+    expect(lstatSync(installedCompat).isSymbolicLink()).toBe(true)
+    expect(readFileSync(installedPolo, 'utf8')).toBe(
+      readFileSync(join(import.meta.dir, '..', 'apps', 'electron', 'resources', 'bin', 'polo'), 'utf8'),
+    )
+
+    const appResult = Bun.spawnSync([installedPolo, 'app'], {
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(appResult.exitCode).toBe(19)
+    expect(appResult.stdout.toString()).toContain('bundled=run')
+    expect(appResult.stdout.toString()).toContain('polo-cli.js app')
+
+    const uninstallResult = Bun.spawnSync(
+      ['bash', join(import.meta.dir, 'uninstall-app.sh')],
+      { env, stdout: 'pipe', stderr: 'pipe' },
+    )
+    expect(uninstallResult.exitCode).toBe(0)
+    expect(existsSync(installedPolo)).toBe(false)
+    expect(existsSync(installedCompat)).toBe(false)
+    expect(existsSync(join(home, '.polo-ai', 'app'))).toBe(false)
   })
 })

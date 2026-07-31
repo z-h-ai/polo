@@ -4,26 +4,9 @@ set -e
 
 PATH_BLOCK_START="# >>> Polo CLI >>>"
 PATH_BLOCK_END="# <<< Polo CLI <<<"
-LAUNCHER_MARKER="# Polo CLI launcher (managed by Polo AI)"
 
 info() { printf "> %s\n" "$1"; }
 warn() { printf "! %s\n" "$1" >&2; }
-
-remove_managed_file() {
-    local path="$1"
-    shift
-    [ -e "$path" ] || return 0
-
-    local marker
-    for marker in "$@"; do
-        if grep -Fq "$marker" "$path" 2>/dev/null; then
-            rm -f "$path"
-            info "Removed $path"
-            return 0
-        fi
-    done
-    warn "Left non-Polo file unchanged: $path"
-}
 
 remove_managed_path_block() {
     local profile_path="$1"
@@ -74,11 +57,25 @@ case "$(uname -s)" in
         ;;
 esac
 
-remove_managed_file "$HOME/.local/bin/polo" "$LAUNCHER_MARKER"
-remove_managed_file \
-    "$HOME/.local/bin/polo-ai" \
-    "deprecated; use 'polo'" \
-    "# Polo AI launcher"
+terminal_cleanup_ok=true
+if [ "$(uname -s)" = "Linux" ]; then
+    linux_helper="$HOME/.polo-ai/app/current/resources/app/resources/scripts/linux-terminal-integration.sh"
+    if [ -f "$linux_helper" ] && [ ! -L "$linux_helper" ]; then
+        if bash "$linux_helper" uninstall \
+            --app-dir "$HOME/.polo-ai/app" \
+            --bin-dir "$HOME/.local/bin"; then
+            info "Removed verified Polo terminal launchers."
+        else
+            terminal_cleanup_ok=false
+        fi
+    elif [ -e "$HOME/.local/bin/polo" ] \
+        || [ -L "$HOME/.local/bin/polo" ] \
+        || [ -e "$HOME/.local/bin/polo-ai" ] \
+        || [ -L "$HOME/.local/bin/polo-ai" ]; then
+        terminal_cleanup_ok=false
+        warn "Polo terminal launchers were left unchanged because ownership state and its verifier are unavailable."
+    fi
+fi
 
 remove_managed_path_block "$HOME/.profile"
 remove_managed_path_block "$HOME/.bash_profile"
@@ -87,10 +84,14 @@ remove_managed_path_block "$HOME/.zprofile"
 remove_managed_path_block "$HOME/.config/fish/conf.d/polo.fish"
 
 if [ "$(uname -s)" = "Linux" ]; then
-    appimage="$HOME/.polo-ai/app/Polo-AI-x64.AppImage"
-    if [ -f "$appimage" ]; then
-        rm -f "$appimage"
-        info "Removed $appimage"
+    if [ "$terminal_cleanup_ok" = true ]; then
+        app_dir="$HOME/.polo-ai/app"
+        if [ -d "$app_dir" ]; then
+            rm -rf "$app_dir"
+            info "Removed $app_dir"
+        fi
+    else
+        warn "Polo application files were preserved because a terminal launcher may still reference them."
     fi
 fi
 

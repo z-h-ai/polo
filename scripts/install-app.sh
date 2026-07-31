@@ -408,104 +408,107 @@ else
     # Linux installation
     appimage_path="$installer_path"
 
-    # New paths
     APP_DIR="$HOME/.polo-ai/app"
     WRAPPER_PATH="$INSTALL_DIR/polo"
     LEGACY_WRAPPER_PATH="$INSTALL_DIR/polo-ai"
     APPIMAGE_INSTALL_PATH="$APP_DIR/Polo-AI-x64.AppImage"
+    EXTRACTED_INSTALL_PATH="$APP_DIR/current"
 
-    # Kill the app if it's running
+    mkdir -p "$APP_DIR"
+    mkdir -p "$INSTALL_DIR"
+
+    # Extract into a staging directory first. The installed command is a
+    # state-owned symlink to the exact canonical wrapper shipped inside the
+    # AppImage, so the installer never carries a divergent launcher template.
+    extraction_temp="$(mktemp -d "$APP_DIR/.polo-extract.XXXXXX")"
+    cleanup_linux_stage() {
+        rm -rf "$extraction_temp"
+    }
+    trap cleanup_linux_stage EXIT
+    info "Extracting packaged terminal runtime..."
+    (
+        cd "$extraction_temp"
+        chmod +x "$appimage_path"
+        "$appimage_path" --appimage-extract >/dev/null
+    )
+    extracted_root="$extraction_temp/squashfs-root"
+    staged_polo="$extracted_root/resources/app/resources/bin/polo"
+    staged_compat="$extracted_root/resources/app/resources/bin/polo-ai"
+    staged_helper="$extracted_root/resources/app/resources/scripts/linux-terminal-integration.sh"
+    staged_package="$extracted_root/resources/app/package.json"
+    for required in "$staged_polo" "$staged_compat" "$staged_helper" "$staged_package"; do
+        [ -f "$required" ] || error "Required packaged terminal file is missing: $required"
+    done
+    packaged_version=$(
+        sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$staged_package" | head -1
+    )
+    [ -n "$packaged_version" ] || error "Unable to read the packaged Polo version."
+
+    existing_polo=$(command -v polo 2>/dev/null || true)
+    if [ -n "$existing_polo" ] && [ "$existing_polo" != "$WRAPPER_PATH" ]; then
+        error "Another command named 'polo' already exists at $existing_polo. It was not changed."
+    fi
+
+    bash "$staged_helper" preflight \
+        --app-dir "$APP_DIR" \
+        --bin-dir "$INSTALL_DIR" \
+        --version "$packaged_version" \
+        --staged-polo "$staged_polo" \
+        --staged-compat "$staged_compat"
+
+    # No installed App/runtime/PATH mutation occurs until the ownership
+    # preflight above has verified both commands.
     if pgrep -f "Polo-AI.*AppImage" >/dev/null 2>&1; then
         info "Stopping Polo AI..."
         pkill -f "Polo-AI.*AppImage" 2>/dev/null || true
         sleep 2
     fi
 
-    # Create directories
-    mkdir -p "$APP_DIR"
-    mkdir -p "$INSTALL_DIR"
-
-    # Remove existing AppImage
-    [ -f "$APPIMAGE_INSTALL_PATH" ] && rm -f "$APPIMAGE_INSTALL_PATH"
-
-    # Install AppImage
-    info "Installing AppImage to $APP_DIR..."
-    mv "$appimage_path" "$APPIMAGE_INSTALL_PATH"
+    current_backup="$APP_DIR/.current.previous.$$"
+    appimage_backup="$APP_DIR/.Polo-AI.previous.$$"
+    [ -d "$EXTRACTED_INSTALL_PATH" ] && mv "$EXTRACTED_INSTALL_PATH" "$current_backup"
+    [ -f "$APPIMAGE_INSTALL_PATH" ] && mv "$APPIMAGE_INSTALL_PATH" "$appimage_backup"
+    if ! mv "$extracted_root" "$EXTRACTED_INSTALL_PATH"; then
+        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
+        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
+        error "Failed to install the packaged runtime."
+    fi
+    if ! mv "$appimage_path" "$APPIMAGE_INSTALL_PATH"; then
+        rm -rf "$EXTRACTED_INSTALL_PATH"
+        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
+        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
+        error "Failed to install the AppImage."
+    fi
     chmod +x "$APPIMAGE_INSTALL_PATH"
 
-    # Create wrapper script
-    existing_polo=$(command -v polo 2>/dev/null || true)
-    if [ -n "$existing_polo" ] && [ "$existing_polo" != "$WRAPPER_PATH" ]; then
-        error "Another command named 'polo' already exists at $existing_polo. It was not changed."
+    path_entry_owned=false
+    case ":$PATH:" in
+        *":$INSTALL_DIR:"*) ;;
+        *) path_entry_owned=true ;;
+    esac
+    installed_helper="$EXTRACTED_INSTALL_PATH/resources/app/resources/scripts/linux-terminal-integration.sh"
+    if ! bash "$installed_helper" install \
+        --app-dir "$APP_DIR" \
+        --bin-dir "$INSTALL_DIR" \
+        --version "$packaged_version" \
+        --path-entry-owned "$path_entry_owned"; then
+        rm -rf "$EXTRACTED_INSTALL_PATH"
+        rm -f "$APPIMAGE_INSTALL_PATH"
+        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
+        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
+        error "Failed to install Polo terminal integration."
     fi
-    if [ -e "$WRAPPER_PATH" ] && ! grep -q "managed by Polo AI" "$WRAPPER_PATH" 2>/dev/null; then
-        error "Another file already exists at $WRAPPER_PATH. It was not changed."
-    fi
-    info "Creating launcher at $WRAPPER_PATH..."
-    WRAPPER_TMP="$WRAPPER_PATH.tmp.$$"
-    cat > "$WRAPPER_TMP" << 'WRAPPER_EOF'
-#!/bin/bash
-# Polo CLI launcher (managed by Polo AI)
-
-APPIMAGE_PATH="$HOME/.polo-ai/app/Polo-AI-x64.AppImage"
-ELECTRON_CACHE="$HOME/.config/@polo-ai"
-ELECTRON_CACHE_ALT="$HOME/.cache/@polo-ai"
-
-# Verify AppImage exists
-if [ ! -f "$APPIMAGE_PATH" ]; then
-    echo "Error: Polo AI not found at $APPIMAGE_PATH"
-    echo "Reinstall: curl -fsSL https://polo.ai/install-app.sh | bash"
-    exit 1
-fi
-
-# Ensure DISPLAY is set (required for X11)
-if [ -z "$DISPLAY" ]; then
-    export DISPLAY=:0.0
-fi
-
-# Clear stale cache referencing AppImage mount paths
-# AppImage creates a new /tmp/.mount_Craft-XXXX each launch, so any cached path is stale
-for cache_dir in "$ELECTRON_CACHE" "$ELECTRON_CACHE_ALT"; do
-    if [ -d "$cache_dir" ] && grep -rq '/tmp/\.mount_Craft' "$cache_dir" 2>/dev/null; then
-        rm -rf "$cache_dir"
-    fi
-done
-
-# Set APPIMAGE for auto-update
-export APPIMAGE="$APPIMAGE_PATH"
-
-# `polo app` starts the GUI. Other commands enter the packaged CLI through
-# Electron's no-window bridge.
-if [ "${1:-}" = "app" ]; then
-    shift
-    exec "$APPIMAGE_PATH" --no-sandbox "$@"
-fi
-
-exec "$APPIMAGE_PATH" --no-sandbox --polo-cli "$@"
-WRAPPER_EOF
-
-    chmod +x "$WRAPPER_TMP"
-    mv -f "$WRAPPER_TMP" "$WRAPPER_PATH"
-
-    # Keep the previous command as a managed compatibility shim through Polo 1.0.
-    if [ ! -e "$LEGACY_WRAPPER_PATH" ] || grep -q "Polo AI launcher\\|managed by Polo AI\\|deprecated; use 'polo'" "$LEGACY_WRAPPER_PATH" 2>/dev/null; then
-        LEGACY_TMP="$LEGACY_WRAPPER_PATH.tmp.$$"
-        cat > "$LEGACY_TMP" << 'LEGACY_EOF'
-#!/bin/sh
-echo "Warning: 'polo-ai' is deprecated; use 'polo' instead." >&2
-exec "$HOME/.local/bin/polo" "$@"
-LEGACY_EOF
-        chmod +x "$LEGACY_TMP"
-        mv -f "$LEGACY_TMP" "$LEGACY_WRAPPER_PATH"
-    else
-        warn "Existing non-Polo command left unchanged: $LEGACY_WRAPPER_PATH"
-    fi
+    rm -rf "$current_backup"
+    rm -f "$appimage_backup"
 
     configure_managed_path
 
     # Migrate old installation
     OLD_APPIMAGE="$INSTALL_DIR/Polo-AI-x64.AppImage"
     [ -f "$OLD_APPIMAGE" ] && rm -f "$OLD_APPIMAGE"
+    trap - EXIT
+    cleanup_linux_stage
 
     echo ""
     echo "─────────────────────────────────────────────────────────────────────────"

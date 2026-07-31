@@ -93,6 +93,30 @@ public static class FixtureBun {
     Assert-True ($missingFiles.Contains("Polo terminal files are missing")) `
         "polo.cmd did not use the base-locale fallback"
     Move-Item -LiteralPath $savedCli -Destination $cliPath
+
+    # The installed copy is byte-identical and resolves its App root through a
+    # self-relative owned sidecar. `app` remains a normal CLI subcommand.
+    $installedBin = Join-Path $root "用户 terminal bin"
+    New-Item -ItemType Directory -Force $installedBin | Out-Null
+    Copy-Item -LiteralPath (Join-Path $binSource "polo.cmd") -Destination $installedBin
+    Copy-Item -LiteralPath (Join-Path $binSource "polo-ai.cmd") -Destination $installedBin
+    [IO.File]::WriteAllText((Join-Path $installedBin "polo-install-root.txt"), $resources)
+    & (Join-Path $installedBin "polo.cmd") "app"
+    Assert-True ($LASTEXITCODE -eq 37) "Installed polo.cmd did not preserve the runtime exit code"
+    $installedData = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
+    Assert-True (($installedData.argv -join "|") -ceq "run|$cliPath|app") `
+        "Installed polo.cmd intercepted app instead of forwarding it to the CLI"
+
+    $movedParent = Join-Path $root "Polo 已移动"
+    Move-Item -LiteralPath (Split-Path -Parent $resources) -Destination $movedParent
+    $movedResources = Join-Path $movedParent "resources"
+    $movedCli = Join-Path $movedResources "app\dist\cli\polo-cli.js"
+    [IO.File]::WriteAllText((Join-Path $installedBin "polo-install-root.txt"), $movedResources)
+    & (Join-Path $installedBin "polo.cmd") "sessions"
+    Assert-True ($LASTEXITCODE -eq 37) "Moved-App repair did not preserve the runtime exit code"
+    $movedData = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
+    Assert-True (($movedData.argv -join "|") -ceq "run|$movedCli|sessions") `
+        "Installed polo.cmd retained a stale absolute App path after repair"
     Write-Host "Windows checked-in Polo wrapper smoke passed."
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

@@ -14,6 +14,7 @@ if (-not $BinDir) {
 
 $launcher = Join-Path $BinDir "polo.cmd"
 $legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
+$rootPointer = Join-Path $BinDir "polo-install-root.txt"
 $stateFile = Join-Path $BinDir "terminal-integration.json"
 $exePath = Join-Path $InstallDir "Polo AI.exe"
 $bunPath = Join-Path $InstallDir "resources\vendor\bun\bun.exe"
@@ -21,7 +22,8 @@ $appRoot = Join-Path $InstallDir "resources\app"
 $cliPath = Join-Path $appRoot "dist\cli\polo-cli.js"
 $serverPath = Join-Path $appRoot "dist\server\polo-server.js"
 $packagePath = Join-Path $appRoot "package.json"
-$marker = "Polo CLI launcher (managed by Polo AI)"
+$launcherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo.cmd"
+$legacyLauncherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo-ai.cmd"
 
 function Write-AtomicUtf8([string]$Path, [string]$Content) {
     $parent = Split-Path -Parent $Path
@@ -121,7 +123,7 @@ function Test-StateOwnedFile($State, [string]$Path) {
 
 function Write-State([bool]$PathEntryAddedByPolo) {
     $files = @()
-    foreach ($managedFile in @($launcher, $legacyLauncher)) {
+    foreach ($managedFile in @($launcher, $legacyLauncher, $rootPointer)) {
         $hash = Get-Sha256 $managedFile
         if ($hash) {
             $files += @{
@@ -156,7 +158,15 @@ function Test-LegacyPoloLauncher {
 }
 
 function Assert-PackagedArtifacts {
-    foreach ($required in @($exePath, $bunPath, $cliPath, $serverPath, $packagePath)) {
+    foreach ($required in @(
+        $exePath,
+        $bunPath,
+        $cliPath,
+        $serverPath,
+        $packagePath,
+        $launcherTemplate,
+        $legacyLauncherTemplate
+    )) {
         if (-not (Test-Path $required)) {
             throw "Required Polo artifact not found: $required"
         }
@@ -164,11 +174,23 @@ function Assert-PackagedArtifacts {
 }
 
 function Get-LauncherContent {
-    return @"
+    return [IO.File]::ReadAllText($launcherTemplate)
+}
+
+function Get-LegacyShimContent {
+    return [IO.File]::ReadAllText($legacyLauncherTemplate)
+}
+
+function Get-HistoricalLauncherAllowlist([string]$Path) {
+    if ($Path.TrimEnd("\") -ieq $launcher.TrimEnd("\")) {
+        # Exact POO-14 pre-template launcher. This allowlist is intentionally
+        # generated from its old absolute layout and is only consulted when
+        # ownership state is absent.
+        $oldContent = @"
 @echo off
 chcp 65001 >nul 2>&1
 setlocal
-rem $marker
+rem Polo CLI launcher (managed by Polo AI)
 set "POLO_AI_BUN=$bunPath"
 set "POLO_AI_SERVER_ENTRY=$serverPath"
 set "POLO_AI_CLI_ENTRY=$cliPath"
@@ -206,10 +228,10 @@ if /I "%~1"=="app" (
 "$bunPath" run "$cliPath" %*
 exit /b %ERRORLEVEL%
 "@
-}
-
-function Get-LegacyShimContent {
-    return @"
+        return @($oldContent, "$oldContent`r`n")
+    }
+    if ($Path.TrimEnd("\") -ieq $legacyLauncher.TrimEnd("\")) {
+        $oldLocalizedShim = @"
 @echo off
 chcp 65001 >nul 2>&1
 setlocal
@@ -223,20 +245,11 @@ echo [POLO_W_DEPRECATED_COMMAND] %POLO_MSG_DEPRECATED% 1>&2
 call "$launcher" %*
 exit /b %ERRORLEVEL%
 "@
-}
-
-function Get-HistoricalLauncherAllowlist([string]$Path) {
-    if ($Path.TrimEnd("\") -ieq $launcher.TrimEnd("\")) {
-        $content = Get-LauncherContent
-        return @($content, "$content`r`n")
-    }
-    if ($Path.TrimEnd("\") -ieq $legacyLauncher.TrimEnd("\")) {
-        $shim = Get-LegacyShimContent
         $previousShim = "@echo off`r`necho Warning: 'polo-ai' is deprecated; use 'polo' instead. 1>&2`r`ncall `"$launcher`" %*`r`nexit /b %ERRORLEVEL%"
         $oldGui = "@echo off`r`nstart `"`" `"$exePath`" %*"
         return @(
-            $shim,
-            "$shim`r`n",
+            $oldLocalizedShim,
+            "$oldLocalizedShim`r`n",
             $previousShim,
             "$previousShim`r`n",
             $oldGui,
@@ -268,10 +281,12 @@ function Install-LauncherFiles([bool]$CheckCommandConflict, $PreviousState) {
     }
     Assert-FileOwnedForReplacement $PreviousState $launcher
     Assert-FileOwnedForReplacement $PreviousState $legacyLauncher
+    Assert-FileOwnedForReplacement $PreviousState $rootPointer
 
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     Write-AtomicUtf8 $launcher (Get-LauncherContent)
     Write-AtomicUtf8 $legacyLauncher (Get-LegacyShimContent)
+    Write-AtomicUtf8 $rootPointer (Join-Path $InstallDir "resources")
 }
 
 if ($Mode -eq "Validate") {
@@ -281,13 +296,13 @@ if ($Mode -eq "Validate") {
         $BinDir = $validationRoot
         $launcher = Join-Path $BinDir "polo.cmd"
         $legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
+        $rootPointer = Join-Path $BinDir "polo-install-root.txt"
         $stateFile = Join-Path $BinDir "terminal-integration.json"
         Install-LauncherFiles $false $null
         $actualContent = Get-Content $launcher -Raw
-        if ($actualContent -match "--polo-cli" -or
-            $actualContent -notmatch [Regex]::Escape($bunPath) -or
-            $actualContent -notmatch [Regex]::Escape($cliPath)) {
-            throw "Generated launcher does not directly invoke the bundled Bun and CLI."
+        if ((Normalize-LineEndings $actualContent) -cne
+            (Normalize-LineEndings ([IO.File]::ReadAllText($launcherTemplate)))) {
+            throw "Installed launcher differs from the checked-in canonical template."
         }
         $expectedVersion = (Get-Content $packagePath -Raw | ConvertFrom-Json).version
         $output = & $launcher --version 2>&1
@@ -304,10 +319,13 @@ if ($Mode -eq "Install") {
     Assert-PackagedArtifacts
 
     $previousState = Read-State
+    if ((Test-Path -LiteralPath $stateFile) -and -not $previousState) {
+        throw "Polo cannot repair terminal integration because its ownership state is invalid."
+    }
     $userPath = Get-UserPath
     $entries = @($userPath -split ";" | Where-Object { $_ })
     $pathEntryPresent = Test-PathEntry $entries $BinDir
-    $legacyPathEntryOwned = -not $previousState `
+    $legacyPathEntryOwned = -not (Test-Path -LiteralPath $stateFile) `
         -and $pathEntryPresent `
         -and (Test-LegacyPoloLauncher)
 
@@ -331,20 +349,27 @@ if ($Mode -eq "Install") {
 }
 
 $state = Read-State
+$stateMissing = -not (Test-Path -LiteralPath $stateFile)
 $ownershipConflict = $false
-foreach ($managedFile in @($launcher, $legacyLauncher)) {
-    if (-not (Test-Path -LiteralPath $managedFile)) {
-        continue
-    }
+$ownedFiles = @()
+$existingManagedFiles = @($launcher, $legacyLauncher, $rootPointer) | Where-Object {
+    Test-Path -LiteralPath $_
+}
+foreach ($managedFile in $existingManagedFiles) {
     $owned = Test-StateOwnedFile $state $managedFile
-    if (-not $state) {
+    if (-not $state -and $stateMissing) {
         $owned = Test-ExactContent $managedFile (Get-HistoricalLauncherAllowlist $managedFile)
     }
     if ($owned) {
-        Remove-Item -LiteralPath $managedFile -Force
+        $ownedFiles += $managedFile
     } else {
         $ownershipConflict = $true
         Write-Warning "Polo left modified or user-owned file unchanged: $managedFile"
+    }
+}
+if (-not $ownershipConflict) {
+    foreach ($managedFile in $ownedFiles) {
+        Remove-Item -LiteralPath $managedFile -Force
     }
 }
 

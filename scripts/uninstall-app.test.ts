@@ -10,7 +10,18 @@ function createHome(): string {
   const home = join(tmpdir(), `polo-uninstall-test-${crypto.randomUUID()}`)
   roots.push(home)
   mkdirSync(join(home, '.local', 'bin'), { recursive: true })
+  const fakeBin = join(home, '.test-bin')
+  mkdirSync(fakeBin, { recursive: true })
+  writeFileSync(join(fakeBin, 'uname'), '#!/bin/sh\nprintf "Linux\\n"\n', { mode: 0o755 })
   return home
+}
+
+function linuxEnv(home: string): Record<string, string> {
+  return {
+    ...process.env,
+    HOME: home,
+    PATH: `${join(home, '.test-bin')}:${process.env.PATH ?? ''}`,
+  }
 }
 
 afterEach(() => {
@@ -18,7 +29,7 @@ afterEach(() => {
 })
 
 describe('macOS/Linux terminal cleanup', () => {
-  it('removes only Polo-managed launchers and profile blocks', () => {
+  it('does not infer launcher ownership from a copied marker', () => {
     const home = createHome()
     const polo = join(home, '.local', 'bin', 'polo')
     const legacy = join(home, '.local', 'bin', 'polo-ai')
@@ -31,14 +42,15 @@ describe('macOS/Linux terminal cleanup', () => {
     )
 
     const result = Bun.spawnSync(['bash', script], {
-      env: { ...process.env, HOME: home },
+      env: linuxEnv(home),
       stdout: 'pipe',
       stderr: 'pipe',
     })
 
     expect(result.exitCode).toBe(0)
-    expect(existsSync(polo)).toBe(false)
-    expect(existsSync(legacy)).toBe(false)
+    expect(existsSync(polo)).toBe(true)
+    expect(existsSync(legacy)).toBe(true)
+    expect(result.stderr.toString()).toContain('ownership state and its verifier are unavailable')
     expect(readFileSync(profile, 'utf8')).toContain('export EDITOR=vim')
     expect(readFileSync(profile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
     expect(readdirSync(home).some((name) => name.startsWith('.zprofile.polo-backup-'))).toBe(true)
@@ -50,14 +62,14 @@ describe('macOS/Linux terminal cleanup', () => {
     writeFileSync(polo, '#!/bin/sh\necho unrelated\n')
 
     const result = Bun.spawnSync(['bash', script], {
-      env: { ...process.env, HOME: home },
+      env: linuxEnv(home),
       stdout: 'pipe',
       stderr: 'pipe',
     })
 
     expect(result.exitCode).toBe(0)
     expect(readFileSync(polo, 'utf8')).toContain('unrelated')
-    expect(result.stderr.toString()).toContain('Left non-Polo file unchanged')
+    expect(result.stderr.toString()).toContain('ownership state and its verifier are unavailable')
   })
 
   it('removes the managed block from Bash login fallback files', () => {
@@ -70,7 +82,7 @@ describe('macOS/Linux terminal cleanup', () => {
     )
 
     const result = Bun.spawnSync(['bash', script], {
-      env: { ...process.env, HOME: home },
+      env: linuxEnv(home),
       stdout: 'pipe',
       stderr: 'pipe',
     })

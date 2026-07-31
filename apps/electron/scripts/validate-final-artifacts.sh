@@ -172,6 +172,7 @@ validate_app_bundle() {
   local app_root="$resources_root/app"
   local bun="$resources_root/vendor/bun/bun"
   local wrapper="$app_root/resources/bin/polo"
+  local linux_terminal_helper="$app_root/resources/scripts/linux-terminal-integration.sh"
   local manifest="$app_root/dist/cli/artifact-manifest.json"
   local cli_package="$app_root/dist/cli/package.json"
   local platform_key
@@ -199,6 +200,11 @@ validate_app_bundle() {
       return 1
     fi
   done
+  if [ "$SYSTEM_NAME" = "Linux" ] \
+    && { [ ! -f "$linux_terminal_helper" ] || [ ! -x "$linux_terminal_helper" ]; }; then
+    echo "$label is missing the executable Linux terminal ownership helper: $linux_terminal_helper" >&2
+    return 1
+  fi
   if [ ! -x "$uv" ]; then
     echo "$label uv runtime is not executable: $uv" >&2
     return 1
@@ -893,6 +899,7 @@ run_linux_full_e2e() {
 
   HOME="$test_home" SHELL=/bin/bash bash "$UNINSTALL_SCRIPT"
   if [ -e "$launcher" ] || [ -e "$installed_app" ] \
+    || [ -e "$test_home/.polo-ai/terminal-integration-linux.state" ] \
     || grep -R -F '# >>> Polo CLI >>>' \
       "$test_home/.profile" "$test_home/.bash_profile" \
       "$test_home/.config/fish/conf.d/polo.fish" 2>/dev/null; then

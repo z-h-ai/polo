@@ -44,6 +44,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('"$uv" --version')
     expect(validator).toContain('runtime-manifest.json')
     expect(validator).toContain('uv-runtime-lock.json')
+    expect(validator).toContain('linux-terminal-integration.sh')
     expect(validator).toContain('Pinned uv runtime manifest mismatch')
     expect(validator).toContain('mode=smoke acceptance=development-only')
     expect(validator).toContain('Full macOS validation requires the release Team ID')
@@ -135,12 +136,19 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('runner: macos-14')
     expect(workflow).toContain('runner: windows-latest')
     expect(workflow).toContain('runner: ubuntu-latest')
-    expect(workflow).toContain('gh release download')
-    expect(workflow).toContain('--repo "$GITHUB_REPOSITORY"')
-    expect(workflow).toContain('application/vnd.github.raw+json')
+    const unixPreviousPreflight = read('scripts/preflight-previous-release.sh')
+    const windowsPreviousPreflight = read('scripts/preflight-previous-release.ps1')
+    expect(workflow).toContain('preflight-previous-release.sh')
+    expect(workflow).toContain('preflight-previous-release.ps1')
+    expect(unixPreviousPreflight).toContain('gh release download')
+    expect(windowsPreviousPreflight).toContain('gh release download')
+    expect(unixPreviousPreflight).toContain('--repo "$GITHUB_REPOSITORY"')
+    expect(unixPreviousPreflight).toContain('application/vnd.github.raw+json')
+    expect(windowsPreviousPreflight).toContain('Get-FileHash')
     expect(workflow).toContain('validate-previous-release-contract.ts')
     expect(workflow).toContain('verified-contract-${{ matrix.platform }}.json')
-    expect(workflow).toContain('Previous release version must differ from current')
+    expect(unixPreviousPreflight).toContain('Previous release version must differ from current')
+    expect(windowsPreviousPreflight).toContain('Previous release version must differ from current')
     expect(workflow).toContain('windows-terminal-integration.test.ps1')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_TEAM_ID')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_APP_REQUIREMENT')
@@ -169,6 +177,43 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('bun run validate:ci')
     expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildMcpServers(config)')
+  })
+
+  it('verifies immutable previous assets before every setup or install write', () => {
+    const workflow = read('.github/workflows/electron-artifact-full.yml')
+    const unixPreflight = workflow.indexOf(
+      'Verify and download previous Unix release before setup',
+    )
+    const windowsPreflight = workflow.indexOf(
+      'Verify and download previous Windows release before setup',
+    )
+    const setupBun = workflow.indexOf('- name: Setup Bun')
+    const setupUv = workflow.indexOf('- name: Install uv')
+    const apt = workflow.indexOf('- name: Install Linux GUI and AppImage dependencies')
+    const installDependencies = workflow.indexOf('- name: Install dependencies')
+
+    for (const preflight of [unixPreflight, windowsPreflight]) {
+      expect(preflight).toBeGreaterThan(0)
+      expect(preflight).toBeLessThan(setupBun)
+      expect(preflight).toBeLessThan(setupUv)
+      expect(preflight).toBeLessThan(apt)
+      expect(preflight).toBeLessThan(installDependencies)
+    }
+    expect(workflow.indexOf('preflight-previous-release.sh')).toBeLessThan(setupBun)
+    expect(workflow.indexOf('preflight-previous-release.ps1')).toBeLessThan(setupBun)
+
+    const unix = read('scripts/preflight-previous-release.sh')
+    const windows = read('scripts/preflight-previous-release.ps1')
+    for (const contract of [unix, windows]) {
+      expect(contract).toContain('PREVIOUS_RELEASE_COMMIT_SHA')
+      expect(contract).toContain('EXPECTED_PREVIOUS_ARTIFACT_SHA256')
+      expect(contract).toContain('gh release download')
+      expect(contract).toContain('Previous release version must differ')
+      expect(contract.toLowerCase()).not.toContain('setup-bun')
+      expect(contract).not.toMatch(/\bbun\b/)
+    }
+    expect(unix).toContain('EXPECTED_PREVIOUS_INSTALLER_SHA256')
+    expect(unix).toContain('application/vnd.github.raw+json')
   })
 
   it('routes every formal and legacy dist entry through target-aware runtime preparation', () => {
@@ -248,6 +293,10 @@ describe('Electron final artifact validation pipeline', () => {
     expect(installer).toContain('POLO_AI_INSTALL_DIR')
     expect(installer).toContain('POLO_AI_BIN_DIR')
     expect(installer).toContain('Using local install artifact')
+    expect(installer).toContain('linux-terminal-integration.sh')
+    expect(installer).toContain('--appimage-extract')
+    expect(installer).not.toContain("cat > \"$WRAPPER_TMP\"")
+    expect(installer).not.toContain('exec "$APPIMAGE_PATH" --no-sandbox --polo-cli')
   })
 
   it('builds and validates dependency-free sanitized CLI metadata', () => {
@@ -270,5 +319,6 @@ describe('Electron final artifact validation pipeline', () => {
       expect(source).toContain('binarySha256')
       expect(source).toContain('astral-sh-release')
     }
+    expect(afterPack).toContain('linux-terminal-integration.sh')
   })
 })
