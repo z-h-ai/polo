@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CliRpcClient } from './client.ts'
@@ -68,6 +68,98 @@ describe('one-shot execution internals', () => {
     expect(await Bun.file(join(snapshot, 'config.json')).exists()).toBe(true)
     expect(await Bun.file(join(snapshot, 'config-defaults.json')).exists()).toBe(true)
     expect(JSON.parse(await Bun.file(join(snapshot, 'config-defaults.json')).text())).toHaveProperty('defaults')
+  })
+
+  it('rejects configuration symlinks without copying their external targets', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-snapshot-symlink-'))
+    tempDirs.push(temp)
+    const appRoot = join(temp, 'app')
+    const workspaceRoot = join(temp, 'workspace')
+    const threadRoot = join(temp, 'thread')
+    const externalSecret = join(temp, 'outside-secret.txt')
+    await mkdir(join(workspaceRoot, 'sources', 'linked'), { recursive: true })
+    await mkdir(threadRoot, { recursive: true })
+    await writeFile(externalSecret, 'must-not-enter-thread')
+    await symlink(externalSecret, join(workspaceRoot, 'sources', 'linked', 'secret.txt'))
+
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = appRoot
+    try {
+      const record = {
+        directory: threadRoot,
+        sessionsRoot: join(threadRoot, 'sessions'),
+        ownerFile: join(threadRoot, 'owner.json'),
+        metadata: {
+          version: 1,
+          threadId: crypto.randomUUID(),
+          origin: 'cli-exec',
+          configurationScopeId: 'workspace-1',
+          configurationWorkspacePath: workspaceRoot,
+          workingDirectory: temp,
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          persistence: 'persistent',
+        },
+      } satisfies CliThreadRecord
+
+      await expect(createConfigurationSnapshot(record, {
+        id: 'workspace-1',
+        path: workspaceRoot,
+      })).rejects.toThrow('unresolved symlink')
+      expect(await Bun.file(join(threadRoot, 'config-snapshot')).exists()).toBe(false)
+      expect(await readFile(externalSecret, 'utf-8')).toBe('must-not-enter-thread')
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
+  })
+
+  it('snapshots the current app-level default permissions for workspace exec', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-snapshot-permissions-'))
+    tempDirs.push(temp)
+    const appRoot = join(temp, 'app')
+    const workspaceRoot = join(temp, 'workspace')
+    const threadRoot = join(temp, 'thread')
+    const permissions = '{"version":"test-current-electron-permissions"}\n'
+    await mkdir(join(appRoot, 'permissions'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'permissions'), { recursive: true })
+    await mkdir(threadRoot, { recursive: true })
+    await writeFile(join(appRoot, 'permissions', 'default.json'), permissions)
+    await writeFile(
+      join(workspaceRoot, 'permissions', 'default.json'),
+      '{"version":"workspace-must-not-override-app-default"}\n',
+    )
+
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = appRoot
+    try {
+      const record = {
+        directory: threadRoot,
+        sessionsRoot: join(threadRoot, 'sessions'),
+        ownerFile: join(threadRoot, 'owner.json'),
+        metadata: {
+          version: 1,
+          threadId: crypto.randomUUID(),
+          origin: 'cli-exec',
+          configurationScopeId: 'workspace-1',
+          configurationWorkspacePath: workspaceRoot,
+          workingDirectory: temp,
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          persistence: 'persistent',
+        },
+      } satisfies CliThreadRecord
+
+      const snapshot = await createConfigurationSnapshot(record, {
+        id: 'workspace-1',
+        path: workspaceRoot,
+      })
+      expect(await readFile(join(snapshot, 'permissions', 'default.json'), 'utf-8'))
+        .toBe(permissions)
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
   })
 
   it('keeps provider typed_error terminal even if complete follows', async () => {
@@ -142,6 +234,78 @@ describe('one-shot execution internals', () => {
 
     expect(result.status).toBe('completed')
     expect(result.finalMessage).toBe('\u001B[31manswer\u001B[39m')
+  })
+
+  it('returns only the final assistant message after intermediate tool commentary', async () => {
+    let listener: ((value: unknown) => void) | undefined
+    const client = {
+      on(_channel: string, callback: (value: unknown) => void) {
+        listener = callback
+        return () => {
+          listener = undefined
+        }
+      },
+      async invoke() {
+        for (const event of [
+          {
+            type: 'text_delta',
+            sessionId: 'session-1',
+            delta: 'I will inspect the repository.',
+          },
+          {
+            type: 'text_complete',
+            sessionId: 'session-1',
+            text: 'I will inspect the repository.',
+            isIntermediate: true,
+          },
+          {
+            type: 'tool_start',
+            sessionId: 'session-1',
+            toolUseId: 'tool-1',
+            toolName: 'bash',
+          },
+          {
+            type: 'tool_result',
+            sessionId: 'session-1',
+            toolUseId: 'tool-1',
+            toolName: 'bash',
+            result: 'ok',
+          },
+          {
+            type: 'text_delta',
+            sessionId: 'session-1',
+            delta: 'Final answer only.',
+          },
+          {
+            type: 'text_complete',
+            sessionId: 'session-1',
+            text: 'Final answer only.',
+            isIntermediate: false,
+          },
+          {
+            type: 'complete',
+            sessionId: 'session-1',
+          },
+        ] satisfies InternalSessionEvent[]) {
+          listener?.(event)
+        }
+      },
+      waitForDisconnect() {
+        return new Promise<Error>(() => {})
+      },
+    } as unknown as CliRpcClient
+    const args = parseExecutionArgs(['bun', 'index.ts', 'exec', 'hello'])
+
+    const result = await waitForTurn(
+      client,
+      'session-1',
+      'hello',
+      args,
+      new ExecEventAdapter({ json: false }),
+    )
+
+    expect(result.status).toBe('completed')
+    expect(result.finalMessage).toBe('Final answer only.')
   })
 
   it('strips ANSI from every run text/tool path for all color modes and JSONL', async () => {

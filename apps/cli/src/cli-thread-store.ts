@@ -81,7 +81,7 @@ interface CliThreadStateLockRecord {
   lockId: string
   /** Backward-compatible alias used by the round-2 takeover lock. */
   takeoverId?: string
-  operation: 'acquire' | 'heartbeat' | 'release' | 'delete' | 'stale-cleanup'
+  operation: 'acquire' | 'heartbeat' | 'release' | 'delete' | 'repair' | 'stale-cleanup'
   pid: number
   processIdentity: string
   createdAt: number
@@ -704,6 +704,37 @@ export async function isCliThreadActive(record: CliThreadRecord): Promise<boolea
   }
   const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
   return owner ? isOwnerActive(owner) : false
+}
+
+export async function repairAbandonedCliThread(
+  record: CliThreadRecord,
+  now = Date.now(),
+): Promise<boolean> {
+  const root = getCliSessionsRoot()
+  await assertCanonicalControlledPath(root, record.directory)
+  const stateLock = await acquireThreadStateLock(record, 'repair')
+  try {
+    if (existsSync(deletingMarkerPath(record))) return false
+    const metadata = await readJson<CliThreadMetadata>(join(record.directory, 'thread.json'))
+    record.metadata = metadata
+    if (
+      metadata.origin !== 'cli-exec'
+      || metadata.persistence !== 'persistent'
+      || metadata.status
+    ) {
+      return false
+    }
+
+    const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
+    if (owner ? isOwnerActive(owner, now) : now - metadata.lastUsedAt <= ACTIVE_LEASE_WINDOW_MS) {
+      return false
+    }
+
+    await updateCliThread(record, { status: 'interrupted' })
+    return true
+  } finally {
+    await stateLock.release()
+  }
 }
 
 export async function cloneCliThreadEphemeral(source: CliThreadRecord): Promise<CliThreadRecord> {

@@ -36,6 +36,7 @@ import {
   isCliThreadActive,
   listCliThreads,
   locateCliThread,
+  repairAbandonedCliThread,
   updateCliThread,
   type CliThreadRecord,
   type CliThreadStatus,
@@ -212,53 +213,88 @@ export async function createConfigurationSnapshot(
   await rm(snapshotRoot, { recursive: true, force: true })
   await mkdir(snapshotRoot, { recursive: true, mode: 0o700 })
 
-  const entries = await readdir(scope.path, { withFileTypes: true }).catch(error => {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && scope.id === 'global') return []
-    throw error
-  })
-  for (const entry of entries) {
-    if (entry.name === 'sessions') continue
-    if (scope.id === 'global' && !GLOBAL_SNAPSHOT_ENTRIES.has(entry.name)) continue
-    await cp(join(scope.path, entry.name), join(snapshotRoot, entry.name), {
-      recursive: true,
+  try {
+    const entries = await readdir(scope.path, { withFileTypes: true }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' && scope.id === 'global') return []
+      throw error
+    })
+    for (const entry of entries) {
+      if (entry.name === 'sessions') continue
+      if (scope.id === 'global' && !GLOBAL_SNAPSHOT_ENTRIES.has(entry.name)) continue
+      await cp(join(scope.path, entry.name), join(snapshotRoot, entry.name), {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+        // Never follow configuration symlinks while building a persistent
+        // Thread. makePrivateTree rejects any copied link before the runtime
+        // can observe the snapshot, preventing links from importing files
+        // outside the selected configuration scope.
+        dereference: false,
+        filter: source => {
+          const name = basename(source)
+          return name !== '.credential-cache.json'
+            && name !== 'credentials.enc'
+            && name !== 'credentials.json'
+            && name !== '.env'
+        },
+      })
+    }
+
+    // Validate the copied scope before writing any seeded files through paths
+    // it supplied. In particular, a workspace-controlled `permissions`
+    // symlink must not redirect the app-level default copy outside the Thread.
+    await makePrivateTree(snapshotRoot)
+
+    if (scope.id === 'global') {
+      const now = Date.now()
+      await writeFile(join(snapshotRoot, 'config.json'), JSON.stringify({
+        id: 'global',
+        name: 'Global',
+        slug: 'global',
+        createdAt: now,
+        updatedAt: now,
+      }, null, 2), { mode: 0o600 })
+    }
+
+    // CLI-first startup cannot rely on Electron having initialized the config
+    // root. Seed the private snapshot from the bundled, read-only defaults.
+    const bundledResource = (name: string): string | undefined => {
+      const candidates = [
+        process.env.POLO_AI_BUNDLED_ASSETS_ROOT
+          ? join(process.env.POLO_AI_BUNDLED_ASSETS_ROOT, 'apps', 'electron', 'resources', name)
+          : '',
+        join(import.meta.dir, '..', '..', '..', 'apps', 'electron', 'resources', name),
+      ].filter(Boolean)
+      return candidates.find(candidate => Bun.file(candidate).size > 0)
+    }
+    const bundledDefaults = bundledResource('config-defaults.json')
+    if (!bundledDefaults) throw new Error('bundled config-defaults.json is unavailable')
+    await cp(bundledDefaults, join(snapshotRoot, 'config-defaults.json'), { force: true })
+
+    // Safe exec must use the same invocation-start app-level permissions that
+    // Electron currently uses, even when the selected configuration scope is
+    // a workspace. Fall back to the bundled defaults only on a fresh install.
+    const appPermissions = join(configRoot(), 'permissions', 'default.json')
+    const bundledPermissions = bundledResource(join('permissions', 'default.json'))
+    const permissionsSource = Bun.file(appPermissions).size > 0
+      ? appPermissions
+      : bundledPermissions
+    if (!permissionsSource) throw new Error('default permissions are unavailable')
+    const permissionsDirectory = join(snapshotRoot, 'permissions')
+    await mkdir(permissionsDirectory, { recursive: true, mode: 0o700 })
+    await rm(join(permissionsDirectory, 'default.json'), { force: true })
+    await cp(permissionsSource, join(permissionsDirectory, 'default.json'), {
       force: false,
       errorOnExist: true,
-      dereference: true,
-      filter: source => {
-        const name = basename(source)
-        return name !== '.credential-cache.json'
-          && name !== 'credentials.enc'
-          && name !== 'credentials.json'
-          && name !== '.env'
-      },
+      dereference: false,
     })
+
+    await makePrivateTree(snapshotRoot)
+    return snapshotRoot
+  } catch (error) {
+    await rm(snapshotRoot, { recursive: true, force: true }).catch(() => {})
+    throw error
   }
-
-  if (scope.id === 'global') {
-    const now = Date.now()
-    await writeFile(join(snapshotRoot, 'config.json'), JSON.stringify({
-      id: 'global',
-      name: 'Global',
-      slug: 'global',
-      createdAt: now,
-      updatedAt: now,
-    }, null, 2), { mode: 0o600 })
-  }
-
-  // CLI-first startup cannot rely on Electron having initialized the config
-  // root. Seed the private snapshot from the bundled, read-only defaults.
-  const bundledDefaultsCandidates = [
-    process.env.POLO_AI_BUNDLED_ASSETS_ROOT
-      ? join(process.env.POLO_AI_BUNDLED_ASSETS_ROOT, 'apps', 'electron', 'resources', 'config-defaults.json')
-      : '',
-    join(import.meta.dir, '..', '..', '..', 'apps', 'electron', 'resources', 'config-defaults.json'),
-  ].filter(Boolean)
-  const bundledDefaults = bundledDefaultsCandidates.find(candidate => Bun.file(candidate).size > 0)
-  if (!bundledDefaults) throw new Error('bundled config-defaults.json is unavailable')
-  await cp(bundledDefaults, join(snapshotRoot, 'config-defaults.json'), { force: true })
-
-  await makePrivateTree(snapshotRoot)
-  return snapshotRoot
 }
 
 function resolveInvocationApiKey(args: ExecutionArgs, provider?: string): string | undefined {
@@ -544,6 +580,8 @@ export async function waitForTurn(
   } = {},
 ): Promise<TurnResult> {
   let finalMessage = ''
+  let pendingText = ''
+  let sawFinalTextComplete = false
   let settled = false
   let settle!: (result: TurnResult) => void
   const resultPromise = new Promise<TurnResult>(resolveResult => {
@@ -566,9 +604,19 @@ export async function waitForTurn(
     }
     if (event.type === 'text_delta') {
       const delta = String(event.delta ?? '')
-      finalMessage += delta
+      pendingText += delta
       if (args.kind === 'run' && args.outputFormat !== 'stream-json') {
         process.stdout.write(stripAnsi(delta))
+      }
+      return
+    }
+    if (event.type === 'text_complete') {
+      if (event.isIntermediate) {
+        pendingText = ''
+      } else {
+        finalMessage = typeof event.text === 'string' ? event.text : pendingText
+        pendingText = ''
+        sawFinalTextComplete = true
       }
       return
     }
@@ -585,7 +633,12 @@ export async function waitForTurn(
       }
       return
     }
-    if (event.type === 'complete') finish({ status: 'completed', finalMessage })
+    if (event.type === 'complete') {
+      finish({
+        status: 'completed',
+        finalMessage: sawFinalTextComplete ? finalMessage : pendingText,
+      })
+    }
     if (event.type === 'interrupted') finish({ status: 'interrupted', finalMessage: '' })
     if (event.type === 'error') {
       finish({
@@ -1291,6 +1344,7 @@ async function listSessionsCommand(args: ExecutionArgs): Promise<number> {
     && record.metadata.configurationScopeId === scope.id
     && record.metadata.workingDirectory === workingDirectory
   )
+  for (const record of records) await repairAbandonedCliThread(record)
   if (args.json) {
     for (const record of records) {
       process.stdout.write(

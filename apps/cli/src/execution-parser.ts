@@ -196,6 +196,7 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
   let dangerousAlias = false
   let modeProvided = false
   let legacyWorkspaceDirProvided = false
+  const providedOptions = new Set<string>()
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!
@@ -210,6 +211,7 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
     }
 
     const [name, inline] = splitLongOption(token)
+    if (token.startsWith('-') && token !== '-') providedOptions.add(name)
     if (LEGACY_SERVER_ONLY_OPTIONS.has(name)) {
       throw new UsageError(`unsupported option for ${command}: ${name}`)
     }
@@ -447,8 +449,13 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
 
   if (args.kind === 'sessions' || args.kind === 'delete') {
     if (positionals.length > 0) throw new UsageError(`unexpected argument: ${positionals[0]}`)
-    if (args.ephemeral || args.outputLastMessage) {
-      throw new UsageError(`unsupported option for exec ${args.kind}`)
+    const allowedOptions = args.kind === 'sessions'
+      ? new Set(['--workspace', '-C', '--cd', '--json', '--color'])
+      : new Set(['--json', '--color'])
+    const unsupportedOption = [...providedOptions]
+      .find(option => !allowedOptions.has(option))
+    if (unsupportedOption) {
+      throw new UsageError(`unsupported option for exec ${args.kind}: ${unsupportedOption}`)
     }
     return args
   }

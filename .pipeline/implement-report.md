@@ -1,61 +1,58 @@
-# POO-16 实施报告
+# POO-16 实现报告
 
 ## 变更摘要
 
-- `polo run` 与 `polo exec` 使用独立 CLI runtime、独立 lock namespace 和 `~/.polo-ai/cli-sessions/` Thread 存储，不连接或复用 Electron RPC，也不把 CLI session 写入 Electron workspace。
-- 交付 `polo exec`、`exec resume`、`exec sessions`、`exec delete`，包含严格参数解析、safe/allow-all 权限映射、JSONL 事件适配、原子 `-o`、退出码和持久/临时 Thread 生命周期。
-- 完成可注入 `SessionStorage`，覆盖 session persistence、files RPC、bundle/import/fork、MCP、browser/tool metadata、附件与 sidecar 路径。
-- 完成 invocation-scoped credential proxy、CLI/model/tool 子进程环境白名单、敏感信息 redaction、私有目录/文件权限、symlink/realpath containment、租约/heartbeat/process birth identity 和 stale cleanup。
-- 关闭最终 reviewer 的两项阻断：
-  - 持久化 `exec` 与 `run --no-cleanup` 在主 session 创建前收到信号时保留 Thread，并原子记录 `interrupted`；仅 ephemeral Thread 自动删除。
-  - `creating.json` 从目录创建第一刻持久化真实 `origin` 与 `persistence`。stale cleaner 仅在该标记可证明 Thread 为 ephemeral 时回收；旧标记、缺失标记、普通持久化 exec 与 `run --no-cleanup` 均 fail closed。
+从提交 `b78632e` 及 worktree 中已有未提交变更继续完成本轮六项 Reviewer 修复：
+
+1. 配置快照不再解引用 `sources`、`skills` 等配置树中的 symlink；复制后在写入任何种子配置前先校验整棵快照，发现 symlink 时删除失败快照，避免越界读取或通过 workspace 控制的路径向 Thread 外写入。
+2. 配置快照显式合并调用开始时的应用级 `permissions/default.json`；workspace 中同名文件不能覆盖应用级默认权限，首次安装时回退到 bundled default。
+3. 最终回答改为按 `text_complete.isIntermediate` 区分中间工具说明与最终 assistant 文本；stdout、`-o` 和 JSON agent message 共用未污染的最终消息。
+4. `ExecEventAdapter` 改读真实 session event 的 `tokenUsage`，并正确映射 `inputTokens`、`cacheReadTokens` 和 `outputTokens`。
+5. `exec sessions`/`exec delete` 使用子命令级选项白名单；`--last`、yolo、model/provider/credential、ephemeral、runtime timeout 及 delete 的 workspace/cwd 等不支持选项均报 usage error 并退出 2。
+6. `exec sessions` 在列出持久 `cli-exec` Thread 前，以 Thread state lock 原子检查 owner/process identity/lease heartbeat；owner 和 lease 均失效且仍无终态时修复为 `interrupted`，不改变原 `lastUsedAt` 排序。
+
+每项均增加了对应回归测试，包括真实 CLI 子进程的退出码/敏感参数输出检查和失效 owner Thread 的 sessions 修复检查。
 
 ## 关键文件列表
 
-- CLI 命令、生命周期与存储：
-  - `apps/cli/src/index.ts`
-  - `apps/cli/src/execution-parser.ts`
-  - `apps/cli/src/one-shot.ts`
-  - `apps/cli/src/cli-thread-store.ts`
-  - `apps/cli/src/server-spawner.ts`
-  - `apps/cli/src/exec-event-adapter.ts`
-  - `apps/cli/src/terminal-output.ts`
-- 最终阻断回归：
-  - `apps/cli/src/cli-thread-store.test.ts`
-  - `apps/cli/src/server-spawner.integration.test.ts`
-  - `apps/cli/src/__fixtures__/execution-signal-stage.ts`
-- SessionStorage、runtime 与凭据隔离：
-  - `packages/shared/src/sessions/session-storage.ts`
-  - `packages/shared/src/credentials/invocation-credential-proxy.ts`
-  - `packages/server-core/src/sessions/SessionManager.ts`
-  - `packages/server-core/src/handlers/rpc/files.ts`
-  - `packages/server-core/src/bootstrap/headless-start.ts`
-  - `packages/server/src/index.ts`
-  - `packages/session-mcp-server/src/index.ts`
-  - `packages/session-tools-core/src/runtime/sandbox-env.ts`
-  - `packages/pi-agent-server/src/index.ts`
+- `apps/cli/src/one-shot.ts`
+  - 安全配置快照、应用级默认权限合并、最终 assistant 文本选择、sessions stale 修复入口。
+- `apps/cli/src/cli-thread-store.ts`
+  - 持久 Thread 的原子 abandoned-state 修复。
+- `apps/cli/src/exec-event-adapter.ts`
+  - JSONL token usage 映射。
+- `apps/cli/src/execution-parser.ts`
+  - sessions/delete 子命令选项白名单。
+- `apps/cli/src/one-shot.test.ts`
+  - symlink、应用级权限、intermediate 文本回归。
+- `apps/cli/src/exec-event-adapter.test.ts`
+  - `tokenUsage` JSONL 回归。
+- `apps/cli/src/execution-parser.test.ts`
+  - management 子命令不支持参数矩阵。
+- `apps/cli/src/index.test.ts`
+  - exit 2、credential 不回显、SIGKILL-abandoned Thread 修复的 CLI 子进程回归。
 
 ## 自测结果
 
-- `bun test apps/cli/src/cli-thread-store.test.ts apps/cli/src/server-spawner.integration.test.ts`
-  - **24 pass，0 fail，292 expect**。
-  - 覆盖 persistent exec 与 `run --no-cleanup` 的启动阶段信号保留、ephemeral 删除、创建标记策略、十分钟 stale 回收以及持久/未知目录保护。
-- `(cd apps/cli && bun run typecheck)`
-  - 通过。
-- `bun run test`
-  - 标准测试：**4852 pass，19 skip，0 fail**，377 files。
-  - 13 个 isolated test files：**149 pass，0 fail**。
-  - 整条命令退出码 0。
-- `bun run typecheck:all`
-  - core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部通过。
-- `bun run server:build:subprocess`
-  - session MCP server 与 Pi agent server 均成功 bundle。
-- `git diff --check`
-  - 通过。
+- Reviewer 聚焦回归：
+  - `bun test apps/cli/src/one-shot.test.ts apps/cli/src/exec-event-adapter.test.ts apps/cli/src/execution-parser.test.ts apps/cli/src/index.test.ts apps/cli/src/cli-thread-store.test.ts`
+  - 44 pass，0 fail。
+- 全量测试：
+  - `bun run test`
+  - 主测试 4859 pass、19 skip、0 fail（4878 tests / 377 files）。
+  - isolated 测试合计 149 pass、0 fail。
+  - 总计 5008 pass、19 skip、0 fail；退出码 0。
+- 类型检查：
+  - `bun run --cwd apps/cli typecheck`：通过。
+  - `bun run typecheck:all`：core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部通过。
+- 子进程构建：
+  - `bun run server:build:subprocess`：通过。
+  - session MCP server：390 modules / 4.58 MB。
+  - Pi agent server：3999 modules / 20.41 MB。
+- `git diff --check`：通过。
 
 ## 遗留问题
 
-- 无已知 P0 阻塞。
-- 未使用真实第三方付费 provider 凭据执行外网 E2E；凭据代理与泄漏负向路径由本地 loopback、真实子进程和全量回归覆盖。
-- POSIX 信号、进程出生身份、目录权限与多进程用例在 macOS 执行；Windows ACL 与 Windows 进程路径未在 Windows 真机复测。
-- 需求快照列出的 P1 参数和功能按范围不实现。
+- 本轮六项 Reviewer 问题无已知遗留。
+- Windows ACL 和 Windows 进程身份分支未在 Windows 真机执行；现有跨平台实现与测试保持通过。
+- 需求快照中的 P1 功能仍按约定不在本任务范围内。

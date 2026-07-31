@@ -65,4 +65,40 @@ describe('ExecEventAdapter', () => {
     expect(events.some(event => event.type === 'item.completed' && event.item?.id === 'tool-1')).toBe(false)
     expect(output).not.toContain('secret-value')
   })
+
+  it('maps real session tokenUsage into turn.completed usage', () => {
+    let output = ''
+    const originalWrite = process.stdout.write
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      output += typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk)
+      return true
+    }) as typeof process.stdout.write
+
+    try {
+      const adapter = new ExecEventAdapter({ json: true })
+      adapter.start('thread-1')
+      adapter.accept({
+        type: 'complete',
+        sessionId: 'session-1',
+        tokenUsage: {
+          inputTokens: 120,
+          cacheReadTokens: 45,
+          outputTokens: 30,
+        },
+      })
+      adapter.completed()
+    } finally {
+      process.stdout.write = originalWrite
+    }
+
+    const events = output.trim().split('\n').map(line => JSON.parse(line))
+    expect(events.at(-1)).toEqual({
+      type: 'turn.completed',
+      usage: {
+        input_tokens: 120,
+        cached_input_tokens: 45,
+        output_tokens: 30,
+      },
+    })
+  })
 })

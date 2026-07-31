@@ -16,9 +16,11 @@ export interface InternalSessionEvent {
   result?: unknown
   isError?: boolean
   error?: unknown
-  usage?: {
+  text?: string
+  isIntermediate?: boolean
+  tokenUsage?: {
     inputTokens?: number
-    cacheReadInputTokens?: number
+    cacheReadTokens?: number
     outputTokens?: number
   }
 }
@@ -46,11 +48,11 @@ export class ExecEventAdapter {
   }
 
   accept(event: InternalSessionEvent): void {
-    if (event.usage) {
+    if (event.tokenUsage) {
       this.usage = {
-        input_tokens: event.usage.inputTokens ?? this.usage.input_tokens,
-        cached_input_tokens: event.usage.cacheReadInputTokens ?? this.usage.cached_input_tokens,
-        output_tokens: event.usage.outputTokens ?? this.usage.output_tokens,
+        input_tokens: event.tokenUsage.inputTokens ?? this.usage.input_tokens,
+        cached_input_tokens: event.tokenUsage.cacheReadTokens ?? this.usage.cached_input_tokens,
+        output_tokens: event.tokenUsage.outputTokens ?? this.usage.output_tokens,
       }
     }
 

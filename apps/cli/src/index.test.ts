@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { printHelp } from './index.ts'
@@ -72,5 +72,98 @@ describe('top-level CLI help', () => {
       expect(stderr).toMatch(/unsupported option for run: --(?:url|token|tls-ca)/)
       expect(await Bun.file(join(root, 'sessions')).exists()).toBe(false)
     }
+  }, 20_000)
+
+  it('returns exit 2 when management subcommands receive execution-only options', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-management-options-'))
+    tempDirs.push(root)
+    const id = '123e4567-e89b-12d3-a456-426614174000'
+    for (const args of [
+      ['exec', 'sessions', '--last'],
+      ['exec', 'sessions', '--yolo'],
+      ['exec', 'sessions', '--model', 'gpt-5'],
+      ['exec', 'sessions', '--api-key', 'secret-value'],
+      ['exec', 'delete', id, '--provider', 'openai'],
+      ['exec', 'delete', id, '--base-url', 'https://example.test'],
+    ]) {
+      const proc = Bun.spawn([
+        'bun',
+        'run',
+        join(import.meta.dir, 'index.ts'),
+        ...args,
+      ], {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, POLO_AI_CONFIG_DIR: root },
+      })
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      expect(exitCode).toBe(2)
+      expect(stdout).toBe('')
+      expect(stderr).toContain('unsupported option for exec')
+      expect(stderr).not.toContain('secret-value')
+    }
+  }, 20_000)
+
+  it('repairs a SIGKILL-abandoned persistent exec Thread when sessions lists it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-sessions-repair-'))
+    tempDirs.push(root)
+    const threadId = crypto.randomUUID()
+    const threadRoot = join(root, 'cli-sessions', 'global', 'executions', threadId)
+    const workingDirectory = await realpath(root)
+    const staleAt = Date.now() - 60_000
+    await mkdir(join(threadRoot, 'sessions'), { recursive: true })
+    await writeFile(join(threadRoot, 'thread.json'), JSON.stringify({
+      version: 1,
+      threadId,
+      origin: 'cli-exec',
+      configurationScopeId: 'global',
+      configurationWorkspacePath: root,
+      workingDirectory,
+      createdAt: staleAt,
+      lastUsedAt: staleAt,
+      persistence: 'persistent',
+    }))
+    await writeFile(join(threadRoot, 'owner.json'), JSON.stringify({
+      leaseId: crypto.randomUUID(),
+      cliPid: 999_999_991,
+      cliStartedAt: staleAt,
+      cliProcessIdentity: 'dead-cli',
+      serverPid: 999_999_992,
+      serverStartedAt: staleAt,
+      serverProcessIdentity: 'dead-runtime',
+      heartbeatAt: staleAt,
+    }))
+
+    const proc = Bun.spawn([
+      'bun',
+      'run',
+      join(import.meta.dir, 'index.ts'),
+      'exec',
+      'sessions',
+      '-C',
+      root,
+    ], {
+      cwd: root,
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, POLO_AI_CONFIG_DIR: root },
+    })
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+
+    expect(exitCode, stderr).toBe(0)
+    expect(stdout).toContain(`${threadId}\tinterrupted\t`)
+    expect(JSON.parse(await readFile(join(threadRoot, 'thread.json'), 'utf-8')))
+      .toMatchObject({ status: 'interrupted', lastUsedAt: staleAt })
   }, 20_000)
 })

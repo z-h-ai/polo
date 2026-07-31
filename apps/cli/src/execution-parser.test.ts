@@ -93,6 +93,34 @@ describe('execution parser', () => {
     })
   })
 
+  it('rejects execution-only options for sessions and delete', () => {
+    const id = '123e4567-e89b-12d3-a456-426614174000'
+    const cases: Array<[string[], string]> = [
+      [argv('exec', 'sessions', '--last'), '--last'],
+      [argv('exec', 'sessions', '--yolo'), '--yolo'],
+      [argv('exec', 'sessions', '--dangerously-bypass-approvals-and-sandbox'), '--dangerously-bypass-approvals-and-sandbox'],
+      [argv('exec', 'sessions', '--model', 'gpt-5'), '--model'],
+      [argv('exec', 'sessions', '--provider', 'openai'), '--provider'],
+      [argv('exec', 'sessions', '--api-key', 'secret-value'), '--api-key'],
+      [argv('exec', 'sessions', '--base-url', 'https://example.test'), '--base-url'],
+      [argv('exec', 'sessions', '--ephemeral'), '--ephemeral'],
+      [argv('exec', 'sessions', '--timeout', '1000'), '--timeout'],
+      [argv('exec', 'delete', id, '--last'), '--last'],
+      [argv('exec', 'delete', id, '--yolo'), '--yolo'],
+      [argv('exec', 'delete', id, '--model', 'gpt-5'), '--model'],
+      [argv('exec', 'delete', id, '--provider', 'openai'), '--provider'],
+      [argv('exec', 'delete', id, '--api-key', 'secret-value'), '--api-key'],
+      [argv('exec', 'delete', id, '--base-url', 'https://example.test'), '--base-url'],
+      [argv('exec', 'delete', id, '--workspace', 'workspace-1'), '--workspace'],
+      [argv('exec', 'delete', id, '-C', '/tmp'), '-C'],
+    ]
+    for (const [value, option] of cases) {
+      expect(() => parseExecutionArgs(value)).toThrow(
+        `unsupported option for exec ${value.includes('sessions') ? 'sessions' : 'delete'}: ${option}`,
+      )
+    }
+  })
+
   it('rejects unknown, unsupported, missing, conflicting and extra args', () => {
     const cases = [
       argv('exec', '--wat', 'hello'),
