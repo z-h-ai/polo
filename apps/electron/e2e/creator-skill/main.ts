@@ -41,6 +41,7 @@ const workspace: Workspace = {
 }
 const sessionId = 'creator-skill-e2e-session'
 const adminHttpClient = new AdminClient(adminBaseUrl)
+let adminAccessToken = ''
 const rpcServer = new WsRpcServer({
   host: '127.0.0.1',
   port: 0,
@@ -192,6 +193,7 @@ function makeChangelog(version: string): string {
 async function login(identifier: string, password: string): Promise<void> {
   logStep(`login-start:${identifier}`)
   const result = await adminHttpClient.login(identifier, password)
+  adminAccessToken = result.accessToken
   await getCredentialManager().setAdminTokens({
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
@@ -350,6 +352,7 @@ async function uploadVersion(
     const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
     const file = new File([bytes], 'creator-skill.zip', { type: 'application/zip' })
     const headers = ${JSON.stringify({
+      Authorization: `Bearer ${adminAccessToken}`,
       ...(upload.headers ?? {}),
     })}
     const response = await fetch(${JSON.stringify(upload.url)}, {
