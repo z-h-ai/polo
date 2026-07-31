@@ -175,6 +175,82 @@ exec /bin/ln "$@"
   }
 }
 
+function racingProfileMvEnvironment(
+  value: Fixture,
+  mode: 'regular' | 'symlink' | 'rename' | 'content',
+): Record<string, string> {
+  const fakeBin = join(value.root, `race-profile-mv-${mode}`)
+  const userTarget = join(fakeBin, 'user-profile-target')
+  mkdirSync(fakeBin, { recursive: true })
+  writeFileSync(userTarget, `concurrent-user-profile-${mode}\n`)
+  writeFileSync(
+    join(fakeBin, 'mv'),
+    `#!/bin/bash
+set -eu
+src="$1"
+dest="$2"
+if [ "$src" = "$POLO_TEST_PROFILE_PATH" ] && [[ "$dest" == */profile.claimed ]]; then
+  case "$POLO_TEST_PROFILE_RACE" in
+    regular)
+      printf 'concurrent-user-profile-regular\\n' > "$src"
+      ;;
+    symlink)
+      rm -f "$src"
+      /bin/ln -s "$POLO_TEST_PROFILE_USER_TARGET" "$src"
+      ;;
+    rename)
+      /bin/mv "$src" "$src.concurrent-renamed"
+      printf 'concurrent-user-profile-rename\\n' > "$src"
+      ;;
+    content)
+      printf 'concurrent-user-profile-content\\n' >> "$src"
+      ;;
+  esac
+fi
+exec /bin/mv "$@"
+`,
+  )
+  chmodSync(join(fakeBin, 'mv'), 0o755)
+  return {
+    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+    POLO_TEST_PROFILE_PATH: value.profilePath,
+    POLO_TEST_PROFILE_RACE: mode,
+    POLO_TEST_PROFILE_USER_TARGET: userTarget,
+  }
+}
+
+function racingProfilePublishEnvironment(
+  value: Fixture,
+  mode: 'regular' | 'symlink',
+): Record<string, string> {
+  const fakeBin = join(value.root, `race-profile-publish-${mode}`)
+  const userTarget = join(fakeBin, 'user-profile-target')
+  mkdirSync(fakeBin, { recursive: true })
+  writeFileSync(userTarget, `publish-user-profile-${mode}\n`)
+  writeFileSync(
+    join(fakeBin, 'ln'),
+    `#!/bin/bash
+set -eu
+for last; do :; done
+if [ "$last" = "$POLO_TEST_PROFILE_PATH" ]; then
+  case "$POLO_TEST_PROFILE_RACE" in
+    regular) printf 'publish-user-profile-regular\\n' > "$last" ;;
+    symlink) /bin/ln -s "$POLO_TEST_PROFILE_USER_TARGET" "$last" ;;
+  esac
+  exit 73
+fi
+exec /bin/ln "$@"
+`,
+  )
+  chmodSync(join(fakeBin, 'ln'), 0o755)
+  return {
+    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+    POLO_TEST_PROFILE_PATH: value.profilePath,
+    POLO_TEST_PROFILE_RACE: mode,
+    POLO_TEST_PROFILE_USER_TARGET: userTarget,
+  }
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
@@ -400,6 +476,85 @@ describe('Linux terminal integration ownership', () => {
         name.startsWith('.terminal-install.'),
       ),
     ).toHaveLength(0)
+  })
+
+  it('claims the verified profile and preserves regular, symlink, rename, and content races', () => {
+    for (const mode of ['regular', 'symlink', 'rename', 'content'] as const) {
+      const value = fixture()
+      install(value)
+      const stateBefore = readFileSync(value.statePath, 'utf8')
+      const poloTargetBefore = readlinkSync(value.poloPath)
+      const compatTargetBefore = readlinkSync(value.compatPath)
+
+      const result = runHelper('uninstall', value, {
+        env: racingProfileMvEnvironment(value, mode),
+      })
+
+      expect(result.exitCode).toBe(2)
+      expect(readlinkSync(value.poloPath)).toBe(poloTargetBefore)
+      expect(readlinkSync(value.compatPath)).toBe(compatTargetBefore)
+      expect(readFileSync(value.statePath, 'utf8')).toBe(stateBefore)
+      if (mode === 'symlink') {
+        expect(lstatSync(value.profilePath).isSymbolicLink()).toBe(true)
+        expect(readFileSync(value.profilePath, 'utf8')).toContain(
+          'concurrent-user-profile-symlink',
+        )
+      } else {
+        expect(readFileSync(value.profilePath, 'utf8')).toContain(
+          `concurrent-user-profile-${mode}`,
+        )
+      }
+      if (mode === 'rename') {
+        expect(readFileSync(`${value.profilePath}.concurrent-renamed`, 'utf8')).toContain(
+          '# >>> Polo CLI >>>',
+        )
+      }
+      const quarantineDirs = readdirSync(join(value.root, '.polo-ai'))
+        .filter((name) => name.startsWith('.terminal-uninstall.'))
+      expect(quarantineDirs).toHaveLength(1)
+      const quarantine = join(value.root, '.polo-ai', quarantineDirs[0]!)
+      expect(readFileSync(join(quarantine, 'profile.owned'), 'utf8')).toContain(
+        '# >>> Polo CLI >>>',
+      )
+      expect(readFileSync(join(quarantine, 'ROLLBACK_REQUIRED'), 'utf8')).toContain(
+        'reason=profile-claim-identity-mismatch',
+      )
+      expect(result.stderr.toString()).toContain(quarantine)
+    }
+  })
+
+  it('publishes the cleaned profile with no-replace when a file or symlink appears', () => {
+    for (const mode of ['regular', 'symlink'] as const) {
+      const value = fixture()
+      install(value)
+      const stateBefore = readFileSync(value.statePath, 'utf8')
+
+      const result = runHelper('uninstall', value, {
+        env: racingProfilePublishEnvironment(value, mode),
+      })
+
+      expect(result.exitCode).toBe(2)
+      expect(lstatSync(value.poloPath).isSymbolicLink()).toBe(true)
+      expect(lstatSync(value.compatPath).isSymbolicLink()).toBe(true)
+      expect(readFileSync(value.statePath, 'utf8')).toBe(stateBefore)
+      if (mode === 'symlink') {
+        expect(lstatSync(value.profilePath).isSymbolicLink()).toBe(true)
+      }
+      expect(readFileSync(value.profilePath, 'utf8')).toContain(
+        `publish-user-profile-${mode}`,
+      )
+      const quarantineDirs = readdirSync(join(value.root, '.polo-ai'))
+        .filter((name) => name.startsWith('.terminal-uninstall.'))
+      expect(quarantineDirs).toHaveLength(1)
+      const quarantine = join(value.root, '.polo-ai', quarantineDirs[0]!)
+      expect(readFileSync(join(quarantine, 'profile.claimed'), 'utf8')).toContain(
+        '# >>> Polo CLI >>>',
+      )
+      expect(readFileSync(join(quarantine, 'ROLLBACK_REQUIRED'), 'utf8')).toContain(
+        'reason=profile-replacement-occupied',
+      )
+      expect(result.stderr.toString()).toContain(quarantine)
+    }
   })
 
   it('migrates only the exact pre-POO-14 Linux GUI launcher template', () => {

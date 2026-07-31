@@ -93,60 +93,267 @@ validate_managed_path() {
     fi
 }
 
+profile_sha256() {
+    sha256sum "$1" | awk '{print $1}'
+}
+
+profile_filesystem_identity() {
+    stat -c '%d:%i' -- "$1" 2>/dev/null \
+        || stat -f '%d:%i' "$1" 2>/dev/null
+}
+
+restore_profile_candidate_no_replace() {
+    local candidate="$1"
+    local profile_path="$2"
+    local target
+
+    [ -e "$candidate" ] || [ -L "$candidate" ] || return 0
+    if [ -e "$profile_path" ] || [ -L "$profile_path" ]; then
+        return 1
+    fi
+    if [ -L "$candidate" ]; then
+        target="$(readlink -- "$candidate")" || return 1
+        ln -s -- "$target" "$profile_path" || return 1
+    elif [ -f "$candidate" ]; then
+        ln -- "$candidate" "$profile_path" || return 1
+    else
+        return 1
+    fi
+    rm -f -- "$candidate"
+}
+
+mark_profile_transaction_conflict() {
+    local reason="$1"
+    local journal="$profile_transaction_dir/ROLLBACK_REQUIRED"
+
+    PROFILE_ROLLBACK_CONFLICT=true
+    {
+        printf 'owner=com.poloai.terminal-integration\n'
+        printf 'reason=%s\n' "$reason"
+        printf 'profile_path_b64=%s\n' "$(printf '%s' "$MANAGED_PROFILE_PATH" | base64 | tr -d '\n')"
+        printf 'created_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    } > "$journal"
+    chmod 600 "$journal"
+    warn "Polo preserved a concurrently changed shell profile at $MANAGED_PROFILE_PATH."
+    warn "The verified previous profile and rollback journal are available at $profile_transaction_dir"
+}
+
+begin_managed_profile_transaction() {
+    local transaction_root="$1"
+
+    [ -n "${MANAGED_PROFILE_PATH:-}" ] || MANAGED_PROFILE_PATH="$(managed_profile_path)"
+    validate_managed_path "$MANAGED_PROFILE_PATH" || return 1
+    mkdir -p "$transaction_root"
+    profile_transaction_dir="$(mktemp -d "$transaction_root/.profile-transaction.XXXXXX")"
+    chmod 700 "$profile_transaction_dir"
+    profile_backup="$profile_transaction_dir/profile.previous"
+    profile_existed=false
+    PROFILE_BEFORE_HASH=""
+    PROFILE_BEFORE_IDENTITY=""
+    PROFILE_AFTER_HASH=""
+    PROFILE_AFTER_IDENTITY=""
+    PROFILE_CONFIG_CHANGED=false
+    PROFILE_ROLLBACK_CONFLICT=false
+
+    if [ -e "$MANAGED_PROFILE_PATH" ]; then
+        PROFILE_BEFORE_HASH="$(profile_sha256 "$MANAGED_PROFILE_PATH")"
+        if ! PROFILE_BEFORE_IDENTITY="$(profile_filesystem_identity "$MANAGED_PROFILE_PATH")"; then
+            mark_profile_transaction_conflict "profile-backup-identity-failed"
+            return 1
+        fi
+        if ! cp -p "$MANAGED_PROFILE_PATH" "$profile_backup"; then
+            mark_profile_transaction_conflict "profile-backup-copy-failed"
+            return 1
+        fi
+        profile_existed=true
+        if [ "$(profile_sha256 "$profile_backup")" != "$PROFILE_BEFORE_HASH" ] \
+            || [ ! -f "$MANAGED_PROFILE_PATH" ] \
+            || [ -L "$MANAGED_PROFILE_PATH" ] \
+            || [ "$(profile_filesystem_identity "$MANAGED_PROFILE_PATH")" != "$PROFILE_BEFORE_IDENTITY" ] \
+            || [ "$(profile_sha256 "$MANAGED_PROFILE_PATH")" != "$PROFILE_BEFORE_HASH" ]; then
+            mark_profile_transaction_conflict "profile-backup-snapshot-changed"
+            return 1
+        fi
+    fi
+}
+
 configure_managed_path() {
     local profile_path="${MANAGED_PROFILE_PATH:-}"
     local path_line
-    local start_count
     local profile_tmp
     local profile_mode=""
+    local profile_claim="$profile_transaction_dir/profile.claimed"
+    local generated_hash
+    local generated_identity
+    local durable_backup
 
     [ -n "$profile_path" ] || profile_path="$(managed_profile_path)"
     path_line="$(managed_path_line "$profile_path")"
-    validate_managed_path "$profile_path" || return 1
-
     mkdir -p "$(dirname "$profile_path")"
-    if [ ! -e "$profile_path" ]; then
-        : > "$profile_path"
-        chmod 600 "$profile_path"
+    profile_tmp="$(dirname "$profile_path")/.polo-profile-generated.$$"
+    if [ "$profile_existed" = true ]; then
+        cp -p "$profile_backup" "$profile_tmp" || return 1
+        profile_mode=$(stat -c '%a' "$profile_backup" 2>/dev/null \
+            || stat -f '%Lp' "$profile_backup" 2>/dev/null || true)
+    else
+        : > "$profile_tmp"
+        chmod 600 "$profile_tmp"
     fi
-
-    start_count=$(grep -Fxc "$PATH_BLOCK_START" "$profile_path" 2>/dev/null || true)
-    profile_tmp="$(dirname "$profile_path")/.polo-profile.$$"
-    profile_mode=$(stat -c '%a' "$profile_path" 2>/dev/null || true)
-    awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
+    if ! awk -v start="$PATH_BLOCK_START" -v end="$PATH_BLOCK_END" '
         $0 == start { managed = 1; next }
         $0 == end { managed = 0; next }
         !managed { print }
-    ' "$profile_path" > "$profile_tmp"
+    ' "$profile_tmp" > "$profile_tmp.rendered"; then
+        rm -f "$profile_tmp" "$profile_tmp.rendered"
+        return 1
+    fi
+    if ! cp "$profile_tmp.rendered" "$profile_tmp"; then
+        rm -f "$profile_tmp" "$profile_tmp.rendered"
+        return 1
+    fi
+    rm -f "$profile_tmp.rendered"
     {
         printf "%s\n" "$PATH_BLOCK_START"
         printf "%s\n" "$path_line"
         printf "%s\n" "$PATH_BLOCK_END"
     } >> "$profile_tmp"
-
-    if ! cmp -s "$profile_path" "$profile_tmp"; then
-        cp "$profile_path" "$profile_path.polo-backup-$(date +%s)"
-        mv -f "$profile_tmp" "$profile_path"
-        [ -n "$profile_mode" ] && chmod "$profile_mode" "$profile_path"
-        info "Configured terminal command in $profile_path"
-    else
+    if [ -n "$profile_mode" ] && ! chmod "$profile_mode" "$profile_tmp"; then
         rm -f "$profile_tmp"
+        return 1
     fi
+
+    # An already-canonical profile requires no write. Revalidate the complete
+    # snapshot so a concurrent update still aborts before launcher/App commit.
+    if [ "$profile_existed" = true ] && cmp -s "$profile_backup" "$profile_tmp"; then
+        rm -f "$profile_tmp"
+        if [ ! -f "$profile_path" ] \
+            || [ -L "$profile_path" ] \
+            || [ "$(profile_filesystem_identity "$profile_path")" != "$PROFILE_BEFORE_IDENTITY" ] \
+            || [ "$(profile_sha256 "$profile_path")" != "$PROFILE_BEFORE_HASH" ]; then
+            mark_profile_transaction_conflict "profile-noop-snapshot-changed"
+            return 1
+        fi
+        PROFILE_AFTER_IDENTITY="$PROFILE_BEFORE_IDENTITY"
+        PROFILE_AFTER_HASH="$PROFILE_BEFORE_HASH"
+        return 0
+    fi
+
+    # Claim the verified original inode before publishing. Checking the claim
+    # after rename catches replacement, symlink, rename and in-place updates
+    # injected between the snapshot and atomic claim.
+    if [ "$profile_existed" = true ]; then
+        if ! mv "$profile_path" "$profile_claim"; then
+            rm -f "$profile_tmp"
+            mark_profile_transaction_conflict "profile-config-claim-failed"
+            return 1
+        fi
+        if [ ! -f "$profile_claim" ] \
+            || [ -L "$profile_claim" ] \
+            || [ "$(profile_filesystem_identity "$profile_claim")" != "$PROFILE_BEFORE_IDENTITY" ] \
+            || [ "$(profile_sha256 "$profile_claim")" != "$PROFILE_BEFORE_HASH" ]; then
+            restore_profile_candidate_no_replace "$profile_claim" "$profile_path" || true
+            rm -f "$profile_tmp"
+            mark_profile_transaction_conflict "profile-config-claim-identity-mismatch"
+            return 1
+        fi
+    elif [ -e "$profile_path" ] || [ -L "$profile_path" ]; then
+        rm -f "$profile_tmp"
+        mark_profile_transaction_conflict "profile-config-created-concurrently"
+        return 1
+    fi
+
+    generated_hash="$(profile_sha256 "$profile_tmp")"
+    generated_identity="$(profile_filesystem_identity "$profile_tmp")" || {
+        restore_profile_candidate_no_replace "$profile_claim" "$profile_path" || true
+        rm -f "$profile_tmp"
+        mark_profile_transaction_conflict "profile-config-generated-identity-failed"
+        return 1
+    }
+    if ! ln -- "$profile_tmp" "$profile_path"; then
+        restore_profile_candidate_no_replace "$profile_claim" "$profile_path" || true
+        rm -f "$profile_tmp"
+        mark_profile_transaction_conflict "profile-config-path-occupied"
+        return 1
+    fi
+    PROFILE_CONFIG_CHANGED=true
+    PROFILE_AFTER_HASH="$generated_hash"
+    PROFILE_AFTER_IDENTITY="$generated_identity"
+    rm -f "$profile_tmp"
+    if [ ! -f "$profile_path" ] \
+        || [ -L "$profile_path" ] \
+        || [ "$(profile_filesystem_identity "$profile_path")" != "$PROFILE_AFTER_IDENTITY" ] \
+        || [ "$(profile_sha256 "$profile_path")" != "$PROFILE_AFTER_HASH" ]; then
+        mark_profile_transaction_conflict "profile-config-result-changed"
+        return 1
+    fi
+
+    rm -f "$profile_claim"
+    if [ "$profile_existed" = true ]; then
+        durable_backup="$profile_path.polo-backup-$(date +%s).$$.$RANDOM"
+        if ! ln -- "$profile_backup" "$durable_backup"; then
+            return 1
+        fi
+    fi
+    info "Configured terminal command in $profile_path"
 }
 
 restore_managed_profile() {
     local profile_path="$1"
     local profile_backup="$2"
     local profile_existed="$3"
-    local restore_tmp
+    local generated_claim="$profile_transaction_dir/profile.generated"
+
+    if [ "$PROFILE_ROLLBACK_CONFLICT" = true ]; then
+        return 1
+    fi
+    if [ "$PROFILE_CONFIG_CHANGED" != true ]; then
+        if [ "$profile_existed" = true ]; then
+            if [ ! -f "$profile_path" ] \
+                || [ -L "$profile_path" ] \
+                || [ "$(profile_filesystem_identity "$profile_path")" != "$PROFILE_AFTER_IDENTITY" ] \
+                || [ "$(profile_sha256 "$profile_path")" != "$PROFILE_AFTER_HASH" ]; then
+                mark_profile_transaction_conflict "profile-rollback-noop-changed"
+                return 1
+            fi
+        elif [ -e "$profile_path" ] || [ -L "$profile_path" ]; then
+            mark_profile_transaction_conflict "profile-rollback-noop-created"
+            return 1
+        fi
+        rm -rf "$profile_transaction_dir"
+        return 0
+    fi
+
+    # Claim exactly the profile generated by this transaction. The checks are
+    # deliberately after rename, so an update in the final validation window
+    # is preserved rather than overwritten by the previous snapshot.
+    if ! mv "$profile_path" "$generated_claim"; then
+        mark_profile_transaction_conflict "profile-rollback-claim-failed"
+        return 1
+    fi
+    if [ ! -f "$generated_claim" ] \
+        || [ -L "$generated_claim" ] \
+        || [ "$(profile_filesystem_identity "$generated_claim")" != "$PROFILE_AFTER_IDENTITY" ] \
+        || [ "$(profile_sha256 "$generated_claim")" != "$PROFILE_AFTER_HASH" ]; then
+        restore_profile_candidate_no_replace "$generated_claim" "$profile_path" || true
+        mark_profile_transaction_conflict "profile-rollback-claim-identity-mismatch"
+        return 1
+    fi
 
     if [ "$profile_existed" = true ]; then
-        restore_tmp="$(dirname "$profile_path")/.polo-profile-restore.$$"
-        cp -p "$profile_backup" "$restore_tmp"
-        mv -f "$restore_tmp" "$profile_path"
-    elif [ -e "$profile_path" ] && validate_managed_path "$profile_path"; then
-        rm -f "$profile_path"
+        if ! ln -- "$profile_backup" "$profile_path"; then
+            restore_profile_candidate_no_replace "$generated_claim" "$profile_path" || true
+            mark_profile_transaction_conflict "profile-rollback-path-occupied"
+            return 1
+        fi
+        if [ ! -f "$profile_path" ] \
+            || [ -L "$profile_path" ] \
+            || [ "$(profile_sha256 "$profile_path")" != "$PROFILE_BEFORE_HASH" ]; then
+            mark_profile_transaction_conflict "profile-rollback-result-changed"
+            return 1
+        fi
     fi
+    rm -f "$generated_claim"
+    rm -rf "$profile_transaction_dir"
 }
 
 # Detect OS
@@ -507,21 +714,19 @@ else
     # Validate and snapshot the selected login profile before any App/runtime
     # mutation. A malformed or user-replaced profile aborts the transaction.
     MANAGED_PROFILE_PATH="$(managed_profile_path)"
-    validate_managed_path "$MANAGED_PROFILE_PATH" \
-        || error "Polo terminal setup found a conflicting shell profile. The existing installation was not changed."
-    profile_backup="$APP_DIR/.profile.previous.$$"
-    profile_existed=false
-    if [ -e "$MANAGED_PROFILE_PATH" ]; then
-        cp -p "$MANAGED_PROFILE_PATH" "$profile_backup"
-        profile_existed=true
-    fi
+    begin_managed_profile_transaction "$APP_DIR" \
+        || error "Polo terminal setup found a conflicting shell profile. The existing installation was not changed; see ${profile_transaction_dir:-the profile warning above}."
 
     rollback_linux_app() {
+        local profile_rollback_ok=true
+
         rm -rf "$EXTRACTED_INSTALL_PATH"
         rm -f "$APPIMAGE_INSTALL_PATH"
         [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
         [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
-        restore_managed_profile "$MANAGED_PROFILE_PATH" "$profile_backup" "$profile_existed"
+        restore_managed_profile "$MANAGED_PROFILE_PATH" "$profile_backup" "$profile_existed" \
+            || profile_rollback_ok=false
+        [ "$profile_rollback_ok" = true ]
     }
 
     # No installed App/runtime/PATH mutation occurs until ownership and the
@@ -539,12 +744,14 @@ else
     if ! mv "$extracted_root" "$EXTRACTED_INSTALL_PATH"; then
         [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
         [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
+        rm -rf "$profile_transaction_dir"
         error "Failed to install the packaged runtime."
     fi
     if ! mv "$appimage_path" "$APPIMAGE_INSTALL_PATH"; then
         rm -rf "$EXTRACTED_INSTALL_PATH"
         [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
         [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
+        rm -rf "$profile_transaction_dir"
         error "Failed to install the AppImage."
     fi
     chmod +x "$APPIMAGE_INSTALL_PATH"
@@ -552,8 +759,12 @@ else
     # Configure PATH while the old App backups are still available. If this
     # fails, neither launchers nor ownership state have been changed yet.
     if ! configure_managed_path; then
-        rollback_linux_app
-        error "Failed to configure Polo terminal PATH. The previous installation was restored."
+        profile_rollback_ok=true
+        rollback_linux_app || profile_rollback_ok=false
+        if [ "$profile_rollback_ok" = true ]; then
+            error "Failed to configure Polo terminal PATH. The previous installation was restored."
+        fi
+        error "Failed to configure Polo terminal PATH because the profile changed concurrently. User content was preserved; see $profile_transaction_dir."
     fi
 
     path_entry_owned=true
@@ -569,15 +780,19 @@ else
         --path-entry-owned "$path_entry_owned" \
         --profile-path "$MANAGED_PROFILE_PATH" \
         "${previous_args[@]}"; then
-        rollback_linux_app
-        error "Failed to install Polo terminal integration. The previous installation and profile were restored."
+        profile_rollback_ok=true
+        rollback_linux_app || profile_rollback_ok=false
+        if [ "$profile_rollback_ok" = true ]; then
+            error "Failed to install Polo terminal integration. The previous installation and profile were restored."
+        fi
+        error "Failed to install Polo terminal integration after the profile changed concurrently. User content was preserved; see $profile_transaction_dir."
     fi
 
     # The helper performs final launcher/state verification before returning.
     # Until it succeeds, the previous App and profile remain available.
     rm -rf "$current_backup"
     rm -f "$appimage_backup"
-    rm -f "$profile_backup"
+    rm -rf "$profile_transaction_dir"
 
     # Migrate old installation
     OLD_APPIMAGE="$INSTALL_DIR/Polo-AI-x64.AppImage"

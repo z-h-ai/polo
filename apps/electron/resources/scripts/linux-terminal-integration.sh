@@ -479,6 +479,61 @@ restore_state_candidate() {
   fi
 }
 
+restore_profile_candidate_no_replace() {
+  local candidate="$1"
+  local path="$2"
+  local target
+
+  [ -e "$candidate" ] || [ -L "$candidate" ] || return 0
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    warn "Polo preserved a concurrently created profile at $path; the claimed profile remains at $candidate."
+    return 1
+  fi
+  if [ -L "$candidate" ]; then
+    target="$(readlink -- "$candidate")" || return 1
+    ln -s -- "$target" "$path" || return 1
+  elif [ -f "$candidate" ]; then
+    ln -- "$candidate" "$path" || return 1
+  else
+    return 1
+  fi
+  rm -f -- "$candidate"
+}
+
+rollback_uninstall_candidates() {
+  local state_candidate="$1"
+  local polo_candidate="$2"
+  local compat_candidate="$3"
+  local rollback_ok="true"
+
+  restore_state_candidate "$state_candidate" "" || rollback_ok="false"
+  restore_candidate "$compat_path" "$compat_candidate" "$compat_target" "" \
+    || rollback_ok="false"
+  restore_candidate "$polo_path" "$polo_candidate" "$polo_target" "" \
+    || rollback_ok="false"
+  [ "$rollback_ok" = "true" ]
+}
+
+persist_uninstall_profile_conflict() {
+  local transaction_dir="$1"
+  local profile_path="$2"
+  local reason="$3"
+  local journal="$transaction_dir/ROLLBACK_REQUIRED"
+
+  {
+    printf 'owner=%s\n' "$OWNER"
+    printf 'reason=%s\n' "$reason"
+    printf 'profile_path_b64=%s\n' "$(encode_value "$profile_path")"
+    printf 'polo_path_b64=%s\n' "$(encode_value "$polo_path")"
+    printf 'compat_path_b64=%s\n' "$(encode_value "$compat_path")"
+    printf 'state_path_b64=%s\n' "$(encode_value "$state_file")"
+    printf 'created_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  } > "$journal"
+  chmod 600 "$journal"
+  warn "Polo preserved a concurrently changed shell profile and restored every unchanged terminal entry."
+  warn "Verified rollback candidates were preserved for recovery at $transaction_dir"
+}
+
 finalize_install_rollback() {
   local transaction_dir="$1"
   local state_candidate="$2"
@@ -661,7 +716,8 @@ install_links_transaction() {
 
 uninstall_links_transaction() {
   local transaction_dir polo_candidate compat_candidate state_candidate state_hash=""
-  local profile_candidate="" profile_tmp="" profile_hash="" profile_mode=""
+  local profile_candidate="" profile_claim="" profile_tmp="" profile_hash="" profile_mode=""
+  local profile_identity="" replacement_hash="" replacement_identity=""
 
   transaction_dir="$(mktemp -d "$state_root/.terminal-uninstall.XXXXXX")"
   chmod 700 "$transaction_dir"
@@ -676,6 +732,10 @@ uninstall_links_transaction() {
         return 1
       }
       profile_hash="$(sha256_file "$STATE_PROFILE_PATH")"
+      profile_identity="$(filesystem_identity "$STATE_PROFILE_PATH")" || {
+        rm -rf "$transaction_dir"
+        return 1
+      }
       profile_candidate="$transaction_dir/profile.owned"
       if ! cp -p "$STATE_PROFILE_PATH" "$profile_candidate" \
         || [ "$(sha256_file "$profile_candidate")" != "$profile_hash" ]; then
@@ -721,43 +781,90 @@ uninstall_links_transaction() {
   fi
 
   if [ "$state_status" = "valid" ] && [ "$STATE_PATH_ENTRY_OWNED" = "true" ]; then
+    profile_claim="$transaction_dir/profile.claimed"
     if ! validate_owned_profile "$STATE_PROFILE_PATH" \
-      || [ "$(sha256_file "$STATE_PROFILE_PATH")" != "$profile_hash" ]; then
+      || [ "$(sha256_file "$STATE_PROFILE_PATH")" != "$profile_hash" ] \
+      || [ "$(filesystem_identity "$STATE_PROFILE_PATH")" != "$profile_identity" ]; then
       finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
         "$compat_candidate" "" "" "" || true
       return 1
     fi
+
+    # Atomically claim the exact profile inode that was verified above. The
+    # post-rename identity/hash check closes the validation-to-rename window:
+    # a replacement is treated as user-owned and restored without clobber.
+    if ! mv "$STATE_PROFILE_PATH" "$profile_claim"; then
+      rollback_uninstall_candidates "$state_candidate" "$polo_candidate" "$compat_candidate" \
+        || true
+      persist_uninstall_profile_conflict \
+        "$transaction_dir" "$STATE_PROFILE_PATH" "profile-claim-failed"
+      return 1
+    fi
+    if [ ! -f "$profile_claim" ] \
+      || [ -L "$profile_claim" ] \
+      || [ "$(filesystem_identity "$profile_claim")" != "$profile_identity" ] \
+      || [ "$(sha256_file "$profile_claim")" != "$profile_hash" ]; then
+      restore_profile_candidate_no_replace "$profile_claim" "$STATE_PROFILE_PATH" || true
+      rollback_uninstall_candidates "$state_candidate" "$polo_candidate" "$compat_candidate" \
+        || true
+      persist_uninstall_profile_conflict \
+        "$transaction_dir" "$STATE_PROFILE_PATH" "profile-claim-identity-mismatch"
+      return 1
+    fi
+
     profile_tmp="$(dirname "$STATE_PROFILE_PATH")/.polo-profile-uninstall.$$.$RANDOM"
-    profile_mode="$(stat -c '%a' "$STATE_PROFILE_PATH" 2>/dev/null \
-      || stat -f '%Lp' "$STATE_PROFILE_PATH" 2>/dev/null || true)"
+    profile_mode="$(stat -c '%a' "$profile_claim" 2>/dev/null \
+      || stat -f '%Lp' "$profile_claim" 2>/dev/null || true)"
     if ! awk -v start='# >>> Polo CLI >>>' -v end='# <<< Polo CLI <<<' '
         $0 == start { managed = 1; next }
         $0 == end { managed = 0; next }
         !managed { print }
       ' "$profile_candidate" > "$profile_tmp"; then
       rm -f "$profile_tmp"
-      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
-        "$compat_candidate" "" "" "" || true
+      restore_profile_candidate_no_replace "$profile_claim" "$STATE_PROFILE_PATH" || true
+      rollback_uninstall_candidates "$state_candidate" "$polo_candidate" "$compat_candidate" \
+        || true
+      persist_uninstall_profile_conflict \
+        "$transaction_dir" "$STATE_PROFILE_PATH" "profile-replacement-render-failed"
       return 1
     fi
     if [ -n "$profile_mode" ] && ! chmod "$profile_mode" "$profile_tmp"; then
       rm -f "$profile_tmp"
-      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
-        "$compat_candidate" "" "" "" || true
+      restore_profile_candidate_no_replace "$profile_claim" "$STATE_PROFILE_PATH" || true
+      rollback_uninstall_candidates "$state_candidate" "$polo_candidate" "$compat_candidate" \
+        || true
+      persist_uninstall_profile_conflict \
+        "$transaction_dir" "$STATE_PROFILE_PATH" "profile-replacement-mode-failed"
       return 1
     fi
-    if ! [ -f "$STATE_PROFILE_PATH" ] \
+    replacement_hash="$(sha256_file "$profile_tmp")"
+    replacement_identity="$(filesystem_identity "$profile_tmp")" || {
+      restore_profile_candidate_no_replace "$profile_claim" "$STATE_PROFILE_PATH" || true
+      rollback_uninstall_candidates "$state_candidate" "$polo_candidate" "$compat_candidate" \
+        || true
+      persist_uninstall_profile_conflict \
+        "$transaction_dir" "$STATE_PROFILE_PATH" "profile-replacement-identity-failed"
+      return 1
+    }
+    # Hard-link publication is a no-replace commit. A concurrent regular file
+    # or symlink at the profile path makes ln fail and is never overwritten.
+    if ! ln -- "$profile_tmp" "$STATE_PROFILE_PATH"; then
+      restore_profile_candidate_no_replace "$profile_claim" "$STATE_PROFILE_PATH" || true
+      rollback_uninstall_candidates "$state_candidate" "$polo_candidate" "$compat_candidate" \
+        || true
+      persist_uninstall_profile_conflict \
+        "$transaction_dir" "$STATE_PROFILE_PATH" "profile-replacement-occupied"
+      return 1
+    fi
+    rm -f "$profile_tmp"
+    if [ ! -f "$STATE_PROFILE_PATH" ] \
       || [ -L "$STATE_PROFILE_PATH" ] \
-      || [ "$(sha256_file "$STATE_PROFILE_PATH")" != "$profile_hash" ]; then
-      rm -f "$profile_tmp"
-      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
-        "$compat_candidate" "" "" "" || true
-      return 1
-    fi
-    if ! mv -f "$profile_tmp" "$STATE_PROFILE_PATH"; then
-      rm -f "$profile_tmp"
-      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
-        "$compat_candidate" "" "" "" || true
+      || [ "$(filesystem_identity "$STATE_PROFILE_PATH")" != "$replacement_identity" ] \
+      || [ "$(sha256_file "$STATE_PROFILE_PATH")" != "$replacement_hash" ]; then
+      rollback_uninstall_candidates "$state_candidate" "$polo_candidate" "$compat_candidate" \
+        || true
+      persist_uninstall_profile_conflict \
+        "$transaction_dir" "$STATE_PROFILE_PATH" "profile-replacement-changed"
       return 1
     fi
   fi
