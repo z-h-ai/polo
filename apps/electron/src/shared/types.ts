@@ -619,11 +619,15 @@ export interface ElectronAPI {
     version: string
     changelog?: string
     idempotencyKey: string
-  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  }): Promise<OrganizationRpcResult<{
+    version: CreatorArtifactVersion
+    upload: CreatorSkillUploadGrant
+    replayed?: boolean
+  }>>
   creatorArtifactCreateUploadGrant(input: {
     organizationId: string
     artifactId: string
-    versionId: string
+    version: string
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{
     grant: CreatorSkillUploadGrant
@@ -631,7 +635,7 @@ export interface ElectronAPI {
   creatorArtifactCompleteUpload(input: {
     organizationId: string
     artifactId: string
-    versionId: string
+    version: string
     uploadGeneration: number
     sizeBytes: number
     idempotencyKey: string
@@ -642,13 +646,13 @@ export interface ElectronAPI {
   creatorArtifactPublishVersion(input: {
     organizationId: string
     artifactId: string
-    versionId: string
+    version: string
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
   creatorArtifactDeleteVersionDraft(input: {
     organizationId: string
     artifactId: string
-    versionId: string
+    version: string
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
   creatorArtifactSetArchived(input: {
@@ -660,7 +664,7 @@ export interface ElectronAPI {
   creatorArtifactRevokeVersion(input: {
     organizationId: string
     artifactId: string
-    versionId: string
+    version: string
     reason: string
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>

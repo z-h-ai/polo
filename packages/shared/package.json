@@ -6,8 +6,17 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "files": [
+    "dist",
+    "src",
+    "package.json"
+  ],
   "scripts": {
-    "test": "bun test",
+    "build:creator-skills": "bun run scripts/build-creator-skills.ts",
+    "build": "bun run build:creator-skills",
+    "prepack": "bun run build",
+    "test": "bun run build:creator-skills && bun test",
+    "test:creator-skills-package": "bun run scripts/verify-creator-skills-package.ts",
     "test:watch": "bun test --watch",
     "sync:polo-ai-bash-patterns": "bun run src/config/sync-polo-ai-bash-patterns.ts"
   },
@@ -33,11 +42,18 @@
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
     "./skills": "./src/skills/index.ts",
-    "./creator-skills": "./src/creator-skills/index.ts",
-    "./creator-skills/archive": "./src/creator-skills/archive.ts",
-    "./creator-skills/fixtures": "./src/creator-skills/fixtures.ts",
-    "./creator-skills/schemas": "./src/creator-skills/schemas.ts",
-    "./creator-skills/skill-content": "./src/creator-skills/skill-content.ts",
+    "./creator-skills": {
+      "types": "./dist/creator-skills/index.d.ts",
+      "node": "./dist/creator-skills/index.cjs",
+      "import": "./dist/creator-skills/index.cjs",
+      "default": "./dist/creator-skills/index.cjs"
+    },
+    "./creator-skills/fixtures": {
+      "types": "./dist/creator-skills/fixtures.d.ts",
+      "node": "./dist/creator-skills/fixtures.cjs",
+      "import": "./dist/creator-skills/fixtures.cjs",
+      "default": "./dist/creator-skills/fixtures.cjs"
+    },
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",
@@ -72,8 +88,6 @@
     "./resources": "./src/resources/index.ts"
   },
   "dependencies": {
-    "@polo-ai/core": "workspace:*",
-    "@polo-ai/session-tools-core": "workspace:*",
     "@isaacs/ttlcache": "^2.1.4",
     "@leeoniya/ufuzzy": "^1.0.19",
     "bash-parser": "^0.5.0",

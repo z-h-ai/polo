@@ -43,6 +43,7 @@ import type {
   CreatorArtifact,
   CreatorArtifactDetail,
   CreatorArtifactVersion,
+  CreatorSkillUploadGrant,
   CreatorSkillOperationProgress,
   SkillValidationIssue,
 } from '../../../shared/types'
@@ -111,6 +112,7 @@ export function CreatorArtifactsPanel({
   const [version, setVersion] = useState('1.0.0')
   const [changelog, setChangelog] = useState('')
   const [draftVersionId, setDraftVersionId] = useState<string | null>(null)
+  const [draftUploadGrant, setDraftUploadGrant] = useState<CreatorSkillUploadGrant | null>(null)
   const [installVersion, setInstallVersion] = useState('')
   const [progress, setProgress] = useState<CreatorSkillOperationProgress | null>(null)
   const [operationId, setOperationId] = useState<string | null>(null)
@@ -283,9 +285,9 @@ export function CreatorArtifactsPanel({
           item.status !== 'published'
           && item.status !== 'revoked'
           && item.status !== 'expired'
-        ))
-        setDraftVersionId(draft?.id ?? null)
-        setIssues(draft?.validationIssues ?? [])
+      ))
+      setDraftVersionId(draft?.id ?? null)
+      setIssues(draft?.validationIssues ?? [])
         setVersion('1.0.0')
         setChangelog(
           result.versions.length === 0
@@ -520,6 +522,7 @@ export function CreatorArtifactsPanel({
         return
       }
       setDraftVersionId(result.version.id)
+      setDraftUploadGrant(result.upload)
       await loadDetail(detail.artifact.id)
     } finally {
       setAction(null)
@@ -527,7 +530,7 @@ export function CreatorArtifactsPanel({
   }
 
   const uploadArchive = async (file: File) => {
-    if (!detail || !draftVersionId) return
+    if (!detail || !draftVersionId || !draftVersion) return
     setAction('upload')
     const nextUploadOperationId = crypto.randomUUID()
     setUploadOperationId(nextUploadOperationId)
@@ -537,24 +540,31 @@ export function CreatorArtifactsPanel({
     setIssues([])
     try {
       await preflightCreatorSkillUploadFile(file, detail.artifact.slug)
-      const grantResult = await window.electronAPI.creatorArtifactCreateUploadGrant({
-        organizationId,
-        artifactId: detail.artifact.id,
-        versionId: draftVersionId,
-        idempotencyKey: idempotencyKey('version-upload'),
-      })
-      if (!grantResult.success) {
-        setError(resultMessage(t, grantResult))
-        return
+      let uploadGrant = draftUploadGrant
+      // A page reopen deliberately does not retain a signed URL. Renew it at
+      // the last responsible moment; this RPC carries no archive bytes.
+      if (!uploadGrant || Date.parse(uploadGrant.expiresAt) <= Date.now()) {
+        const renewed = await window.electronAPI.creatorArtifactCreateUploadGrant({
+          organizationId,
+          artifactId: detail.artifact.id,
+          version: draftVersion.version,
+          idempotencyKey: idempotencyKey('version-upload-grant'),
+        })
+        if (!renewed.success) {
+          setError(resultMessage(t, renewed))
+          return
+        }
+        uploadGrant = renewed.grant
+        setDraftUploadGrant(uploadGrant)
       }
-      const uploaded = await uploadCreatorSkillArchive(file, grantResult.grant, {
+      const uploaded = await uploadCreatorSkillArchive(file, uploadGrant, {
         signal: controller.signal,
       })
       const result = await window.electronAPI.creatorArtifactCompleteUpload({
         organizationId,
         artifactId: detail.artifact.id,
-        versionId: draftVersionId,
-        uploadGeneration: grantResult.grant.uploadGeneration,
+        version: draftVersion.version,
+        uploadGeneration: uploadGrant.uploadGeneration,
         sizeBytes: uploaded.sizeBytes,
         idempotencyKey: idempotencyKey('version-upload-complete'),
       })
@@ -578,14 +588,14 @@ export function CreatorArtifactsPanel({
   }
 
   const publishVersion = async () => {
-    if (!detail || !draftVersionId) return
+    if (!detail || !draftVersionId || !draftVersion) return
     setAction('publish')
     setError(null)
     try {
       const result = await window.electronAPI.creatorArtifactPublishVersion({
         organizationId,
         artifactId: detail.artifact.id,
-        versionId: draftVersionId,
+        version: draftVersion.version,
         idempotencyKey: idempotencyKey('version-publish'),
       })
       if (!result.success) {
@@ -599,7 +609,7 @@ export function CreatorArtifactsPanel({
   }
 
   const deleteVersionDraft = async () => {
-    if (!detail || !draftVersionId) return
+    if (!detail || !draftVersionId || !draftVersion) return
     if (!window.confirm(t('creatorSkills.version.confirmDelete'))) return
     setAction('delete')
     setError(null)
@@ -607,7 +617,7 @@ export function CreatorArtifactsPanel({
       const result = await window.electronAPI.creatorArtifactDeleteVersionDraft({
         organizationId,
         artifactId: detail.artifact.id,
-        versionId: draftVersionId,
+        version: draftVersion.version,
         idempotencyKey: idempotencyKey('version-delete'),
       })
       if (!result.success) {
@@ -615,6 +625,7 @@ export function CreatorArtifactsPanel({
         return
       }
       setDraftVersionId(null)
+      setDraftUploadGrant(null)
       await loadDetail(detail.artifact.id)
     } finally {
       setAction(null)
@@ -799,7 +810,7 @@ export function CreatorArtifactsPanel({
       const result = await window.electronAPI.creatorArtifactRevokeVersion({
         organizationId,
         artifactId: detail.artifact.id,
-        versionId: item.id,
+        version: item.version,
         reason: revokeReason.trim(),
         idempotencyKey: idempotencyKey('version-revoke'),
       })

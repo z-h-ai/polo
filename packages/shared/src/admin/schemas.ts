@@ -4,6 +4,8 @@ export {
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
   CreatorArtifactMutationResponseSchema,
+  CreatorArtifactVersionCreatedResponseSchema,
+  CreatorArtifactVersionSchema,
   CreatorArtifactVersionMutationResponseSchema,
   CreatorSkillDownloadGrantSchema,
   CreatorSkillSafetyStatusBatchSchema,

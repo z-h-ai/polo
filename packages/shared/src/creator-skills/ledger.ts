@@ -9,8 +9,8 @@ import { dirname, join } from 'node:path'
 import {
   type CreatorSkillsLedger,
   type InstalledCreatorSkill,
-} from './types'
-import { InstalledCreatorSkillSchema } from './schemas'
+} from './types.ts'
+import { InstalledCreatorSkillSchema } from './schemas.ts'
 
 export const CREATOR_SKILLS_LEDGER_FILE = 'creator-skills.json'
 
