@@ -15,8 +15,18 @@ type PackSummary = {
   filename: string
 }
 
+type PackManifestEntry = {
+  path: string
+}
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
+}
+
+function getAdminCommit(adminSourceRoot: string): string {
+  return execFileSync('git', ['-C', adminSourceRoot, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+  }).trim()
 }
 
 async function runCommand(
@@ -137,9 +147,13 @@ async function waitForRoute(url: string, expectedFragments: string[]): Promise<s
   throw new Error(`Timed out waiting for ${url}: ${lastError instanceof Error ? lastError.message : String(lastError)}`)
 }
 
-async function extractGitArchive(sourceRoot: string, destinationRoot: string): Promise<void> {
+async function extractGitArchive(
+  sourceRoot: string,
+  destinationRoot: string,
+  ref: string,
+): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
-    const git = spawn('git', ['-C', sourceRoot, 'archive', 'HEAD'], {
+    const git = spawn('git', ['-C', sourceRoot, 'archive', ref], {
       stdio: ['ignore', 'pipe', 'inherit'],
     })
     const tar = spawn('tar', ['-x', '-C', destinationRoot], {
@@ -177,6 +191,29 @@ async function extractGitArchive(sourceRoot: string, destinationRoot: string): P
   })
 }
 
+function validatePackedCreatorSkillsBoundary(manifest: PackManifestEntry[]): void {
+  const paths = manifest.map(entry => entry.path)
+  const requiredEntries = [
+    'dist/creator-skills/index.cjs',
+    'dist/creator-skills/index.d.ts',
+    'dist/creator-skills/fixtures.cjs',
+    'dist/creator-skills/fixtures.d.ts',
+  ]
+
+  for (const requiredEntry of requiredEntries) {
+    assert(paths.includes(requiredEntry), `tarball is missing ${requiredEntry}`)
+  }
+
+  const privateCreatorSkillPaths = paths.filter(path => (
+    path.startsWith('src/creator-skills/')
+    && path !== 'src/creator-skills/.npmignore'
+  ))
+  assert(
+    privateCreatorSkillPaths.length === 0,
+    `tarball leaked private creator-skill source paths: ${privateCreatorSkillPaths.join(', ')}`,
+  )
+}
+
 async function buildSharedPackage(tempRoot: string): Promise<string> {
   await runCommand('bun', ['run', 'build:creator-skills'], {
     cwd: packageRoot,
@@ -184,6 +221,19 @@ async function buildSharedPackage(tempRoot: string): Promise<string> {
 
   const packDestination = join(tempRoot, 'pack')
   await mkdir(packDestination, { recursive: true })
+  const dryRunOutput = await runCommandCapture('npm', [
+    'pack',
+    '--json',
+    '--dry-run',
+    '--pack-destination',
+    packDestination,
+  ], {
+    cwd: packageRoot,
+  })
+  const dryRunSummary = JSON.parse(dryRunOutput.stdout.trim()) as Array<{ files?: PackManifestEntry[] }>
+  assert(dryRunSummary.length === 1, 'npm pack --dry-run did not return exactly one manifest')
+  validatePackedCreatorSkillsBoundary(dryRunSummary[0]?.files ?? [])
+
   const packOutput = await runCommandCapture('npm', [
     'pack',
     '--json',
@@ -196,19 +246,6 @@ async function buildSharedPackage(tempRoot: string): Promise<string> {
   assert(packSummary.length === 1, 'npm pack did not return exactly one tarball')
 
   const tarballPath = join(packDestination, packSummary[0]!.filename)
-  const archiveEntries = (await runCommandCapture('tar', ['-tf', tarballPath])).stdout
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-  const expectedEntries = [
-    'package/dist/creator-skills/index.cjs',
-    'package/dist/creator-skills/index.d.ts',
-    'package/dist/creator-skills/fixtures.cjs',
-    'package/dist/creator-skills/fixtures.d.ts',
-  ]
-  for (const entry of expectedEntries) {
-    assert(archiveEntries.includes(entry), `tarball is missing ${entry}`)
-  }
 
   return tarballPath
 }
@@ -219,11 +256,11 @@ async function prepareAdminConsumer(
 ): Promise<string> {
   const adminSourceRoot = process.env.POLO_ADMIN_SOURCE_ROOT ?? defaultAdminSourceRoot
   await access(join(adminSourceRoot, 'package.json'))
+  const adminCommit = getAdminCommit(adminSourceRoot)
 
   const consumerRoot = join(tempRoot, 'admin-consumer')
   await mkdir(consumerRoot, { recursive: true })
-  await extractGitArchive(adminSourceRoot, consumerRoot)
-  await rm(join(consumerRoot, 'package-lock.json'), { force: true })
+  await extractGitArchive(adminSourceRoot, consumerRoot, adminCommit)
 
   const packageJsonPath = join(consumerRoot, 'package.json')
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
@@ -234,6 +271,17 @@ async function prepareAdminConsumer(
     [sharedPackageName]: `file:${tarballPath}`,
   }
   await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+
+  await runCommand('npm', [
+    'install',
+    '--package-lock-only',
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+    '--prefer-offline',
+  ], {
+    cwd: consumerRoot,
+  })
 
   const proofRouteFile = join(consumerRoot, proofRoutePath)
   await mkdir(dirname(proofRouteFile), { recursive: true })
@@ -264,10 +312,11 @@ export default function SharedSkillProofPage() {
 
 async function installConsumerDependencies(consumerRoot: string): Promise<void> {
   await runCommand('npm', [
-    'install',
+    'ci',
     '--omit=dev',
     '--no-audit',
     '--no-fund',
+    '--prefer-offline',
   ], {
     cwd: consumerRoot,
   })
@@ -312,6 +361,15 @@ async function proveNextRouteCompiles(consumerRoot: string): Promise<void> {
       CREATOR_SKILL_FIXTURE_MARKER,
     ])
     assert(body.includes('Review Helper'), 'Next proof route did not render the fixture metadata')
+
+    const resolutionCheck = await runCommandCapture('node', [
+      '-e',
+      String.raw`const path = require.resolve('@polo-ai/shared/creator-skills'); const fixtures = require.resolve('@polo-ai/shared/creator-skills/fixtures'); if (!path.includes('/dist/creator-skills/index.cjs') || !fixtures.includes('/dist/creator-skills/fixtures.cjs')) { throw new Error(JSON.stringify({ path, fixtures })); } if (path.includes('/src/creator-skills/') || fixtures.includes('/src/creator-skills/')) { throw new Error(JSON.stringify({ path, fixtures })); } console.log(JSON.stringify({ path, fixtures }));`,
+    ], {
+      cwd: consumerRoot,
+    })
+    assert(resolutionCheck.stdout.includes('/dist/creator-skills/index.cjs'), 'creator-skills subpath did not resolve to the dist entrypoint')
+    assert(resolutionCheck.stdout.includes('/dist/creator-skills/fixtures.cjs'), 'creator-skills fixtures subpath did not resolve to the dist entrypoint')
   } finally {
     child.kill('SIGTERM')
     await new Promise(resolvePromise => {
