@@ -51,6 +51,10 @@ const OP_OPEN_HANDLE_NEW_INSTALLED = '17171717-1717-4717-8717-171717171717'
 const OP_OPEN_HANDLE_LEDGER_COMMITTED = '18181818-1818-4818-8818-181818181818'
 const OP_OPEN_HANDLE_COMMITTED = '19191919-1919-4919-8919-191919191919'
 const OP_OPEN_HANDLE_CLEANUP = '20202020-2020-4020-8020-202020202020'
+const OP_FORCE_DELETE_OLD_BACKED_UP = '45454545-4545-4545-8545-454545454545'
+const OP_FORCE_DELETE_LEDGER_COMMITTED = '46464646-4646-4646-8646-464646464646'
+const OP_FORCE_DELETE_COMMITTED = '47474747-4747-4747-8747-474747474747'
+const OP_FORCE_DELETE_RECOVERY = '48484848-4848-4848-8848-484848484848'
 
 function skillContent(version: string): string {
   return `---
@@ -911,6 +915,167 @@ describe('Creator Skill workspace installer', () => {
       })
       expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8'))
         .toBe(skillContent('local'))
+    })
+  })
+
+  it('rejects confirmed force deletion when writes arrive at every commit checkpoint', async () => {
+    for (const [checkpoint, operationId] of [
+      ['old_backed_up', OP_FORCE_DELETE_OLD_BACKED_UP],
+      ['ledger_committed', OP_FORCE_DELETE_LEDGER_COMMITTED],
+      ['committed', OP_FORCE_DELETE_COMMITTED],
+    ] as const) {
+      await withWorkspace(async root => {
+        const packaged = await packageGrant(root, '1.0.0')
+        expect((await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: OP_BASE,
+          grant: packaged.grant,
+        }, { fetch: responseFetch(packaged.bytes) })).success).toBe(true)
+        const targetPath = join(root, 'skills', 'install-test')
+        await writeFile(join(targetPath, 'local-note.txt'), 'confirmed local content')
+
+        const detached = await uninstallCreatorSkill({
+          workspaceRoot: root,
+          workspaceId: 'workspace-1',
+          operationId: '49494949-4949-4949-8949-494949494949',
+          slug: 'install-test',
+        })
+        const forceDeleteCredential = detached.success
+          ? detached.forceDeleteCredential
+          : undefined
+        expect(typeof forceDeleteCredential).toBe('string')
+
+        let persistedConfirmation: Record<string, string> | undefined
+        const result = await uninstallCreatorSkill({
+          workspaceRoot: root,
+          workspaceId: 'workspace-1',
+          operationId,
+          slug: 'install-test',
+          forceDeleteModified: true,
+          forceDeleteCredential,
+        }, {
+          onJournalPersisted: async state => {
+            if (state !== checkpoint) return
+            const operationPath = join(root, '.creator-skill-ops', operationId)
+            const journal = JSON.parse(await readFile(
+              join(operationPath, 'journal.json'),
+              'utf8',
+            ))
+            persistedConfirmation = journal.forceDeleteConfirmation
+            await writeFile(
+              join(operationPath, 'backup', 'late-write.txt'),
+              checkpoint,
+            )
+          },
+        })
+
+        expect(persistedConfirmation).toEqual({
+          artifactId: 'artifact-1',
+          archiveChecksum: packaged.grant.archiveChecksum,
+          directoryIdentity: expect.stringMatching(/^[0-9]+:[0-9]+:[0-9]+$/),
+          contentFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        })
+        expect(result).toMatchObject({
+          success: false,
+          errorCode: 'creator_skill_force_delete_stale',
+        })
+        expect(await readFile(join(targetPath, 'late-write.txt'), 'utf8'))
+          .toBe(checkpoint)
+        expect(await readFile(join(targetPath, 'local-note.txt'), 'utf8'))
+          .toBe('confirmed local content')
+        expect(await access(join(root, '.creator-skill-ops', operationId)).then(
+          () => true,
+          () => false,
+        )).toBe(false)
+        expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
+      })
+    }
+  })
+
+  it('restores a force-delete backup changed after a durable committed crash', async () => {
+    await withWorkspace(async root => {
+      const packaged = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: packaged.grant,
+      }, { fetch: responseFetch(packaged.bytes) })).success).toBe(true)
+      const targetPath = join(root, 'skills', 'install-test')
+      await writeFile(join(targetPath, 'local-note.txt'), 'confirmed local content')
+
+      const detached = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '50505050-5050-4050-8050-505050505050',
+        slug: 'install-test',
+      })
+      const forceDeleteCredential = detached.success
+        ? detached.forceDeleteCredential
+        : undefined
+      expect(typeof forceDeleteCredential).toBe('string')
+
+      let journalSyncCount = 0
+      const result = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: OP_FORCE_DELETE_RECOVERY,
+        slug: 'install-test',
+        forceDeleteModified: true,
+        forceDeleteCredential,
+      }, {
+        syncJournalDirectory: async () => {
+          journalSyncCount += 1
+          if (journalSyncCount === 4) {
+            throw Object.assign(new Error('directory fsync unavailable'), {
+              code: 'ENOTSUP',
+            })
+          }
+        },
+      })
+
+      expect(result).toMatchObject({ success: true })
+      const operationPath = join(
+        root,
+        '.creator-skill-ops',
+        OP_FORCE_DELETE_RECOVERY,
+      )
+      const journal = JSON.parse(await readFile(
+        join(operationPath, 'journal.json'),
+        'utf8',
+      ))
+      expect(journal).toMatchObject({
+        state: 'committed',
+        forceDeleteConfirmation: {
+          artifactId: 'artifact-1',
+          archiveChecksum: packaged.grant.archiveChecksum,
+          directoryIdentity: expect.stringMatching(/^[0-9]+:[0-9]+:[0-9]+$/),
+          contentFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      })
+      await writeFile(
+        join(operationPath, 'backup', 'late-write.txt'),
+        'write after committed crash',
+      )
+
+      await recoverCreatorSkillOperations(root)
+
+      expect(await readFile(join(targetPath, 'late-write.txt'), 'utf8'))
+        .toBe('write after committed crash')
+      expect(await readFile(join(targetPath, 'local-note.txt'), 'utf8'))
+        .toBe('confirmed local content')
+      expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+      expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
+      const reconfirmed = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '51515151-5151-4151-8151-515151515151',
+        slug: 'install-test',
+      })
+      expect(reconfirmed).toMatchObject({
+        success: true,
+        detached: true,
+        forceDeleteCredential: expect.any(String),
+      })
     })
   })
 

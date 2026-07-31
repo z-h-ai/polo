@@ -86,6 +86,7 @@ interface CreatorSkillJournal {
   backupVersion?: string
   backupCreatedAt?: string
   promotedDirectoryIdentity?: string
+  forceDeleteConfirmation?: ForceDeleteConfirmation
 }
 
 interface CreatorSkillBackupMetadata {
@@ -107,9 +108,32 @@ interface StoredForceDeleteCredential {
   expiresAt: string
 }
 
+interface ForceDeleteConfirmation {
+  artifactId: string
+  archiveChecksum: string
+  directoryIdentity: string
+  contentFingerprint: string
+}
+
 interface ForceDeleteCredentialStore {
   schemaVersion: 1
   credentials: StoredForceDeleteCredential[]
+}
+
+function validForceDeleteConfirmation(
+  value: unknown,
+): value is ForceDeleteConfirmation {
+  if (!value || typeof value !== 'object') return false
+  const confirmation = value as Partial<ForceDeleteConfirmation>
+  return typeof confirmation.artifactId === 'string'
+    && confirmation.artifactId.length > 0
+    && confirmation.artifactId.length <= 512
+    && typeof confirmation.archiveChecksum === 'string'
+    && /^[a-f0-9]{64}$/.test(confirmation.archiveChecksum)
+    && typeof confirmation.directoryIdentity === 'string'
+    && /^[0-9]+:[0-9]+:[0-9]+$/.test(confirmation.directoryIdentity)
+    && typeof confirmation.contentFingerprint === 'string'
+    && /^[a-f0-9]{64}$/.test(confirmation.contentFingerprint)
 }
 
 export interface CreatorSkillInstallerDependencies {
@@ -685,6 +709,9 @@ function validateJournalShape(
     || journal.backupVersion !== undefined
     || journal.backupCreatedAt !== undefined
   )
+  const forceDeleteConfirmation = journal.forceDeleteConfirmation
+  const hasValidForceDeleteConfirmation = forceDeleteConfirmation === undefined
+    || validForceDeleteConfirmation(forceDeleteConfirmation)
   if (
     !journal
     || journal.schemaVersion !== 1
@@ -706,6 +733,11 @@ function validateJournalShape(
     || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES
     || (journal.promotedDirectoryIdentity !== undefined
       && !/^[0-9]+:[0-9]+:[0-9]+$/.test(journal.promotedDirectoryIdentity))
+    || !hasValidForceDeleteConfirmation
+    || (forceDeleteConfirmation !== undefined && (
+      journal.action !== 'uninstall'
+      || journal.preserveBackupPath !== undefined
+    ))
     || (hasAnyBackupMetadata && (
       !isBackupOperation(journal.backupOperation)
       || typeof journal.backupCreatedAt !== 'string'
@@ -1280,11 +1312,41 @@ async function validateForceDeleteCredential(args: {
     || identity.directoryIdentity !== credential.directoryIdentity
     || identity.contentDigest !== credential.contentFingerprint
   ) {
-    throw Object.assign(new Error('Creator Skill changed after deletion confirmation'), {
-      code: 'creator_skill_force_delete_stale',
-    })
+    throw forceDeleteStaleError()
   }
   return credential
+}
+
+function forceDeleteStaleError(): Error & { code: string } {
+  return Object.assign(new Error('Creator Skill changed after deletion confirmation'), {
+    code: 'creator_skill_force_delete_stale',
+  })
+}
+
+function forceDeleteConfirmationFromCredential(
+  credential: StoredForceDeleteCredential,
+): ForceDeleteConfirmation {
+  return {
+    artifactId: credential.artifactId,
+    archiveChecksum: credential.archiveChecksum,
+    directoryIdentity: credential.directoryIdentity,
+    contentFingerprint: credential.contentFingerprint,
+  }
+}
+
+async function assertForceDeleteBackupUnchanged(
+  transactionBackupPath: string,
+  confirmation: ForceDeleteConfirmation | undefined,
+): Promise<void> {
+  if (!confirmation) throw forceDeleteStaleError()
+  const captured = await inspectCreatorSkillTarget(transactionBackupPath)
+  if (
+    captured.kind !== 'scanned'
+    || captured.directoryIdentity !== confirmation.directoryIdentity
+    || captured.contentDigest !== confirmation.contentFingerprint
+  ) {
+    throw forceDeleteStaleError()
+  }
 }
 
 export async function hasPendingCreatorSkillForceDelete(
@@ -1483,10 +1545,35 @@ async function finalizeCommittedJournal(
   operationPath: string,
   journal: CreatorSkillJournal,
 ): Promise<void> {
-  await publishCommittedBackup(workspaceRoot, operationPath, journal)
   if (journal.action === 'uninstall' && !journal.preserveBackupPath) {
+    const paths = await deriveJournalPaths(workspaceRoot, operationPath, journal)
+    if (await exists(paths.transactionBackupPath)) {
+      try {
+        await assertForceDeleteBackupUnchanged(
+          paths.transactionBackupPath,
+          journal.forceDeleteConfirmation,
+        )
+      } catch (error) {
+        // A committed force-delete journal is not permission to discard writes
+        // that arrived after confirmation. Restore the detached directory and
+        // leave its credential available so the user can confirm again.
+        await rollbackJournal(workspaceRoot, operationPath, journal)
+        if (
+          error
+          && typeof error === 'object'
+          && (error as { code?: string }).code === 'creator_skill_force_delete_stale'
+        ) {
+          return
+        }
+        throw error
+      }
+      await rm(paths.transactionBackupPath, { recursive: true, force: true })
+    }
     await removeForceDeleteCredential(workspaceRoot, journal.slug)
+    await rm(operationPath, { recursive: true, force: true })
+    return
   }
+  await publishCommittedBackup(workspaceRoot, operationPath, journal)
   await rm(operationPath, { recursive: true, force: true })
 }
 
@@ -2007,6 +2094,11 @@ export async function uninstallCreatorSkill(args: {
           backupVersion: installed?.version,
           backupCreatedAt: inferBackupCreatedAt(preserveBackupPath),
         } : {}),
+        ...(validatedForceCredential ? {
+          forceDeleteConfirmation: forceDeleteConfirmationFromCredential(
+            validatedForceCredential,
+          ),
+        } : {}),
       }
       const journalPath = join(operationPath, 'journal.json')
       await persistJournal(journalPath, journal, dependencies)
@@ -2016,16 +2108,10 @@ export async function uninstallCreatorSkill(args: {
         'Creator Skill uninstall snapshot',
       )
       if (validatedForceCredential) {
-        const captured = await inspectCreatorSkillTarget(transactionBackupPath)
-        if (
-          captured.kind !== 'scanned'
-          || captured.directoryIdentity !== validatedForceCredential.directoryIdentity
-          || captured.contentDigest !== validatedForceCredential.contentFingerprint
-        ) {
-          throw Object.assign(new Error('Creator Skill changed after deletion confirmation'), {
-            code: 'creator_skill_force_delete_stale',
-          })
-        }
+        await assertForceDeleteBackupUnchanged(
+          transactionBackupPath,
+          journal.forceDeleteConfirmation,
+        )
       }
       journal.state = 'old_backed_up'
       await persistJournal(journalPath, journal, dependencies)
@@ -2083,16 +2169,25 @@ export async function uninstallCreatorSkill(args: {
           version: installed?.version,
         })
       }
-      const backupPath = await publishCommittedBackup(
-        canonicalWorkspace,
-        operationPath,
-        journal,
-      )
-      if (!backupPath) {
-        await rm(transactionBackupPath, { recursive: true, force: true })
-      }
       if (args.forceDeleteModified) {
+        // This scan is deliberately adjacent to the only irreversible delete.
+        // Earlier checkpoint scans cannot protect writes made through handles
+        // that still reference the directory after it was renamed.
+        await assertForceDeleteBackupUnchanged(
+          transactionBackupPath,
+          journal.forceDeleteConfirmation,
+        )
+        await rm(transactionBackupPath, { recursive: true, force: true })
         await removeForceDeleteCredential(canonicalWorkspace, args.slug)
+      } else {
+        const backupPath = await publishCommittedBackup(
+          canonicalWorkspace,
+          operationPath,
+          journal,
+        )
+        if (!backupPath) {
+          await rm(transactionBackupPath, { recursive: true, force: true })
+        }
       }
       await dependencies.onCleanupStep?.('transaction_backup_removed')
       await rm(operationPath, { recursive: true, force: true })
@@ -2100,15 +2195,48 @@ export async function uninstallCreatorSkill(args: {
       return committedResult
     } catch (error) {
       dependencies.onError?.(error)
+      const record = error && typeof error === 'object'
+        ? error as { code?: string; message?: string }
+        : {}
+      if (
+        record.code === 'creator_skill_force_delete_stale'
+        && journal
+        && operationPath
+      ) {
+        await rollbackJournal(args.workspaceRoot, operationPath, journal).catch(() => {})
+        return errorResult({
+          operationId: args.operationId,
+          stage: 'commit',
+          errorCode: 'creator_skill_force_delete_stale',
+          message: 'Creator Skill uninstall failed',
+        })
+      }
       if (journal?.state === 'committed' && committedResult) {
+        if (journal.forceDeleteConfirmation && operationPath) {
+          const transactionBackupPath = resolve(operationPath, 'backup')
+          try {
+            if (await exists(transactionBackupPath)) {
+              await assertForceDeleteBackupUnchanged(
+                transactionBackupPath,
+                journal.forceDeleteConfirmation,
+              )
+            }
+          } catch (validationError) {
+            dependencies.onError?.(validationError)
+            await rollbackJournal(args.workspaceRoot, operationPath, journal).catch(() => {})
+            return errorResult({
+              operationId: args.operationId,
+              stage: 'commit',
+              errorCode: 'creator_skill_force_delete_stale',
+              message: 'Creator Skill uninstall failed',
+            })
+          }
+        }
         return committedResult
       }
       if (journal && operationPath) {
         await rollbackJournal(args.workspaceRoot, operationPath, journal).catch(() => {})
       }
-      const record = error && typeof error === 'object'
-        ? error as { code?: string; message?: string }
-        : {}
       return errorResult({
         operationId: args.operationId,
         stage: 'commit',
