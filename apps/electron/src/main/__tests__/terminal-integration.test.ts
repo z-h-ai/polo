@@ -7,6 +7,7 @@ import {
   readFileSync,
   readlinkSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -99,6 +100,87 @@ describe('macOS terminal integration', () => {
     const backups = readdirSync(options.homeDir!).filter((name) =>
       name.startsWith('.bash_profile.polo-backup-'))
     expect(backups.length).toBe(1)
+  })
+
+  it('rejects a user-owned shell-profile symlink without changing its target', () => {
+    const options = setup()
+    const profile = join(options.homeDir!, '.zprofile')
+    const userProfile = join(options.homeDir!, 'user-zprofile')
+    mkdirSync(options.homeDir!, { recursive: true })
+    writeFileSync(userProfile, 'export USER_PROFILE=1\n')
+    symlinkSync(userProfile, profile)
+
+    const status = installTerminalIntegration(options)
+
+    expect(status.conflict).toEqual({ code: 'profile_conflict', path: profile })
+    expect(lstatSync(profile).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(profile)).toBe(userProfile)
+    expect(readFileSync(userProfile, 'utf8')).toBe('export USER_PROFILE=1\n')
+  })
+
+  it('preserves macOS shell profiles across regular, symlink, rename, and content races', () => {
+    for (const race of [
+      'regular_publish',
+      'symlink_publish',
+      'rename_claim',
+      'content_claim',
+    ] as const) {
+      const options = setup()
+      const profile = join(options.homeDir!, '.zprofile')
+      const original = 'export ORIGINAL_PROFILE=1\n'
+      const userContent = `export USER_${race.toUpperCase()}=1\n`
+      const movedOriginal = join(options.homeDir!, `moved-${race}`)
+      const userTarget = join(options.homeDir!, `user-target-${race}`)
+      mkdirSync(options.homeDir!, { recursive: true })
+      writeFileSync(profile, original)
+      writeFileSync(userTarget, userContent)
+      options.onBeforeTransactionStep = (step, path) => {
+        if (path !== profile) return
+        if (race === 'regular_publish' && step === 'profile_publish') {
+          writeFileSync(profile, userContent)
+        }
+        if (race === 'symlink_publish' && step === 'profile_publish') {
+          symlinkSync(userTarget, profile)
+        }
+        if (race === 'rename_claim' && step === 'profile_claim') {
+          renameSync(profile, movedOriginal)
+          writeFileSync(profile, userContent)
+        }
+        if (race === 'content_claim' && step === 'profile_claim') {
+          writeFileSync(profile, userContent)
+        }
+      }
+
+      let thrown: unknown
+      try {
+        installTerminalIntegration(options)
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBeInstanceOf(TerminalIntegrationOperationError)
+      expect(toTerminalIntegrationErrorPayload(thrown, 'install')).toEqual({
+        errorCode: 'install_failed',
+        errorParams: { operation: 'install' },
+      })
+      expect(existsSync(join(options.homeDir!, '.local', 'bin', 'polo'))).toBe(false)
+      if (race === 'symlink_publish') {
+        expect(lstatSync(profile).isSymbolicLink()).toBe(true)
+        expect(readlinkSync(profile)).toBe(userTarget)
+        expect(readFileSync(userTarget, 'utf8')).toBe(userContent)
+      } else {
+        expect(readFileSync(profile, 'utf8')).toBe(userContent)
+      }
+      if (race === 'rename_claim') {
+        expect(readFileSync(movedOriginal, 'utf8')).toBe(original)
+      }
+      if (race.endsWith('publish')) {
+        const backups = readdirSync(options.homeDir!).filter((name) =>
+          name.startsWith('.zprofile.polo-backup-'))
+        expect(backups).toHaveLength(1)
+        expect(readFileSync(join(options.homeDir!, backups[0]!), 'utf8')).toBe(original)
+      }
+    }
   })
 
   it('keeps the managed launcher current across app version upgrades', () => {
@@ -202,6 +284,86 @@ describe('macOS terminal integration', () => {
     expect(readFileSync(launcher, 'utf8')).toContain('echo other')
   })
 
+  it('does not overwrite a regular file or symlink created after launcher validation', () => {
+    for (const kind of ['regular', 'symlink'] as const) {
+      const options = setup()
+      const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
+      const userTarget = join(options.homeDir!, `user-polo-${kind}`)
+      const userContent = `#!/bin/sh\necho ${kind}-user-command\n`
+      mkdirSync(dirname(launcher), { recursive: true })
+      writeFileSync(userTarget, userContent, { mode: 0o755 })
+      options.onBeforeTransactionStep = (step, path) => {
+        if (step !== 'launcher_publish' || path !== launcher) return
+        if (kind === 'regular') {
+          writeFileSync(launcher, userContent, { mode: 0o755 })
+        } else {
+          symlinkSync(userTarget, launcher)
+        }
+      }
+
+      const status = installTerminalIntegration(options)
+
+      expect(status.conflict).toEqual({ code: 'launcher_conflict', path: launcher })
+      expect(existsSync(join(options.homeDir!, '.polo-ai', 'terminal-integration.json'))).toBe(false)
+      if (kind === 'regular') {
+        expect(lstatSync(launcher).isSymbolicLink()).toBe(false)
+        expect(readFileSync(launcher, 'utf8')).toBe(userContent)
+      } else {
+        expect(lstatSync(launcher).isSymbolicLink()).toBe(true)
+        expect(readlinkSync(launcher)).toBe(userTarget)
+        expect(readFileSync(userTarget, 'utf8')).toBe(userContent)
+      }
+    }
+  })
+
+  it('restores an existing launcher race without replacing the user command', () => {
+    for (const kind of ['regular', 'symlink'] as const) {
+      const options = setup()
+      const installed = installTerminalIntegration(options)
+      const movedResources = join(
+        dirname(dirname(dirname(options.resourcesPath))),
+        `Polo Launcher Race ${kind}.app`,
+        'Contents',
+        'Resources',
+      )
+      const movedTarget = join(movedResources, 'app', 'resources', 'bin', 'polo')
+      mkdirSync(dirname(movedTarget), { recursive: true })
+      writeFileSync(movedTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+      const userTarget = join(options.homeDir!, `racing-user-polo-${kind}`)
+      const userContent = `#!/bin/sh\necho replacement-${kind}\n`
+      writeFileSync(userTarget, userContent, { mode: 0o755 })
+      const racedOptions: TerminalIntegrationOptions = {
+        ...options,
+        resourcesPath: movedResources,
+        onBeforeTransactionStep: (step, path) => {
+          if (step !== 'launcher_claim' || path !== installed.launcherPath) return
+          rmSync(path)
+          if (kind === 'regular') {
+            writeFileSync(path, userContent, { mode: 0o755 })
+          } else {
+            symlinkSync(userTarget, path)
+          }
+        },
+      }
+
+      let thrown: unknown
+      try {
+        installTerminalIntegration(racedOptions)
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBeInstanceOf(TerminalIntegrationOperationError)
+      if (kind === 'regular') {
+        expect(readFileSync(installed.launcherPath, 'utf8')).toBe(userContent)
+      } else {
+        expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
+        expect(readlinkSync(installed.launcherPath)).toBe(userTarget)
+      }
+      expect(readFileSync(userTarget, 'utf8')).toBe(userContent)
+    }
+  })
+
   it('does not own or uninstall a user-created symlink to the packaged target', () => {
     const options = setup()
     const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
@@ -267,6 +429,35 @@ describe('macOS terminal integration', () => {
 
     uninstallTerminalIntegration(options)
     expect(readlinkSync(installed.launcherPath)).toBe(userTarget)
+  })
+
+  it('does not delete a user command that races a managed launcher uninstall', () => {
+    for (const kind of ['regular', 'symlink'] as const) {
+      const options = setup()
+      const installed = installTerminalIntegration(options)
+      const userTarget = join(options.homeDir!, `uninstall-user-polo-${kind}`)
+      const userContent = `#!/bin/sh\necho uninstall-${kind}\n`
+      writeFileSync(userTarget, userContent, { mode: 0o755 })
+      options.onBeforeTransactionStep = (step, path) => {
+        if (step !== 'launcher_claim' || path !== installed.launcherPath) return
+        rmSync(path)
+        if (kind === 'regular') {
+          writeFileSync(path, userContent, { mode: 0o755 })
+        } else {
+          symlinkSync(userTarget, path)
+        }
+      }
+
+      uninstallTerminalIntegration(options)
+
+      if (kind === 'regular') {
+        expect(readFileSync(installed.launcherPath, 'utf8')).toBe(userContent)
+      } else {
+        expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
+        expect(readlinkSync(installed.launcherPath)).toBe(userTarget)
+      }
+      expect(readFileSync(userTarget, 'utf8')).toBe(userContent)
+    }
   })
 
   it('migrates a verified historical ownership state during App path repair', () => {

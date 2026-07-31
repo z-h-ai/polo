@@ -2,6 +2,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -82,6 +83,11 @@ export interface TerminalIntegrationOptions {
     output?: string
     outputTruncated?: boolean
   }
+  /** Allows deterministic transaction-race coverage in main-process tests. */
+  onBeforeTransactionStep?: (
+    step: TerminalIntegrationTransactionStep,
+    path: string,
+  ) => void
 }
 
 interface TerminalIntegrationState {
@@ -96,6 +102,32 @@ interface TerminalIntegrationState {
   activeProfile?: string
   profiles?: string[]
   updatedAt?: string
+}
+
+type TerminalIntegrationTransactionStep =
+  | 'profile_claim'
+  | 'profile_publish'
+  | 'launcher_claim'
+  | 'launcher_publish'
+
+interface LeafSnapshot {
+  exists: boolean
+  kind?: 'file' | 'symlink' | 'other'
+  identity?: string
+  mode?: number
+  content?: string
+  symlinkTarget?: string
+  symlinkValue?: string
+}
+
+class TerminalIntegrationConflictError extends Error {
+  constructor(
+    readonly kind: 'profile' | 'launcher',
+    readonly path: string,
+  ) {
+    super(`Terminal integration transaction conflicted at ${path}`)
+    this.name = 'TerminalIntegrationConflictError'
+  }
 }
 
 function getLauncherPath(options: TerminalIntegrationOptions): string {
@@ -223,6 +255,147 @@ function pathExists(path: string): boolean {
   }
 }
 
+function captureLeaf(path: string): LeafSnapshot {
+  try {
+    const stats = lstatSync(path)
+    const identity = `${stats.dev}:${stats.ino}`
+    if (stats.isSymbolicLink()) {
+      const symlinkValue = readlinkSync(path)
+      return {
+        exists: true,
+        kind: 'symlink',
+        identity,
+        mode: stats.mode & 0o777,
+        symlinkValue,
+        symlinkTarget: resolve(dirname(path), symlinkValue),
+      }
+    }
+    if (stats.isFile()) {
+      return {
+        exists: true,
+        kind: 'file',
+        identity,
+        mode: stats.mode & 0o777,
+        content: readFileSync(path, 'utf8'),
+      }
+    }
+    return { exists: true, kind: 'other', identity, mode: stats.mode & 0o777 }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { exists: false }
+    throw error
+  }
+}
+
+function isSameLeaf(expected: LeafSnapshot, actual: LeafSnapshot): boolean {
+  return expected.exists === actual.exists
+    && expected.kind === actual.kind
+    && expected.identity === actual.identity
+    && expected.content === actual.content
+    && expected.symlinkTarget === actual.symlinkTarget
+    && expected.symlinkValue === actual.symlinkValue
+}
+
+function transactionPath(path: string, purpose: 'claim' | 'tmp' | 'backup'): string {
+  return `${path}.polo-${purpose}-${process.pid}-${crypto.randomUUID()}`
+}
+
+function publishRegularFileNoReplace(temp: string, path: string): boolean {
+  try {
+    // `link` fails with EEXIST and never follows a destination symlink. The
+    // temporary file lives beside its destination, so this is an atomic
+    // no-replace publication on every supported macOS filesystem.
+    linkSync(temp, path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+    throw error
+  } finally {
+    rmSync(temp, { force: true })
+  }
+}
+
+function publishSymlinkNoReplace(path: string, target: string): boolean {
+  try {
+    // Creating a symlink is atomic and fails if a user-created leaf appeared
+    // after preflight; unlike rename it cannot replace that leaf.
+    symlinkSync(target, path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+    throw error
+  }
+}
+
+function restoreClaimedLeafNoReplace(claimedPath: string, destination: string): boolean {
+  const claimed = captureLeaf(claimedPath)
+  if (!claimed.exists) return true
+  if (claimed.kind === 'file') {
+    return publishRegularFileNoReplace(claimedPath, destination)
+  }
+  if (claimed.kind === 'symlink' && claimed.symlinkValue) {
+    const restored = publishSymlinkNoReplace(destination, claimed.symlinkValue)
+    if (restored) rmSync(claimedPath, { force: true })
+    return restored
+  }
+  return false
+}
+
+function claimVerifiedLeaf(
+  options: TerminalIntegrationOptions,
+  step: 'profile_claim' | 'launcher_claim',
+  kind: 'profile' | 'launcher',
+  path: string,
+  expected: LeafSnapshot,
+): string | undefined {
+  if (!expected.exists) return undefined
+  options.onBeforeTransactionStep?.(step, path)
+  const claimedPath = transactionPath(path, 'claim')
+  try {
+    renameSync(path, claimedPath)
+  } catch {
+    throw new TerminalIntegrationConflictError(kind, path)
+  }
+  if (!isSameLeaf(expected, captureLeaf(claimedPath))) {
+    restoreClaimedLeafNoReplace(claimedPath, path)
+    throw new TerminalIntegrationConflictError(kind, path)
+  }
+  return claimedPath
+}
+
+function backupClaimedRegularFile(path: string, originalPath = path): string {
+  const backupPath = transactionPath(originalPath, 'backup')
+  copyFileSync(path, backupPath)
+  return backupPath
+}
+
+function updateManagedProfile(
+  options: TerminalIntegrationOptions,
+  path: string,
+  block: string | null,
+): void {
+  const snapshot = captureLeaf(path)
+  if (snapshot.exists && snapshot.kind !== 'file') {
+    throw new TerminalIntegrationConflictError('profile', path)
+  }
+  const current = snapshot.content ?? ''
+  const next = replaceManagedBlock(current, block)
+  if (next === current) return
+
+  const claimedPath = claimVerifiedLeaf(options, 'profile_claim', 'profile', path, snapshot)
+  if (claimedPath) backupClaimedRegularFile(claimedPath, path)
+  const temp = transactionPath(path, 'tmp')
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(temp, next, { encoding: 'utf8', mode: snapshot.mode ?? 0o600 })
+  options.onBeforeTransactionStep?.('profile_publish', path)
+  if (!publishRegularFileNoReplace(temp, path)) {
+    // The pre-transaction content is already preserved in the explicit
+    // backup. A newly appeared user leaf wins; never restore over it.
+    if (claimedPath) rmSync(claimedPath, { force: true })
+    throw new TerminalIntegrationConflictError('profile', path)
+  }
+  if (claimedPath) rmSync(claimedPath, { force: true })
+}
+
 function isExecutable(path: string): boolean {
   try {
     return (statSync(path).mode & 0o111) !== 0
@@ -237,24 +410,6 @@ function writeAtomic(path: string, content: string, mode?: number): void {
   writeFileSync(temp, content, { encoding: 'utf8', mode })
   renameSync(temp, path)
   if (mode !== undefined) chmodSync(path, mode)
-}
-
-function replaceSymlinkAtomic(path: string, target: string): void {
-  mkdirSync(dirname(path), { recursive: true })
-  const temp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`
-  symlinkSync(target, temp)
-  try {
-    renameSync(temp, path)
-  } finally {
-    rmSync(temp, { force: true })
-  }
-}
-
-function backup(path: string): string | undefined {
-  if (!existsSync(path)) return undefined
-  const backupPath = `${path}.polo-backup-${Date.now()}`
-  copyFileSync(path, backupPath)
-  return backupPath
 }
 
 function writeState(
@@ -301,26 +456,18 @@ function resolveSymlinkTarget(path: string): string | null {
   }
 }
 
-function isLegacyManagedLauncher(path: string, options: TerminalIntegrationOptions): boolean {
-  try {
-    return !lstatSync(path).isSymbolicLink()
-      && read(path) === legacyManagedLauncherContent(options)
-  } catch {
-    return false
-  }
-}
-
-function isOwnedLauncher(
+function isOwnedLauncherSnapshot(
   path: string,
+  snapshot: LeafSnapshot,
   state: TerminalIntegrationState | null,
   options: TerminalIntegrationOptions,
 ): boolean {
-  if (!pathExists(path)) return false
-  const resolvedTarget = resolveSymlinkTarget(path)
+  if (!snapshot.exists) return false
   if (
-    resolvedTarget
+    snapshot.kind === 'symlink'
+    && snapshot.symlinkTarget
     && state?.launcherPath === path
-    && state.launcherTarget === resolvedTarget
+    && state.launcherTarget === snapshot.symlinkTarget
   ) {
     if (state.schemaVersion === STATE_SCHEMA_VERSION) {
       return state.owner === STATE_OWNER
@@ -328,7 +475,7 @@ function isOwnedLauncher(
         && Boolean(state.appVersion)
         && state.launcherIdentity === launcherIdentity(
           path,
-          resolvedTarget,
+          snapshot.symlinkTarget,
           state.appVersion!,
         )
     }
@@ -337,11 +484,64 @@ function isOwnedLauncher(
     // without treating a target match alone as ownership.
     return state.schemaVersion === 1 || state.schemaVersion === 2
   }
-  return isLegacyManagedLauncher(path, options)
+  return snapshot.kind === 'file'
+    && snapshot.content === legacyManagedLauncherContent(options)
 }
 
-function existingMode(path: string, fallback: number): number {
-  return existsSync(path) ? statSync(path).mode & 0o777 : fallback
+function isOwnedLauncher(
+  path: string,
+  state: TerminalIntegrationState | null,
+  options: TerminalIntegrationOptions,
+): boolean {
+  return isOwnedLauncherSnapshot(path, captureLeaf(path), state, options)
+}
+
+function installManagedLauncher(
+  options: TerminalIntegrationOptions,
+  path: string,
+  target: string,
+  state: TerminalIntegrationState | null,
+): boolean {
+  const snapshot = captureLeaf(path)
+  if (snapshot.exists && !isOwnedLauncherSnapshot(path, snapshot, state, options)) {
+    return false
+  }
+  if (snapshot.kind === 'symlink' && snapshot.symlinkTarget === target) return true
+
+  const claimedPath = claimVerifiedLeaf(options, 'launcher_claim', 'launcher', path, snapshot)
+  if (claimedPath && snapshot.kind === 'file') backupClaimedRegularFile(claimedPath, path)
+  mkdirSync(dirname(path), { recursive: true })
+  options.onBeforeTransactionStep?.('launcher_publish', path)
+  if (!publishSymlinkNoReplace(path, target)) {
+    // A caller may have installed a command after the verified old launcher
+    // was claimed. Restore only into an empty leaf and otherwise preserve both
+    // the new command and our verified rollback candidate/backup.
+    if (claimedPath) restoreClaimedLeafNoReplace(claimedPath, path)
+    return false
+  }
+  if (claimedPath) rmSync(claimedPath, { force: true })
+  return true
+}
+
+function removeManagedLauncher(
+  options: TerminalIntegrationOptions,
+  path: string,
+  state: TerminalIntegrationState | null,
+): boolean {
+  const snapshot = captureLeaf(path)
+  if (!isOwnedLauncherSnapshot(path, snapshot, state, options)) return false
+  let claimedPath: string | undefined
+  try {
+    claimedPath = claimVerifiedLeaf(options, 'launcher_claim', 'launcher', path, snapshot)
+  } catch (error) {
+    if (error instanceof TerminalIntegrationConflictError) return false
+    throw error
+  }
+  if (!claimedPath) return false
+  // Delete only the private, revalidated candidate. If a user recreated the
+  // command after the claim, it occupies the public path and is left alone.
+  rmSync(claimedPath, { force: true })
+  return true
 }
 
 function getManagedBlockRange(content: string): { start: number; end: number } | null {
@@ -502,7 +702,12 @@ export function getTerminalIntegrationStatus(
   const managedProfiles: string[] = []
   for (const path of profilePaths) {
     try {
-      const content = read(path)
+      const profileSnapshot = captureLeaf(path)
+      if (profileSnapshot.exists && profileSnapshot.kind !== 'file') {
+        malformedProfile = path
+        break
+      }
+      const content = profileSnapshot.content ?? ''
       const range = getManagedBlockRange(content)
       if (!range) continue
       managedProfiles.push(path)
@@ -585,23 +790,12 @@ export function installTerminalIntegration(
     const state = readState(options)
     const profiles = safeProfilePaths(options, state)
     for (const path of profiles) {
-      const current = read(path)
       const block = path === profile.path ? profile.block : null
-      const next = replaceManagedBlock(current, block)
-      if (next === current) continue
-      const profileMode = existingMode(path, 0o600)
-      backup(path)
-      writeAtomic(path, next, profileMode)
+      updateManagedProfile(options, path, block)
     }
 
-    if (pathExists(launcherPath)) {
-      if (!isOwnedLauncher(launcherPath, state, options)) {
-        return getTerminalIntegrationStatus(options)
-      }
-      if (!lstatSync(launcherPath).isSymbolicLink()) backup(launcherPath)
-    }
-    if (resolveSymlinkTarget(launcherPath) !== launcherTarget) {
-      replaceSymlinkAtomic(launcherPath, launcherTarget)
+    if (!installManagedLauncher(options, launcherPath, launcherTarget, state)) {
+      return getTerminalIntegrationStatus(options)
     }
     writeState(options, launcherTarget, [profile.path], profile.path)
 
@@ -634,17 +828,10 @@ export function uninstallTerminalIntegration(
   try {
     const launcherPath = getLauncherPath(options)
     const state = readState(options)
-    if (isOwnedLauncher(launcherPath, state, options)) {
-      rmSync(launcherPath)
-    }
+    removeManagedLauncher(options, launcherPath, state)
 
     for (const path of safeProfilePaths(options, state)) {
-      const current = read(path)
-      const next = replaceManagedBlock(current, null)
-      if (next === current) continue
-      const profileMode = existingMode(path, 0o600)
-      backup(path)
-      writeAtomic(path, next, profileMode)
+      updateManagedProfile(options, path, null)
     }
     if (state) rmSync(statePath(options), { force: true })
 
