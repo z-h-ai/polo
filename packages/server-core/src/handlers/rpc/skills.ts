@@ -2,13 +2,14 @@ import { basename, dirname, join, resolve, sep } from 'path'
 import { constants as fsConstants, existsSync, readdirSync, statSync } from 'fs'
 import { access, realpath, stat } from 'node:fs/promises'
 import { RPC_CHANNELS, type SkillFile } from '@polo-ai/shared/protocol'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { getAdminUrl, getWorkspaceByNameOrId } from '@polo-ai/shared/config'
 import {
   CLIENT_CREATOR_SKILL_COMMIT_CHECK,
   pushTyped,
   type RequestContext,
   type RpcServer,
 } from '@polo-ai/server-core/transport'
+import { CredentialManager } from '@polo-ai/shared/credentials'
 import type { HandlerDeps } from '../handler-deps'
 import {
   CreatorSkillBackupDeleteRpcInputSchema,
@@ -79,6 +80,60 @@ function workspaceMutationError(
     diagnostic: JSON.stringify({ errorCode, stage: 'prepare' }),
     retryable: false,
   }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+}
+
+export function shouldAttachAdminAuth(requestUrl: string, adminOrigin: string): boolean {
+  const request = new URL(requestUrl)
+  const admin = new URL(adminOrigin)
+  if (request.origin === adminOrigin) return true
+  return isLoopbackHost(request.hostname)
+    && isLoopbackHost(admin.hostname)
+    && request.protocol === admin.protocol
+    && request.port === admin.port
+}
+
+function createCreatorSkillDownloadFetch(
+  getAdminAccessToken?: () => string | Promise<string | null>,
+  fetchImpl: typeof fetch = fetch,
+): typeof fetch {
+  const adminUrl = getAdminUrl()
+  const adminOrigin = adminUrl ? new URL(adminUrl).origin : null
+
+  const authenticatedFetch = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const headers = new Headers(init?.headers)
+    if (adminOrigin) {
+      const requestUrl = typeof input === 'string' || input instanceof URL
+        ? input.toString()
+        : input.url
+      if (shouldAttachAdminAuth(requestUrl, adminOrigin)) {
+        let accessToken = await getAdminAccessToken?.()
+        if (!accessToken) {
+          const credentialManager = new CredentialManager()
+          const tokens = await credentialManager.getAdminTokens()
+          accessToken = tokens?.accessToken ?? null
+        }
+        if (accessToken) {
+          headers.set('Authorization', `Bearer ${accessToken}`)
+        }
+      }
+    }
+
+    return fetchImpl(input, {
+      ...init,
+      headers,
+    })
+  }
+
+  return Object.assign(authenticatedFetch, {
+    preconnect: fetchImpl.preconnect,
+  })
 }
 
 async function canonicalizePotentialPath(path: string): Promise<string> {
@@ -402,6 +457,9 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       ...(workingDirectory ? { workingDirectory } : {}),
     }, {
       operationOwnerId: ctx.clientId,
+      fetch: createCreatorSkillDownloadFetch(
+        deps.platform.getAdminAccessToken,
+      ),
       onProgress: progress => pushTyped(
         server,
         RPC_CHANNELS.creatorSkills.PROGRESS,

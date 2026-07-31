@@ -41,6 +41,8 @@ const workspace: Workspace = {
 }
 const sessionId = 'creator-skill-e2e-session'
 const adminHttpClient = new AdminClient(adminBaseUrl)
+const adminSessions = new Map<string, Awaited<ReturnType<AdminClient['login']>>>()
+let adminAccessToken = ''
 const rpcServer = new WsRpcServer({
   host: '127.0.0.1',
   port: 0,
@@ -110,6 +112,7 @@ function createHandlerDependencies(): HandlerDeps {
         error: (...args: unknown[]) => console.error(...args),
         debug: () => {},
       },
+      getAdminAccessToken: () => adminAccessToken,
       systemDarkMode: () => false,
       imageProcessor: {
         getMetadata: async () => null,
@@ -173,6 +176,17 @@ async function rendererAdminCall<T>(method: string, ...args: unknown[]): Promise
   return rendererCall<T>(`return await window.electronAPI.${method}(${serializedArgs})`)
 }
 
+async function rendererFetchStatus(
+  pathOrUrl: string,
+  init: Record<string, unknown>,
+): Promise<number> {
+  const url = new URL(pathOrUrl, adminBaseUrl).toString()
+  return rendererCall<number>(`
+    const response = await fetch(${JSON.stringify(url)}, ${JSON.stringify(init)})
+    return response.status
+  `)
+}
+
 function logStep(step: string): void {
   console.log(JSON.stringify({ event: 'creator_skill_step', step }))
 }
@@ -191,7 +205,10 @@ function makeChangelog(version: string): string {
 
 async function login(identifier: string, password: string): Promise<void> {
   logStep(`login-start:${identifier}`)
-  const result = await adminHttpClient.login(identifier, password)
+  const cached = adminSessions.get(identifier)
+  const result = cached ?? await adminHttpClient.login(identifier, password)
+  if (!cached) adminSessions.set(identifier, result)
+  adminAccessToken = result.accessToken
   await getCredentialManager().setAdminTokens({
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
@@ -201,6 +218,20 @@ async function login(identifier: string, password: string): Promise<void> {
     displayName: result.user.displayName ?? undefined,
   })
   logStep(`login-done:${identifier}`)
+}
+
+async function assertInvalidCredentialsRejected(): Promise<void> {
+  const status = await rendererFetchStatus('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      identifier: 'alice',
+      password: 'definitely-not-alice-password',
+    }),
+  })
+  if (status !== 401) {
+    throw new Error(`Invalid credentials returned unexpected status ${status}`)
+  }
 }
 
 async function logout(): Promise<void> {
@@ -286,6 +317,39 @@ async function createArtifact(organizationId: string, slug: string): Promise<{ i
   return { id: result.artifact.id }
 }
 
+async function assertInvalidArtifactBodyRejected(organizationId: string): Promise<void> {
+  const status = await rendererFetchStatus(
+    `/api/organizations/${organizationId}/artifacts`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminAccessToken}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `creator-skill-invalid-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        slug: '../invalid-skill',
+        unexpected: true,
+      }),
+    },
+  )
+  if (status !== 400) {
+    throw new Error(`Invalid Creator Artifact body returned unexpected status ${status}`)
+  }
+}
+
+async function assertMemberManagementDenied(organizationId: string): Promise<void> {
+  const result = await rendererAdminCall<{ success: boolean }>('creatorArtifactCreate', {
+    organizationId,
+    type: 'skill',
+    slug: `member-denied-${randomUUID().slice(0, 8)}`,
+    idempotencyKey: `creator-skill-member-denied-${randomUUID()}`,
+  })
+  if (result.success) {
+    throw new Error('Member unexpectedly created a Creator Skill draft')
+  }
+}
+
 async function createVersion(
   organizationId: string,
   artifactId: string,
@@ -350,6 +414,7 @@ async function uploadVersion(
     const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
     const file = new File([bytes], 'creator-skill.zip', { type: 'application/zip' })
     const headers = ${JSON.stringify({
+      Authorization: `Bearer ${adminAccessToken}`,
       ...(upload.headers ?? {}),
     })}
     const response = await fetch(${JSON.stringify(upload.url)}, {
@@ -362,6 +427,21 @@ async function uploadVersion(
   `)
   if (!uploadResult.ok) {
     throw new Error('Creator skill upload PUT failed in renderer')
+  }
+
+  const staleCompleteResult = await rendererAdminCall<{ success: boolean }>(
+    'creatorArtifactCompleteUpload',
+    {
+      organizationId,
+      artifactId,
+      version,
+      uploadGeneration: upload.uploadGeneration + 1,
+      sizeBytes: archive.length,
+      idempotencyKey: `creator-skill-stale-complete-${randomUUID()}`,
+    },
+  )
+  if (staleCompleteResult.success) {
+    throw new Error('Stale upload generation unexpectedly completed')
   }
 
   const completeResult = await rendererAdminCall<{
@@ -398,6 +478,51 @@ async function waitForValidatedVersion(
     return detail.success
       && detail.versions?.some(item => item.version === version && item.status === 'validated') === true
   })
+}
+
+async function assertValidationPolicySnapshot(
+  organizationId: string,
+  artifactId: string,
+  version: string,
+): Promise<void> {
+  const detail = await rendererAdminCall<{
+    success: boolean
+    versions?: Array<{
+      version: string
+      status: string
+      archiveChecksum?: string
+      validatedArchiveChecksum?: string
+      validatorVersion?: string
+      validationPolicy?: {
+        version: string
+        maxArchiveBytes: number
+        maxFileCount: number
+        maxFileBytes: number
+        maxExpandedBytes: number
+      }
+    }>
+  }>('creatorArtifactGet', {
+    organizationId,
+    artifactId,
+    version,
+  })
+  const validated = detail.versions?.find(item => item.version === version)
+  const policy = validated?.validationPolicy
+  if (
+    !detail.success
+    || validated?.status !== 'validated'
+    || !validated.archiveChecksum
+    || validated.validatedArchiveChecksum !== validated.archiveChecksum
+    || !validated.validatorVersion
+    || !policy
+    || !policy.version
+    || policy.maxArchiveBytes <= 0
+    || policy.maxFileCount <= 0
+    || policy.maxFileBytes <= 0
+    || policy.maxExpandedBytes <= 0
+  ) {
+    throw new Error(`Validated version ${version} is missing its policy or checksum snapshot`)
+  }
 }
 
 async function attemptMemberAccessBeforePublish(
@@ -555,15 +680,20 @@ async function run(): Promise<void> {
     return true
   `)
 
+  logStep('invalid-credentials')
+  await assertInvalidCredentialsRejected()
+
   logStep('alice-login-org')
   await login('alice', 'alice-password-123')
   const organization = await createOrganization()
+  await assertInvalidArtifactBodyRejected(organization.id)
   const joinToken = await createJoinLink(organization.id)
 
   logStep('bob-join')
   await logout()
   await login('bob', 'bob-password-123')
   await acceptJoin(joinToken)
+  await assertMemberManagementDenied(organization.id)
 
   logStep('draft-upload')
   await logout()
@@ -583,6 +713,7 @@ async function run(): Promise<void> {
     versionOne.upload,
   )
   await waitForValidatedVersion(organization.id, artifact.id, '1.0.0')
+  await assertValidationPolicySnapshot(organization.id, artifact.id, '1.0.0')
 
   logStep('member-prepublish')
   await logout()
@@ -659,13 +790,19 @@ async function run(): Promise<void> {
     const response = await rendererAdminCall<{
       success: boolean
       artifact?: { id: string; slug: string; latestPublishedVersion?: string }
-      versions?: Array<{ version: string; status: string }>
+      versions?: Array<{ version: string; status: string; validationPolicy?: unknown }>
     }>('creatorArtifactGet', {
       organizationId: organization.id,
       artifactId: artifact.id,
       version: '1.0.0',
     })
-    if (!response.success || response.artifact?.latestPublishedVersion !== '1.0.0') {
+    if (
+      !response.success
+      || response.artifact?.latestPublishedVersion !== '1.0.0'
+      || response.versions?.length !== 1
+      || response.versions.some(version => version.status !== 'published')
+      || !response.versions[0]?.validationPolicy
+    ) {
       throw new Error('Published artifact detail is incorrect')
     }
   }
@@ -713,6 +850,20 @@ async function run(): Promise<void> {
     throw new Error('Published version download grant was not issued')
   }
 
+  logStep('download-token-binding')
+  await logout()
+  await login('alice', 'alice-password-123')
+  const crossUserDownloadStatus = await rendererFetchStatus(downloadGrantOne.url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${adminAccessToken}` },
+    redirect: 'error',
+  })
+  if (crossUserDownloadStatus >= 200 && crossUserDownloadStatus < 300) {
+    throw new Error('Download token unexpectedly authorized a different user')
+  }
+  await logout()
+  await login('bob', 'bob-password-123')
+
   await rendererCall(`
     if (!window.__creatorSkillHarnessState) throw new Error('Harness state missing')
     return true
@@ -752,6 +903,7 @@ async function run(): Promise<void> {
     versionTwo.upload,
   )
   await waitForValidatedVersion(organization.id, artifact.id, '1.1.0')
+  await assertValidationPolicySnapshot(organization.id, artifact.id, '1.1.0')
   await publishVersion(organization.id, artifact.id, versionTwo.version)
 
   await logout()
@@ -849,9 +1001,16 @@ async function run(): Promise<void> {
     },
     roles: [
       'alice owner created artifact and approved membership changes',
-      'bob member could not download draft content',
+      'bob member could not manage or download draft content',
       'bob manager published both released versions',
-      'admin member installed the published skill',
+      'bob member installed the published skill',
+    ],
+    negativeChecks: [
+      'invalid credentials rejected',
+      'invalid artifact body rejected',
+      'member management rejected',
+      'stale upload generation rejected',
+      'cross-user download token rejected',
     ],
     versions: [
       { version: '1.0.0', archiveChecksum: downloadGrantOne.archiveChecksum, contentDigest: downloadGrantOne.contentDigest },

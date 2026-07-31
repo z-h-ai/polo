@@ -48,6 +48,7 @@ const [{
   assertCreatorSkillCommitAllowed,
   registerSkillsHandlers,
   registerSessionsHandlers,
+  shouldAttachAdminAuth,
   clearClientActiveSession,
 }] = await Promise.all([
   import('@polo-ai/shared/protocol'),
@@ -173,6 +174,27 @@ afterAll(async () => {
 })
 
 describe('Creator Skill workspace RPC boundary', () => {
+  it('only attaches Admin auth to the configured origin or an equivalent loopback alias', () => {
+    const adminOrigin = 'http://127.0.0.1:39121'
+
+    expect(shouldAttachAdminAuth(
+      'http://127.0.0.1:39121/api/artifacts/a/download/file',
+      adminOrigin,
+    )).toBe(true)
+    expect(shouldAttachAdminAuth(
+      'http://localhost:39121/api/artifacts/a/download/file',
+      adminOrigin,
+    )).toBe(true)
+    expect(shouldAttachAdminAuth(
+      'http://localhost:39122/api/artifacts/a/download/file',
+      adminOrigin,
+    )).toBe(false)
+    expect(shouldAttachAdminAuth(
+      'https://attacker.example/api/artifacts/a/download/file',
+      adminOrigin,
+    )).toBe(false)
+  })
+
   it('allows an already-authorized archived install but blocks revocation and feature shutdown', () => {
     expect(() => assertCreatorSkillCommitAllowed({
       success: true,

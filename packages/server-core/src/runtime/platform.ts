@@ -62,6 +62,7 @@ export interface PlatformServices {
   isDebugMode: boolean
   getLogFilePath?(): string | undefined
   captureError?(error: Error): void
+  getAdminAccessToken?(): string | Promise<string | null>
 }
 
 // ── Logger helpers ──────────────────────────────────────────────────────────

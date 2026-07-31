@@ -66,7 +66,6 @@ import {
   CreatorArtifactVersionSchema,
   CreatorArtifactVersionMutationResponseSchema,
   CreatorSkillDownloadGrantSchema,
-  CreatorSkillSafetyStatusBatchSchema,
   CreatorSkillSafetyStatusSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
@@ -750,28 +749,38 @@ export class AdminClient {
       archiveChecksum: string;
     },
   ): Promise<CreatorSkillSafetyStatus> {
-    const response = await this.request<unknown>(
-      '/api/installed-artifacts/status',
-      {
-        method: 'POST',
-        accessToken,
-        body: { installations: [input] },
-      },
+    const detail = await this.getCreatorArtifact(
+      accessToken,
+      '',
+      input.artifactId,
+      input.version,
     );
-    const parsed = this.readSuccessResponse(
-      response,
-      CreatorSkillSafetyStatusBatchSchema,
-    );
-    const status = parsed.statuses[0];
+    const currentVersion = detail.versions.find(version => version.version === input.version);
     if (
-      !status
-      || status.artifactId !== input.artifactId
-      || status.version !== input.version
-      || status.archiveChecksum !== input.archiveChecksum
+      detail.artifact.id !== input.artifactId
+      || !currentVersion
+      || currentVersion.archiveChecksum !== input.archiveChecksum
     ) {
       throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
     }
-    return CreatorSkillSafetyStatusSchema.parse(status);
+
+    const status =
+      detail.artifact.status === 'archived' || currentVersion.status === 'expired'
+        ? 'archived'
+        : currentVersion.status === 'revoked' || currentVersion.revokedAt
+          ? 'revoked'
+          : 'active';
+    const safeVersion = detail.artifact.latestPublishedVersion !== input.version
+      ? detail.artifact.latestPublishedVersion
+      : undefined;
+
+    return CreatorSkillSafetyStatusSchema.parse({
+      artifactId: input.artifactId,
+      version: input.version,
+      archiveChecksum: input.archiveChecksum,
+      status,
+      ...(safeVersion ? { safeVersion } : {}),
+    });
   }
 
   private async request<T>(path: string, options: {
