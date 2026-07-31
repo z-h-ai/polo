@@ -684,6 +684,7 @@ export interface ElectronAPI {
     operationId: string
     slug: string
     forceDeleteModified?: boolean
+    forceDeleteCredential?: string
   }): Promise<CreatorSkillOperationResult>
   creatorSkillListBackups(input: { workspaceId: string }): Promise<
     { success: true; backups: CreatorSkillBackup[] }
@@ -811,7 +812,11 @@ export interface ElectronAPI {
   deleteSkill(input: {
     workspaceId: string
     skillSlug: string
-  }): Promise<{ managed: boolean; detached: boolean }>
+  }): Promise<{
+    managed: boolean
+    detached: boolean
+    forceDeleteCredential?: string
+  }>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
 

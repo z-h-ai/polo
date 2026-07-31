@@ -24,12 +24,29 @@ export async function deleteWorkspaceSkillWithModifiedConfirmation(args: {
   })
   if (!initial.detached) return { status: 'deleted' }
   if (!args.confirmPermanentDelete()) return { status: 'detached' }
+  if (!initial.forceDeleteCredential) {
+    return {
+      status: 'error',
+      result: {
+        success: false,
+        operationId: crypto.randomUUID(),
+        errorCode: 'creator_skill_force_delete_credential_required',
+        stage: 'prepare',
+        diagnostic: JSON.stringify({
+          errorCode: 'creator_skill_force_delete_credential_required',
+          stage: 'prepare',
+        }),
+        retryable: false,
+      },
+    }
+  }
 
   const forced = await args.api.creatorSkillUninstall({
     workspaceId: args.workspaceId,
     operationId: crypto.randomUUID(),
     slug: args.slug,
     forceDeleteModified: true,
+    forceDeleteCredential: initial.forceDeleteCredential,
   })
   if (!forced.success) return { status: 'error', result: forced }
   return { status: 'force_deleted' }

@@ -241,7 +241,7 @@ export type CreatorSkillOperationResult =
       operationId: string
       installed?: InstalledCreatorSkill
       detached?: boolean
-      backupPath?: string
+      forceDeleteCredential?: string
     }
   | {
       success: false
@@ -260,6 +260,7 @@ export type CreatorSkillBackupOperation =
   | 'modified_update'
   | 'update_safety_snapshot'
   | 'clean_uninstall_snapshot'
+  | 'concurrent_recreation'
 
 export interface CreatorSkillBackup {
   backupId: string

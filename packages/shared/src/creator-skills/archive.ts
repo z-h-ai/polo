@@ -22,7 +22,7 @@ import {
 } from './types'
 import {
   readValidatedSkillMetadata,
-  validatePortableSkillContent,
+  validateCreatorSkillContent,
 } from './skill-content'
 
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
@@ -359,14 +359,23 @@ function inspectArchiveDirectory(
   }
 
   const fileEntries = businessEntries.filter(entry => !entry.directory)
-  const skillFiles = fileEntries.filter(
-    entry => entry.normalizedPath === `${slug}/SKILL.md`,
-  )
-  if (skillFiles.length !== 1) {
+  const skillFiles = fileEntries.filter(entry => (
+    basename(entry.normalizedPath)
+      .normalize('NFC')
+      .toLocaleLowerCase('en-US') === 'skill.md'
+  ))
+  if (
+    skillFiles.length !== 1
+    || skillFiles[0]?.normalizedPath !== `${slug}/SKILL.md`
+  ) {
     throw new CreatorSkillArchiveError(
       'invalid_skill_archive',
-      'ZIP must contain exactly one root SKILL.md',
-      [issue('skill_file_count', `${slug}/SKILL.md`, 'Exactly one SKILL.md is required')],
+      'ZIP must contain exactly one canonical root SKILL.md',
+      [issue(
+        'skill_file_count',
+        `${slug}/SKILL.md`,
+        'Exactly one SKILL.md basename is allowed and it must be at the package root',
+      )],
     )
   }
 
@@ -920,7 +929,7 @@ export async function validateCreatorSkillArchive(args: {
       }
       if (archiveEntry.normalizedPath === `${args.slug}/SKILL.md`) {
         const content = data.toString('utf8')
-        const contentValidation = validatePortableSkillContent(content, args.slug)
+        const contentValidation = validateCreatorSkillContent(content, args.slug)
         if (!contentValidation.valid) {
           throw new CreatorSkillArchiveError(
             'skill_validation_failed',

@@ -25,7 +25,7 @@ describe('Creator Skill renderer error translation', () => {
     expect(translated).not.toContain('Workspace is read-only')
   })
 
-  it('uses the localized unknown error while keeping backend text diagnostic-only', () => {
+  it('uses the localized unknown error without exposing backend text', () => {
     const payload = {
       errorCode: 'future_backend_code',
       message: 'A future backend English failure',
@@ -34,6 +34,31 @@ describe('Creator Skill renderer error translation', () => {
 
     expect(translated).toBe(i18n.t('creatorSkills.errors.unknown'))
     expect(translated).not.toContain(payload.message)
-    expect(creatorSkillErrorDiagnostic(payload)).toContain(payload.message)
+    expect(creatorSkillErrorDiagnostic(payload)).toBe(
+      JSON.stringify({ errorCode: payload.errorCode }),
+    )
+  })
+
+  it('strips Node system paths and messages from copyable diagnostics', () => {
+    const workspacePath = '/private/workspace/skills/review-helper'
+    const diagnostic = creatorSkillErrorDiagnostic({
+      errorCode: 'creator_skill_install_failed',
+      diagnostic: JSON.stringify({
+        operationId: '11111111-1111-4111-8111-111111111111',
+        stage: 'commit',
+        errorCode: 'creator_skill_install_failed',
+        path: workspacePath,
+        message: `EACCES: rename '${workspacePath}'`,
+        dest: '/private/workspace/.creator-skill-ops/stage',
+      }),
+    })
+
+    expect(diagnostic).toBe(JSON.stringify({
+      operationId: '11111111-1111-4111-8111-111111111111',
+      stage: 'commit',
+      errorCode: 'creator_skill_install_failed',
+    }))
+    expect(diagnostic).not.toContain('/private')
+    expect(diagnostic).not.toContain('EACCES')
   })
 })

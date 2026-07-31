@@ -20,19 +20,16 @@ import {
   CreatorSkillTargetRpcInputSchema,
   CreatorSkillUninstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
-} from '@polo-ai/shared/creator-skills/schemas'
-import {
   cancelCreatorSkillOperation,
   deleteCreatorSkillBackups,
+  hasPendingCreatorSkillForceDelete,
   installCreatorSkill,
   listCreatorSkillBackups,
+  readCreatorSkillsLedger,
   recoverCreatorSkillOperations,
   uninstallCreatorSkill,
   updateCreatorSkillInstallationMetadata,
-} from '@polo-ai/shared/creator-skills/installer'
-import {
-  readCreatorSkillsLedger,
-} from '@polo-ai/shared/creator-skills/ledger'
+} from '@polo-ai/shared/creator-skills'
 import type { LoadedSkill } from '@polo-ai/shared/skills'
 import { getClientActiveSession } from './client-active-session'
 
@@ -59,6 +56,7 @@ export async function hasWorkspaceSkillWriteAccess(workspaceRoot: string): Promi
     workspaceRoot,
     join(workspaceRoot, 'skills'),
     join(workspaceRoot, '.creator-skill-ops'),
+    join(workspaceRoot, '.creator-skill-force-delete.json'),
     join(workspaceRoot, 'creator-skills.json'),
   ].filter(path => path === workspaceRoot || existsSync(path))
   try {
@@ -314,25 +312,38 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
     const ledger = await readCreatorSkillsLedger(workspace.rootPath)
     const managed = ledger.installed.some(item => item.slug === skillSlug)
+    const pendingDetach = !managed
+      && await hasPendingCreatorSkillForceDelete(workspace.rootPath, skillSlug)
     let detached = false
-    if (managed) {
+    let forceDeleteCredential: string | undefined
+    if (managed || pendingDetach) {
       const result = await uninstallCreatorSkill({
         workspaceRoot: workspace.rootPath,
         workspaceId: workspace.id,
         operationId: crypto.randomUUID(),
         slug: skillSlug,
+      }, {
+        onError: error => deps.platform.logger?.error(
+          'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
+          error,
+        ),
       })
       if (!result.success) throw Object.assign(new Error(result.message), {
         code: result.errorCode,
       })
       detached = result.detached === true
+      forceDeleteCredential = result.forceDeleteCredential
     } else {
       const { deleteSkill } = await import('@polo-ai/shared/skills')
       deleteSkill(workspace.rootPath, skillSlug)
     }
     await broadcastSkillsChanged(workspace.id, workspace.rootPath)
     deps.platform.logger?.info(`Deleted skill: ${skillSlug}`)
-    return { managed, detached }
+    return {
+      managed: managed || pendingDetach,
+      detached,
+      ...(forceDeleteCredential ? { forceDeleteCredential } : {}),
+    }
   })
 
   server.handle(RPC_CHANNELS.creatorSkills.GET_TARGET, async (ctx, rawInput: unknown) => {
@@ -410,6 +421,10 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         }
         assertCreatorSkillCommitAllowed(check)
       },
+      onError: error => deps.platform.logger?.error(
+        'CREATOR_SKILLS_INSTALL: Server-side failure:',
+        error,
+      ),
     })
     if (result.success) {
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)
@@ -460,6 +475,11 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const result = await uninstallCreatorSkill({
       workspaceRoot: workspace.rootPath,
       ...input.data,
+    }, {
+      onError: error => deps.platform.logger?.error(
+        'CREATOR_SKILLS_UNINSTALL: Server-side failure:',
+        error,
+      ),
     })
     if (result.success) {
       await broadcastSkillsChanged(workspace.id, workspace.rootPath)

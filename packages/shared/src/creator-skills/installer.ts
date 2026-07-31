@@ -1,4 +1,9 @@
-import { randomUUID } from 'node:crypto'
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from 'node:crypto'
 import {
   access,
   cp,
@@ -44,11 +49,14 @@ import {
 
 const OP_DIRECTORY = '.creator-skill-ops'
 const BACKUP_DIRECTORY = 'skill-backups'
+const FORCE_DELETE_CREDENTIAL_FILE = '.creator-skill-force-delete.json'
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SKILL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const BACKUP_NAME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/
 const MAX_JOURNAL_BYTES = 5 * 1024 * 1024
 const MAX_BACKUP_METADATA_BYTES = 16 * 1024
+const MAX_FORCE_DELETE_CREDENTIAL_BYTES = 1024 * 1024
+const FORCE_DELETE_CREDENTIAL_TTL_MS = 10 * 60 * 1000
 const BACKUP_MANAGEMENT_LOCK = '__creator-skill-backups__'
 const LEDGER_MUTATION_LOCK = '__creator-skills-ledger__'
 const processQueues = new Map<string, Promise<void>>()
@@ -77,6 +85,7 @@ interface CreatorSkillJournal {
   backupOperation?: CreatorSkillBackupOperation
   backupVersion?: string
   backupCreatedAt?: string
+  promotedDirectoryIdentity?: string
 }
 
 interface CreatorSkillBackupMetadata {
@@ -86,6 +95,21 @@ interface CreatorSkillBackupMetadata {
   operation: CreatorSkillBackupOperation
   createdAt: string
   version?: string
+}
+
+interface StoredForceDeleteCredential {
+  tokenHash: string
+  slug: string
+  artifactId: string
+  archiveChecksum: string
+  directoryIdentity: string
+  contentFingerprint: string
+  expiresAt: string
+}
+
+interface ForceDeleteCredentialStore {
+  schemaVersion: 1
+  credentials: StoredForceDeleteCredential[]
 }
 
 export interface CreatorSkillInstallerDependencies {
@@ -114,6 +138,8 @@ export interface CreatorSkillInstallerDependencies {
   operationOwnerId?: string
   /** Ledger durability fault injection used by deterministic transaction tests. */
   ledgerWriteDependencies?: CreatorSkillsLedgerWriteDependencies
+  /** Receives raw filesystem/download errors for server-only diagnostics. */
+  onError?: (error: unknown) => void
 }
 
 export type CreatorSkillUninstallerDependencies = Pick<
@@ -125,6 +151,7 @@ export type CreatorSkillUninstallerDependencies = Pick<
   | 'onLedgerMutationLocked'
   | 'onLedgerMutationLockContended'
   | 'ledgerWriteDependencies'
+  | 'onError'
 >
 
 export type CreatorSkillMetadataUpdateDependencies = Pick<
@@ -161,6 +188,35 @@ function errorResult(args: {
     }),
     retryable: args.retryable ?? false,
   }
+}
+
+const SAFE_OPERATION_ERROR_CODES = new Set([
+  'archive_policy_exceeded',
+  'artifact_not_published',
+  'artifact_version_revoked',
+  'checksum_mismatch',
+  'content_digest_mismatch',
+  'creator_skill_cancelled',
+  'creator_skill_conflict',
+  'creator_skill_download_failed',
+  'creator_skill_feature_disabled',
+  'creator_skill_force_delete_credential_required',
+  'creator_skill_force_delete_stale',
+  'creator_skill_not_installed',
+  'creator_skill_operation_id_conflict',
+  'creator_skill_operation_in_progress',
+  'invalid_operation_id',
+  'invalid_backup_path',
+  'invalid_creator_skill_operation_path',
+  'invalid_skill_archive',
+  'project_skill_conflict',
+  'skill_validation_failed',
+])
+
+function safeOperationErrorCode(value: unknown, fallback: string): string {
+  return typeof value === 'string' && SAFE_OPERATION_ERROR_CODES.has(value)
+    ? value
+    : fallback
 }
 
 function exists(path: string): Promise<boolean> {
@@ -213,6 +269,128 @@ async function lstatIfPresent(path: string) {
     }
     throw error
   }
+}
+
+async function directoryIdentity(path: string): Promise<string> {
+  const stats = await lstat(path, { bigint: true })
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw Object.assign(new Error('Creator Skill target must be a regular directory'), {
+      code: 'content_digest_mismatch',
+    })
+  }
+  return `${stats.dev}:${stats.ino}:${stats.birthtimeNs}`
+}
+
+function forceDeleteCredentialPath(workspaceRoot: string): string {
+  const path = resolve(workspaceRoot, FORCE_DELETE_CREDENTIAL_FILE)
+  assertChildPath(workspaceRoot, path, 'Creator Skill force-delete credential store')
+  return path
+}
+
+function validStoredForceDeleteCredential(
+  value: unknown,
+): value is StoredForceDeleteCredential {
+  if (!value || typeof value !== 'object') return false
+  const credential = value as Partial<StoredForceDeleteCredential>
+  return typeof credential.tokenHash === 'string'
+    && /^[a-f0-9]{64}$/.test(credential.tokenHash)
+    && typeof credential.slug === 'string'
+    && SKILL_SLUG_PATTERN.test(credential.slug)
+    && typeof credential.artifactId === 'string'
+    && credential.artifactId.length > 0
+    && credential.artifactId.length <= 512
+    && typeof credential.archiveChecksum === 'string'
+    && /^[a-f0-9]{64}$/.test(credential.archiveChecksum)
+    && typeof credential.directoryIdentity === 'string'
+    && /^[0-9]+:[0-9]+:[0-9]+$/.test(credential.directoryIdentity)
+    && typeof credential.contentFingerprint === 'string'
+    && /^[a-f0-9]{64}$/.test(credential.contentFingerprint)
+    && typeof credential.expiresAt === 'string'
+    && !Number.isNaN(Date.parse(credential.expiresAt))
+}
+
+async function readForceDeleteCredentialStore(
+  workspaceRoot: string,
+): Promise<ForceDeleteCredentialStore> {
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const path = forceDeleteCredentialPath(canonicalWorkspace)
+  const stats = await lstatIfPresent(path)
+  if (!stats) return { schemaVersion: 1, credentials: [] }
+  if (
+    stats.isSymbolicLink()
+    || !stats.isFile()
+    || stats.size > MAX_FORCE_DELETE_CREDENTIAL_BYTES
+    || await realpath(path) !== path
+  ) {
+    throw invalidOperationPath('Creator Skill force-delete credential store is invalid')
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await readFile(path, 'utf8')) as unknown
+  } catch {
+    throw invalidOperationPath('Creator Skill force-delete credential store is invalid JSON')
+  }
+  if (
+    !parsed
+    || typeof parsed !== 'object'
+    || (parsed as Partial<ForceDeleteCredentialStore>).schemaVersion !== 1
+    || !Array.isArray((parsed as Partial<ForceDeleteCredentialStore>).credentials)
+    || !(parsed as ForceDeleteCredentialStore).credentials.every(
+      validStoredForceDeleteCredential,
+    )
+  ) {
+    throw invalidOperationPath('Creator Skill force-delete credential store is invalid')
+  }
+  const now = Date.now()
+  return {
+    schemaVersion: 1,
+    credentials: (parsed as ForceDeleteCredentialStore).credentials
+      .filter(credential => Date.parse(credential.expiresAt) > now)
+      .slice(-64),
+  }
+}
+
+async function writeForceDeleteCredentialStore(
+  workspaceRoot: string,
+  store: ForceDeleteCredentialStore,
+): Promise<void> {
+  const canonicalWorkspace = await canonicalWorkspaceRoot(workspaceRoot)
+  const path = forceDeleteCredentialPath(canonicalWorkspace)
+  const existing = await lstatIfPresent(path)
+  if (existing?.isSymbolicLink() || (existing && !existing.isFile())) {
+    throw invalidOperationPath('Creator Skill force-delete credential store is invalid')
+  }
+  if (store.credentials.length === 0) {
+    await rm(path, { force: true })
+    await syncJournalDirectory(canonicalWorkspace)
+    return
+  }
+  const tempPath = `${path}.${randomUUID()}.tmp`
+  const handle = await open(tempPath, 'wx', 0o600)
+  try {
+    await handle.writeFile(`${JSON.stringify(store, null, 2)}\n`)
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+  try {
+    await rename(tempPath, path)
+    await syncJournalDirectory(canonicalWorkspace)
+  } catch (error) {
+    await rm(tempPath, { force: true })
+    throw error
+  }
+}
+
+function hashForceDeleteCredential(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex')
+}
+
+function credentialHashesEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left, 'hex')
+  const rightBytes = Buffer.from(right, 'hex')
+  return leftBytes.length === rightBytes.length
+    && timingSafeEqual(leftBytes, rightBytes)
 }
 
 async function assertSafeBackupDirectory(
@@ -311,6 +489,7 @@ function isBackupOperation(value: unknown): value is CreatorSkillBackupOperation
   return value === 'modified_update'
     || value === 'update_safety_snapshot'
     || value === 'clean_uninstall_snapshot'
+    || value === 'concurrent_recreation'
 }
 
 function parseBackupMetadata(
@@ -525,6 +704,8 @@ function validateJournalShape(
       .includes(journal.state)
     || (journal.oldLedger !== null && typeof journal.oldLedger !== 'string')
     || (journal.oldLedger?.length ?? 0) > MAX_JOURNAL_BYTES
+    || (journal.promotedDirectoryIdentity !== undefined
+      && !/^[0-9]+:[0-9]+:[0-9]+$/.test(journal.promotedDirectoryIdentity))
     || (hasAnyBackupMetadata && (
       !isBackupOperation(journal.backupOperation)
       || typeof journal.backupCreatedAt !== 'string'
@@ -982,6 +1163,7 @@ async function inspectConflicts(
 interface CreatorSkillTargetIdentity {
   kind: 'missing' | 'scanned' | 'unreadable'
   contentDigest?: string
+  directoryIdentity?: string
 }
 
 async function inspectCreatorSkillTarget(
@@ -989,10 +1171,14 @@ async function inspectCreatorSkillTarget(
 ): Promise<CreatorSkillTargetIdentity> {
   if (!await exists(targetPath)) return { kind: 'missing' }
   try {
+    const beforeIdentity = await directoryIdentity(targetPath)
     const scanned = await scanCreatorSkillDirectory(targetPath)
+    const afterIdentity = await directoryIdentity(targetPath)
+    if (beforeIdentity !== afterIdentity) return { kind: 'unreadable' }
     return {
       kind: 'scanned',
       contentDigest: scanned.contentDigest,
+      directoryIdentity: afterIdentity,
     }
   } catch {
     return { kind: 'unreadable' }
@@ -1005,6 +1191,108 @@ function targetIdentitiesEqual(
 ): boolean {
   return left.kind === right.kind
     && left.contentDigest === right.contentDigest
+    && left.directoryIdentity === right.directoryIdentity
+}
+
+async function issueForceDeleteCredential(args: {
+  workspaceRoot: string
+  slug: string
+  artifactId: string
+  archiveChecksum: string
+  targetPath: string
+}): Promise<string> {
+  const identity = await inspectCreatorSkillTarget(args.targetPath)
+  if (
+    identity.kind !== 'scanned'
+    || !identity.contentDigest
+    || !identity.directoryIdentity
+  ) {
+    throw Object.assign(
+      new Error('Creator Skill changed while preparing permanent deletion'),
+      { code: 'creator_skill_force_delete_stale' },
+    )
+  }
+  const token = randomBytes(32).toString('base64url')
+  const store = await readForceDeleteCredentialStore(args.workspaceRoot)
+  const credential: StoredForceDeleteCredential = {
+    tokenHash: hashForceDeleteCredential(token),
+    slug: args.slug,
+    artifactId: args.artifactId,
+    archiveChecksum: args.archiveChecksum,
+    directoryIdentity: identity.directoryIdentity,
+    contentFingerprint: identity.contentDigest,
+    expiresAt: new Date(Date.now() + FORCE_DELETE_CREDENTIAL_TTL_MS).toISOString(),
+  }
+  await writeForceDeleteCredentialStore(args.workspaceRoot, {
+    schemaVersion: 1,
+    credentials: [
+      ...store.credentials.filter(item => item.slug !== args.slug),
+      credential,
+    ],
+  })
+  return token
+}
+
+async function pendingForceDeleteCredential(
+  workspaceRoot: string,
+  slug: string,
+): Promise<StoredForceDeleteCredential | undefined> {
+  const store = await readForceDeleteCredentialStore(workspaceRoot)
+  return store.credentials.find(credential => credential.slug === slug)
+}
+
+async function removeForceDeleteCredential(
+  workspaceRoot: string,
+  slug: string,
+): Promise<void> {
+  const store = await readForceDeleteCredentialStore(workspaceRoot)
+  await writeForceDeleteCredentialStore(workspaceRoot, {
+    schemaVersion: 1,
+    credentials: store.credentials.filter(credential => credential.slug !== slug),
+  })
+}
+
+async function validateForceDeleteCredential(args: {
+  workspaceRoot: string
+  slug: string
+  token?: string
+  targetPath: string
+}): Promise<StoredForceDeleteCredential> {
+  if (!args.token) {
+    throw Object.assign(new Error('Permanent deletion requires a confirmation credential'), {
+      code: 'creator_skill_force_delete_credential_required',
+    })
+  }
+  const credential = await pendingForceDeleteCredential(args.workspaceRoot, args.slug)
+  const tokenHash = hashForceDeleteCredential(args.token)
+  if (
+    !credential
+    || !credentialHashesEqual(credential.tokenHash, tokenHash)
+    || Date.parse(credential.expiresAt) <= Date.now()
+  ) {
+    throw Object.assign(new Error('Permanent deletion credential is invalid or expired'), {
+      code: 'creator_skill_force_delete_credential_required',
+    })
+  }
+  const identity = await inspectCreatorSkillTarget(args.targetPath)
+  if (
+    identity.kind !== 'scanned'
+    || identity.directoryIdentity !== credential.directoryIdentity
+    || identity.contentDigest !== credential.contentFingerprint
+  ) {
+    throw Object.assign(new Error('Creator Skill changed after deletion confirmation'), {
+      code: 'creator_skill_force_delete_stale',
+    })
+  }
+  return credential
+}
+
+export async function hasPendingCreatorSkillForceDelete(
+  workspaceRoot: string,
+  slug: string,
+): Promise<boolean> {
+  if (!SKILL_SLUG_PATTERN.test(slug)) return false
+  return Boolean(await pendingForceDeleteCredential(workspaceRoot, slug))
 }
 
 function isTargetLocallyModified(
@@ -1041,6 +1329,70 @@ function confirmationsMissing(
   })
 }
 
+async function preserveConcurrentRecreation(args: {
+  workspaceRoot: string
+  slug: string
+  targetPath: string
+  version?: string
+}): Promise<string | undefined> {
+  if (!await exists(args.targetPath)) return undefined
+  return withBackupManagementLock(args.workspaceRoot, async () => {
+    if (!await exists(args.targetPath)) return undefined
+    await assertCanonicalPathWhenPresent(
+      args.targetPath,
+      'Concurrent Creator Skill recreation',
+    )
+    const backup = await allocateCreatorSkillBackupTarget(
+      args.workspaceRoot,
+      args.slug,
+    )
+    await rename(args.targetPath, backup.targetPath)
+    await writeBackupMetadata(backup.targetPath, {
+      schemaVersion: 1,
+      slug: args.slug,
+      backupId: basename(backup.targetPath),
+      operation: 'concurrent_recreation',
+      createdAt: inferBackupCreatedAt(backup.targetPath),
+      ...(args.version ? { version: args.version } : {}),
+    })
+    return backup.targetPath
+  })
+}
+
+async function removeTransactionTargetOrPreserveRecreation(args: {
+  workspaceRoot: string
+  targetPath: string
+  journal: CreatorSkillJournal
+}): Promise<void> {
+  if (!await exists(args.targetPath)) return
+  const currentIdentity = await directoryIdentity(args.targetPath).catch(() => undefined)
+  if (
+    args.journal.promotedDirectoryIdentity
+    && currentIdentity === args.journal.promotedDirectoryIdentity
+  ) {
+    await rm(args.targetPath, { recursive: true, force: true })
+    return
+  }
+  await preserveConcurrentRecreation({
+    workspaceRoot: args.workspaceRoot,
+    slug: args.journal.slug,
+    targetPath: args.targetPath,
+    version: args.journal.backupVersion,
+  })
+}
+
+async function assertPromotedTargetIdentity(
+  targetPath: string,
+  expectedIdentity: string,
+): Promise<void> {
+  const actualIdentity = await directoryIdentity(targetPath).catch(() => undefined)
+  if (actualIdentity !== expectedIdentity) {
+    throw Object.assign(new Error('Creator Skill target was recreated during commit'), {
+      code: 'creator_skill_conflict',
+    })
+  }
+}
+
 async function rollbackJournal(
   workspaceRoot: string,
   operationPath: string,
@@ -1070,7 +1422,11 @@ async function rollbackJournal(
     !detachedTargetAlreadyRestored
     && (recoverableBackupPath || journal.state !== 'prepared')
   ) {
-    await rm(paths.targetPath, { recursive: true, force: true })
+    await removeTransactionTargetOrPreserveRecreation({
+      workspaceRoot,
+      targetPath: paths.targetPath,
+      journal,
+    })
   }
   if (recoverableBackupPath) {
     await mkdir(dirname(paths.targetPath), { recursive: true })
@@ -1128,6 +1484,9 @@ async function finalizeCommittedJournal(
   journal: CreatorSkillJournal,
 ): Promise<void> {
   await publishCommittedBackup(workspaceRoot, operationPath, journal)
+  if (journal.action === 'uninstall' && !journal.preserveBackupPath) {
+    await removeForceDeleteCredential(workspaceRoot, journal.slug)
+  }
   await rm(operationPath, { recursive: true, force: true })
 }
 
@@ -1342,12 +1701,24 @@ export async function installCreatorSkill(
         journal.backupOperation = backupOperation
         await persistJournal(journalPath, journal, dependencies)
       }
+      const promotedDirectoryIdentity = await directoryIdentity(
+        join(stagePath, input.grant.slug),
+      )
+      journal.promotedDirectoryIdentity = promotedDirectoryIdentity
       journal.state = 'old_backed_up'
       await persistJournal(journalPath, journal, dependencies)
 
+      await preserveConcurrentRecreation({
+        workspaceRoot: canonicalWorkspace,
+        slug: input.grant.slug,
+        targetPath,
+        version: conflictState.existing?.version,
+      })
       await rename(join(stagePath, input.grant.slug), targetPath)
+      await assertPromotedTargetIdentity(targetPath, promotedDirectoryIdentity)
       journal.state = 'new_installed'
       await persistJournal(journalPath, journal, dependencies)
+      await assertPromotedTargetIdentity(targetPath, promotedDirectoryIdentity)
 
       await writeCreatorSkillsLedger(
         canonicalWorkspace,
@@ -1356,6 +1727,7 @@ export async function installCreatorSkill(
       )
       journal.state = 'ledger_committed'
       await persistJournal(journalPath, journal, dependencies)
+      await assertPromotedTargetIdentity(targetPath, promotedDirectoryIdentity)
 
       // `committed` is the point of no return. Persist it durably before the
       // hidden transaction backup is published to the user-managed backup
@@ -1386,9 +1758,7 @@ export async function installCreatorSkill(
         operationPath,
         journal,
       )
-      if (backupPath) {
-        committedResult = { ...committedResult, backupPath }
-      } else {
+      if (!backupPath) {
         await rm(transactionBackupPath, { recursive: true, force: true })
       }
       await dependencies.onCleanupStep?.('transaction_backup_removed')
@@ -1398,6 +1768,7 @@ export async function installCreatorSkill(
       report(dependencies, input, 'refresh', 100, false)
       return committedResult
     } catch (error) {
+      dependencies.onError?.(error)
       if (journal?.state === 'committed' && committedResult) {
         // The directory and Ledger are already atomically committed. Leave
         // cleanup to startup recovery rather than attempting an unsafe rollback
@@ -1422,7 +1793,10 @@ export async function installCreatorSkill(
             issues?: Array<{ path?: string }>
           }
         : {}
-      const code = record.code ?? 'creator_skill_install_failed'
+      const code = safeOperationErrorCode(
+        record.code,
+        'creator_skill_install_failed',
+      )
       const cancelled = code === 'creator_skill_cancelled' || controller.signal.aborted
       const failureStage = commitStarted
         ? 'commit'
@@ -1431,14 +1805,21 @@ export async function installCreatorSkill(
           : code.includes('conflict') || code === 'creator_skill_operation_in_progress'
             ? 'prepare'
             : 'validate'
-      const failurePath = record.path || record.issues?.find(item => item.path)?.path
+      const issuePath = record.issues?.find(item => item.path)?.path
+      const failurePath = issuePath
+        && !issuePath.startsWith('/')
+        && !/^[a-zA-Z]:/.test(issuePath)
+        && !issuePath.includes('\\')
+        && !issuePath.split('/').some(segment => segment === '..')
+        ? issuePath.replace(new RegExp(`^${input.grant.slug}/`), '')
+        : undefined
       return errorResult({
         operationId: input.operationId,
         stage: failureStage,
         errorCode: cancelled ? 'creator_skill_cancelled' : code,
         message: cancelled
           ? 'Installation was cancelled before the commit boundary'
-          : record.message ?? 'Creator Skill installation failed',
+          : 'Creator Skill installation failed',
         ...(failurePath ? { path: failurePath } : {}),
         retryable: !commitStarted
           && !cancelled
@@ -1480,6 +1861,7 @@ export async function uninstallCreatorSkill(args: {
   operationId: string
   slug: string
   forceDeleteModified?: boolean
+  forceDeleteCredential?: string
 }, dependencies: CreatorSkillUninstallerDependencies = {}): Promise<CreatorSkillOperationResult> {
   const queueWorkspace = await canonicalWorkspaceRoot(args.workspaceRoot)
   const key = `${queueWorkspace}\0${args.slug}`
@@ -1503,7 +1885,10 @@ export async function uninstallCreatorSkill(args: {
       const ledger = await readCreatorSkillsLedger(canonicalWorkspace)
       await dependencies.onLedgerMutationLocked?.()
       const installed = ledger.installed.find(item => item.slug === args.slug)
-      if (!installed && !args.forceDeleteModified) {
+      const pendingCredential = installed
+        ? undefined
+        : await pendingForceDeleteCredential(canonicalWorkspace, args.slug)
+      if (!installed && !pendingCredential) {
         return errorResult({
           operationId: args.operationId,
           stage: 'prepare',
@@ -1517,6 +1902,20 @@ export async function uninstallCreatorSkill(args: {
       await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
       const targetIdentity = await inspectCreatorSkillTarget(targetPath)
       await dependencies.beforeCommitSnapshot?.()
+      let validatedForceCredential: StoredForceDeleteCredential | undefined
+      if (args.forceDeleteModified) {
+        if (installed) {
+          throw Object.assign(new Error('Detach the modified Creator Skill before deleting it'), {
+            code: 'creator_skill_force_delete_credential_required',
+          })
+        }
+        validatedForceCredential = await validateForceDeleteCredential({
+          workspaceRoot: canonicalWorkspace,
+          slug: args.slug,
+          token: args.forceDeleteCredential,
+          targetPath,
+        })
+      }
       const nextLedger = installed
         ? removeLedgerInstallation(ledger, args.slug)
         : ledger
@@ -1526,6 +1925,9 @@ export async function uninstallCreatorSkill(args: {
           nextLedger,
           dependencies.ledgerWriteDependencies,
         )
+        if (pendingCredential) {
+          await removeForceDeleteCredential(canonicalWorkspace, args.slug)
+        }
         return {
           success: true,
           operationId: args.operationId,
@@ -1539,18 +1941,41 @@ export async function uninstallCreatorSkill(args: {
       // retained by the snapshot instead of silently disappearing.
       if (
         !args.forceDeleteModified
-        && installed
-        && isTargetLocallyModified(targetIdentity, installed)
+        && (
+          (installed && isTargetLocallyModified(targetIdentity, installed))
+          || (!installed && pendingCredential)
+        )
       ) {
         await writeCreatorSkillsLedger(
           canonicalWorkspace,
           nextLedger,
           dependencies.ledgerWriteDependencies,
         )
+        let forceDeleteCredential: string
+        try {
+          forceDeleteCredential = await issueForceDeleteCredential({
+            workspaceRoot: canonicalWorkspace,
+            slug: args.slug,
+            artifactId: installed?.artifactId ?? pendingCredential!.artifactId,
+            archiveChecksum: installed?.archiveChecksum
+              ?? pendingCredential!.archiveChecksum,
+            targetPath,
+          })
+        } catch (error) {
+          if (installed) {
+            await writeCreatorSkillsLedger(
+              canonicalWorkspace,
+              ledger,
+              dependencies.ledgerWriteDependencies,
+            )
+          }
+          throw error
+        }
         return {
           success: true,
           operationId: args.operationId,
           detached: true,
+          forceDeleteCredential,
         }
       }
 
@@ -1590,8 +2015,33 @@ export async function uninstallCreatorSkill(args: {
         transactionBackupPath,
         'Creator Skill uninstall snapshot',
       )
+      if (validatedForceCredential) {
+        const captured = await inspectCreatorSkillTarget(transactionBackupPath)
+        if (
+          captured.kind !== 'scanned'
+          || captured.directoryIdentity !== validatedForceCredential.directoryIdentity
+          || captured.contentDigest !== validatedForceCredential.contentFingerprint
+        ) {
+          throw Object.assign(new Error('Creator Skill changed after deletion confirmation'), {
+            code: 'creator_skill_force_delete_stale',
+          })
+        }
+      }
       journal.state = 'old_backed_up'
       await persistJournal(journalPath, journal, dependencies)
+      if (args.forceDeleteModified && await exists(targetPath)) {
+        throw Object.assign(new Error('Creator Skill target was recreated during deletion'), {
+          code: 'creator_skill_force_delete_stale',
+        })
+      }
+      if (!args.forceDeleteModified) {
+        await preserveConcurrentRecreation({
+          workspaceRoot: canonicalWorkspace,
+          slug: args.slug,
+          targetPath,
+          version: installed?.version,
+        })
+      }
       await writeCreatorSkillsLedger(
         canonicalWorkspace,
         nextLedger,
@@ -1599,6 +2049,19 @@ export async function uninstallCreatorSkill(args: {
       )
       journal.state = 'ledger_committed'
       await persistJournal(journalPath, journal, dependencies)
+      if (args.forceDeleteModified && await exists(targetPath)) {
+        throw Object.assign(new Error('Creator Skill target was recreated during deletion'), {
+          code: 'creator_skill_force_delete_stale',
+        })
+      }
+      if (!args.forceDeleteModified) {
+        await preserveConcurrentRecreation({
+          workspaceRoot: canonicalWorkspace,
+          slug: args.slug,
+          targetPath,
+          version: installed?.version,
+        })
+      }
 
       journal.state = 'committed'
       const committedJournalDurable = await writeJournal(
@@ -1612,21 +2075,31 @@ export async function uninstallCreatorSkill(args: {
       }
       await dependencies.onJournalPersisted?.(journal.state)
       if (!committedJournalDurable) return committedResult
+      if (!args.forceDeleteModified) {
+        await preserveConcurrentRecreation({
+          workspaceRoot: canonicalWorkspace,
+          slug: args.slug,
+          targetPath,
+          version: installed?.version,
+        })
+      }
       const backupPath = await publishCommittedBackup(
         canonicalWorkspace,
         operationPath,
         journal,
       )
-      if (backupPath) {
-        committedResult = { ...committedResult, backupPath }
-      } else {
+      if (!backupPath) {
         await rm(transactionBackupPath, { recursive: true, force: true })
+      }
+      if (args.forceDeleteModified) {
+        await removeForceDeleteCredential(canonicalWorkspace, args.slug)
       }
       await dependencies.onCleanupStep?.('transaction_backup_removed')
       await rm(operationPath, { recursive: true, force: true })
       await dependencies.onCleanupStep?.('operation_removed')
       return committedResult
     } catch (error) {
+      dependencies.onError?.(error)
       if (journal?.state === 'committed' && committedResult) {
         return committedResult
       }
@@ -1639,8 +2112,11 @@ export async function uninstallCreatorSkill(args: {
       return errorResult({
         operationId: args.operationId,
         stage: 'commit',
-        errorCode: record.code ?? 'creator_skill_uninstall_failed',
-        message: record.message ?? 'Creator Skill uninstall failed',
+        errorCode: safeOperationErrorCode(
+          record.code,
+          'creator_skill_uninstall_failed',
+        ),
+        message: 'Creator Skill uninstall failed',
       })
     } finally {
       await releaseLedgerLock?.()

@@ -107,7 +107,11 @@ beforeEach(async () => {
     success: false as const,
     errorCode: 'temporary_network_failure',
   })
-  deleteSkillResponse = async () => ({ managed: true, detached: true })
+  deleteSkillResponse = async () => ({
+    managed: true,
+    detached: true,
+    forceDeleteCredential: 'credential-token',
+  })
   uninstallInputs = []
   installInputs = []
   window.confirm = mock(() => false)
@@ -214,6 +218,7 @@ describe('SkillInfoPage Creator Skill interactions', () => {
         workspaceId: 'workspace-one',
         slug: 'review-skill',
         forceDeleteModified: true,
+        forceDeleteCredential: 'credential-token',
       })
     })
   })

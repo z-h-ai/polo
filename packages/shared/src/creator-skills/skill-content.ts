@@ -45,6 +45,10 @@ export const PortableSkillMetadataSchema = z.object({
 }).passthrough()
 
 export function isValidSkillSlug(slug: string): boolean {
+  return /^[a-z0-9-]+$/.test(slug)
+}
+
+export function isValidCreatorSkillSlug(slug: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)
 }
 
@@ -122,6 +126,28 @@ export function validatePortableSkillContent(
     valid: errors.length === 0,
     errors,
     warnings: [],
+  }
+}
+
+export function validateCreatorSkillContent(
+  markdownContent: string,
+  slug: string,
+): SkillContentValidationResult {
+  const validation = validatePortableSkillContent(markdownContent, slug)
+  if (isValidCreatorSkillSlug(slug)) return validation
+  return {
+    valid: false,
+    errors: [
+      ...validation.errors.filter(error => error.path !== 'slug'),
+      {
+        file: `skills/${slug}`,
+        path: 'slug',
+        message: 'Creator Skill slug must use strict kebab-case',
+        severity: 'error',
+        suggestion: `Rename folder to '${suggestSkillSlug(slug)}'`,
+      },
+    ],
+    warnings: validation.warnings,
   }
 }
 

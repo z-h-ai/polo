@@ -303,6 +303,7 @@ export const CreatorSkillUninstallRpcInputSchema = z.object({
   operationId: CreatorSkillOperationIdSchema,
   slug: skillSlug,
   forceDeleteModified: z.boolean().optional(),
+  forceDeleteCredential: z.string().min(32).max(256).optional(),
 }).strict()
 
 export const CreatorSkillBackupRpcInputSchema = z.object({

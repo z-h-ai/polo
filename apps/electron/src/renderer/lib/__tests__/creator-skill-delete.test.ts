@@ -12,7 +12,11 @@ describe('deleteWorkspaceSkillWithModifiedConfirmation', () => {
       slug: 'modified-skill',
       confirmPermanentDelete: () => false,
       api: {
-        deleteSkill: async () => ({ managed: true, detached: true }),
+        deleteSkill: async () => ({
+          managed: true,
+          detached: true,
+          forceDeleteCredential: 'credential-token',
+        }),
         creatorSkillUninstall,
       },
     })
@@ -27,6 +31,7 @@ describe('deleteWorkspaceSkillWithModifiedConfirmation', () => {
       operationId: string
       slug: string
       forceDeleteModified?: boolean
+      forceDeleteCredential?: string
     }) => ({
       success: true as const,
       operationId: input.operationId,
@@ -36,7 +41,11 @@ describe('deleteWorkspaceSkillWithModifiedConfirmation', () => {
       slug: 'modified-skill',
       confirmPermanentDelete: () => true,
       api: {
-        deleteSkill: async () => ({ managed: true, detached: true }),
+        deleteSkill: async () => ({
+          managed: true,
+          detached: true,
+          forceDeleteCredential: 'credential-token',
+        }),
         creatorSkillUninstall,
       },
     })
@@ -47,6 +56,7 @@ describe('deleteWorkspaceSkillWithModifiedConfirmation', () => {
       workspaceId: 'workspace-one',
       slug: 'modified-skill',
       forceDeleteModified: true,
+      forceDeleteCredential: 'credential-token',
     })
   })
 })

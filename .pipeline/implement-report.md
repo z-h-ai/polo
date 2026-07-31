@@ -2,48 +2,47 @@
 
 ## 变更摘要
 
-- 落实 Round 6 安全快照语义：每次更新都把旧正式目录通过同文件系统 `rename` 保存为永久、用户管理的安全快照；已修改更新、干净更新和干净卸载分别记录为 `modified_update`、`update_safety_snapshot`、`clean_uninstall_snapshot`，并保存原版本、创建时间和大小。
-- 普通卸载先按安装记录扫描目录。扫描时已经修改的 Skill 仅移除 Ledger、保留为普通 workspace Skill；干净 Skill 则从正式加载路径移入卸载安全快照。扫描后的晚到写入跟随旧 inode 进入快照，不会被静默删除。明确强制删除仍可永久移除已修改目录。
-- 扩展事务 journal 和启动恢复：安全快照元数据可由已提交 journal 补写；提交前失败会恢复旧目录与旧 Ledger；备份列表、逐个删除和全部删除均继续执行路径、符号链接和边界校验。
-- INSTALL RPC 改为只接受 `sessionId`，不再接受 renderer 提交的 `workingDirectory`。server-core 从绑定 workspace 的 SessionManager 会话派生项目目录，并拒绝错误 workspace、workspace 外的已存在/不存在路径以及非目录路径，错误响应不泄露绝对路径。
-- Creator Skill 校验状态轮询改为响应完成后再调度下一次的单飞 `setTimeout`；切换组织、作品或卸载组件会使旧请求失效并清理定时器。返回仍有旧请求在途的作品时会创建新的有效请求。
-- 撤销版本可对低于当前版本的 `safeVersion` 执行明确安全回滚；安装和回滚均携带当前 session，renderer 不再发送裸项目路径。
-- 备份管理页展示快照真实来源、原版本、创建时间和大小。补齐 `de/es/hu/ja/pl` 全部新增 `creatorSkills.*` 与 `skillInfo.*` 文案的实际翻译，并增加非英语占位静态门禁。
+- 落实 Round 3 并发目录安全裁决：事务记录正式目录 identity；更新回滚、干净卸载和启动恢复遇到第三方重建的同名目录时，不再递归删除，而是原子迁移为可管理的 `concurrent_recreation` 安全快照。空目录、非空目录和重复恢复均覆盖。
+- 为已修改 Skill 的强制删除增加短期、一次性、持久化凭证。凭证绑定 workspace、slug、artifactId、archiveChecksum、目录 identity 和内容 fingerprint；目录被替换、内容变化、凭证过期或重复使用都会拒绝。无 Ledger 且无有效凭证时不会删除普通 workspace Skill。
+- 收紧 RPC 错误边界：原始 Node `SystemError`、绝对路径、stage/backup/operation 路径只进入 server-core 日志；renderer 仅得到稳定错误码、安全文案和已校验的包内相对路径。成功结果也不再回传绝对备份路径。
+- 强化归档校验：清理噪音后，全包按 Unicode NFC 与大小写规范化统计 `SKILL.md` basename，要求全包恰好一个且只能位于 `<slug>/SKILL.md`；拒绝 references 内副本及大小写变体。
+- 恢复普通本地 Skill 的历史 slug 规则与错误语义，新增 Creator 专用严格 kebab-case 校验，避免 Creator 发布策略影响普通 Skill 创建、校验、加载和删除。
+- 统一内部消费者从 `@polo-ai/shared/creator-skills` 导出入口消费共享实现；新增可导出的 POL-59 交接 fixtures，以及不依赖 tsconfig wildcard 的真实 package export smoke test。
+- 补齐 `concurrent_recreation` 备份来源、强删凭证失效等用户文案及 `de/es/hu/ja/pl/zh-Hans` 翻译，并更新 locale 静态门禁。
 
 ## 关键文件列表
 
 - `packages/shared/src/creator-skills/installer.ts`
-- `packages/shared/src/creator-skills/types.ts`
+- `packages/shared/src/creator-skills/archive.ts`
+- `packages/shared/src/creator-skills/skill-content.ts`
 - `packages/shared/src/creator-skills/schemas.ts`
+- `packages/shared/src/creator-skills/types.ts`
+- `packages/shared/src/creator-skills/fixtures.ts`
+- `packages/shared/src/creator-skills/index.ts`
+- `packages/shared/package.json`
 - `packages/server-core/src/handlers/rpc/skills.ts`
-- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
-- `apps/electron/src/renderer/pages/SkillInfoPage.tsx`
-- `apps/electron/src/renderer/pages/settings/WorkspaceSettingsPage.tsx`
-- `apps/electron/src/renderer/context/AppShellContext.tsx`
-- `apps/electron/src/renderer/components/app-shell/AppShell.tsx`
-- `apps/electron/src/renderer/components/app-shell/MainContentPanel.tsx`
-- `apps/electron/src/renderer/App.tsx`
-- `packages/shared/src/i18n/locales/{de,en,es,hu,ja,pl,zh-Hans}.json`
+- `packages/server-core/src/handlers/rpc/admin.ts`
+- `apps/electron/src/renderer/lib/creator-skill-delete.ts`
+- `apps/electron/src/renderer/lib/creator-skill-errors.ts`
+- `apps/electron/src/shared/types.ts`
 - `packages/shared/src/creator-skills/__tests__/installer.test.ts`
-- `packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts`
-- `apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
-- `apps/electron/src/renderer/pages/__tests__/SkillInfoPage.creator-skill.interaction.isolated.ts`
-- `packages/shared/src/i18n/__tests__/locale-parity.test.ts`
+- `packages/shared/src/creator-skills/__tests__/archive.test.ts`
+- `packages/shared/src/creator-skills/__tests__/skill-content.test.ts`
+- `packages/shared/src/creator-skills/__tests__/package-exports.test.ts`
+- `packages/shared/src/i18n/locales/{de,en,es,hu,ja,pl,zh-Hans}.json`
 
 ## 自测结果
 
-- `bun run typecheck:all`：通过；core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部完成 TypeScript 检查。
-- Creator Skill shared 定向测试：78 pass，0 fail；覆盖连续干净升级快照、干净卸载、扫描后晚到写入、已修改卸载、事务故障恢复、归档安全和 RPC schema。
-- `bun test ./packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts`：8 pass，0 fail；覆盖 session 派生目录、renderer 路径拒绝、workspace 外已存在/不存在路径、只读和 workspace 绑定。
-- `bun test ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`：13 pass，0 fail；覆盖延迟响应下单飞轮询、组织/作品切换清理和返回作品时的陈旧请求替换。
-- `bun test ./apps/electron/src/renderer/pages/__tests__/SkillInfoPage.creator-skill.interaction.isolated.ts`：3 pass，0 fail；覆盖撤销版本向较低安全版本回滚和 session-bound INSTALL。
-- Creator Skill 安全状态/版本定向测试：8 pass，0 fail；覆盖 24 小时复查、in-flight 去重、timer 清理和低版本安全回滚。
-- i18n parity/sorted/coverage：全部通过；6 个非英语 locale 各 1763 keys，并通过代表性非英语占位门禁。
-- Electron ESLint：0 error（111 条仓库既有 warning）；本次 shared 变更文件定向 ESLint：0 error。
+- `bun run test`：通过。主测试集 4862 pass、19 skip、0 fail（4881 tests / 373 files），随后全部 `*.isolated.ts` 测试通过。
+- Creator Skill shared 与 renderer 定向测试：110 pass、0 fail；覆盖并发重建快照、强删凭证、原始系统错误隔离、归档边界、slug 策略和 package exports。
+- `bun test ./packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts`：9 pass、0 fail。
+- `bun test ./apps/electron/src/renderer/pages/__tests__/SkillInfoPage.creator-skill.interaction.isolated.ts`：3 pass、0 fail。
+- `bun run typecheck:all`：通过。
+- `bun run lint:electron`、`bun run lint:shared`：通过。
+- `bun run lint:i18n:sorted`、`bun run lint:i18n:parity`、`bun run lint:i18n:coverage`：通过；6 个非英语 locale 各 1766 keys。
 - `git diff --check`：通过。
-- 仓库完整 `bun test` 首轮结果为 4828 pass、19 skip、1 fail；唯一失败是无关的 `session-watcher.test.ts` 时序用例，单文件立即复跑为 3 pass、0 fail。
 
 ## 遗留问题
 
-- 本轮 Round 6 确定语义无已知功能遗留。
-- 仓库级 `lint:shared` 仍被本次范围外 5 个既有 `craft-shared/no-inline-source-auth-check` 错误阻塞，位置在 resource/source token refresh 相关文件；本次修改的 shared 文件定向检查全部通过。
+- 本轮 Round 3 确定语义无已知功能遗留。
+- 完整测试中 `CreatorArtifactsPanel` 的一个既有异步用例仍输出非阻断 React `act(...)` warning，但测试通过，本轮未修改该组件。

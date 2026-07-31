@@ -309,6 +309,29 @@ describe('Creator Skill archive validation', () => {
     })
   })
 
+  it('rejects every additional or non-canonical SKILL.md basename', async () => {
+    await withTemp(async root => {
+      for (const [name, entries] of [
+        ['nested', {
+          'review-helper/SKILL.md': VALID_SKILL,
+          'review-helper/references/SKILL.md': 'not another entrypoint',
+        }],
+        ['case-variant', {
+          'review-helper/skill.MD': VALID_SKILL,
+        }],
+      ] as const) {
+        const archivePath = await writeZip(root, entries, `${name}.zip`)
+        await expect(validateCreatorSkillArchive({
+          archivePath,
+          slug: 'review-helper',
+        })).rejects.toMatchObject({
+          code: 'invalid_skill_archive',
+          issues: [{ code: 'skill_file_count' }],
+        })
+      }
+    })
+  })
+
   it('rejects path traversal during preflight without writing outside staging', async () => {
     await withTemp(async root => {
       const archivePath = await writeZip(root, {

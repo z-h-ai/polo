@@ -590,6 +590,46 @@ describe('Creator Skill workspace installer', () => {
     })
   })
 
+  it('keeps raw Node filesystem errors server-only', async () => {
+    await withWorkspace(async root => {
+      const packaged = await packageGrant(root, '1.0.0')
+      const privatePath = join(root, '.creator-skill-ops', 'private-stage')
+      const systemError = Object.assign(
+        new Error(`EACCES: permission denied, rename '${privatePath}'`),
+        {
+          code: 'EACCES',
+          path: privatePath,
+          dest: join(root, 'skills', 'install-test'),
+        },
+      )
+      let loggedError: unknown
+
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '50505050-5050-4050-8050-505050505050',
+        grant: packaged.grant,
+      }, {
+        fetch: responseFetch(packaged.bytes),
+        beforeCommitSnapshot: () => {
+          throw systemError
+        },
+        onError: error => {
+          loggedError = error
+        },
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_install_failed',
+        message: 'Creator Skill installation failed',
+      })
+      expect(loggedError).toBe(systemError)
+      expect(JSON.stringify(result)).not.toContain(root)
+      expect(JSON.stringify(result)).not.toContain('EACCES')
+      expect(result).not.toHaveProperty('path')
+    })
+  })
+
   it('returns structured existing and incoming identities for an unmanaged conflict', async () => {
     await withWorkspace(async root => {
       await mkdir(join(root, 'skills', 'install-test'), { recursive: true })
@@ -710,19 +750,167 @@ describe('Creator Skill workspace installer', () => {
         operationId: OP_UNINSTALL,
         slug: 'install-test',
       })
-      expect(uninstall).toMatchObject({ success: true, detached: true })
+      expect(uninstall).toMatchObject({
+        success: true,
+        detached: true,
+      })
+      const forceDeleteCredential = uninstall.success
+        ? uninstall.forceDeleteCredential
+        : undefined
+      expect(typeof forceDeleteCredential).toBe('string')
       expect(await access(skillPath).then(() => true, () => false)).toBe(true)
       expect((await readCreatorSkillsLedger(root)).installed).toHaveLength(0)
 
+      let forceError: unknown
       const forced = await uninstallCreatorSkill({
         workspaceRoot: root,
         workspaceId: 'workspace-1',
         operationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
         slug: 'install-test',
         forceDeleteModified: true,
-      })
+        forceDeleteCredential,
+      }, { onError: error => { forceError = error } })
+      expect(forceError).toBeUndefined()
       expect(forced).toMatchObject({ success: true })
       expect(await access(skillPath).then(() => true, () => false)).toBe(false)
+    })
+  })
+
+  it('requires a persistent one-time credential bound to the detached directory', async () => {
+    await withWorkspace(async root => {
+      const packaged = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: packaged.grant,
+      }, { fetch: responseFetch(packaged.bytes) })).success).toBe(true)
+      const targetPath = join(root, 'skills', 'install-test')
+      await writeFile(join(targetPath, 'local-note.txt'), 'first local change')
+
+      const detached = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '37373737-3737-4737-8737-373737373737',
+        slug: 'install-test',
+      })
+      expect(detached).toMatchObject({
+        success: true,
+        detached: true,
+      })
+      const initialCredential = detached.success
+        ? detached.forceDeleteCredential
+        : undefined
+      expect(typeof initialCredential).toBe('string')
+      expect(await access(join(root, '.creator-skill-force-delete.json')).then(
+        () => true,
+        () => false,
+      )).toBe(true)
+      expect(await readFile(join(root, '.creator-skill-force-delete.json'), 'utf8'))
+        .not.toContain(initialCredential!)
+
+      for (const [operationId, forceDeleteCredential] of [
+        ['38383838-3838-4838-8838-383838383838', undefined],
+        ['39393939-3939-4939-8939-393939393939', 'wrong-credential-token-that-is-long-enough'],
+      ] as const) {
+        const rejected = await uninstallCreatorSkill({
+          workspaceRoot: root,
+          workspaceId: 'workspace-1',
+          operationId,
+          slug: 'install-test',
+          forceDeleteModified: true,
+          ...(forceDeleteCredential ? { forceDeleteCredential } : {}),
+        })
+        expect(rejected).toMatchObject({
+          success: false,
+          errorCode: 'creator_skill_force_delete_credential_required',
+        })
+      }
+
+      await writeFile(join(targetPath, 'local-note.txt'), 'changed after confirmation')
+      let staleError: unknown
+      const stale = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '40404040-4040-4040-8040-404040404040',
+        slug: 'install-test',
+        forceDeleteModified: true,
+        forceDeleteCredential: initialCredential,
+      }, { onError: error => { staleError = error } })
+      expect(staleError).toMatchObject({
+        code: 'creator_skill_force_delete_stale',
+      })
+      expect(stale).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_force_delete_stale',
+      })
+      expect(await readFile(join(targetPath, 'local-note.txt'), 'utf8'))
+        .toBe('changed after confirmation')
+
+      const reconfirmed = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '41414141-4141-4141-8141-414141414141',
+        slug: 'install-test',
+      })
+      expect(reconfirmed).toMatchObject({
+        success: true,
+        detached: true,
+      })
+      const refreshedCredential = reconfirmed.success
+        ? reconfirmed.forceDeleteCredential
+        : undefined
+      expect(typeof refreshedCredential).toBe('string')
+      const deleted = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '42424242-4242-4242-8242-424242424242',
+        slug: 'install-test',
+        forceDeleteModified: true,
+        forceDeleteCredential: refreshedCredential,
+      })
+      expect(deleted).toMatchObject({ success: true })
+      expect(await access(targetPath).then(() => true, () => false)).toBe(false)
+      expect(await access(join(root, '.creator-skill-force-delete.json')).then(
+        () => true,
+        () => false,
+      )).toBe(false)
+
+      const replay = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '43434343-4343-4343-8343-434343434343',
+        slug: 'install-test',
+        forceDeleteModified: true,
+        forceDeleteCredential: refreshedCredential,
+      })
+      expect(replay).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_not_installed',
+      })
+    })
+  })
+
+  it('never force-deletes an unmanaged ordinary Skill without a credential', async () => {
+    await withWorkspace(async root => {
+      const targetPath = join(root, 'skills', 'install-test')
+      await mkdir(targetPath, { recursive: true })
+      await writeFile(join(targetPath, 'SKILL.md'), skillContent('local'))
+
+      const result = await uninstallCreatorSkill({
+        workspaceRoot: root,
+        workspaceId: 'workspace-1',
+        operationId: '44444445-4444-4444-8444-444444444445',
+        slug: 'install-test',
+        forceDeleteModified: true,
+        forceDeleteCredential: 'untrusted-credential-token-that-is-long-enough',
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_not_installed',
+      })
+      expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8'))
+        .toBe(skillContent('local'))
     })
   })
 
@@ -870,6 +1058,145 @@ describe('Creator Skill workspace installer', () => {
       expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
       expect(await listCreatorSkillBackups(root)).toHaveLength(0)
     })
+  })
+
+  it('preserves empty and non-empty target recreations before update promotion', async () => {
+    for (const [index, nonEmpty] of [false, true].entries()) {
+      await withWorkspace(async root => {
+        const first = await packageGrant(root, '1.0.0')
+        expect((await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: OP_BASE,
+          grant: first.grant,
+        }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+        const next = await packageGrant(root, '2.0.0')
+        const targetPath = join(root, 'skills', 'install-test')
+
+        const result = await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: index === 0
+            ? '45454545-4545-4545-8545-454545454545'
+            : '46464646-4646-4646-8646-464646464646',
+          grant: next.grant,
+          replaceExisting: true,
+        }, {
+          fetch: responseFetch(next.bytes),
+          onJournalPersisted: async state => {
+            if (state !== 'old_backed_up') return
+            await mkdir(targetPath)
+            if (nonEmpty) {
+              await writeFile(join(targetPath, 'concurrent.txt'), 'preserve recreation')
+            }
+          },
+        })
+
+        expect(result).toMatchObject({ success: true })
+        expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('2.0.0')
+        const recreated = (await listCreatorSkillBackups(root))
+          .find(backup => backup.operation === 'concurrent_recreation')
+        expect(recreated).toBeTruthy()
+        if (nonEmpty) {
+          expect(await readFile(join(
+            root,
+            'skill-backups',
+            recreated!.slug,
+            recreated!.backupId,
+            'concurrent.txt',
+          ), 'utf8')).toBe('preserve recreation')
+        }
+      })
+    }
+  })
+
+  it('snapshots a replaced transaction target before restoring the old Skill', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+      const next = await packageGrant(root, '2.0.0')
+      const targetPath = join(root, 'skills', 'install-test')
+
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: '47474747-4747-4747-8747-474747474747',
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        onJournalPersisted: async state => {
+          if (state !== 'new_installed') return
+          await rm(targetPath, { recursive: true })
+          await mkdir(targetPath)
+          await writeFile(join(targetPath, 'concurrent.txt'), 'replacement content')
+        },
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'creator_skill_conflict',
+      })
+      expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8'))
+        .toBe(skillContent('1.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+      const recreated = (await listCreatorSkillBackups(root))
+        .find(backup => backup.operation === 'concurrent_recreation')
+      expect(await readFile(join(
+        root,
+        'skill-backups',
+        recreated!.slug,
+        recreated!.backupId,
+        'concurrent.txt',
+      ), 'utf8')).toBe('replacement content')
+    })
+  })
+
+  it('moves clean-uninstall target recreations into managed safety snapshots', async () => {
+    for (const [index, nonEmpty] of [false, true].entries()) {
+      await withWorkspace(async root => {
+        const packaged = await packageGrant(root, '1.0.0')
+        expect((await installCreatorSkill(root, {
+          workspaceId: 'workspace-1',
+          operationId: OP_BASE,
+          grant: packaged.grant,
+        }, { fetch: responseFetch(packaged.bytes) })).success).toBe(true)
+        const targetPath = join(root, 'skills', 'install-test')
+
+        const result = await uninstallCreatorSkill({
+          workspaceRoot: root,
+          workspaceId: 'workspace-1',
+          operationId: index === 0
+            ? '48484848-4848-4848-8848-484848484848'
+            : '49494949-4949-4949-8949-494949494949',
+          slug: 'install-test',
+        }, {
+          onJournalPersisted: async state => {
+            if (state !== 'old_backed_up') return
+            await mkdir(targetPath)
+            if (nonEmpty) {
+              await writeFile(join(targetPath, 'concurrent.txt'), 'uninstall recreation')
+            }
+          },
+        })
+
+        expect(result).toMatchObject({ success: true })
+        expect(await access(targetPath).then(() => true, () => false)).toBe(false)
+        const recreated = (await listCreatorSkillBackups(root))
+          .find(backup => backup.operation === 'concurrent_recreation')
+        expect(recreated).toBeTruthy()
+        if (nonEmpty) {
+          expect(await readFile(join(
+            root,
+            'skill-backups',
+            recreated!.slug,
+            recreated!.backupId,
+            'concurrent.txt',
+          ), 'utf8')).toBe('uninstall recreation')
+        }
+      })
+    }
   })
 
   it('keeps open-handle writes from every post-rename update window', async () => {
@@ -1032,7 +1359,6 @@ describe('Creator Skill workspace installer', () => {
 
           expect(result).toMatchObject({
             success: true,
-            backupPath: expect.any(String),
           })
         } finally {
           await oldFileHandle.close()
@@ -1338,6 +1664,22 @@ describe('Creator Skill workspace installer', () => {
       expect((await readCreatorSkillsLedger(root)).installed[0])
         .toMatchObject({ artifactId: 'artifact-old', version: '1.0.0' })
       expect(await access(operationPath).then(() => true, () => false)).toBe(false)
+      const recreation = (await listCreatorSkillBackups(root))
+        .find(backup => backup.operation === 'concurrent_recreation')
+      expect(await readFile(join(
+        root,
+        'skill-backups',
+        recreation!.slug,
+        recreation!.backupId,
+        'SKILL.md',
+      ), 'utf8')).toBe('new promoted content')
+
+      await recoverCreatorSkillOperations(root)
+      expect(await readFile(join(targetPath, 'SKILL.md'), 'utf8'))
+        .toBe('old installed content')
+      expect((await listCreatorSkillBackups(root))
+        .filter(backup => backup.operation === 'concurrent_recreation'))
+        .toHaveLength(1)
     })
   })
 

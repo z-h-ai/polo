@@ -5,6 +5,7 @@ import {
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
   CreatorSkillInstallRpcInputSchema,
+  CreatorSkillUninstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
   SkillArchivePolicySchema,
   StableSemverSchema,
@@ -184,6 +185,28 @@ describe('Creator Skill boundary schemas', () => {
       ...base,
       operationId: '11111111-1111-4111-8111-111111111111',
       workingDirectory: '/renderer-controlled/project',
+    }).success).toBe(false)
+  })
+
+  it('accepts only an opaque force-delete credential through the strict uninstall RPC', () => {
+    const base = {
+      workspaceId: 'workspace-id',
+      operationId: '11111111-1111-4111-8111-111111111111',
+      slug: 'review-helper',
+      forceDeleteModified: true,
+    }
+    expect(CreatorSkillUninstallRpcInputSchema.safeParse({
+      ...base,
+      forceDeleteCredential: 'a'.repeat(43),
+    }).success).toBe(true)
+    expect(CreatorSkillUninstallRpcInputSchema.safeParse({
+      ...base,
+      forceDeleteCredential: 'short',
+    }).success).toBe(false)
+    expect(CreatorSkillUninstallRpcInputSchema.safeParse({
+      ...base,
+      forceDeleteCredential: 'a'.repeat(43),
+      artifactId: 'renderer-cannot-rebind-the-credential',
     }).success).toBe(false)
   })
 })

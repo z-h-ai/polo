@@ -31,11 +31,9 @@ import {
   CreatorSkillDownloadRpcInputSchema,
   CreatorSkillSafetyRpcInputSchema,
   CreateCreatorArtifactVersionRpcInputSchema,
-} from '@polo-ai/shared/creator-skills/schemas'
-import {
   CreatorSkillArchiveError,
   preflightCreatorSkillArchive,
-} from '@polo-ai/shared/creator-skills/archive'
+} from '@polo-ai/shared/creator-skills'
 import {
   addLlmConnection,
   deleteLlmConnection,
