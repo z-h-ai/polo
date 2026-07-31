@@ -879,7 +879,6 @@ describe('AdminClient', () => {
     });
 
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
-      type: 'skill',
       slug: 'review-helper',
     }));
     expect(fetchCalls[0]!.init.headers).toMatchObject({

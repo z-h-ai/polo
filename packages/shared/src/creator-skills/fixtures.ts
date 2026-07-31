@@ -2,7 +2,7 @@ import type {
   CreatorSkillManifestEntry,
   SkillArchivePolicy,
   SkillVersionMetadata,
-} from './types'
+} from './types.ts'
 
 export const CREATOR_SKILL_FIXTURE_SLUG = 'review-helper'
 

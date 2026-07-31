@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { HARD_SKILL_ARCHIVE_POLICY } from './types'
+import { HARD_SKILL_ARCHIVE_POLICY } from './types.ts'
 
 const entityId = z.string().trim().min(1).max(512)
 const isoDate = z.string().datetime({ offset: true })
@@ -18,6 +18,13 @@ const localSkillBasename = z.string()
   ))
 const idempotencyKey = z.string().min(1).max(128).regex(/^[\x21-\x7E]+$/)
 export const CreatorSkillOperationIdSchema = z.string().uuid()
+
+// Prisma serializes nullable columns as JSON null. The desktop DTO uses
+// optional fields, so normalize the documented nullable Admin representation
+// here while still rejecting malformed non-null values.
+function nullableOptional<T extends z.ZodType>(schema: T) {
+  return schema.nullish().transform(value => value ?? undefined)
+}
 
 export const SkillArchivePolicySchema = z.object({
   version: z.string().min(1).max(128),
@@ -48,19 +55,19 @@ export const SkillVersionMetadataSchema = z.object({
 const creatorArtifactBaseSchema = z.object({
   id: entityId,
   organizationId: entityId,
-  name: z.string().max(512).optional(),
-  summary: z.string().max(8_192).optional(),
-  displayIcon: z.discriminatedUnion('kind', [
+  name: nullableOptional(z.string().max(512)),
+  summary: nullableOptional(z.string().max(8_192)),
+  displayIcon: nullableOptional(z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('emoji'), value: z.string().min(1).max(64) }),
     z.object({ kind: z.literal('image'), url: z.string().url().max(8_192) }),
-  ]).optional(),
+  ])),
   status: z.enum(['draft', 'published', 'archived']),
-  latestPublishedVersion: stableSemver.optional(),
+  latestPublishedVersion: nullableOptional(stableSemver),
   createdByUserId: entityId,
   createdAt: isoDate,
   updatedAt: isoDate,
-  archivedAt: isoDate.optional(),
-  archivedByUserId: entityId.optional(),
+  archivedAt: nullableOptional(isoDate),
+  archivedByUserId: nullableOptional(entityId),
 })
 
 export const CreatorArtifactSchema = z.discriminatedUnion('type', [

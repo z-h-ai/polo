@@ -513,7 +513,11 @@ export class AdminClient {
         method: 'POST',
         accessToken,
         headers: { 'Idempotency-Key': input.idempotencyKey },
-        body: { type: input.type, slug: input.slug },
+        // The creator-artifact endpoint is the dedicated Skill creation
+        // endpoint. `type` remains in the renderer/RPC DTO to make that
+        // boundary explicit, but it is intentionally not serialized: POL-59
+        // rejects unknown body fields with a strict schema.
+        body: { slug: input.slug },
       },
     );
     return this.readSuccessResponse(response, CreatorArtifactMutationResponseSchema);

@@ -19,11 +19,11 @@ import {
   type SkillArchivePolicy,
   type SkillValidationIssue,
   type SkillVersionMetadata,
-} from './types'
+} from './types.ts'
 import {
   readValidatedSkillMetadata,
   validateCreatorSkillContent,
-} from './skill-content'
+} from './skill-content.ts'
 
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])

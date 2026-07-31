@@ -1,4 +1,4 @@
-import type { ValidatedSkillMetadata } from './skill-content'
+import type { ValidatedSkillMetadata } from './skill-content.ts'
 
 export type CreatorArtifactType = 'web_app' | 'skill'
 export type CreatorArtifactStatus = 'draft' | 'published' | 'archived'

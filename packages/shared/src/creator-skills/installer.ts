@@ -27,7 +27,7 @@ import {
   inferBackupCreatedAt,
   scanCreatorSkillDirectory,
   validateCreatorSkillArchive,
-} from './archive'
+} from './archive.ts'
 import {
   parseCreatorSkillsLedger,
   readCreatorSkillsLedger,
@@ -35,7 +35,7 @@ import {
   replaceLedgerInstallation,
   type CreatorSkillsLedgerWriteDependencies,
   writeCreatorSkillsLedger,
-} from './ledger'
+} from './ledger.ts'
 import {
   HARD_SKILL_ARCHIVE_POLICY,
   type CreatorSkillBackup,
@@ -47,7 +47,7 @@ import {
   type CreatorSkillOperationProgress,
   type CreatorSkillOperationResult,
   type InstalledCreatorSkill,
-} from './types'
+} from './types.ts'
 
 const OP_DIRECTORY = '.creator-skill-ops'
 const BACKUP_DIRECTORY = 'skill-backups'
