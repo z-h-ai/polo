@@ -30,6 +30,26 @@ case "$POLO_LOCALE" in
     RUNTIME_MISSING="错误：Polo 内置运行时缺失。请重新安装 Polo。"
     TERMINAL_FILES_MISSING="错误：Polo 终端文件缺失。请重新安装 Polo。"
     ;;
+  de|de[_-]*)
+    RUNTIME_MISSING="Fehler: Die gebündelte Polo-Laufzeit fehlt. Installiere Polo erneut."
+    TERMINAL_FILES_MISSING="Fehler: Polo-Terminaldateien fehlen. Installiere Polo erneut."
+    ;;
+  es|es[_-]*)
+    RUNTIME_MISSING="Error: Falta el entorno de ejecución incluido de Polo. Reinstala Polo."
+    TERMINAL_FILES_MISSING="Error: Faltan los archivos de terminal de Polo. Reinstala Polo."
+    ;;
+  hu|hu[_-]*)
+    RUNTIME_MISSING="Hiba: A Polo beépített futtatókörnyezete hiányzik. Telepítsd újra a Polót."
+    TERMINAL_FILES_MISSING="Hiba: A Polo terminálfájljai hiányoznak. Telepítsd újra a Polót."
+    ;;
+  ja|ja[_-]*)
+    RUNTIME_MISSING="エラー: Polo の内蔵ランタイムがありません。Polo を再インストールしてください。"
+    TERMINAL_FILES_MISSING="エラー: Polo のターミナルファイルがありません。Polo を再インストールしてください。"
+    ;;
+  pl|pl[_-]*)
+    RUNTIME_MISSING="Błąd: Brakuje dołączonego środowiska uruchomieniowego Polo. Zainstaluj Polo ponownie."
+    TERMINAL_FILES_MISSING="Błąd: Brakuje plików terminala Polo. Zainstaluj Polo ponownie."
+    ;;
   *)
     RUNTIME_MISSING="Error: Polo's bundled runtime is missing. Reinstall Polo."
     TERMINAL_FILES_MISSING="Error: Polo terminal files are missing. Reinstall Polo."

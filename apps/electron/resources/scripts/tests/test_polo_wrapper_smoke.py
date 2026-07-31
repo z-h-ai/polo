@@ -94,6 +94,12 @@ exit "${POLO_WRAPPER_EXIT:-37}"
     def test_checked_in_wrapper_localizes_missing_runtime_with_fallback(self) -> None:
         self.runtime.unlink()
         for locale, expected in (
+            ("de_DE.UTF-8", "Die gebündelte Polo-Laufzeit fehlt"),
+            ("en_US.UTF-8", "Polo's bundled runtime is missing"),
+            ("es_ES.UTF-8", "Falta el entorno de ejecución incluido de Polo"),
+            ("hu_HU.UTF-8", "A Polo beépített futtatókörnyezete hiányzik"),
+            ("ja_JP.UTF-8", "Polo の内蔵ランタイムがありません"),
+            ("pl_PL.UTF-8", "Brakuje dołączonego środowiska uruchomieniowego Polo"),
             ("zh_CN.UTF-8", "Polo 内置运行时缺失"),
             ("fr_FR.UTF-8", "Polo's bundled runtime is missing"),
         ):
@@ -115,8 +121,14 @@ exit "${POLO_WRAPPER_EXIT:-37}"
     def test_checked_in_wrapper_localizes_missing_terminal_files_with_fallback(self) -> None:
         self.cli.unlink()
         for locale, expected in (
+            ("de_DE.UTF-8", "Polo-Terminaldateien fehlen"),
+            ("en_US.UTF-8", "Polo terminal files are missing"),
+            ("es_ES.UTF-8", "Faltan los archivos de terminal de Polo"),
+            ("hu_HU.UTF-8", "A Polo terminálfájljai hiányoznak"),
+            ("ja_JP.UTF-8", "Polo のターミナルファイルがありません"),
+            ("pl_PL.UTF-8", "Brakuje plików terminala Polo"),
             ("zh-CN", "Polo 终端文件缺失"),
-            ("de_DE.UTF-8", "Polo terminal files are missing"),
+            ("fr_FR.UTF-8", "Polo terminal files are missing"),
         ):
             with self.subTest(locale=locale):
                 env = dict(os.environ)

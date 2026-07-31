@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -328,6 +329,170 @@ restore_managed_profile "$MANAGED_PROFILE_PATH" "$profile_backup" "$profile_exis
 })
 
 describe('Linux AppImage installer lifecycle', () => {
+  it('rolls back every App/runtime backup, publication, and chmod failure point', () => {
+    for (const failurePoint of [
+      'current-backup',
+      'appimage-backup',
+      'current-publish',
+      'appimage-publish',
+      'appimage-chmod',
+    ]) {
+      const home = createHome()
+      const fakeBin = join(home, 'fake-bin')
+      const artifact = join(home, 'Polo-AI-x64.AppImage')
+      const binDir = join(home, '.local', 'bin')
+      const failureFlag = join(home, `failed-${failurePoint}`)
+      const appDir = join(home, '.polo-ai', 'app')
+      const currentPath = join(appDir, 'current')
+      const appImagePath = join(appDir, 'Polo-AI-x64.AppImage')
+      const profilePath = join(home, '.zprofile')
+      const statePath = join(home, '.polo-ai', 'terminal-integration-linux.state')
+      const installedPolo = join(binDir, 'polo')
+      const installedCompat = join(binDir, 'polo-ai')
+
+      mkdirSync(fakeBin, { recursive: true })
+      writeFileSync(
+        join(fakeBin, 'uname'),
+        '#!/bin/sh\ncase "$1" in -m) printf "x86_64\\n" ;; *) printf "Linux\\n" ;; esac\n',
+      )
+      writeFileSync(join(fakeBin, 'pgrep'), '#!/bin/sh\nexit 1\n')
+      writeFileSync(join(fakeBin, 'fusermount'), '#!/bin/sh\nexit 0\n')
+      writeFileSync(
+        join(fakeBin, 'mv'),
+        `#!/bin/bash
+set -eu
+src="$1"
+dest="$2"
+fail=false
+case "\${POLO_TEST_FAIL_POINT:-}" in
+  current-backup)
+    [[ "$src" == */current && "$dest" == */current.previous ]] && fail=true
+    ;;
+  appimage-backup)
+    [[ "$src" == */Polo-AI-x64.AppImage && "$dest" == */Polo-AI.previous ]] && fail=true
+    ;;
+  current-publish)
+    [[ "$src" == */squashfs-root && "$dest" == */current ]] && fail=true
+    ;;
+  appimage-publish)
+    [[ "$src" == */downloads/Polo-AI-x64.AppImage && "$dest" == */Polo-AI-x64.AppImage ]] && fail=true
+    ;;
+esac
+if [ "$fail" = true ] && [ ! -e "$POLO_TEST_FAILURE_FLAG" ]; then
+  : > "$POLO_TEST_FAILURE_FLAG"
+  printf 'injected %s failure\\n' "$POLO_TEST_FAIL_POINT" >&2
+  exit 73
+fi
+exec /bin/mv "$@"
+`,
+      )
+      writeFileSync(
+        join(fakeBin, 'chmod'),
+        `#!/bin/bash
+set -eu
+for last; do :; done
+if [ "\${POLO_TEST_FAIL_POINT:-}" = "appimage-chmod" ] \
+  && [ "$last" = "$POLO_TEST_INSTALLED_APPIMAGE" ] \
+  && [ ! -e "$POLO_TEST_FAILURE_FLAG" ]; then
+  : > "$POLO_TEST_FAILURE_FLAG"
+  printf 'injected appimage chmod failure\\n' >&2
+  exit 74
+fi
+exec /bin/chmod "$@"
+`,
+      )
+      for (const file of ['uname', 'pgrep', 'fusermount', 'mv', 'chmod']) {
+        chmodSync(join(fakeBin, file), 0o755)
+      }
+      writeFileSync(
+        artifact,
+        `#!/bin/bash
+set -e
+[ "\${1:-}" = "--appimage-extract" ] || exit 64
+root="$PWD/squashfs-root/resources"
+mkdir -p "$root/app/resources/bin" "$root/app/resources/scripts"
+mkdir -p "$root/vendor/bun" "$root/app/dist/cli" "$root/app/dist/server"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo" "$root/app/resources/bin/polo"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/bin/polo-ai" "$root/app/resources/bin/polo-ai"
+cp "$POLO_TEST_SOURCE_ROOT/apps/electron/resources/scripts/linux-terminal-integration.sh" "$root/app/resources/scripts/linux-terminal-integration.sh"
+chmod +x "$root/app/resources/bin/polo" "$root/app/resources/bin/polo-ai" "$root/app/resources/scripts/linux-terminal-integration.sh"
+printf '{\\n  "version": "0.10.0"\\n}\\n' > "$root/app/package.json"
+printf '#!/bin/sh\\nexit 0\\n' > "$root/vendor/bun/bun"
+chmod +x "$root/vendor/bun/bun"
+printf 'cli\\n' > "$root/app/dist/cli/polo-cli.js"
+printf 'server\\n' > "$root/app/dist/server/polo-server.js"
+`,
+      )
+      chmodSync(artifact, 0o755)
+      const env = {
+        ...process.env,
+        HOME: home,
+        SHELL: '/bin/zsh',
+        PATH: `${fakeBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        POLO_AI_INSTALL_ARTIFACT: artifact,
+        POLO_AI_BIN_DIR: binDir,
+        POLO_TEST_SOURCE_ROOT: join(import.meta.dir, '..'),
+        POLO_TEST_FAILURE_FLAG: failureFlag,
+        POLO_TEST_INSTALLED_APPIMAGE: appImagePath,
+      }
+
+      const initial = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
+        env,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(initial.exitCode).toBe(0)
+      const before = {
+        currentIdentity: `${lstatSync(currentPath).dev}:${lstatSync(currentPath).ino}`,
+        currentPackage: readFileSync(
+          join(currentPath, 'resources', 'app', 'package.json'),
+          'utf8',
+        ),
+        appImageIdentity: `${lstatSync(appImagePath).dev}:${lstatSync(appImagePath).ino}`,
+        appImage: readFileSync(appImagePath, 'utf8'),
+        profile: readFileSync(profilePath, 'utf8'),
+        state: readFileSync(statePath, 'utf8'),
+        poloTarget: readlinkSync(installedPolo),
+        compatTarget: readlinkSync(installedCompat),
+        polo: readFileSync(installedPolo, 'utf8'),
+        compat: readFileSync(installedCompat, 'utf8'),
+      }
+
+      const failed = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
+        env: { ...env, POLO_TEST_FAIL_POINT: failurePoint },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(failed.exitCode).not.toBe(0)
+      expect(existsSync(failureFlag)).toBe(true)
+      expect(`${lstatSync(currentPath).dev}:${lstatSync(currentPath).ino}`)
+        .toBe(before.currentIdentity)
+      expect(readFileSync(join(currentPath, 'resources', 'app', 'package.json'), 'utf8'))
+        .toBe(before.currentPackage)
+      expect(`${lstatSync(appImagePath).dev}:${lstatSync(appImagePath).ino}`)
+        .toBe(before.appImageIdentity)
+      expect(readFileSync(appImagePath, 'utf8')).toBe(before.appImage)
+      expect(readFileSync(profilePath, 'utf8')).toBe(before.profile)
+      expect(readFileSync(statePath, 'utf8')).toBe(before.state)
+      expect(lstatSync(installedPolo).isSymbolicLink()).toBe(true)
+      expect(lstatSync(installedCompat).isSymbolicLink()).toBe(true)
+      expect(readlinkSync(installedPolo)).toBe(before.poloTarget)
+      expect(readlinkSync(installedCompat)).toBe(before.compatTarget)
+      expect(readFileSync(installedPolo, 'utf8')).toBe(before.polo)
+      expect(readFileSync(installedCompat, 'utf8')).toBe(before.compat)
+      expect(
+        readdirSync(appDir).filter((name) =>
+          name.startsWith('.install-transaction.')
+          || name.startsWith('.profile-transaction.')
+          || name.startsWith('.polo-extract.')),
+      ).toEqual([])
+      expect(
+        readdirSync(join(home, '.polo-ai')).filter((name) =>
+          name.startsWith('.terminal-install.')),
+      ).toHaveLength(0)
+    }
+  }, 30_000)
+
   it('installs the packaged canonical wrappers and removes only verified ownership', () => {
     const home = createHome()
     const fakeBin = join(home, 'fake-bin')

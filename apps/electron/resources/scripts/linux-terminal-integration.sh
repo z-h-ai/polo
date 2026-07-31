@@ -625,10 +625,19 @@ verify_moved_candidate() {
 
 install_links_transaction() {
   local previous_current="$1"
+  local deferred_transaction_dir="${2:-}"
   local transaction_dir state_candidate polo_candidate compat_candidate state_hash="" new_state_hash=""
   local polo_installed_identity="" compat_installed_identity=""
+  local pending_file deferred="false"
 
-  transaction_dir="$(mktemp -d "$state_root/.terminal-install.XXXXXX")"
+  if [ -n "$deferred_transaction_dir" ]; then
+    transaction_dir="$deferred_transaction_dir"
+    deferred="true"
+    [ -d "$transaction_dir" ] && [ ! -L "$transaction_dir" ] || return 1
+    [ -z "$(find "$transaction_dir" -mindepth 1 -maxdepth 1 -print -quit)" ] || return 1
+  else
+    transaction_dir="$(mktemp -d "$state_root/.terminal-install.XXXXXX")"
+  fi
   chmod 700 "$transaction_dir"
   polo_candidate="$transaction_dir/polo.previous"
   compat_candidate="$transaction_dir/polo-ai.previous"
@@ -711,7 +720,112 @@ install_links_transaction() {
     return 1
   fi
 
+  if [ "$deferred" = "true" ]; then
+    pending_file="$transaction_dir/INSTALL_PENDING"
+    if ! {
+      umask 077
+      {
+        printf 'owner=%s\n' "$OWNER"
+        printf 'new_state_sha256=%s\n' "$new_state_hash"
+        printf 'polo_installed_identity=%s\n' "$polo_installed_identity"
+        printf 'compat_installed_identity=%s\n' "$compat_installed_identity"
+      } > "$pending_file"
+      chmod 600 "$pending_file"
+    }; then
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "$new_state_hash" "$polo_installed_identity" \
+        "$compat_installed_identity" || true
+      return 1
+    fi
+    return 0
+  fi
+
   rm -rf "$transaction_dir"
+}
+
+pending_install_value() {
+  local pending_file="$1"
+  local key="$2"
+  local value
+
+  [ -f "$pending_file" ] && [ ! -L "$pending_file" ] || return 1
+  [ "$(grep -c "^${key}=" "$pending_file" 2>/dev/null || true)" -eq 1 ] || return 1
+  value="$(sed -n "s/^${key}=//p" "$pending_file")"
+  [ -n "$value" ] || return 1
+  printf '%s\n' "$value"
+}
+
+validate_deferred_install_transaction() {
+  local transaction_dir="$1"
+
+  [ -d "$transaction_dir" ] && [ ! -L "$transaction_dir" ] || return 1
+  case "$transaction_dir" in
+    "$app_dir"/.install-transaction.*/terminal) ;;
+    *) return 1 ;;
+  esac
+}
+
+commit_install_transaction() {
+  local transaction_dir="$1"
+  local pending_file="$transaction_dir/INSTALL_PENDING"
+  local new_state_hash
+
+  validate_deferred_install_transaction "$transaction_dir" || return 1
+  [ "$(pending_install_value "$pending_file" owner)" = "$OWNER" ] || return 1
+  new_state_hash="$(pending_install_value "$pending_file" new_state_sha256)" || return 1
+  [[ "$new_state_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [ -f "$state_file" ] && [ ! -L "$state_file" ] \
+    && [ "$(sha256_file "$state_file")" = "$new_state_hash" ] \
+    && load_state "$state_file" \
+    && [ "$STATE_HAS_FULL_IDENTITY" = "true" ] \
+    && verify_owned_link "$polo_path" "$STATE_POLO_PATH" "$STATE_POLO_TARGET" "$STATE_POLO_SHA" \
+    && verify_owned_link "$compat_path" "$STATE_COMPAT_PATH" "$STATE_COMPAT_TARGET" "$STATE_COMPAT_SHA" \
+    || return 1
+  if [ "$STATE_PATH_ENTRY_OWNED" = "true" ]; then
+    validate_owned_profile "$STATE_PROFILE_PATH" || return 1
+  fi
+  rm -rf "$transaction_dir"
+}
+
+rollback_install_transaction() {
+  local transaction_dir="$1"
+  local pending_file="$transaction_dir/INSTALL_PENDING"
+  local new_state_hash polo_installed_identity compat_installed_identity
+
+  validate_deferred_install_transaction "$transaction_dir" || return 1
+  [ "$(pending_install_value "$pending_file" owner)" = "$OWNER" ] || return 1
+  new_state_hash="$(pending_install_value "$pending_file" new_state_sha256)" || return 1
+  polo_installed_identity="$(
+    pending_install_value "$pending_file" polo_installed_identity
+  )" || return 1
+  compat_installed_identity="$(
+    pending_install_value "$pending_file" compat_installed_identity
+  )" || return 1
+  [[ "$new_state_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [[ "$polo_installed_identity" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  [[ "$compat_installed_identity" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+
+  rm -f "$pending_file"
+  finalize_install_rollback "$transaction_dir" \
+    "$transaction_dir/state.previous" \
+    "$transaction_dir/polo.previous" \
+    "$transaction_dir/polo-ai.previous" \
+    "$new_state_hash" "$polo_installed_identity" "$compat_installed_identity"
+}
+
+preserve_deferred_install_conflict() {
+  local transaction_dir="$1"
+  local quarantine
+
+  [ -d "$transaction_dir" ] && [ ! -L "$transaction_dir" ] || return 0
+  [ -n "$(find "$transaction_dir" -mindepth 1 -maxdepth 1 -print -quit)" ] || {
+    rmdir "$transaction_dir"
+    return 0
+  }
+  quarantine="$(mktemp -d "$state_root/.terminal-install.XXXXXX")"
+  rmdir "$quarantine"
+  mv "$transaction_dir" "$quarantine"
+  warn "Verified rollback candidates were preserved for recovery at $quarantine"
 }
 
 uninstall_links_transaction() {
@@ -883,6 +997,7 @@ staged_compat=""
 path_entry_owned="false"
 previous_current=""
 profile_path=""
+install_transaction_dir=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --app-dir) app_dir="$2"; shift 2 ;;
@@ -893,6 +1008,7 @@ while [ "$#" -gt 0 ]; do
     --path-entry-owned) path_entry_owned="$2"; shift 2 ;;
     --previous-current) previous_current="$2"; shift 2 ;;
     --profile-path) profile_path="$2"; shift 2 ;;
+    --transaction-dir) install_transaction_dir="$2"; shift 2 ;;
     *) printf "Unknown argument: %s\n" "$1" >&2; exit 64 ;;
   esac
 done
@@ -978,9 +1094,28 @@ case "$mode" in
     if [ -n "$previous_current" ]; then
       previous_current="$(canonical_existing_path "$previous_current")"
     fi
+    if [ -n "$install_transaction_dir" ]; then
+      install_transaction_dir="$(canonical_existing_path "$install_transaction_dir")"
+      validate_deferred_install_transaction "$install_transaction_dir" || exit 64
+    fi
     assert_replaceable "$state_status" "$polo_path" polo "$previous_current"
     assert_replaceable "$state_status" "$compat_path" compat "$previous_current"
-    install_links_transaction "$previous_current"
+    if ! install_links_transaction "$previous_current" "$install_transaction_dir"; then
+      if [ -n "$install_transaction_dir" ]; then
+        preserve_deferred_install_conflict "$install_transaction_dir" || true
+      fi
+      exit 1
+    fi
+    ;;
+  commit-install)
+    [ -n "$install_transaction_dir" ] || exit 64
+    install_transaction_dir="$(canonical_existing_path "$install_transaction_dir")"
+    commit_install_transaction "$install_transaction_dir"
+    ;;
+  rollback-install)
+    [ -n "$install_transaction_dir" ] || exit 64
+    install_transaction_dir="$(canonical_existing_path "$install_transaction_dir")"
+    rollback_install_transaction "$install_transaction_dir"
     ;;
   verify-uninstall)
     if ! assert_uninstallable; then
@@ -1017,7 +1152,7 @@ case "$mode" in
     fi
     ;;
   *)
-    printf "Usage: %s <preflight|install|verify-uninstall|path-entry-owned|profile-path|uninstall> --app-dir PATH --bin-dir PATH\n" "$0" >&2
+    printf "Usage: %s <preflight|install|commit-install|rollback-install|verify-uninstall|path-entry-owned|profile-path|uninstall> --app-dir PATH --bin-dir PATH\n" "$0" >&2
     exit 64
     ;;
 esac

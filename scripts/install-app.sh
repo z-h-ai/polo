@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -Ee
 
 VERSIONS_URL="https://polo.ai/electron"
 DOWNLOAD_DIR="$HOME/.polo-ai/downloads"
@@ -175,6 +175,8 @@ begin_managed_profile_transaction() {
             return 1
         fi
     fi
+    PROFILE_AFTER_HASH="$PROFILE_BEFORE_HASH"
+    PROFILE_AFTER_IDENTITY="$PROFILE_BEFORE_IDENTITY"
 }
 
 configure_managed_path() {
@@ -675,8 +677,28 @@ else
     # state-owned symlink to the exact canonical wrapper shipped inside the
     # AppImage, so the installer never carries a divergent launcher template.
     extraction_temp="$(mktemp -d "$APP_DIR/.polo-extract.XXXXXX")"
+    LINUX_INSTALL_TRANSACTION_ACTIVE=false
+    LINUX_INSTALL_TRANSACTION_COMMITTED=false
+    install_transaction_dir=""
+    terminal_transaction_dir=""
+    current_backup=""
+    appimage_backup=""
+    current_existed=false
+    appimage_existed=false
+    CURRENT_BEFORE_IDENTITY=""
+    CURRENT_BEFORE_PACKAGE_HASH=""
+    APPIMAGE_BEFORE_IDENTITY=""
+    APPIMAGE_BEFORE_HASH=""
+    CURRENT_AFTER_IDENTITY=""
+    APPIMAGE_AFTER_IDENTITY=""
+    APPIMAGE_AFTER_HASH=""
+    STAGED_PACKAGE_HASH=""
+    STAGED_POLO_HASH=""
+    STAGED_COMPAT_HASH=""
+    STAGED_HELPER_HASH=""
+
     cleanup_linux_stage() {
-        rm -rf "$extraction_temp"
+        [ -z "${extraction_temp:-}" ] || rm -rf "$extraction_temp"
     }
     trap cleanup_linux_stage EXIT
     info "Extracting packaged terminal runtime..."
@@ -698,6 +720,11 @@ else
             "$staged_package" | head -1
     )
     [ -n "$packaged_version" ] || error "Unable to read the packaged Polo version."
+    STAGED_PACKAGE_HASH="$(profile_sha256 "$staged_package")"
+    STAGED_POLO_HASH="$(profile_sha256 "$staged_polo")"
+    STAGED_COMPAT_HASH="$(profile_sha256 "$staged_compat")"
+    STAGED_HELPER_HASH="$(profile_sha256 "$staged_helper")"
+    APPIMAGE_AFTER_HASH="$(profile_sha256 "$appimage_path")"
 
     existing_polo=$(command -v polo 2>/dev/null || true)
     if [ -n "$existing_polo" ] && [ "$existing_polo" != "$WRAPPER_PATH" ]; then
@@ -714,20 +741,139 @@ else
     # Validate and snapshot the selected login profile before any App/runtime
     # mutation. A malformed or user-replaced profile aborts the transaction.
     MANAGED_PROFILE_PATH="$(managed_profile_path)"
-    begin_managed_profile_transaction "$APP_DIR" \
-        || error "Polo terminal setup found a conflicting shell profile. The existing installation was not changed; see ${profile_transaction_dir:-the profile warning above}."
+    install_transaction_dir="$(mktemp -d "$APP_DIR/.install-transaction.XXXXXX")"
+    chmod 700 "$install_transaction_dir"
+    terminal_transaction_dir="$install_transaction_dir/terminal"
+    mkdir "$terminal_transaction_dir"
+    chmod 700 "$terminal_transaction_dir"
+    current_backup="$install_transaction_dir/current.previous"
+    appimage_backup="$install_transaction_dir/Polo-AI.previous"
+    transaction_helper="$install_transaction_dir/linux-terminal-integration.sh"
+    cp "$staged_helper" "$transaction_helper"
+    chmod 700 "$transaction_helper"
 
-    rollback_linux_app() {
+    if ! begin_managed_profile_transaction "$APP_DIR"; then
+        rm -rf "$install_transaction_dir"
+        error "Polo terminal setup found a conflicting shell profile. The existing installation was not changed; see ${profile_transaction_dir:-the profile warning above}."
+    fi
+
+    rollback_linux_install_transaction() {
         local profile_rollback_ok=true
+        local terminal_rollback_ok=true
+        local app_rollback_ok=true
 
-        rm -rf "$EXTRACTED_INSTALL_PATH"
-        rm -f "$APPIMAGE_INSTALL_PATH"
-        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
-        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
+        if [ -f "$terminal_transaction_dir/INSTALL_PENDING" ]; then
+            bash "$transaction_helper" rollback-install \
+                --app-dir "$APP_DIR" \
+                --bin-dir "$INSTALL_DIR" \
+                --transaction-dir "$terminal_transaction_dir" \
+                || terminal_rollback_ok=false
+        fi
+
         restore_managed_profile "$MANAGED_PROFILE_PATH" "$profile_backup" "$profile_existed" \
             || profile_rollback_ok=false
-        [ "$profile_rollback_ok" = true ]
+
+        if [ -n "$CURRENT_AFTER_IDENTITY" ] \
+            && [ -d "$EXTRACTED_INSTALL_PATH" ] \
+            && [ ! -L "$EXTRACTED_INSTALL_PATH" ] \
+            && [ "$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")" = "$CURRENT_AFTER_IDENTITY" ] \
+            && [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json")" = "$STAGED_PACKAGE_HASH" ]; then
+            rm -rf "$EXTRACTED_INSTALL_PATH"
+        elif [ "$current_existed" = true ] \
+            && [ ! -e "$current_backup" ] \
+            && [ -d "$EXTRACTED_INSTALL_PATH" ] \
+            && [ ! -L "$EXTRACTED_INSTALL_PATH" ] \
+            && [ "$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")" = "$CURRENT_BEFORE_IDENTITY" ] \
+            && [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json")" = "$CURRENT_BEFORE_PACKAGE_HASH" ]; then
+            :
+        elif [ -e "$EXTRACTED_INSTALL_PATH" ] || [ -L "$EXTRACTED_INSTALL_PATH" ]; then
+            app_rollback_ok=false
+        fi
+
+        if [ -n "$APPIMAGE_AFTER_IDENTITY" ] \
+            && [ -f "$APPIMAGE_INSTALL_PATH" ] \
+            && [ ! -L "$APPIMAGE_INSTALL_PATH" ] \
+            && [ "$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_IDENTITY" ] \
+            && [ "$(profile_sha256 "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_HASH" ]; then
+            rm -f "$APPIMAGE_INSTALL_PATH"
+        elif [ "$appimage_existed" = true ] \
+            && [ ! -e "$appimage_backup" ] \
+            && [ -f "$APPIMAGE_INSTALL_PATH" ] \
+            && [ ! -L "$APPIMAGE_INSTALL_PATH" ] \
+            && [ "$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_BEFORE_IDENTITY" ] \
+            && [ "$(profile_sha256 "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_BEFORE_HASH" ]; then
+            :
+        elif [ -e "$APPIMAGE_INSTALL_PATH" ] || [ -L "$APPIMAGE_INSTALL_PATH" ]; then
+            app_rollback_ok=false
+        fi
+
+        if [ "$current_existed" = true ]; then
+            if [ -d "$current_backup" ]; then
+                if [ -L "$current_backup" ] \
+                    || [ "$(profile_filesystem_identity "$current_backup")" != "$CURRENT_BEFORE_IDENTITY" ] \
+                    || [ "$(profile_sha256 "$current_backup/resources/app/package.json")" != "$CURRENT_BEFORE_PACKAGE_HASH" ] \
+                    || [ -e "$EXTRACTED_INSTALL_PATH" ] \
+                    || ! mv "$current_backup" "$EXTRACTED_INSTALL_PATH"; then
+                    app_rollback_ok=false
+                fi
+            elif [ ! -d "$EXTRACTED_INSTALL_PATH" ] \
+                || [ -L "$EXTRACTED_INSTALL_PATH" ] \
+                || [ "$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")" != "$CURRENT_BEFORE_IDENTITY" ] \
+                || [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json")" != "$CURRENT_BEFORE_PACKAGE_HASH" ]; then
+                app_rollback_ok=false
+            fi
+        fi
+        if [ "$appimage_existed" = true ]; then
+            if [ -f "$appimage_backup" ]; then
+                if [ -L "$appimage_backup" ] \
+                    || [ "$(profile_filesystem_identity "$appimage_backup")" != "$APPIMAGE_BEFORE_IDENTITY" ] \
+                    || [ "$(profile_sha256 "$appimage_backup")" != "$APPIMAGE_BEFORE_HASH" ] \
+                    || [ -e "$APPIMAGE_INSTALL_PATH" ] \
+                    || ! mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"; then
+                    app_rollback_ok=false
+                fi
+            elif [ ! -f "$APPIMAGE_INSTALL_PATH" ] \
+                || [ -L "$APPIMAGE_INSTALL_PATH" ] \
+                || [ "$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")" != "$APPIMAGE_BEFORE_IDENTITY" ] \
+                || [ "$(profile_sha256 "$APPIMAGE_INSTALL_PATH")" != "$APPIMAGE_BEFORE_HASH" ]; then
+                app_rollback_ok=false
+            fi
+        fi
+
+        if [ "$terminal_rollback_ok" = true ] \
+            && [ "$profile_rollback_ok" = true ] \
+            && [ "$app_rollback_ok" = true ]; then
+            rm -rf "$install_transaction_dir"
+            LINUX_INSTALL_TRANSACTION_ACTIVE=false
+            return 0
+        fi
+
+        {
+            printf 'owner=com.poloai.terminal-integration\n'
+            printf 'reason=linux-install-rollback-conflict\n'
+            printf 'created_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        } > "$install_transaction_dir/ROLLBACK_REQUIRED"
+        chmod 600 "$install_transaction_dir/ROLLBACK_REQUIRED"
+        warn "Polo could not restore every verified install candidate."
+        warn "Rollback candidates remain at $install_transaction_dir"
+        return 1
     }
+
+    linux_install_transaction_trap() {
+        local status=$?
+
+        trap - ERR EXIT
+        set +e
+        if [ "$LINUX_INSTALL_TRANSACTION_ACTIVE" = true ] \
+            && [ "$LINUX_INSTALL_TRANSACTION_COMMITTED" != true ]; then
+            rollback_linux_install_transaction || status=2
+        fi
+        cleanup_linux_stage
+        exit "$status"
+    }
+
+    LINUX_INSTALL_TRANSACTION_ACTIVE=true
+    trap linux_install_transaction_trap ERR EXIT
 
     # No installed App/runtime/PATH mutation occurs until ownership and the
     # selected profile have both passed their read-only preflight.
@@ -737,34 +883,37 @@ else
         sleep 2
     fi
 
-    current_backup="$APP_DIR/.current.previous.$$"
-    appimage_backup="$APP_DIR/.Polo-AI.previous.$$"
-    [ -d "$EXTRACTED_INSTALL_PATH" ] && mv "$EXTRACTED_INSTALL_PATH" "$current_backup"
-    [ -f "$APPIMAGE_INSTALL_PATH" ] && mv "$APPIMAGE_INSTALL_PATH" "$appimage_backup"
-    if ! mv "$extracted_root" "$EXTRACTED_INSTALL_PATH"; then
-        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
-        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
-        rm -rf "$profile_transaction_dir"
-        error "Failed to install the packaged runtime."
+    if [ -d "$EXTRACTED_INSTALL_PATH" ] && [ ! -L "$EXTRACTED_INSTALL_PATH" ]; then
+        current_existed=true
+        CURRENT_BEFORE_IDENTITY="$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")"
+        CURRENT_BEFORE_PACKAGE_HASH="$(
+            profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json"
+        )"
     fi
-    if ! mv "$appimage_path" "$APPIMAGE_INSTALL_PATH"; then
-        rm -rf "$EXTRACTED_INSTALL_PATH"
-        [ -d "$current_backup" ] && mv "$current_backup" "$EXTRACTED_INSTALL_PATH"
-        [ -f "$appimage_backup" ] && mv "$appimage_backup" "$APPIMAGE_INSTALL_PATH"
-        rm -rf "$profile_transaction_dir"
-        error "Failed to install the AppImage."
+    if [ -f "$APPIMAGE_INSTALL_PATH" ] && [ ! -L "$APPIMAGE_INSTALL_PATH" ]; then
+        appimage_existed=true
+        APPIMAGE_BEFORE_IDENTITY="$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")"
+        APPIMAGE_BEFORE_HASH="$(profile_sha256 "$APPIMAGE_INSTALL_PATH")"
     fi
+    if [ "$current_existed" = true ]; then
+        mv "$EXTRACTED_INSTALL_PATH" "$current_backup"
+        [ "$(profile_filesystem_identity "$current_backup")" = "$CURRENT_BEFORE_IDENTITY" ]
+    fi
+    if [ "$appimage_existed" = true ]; then
+        mv "$APPIMAGE_INSTALL_PATH" "$appimage_backup"
+        [ "$(profile_filesystem_identity "$appimage_backup")" = "$APPIMAGE_BEFORE_IDENTITY" ]
+    fi
+
+    mv "$extracted_root" "$EXTRACTED_INSTALL_PATH"
+    CURRENT_AFTER_IDENTITY="$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")"
+    mv "$appimage_path" "$APPIMAGE_INSTALL_PATH"
+    APPIMAGE_AFTER_IDENTITY="$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")"
     chmod +x "$APPIMAGE_INSTALL_PATH"
 
     # Configure PATH while the old App backups are still available. If this
     # fails, neither launchers nor ownership state have been changed yet.
     if ! configure_managed_path; then
-        profile_rollback_ok=true
-        rollback_linux_app || profile_rollback_ok=false
-        if [ "$profile_rollback_ok" = true ]; then
-            error "Failed to configure Polo terminal PATH. The previous installation was restored."
-        fi
-        error "Failed to configure Polo terminal PATH because the profile changed concurrently. User content was preserved; see $profile_transaction_dir."
+        error "Failed to configure Polo terminal PATH. The transaction will restore the previous installation."
     fi
 
     path_entry_owned=true
@@ -779,25 +928,40 @@ else
         --version "$packaged_version" \
         --path-entry-owned "$path_entry_owned" \
         --profile-path "$MANAGED_PROFILE_PATH" \
+        --transaction-dir "$terminal_transaction_dir" \
         "${previous_args[@]}"; then
-        profile_rollback_ok=true
-        rollback_linux_app || profile_rollback_ok=false
-        if [ "$profile_rollback_ok" = true ]; then
-            error "Failed to install Polo terminal integration. The previous installation and profile were restored."
-        fi
-        error "Failed to install Polo terminal integration after the profile changed concurrently. User content was preserved; see $profile_transaction_dir."
+        error "Failed to install Polo terminal integration. The transaction will restore the previous installation and profile."
     fi
 
-    # The helper performs final launcher/state verification before returning.
-    # Until it succeeds, the previous App and profile remain available.
-    rm -rf "$current_backup"
-    rm -f "$appimage_backup"
-    rm -rf "$profile_transaction_dir"
+    # Verify every transaction participant before committing launcher/state and
+    # deleting any previous App/runtime/profile candidate.
+    [ -d "$EXTRACTED_INSTALL_PATH" ] && [ ! -L "$EXTRACTED_INSTALL_PATH" ]
+    [ "$(profile_filesystem_identity "$EXTRACTED_INSTALL_PATH")" = "$CURRENT_AFTER_IDENTITY" ]
+    [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/package.json")" = "$STAGED_PACKAGE_HASH" ]
+    [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/bin/polo")" = "$STAGED_POLO_HASH" ]
+    [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/bin/polo-ai")" = "$STAGED_COMPAT_HASH" ]
+    [ "$(profile_sha256 "$EXTRACTED_INSTALL_PATH/resources/app/resources/scripts/linux-terminal-integration.sh")" = "$STAGED_HELPER_HASH" ]
+    [ -x "$APPIMAGE_INSTALL_PATH" ] && [ ! -L "$APPIMAGE_INSTALL_PATH" ]
+    [ "$(profile_filesystem_identity "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_IDENTITY" ]
+    [ "$(profile_sha256 "$APPIMAGE_INSTALL_PATH")" = "$APPIMAGE_AFTER_HASH" ]
+    validate_managed_path "$MANAGED_PROFILE_PATH"
+    [ "$(profile_filesystem_identity "$MANAGED_PROFILE_PATH")" = "$PROFILE_AFTER_IDENTITY" ]
+    [ "$(profile_sha256 "$MANAGED_PROFILE_PATH")" = "$PROFILE_AFTER_HASH" ]
+    bash "$transaction_helper" commit-install \
+        --app-dir "$APP_DIR" \
+        --bin-dir "$INSTALL_DIR" \
+        --transaction-dir "$terminal_transaction_dir"
+
+    LINUX_INSTALL_TRANSACTION_COMMITTED=true
+    LINUX_INSTALL_TRANSACTION_ACTIVE=false
+    trap - ERR EXIT
+    rm -rf "$current_backup" "$profile_transaction_dir" 2>/dev/null || true
+    rm -f "$appimage_backup" 2>/dev/null || true
+    rm -rf "$install_transaction_dir" 2>/dev/null || true
 
     # Migrate old installation
     OLD_APPIMAGE="$INSTALL_DIR/Polo-AI-x64.AppImage"
     [ -f "$OLD_APPIMAGE" ] && rm -f "$OLD_APPIMAGE"
-    trap - EXIT
     cleanup_linux_stage
 
     echo ""
