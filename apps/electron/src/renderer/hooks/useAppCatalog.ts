@@ -1011,11 +1011,32 @@ export function useAppCatalog() {
 
   const getLogs = useCallback(async (app: CatalogApp) => {
     const snapshot = currentSnapshotForApp(app)
+    const admittedWithDeliveryAccess = (
+      app.availability === undefined
+      || app.availability === 'available'
+    )
     const result = await window.electronAPI.localApps.getLogs(
       scopeForCatalogApp(snapshot.catalog, app),
       { tail: 300 },
     )
     requireCurrent(snapshot)
+    const currentApp = catalogRef.current
+      ? getAppCatalogApps(catalogRef.current)
+          .find(candidate => candidate.id === app.id)
+      : undefined
+    const currentlyHasDeliveryAccess = Boolean(
+      currentApp
+      && (
+        currentApp.availability === undefined
+        || currentApp.availability === 'available'
+      ),
+    )
+    // A same-organization refresh intentionally preserves lifecycle results,
+    // but a log read is bound to its admitted delivery/retained capability.
+    // Do not let an older retained response publish after re-authorization.
+    if (currentlyHasDeliveryAccess !== admittedWithDeliveryAccess) {
+      throw new Error(i18n.t('homeApps.errors.staleContext'))
+    }
     return result
   }, [currentSnapshotForApp, requireCurrent])
 

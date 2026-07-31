@@ -647,11 +647,23 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     (_ctx, reference: unknown, options?: LocalAppLogsOptions) =>
       withCatalogManagementScope(
         reference,
-        (scope, catalogReference) => {
+        async (scope, catalogReference) => {
           const registry = getScopedLocalAppRuntimeRegistry()
-          return catalogReference.canAccessDeliveryMetadata
-            ? registry.getFailureRecoveryLogs(scope, options)
-            : registry.getRetainedManagementLogs(scope, options)
+          if (catalogReference.canAccessDeliveryMetadata) {
+            return registry.getFailureRecoveryLogs(scope, options)
+          }
+          const logs = await registry.getRetainedManagementLogs(scope, options)
+          // Retained access is a capability of the denied/withdrawn snapshot,
+          // not a reusable read token. Re-check synchronously after the
+          // bounded tail completes so re-authorization cannot publish healthy
+          // runtime logs from a request admitted under the older snapshot.
+          if (canAccessCatalogDeliveryMetadata(scope)) {
+            throw new LocalAppRuntimeError(
+              'NOT_AUTHORIZED',
+              'Organization app log authorization changed during the request',
+            )
+          }
+          return logs
         },
       ),
   )

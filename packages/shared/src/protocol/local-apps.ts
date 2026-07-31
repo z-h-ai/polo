@@ -217,14 +217,18 @@ export interface LocalAppRestrictedRuntimeStatus {
 export interface LocalAppRestrictedInstalledApp {
   appId: string
   scope?: LocalAppScope
-  name?: string
   currentVersion: string
-  previousVersion?: string
-  versions: string[]
-  runtime: LocalAppRuntimeKind
   status: LocalAppLifecycleStatus
-  installedAt: number
 }
+
+export type LocalAppCatalogAccessProjection<
+  T extends LocalAppRuntimeStatus | LocalAppInstalledApp,
+  CanAccessDeliveryMetadata extends boolean,
+> = CanAccessDeliveryMetadata extends true
+  ? T
+  : T extends LocalAppInstalledApp
+    ? LocalAppRestrictedInstalledApp
+    : LocalAppRestrictedRuntimeStatus
 
 /**
  * Renderer-facing status projection used after Catalog access is denied or an
@@ -235,27 +239,29 @@ export interface LocalAppRestrictedInstalledApp {
  */
 export function projectLocalAppStatusForCatalogAccess<
   T extends LocalAppRuntimeStatus | LocalAppInstalledApp,
+  CanAccessDeliveryMetadata extends boolean,
 >(
   status: T,
-  canAccessDeliveryMetadata: boolean,
-): T {
-  if (canAccessDeliveryMetadata) return status
+  canAccessDeliveryMetadata: CanAccessDeliveryMetadata,
+): LocalAppCatalogAccessProjection<T, CanAccessDeliveryMetadata> {
+  if (canAccessDeliveryMetadata) {
+    return status as LocalAppCatalogAccessProjection<
+      T,
+      CanAccessDeliveryMetadata
+    >
+  }
 
   if ('versions' in status && 'runtime' in status && 'installedAt' in status) {
     const projected: LocalAppRestrictedInstalledApp = {
       appId: status.appId,
       ...(status.scope ? { scope: status.scope } : {}),
-      ...(status.name ? { name: status.name } : {}),
       currentVersion: status.currentVersion,
-      ...(status.previousVersion
-        ? { previousVersion: status.previousVersion }
-        : {}),
-      versions: [...status.versions],
-      runtime: status.runtime,
       status: status.status,
-      installedAt: status.installedAt,
     }
-    return projected as T
+    return projected as LocalAppCatalogAccessProjection<
+      T,
+      CanAccessDeliveryMetadata
+    >
   }
 
   const projected: LocalAppRestrictedRuntimeStatus = {
@@ -281,7 +287,10 @@ export function projectLocalAppStatusForCatalogAccess<
         }
       : {}),
   }
-  return projected as T
+  return projected as LocalAppCatalogAccessProjection<
+    T,
+    CanAccessDeliveryMetadata
+  >
 }
 
 export interface LocalAppStartResult {

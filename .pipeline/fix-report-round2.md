@@ -1,43 +1,47 @@
-# POL-51 第 2 轮 Blocking Issue 修复报告
+# POL-51 第 2 轮修复报告
 
-## Issue 处理结果
+## 阻塞问题处理结果
 
-### Renderer 误引入 Node-heavy shared config barrel
+### 1. retained 日志在 App 重新授权后的迟到提交
 
-- 新增 browser-safe leaf export `@polo-ai/shared/config/home-recent`，集中提供 Home 最近应用类型及长度常量。该模块不依赖 Node API、配置持久化实现或 Claude Agent SDK。
-- Renderer 的最近应用运行时代码与相关类型引用均改为从安全 leaf 导入，不再经过 `@polo-ai/shared/config` 聚合入口。
-- Node 侧配置实现继续从同一 leaf 复用类型和边界常量，并从原聚合入口重导出类型，保持既有服务端调用兼容。
-- 新增真实 browser bundle 边界测试：使用 esbuild 打包 `home-recent-apps.ts`，断言依赖图包含安全 leaf，同时不包含 config barrel、preferences 实现或 `@anthropic-ai/claude-agent-sdk`。
-- 完整 `bun run electron:build` 已通过，main、preload 和 renderer production bundles 均构建并完成资源校验。
+- 已修复。
+- 主进程 `GET_LOGS` 在 retained 日志尾部读取完成后，重新读取当前 Catalog、access mode 与 App deny fence。
+- 若读取期间 withdrawn / denied App 已恢复 delivery access，旧 retained 请求统一返回 `NOT_AUTHORIZED`，不向 renderer 提交健康运行日志。
+- 正常 available App 仍走原有 broken-only failure-recovery 日志校验；denied / withdrawn 管理闭环保持可用。
+- renderer 的日志读取同时记录请求进入时的 delivery / retained 能力，并在 RPC 返回后与当前同 scope Catalog App 复核；同组织刷新重新收录 App 后，旧结果按 stale context 丢弃。
+- 新增确定性 production-wiring 测试：withdrawn App 的 retained 日志读取挂起，Catalog v3 重新收录并释放 deny fence，迟到日志必须失败。
+- 新增 renderer hook 回归：同组织重新授权后，挂起的 retained 日志结果不得返回。
+
+### 2. denied / withdrawn `GET_INSTALLED_APPS` 投影过宽
+
+- 已修复。
+- `LocalAppRestrictedInstalledApp` 收窄为 `appId`、完整 `scope`、`currentVersion` 与 `status`。
+- restricted 投影移除 `name`、`previousVersion`、`versions`、`runtime`、`installedAt` 和 `availableRelease` 等非管理闭环字段。
+- 投影函数增加条件返回类型，调用方在 `false` 权限分支只能获得 restricted DTO，避免类型层继续宣称完整安装元数据可用。
+- denied 403 与 withdrawn production IPC 测试均使用精确对象断言，确认 runtime、版本列表、安装时间、私有 Release 下载信息不会泄露；日志、STOP 和 UNINSTALL 所需 scope / 状态仍保留。
 
 ## 关键文件
 
-- `packages/shared/src/config/home-recent.ts`
-- `packages/shared/src/config/home-recent-limits.ts`（由安全 leaf 替代）
-- `packages/shared/src/config/index.ts`
-- `packages/shared/src/config/preferences.ts`
-- `packages/shared/src/config/validators.ts`
-- `packages/shared/package.json`
-- `apps/electron/src/renderer/lib/home-recent-apps.ts`
-- `apps/electron/src/renderer/lib/__tests__/home-recent-browser-boundary.test.ts`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
+- `apps/electron/src/main/handlers/local-apps.ts`
+- `apps/electron/src/main/handlers/__tests__/local-apps.isolated.ts`
+- `apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`
+- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
+- `apps/electron/src/renderer/hooks/__tests__/useAppCatalog.interaction.isolated.ts`
 - `apps/electron/src/shared/types.ts`
-- `packages/server-core/src/handlers/rpc/settings.ts`
+- `packages/shared/src/protocol/local-apps.ts`
+- `packages/shared/src/protocol/__tests__/local-apps.test.ts`
 
-## 实际运行的测试与结果
+## 自测结果
 
-- `bun run electron:build`：通过；main、preload、renderer production build 及资源复制/校验全部成功，renderer 共转换 5,582 个模块。
-- `bun test apps/electron/src/renderer/lib/__tests__/home-recent-browser-boundary.test.ts packages/shared/src/config/__tests__/home-recent-apps.test.ts`：3 pass、0 fail。
-- `bun test ./apps/electron/src/renderer`：479 pass、0 fail。
-- 对 `apps/electron/src/renderer` 下所有 `*.isolated.ts` 逐文件执行 `bun test`：全部通过、0 fail。
+- shared protocol、main handler 与 renderer hook 定向测试：54 passed、0 failed。
+- production-wiring 定向测试：23 passed、0 failed。
 - `bun run typecheck:shared`：通过。
 - `bun run typecheck:electron`：通过。
-- `packages/server-core` 执行 `bun run tsc --noEmit`：通过。
-- Electron 本轮变更文件定向 ESLint：通过。
-- shared 本轮变更文件定向 ESLint：通过。
+- 本轮修改文件 ESLint：0 errors、0 warnings。
+- `bun run test`：全量测试通过。
+- `bun run validate:ci`：通过（全包类型检查、shared/config/doc-tools 测试与 i18n parity/sorted/coverage）。
 - `git diff --check`：通过。
 
 ## 遗留问题
 
-- 本轮 blocking issue 无遗留。
-- worktree 原有的 `.pipeline/fix-report-round3.md`、`.pipeline/fix-report-round4.md` 删除状态，以及 `design-demos/` 和 3 个未跟踪的 `docs/spec-home-app-admin-config*.md` 均保持不动，不纳入本轮 commit。
+- 本轮 2 项阻塞问题均已修复，无已知功能性遗留。

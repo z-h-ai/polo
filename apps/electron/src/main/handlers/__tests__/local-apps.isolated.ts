@@ -819,10 +819,7 @@ describe('local app main-process authorization boundary', () => {
       appId: deniedScope.catalogAppId,
       scope: deniedScope,
       currentVersion: '1.0.0',
-      versions: ['1.0.0'],
-      runtime: 'static',
       status: 'update_available',
-      installedAt: 1,
     })
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
@@ -1042,6 +1039,40 @@ describe('local app main-process authorization boundary', () => {
       { tail: 20 },
     )
     expect(scopedRegistry.getLogs).not.toHaveBeenCalled()
+  })
+
+  it('rejects a retained log result when the App is re-authorized before commit', async () => {
+    const logsEntered = createDeferred<void>()
+    const pendingTail = createDeferred<string>()
+    scopedRetainedManagementLogs.mockImplementationOnce(async () => {
+      logsEntered.resolve()
+      return pendingTail.promise
+    })
+    const withdrawnApp = {
+      ...catalog.apps[0]!,
+      availability: 'withdrawn' as const,
+    }
+    catalog = {
+      ...catalog,
+      apps: [],
+      withdrawnApps: [withdrawnApp],
+    }
+
+    const pendingLogs = handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
+      context,
+      scope(),
+      { tail: 20 },
+    )
+    await logsEntered.promise
+
+    catalog = createCatalog(1)
+    accessMode = 'online'
+    appAccessDenied = false
+    pendingTail.resolve('stale retained logs')
+
+    await expect(pendingLogs).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
   })
 
   it('retains a full-directory tombstone with status access but rejects launch', async () => {

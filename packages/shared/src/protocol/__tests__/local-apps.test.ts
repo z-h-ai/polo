@@ -81,13 +81,8 @@ describe('projectLocalAppStatusForCatalogAccess', () => {
       .toEqual({
         appId: 'app-1',
         scope: runtimeStatus.scope,
-        name: 'Private App',
         currentVersion: '1.0.0',
-        previousVersion: '0.9.0',
-        versions: ['1.0.0'],
-        runtime: 'static',
         status: 'update_available',
-        installedAt: 1,
       })
   })
 

@@ -831,6 +831,28 @@ describe('Admin session and scoped local app production wiring', () => {
         return 'retained organization logs'
       }
 
+      override async getInstalledApps(): Promise<LocalAppInstalledApp[]> {
+        managerCalls.push('installedApps')
+        return [{
+          appId: createCatalogRuntimeAppId(scope),
+          name: 'Private runtime name',
+          currentVersion: '1.0.0',
+          previousVersion: '0.9.0',
+          versions: ['0.9.0', '1.0.0'],
+          runtime: 'python',
+          status: 'installed',
+          installedAt: 123,
+          availableRelease: {
+            version: '2.0.0',
+            downloadUrl: 'https://private.example.com/app.zip',
+            checksum: 'b'.repeat(64),
+            sizeBytes: 42,
+            platform: 'darwin',
+            arch: 'arm64',
+          },
+        }]
+      }
+
       override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
         managerCalls.push('stop')
         return {
@@ -916,6 +938,15 @@ describe('Admin session and scoped local app production wiring', () => {
       status: 'installed',
       currentVersion: '1.0.0',
     })
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_INSTALLED_APPS)!(
+      context,
+      scope,
+    )).resolves.toEqual([{
+      appId: scope.catalogAppId,
+      scope,
+      currentVersion: '1.0.0',
+      status: 'installed',
+    }])
     await expect(handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!(
       context,
       scope,
@@ -930,6 +961,7 @@ describe('Admin session and scoped local app production wiring', () => {
       { preserveData: true },
     )).resolves.toBeUndefined()
     expect(managerCalls).toContain('status')
+    expect(managerCalls).toContain('installedApps')
     expect(managerCalls).toContain('logs')
     expect(managerCalls).toContain('stop')
     expect(managerCalls).toContain('uninstall')
@@ -1404,6 +1436,117 @@ describe('Admin session and scoped local app production wiring', () => {
     })
     await processStopped.promise
     expect(calls).toEqual(['start', 'stop'])
+  })
+
+  it('rejects a deferred retained log tail after Catalog re-authorizes the App', async () => {
+    const retainedLogsEntered = createDeferred<void>()
+    const finishRetainedLogs = createDeferred<string>()
+    const availableApp = { ...catalog.apps[0]! }
+    class DeferredRetainedLogsManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus> {
+        return {
+          appId,
+          status: 'running',
+          currentVersion: '1.0.0',
+          runningVersion: '1.0.0',
+        }
+      }
+
+      override async getLogs(): Promise<string> {
+        return 'materialized logs'
+      }
+
+      override getRetainedManagementLogs(): Promise<string> {
+        retainedLogsEntered.resolve()
+        return finishRetainedLogs.promise
+      }
+
+      override async getInstalledApps(): Promise<LocalAppInstalledApp[]> {
+        return [{
+          appId: createCatalogRuntimeAppId(scope),
+          name: 'Private runtime name',
+          currentVersion: '1.0.0',
+          previousVersion: '0.9.0',
+          versions: ['0.9.0', '1.0.0'],
+          runtime: 'js',
+          status: 'running',
+          installedAt: 123,
+          availableRelease: {
+            version: '2.0.0',
+            downloadUrl: 'https://private.example.com/app.zip',
+            checksum: 'c'.repeat(64),
+            sizeBytes: 99,
+          },
+        }]
+      }
+
+      override async stop(appId: string): Promise<LocalAppRuntimeStatus> {
+        return {
+          appId,
+          status: 'stopped',
+          currentVersion: '1.0.0',
+        }
+      }
+    }
+
+    const root = await mkdtemp(join(tmpdir(), 'polo-retained-log-reauthorize-'))
+    temporaryRoots.push(root)
+    runtimeRegistry = new ScopedLocalAppRuntimeRegistry({
+      rootDir: root,
+      managerFactory: options => new DeferredRetainedLogsManager(options),
+    })
+    tokens = createSignedInTokens()
+    accessMode = 'online'
+    const { handlers, context } = registerProductionHandlers(root)
+    const sync = handlers.get(RPC_CHANNELS.admin.SYNC_APP_CATALOG)!
+    const getLogs = handlers.get(RPC_CHANNELS.localApps.GET_LOGS)!
+
+    await expect(runtimeRegistry.getLogs(scope)).resolves.toBe('materialized logs')
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v2',
+      apps: [],
+    })
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({
+        success: true,
+        catalog: {
+          appConfigVersion: 'catalog-v2',
+          withdrawnApps: [{ id: scope.catalogAppId }],
+        },
+      })
+    await expect(handlers.get(RPC_CHANNELS.localApps.GET_INSTALLED_APPS)!(
+      context,
+      scope,
+    )).resolves.toEqual([{
+      appId: scope.catalogAppId,
+      scope,
+      currentVersion: '1.0.0',
+      status: 'running',
+    }])
+
+    const pendingLogs = getLogs(context, scope, { tail: 20 })
+    await retainedLogsEntered.promise
+
+    getAppCatalogAdmin = async () => ({
+      notModified: false,
+      appConfigVersion: 'catalog-v3',
+      apps: [availableApp],
+    })
+    await expect(sync(context, scope.organizationId, { force: true }))
+      .resolves.toMatchObject({
+        success: true,
+        catalog: {
+          appConfigVersion: 'catalog-v3',
+          apps: [{ id: scope.catalogAppId, availability: 'available' }],
+        },
+      })
+    expect(() => runtimeRegistry!.assertAppAuthorized(scope)).not.toThrow()
+
+    finishRetainedLogs.resolve('stale healthy runtime logs')
+    await expect(pendingLogs).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
   })
 
   it('keeps a withdrawn App denied when the replacement Catalog cache write fails', async () => {

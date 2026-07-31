@@ -408,6 +408,61 @@ describe('useAppCatalog scoped async state', () => {
     })
   }
 
+  it('rejects deferred retained logs after a same-context re-authorization', async () => {
+    const retainedApp: CatalogApp = {
+      ...app('organization-a'),
+      availability: 'withdrawn',
+    }
+    const availableApp: CatalogApp = {
+      ...retainedApp,
+      availability: 'available',
+    }
+    let syncCall = 0
+    syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => {
+      syncCall += 1
+      return syncCall === 1
+        ? {
+            success: true,
+            catalog: {
+              ...catalog('organization-a', 'withdrawn', []),
+              withdrawnApps: [retainedApp],
+            },
+            source: 'cache',
+            refreshed: false,
+            accessMode: 'online',
+          }
+        : syncResult('organization-a', 're-authorized', [availableApp])
+    })
+    getRuntimeStatuses = mock(async (
+      request: { scopes: CatalogLocalAppScope[] },
+    ): Promise<LocalAppRuntimeStatus[]> => request.scopes.map(scope => ({
+      appId: scope.catalogAppId,
+      scope,
+      status: 'running',
+      currentVersion: '1.0.0',
+      runningVersion: '1.0.0',
+    })))
+    const pendingTail = deferred<string>()
+    getLocalAppLogs = mock(() => pendingTail.promise)
+
+    const { result } = renderHook(() => useAppCatalog())
+    await waitFor(() => {
+      expect(result.current.state.catalog?.withdrawnApps?.[0]?.availability)
+        .toBe('withdrawn')
+    })
+    const admittedApp = result.current.state.catalog!.withdrawnApps![0]!
+    const pendingLogs = result.current.getLogs(admittedApp)
+    await waitFor(() => expect(getLocalAppLogs).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      await result.current.sync(true)
+    })
+    expect(result.current.state.catalog?.apps[0]?.availability).toBe('available')
+
+    pendingTail.resolve('stale retained logs')
+    await expect(pendingLogs).rejects.toThrow()
+  })
+
   it('propagates an account-disabled Catalog response into the auth-failure channel', async () => {
     syncCatalog = mock(async (): Promise<AppCatalogSyncResult> => ({
       success: false,

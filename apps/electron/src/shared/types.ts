@@ -217,6 +217,7 @@ import type {
   LocalAppBatchStatusRequest,
   LocalAppCatalogInstallRequest,
   LocalAppInstalledApp,
+  LocalAppRestrictedInstalledApp,
   LocalAppRemoteUrlResult,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
@@ -509,7 +510,9 @@ export interface ElectronAPI {
       app: CatalogLocalAppScope,
       release: LocalAppAvailableRelease | null,
     ): Promise<LocalAppRuntimeStatus>
-    getInstalledApps(scope: CatalogLocalAppScope): Promise<LocalAppInstalledApp[]>
+    getInstalledApps(
+      scope: CatalogLocalAppScope,
+    ): Promise<Array<LocalAppInstalledApp | LocalAppRestrictedInstalledApp>>
     getRuntimeStatus(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
     getRuntimeStatuses(request: LocalAppBatchStatusRequest): Promise<LocalAppRuntimeStatus[]>
     resolveRemoteUrl(scope: CatalogLocalAppScope): Promise<LocalAppRemoteUrlResult>
