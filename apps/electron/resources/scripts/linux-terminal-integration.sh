@@ -38,6 +38,75 @@ link_identity() {
     | awk '{print $1}'
 }
 
+profile_expected_line() {
+  case "$1" in
+    "$HOME/.config/fish/conf.d/polo.fish") printf '%s\n' 'fish_add_path -g "$HOME/.local/bin"' ;;
+    *) printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' ;;
+  esac
+}
+
+profile_block_sha256() {
+  local profile_path="$1"
+  printf '%s\n%s\n%s\n' \
+    '# >>> Polo CLI >>>' \
+    "$(profile_expected_line "$profile_path")" \
+    '# <<< Polo CLI <<<' \
+    | sha256sum \
+    | awk '{print $1}'
+}
+
+validate_owned_profile() {
+  local profile_path="$1"
+  local expected_line start_count end_count
+
+  case "$profile_path" in
+    "$HOME/.profile"|"$HOME/.bash_profile"|"$HOME/.bash_login"|"$HOME/.zprofile"|"$HOME/.config/fish/conf.d/polo.fish") ;;
+    *) return 1 ;;
+  esac
+  [ -f "$profile_path" ] && [ ! -L "$profile_path" ] || return 1
+  expected_line="$(profile_expected_line "$profile_path")"
+  start_count="$(grep -Fxc '# >>> Polo CLI >>>' "$profile_path" 2>/dev/null || true)"
+  end_count="$(grep -Fxc '# <<< Polo CLI <<<' "$profile_path" 2>/dev/null || true)"
+  [ "$start_count" -eq 1 ] && [ "$end_count" -eq 1 ] || return 1
+  awk -v start='# >>> Polo CLI >>>' -v end='# <<< Polo CLI <<<' -v expected="$expected_line" '
+    $0 == start { start_line = NR; next }
+    $0 == end { end_line = NR; next }
+    start_line && !end_line {
+      managed_lines++
+      if ($0 != expected) invalid = 1
+    }
+    END {
+      exit !(start_line && end_line && start_line < end_line && managed_lines == 1 && !invalid)
+    }
+  ' "$profile_path"
+}
+
+state_identity() {
+  local schema="$1"
+  local owner="$2"
+  local format="$3"
+  local version="$4"
+  local polo_path="$5"
+  local polo_target="$6"
+  local polo_hash="$7"
+  local polo_identity="$8"
+  local compat_path="$9"
+  local compat_target="${10}"
+  local compat_hash="${11}"
+  local compat_identity="${12}"
+  local path_entry_owned="${13}"
+  local profile_path="${14}"
+  local profile_block_hash="${15}"
+
+  printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
+    "$schema" "$owner" "$format" "$version" \
+    "$polo_path" "$polo_target" "$polo_hash" "$polo_identity" \
+    "$compat_path" "$compat_target" "$compat_hash" "$compat_identity" \
+    "$path_entry_owned" "$profile_path" "$profile_block_hash" \
+    | sha256sum \
+    | awk '{print $1}'
+}
+
 state_value() {
   local state_file="$1"
   local key="$2"
@@ -47,18 +116,31 @@ state_value() {
 
 load_state() {
   local state_file="$1"
+  local line_count expected_state_identity
   [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
   STATE_SCHEMA="$(state_value "$state_file" schemaVersion)" || return 1
+  line_count="$(wc -l < "$state_file" | tr -d ' ')"
+  STATE_HAS_FULL_IDENTITY="false"
   if [ "$STATE_SCHEMA" = "$SCHEMA_VERSION" ]; then
-    [ "$(wc -l < "$state_file" | tr -d ' ')" -eq 14 ] || return 1
+    case "$line_count" in
+      16) STATE_HAS_FULL_IDENTITY="true" ;;
+      14) ;;
+      *) return 1 ;;
+    esac
   elif [ "$STATE_SCHEMA" = "3" ]; then
-    [ "$(wc -l < "$state_file" | tr -d ' ')" -eq 13 ] || return 1
+    [ "$line_count" -eq 13 ] || return 1
   else
     return 1
   fi
-  awk -F= '
-    $1 !~ /^(schemaVersion|owner|format|version_b64|polo_path_b64|polo_target_b64|polo_sha256|polo_identity|compat_path_b64|compat_target_b64|compat_sha256|compat_identity|path_entry_owned|profile_path_b64)$/ { exit 1 }
-  ' "$state_file" || return 1
+  if [ "$STATE_HAS_FULL_IDENTITY" = "true" ]; then
+    awk -F= '
+      $1 !~ /^(schemaVersion|owner|format|version_b64|polo_path_b64|polo_target_b64|polo_sha256|polo_identity|compat_path_b64|compat_target_b64|compat_sha256|compat_identity|path_entry_owned|profile_path_b64|profile_block_sha256|state_identity)$/ { exit 1 }
+    ' "$state_file" || return 1
+  else
+    awk -F= '
+      $1 !~ /^(schemaVersion|owner|format|version_b64|polo_path_b64|polo_target_b64|polo_sha256|polo_identity|compat_path_b64|compat_target_b64|compat_sha256|compat_identity|path_entry_owned|profile_path_b64)$/ { exit 1 }
+    ' "$state_file" || return 1
+  fi
 
   STATE_OWNER="$(state_value "$state_file" owner)" || return 1
   STATE_FORMAT="$(state_value "$state_file" format)" || return 1
@@ -77,6 +159,13 @@ load_state() {
   else
     STATE_PROFILE_PATH=""
   fi
+  if [ "$STATE_HAS_FULL_IDENTITY" = "true" ]; then
+    STATE_PROFILE_BLOCK_SHA="$(state_value "$state_file" profile_block_sha256)" || return 1
+    STATE_IDENTITY="$(state_value "$state_file" state_identity)" || return 1
+  else
+    STATE_PROFILE_BLOCK_SHA=""
+    STATE_IDENTITY=""
+  fi
 
   [ "$STATE_OWNER" = "$OWNER" ] || return 1
   [ "$STATE_FORMAT" = "$FORMAT" ] || return 1
@@ -90,12 +179,26 @@ load_state() {
     && [ "${#STATE_COMPAT_IDENTITY}" -eq 64 ] || return 1
   [ "$STATE_POLO_IDENTITY" = "$(link_identity "$STATE_VERSION" "$STATE_POLO_PATH" "$STATE_POLO_TARGET" "$STATE_POLO_SHA")" ] || return 1
   [ "$STATE_COMPAT_IDENTITY" = "$(link_identity "$STATE_VERSION" "$STATE_COMPAT_PATH" "$STATE_COMPAT_TARGET" "$STATE_COMPAT_SHA")" ] || return 1
-  if [ "$STATE_PATH_ENTRY_OWNED" = "true" ] && [ "$STATE_SCHEMA" = "$SCHEMA_VERSION" ]; then
-    case "$STATE_PROFILE_PATH" in
-      "$HOME/.profile"|"$HOME/.bash_profile"|"$HOME/.bash_login"|"$HOME/.zprofile"|"$HOME/.config/fish/conf.d/polo.fish") ;;
-      *) return 1 ;;
+  if [ "$STATE_HAS_FULL_IDENTITY" = "true" ]; then
+    case "$STATE_PROFILE_BLOCK_SHA$STATE_IDENTITY" in
+      *[!0-9a-f]*) return 1 ;;
     esac
+    [ "${#STATE_PROFILE_BLOCK_SHA}" -eq 64 ] && [ "${#STATE_IDENTITY}" -eq 64 ] || return 1
+    if [ "$STATE_PATH_ENTRY_OWNED" = "true" ]; then
+      validate_owned_profile "$STATE_PROFILE_PATH" || return 1
+      [ "$STATE_PROFILE_BLOCK_SHA" = "$(profile_block_sha256 "$STATE_PROFILE_PATH")" ] || return 1
+    else
+      [ -z "$STATE_PROFILE_PATH" ] || return 1
+      [ "$STATE_PROFILE_BLOCK_SHA" = "$(printf '' | sha256sum | awk '{print $1}')" ] || return 1
+    fi
+    expected_state_identity="$(state_identity \
+      "$STATE_SCHEMA" "$STATE_OWNER" "$STATE_FORMAT" "$STATE_VERSION" \
+      "$STATE_POLO_PATH" "$STATE_POLO_TARGET" "$STATE_POLO_SHA" "$STATE_POLO_IDENTITY" \
+      "$STATE_COMPAT_PATH" "$STATE_COMPAT_TARGET" "$STATE_COMPAT_SHA" "$STATE_COMPAT_IDENTITY" \
+      "$STATE_PATH_ENTRY_OWNED" "$STATE_PROFILE_PATH" "$STATE_PROFILE_BLOCK_SHA")"
+    [ "$STATE_IDENTITY" = "$expected_state_identity" ] || return 1
   fi
+  STATE_FILE_HASH="$(sha256_file "$state_file")"
 }
 
 verify_owned_link() {
@@ -221,7 +324,7 @@ assert_replaceable() {
   local expected_path expected_target expected_hash previous_target
 
   [ ! -e "$path" ] && [ ! -L "$path" ] && return 0
-  if [ "$state_status" = "valid" ]; then
+  if [ "$state_status" = "valid" ] || [ "$state_status" = "legacy" ]; then
     if [ "$kind" = "polo" ]; then
       expected_path="$STATE_POLO_PATH"
       expected_target="$STATE_POLO_TARGET"
@@ -266,10 +369,24 @@ render_state() {
   local compat_target="$6"
   local path_entry_owned="$7"
   local profile_path="$8"
-  local polo_hash compat_hash
+  local polo_hash compat_hash polo_identity compat_identity profile_block_hash full_identity
 
   polo_hash="$(sha256_file "$polo_target")"
   compat_hash="$(sha256_file "$compat_target")"
+  polo_identity="$(link_identity "$version" "$polo_path" "$polo_target" "$polo_hash")"
+  compat_identity="$(link_identity "$version" "$compat_path" "$compat_target" "$compat_hash")"
+  if [ "$path_entry_owned" = "true" ]; then
+    validate_owned_profile "$profile_path" || return 1
+    profile_block_hash="$(profile_block_sha256 "$profile_path")"
+  else
+    [ -z "$profile_path" ] || return 1
+    profile_block_hash="$(printf '' | sha256sum | awk '{print $1}')"
+  fi
+  full_identity="$(state_identity \
+    "$SCHEMA_VERSION" "$OWNER" "$FORMAT" "$version" \
+    "$polo_path" "$polo_target" "$polo_hash" "$polo_identity" \
+    "$compat_path" "$compat_target" "$compat_hash" "$compat_identity" \
+    "$path_entry_owned" "$profile_path" "$profile_block_hash")"
   {
     printf 'schemaVersion=%s\n' "$SCHEMA_VERSION"
     printf 'owner=%s\n' "$OWNER"
@@ -278,13 +395,15 @@ render_state() {
     printf 'polo_path_b64=%s\n' "$(encode_value "$polo_path")"
     printf 'polo_target_b64=%s\n' "$(encode_value "$polo_target")"
     printf 'polo_sha256=%s\n' "$polo_hash"
-    printf 'polo_identity=%s\n' "$(link_identity "$version" "$polo_path" "$polo_target" "$polo_hash")"
+    printf 'polo_identity=%s\n' "$polo_identity"
     printf 'compat_path_b64=%s\n' "$(encode_value "$compat_path")"
     printf 'compat_target_b64=%s\n' "$(encode_value "$compat_target")"
     printf 'compat_sha256=%s\n' "$compat_hash"
-    printf 'compat_identity=%s\n' "$(link_identity "$version" "$compat_path" "$compat_target" "$compat_hash")"
+    printf 'compat_identity=%s\n' "$compat_identity"
     printf 'path_entry_owned=%s\n' "$path_entry_owned"
     printf 'profile_path_b64=%s\n' "$(encode_value "$profile_path")"
+    printf 'profile_block_sha256=%s\n' "$profile_block_hash"
+    printf 'state_identity=%s\n' "$full_identity"
   } > "$output"
 }
 
@@ -315,9 +434,16 @@ restore_candidate() {
   local path="$1"
   local candidate="$2"
   local installed_target="$3"
+  local installed_identity="${4:-}"
+  local current_identity=""
 
-  if [ -L "$path" ] && [ "$(readlink -- "$path")" = "$installed_target" ]; then
-    rm -f "$path"
+  if [ -n "$installed_identity" ] \
+    && [ -L "$path" ] \
+    && [ "$(readlink -- "$path")" = "$installed_target" ]; then
+    current_identity="$(filesystem_identity "$path")" || current_identity=""
+    if [ "$current_identity" = "$installed_identity" ]; then
+      rm -f "$path"
+    fi
   fi
   if [ -e "$candidate" ] || [ -L "$candidate" ]; then
     if [ -e "$path" ] || [ -L "$path" ]; then
@@ -326,6 +452,71 @@ restore_candidate() {
     fi
     mv "$candidate" "$path"
   fi
+}
+
+filesystem_identity() {
+  local path="$1"
+  stat -c '%d:%i' -- "$path" 2>/dev/null \
+    || stat -f '%d:%i' "$path" 2>/dev/null
+}
+
+restore_state_candidate() {
+  local candidate="$1"
+  local installed_hash="${2:-}"
+
+  if [ -n "$installed_hash" ] \
+    && [ -f "$state_file" ] \
+    && [ ! -L "$state_file" ] \
+    && [ "$(sha256_file "$state_file")" = "$installed_hash" ]; then
+    rm -f "$state_file"
+  fi
+  if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+    if [ -e "$state_file" ] || [ -L "$state_file" ]; then
+      warn "Polo preserved a concurrently created ownership state at $state_file; the previous managed state remains at $candidate."
+      return 1
+    fi
+    mv "$candidate" "$state_file"
+  fi
+}
+
+finalize_install_rollback() {
+  local transaction_dir="$1"
+  local state_candidate="$2"
+  local polo_candidate="$3"
+  local compat_candidate="$4"
+  local new_state_hash="${5:-}"
+  local polo_installed_identity="${6:-}"
+  local compat_installed_identity="${7:-}"
+  local rollback_ok="true"
+  local journal
+
+  restore_state_candidate "$state_candidate" "$new_state_hash" || rollback_ok="false"
+  restore_candidate "$compat_path" "$compat_candidate" "$compat_target" "$compat_installed_identity" \
+    || rollback_ok="false"
+  restore_candidate "$polo_path" "$polo_candidate" "$polo_target" "$polo_installed_identity" \
+    || rollback_ok="false"
+
+  if [ "$rollback_ok" = "true" ] \
+    && [ ! -e "$state_candidate" ] && [ ! -L "$state_candidate" ] \
+    && [ ! -e "$polo_candidate" ] && [ ! -L "$polo_candidate" ] \
+    && [ ! -e "$compat_candidate" ] && [ ! -L "$compat_candidate" ]; then
+    rm -rf "$transaction_dir"
+    return 0
+  fi
+
+  journal="$transaction_dir/ROLLBACK_REQUIRED"
+  {
+    printf 'owner=%s\n' "$OWNER"
+    printf 'reason=concurrent-path-occupation\n'
+    printf 'polo_path_b64=%s\n' "$(encode_value "$polo_path")"
+    printf 'compat_path_b64=%s\n' "$(encode_value "$compat_path")"
+    printf 'state_path_b64=%s\n' "$(encode_value "$state_file")"
+    printf 'created_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  } > "$journal"
+  chmod 600 "$journal"
+  warn "Polo could not restore every managed entry because a concurrent file occupied its path."
+  warn "Previous managed candidates were preserved for recovery at $transaction_dir"
+  return 1
 }
 
 move_verified_candidate() {
@@ -354,7 +545,7 @@ verify_moved_candidate() {
   local previous_current="${4:-}"
   local expected_target expected_hash hash_target
 
-  if [ "$state_status" = "valid" ]; then
+  if [ "$state_status" = "valid" ] || [ "$state_status" = "legacy" ]; then
     if [ "$kind" = "polo" ]; then
       expected_target="$STATE_POLO_TARGET"
       expected_hash="$STATE_POLO_SHA"
@@ -380,64 +571,79 @@ verify_moved_candidate() {
 install_links_transaction() {
   local previous_current="$1"
   local transaction_dir state_candidate polo_candidate compat_candidate state_hash="" new_state_hash=""
+  local polo_installed_identity="" compat_installed_identity=""
 
   transaction_dir="$(mktemp -d "$state_root/.terminal-install.XXXXXX")"
   chmod 700 "$transaction_dir"
   polo_candidate="$transaction_dir/polo.previous"
   compat_candidate="$transaction_dir/polo-ai.previous"
   state_candidate="$transaction_dir/state.previous"
-  if [ "$state_status" = "valid" ]; then
-    state_hash="$(sha256_file "$state_file")"
+  if [ "$state_status" = "valid" ] || [ "$state_status" = "legacy" ]; then
+    state_hash="$STATE_FILE_HASH"
   fi
 
+  if [ "$path_entry_owned" = "true" ]; then
+    validate_owned_profile "$profile_path" || {
+      rm -rf "$transaction_dir"
+      return 1
+    }
+  fi
   if ! move_verified_candidate "$polo_path" "$polo_candidate" "$state_status" polo "$previous_current"; then
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "" "" || true
     return 1
   fi
   if ! ln -s "$polo_target" "$polo_path"; then
-    restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "" "" || true
+    return 1
+  fi
+  if ! polo_installed_identity="$(filesystem_identity "$polo_path")"; then
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "" "" || true
     return 1
   fi
 
   if ! move_verified_candidate "$compat_path" "$compat_candidate" "$state_status" compat "$previous_current"; then
-    restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "$polo_installed_identity" "" || true
     return 1
   fi
   if ! ln -s "$compat_target" "$compat_path"; then
-    restore_candidate "$compat_path" "$compat_candidate" "$compat_target" || true
-    restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "$polo_installed_identity" "" || true
+    return 1
+  fi
+  if ! compat_installed_identity="$(filesystem_identity "$compat_path")"; then
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "$polo_installed_identity" "" || true
     return 1
   fi
 
   if [ -e "$state_file" ] || [ -L "$state_file" ]; then
-    mv "$state_file" "$state_candidate"
-    if [ "$state_status" != "valid" ] \
+    if ! mv "$state_file" "$state_candidate"; then
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "$polo_installed_identity" "$compat_installed_identity" || true
+      return 1
+    fi
+    if { [ "$state_status" != "valid" ] && [ "$state_status" != "legacy" ]; } \
       || [ ! -f "$state_candidate" ] \
       || [ -L "$state_candidate" ] \
       || [ "$(sha256_file "$state_candidate")" != "$state_hash" ]; then
-      [ ! -e "$state_file" ] && [ ! -L "$state_file" ] && mv "$state_candidate" "$state_file"
-      restore_candidate "$compat_path" "$compat_candidate" "$compat_target" || true
-      restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
-      rm -rf "$transaction_dir"
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "$polo_installed_identity" "$compat_installed_identity" || true
       return 1
     fi
   elif [ "$state_status" != "missing" ]; then
-    restore_candidate "$compat_path" "$compat_candidate" "$compat_target" || true
-    restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "$polo_installed_identity" "$compat_installed_identity" || true
     return 1
   fi
 
   if ! write_state_no_clobber "$state_file" "$version" "$polo_path" "$polo_target" \
     "$compat_path" "$compat_target" "$path_entry_owned" "$profile_path"; then
-    [ ! -e "$state_file" ] && [ ! -L "$state_file" ] \
-      && [ -e "$state_candidate" ] && mv "$state_candidate" "$state_file"
-    restore_candidate "$compat_path" "$compat_candidate" "$compat_target" || true
-    restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "$polo_installed_identity" "$compat_installed_identity" || true
     return 1
   fi
   new_state_hash="$(sha256_file "$state_file")"
@@ -445,15 +651,8 @@ install_links_transaction() {
   if ! load_state "$state_file" \
     || ! verify_owned_link "$polo_path" "$STATE_POLO_PATH" "$STATE_POLO_TARGET" "$STATE_POLO_SHA" \
     || ! verify_owned_link "$compat_path" "$STATE_COMPAT_PATH" "$STATE_COMPAT_TARGET" "$STATE_COMPAT_SHA"; then
-    if [ -f "$state_file" ] && [ ! -L "$state_file" ] \
-      && [ "$(sha256_file "$state_file")" = "$new_state_hash" ]; then
-      rm -f "$state_file"
-    fi
-    [ ! -e "$state_file" ] && [ ! -L "$state_file" ] \
-      && [ -e "$state_candidate" ] && mv "$state_candidate" "$state_file"
-    restore_candidate "$compat_path" "$compat_candidate" "$compat_target" || true
-    restore_candidate "$polo_path" "$polo_candidate" "$polo_target" || true
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "$new_state_hash" "$polo_installed_identity" "$compat_installed_identity" || true
     return 1
   fi
 
@@ -462,6 +661,7 @@ install_links_transaction() {
 
 uninstall_links_transaction() {
   local transaction_dir polo_candidate compat_candidate state_candidate state_hash=""
+  local profile_candidate="" profile_tmp="" profile_hash="" profile_mode=""
 
   transaction_dir="$(mktemp -d "$state_root/.terminal-uninstall.XXXXXX")"
   chmod 700 "$transaction_dir"
@@ -469,42 +669,97 @@ uninstall_links_transaction() {
   compat_candidate="$transaction_dir/polo-ai.owned"
   state_candidate="$transaction_dir/state.owned"
   if [ "$state_status" = "valid" ]; then
-    state_hash="$(sha256_file "$state_file")"
+    state_hash="$STATE_FILE_HASH"
+    if [ "$STATE_PATH_ENTRY_OWNED" = "true" ]; then
+      validate_owned_profile "$STATE_PROFILE_PATH" || {
+        rm -rf "$transaction_dir"
+        return 1
+      }
+      profile_hash="$(sha256_file "$STATE_PROFILE_PATH")"
+      profile_candidate="$transaction_dir/profile.owned"
+      if ! cp -p "$STATE_PROFILE_PATH" "$profile_candidate" \
+        || [ "$(sha256_file "$profile_candidate")" != "$profile_hash" ]; then
+        rm -rf "$transaction_dir"
+        return 1
+      fi
+    fi
   fi
 
   if ! move_verified_candidate "$polo_path" "$polo_candidate" "$state_status" polo; then
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "" "" || true
     return 1
   fi
   if ! move_verified_candidate "$compat_path" "$compat_candidate" "$state_status" compat; then
-    [ ! -e "$polo_path" ] && [ ! -L "$polo_path" ] && [ -e "$polo_candidate" ] \
-      && mv "$polo_candidate" "$polo_path"
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "" "" || true
     return 1
   fi
 
   if [ "$state_status" = "valid" ]; then
     if [ ! -e "$state_file" ] || [ -L "$state_file" ]; then
-      [ ! -e "$compat_path" ] && [ ! -L "$compat_path" ] && mv "$compat_candidate" "$compat_path"
-      [ ! -e "$polo_path" ] && [ ! -L "$polo_path" ] && mv "$polo_candidate" "$polo_path"
-      rm -rf "$transaction_dir"
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
       return 1
     fi
-    mv "$state_file" "$state_candidate"
+    if ! mv "$state_file" "$state_candidate"; then
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
+      return 1
+    fi
     if [ ! -f "$state_candidate" ] \
       || [ -L "$state_candidate" ] \
       || [ "$(sha256_file "$state_candidate")" != "$state_hash" ]; then
-      [ ! -e "$state_file" ] && [ ! -L "$state_file" ] && mv "$state_candidate" "$state_file"
-      [ ! -e "$compat_path" ] && [ ! -L "$compat_path" ] && mv "$compat_candidate" "$compat_path"
-      [ ! -e "$polo_path" ] && [ ! -L "$polo_path" ] && mv "$polo_candidate" "$polo_path"
-      rm -rf "$transaction_dir"
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
       return 1
     fi
   elif [ -e "$state_file" ] || [ -L "$state_file" ]; then
-    [ ! -e "$compat_path" ] && [ ! -L "$compat_path" ] && mv "$compat_candidate" "$compat_path"
-    [ ! -e "$polo_path" ] && [ ! -L "$polo_path" ] && mv "$polo_candidate" "$polo_path"
-    rm -rf "$transaction_dir"
+    finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+      "$compat_candidate" "" "" "" || true
     return 1
+  fi
+
+  if [ "$state_status" = "valid" ] && [ "$STATE_PATH_ENTRY_OWNED" = "true" ]; then
+    if ! validate_owned_profile "$STATE_PROFILE_PATH" \
+      || [ "$(sha256_file "$STATE_PROFILE_PATH")" != "$profile_hash" ]; then
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
+      return 1
+    fi
+    profile_tmp="$(dirname "$STATE_PROFILE_PATH")/.polo-profile-uninstall.$$.$RANDOM"
+    profile_mode="$(stat -c '%a' "$STATE_PROFILE_PATH" 2>/dev/null \
+      || stat -f '%Lp' "$STATE_PROFILE_PATH" 2>/dev/null || true)"
+    if ! awk -v start='# >>> Polo CLI >>>' -v end='# <<< Polo CLI <<<' '
+        $0 == start { managed = 1; next }
+        $0 == end { managed = 0; next }
+        !managed { print }
+      ' "$profile_candidate" > "$profile_tmp"; then
+      rm -f "$profile_tmp"
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
+      return 1
+    fi
+    if [ -n "$profile_mode" ] && ! chmod "$profile_mode" "$profile_tmp"; then
+      rm -f "$profile_tmp"
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
+      return 1
+    fi
+    if ! [ -f "$STATE_PROFILE_PATH" ] \
+      || [ -L "$STATE_PROFILE_PATH" ] \
+      || [ "$(sha256_file "$STATE_PROFILE_PATH")" != "$profile_hash" ]; then
+      rm -f "$profile_tmp"
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
+      return 1
+    fi
+    if ! mv -f "$profile_tmp" "$STATE_PROFILE_PATH"; then
+      rm -f "$profile_tmp"
+      finalize_install_rollback "$transaction_dir" "$state_candidate" "$polo_candidate" \
+        "$compat_candidate" "" "" "" || true
+      return 1
+    fi
   fi
 
   rm -rf "$transaction_dir"
@@ -552,7 +807,11 @@ compat_target="$app_dir/current/resources/app/resources/bin/polo-ai"
 state_status="missing"
 if [ -e "$state_file" ] || [ -L "$state_file" ]; then
   if load_state "$state_file"; then
-    state_status="valid"
+    if [ "$STATE_HAS_FULL_IDENTITY" = "true" ]; then
+      state_status="valid"
+    else
+      state_status="legacy"
+    fi
   else
     state_status="invalid"
   fi
@@ -599,10 +858,13 @@ case "$mode" in
         printf "Install requires --profile-path when Polo owns the PATH entry.\n" >&2
         exit 64
       }
-      case "$profile_path" in
-        "$HOME/.profile"|"$HOME/.bash_profile"|"$HOME/.bash_login"|"$HOME/.zprofile"|"$HOME/.config/fish/conf.d/polo.fish") ;;
-        *) printf "Install profile path is outside the supported shell profiles.\n" >&2; exit 64 ;;
-      esac
+      if ! validate_owned_profile "$profile_path"; then
+        printf "Install profile must be a regular file containing one exact Polo-managed PATH block.\n" >&2
+        exit 64
+      fi
+    elif [ -n "$profile_path" ]; then
+      printf "Install profile path must be empty when Polo does not own the PATH entry.\n" >&2
+      exit 64
     fi
     mkdir -p "$bin_dir" "$(dirname "$state_file")"
     chmod 700 "$(dirname "$state_file")"

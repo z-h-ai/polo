@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -69,6 +70,11 @@ function fixture(): Fixture {
   copyFileSync(canonicalCompat, compatTarget)
   chmodSync(poloTarget, 0o755)
   chmodSync(compatTarget, 0o755)
+  const profilePath = join(root, '.zprofile')
+  writeFileSync(
+    profilePath,
+    '# >>> Polo CLI >>>\nexport PATH="$HOME/.local/bin:$PATH"\n# <<< Polo CLI <<<\n',
+  )
   return {
     root,
     appDir,
@@ -78,13 +84,24 @@ function fixture(): Fixture {
     poloPath: join(binDir, 'polo'),
     compatPath: join(binDir, 'polo-ai'),
     statePath: join(root, '.polo-ai', 'terminal-integration-linux.state'),
-    profilePath: join(root, '.zprofile'),
+    profilePath,
   }
 }
 
 function runHelper(
-  mode: 'preflight' | 'install' | 'verify-uninstall' | 'path-entry-owned' | 'uninstall',
+  mode:
+    | 'preflight'
+    | 'install'
+    | 'verify-uninstall'
+    | 'path-entry-owned'
+    | 'profile-path'
+    | 'uninstall',
   value: Fixture,
+  options: {
+    env?: Record<string, string>
+    profilePath?: string
+    pathEntryOwned?: 'true' | 'false'
+  } = {},
 ): ReturnType<typeof Bun.spawnSync> {
   const args = [
     'bash',
@@ -106,10 +123,13 @@ function runHelper(
     )
   }
   if (mode === 'install') {
-    args.push('--path-entry-owned', 'true', '--profile-path', value.profilePath)
+    args.push('--path-entry-owned', options.pathEntryOwned ?? 'true')
+    if ((options.pathEntryOwned ?? 'true') === 'true') {
+      args.push('--profile-path', options.profilePath ?? value.profilePath)
+    }
   }
   return Bun.spawnSync(args, {
-    env: { ...process.env, HOME: value.root },
+    env: { ...process.env, HOME: value.root, ...options.env },
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -118,6 +138,41 @@ function runHelper(
 function install(value: Fixture): void {
   expect(runHelper('preflight', value).exitCode).toBe(0)
   expect(runHelper('install', value).exitCode).toBe(0)
+}
+
+function racingLnEnvironment(
+  value: Fixture,
+  failCall: number,
+  createRace = true,
+): Record<string, string> {
+  const fakeBin = join(value.root, `race-ln-${failCall}`)
+  const countFile = join(fakeBin, 'count')
+  mkdirSync(fakeBin, { recursive: true })
+  writeFileSync(
+    join(fakeBin, 'ln'),
+    `#!/bin/bash
+set -eu
+count=0
+[ ! -f "$POLO_TEST_LN_COUNT" ] || count="$(cat "$POLO_TEST_LN_COUNT")"
+count=$((count + 1))
+printf '%s\\n' "$count" > "$POLO_TEST_LN_COUNT"
+if [ "$count" -eq "$POLO_TEST_FAIL_LN_CALL" ]; then
+  for last; do :; done
+  if [ "$POLO_TEST_CREATE_RACE" = "true" ]; then
+    printf 'concurrent-user-file-%s\\n' "$count" > "$last"
+  fi
+  exit 73
+fi
+exec /bin/ln "$@"
+`,
+  )
+  chmodSync(join(fakeBin, 'ln'), 0o755)
+  return {
+    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+    POLO_TEST_LN_COUNT: countFile,
+    POLO_TEST_FAIL_LN_CALL: String(failCall),
+    POLO_TEST_CREATE_RACE: createRace ? 'true' : 'false',
+  }
 }
 
 afterEach(() => {
@@ -140,11 +195,76 @@ describe('Linux terminal integration ownership', () => {
     expect(state).toMatch(/polo_sha256=[0-9a-f]{64}/)
     expect(state).toMatch(/polo_identity=[0-9a-f]{64}/)
     expect(state).toContain('profile_path_b64=')
+    expect(state).toMatch(/profile_block_sha256=[0-9a-f]{64}/)
+    expect(state).toMatch(/state_identity=[0-9a-f]{64}/)
 
     expect(runHelper('uninstall', value).exitCode).toBe(0)
     expect(existsSync(value.poloPath)).toBe(false)
     expect(existsSync(value.compatPath)).toBe(false)
     expect(existsSync(value.statePath)).toBe(false)
+    expect(readFileSync(value.profilePath, 'utf8')).not.toContain('# >>> Polo CLI >>>')
+  })
+
+  it('rejects missing or malformed owned profiles before creating launchers or state', () => {
+    const missing = fixture()
+    rmSync(missing.profilePath)
+    const missingResult = runHelper('install', missing)
+    expect(missingResult.exitCode).not.toBe(0)
+    expect(existsSync(missing.poloPath)).toBe(false)
+    expect(existsSync(missing.compatPath)).toBe(false)
+    expect(existsSync(missing.statePath)).toBe(false)
+
+    const malformed = fixture()
+    writeFileSync(
+      malformed.profilePath,
+      '# >>> Polo CLI >>>\nexport PATH="/user/bin:$PATH"\n# <<< Polo CLI <<<\n',
+    )
+    const malformedResult = runHelper('install', malformed)
+    expect(malformedResult.exitCode).not.toBe(0)
+    expect(existsSync(malformed.poloPath)).toBe(false)
+    expect(existsSync(malformed.compatPath)).toBe(false)
+    expect(existsSync(malformed.statePath)).toBe(false)
+  })
+
+  it('binds profile and path ownership into the full state identity', () => {
+    for (const field of ['profile_path_b64', 'path_entry_owned']) {
+      const value = fixture()
+      install(value)
+      const bashProfile = join(value.root, '.bash_profile')
+      writeFileSync(
+        bashProfile,
+        '# >>> Polo CLI >>>\nexport PATH="$HOME/.local/bin:$PATH"\n# <<< Polo CLI <<<\n',
+      )
+      const state = readFileSync(value.statePath, 'utf8')
+      const tampered =
+        field === 'profile_path_b64'
+          ? state.replace(
+              /^profile_path_b64=.*$/m,
+              `profile_path_b64=${Buffer.from(bashProfile).toString('base64')}`,
+            )
+          : state.replace(/^path_entry_owned=true$/m, 'path_entry_owned=false')
+      writeFileSync(value.statePath, tampered)
+
+      expect(runHelper('profile-path', value).exitCode).toBe(2)
+      expect(runHelper('uninstall', value).exitCode).toBe(2)
+      expect(lstatSync(value.poloPath).isSymbolicLink()).toBe(true)
+      expect(readFileSync(value.profilePath, 'utf8')).toContain('# >>> Polo CLI >>>')
+      expect(readFileSync(bashProfile, 'utf8')).toContain('# >>> Polo CLI >>>')
+    }
+  })
+
+  it('never authorizes a different supported profile that is not bound by state', () => {
+    const value = fixture()
+    install(value)
+    const bashProfile = join(value.root, '.bash_profile')
+    const bashContent =
+      'export USER_SETTING=1\n# >>> Polo CLI >>>\n'
+      + 'export PATH="$HOME/.local/bin:$PATH"\n# <<< Polo CLI <<<\n'
+    writeFileSync(bashProfile, bashContent)
+
+    expect(runHelper('profile-path', value).stdout.toString().trim()).toBe(value.profilePath)
+    expect(runHelper('uninstall', value).exitCode).toBe(0)
+    expect(readFileSync(bashProfile, 'utf8')).toBe(bashContent)
   })
 
   it('preserves the reviewer copied-marker file when ownership state is absent', () => {
@@ -201,6 +321,85 @@ describe('Linux terminal integration ownership', () => {
     expect(runHelper('verify-uninstall', value).exitCode).toBe(0)
     expect(runHelper('path-entry-owned', value).stdout.toString().trim()).toBe('true')
     expect(runHelper('uninstall', value).exitCode).toBe(0)
+  })
+
+  it('requires repair to bind legacy schema 4 state before uninstall', () => {
+    const value = fixture()
+    install(value)
+    const legacyState = readFileSync(value.statePath, 'utf8')
+      .split('\n')
+      .filter(
+        (line) =>
+          !line.startsWith('profile_block_sha256=') && !line.startsWith('state_identity='),
+      )
+      .join('\n')
+    writeFileSync(value.statePath, legacyState)
+
+    expect(runHelper('verify-uninstall', value).exitCode).toBe(2)
+    expect(runHelper('preflight', value).exitCode).toBe(0)
+    expect(runHelper('install', value).exitCode).toBe(0)
+    expect(readFileSync(value.statePath, 'utf8')).toMatch(/state_identity=[0-9a-f]{64}/)
+    expect(runHelper('uninstall', value).exitCode).toBe(0)
+  })
+
+  it('persists rollback candidates when polo, compat, or state is concurrently occupied', () => {
+    const cases = [
+      { failCall: 1, occupied: 'polo', candidate: 'polo.previous' },
+      { failCall: 2, occupied: 'polo-ai', candidate: 'polo-ai.previous' },
+      { failCall: 3, occupied: 'terminal-integration-linux.state', candidate: 'state.previous' },
+    ] as const
+
+    for (const testCase of cases) {
+      const value = fixture()
+      install(value)
+      const oldState = readFileSync(value.statePath, 'utf8')
+      const result = runHelper('install', value, {
+        env: racingLnEnvironment(value, testCase.failCall),
+      })
+
+      expect(result.exitCode).not.toBe(0)
+      const occupiedPath =
+        testCase.occupied === 'polo'
+          ? value.poloPath
+          : testCase.occupied === 'polo-ai'
+            ? value.compatPath
+            : value.statePath
+      expect(readFileSync(occupiedPath, 'utf8')).toContain('concurrent-user-file')
+      const quarantineDirs = readdirSync(join(value.root, '.polo-ai'))
+        .filter((name) => name.startsWith('.terminal-install.'))
+      expect(quarantineDirs).toHaveLength(1)
+      const quarantine = join(value.root, '.polo-ai', quarantineDirs[0]!)
+      expect(existsSync(join(quarantine, testCase.candidate))).toBe(true)
+      expect(readFileSync(join(quarantine, 'ROLLBACK_REQUIRED'), 'utf8')).toContain(
+        'reason=concurrent-path-occupation',
+      )
+      expect(result.stderr.toString()).toContain(quarantine)
+      if (testCase.failCall !== 3) {
+        expect(readFileSync(value.statePath, 'utf8')).toBe(oldState)
+      }
+    }
+  })
+
+  it('fully restores managed entries and removes quarantine after a helper failure without a race', () => {
+    const value = fixture()
+    install(value)
+    const oldState = readFileSync(value.statePath, 'utf8')
+    const oldPoloTarget = readlinkSync(value.poloPath)
+    const oldCompatTarget = readlinkSync(value.compatPath)
+
+    const result = runHelper('install', value, {
+      env: racingLnEnvironment(value, 2, false),
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(readlinkSync(value.poloPath)).toBe(oldPoloTarget)
+    expect(readlinkSync(value.compatPath)).toBe(oldCompatTarget)
+    expect(readFileSync(value.statePath, 'utf8')).toBe(oldState)
+    expect(
+      readdirSync(join(value.root, '.polo-ai')).filter((name) =>
+        name.startsWith('.terminal-install.'),
+      ),
+    ).toHaveLength(0)
   })
 
   it('migrates only the exact pre-POO-14 Linux GUI launcher template', () => {

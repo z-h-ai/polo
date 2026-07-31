@@ -4,7 +4,9 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -162,6 +164,30 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
     expect(readFileSync(appImagePath, 'utf8')).toBe(originalAppImage)
     writeFileSync(statePath, originalState)
 
+    const unboundProfile = join(home, '.bash_profile')
+    const unboundProfileContent =
+      'export USER_SETTING=1\n# >>> Polo CLI >>>\n'
+      + 'export PATH="$HOME/.local/bin:$PATH"\n# <<< Polo CLI <<<\n'
+    writeFileSync(unboundProfile, unboundProfileContent)
+    writeFileSync(
+      statePath,
+      originalState.replace(
+        /^profile_path_b64=.*$/m,
+        `profile_path_b64=${Buffer.from(unboundProfile).toString('base64')}`,
+      ),
+    )
+    const tamperedProfileUninstall = Bun.spawnSync(
+      ['bash', join(import.meta.dir, 'uninstall-app.sh')],
+      { env, stdout: 'pipe', stderr: 'pipe' },
+    )
+    expect(tamperedProfileUninstall.exitCode).toBe(2)
+    expect(readFileSync(unboundProfile, 'utf8')).toBe(unboundProfileContent)
+    expect(readFileSync(profilePath, 'utf8')).toBe(originalProfile)
+    expect(readFileSync(currentPackage, 'utf8')).toBe(originalPackage)
+    expect(readFileSync(appImagePath, 'utf8')).toBe(originalAppImage)
+    expect(existsSync(installedPolo)).toBe(true)
+    writeFileSync(statePath, originalState)
+
     writeFileSync(profilePath, `${originalProfile}# >>> Polo CLI >>>\n`)
     const malformedUpgrade = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
       env,
@@ -174,6 +200,49 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
     expect(readFileSync(statePath, 'utf8')).toBe(originalState)
     expect(lstatSync(installedPolo).isSymbolicLink()).toBe(true)
     writeFileSync(profilePath, originalProfile)
+
+    const lnCount = join(fakeBin, 'ln-count')
+    writeFileSync(
+      join(fakeBin, 'ln'),
+      `#!/bin/bash
+set -eu
+count=0
+[ ! -f "$POLO_TEST_LN_COUNT" ] || count="$(cat "$POLO_TEST_LN_COUNT")"
+count=$((count + 1))
+printf '%s\\n' "$count" > "$POLO_TEST_LN_COUNT"
+if [ "$count" -eq 1 ]; then
+  for last; do :; done
+  printf 'installer-concurrent-user-file\\n' > "$last"
+  exit 73
+fi
+exec /bin/ln "$@"
+`,
+    )
+    chmodSync(join(fakeBin, 'ln'), 0o755)
+    const racedUpgrade = Bun.spawnSync(['bash', join(import.meta.dir, 'install-app.sh')], {
+      env: { ...env, POLO_TEST_LN_COUNT: lnCount },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(racedUpgrade.exitCode).not.toBe(0)
+    expect(readFileSync(installedPolo, 'utf8')).toContain('installer-concurrent-user-file')
+    expect(readFileSync(profilePath, 'utf8')).toBe(originalProfile)
+    expect(readFileSync(currentPackage, 'utf8')).toBe(originalPackage)
+    expect(readFileSync(appImagePath, 'utf8')).toBe(originalAppImage)
+    expect(readFileSync(statePath, 'utf8')).toBe(originalState)
+    const quarantineDirs = readdirSync(join(home, '.polo-ai'))
+      .filter((name) => name.startsWith('.terminal-install.'))
+    expect(quarantineDirs).toHaveLength(1)
+    const quarantine = join(home, '.polo-ai', quarantineDirs[0]!)
+    expect(readFileSync(join(quarantine, 'ROLLBACK_REQUIRED'), 'utf8')).toContain(
+      'reason=concurrent-path-occupation',
+    )
+    expect(racedUpgrade.stderr.toString()).toContain(quarantine)
+
+    rmSync(installedPolo)
+    renameSync(join(quarantine, 'polo.previous'), installedPolo)
+    rmSync(quarantine, { recursive: true, force: true })
+    rmSync(join(fakeBin, 'ln'))
 
     const userProfile = join(home, '.bash_profile')
     const userProfileContent =
@@ -189,5 +258,5 @@ printf 'server\\n' > "$root/app/dist/server/polo-server.js"
     expect(existsSync(installedCompat)).toBe(false)
     expect(existsSync(join(home, '.polo-ai', 'app'))).toBe(false)
     expect(readFileSync(userProfile, 'utf8')).toBe(userProfileContent)
-  })
+  }, 20_000)
 })

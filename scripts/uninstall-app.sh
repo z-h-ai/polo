@@ -85,67 +85,13 @@ terminal_cleanup_ok=true
 if [ "$(uname -s)" = "Linux" ]; then
     linux_helper="$HOME/.polo-ai/app/current/resources/app/resources/scripts/linux-terminal-integration.sh"
     if [ -f "$linux_helper" ] && [ ! -L "$linux_helper" ]; then
-        profile_paths=()
-        if ! bash "$linux_helper" verify-uninstall \
+        if ! bash "$linux_helper" uninstall \
             --app-dir "$HOME/.polo-ai/app" \
             --bin-dir "$HOME/.local/bin"; then
             terminal_cleanup_ok=false
+            warn "Polo terminal integration was preserved because launcher, state, or PATH ownership changed during uninstall."
         else
-            path_entry_owned=$(bash "$linux_helper" path-entry-owned \
-                --app-dir "$HOME/.polo-ai/app" \
-                --bin-dir "$HOME/.local/bin") || terminal_cleanup_ok=false
-            if [ "$terminal_cleanup_ok" = true ] && [ "$path_entry_owned" = true ]; then
-                owned_profile_path=$(bash "$linux_helper" profile-path \
-                    --app-dir "$HOME/.polo-ai/app" \
-                    --bin-dir "$HOME/.local/bin") || terminal_cleanup_ok=false
-                if [ "$terminal_cleanup_ok" = true ] && [ -n "$owned_profile_path" ]; then
-                    profile_paths=("$owned_profile_path")
-                else
-                    terminal_cleanup_ok=false
-                    warn "Polo terminal integration was preserved because its PATH profile is not bound to ownership state."
-                fi
-            fi
-            if [ "$terminal_cleanup_ok" = true ] && [ "$path_entry_owned" = true ]; then
-                for profile_path in "${profile_paths[@]}"; do
-                    if ! validate_managed_path_block "$profile_path"; then
-                        terminal_cleanup_ok=false
-                        warn "Polo terminal integration was preserved because PATH ownership is malformed or ambiguous: $profile_path"
-                        break
-                    fi
-                done
-            fi
-            if [ "$terminal_cleanup_ok" = true ]; then
-                profile_backup_dir=$(mktemp -d "$HOME/.polo-ai/.terminal-uninstall.XXXXXX")
-                profile_index=0
-                for profile_path in "${profile_paths[@]}"; do
-                    if [ -e "$profile_path" ]; then
-                        cp -p "$profile_path" "$profile_backup_dir/$profile_index"
-                    fi
-                    profile_index=$((profile_index + 1))
-                done
-                if [ "$path_entry_owned" = true ]; then
-                    for profile_path in "${profile_paths[@]}"; do
-                        remove_managed_path_block "$profile_path" || terminal_cleanup_ok=false
-                    done
-                fi
-                if [ "$terminal_cleanup_ok" = true ] && bash "$linux_helper" uninstall \
-                    --app-dir "$HOME/.polo-ai/app" \
-                    --bin-dir "$HOME/.local/bin"; then
-                    info "Removed verified Polo terminal launchers and PATH configuration."
-                else
-                    terminal_cleanup_ok=false
-                    profile_index=0
-                    for profile_path in "${profile_paths[@]}"; do
-                        if [ -f "$profile_backup_dir/$profile_index" ]; then
-                            mkdir -p "$(dirname "$profile_path")"
-                            cp -p "$profile_backup_dir/$profile_index" "$profile_path"
-                        fi
-                        profile_index=$((profile_index + 1))
-                    done
-                    warn "Polo restored PATH configuration because launcher ownership changed during uninstall."
-                fi
-                rm -rf "$profile_backup_dir"
-            fi
+            info "Removed verified Polo terminal launchers and PATH configuration."
         fi
     elif [ -e "$HOME/.local/bin/polo" ] \
         || [ -L "$HOME/.local/bin/polo" ] \
