@@ -259,12 +259,16 @@ export async function createConfigurationSnapshot(
     // CLI-first startup cannot rely on Electron having initialized the config
     // root. Seed the private snapshot from the bundled, read-only defaults.
     const bundledResource = (name: string): string | undefined => {
+      const bundledRoot = process.env.POLO_AI_BUNDLED_ASSETS_ROOT
       const candidates = [
-        process.env.POLO_AI_BUNDLED_ASSETS_ROOT
-          ? join(process.env.POLO_AI_BUNDLED_ASSETS_ROOT, 'apps', 'electron', 'resources', name)
-          : '',
+        // Packaged launchers set the root of the assembled distribution;
+        // bundled assets live directly under <root>/resources.
+        ...(bundledRoot ? [join(bundledRoot, 'resources', name)] : []),
+        // Preserve source-tree support for callers that provide repository
+        // root rather than the Electron app/resources directory.
+        ...(bundledRoot ? [join(bundledRoot, 'apps', 'electron', 'resources', name)] : []),
         join(import.meta.dir, '..', '..', '..', 'apps', 'electron', 'resources', name),
-      ].filter(Boolean)
+      ]
       return candidates.find(candidate => Bun.file(candidate).size > 0)
     }
     const bundledDefaults = bundledResource('config-defaults.json')

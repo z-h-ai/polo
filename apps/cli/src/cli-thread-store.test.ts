@@ -21,6 +21,7 @@ import {
   isOwnerActive,
   listCliThreads,
   locateCliThread,
+  repairAbandonedCliThread,
   updateCliThread,
 } from './cli-thread-store.ts'
 
@@ -137,6 +138,25 @@ describe('CLI Thread store', () => {
 
     await expect(deleteCliThread(record)).rejects.toThrow('symlink')
     expect((await stat(outside)).isDirectory()).toBe(true)
+  })
+
+  it('fails closed when an abandoned Thread owner sidecar is a symlink', async () => {
+    const record = await createExecThread()
+    const outsideOwner = join(root, 'outside-owner.json')
+    await writeFile(outsideOwner, JSON.stringify({
+      leaseId: crypto.randomUUID(),
+      cliPid: 2_147_483_647,
+      cliProcessIdentity: 'external-owner',
+      serverPid: 2_147_483_646,
+      heartbeatAt: Date.now() - 60_000,
+    }))
+    await symlink(outsideOwner, record.ownerFile)
+
+    await expect(repairAbandonedCliThread(record)).rejects.toThrow('symlink')
+    expect(JSON.parse(await readFile(join(record.directory, 'thread.json'), 'utf-8')).status)
+      .toBeUndefined()
+    expect(JSON.parse(await readFile(outsideOwner, 'utf-8')).cliProcessIdentity)
+      .toBe('external-owner')
   })
 
   it('rejects scope and executions ancestor symlinks before writing outside the CLI root', async () => {

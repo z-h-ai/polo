@@ -70,6 +70,56 @@ describe('one-shot execution internals', () => {
     expect(JSON.parse(await Bun.file(join(snapshot, 'config-defaults.json')).text())).toHaveProperty('defaults')
   })
 
+  it('uses packaged distribution resources for an empty fresh-install config', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-packaged-fresh-config-'))
+    tempDirs.push(temp)
+    const configRoot = join(temp, 'empty-config')
+    const packagedRoot = join(temp, 'distribution')
+    const resources = join(packagedRoot, 'resources')
+    const directory = join(temp, 'thread')
+    const defaults = '{"defaults":{"defaultThinkingLevel":"high"}}\n'
+    const permissions = '{"allowedBashPatterns":["^pwd$"]}\n'
+    await mkdir(join(resources, 'permissions'), { recursive: true })
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(resources, 'config-defaults.json'), defaults)
+    await writeFile(join(resources, 'permissions', 'default.json'), permissions)
+
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    const previousAssetsRoot = process.env.POLO_AI_BUNDLED_ASSETS_ROOT
+    process.env.POLO_AI_CONFIG_DIR = configRoot
+    process.env.POLO_AI_BUNDLED_ASSETS_ROOT = packagedRoot
+    try {
+      const record = {
+        directory,
+        sessionsRoot: join(directory, 'sessions'),
+        ownerFile: join(directory, 'owner.json'),
+        metadata: {
+          version: 1,
+          threadId: crypto.randomUUID(),
+          origin: 'cli-exec',
+          configurationScopeId: 'global',
+          configurationWorkspacePath: configRoot,
+          workingDirectory: temp,
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          persistence: 'persistent',
+        },
+      } satisfies CliThreadRecord
+
+      const snapshot = await createConfigurationSnapshot(record, {
+        id: 'global',
+        path: configRoot,
+      })
+      expect(await readFile(join(snapshot, 'config-defaults.json'), 'utf-8')).toBe(defaults)
+      expect(await readFile(join(snapshot, 'permissions', 'default.json'), 'utf-8')).toBe(permissions)
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+      if (previousAssetsRoot === undefined) delete process.env.POLO_AI_BUNDLED_ASSETS_ROOT
+      else process.env.POLO_AI_BUNDLED_ASSETS_ROOT = previousAssetsRoot
+    }
+  })
+
   it('rejects configuration symlinks without copying their external targets', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'polo-snapshot-symlink-'))
     tempDirs.push(temp)

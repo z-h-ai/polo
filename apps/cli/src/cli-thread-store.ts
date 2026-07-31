@@ -725,6 +725,9 @@ export async function repairAbandonedCliThread(
       return false
     }
 
+    if (existsSync(record.ownerFile)) {
+      await assertCanonicalControlledPath(root, record.ownerFile)
+    }
     const owner = await readJson<CliThreadOwner>(record.ownerFile).catch(() => null)
     if (owner ? isOwnerActive(owner, now) : now - metadata.lastUsedAt <= ACTIVE_LEASE_WINDOW_MS) {
       return false
