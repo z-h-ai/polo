@@ -98,6 +98,18 @@ describe("derived exports", () => {
       translateRegistryMessage("de-DE", "cli.terminalFilesMissing"),
     ).toBe(LOCALE_REGISTRY.de.messages["cli.terminalFilesMissing"]);
   });
+
+  it("localizes the terminal command validation error with stable parameters", () => {
+    const key = "settings.terminalFeatures.error.invalidCommand";
+    const english = LOCALE_REGISTRY.en.messages[key];
+    expect(english).toContain("{{operations}}");
+    for (const code of SUPPORTED_LANGUAGE_CODES) {
+      const message = LOCALE_REGISTRY[code].messages[key];
+      expect(message).toBeDefined();
+      expect(message).toContain("{{operations}}");
+      if (code !== "en") expect(message).not.toBe(english);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

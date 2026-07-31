@@ -1221,6 +1221,7 @@
   "settings.shortcuts.title": "Tastaturkürzel",
   "settings.terminalFeatures.description": "Polo aus jedem Projekt starten und Terminal-Workflows verwenden.",
   "settings.terminalFeatures.error.installFailed": "Polo konnte die Terminalfunktionen nicht installieren. Versuche es erneut.",
+  "settings.terminalFeatures.error.invalidCommand": "Wähle einen dieser Vorgänge für die Terminaleinrichtung: {{operations}}.",
   "settings.terminalFeatures.error.ipcFailed": "Polo konnte die Terminaleinrichtung nicht erreichen. Versuche es erneut.",
   "settings.terminalFeatures.error.profileMalformed": "Die Polo-Terminalkonfiguration in {{path}} ist fehlerhaft und wurde nicht geändert.",
   "settings.terminalFeatures.error.statusFailed": "Polo konnte den Status der Terminalfunktionen nicht prüfen. Versuche es erneut.",

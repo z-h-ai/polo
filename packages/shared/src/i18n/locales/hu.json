@@ -1221,6 +1221,7 @@
   "settings.shortcuts.title": "Billentyűparancsok",
   "settings.terminalFeatures.description": "Indítsa el a Polót bármely projektből, és használja a terminál munkafolyamatait.",
   "settings.terminalFeatures.error.installFailed": "A Polo nem tudta telepíteni a terminálfunkciókat. Próbálja újra.",
+  "settings.terminalFeatures.error.invalidCommand": "Válasszon egy terminálbeállítási műveletet: {{operations}}.",
   "settings.terminalFeatures.error.ipcFailed": "A Polo nem tudott kapcsolódni a terminálbeállításhoz. Próbálja újra.",
   "settings.terminalFeatures.error.profileMalformed": "A Polo terminálkonfigurációja hibás itt: {{path}}, ezért nem módosult.",
   "settings.terminalFeatures.error.statusFailed": "A Polo nem tudta ellenőrizni a terminálfunkciók állapotát. Próbálja újra.",

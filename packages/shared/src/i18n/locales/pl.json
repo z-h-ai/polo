@@ -1221,6 +1221,7 @@
   "settings.shortcuts.title": "Skróty",
   "settings.terminalFeatures.description": "Uruchamiaj Polo z dowolnego projektu i korzystaj z terminala.",
   "settings.terminalFeatures.error.installFailed": "Polo nie mogło zainstalować funkcji terminala. Spróbuj ponownie.",
+  "settings.terminalFeatures.error.invalidCommand": "Wybierz jedną z operacji konfiguracji terminala: {{operations}}.",
   "settings.terminalFeatures.error.ipcFailed": "Polo nie mogło połączyć się z konfiguracją terminala. Spróbuj ponownie.",
   "settings.terminalFeatures.error.profileMalformed": "Konfiguracja terminala Polo w {{path}} jest nieprawidłowa i nie została zmieniona.",
   "settings.terminalFeatures.error.statusFailed": "Polo nie mogło sprawdzić stanu funkcji terminala. Spróbuj ponownie.",

@@ -170,6 +170,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(windowsPreviousPreflight).not.toContain("$semverPattern = '(?:")
     expect(workflow).not.toContain('v[0-9]*.[0-9]*.[0-9]*)')
     expect(workflow).toContain('windows-terminal-integration.test.ps1')
+    expect(workflow).toContain('windows-terminal-integration-race.test.ps1')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_TEAM_ID')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_APP_REQUIREMENT')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_UV_REQUIREMENT')

@@ -8,6 +8,21 @@ import {
 
 export type TerminalIntegrationCommand = 'install' | 'repair' | 'uninstall' | 'status'
 
+export const TERMINAL_INTEGRATION_COMMAND_ERROR_CODE =
+  'POLO_E_TERMINAL_INTEGRATION_INVALID_COMMAND' as const
+
+export class TerminalIntegrationCommandParseError extends Error {
+  readonly errorCode = TERMINAL_INTEGRATION_COMMAND_ERROR_CODE
+  readonly errorParams = {
+    operations: 'install, repair, uninstall, status',
+  }
+
+  constructor() {
+    super(TERMINAL_INTEGRATION_COMMAND_ERROR_CODE)
+    this.name = 'TerminalIntegrationCommandParseError'
+  }
+}
+
 export function parseTerminalIntegrationCommand(
   argv: string[],
 ): TerminalIntegrationCommand | null {
@@ -22,9 +37,7 @@ export function parseTerminalIntegrationCommand(
   ) {
     return command
   }
-  throw new Error(
-    '--polo-terminal-integration requires install, repair, uninstall, or status',
-  )
+  throw new TerminalIntegrationCommandParseError()
 }
 
 export function executeTerminalIntegrationCommand(

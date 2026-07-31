@@ -19,10 +19,14 @@ done < <(
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     windows_test="$PWD/apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1"
+    windows_race_test="$PWD/apps/electron/resources/scripts/tests/windows-terminal-integration-race.test.ps1"
     if command -v cygpath >/dev/null 2>&1; then
       windows_test="$(cygpath -w "$windows_test")"
+      windows_race_test="$(cygpath -w "$windows_race_test")"
     fi
     powershell.exe -NoLogo -NoProfile -NonInteractive \
       -ExecutionPolicy Bypass -File "$windows_test"
+    powershell.exe -NoLogo -NoProfile -NonInteractive \
+      -ExecutionPolicy Bypass -File "$windows_race_test"
     ;;
 esac

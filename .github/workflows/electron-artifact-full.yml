@@ -254,6 +254,12 @@ jobs:
           }
           & powershell.exe -NoLogo -NoProfile -NonInteractive `
             -ExecutionPolicy Bypass `
+            -File apps/electron/resources/scripts/tests/windows-terminal-integration-race.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows terminal integration race tests failed"
+          }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass `
             -File apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
           if ($LASTEXITCODE -ne 0) {
             throw "Native Windows checked-in wrapper smoke failed"

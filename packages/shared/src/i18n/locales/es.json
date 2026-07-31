@@ -1221,6 +1221,7 @@
   "settings.shortcuts.title": "Atajos",
   "settings.terminalFeatures.description": "Inicia Polo desde cualquier proyecto y usa flujos de terminal.",
   "settings.terminalFeatures.error.installFailed": "Polo no pudo instalar las funciones de terminal. Inténtalo de nuevo.",
+  "settings.terminalFeatures.error.invalidCommand": "Elige una de estas operaciones de configuración del terminal: {{operations}}.",
   "settings.terminalFeatures.error.ipcFailed": "Polo no pudo comunicarse con la configuración del terminal. Inténtalo de nuevo.",
   "settings.terminalFeatures.error.profileMalformed": "La configuración del terminal de Polo en {{path}} no es válida y no se modificó.",
   "settings.terminalFeatures.error.statusFailed": "Polo no pudo comprobar el estado de las funciones de terminal. Inténtalo de nuevo.",

@@ -141,6 +141,8 @@ import {
 import {
   executeTerminalIntegrationCommand,
   parseTerminalIntegrationCommand,
+  TerminalIntegrationCommandParseError,
+  type TerminalIntegrationCommand,
 } from './terminal-integration-command'
 import { runTerminalOnboarding } from './terminal-onboarding'
 import { runNonCriticalTerminalOnboarding } from './startup-continuation'
@@ -243,7 +245,7 @@ if (poloCliArgIndex >= 0) {
   if (!bun || !entry || !existsSync(bun) || !existsSync(entry)) {
     const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale
     process.stderr.write(
-      `Error: ${translateRegistryMessage(systemLocale, 'cli.terminalFilesMissing')}\n`,
+      `[POLO_E_TERMINAL_FILES_MISSING] ${translateRegistryMessage(systemLocale, 'cli.terminalFilesMissing')}\n`,
     )
     process.exit(1)
   }
@@ -381,7 +383,17 @@ async function validateAdminSessionAfterResume(args: {
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
-const terminalIntegrationCommand = parseTerminalIntegrationCommand(process.argv)
+let terminalIntegrationCommand: TerminalIntegrationCommand | null = null
+let terminalIntegrationCommandParseError: TerminalIntegrationCommandParseError | null = null
+try {
+  terminalIntegrationCommand = parseTerminalIntegrationCommand(process.argv)
+} catch (error) {
+  if (error instanceof TerminalIntegrationCommandParseError) {
+    terminalIntegrationCommandParseError = error
+  } else {
+    throw error
+  }
+}
 
 // Set app name early (before app.whenReady) to ensure correct macOS menu bar title
 // Supports multi-instance dev: POLO_AI_APP_NAME env var (e.g., "Polo AI [1]")
@@ -552,17 +564,35 @@ async function createInitialWindows(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  if (terminalIntegrationCommand) {
+  if (terminalIntegrationCommand || terminalIntegrationCommandParseError) {
+    await i18n.changeLanguage(resolveSupportedLanguage(app.getLocale()))
+    if (terminalIntegrationCommandParseError) {
+      process.stderr.write(
+        `[${terminalIntegrationCommandParseError.errorCode}] ${i18n.t(
+          'settings.terminalFeatures.error.invalidCommand',
+          terminalIntegrationCommandParseError.errorParams,
+        )}\n`,
+      )
+      app.exit(1)
+      return
+    }
     try {
       const status = executeTerminalIntegrationCommand(
-        terminalIntegrationCommand,
+        terminalIntegrationCommand!,
         terminalIntegrationOptions(),
       )
       process.stdout.write(`${JSON.stringify(status)}\n`)
       app.exit(0)
     } catch (error) {
+      const operation = terminalIntegrationCommand === 'repair'
+        ? 'install'
+        : terminalIntegrationCommand!
+      const payload = toTerminalIntegrationErrorPayload(error, operation)
       process.stderr.write(
-        `${error instanceof Error ? error.message : String(error)}\n`,
+        `[POLO_E_TERMINAL_INTEGRATION_${payload.errorCode.toUpperCase()}] ${i18n.t(
+          TERMINAL_INTEGRATION_ERROR_KEYS[payload.errorCode],
+          payload.errorParams,
+        )}\n`,
       )
       app.exit(1)
     }

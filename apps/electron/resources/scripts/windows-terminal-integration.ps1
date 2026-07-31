@@ -4,7 +4,11 @@ param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\Polo AI",
     [string]$BinDir = "",
     [string]$UserPathFile = "",
-    [switch]$SkipCommandConflict
+    [switch]$SkipCommandConflict,
+    [scriptblock]$TestMutationHook = $null,
+    [string]$UserPathRegistrySubKey = "Environment",
+    [string]$UserPathRegistryValueName = "Path",
+    [string]$TestRegistryRaceValue = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,18 +30,432 @@ $launcherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo.cmd"
 $legacyLauncherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo-ai.cmd"
 $messageTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo-messages.cmd"
 
-function Write-AtomicUtf8([string]$Path, [string]$Content) {
+Add-Type -TypeDefinition @"
+using System;
+using System.ComponentModel;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
+
+public sealed class PoloPathMutationResult {
+    public bool WasPresent { get; set; }
+    public bool Changed { get; set; }
+    public string PreviousValue { get; set; }
+    public string Value { get; set; }
+}
+
+public static class PoloWindowsTerminalAtomic {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle handle,
+        out ByHandleFileInformation information);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInformation {
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool DeleteFile;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetFileInformationByHandle(
+        SafeFileHandle handle,
+        int informationClass,
+        ref FileDispositionInformation information,
+        uint bufferSize);
+
+    [DllImport("ktmw32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateTransaction(
+        IntPtr attributes,
+        IntPtr unitOfWork,
+        uint createOptions,
+        uint isolationLevel,
+        uint isolationFlags,
+        uint timeout,
+        string description);
+
+    [DllImport("ktmw32.dll", SetLastError = true)]
+    private static extern bool CommitTransaction(IntPtr transaction);
+
+    [DllImport("ktmw32.dll", SetLastError = true)]
+    private static extern bool RollbackTransaction(IntPtr transaction);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr window,
+        uint message,
+        IntPtr wParam,
+        string lParam,
+        uint flags,
+        uint timeout,
+        out IntPtr result);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int RegOpenKeyTransacted(
+        IntPtr key,
+        string subKey,
+        uint options,
+        int desiredAccess,
+        out IntPtr result,
+        IntPtr transaction,
+        IntPtr extendedParameter);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int RegQueryValueEx(
+        IntPtr key,
+        string valueName,
+        IntPtr reserved,
+        out uint type,
+        byte[] data,
+        ref uint dataLength);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int RegSetValueEx(
+        IntPtr key,
+        string valueName,
+        int reserved,
+        uint type,
+        byte[] data,
+        int dataLength);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern int RegCloseKey(IntPtr key);
+
+    private const int KeyQueryValue = 0x0001;
+    private const int KeySetValue = 0x0002;
+    private const int ErrorSuccess = 0;
+    private const int ErrorFileNotFound = 2;
+    private const int ErrorMoreData = 234;
+    private const uint RegSz = 1;
+    private const uint RegExpandSz = 2;
+    private const uint GenericRead = 0x80000000;
+    private const uint DeleteAccess = 0x00010000;
+    private const uint FileShareRead = 0x00000001;
+    private const uint OpenExisting = 3;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const int FileDispositionInfo = 4;
+
+    private static string IdentityFromInformation(ByHandleFileInformation information) {
+        ulong fileIndex = ((ulong)information.FileIndexHigh << 32) |
+            information.FileIndexLow;
+        return information.VolumeSerialNumber.ToString("x8") + ":" +
+            fileIndex.ToString("x16");
+    }
+
+    public static string GetRegularFileIdentity(string path) {
+        FileAttributes attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.Directory) != 0 ||
+            (attributes & FileAttributes.ReparsePoint) != 0) {
+            return null;
+        }
+        using (FileStream stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete)) {
+            ByHandleFileInformation information;
+            if (!GetFileInformationByHandle(stream.SafeFileHandle, out information)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return IdentityFromInformation(information);
+        }
+    }
+
+    public static bool DeleteRegularFileIfOwned(
+        string path,
+        string expectedIdentity,
+        string expectedSha256) {
+        return DeleteRegularFilesIfOwned(
+            new string[] { path },
+            new string[] { expectedIdentity },
+            new string[] { expectedSha256 });
+    }
+
+    public static bool DeleteRegularFilesIfOwned(
+        string[] paths,
+        string[] expectedIdentities,
+        string[] expectedSha256s) {
+        if (paths.Length != expectedIdentities.Length ||
+            paths.Length != expectedSha256s.Length) {
+            throw new ArgumentException("Owned-file arrays must have equal lengths.");
+        }
+        List<FileStream> streams = new List<FileStream>();
+        try {
+            for (int index = 0; index < paths.Length; index++) {
+                SafeFileHandle handle = CreateFile(
+                    paths[index],
+                    GenericRead | DeleteAccess,
+                    FileShareRead,
+                    IntPtr.Zero,
+                    OpenExisting,
+                    FileFlagOpenReparsePoint,
+                    IntPtr.Zero);
+                if (handle.IsInvalid) {
+                    int error = Marshal.GetLastWin32Error();
+                    handle.Dispose();
+                    if (error == ErrorFileNotFound) return false;
+                    throw new Win32Exception(error);
+                }
+                ByHandleFileInformation information;
+                if (!GetFileInformationByHandle(handle, out information)) {
+                    int error = Marshal.GetLastWin32Error();
+                    handle.Dispose();
+                    throw new Win32Exception(error);
+                }
+                const uint directoryAttribute = 0x10;
+                const uint reparsePointAttribute = 0x400;
+                if ((information.FileAttributes &
+                    (directoryAttribute | reparsePointAttribute)) != 0 ||
+                    !String.Equals(
+                        IdentityFromInformation(information),
+                        expectedIdentities[index],
+                        StringComparison.Ordinal)) {
+                    handle.Dispose();
+                    return false;
+                }
+                FileStream stream = new FileStream(handle, FileAccess.Read);
+                streams.Add(stream);
+                string actualHash;
+                using (SHA256 sha = SHA256.Create()) {
+                    byte[] hash = sha.ComputeHash(stream);
+                    StringBuilder text = new StringBuilder(hash.Length * 2);
+                    foreach (byte value in hash) text.Append(value.ToString("x2"));
+                    actualHash = text.ToString();
+                }
+                if (!String.Equals(
+                    actualHash,
+                    expectedSha256s[index],
+                    StringComparison.Ordinal)) {
+                    return false;
+                }
+            }
+            for (int index = 0; index < streams.Count; index++) {
+                FileDispositionInformation disposition =
+                    new FileDispositionInformation { DeleteFile = true };
+                if (!SetFileInformationByHandle(
+                    streams[index].SafeFileHandle,
+                    FileDispositionInfo,
+                    ref disposition,
+                    (uint)Marshal.SizeOf(typeof(FileDispositionInformation)))) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+            }
+            return true;
+        } finally {
+            foreach (FileStream stream in streams) stream.Dispose();
+        }
+    }
+
+    public static void MoveNoReplace(string source, string destination) {
+        File.Move(source, destination);
+    }
+
+    public static void WriteUtf8New(string path, string content) {
+        byte[] bytes = new UTF8Encoding(false).GetBytes(content);
+        using (FileStream stream = new FileStream(
+            path,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.Read)) {
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(true);
+        }
+    }
+
+    private static string ReadRegistryString(
+        IntPtr key,
+        string valueName,
+        out uint valueType) {
+        uint length = 0;
+        int status = RegQueryValueEx(
+            key, valueName, IntPtr.Zero, out valueType, null, ref length);
+        if (status == ErrorFileNotFound) {
+            valueType = RegExpandSz;
+            return String.Empty;
+        }
+        if (status != ErrorSuccess && status != ErrorMoreData) {
+            throw new Win32Exception(status);
+        }
+        byte[] data = new byte[length];
+        status = RegQueryValueEx(
+            key, valueName, IntPtr.Zero, out valueType, data, ref length);
+        if (status != ErrorSuccess) {
+            throw new Win32Exception(status);
+        }
+        if (valueType != RegSz && valueType != RegExpandSz) {
+            throw new InvalidDataException("User PATH registry value is not a string.");
+        }
+        string value = Encoding.Unicode.GetString(data, 0, (int)length);
+        return value.TrimEnd('\0');
+    }
+
+    private static bool SamePathEntry(string left, string right) {
+        return String.Equals(
+            left.Trim().TrimEnd('\\'),
+            right.Trim().TrimEnd('\\'),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static PoloPathMutationResult MutateUserPath(
+        string subKey,
+        string valueName,
+        string binDir,
+        bool ensurePresent,
+        string expectedValue,
+        string replacementValue,
+        string testRaceValue) {
+        IntPtr transaction = CreateTransaction(
+            IntPtr.Zero, IntPtr.Zero, 0, 0, 0, 0, "Polo terminal PATH update");
+        if (transaction == new IntPtr(-1)) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        IntPtr key = IntPtr.Zero;
+        bool committed = false;
+        try {
+            int status = RegOpenKeyTransacted(
+                new IntPtr(unchecked((int)0x80000001)),
+                subKey,
+                0,
+                KeyQueryValue | KeySetValue,
+                out key,
+                transaction,
+                IntPtr.Zero);
+            if (status != ErrorSuccess) {
+                throw new Win32Exception(status);
+            }
+            uint valueType;
+            string before = ReadRegistryString(key, valueName, out valueType);
+            if (expectedValue != null &&
+                !String.Equals(before, expectedValue, StringComparison.Ordinal)) {
+                throw new InvalidOperationException(
+                    "User PATH changed before the guarded rollback.");
+            }
+            string[] rawEntries = before.Split(new char[] { ';' });
+            bool wasPresent = false;
+            foreach (string entry in rawEntries) {
+                if (entry.Length > 0 && SamePathEntry(entry, binDir)) {
+                    wasPresent = true;
+                    break;
+                }
+            }
+            string after;
+            if (replacementValue != null) {
+                after = replacementValue;
+            } else {
+                System.Collections.Generic.List<string> entries =
+                    new System.Collections.Generic.List<string>();
+                foreach (string entry in rawEntries) {
+                    if (entry.Length == 0) continue;
+                    if (!ensurePresent && SamePathEntry(entry, binDir)) continue;
+                    entries.Add(entry);
+                }
+                if (ensurePresent && !wasPresent) entries.Add(binDir);
+                after = String.Join(";", entries.ToArray());
+            }
+            bool changed = !String.Equals(before, after, StringComparison.Ordinal);
+            if (!changed) {
+                RollbackTransaction(transaction);
+                return new PoloPathMutationResult {
+                    WasPresent = wasPresent,
+                    Changed = false,
+                    PreviousValue = before,
+                    Value = before
+                };
+            }
+            if (testRaceValue != null) {
+                using (RegistryKey raceKey = Registry.CurrentUser.OpenSubKey(subKey, true)) {
+                    raceKey.SetValue(valueName, testRaceValue, RegistryValueKind.ExpandString);
+                }
+            }
+            byte[] data = Encoding.Unicode.GetBytes(after + "\0");
+            status = RegSetValueEx(
+                key, valueName, 0, valueType, data, data.Length);
+            if (status != ErrorSuccess) {
+                throw new Win32Exception(status);
+            }
+            if (!CommitTransaction(transaction)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            committed = true;
+            IntPtr broadcastResult;
+            SendMessageTimeout(
+                new IntPtr(0xffff),
+                0x001a,
+                IntPtr.Zero,
+                "Environment",
+                0x0002,
+                5000,
+                out broadcastResult);
+            return new PoloPathMutationResult {
+                WasPresent = wasPresent,
+                Changed = true,
+                PreviousValue = before,
+                Value = after
+            };
+        } finally {
+            if (key != IntPtr.Zero) RegCloseKey(key);
+            if (!committed) RollbackTransaction(transaction);
+            CloseHandle(transaction);
+        }
+    }
+}
+"@
+
+function Invoke-TestMutationHook([string]$Step, [string]$Path, [string]$Candidate = "") {
+    if ($TestMutationHook) {
+        & $TestMutationHook $Step $Path $Candidate
+    }
+}
+
+function New-PrivatePath([string]$Path, [string]$Kind) {
+    return "$Path.polo-$Kind-$PID-$([Guid]::NewGuid().ToString('N'))"
+}
+
+function Write-NewUtf8([string]$Path, [string]$Content) {
     $parent = Split-Path -Parent $Path
     if ($parent) {
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
     }
-    $temp = "$Path.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    [PoloWindowsTerminalAtomic]::WriteUtf8New($Path, $Content)
+}
+
+function Get-RegularFileIdentity([string]$Path) {
     try {
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [IO.File]::WriteAllText($temp, $Content, $utf8NoBom)
-        Move-Item -Path $temp -Destination $Path -Force
-    } finally {
-        Remove-Item -Path $temp -Force -ErrorAction SilentlyContinue
+        return [PoloWindowsTerminalAtomic]::GetRegularFileIdentity($Path)
+    } catch [IO.FileNotFoundException] {
+        return $null
+    } catch [IO.DirectoryNotFoundException] {
+        return $null
     }
 }
 
@@ -53,7 +471,7 @@ function Normalize-LineEndings([string]$Content) {
 }
 
 function Test-ExactContent([string]$Path, [string[]]$AllowedContents) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    if (-not (Get-RegularFileIdentity $Path)) {
         return $false
     }
     $actual = Normalize-LineEndings ([IO.File]::ReadAllText($Path))
@@ -65,37 +483,20 @@ function Test-ExactContent([string]$Path, [string[]]$AllowedContents) {
     return $false
 }
 
-function Get-UserPath {
-    if ($UserPathFile) {
-        if (Test-Path $UserPathFile) {
-            return Get-Content $UserPathFile -Raw
-        }
-        return ""
-    }
-    return [Environment]::GetEnvironmentVariable("Path", "User")
-}
-
-function Set-UserPath([string]$Value) {
-    if ($UserPathFile) {
-        Write-AtomicUtf8 $UserPathFile $Value
-        return
-    }
-    [Environment]::SetEnvironmentVariable("Path", $Value, "User")
-}
-
 function Test-PathEntry([string[]]$Entries, [string]$Path) {
     return [bool]($Entries | Where-Object {
         $_ -and $_.Trim().TrimEnd("\") -ieq $Path.TrimEnd("\")
     } | Select-Object -First 1)
 }
 
-function Read-State {
-    if (-not (Test-Path $stateFile)) {
+function Read-State([string]$Path = $stateFile) {
+    if (-not (Get-RegularFileIdentity $Path)) {
         return $null
     }
     try {
-        $state = Get-Content $stateFile -Raw | ConvertFrom-Json
-        if ($state.schemaVersion -ne 1 -and $state.schemaVersion -ne 2) {
+        $state = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        if ($state.schemaVersion -ne 1 -and $state.schemaVersion -ne 2 -and
+            $state.schemaVersion -ne 3) {
             return $null
         }
         return $state
@@ -105,57 +506,12 @@ function Read-State {
 }
 
 function Get-StateFileRecord($State, [string]$Path) {
-    if (-not $State -or $State.schemaVersion -ne 2 -or -not $State.files) {
+    if (-not $State -or $State.schemaVersion -lt 2 -or -not $State.files) {
         return $null
     }
     return $State.files | Where-Object {
         $_.path -and $_.path.TrimEnd("\") -ieq $Path.TrimEnd("\")
     } | Select-Object -First 1
-}
-
-function Test-StateOwnedFile($State, [string]$Path) {
-    $record = Get-StateFileRecord $State $Path
-    if (-not $record -or -not $record.sha256) {
-        return $false
-    }
-    $actualHash = Get-Sha256 $Path
-    return $actualHash -and $actualHash -ceq ([string]$record.sha256).ToLowerInvariant()
-}
-
-function Write-State([bool]$PathEntryAddedByPolo) {
-    $files = @()
-    foreach ($managedFile in @($launcher, $legacyLauncher, $rootPointer)) {
-        $hash = Get-Sha256 $managedFile
-        if ($hash) {
-            $files += @{
-                path = $managedFile
-                sha256 = $hash
-            }
-        }
-    }
-    $state = @{
-        schemaVersion = 2
-        pathEntryAddedByPolo = $PathEntryAddedByPolo
-        binDir = $BinDir
-        files = $files
-        updatedAt = [DateTime]::UtcNow.ToString("o")
-    } | ConvertTo-Json -Depth 4
-    Write-AtomicUtf8 $stateFile $state
-}
-
-function Test-LegacyPoloLauncher {
-    if (-not (Test-Path $legacyLauncher)) {
-        return $false
-    }
-    try {
-        # POO-14 replaces the pre-unified launcher created by install-app.ps1.
-        # Match that exact two-line file so an unrelated polo-ai.cmd can never
-        # transfer ownership of a user-created PATH entry to Polo.
-        $expected = "@echo off`r`nstart `"`" `"$exePath`" %*"
-        return (Test-ExactContent $legacyLauncher @($expected, "$expected`r`n"))
-    } catch {
-        return $false
-    }
 }
 
 function Assert-PackagedArtifacts {
@@ -261,34 +617,420 @@ exit /b %ERRORLEVEL%
     return @()
 }
 
-function Assert-FileOwnedForReplacement($State, [string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
+function Test-LiteralPathExists([string]$Path) {
+    try {
+        Get-Item -Force -LiteralPath $Path -ErrorAction Stop | Out-Null
+        return $true
+    } catch [Management.Automation.ItemNotFoundException] {
+        return $false
     }
-    if (Test-StateOwnedFile $State $Path) {
-        return
-    }
-    if (Test-ExactContent $Path (Get-HistoricalLauncherAllowlist $Path)) {
-        return
-    }
-    throw "Polo cannot replace $Path because it is modified or user-owned. Restore the managed file or remove it manually, then retry."
 }
 
-function Install-LauncherFiles([bool]$CheckCommandConflict, $PreviousState) {
+function Get-ManagedFileSpecs {
+    return @(
+        [PSCustomObject]@{ Path = $launcher; Content = Get-LauncherContent },
+        [PSCustomObject]@{ Path = $legacyLauncher; Content = Get-LegacyShimContent },
+        [PSCustomObject]@{
+            Path = $rootPointer
+            Content = Join-Path $InstallDir "resources"
+        }
+    )
+}
+
+function Claim-ExistingPath([string]$Path, [string]$StepPrefix) {
+    Invoke-TestMutationHook "$StepPrefix`:before-claim" $Path
+    if (-not (Test-LiteralPathExists $Path)) {
+        return $null
+    }
+    $claim = New-PrivatePath $Path "claim"
+    [PoloWindowsTerminalAtomic]::MoveNoReplace($Path, $claim)
+    Invoke-TestMutationHook "$StepPrefix`:after-claim" $Path $claim
+    return [PSCustomObject]@{
+        Path = $Path
+        Claim = $claim
+        Identity = Get-RegularFileIdentity $claim
+        Sha256 = Get-Sha256 $claim
+    }
+}
+
+function Restore-ClaimNoReplace($Claim, [string]$StepPrefix) {
+    if (-not $Claim -or -not (Test-LiteralPathExists $Claim.Claim)) {
+        return
+    }
+    Invoke-TestMutationHook "$StepPrefix`:before-restore" $Claim.Path $Claim.Claim
+    try {
+        [PoloWindowsTerminalAtomic]::MoveNoReplace($Claim.Claim, $Claim.Path)
+    } catch {
+        Write-Warning "Polo preserved a rollback candidate at $($Claim.Claim) because $($Claim.Path) is occupied."
+    }
+}
+
+function Test-ClaimMatchesState($State, [string]$OriginalPath, [string]$ClaimPath) {
+    $record = Get-StateFileRecord $State $OriginalPath
+    if (-not $record -or -not $record.sha256) {
+        return $false
+    }
+    $identity = Get-RegularFileIdentity $ClaimPath
+    if (-not $identity) {
+        return $false
+    }
+    if ($State.schemaVersion -ge 3 -and
+        (!$record.identity -or $identity -cne [string]$record.identity)) {
+        return $false
+    }
+    $hash = Get-Sha256 $ClaimPath
+    return $hash -and $hash -ceq ([string]$record.sha256).ToLowerInvariant()
+}
+
+function Test-ClaimOwnedForUpgrade($State, [string]$OriginalPath, [string]$ClaimPath) {
+    if ($State -and (Test-ClaimMatchesState $State $OriginalPath $ClaimPath)) {
+        return $true
+    }
+    if (-not $State -and
+        (Test-ExactContent $ClaimPath (Get-HistoricalLauncherAllowlist $OriginalPath))) {
+        return $true
+    }
+    return $false
+}
+
+function Publish-NewManagedFile(
+    [string]$Path,
+    [string]$Content,
+    [string]$StepPrefix,
+    [Collections.Generic.List[object]]$Published
+) {
+    $stage = New-PrivatePath $Path "stage"
+    $validationClaim = $null
+    try {
+        Write-NewUtf8 $stage $Content
+        $identity = Get-RegularFileIdentity $stage
+        $hash = Get-Sha256 $stage
+        if (-not $identity -or -not $hash) {
+            throw "Polo could not create a regular staged file for $Path."
+        }
+        Invoke-TestMutationHook "$StepPrefix`:before-publish" $Path $stage
+        [PoloWindowsTerminalAtomic]::MoveNoReplace($stage, $Path)
+        $record = [PSCustomObject]@{
+            Path = $Path
+            Identity = $identity
+            Sha256 = $hash
+        }
+        $Published.Add($record)
+
+        Invoke-TestMutationHook "$StepPrefix`:after-publish" $Path
+        $validationClaim = New-PrivatePath $Path "verify"
+        [PoloWindowsTerminalAtomic]::MoveNoReplace($Path, $validationClaim)
+        Invoke-TestMutationHook "$StepPrefix`:after-validation-claim" $Path $validationClaim
+        if ((Get-RegularFileIdentity $validationClaim) -cne $identity -or
+            (Get-Sha256 $validationClaim) -cne $hash) {
+            throw "Polo lost ownership of $Path before publication completed."
+        }
+        [PoloWindowsTerminalAtomic]::MoveNoReplace($validationClaim, $Path)
+        $validationClaim = $null
+        return $record
+    } finally {
+        if (Test-LiteralPathExists $stage) {
+            Remove-Item -Force -LiteralPath $stage -ErrorAction SilentlyContinue
+        }
+        if ($validationClaim -and (Test-LiteralPathExists $validationClaim)) {
+            try {
+                [PoloWindowsTerminalAtomic]::MoveNoReplace($validationClaim, $Path)
+            } catch {
+                Write-Warning "Polo preserved a publication candidate at $validationClaim because $Path is occupied."
+            }
+        }
+    }
+}
+
+function Remove-PublishedForRollback(
+    [Collections.Generic.List[object]]$Published,
+    [string]$StepPrefix
+) {
+    for ($index = $Published.Count - 1; $index -ge 0; $index--) {
+        $record = $Published[$index]
+        if (-not (Test-LiteralPathExists $record.Path)) {
+            continue
+        }
+        $claim = New-PrivatePath $record.Path "rollback"
+        try {
+            [PoloWindowsTerminalAtomic]::MoveNoReplace($record.Path, $claim)
+            Invoke-TestMutationHook "$StepPrefix`:before-delete-published" $record.Path $claim
+            if (-not [PoloWindowsTerminalAtomic]::DeleteRegularFileIfOwned(
+                $claim,
+                $record.Identity,
+                $record.Sha256
+            )) {
+                Restore-ClaimNoReplace ([PSCustomObject]@{
+                    Path = $record.Path
+                    Claim = $claim
+                }) $StepPrefix
+            }
+        } catch {
+            if (Test-LiteralPathExists $claim) {
+                Restore-ClaimNoReplace ([PSCustomObject]@{
+                    Path = $record.Path
+                    Claim = $claim
+                }) $StepPrefix
+            }
+        }
+    }
+}
+
+function New-StateContent([bool]$PathEntryAddedByPolo, $PublishedRecords) {
+    $files = @()
+    foreach ($record in $PublishedRecords) {
+        $files += @{
+            path = $record.Path
+            identity = $record.Identity
+            sha256 = $record.Sha256
+        }
+    }
+    return @{
+        schemaVersion = 3
+        pathEntryAddedByPolo = $PathEntryAddedByPolo
+        binDir = $BinDir
+        files = $files
+        updatedAt = [DateTime]::UtcNow.ToString("o")
+    } | ConvertTo-Json -Depth 4
+}
+
+function Mutate-UserPathFile(
+    [bool]$EnsurePresent,
+    [string]$ExpectedValue,
+    [Collections.Generic.List[object]]$Claims,
+    [Collections.Generic.List[object]]$Published
+) {
+    $claim = Claim-ExistingPath $UserPathFile "path"
+    if ($claim) {
+        if (-not $claim.Identity) {
+            Restore-ClaimNoReplace $claim "path"
+            throw "Polo cannot update the user PATH fixture because it is not a regular file."
+        }
+        $Claims.Add($claim)
+        $before = [IO.File]::ReadAllText($claim.Claim)
+    } else {
+        $before = ""
+    }
+    if ($null -ne $ExpectedValue -and $before -cne $ExpectedValue) {
+        throw "User PATH changed before the guarded rollback."
+    }
+    $entries = @($before -split ";" | Where-Object { $_ })
+    $wasPresent = Test-PathEntry $entries $BinDir
+    if ($EnsurePresent) {
+        $afterEntries = @($entries)
+        if (-not $wasPresent) {
+            $afterEntries += $BinDir
+        }
+    } else {
+        $afterEntries = @($entries | Where-Object {
+            $_.Trim().TrimEnd("\") -ine $BinDir.TrimEnd("\")
+        })
+    }
+    $after = $afterEntries -join ";"
+    $record = Publish-NewManagedFile $UserPathFile $after "path" $Published
+    return [PSCustomObject]@{
+        WasPresent = $wasPresent
+        Changed = $before -cne $after
+        PreviousValue = $before
+        Value = $after
+        Record = $record
+    }
+}
+
+function Mutate-UserPath(
+    [bool]$EnsurePresent,
+    [string]$ExpectedValue,
+    [Collections.Generic.List[object]]$Claims,
+    [Collections.Generic.List[object]]$Published,
+    [string]$RaceValue,
+    [string]$ReplacementValue = $null
+) {
+    if ($UserPathFile) {
+        return Mutate-UserPathFile $EnsurePresent $ExpectedValue $Claims $Published
+    }
+    return [PoloWindowsTerminalAtomic]::MutateUserPath(
+        $UserPathRegistrySubKey,
+        $UserPathRegistryValueName,
+        $BinDir,
+        $EnsurePresent,
+        $ExpectedValue,
+        $ReplacementValue,
+        $RaceValue
+    )
+}
+
+function Undo-UserPathMutation($Mutation, [bool]$InstallMutation) {
+    if (-not $Mutation -or -not $Mutation.Changed) {
+        return
+    }
+    if ($UserPathFile) {
+        # The file-backed native fixture is restored from its exact atomic claim.
+        return
+    }
+    try {
+        $throwawayClaims = New-Object 'Collections.Generic.List[object]'
+        $throwawayPublished = New-Object 'Collections.Generic.List[object]'
+        Mutate-UserPath (-not $InstallMutation) $Mutation.Value `
+            $throwawayClaims $throwawayPublished $null $Mutation.PreviousValue | Out-Null
+    } catch {
+        Write-Warning "Polo did not roll back PATH because it changed concurrently: $($_.Exception.Message)"
+    }
+}
+
+function Complete-Claims([Collections.Generic.List[object]]$Claims) {
+    $paths = @()
+    $identities = @()
+    $hashes = @()
+    foreach ($claim in $Claims) {
+        if (-not (Test-LiteralPathExists $claim.Claim)) {
+            return $false
+        }
+        Invoke-TestMutationHook "commit:before-delete-claim" $claim.Path $claim.Claim
+        if (-not $claim.Identity -or -not $claim.Sha256) {
+            return $false
+        }
+        $paths += [string]$claim.Claim
+        $identities += [string]$claim.Identity
+        $hashes += [string]$claim.Sha256
+    }
+    if ($paths.Count -eq 0) {
+        return $true
+    }
+    return [PoloWindowsTerminalAtomic]::DeleteRegularFilesIfOwned(
+        [string[]]$paths,
+        [string[]]$identities,
+        [string[]]$hashes
+    )
+}
+
+function Restore-AllClaims([Collections.Generic.List[object]]$Claims, [string]$StepPrefix) {
+    for ($index = $Claims.Count - 1; $index -ge 0; $index--) {
+        Restore-ClaimNoReplace $Claims[$index] $StepPrefix
+    }
+}
+
+function Install-Transactional([bool]$CheckCommandConflict) {
+    Assert-PackagedArtifacts
     if ($CheckCommandConflict) {
         $existing = Get-Command polo -ErrorAction SilentlyContinue
         if ($existing -and $existing.Source.TrimEnd("\") -ine $launcher.TrimEnd("\")) {
             throw "Another command named polo already exists at $($existing.Source). Polo did not overwrite it."
         }
     }
-    Assert-FileOwnedForReplacement $PreviousState $launcher
-    Assert-FileOwnedForReplacement $PreviousState $legacyLauncher
-    Assert-FileOwnedForReplacement $PreviousState $rootPointer
 
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-    Write-AtomicUtf8 $launcher (Get-LauncherContent)
-    Write-AtomicUtf8 $legacyLauncher (Get-LegacyShimContent)
-    Write-AtomicUtf8 $rootPointer (Join-Path $InstallDir "resources")
+    $claims = New-Object 'Collections.Generic.List[object]'
+    $published = New-Object 'Collections.Generic.List[object]'
+    $managedPublished = New-Object 'Collections.Generic.List[object]'
+    $pathMutation = $null
+    $committed = $false
+    try {
+        $stateClaim = Claim-ExistingPath $stateFile "state"
+        $previousState = $null
+        if ($stateClaim) {
+            $claims.Add($stateClaim)
+            $previousState = Read-State $stateClaim.Claim
+            if (-not $previousState) {
+                throw "Polo cannot repair terminal integration because its ownership state is invalid."
+            }
+        }
+
+        $legacyLauncherWasHistorical = $false
+        foreach ($spec in Get-ManagedFileSpecs) {
+            $claim = Claim-ExistingPath $spec.Path "install"
+            if ($claim) {
+                $claims.Add($claim)
+                if (-not (Test-ClaimOwnedForUpgrade $previousState $spec.Path $claim.Claim)) {
+                    throw "Polo cannot replace $($spec.Path) because it is modified or user-owned."
+                }
+                if (-not $previousState -and
+                    $spec.Path.TrimEnd("\") -ieq $legacyLauncher.TrimEnd("\")) {
+                    $legacyLauncherWasHistorical = $true
+                }
+            }
+        }
+
+        foreach ($spec in Get-ManagedFileSpecs) {
+            $record = Publish-NewManagedFile $spec.Path $spec.Content "install" $published
+            $managedPublished.Add($record)
+        }
+
+        $pathMutation = Mutate-UserPath $true $null $claims $published $TestRegistryRaceValue
+        $pathEntryOwned = [bool](
+            ($previousState -and $previousState.pathEntryAddedByPolo) -or
+            (-not $pathMutation.WasPresent) -or
+            ($legacyLauncherWasHistorical -and $pathMutation.WasPresent)
+        )
+        $stateContent = New-StateContent $pathEntryOwned $managedPublished
+        Publish-NewManagedFile $stateFile $stateContent "state" $published | Out-Null
+        $committed = $true
+    } finally {
+        if (-not $committed) {
+            Remove-PublishedForRollback $published "install-rollback"
+            Undo-UserPathMutation $pathMutation $true
+            Restore-AllClaims $claims "install-rollback"
+        } else {
+            if (-not (Complete-Claims $claims)) {
+                Write-Warning "Polo preserved changed transaction candidates instead of deleting them."
+            }
+        }
+    }
+}
+
+function Uninstall-Transactional {
+    $claims = New-Object 'Collections.Generic.List[object]'
+    $published = New-Object 'Collections.Generic.List[object]'
+    $pathMutation = $null
+    $committed = $false
+    try {
+        $stateClaim = Claim-ExistingPath $stateFile "state"
+        if (-not $stateClaim) {
+            Write-Warning "Polo left terminal files unchanged because ownership state is absent."
+            return
+        }
+        $claims.Add($stateClaim)
+        $state = Read-State $stateClaim.Claim
+        if (-not $state) {
+            throw "Polo cannot uninstall terminal integration because its ownership state is invalid."
+        }
+
+        foreach ($spec in Get-ManagedFileSpecs) {
+            $claim = Claim-ExistingPath $spec.Path "uninstall"
+            if (-not $claim) {
+                throw "Polo cannot uninstall terminal integration because $($spec.Path) is missing."
+            }
+            $claims.Add($claim)
+            if (-not (Test-ClaimMatchesState $state $spec.Path $claim.Claim)) {
+                throw "Polo left modified or user-owned file unchanged: $($spec.Path)"
+            }
+        }
+
+        if ($state.pathEntryAddedByPolo) {
+            $pathMutation = Mutate-UserPath $false $null $claims $published $TestRegistryRaceValue
+        }
+
+        foreach ($claim in $claims) {
+            Invoke-TestMutationHook "uninstall:before-commit" $claim.Path $claim.Claim
+            if (-not $claim.Identity -or
+                (Get-RegularFileIdentity $claim.Claim) -cne $claim.Identity -or
+                (Get-Sha256 $claim.Claim) -cne $claim.Sha256) {
+                throw "Polo stopped uninstall because a claimed file changed concurrently: $($claim.Path)"
+            }
+        }
+        if (-not (Complete-Claims $claims)) {
+            throw "Polo stopped uninstall because a claimed file changed before handle-bound cleanup."
+        }
+        $claims.Clear()
+        $committed = $true
+    } finally {
+        if (-not $committed) {
+            Remove-PublishedForRollback $published "uninstall-rollback"
+            Undo-UserPathMutation $pathMutation $false
+            Restore-AllClaims $claims "uninstall-rollback"
+        } else {
+            Complete-Claims $claims | Out-Null
+        }
+    }
 }
 
 if ($Mode -eq "Validate") {
@@ -300,7 +1042,8 @@ if ($Mode -eq "Validate") {
         $legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
         $rootPointer = Join-Path $BinDir "polo-install-root.txt"
         $stateFile = Join-Path $BinDir "terminal-integration.json"
-        Install-LauncherFiles $false $null
+        $UserPathFile = Join-Path $validationRoot "user-path.txt"
+        Install-Transactional $false
         $actualContent = Get-Content $launcher -Raw
         if ((Normalize-LineEndings $actualContent) -cne
             (Normalize-LineEndings ([IO.File]::ReadAllText($launcherTemplate)))) {
@@ -318,75 +1061,11 @@ if ($Mode -eq "Validate") {
 }
 
 if ($Mode -eq "Install") {
-    Assert-PackagedArtifacts
-
-    $previousState = Read-State
-    if ((Test-Path -LiteralPath $stateFile) -and -not $previousState) {
-        throw "Polo cannot repair terminal integration because its ownership state is invalid."
-    }
-    $userPath = Get-UserPath
-    $entries = @($userPath -split ";" | Where-Object { $_ })
-    $pathEntryPresent = Test-PathEntry $entries $BinDir
-    $legacyPathEntryOwned = -not (Test-Path -LiteralPath $stateFile) `
-        -and $pathEntryPresent `
-        -and (Test-LegacyPoloLauncher)
-
-    Install-LauncherFiles (-not $SkipCommandConflict) $previousState
-
-    $pathEntryOwned = [bool](
-        ($previousState -and $previousState.pathEntryAddedByPolo) `
-        -or $legacyPathEntryOwned
-    )
-    if (-not $pathEntryPresent) {
-        # Persist ownership before mutating PATH so an interrupted install never
-        # loses track of an entry Polo intended to add.
-        $pathEntryOwned = $true
-        Write-State $pathEntryOwned
-        Set-UserPath (($entries + $BinDir) -join ";")
-    } else {
-        # A pre-existing entry without Polo state belongs to the user.
-        Write-State $pathEntryOwned
-    }
+    Install-Transactional (-not $SkipCommandConflict)
     return
 }
 
-$state = Read-State
-$stateMissing = -not (Test-Path -LiteralPath $stateFile)
-$ownershipConflict = $false
-$ownedFiles = @()
-$existingManagedFiles = @($launcher, $legacyLauncher, $rootPointer) | Where-Object {
-    Test-Path -LiteralPath $_
-}
-foreach ($managedFile in $existingManagedFiles) {
-    $owned = Test-StateOwnedFile $state $managedFile
-    if (-not $state -and $stateMissing) {
-        $owned = Test-ExactContent $managedFile (Get-HistoricalLauncherAllowlist $managedFile)
-    }
-    if ($owned) {
-        $ownedFiles += $managedFile
-    } else {
-        $ownershipConflict = $true
-        Write-Warning "Polo left modified or user-owned file unchanged: $managedFile"
-    }
-}
-if (-not $ownershipConflict) {
-    foreach ($managedFile in $ownedFiles) {
-        Remove-Item -LiteralPath $managedFile -Force
-    }
-}
-
-if (-not $ownershipConflict -and $state -and $state.pathEntryAddedByPolo) {
-    $userPath = Get-UserPath
-    $remaining = @($userPath -split ";" | Where-Object {
-        $_ -and $_.Trim().TrimEnd("\") -ine $BinDir.TrimEnd("\")
-    })
-    Set-UserPath ($remaining -join ";")
-}
-if (-not $ownershipConflict) {
-    Remove-Item $stateFile -Force -ErrorAction SilentlyContinue
-} else {
-    Write-Warning "Polo terminal state was preserved because managed files no longer match their recorded SHA-256."
-}
+Uninstall-Transactional
 
 if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir -Force | Select-Object -First 1)) {
     Remove-Item $BinDir -Force

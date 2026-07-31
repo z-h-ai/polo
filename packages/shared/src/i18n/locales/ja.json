@@ -1221,6 +1221,7 @@
   "settings.shortcuts.title": "ショートカット",
   "settings.terminalFeatures.description": "どのプロジェクトからでも Polo を起動し、ターミナル機能を利用できます。",
   "settings.terminalFeatures.error.installFailed": "Polo のターミナル機能をインストールできませんでした。もう一度お試しください。",
+  "settings.terminalFeatures.error.invalidCommand": "次のターミナル設定操作から選択してください: {{operations}}。",
   "settings.terminalFeatures.error.ipcFailed": "Polo はターミナル設定と通信できませんでした。もう一度お試しください。",
   "settings.terminalFeatures.error.profileMalformed": "{{path}} の Polo ターミナル設定が正しくないため、変更しませんでした。",
   "settings.terminalFeatures.error.statusFailed": "Polo はターミナル機能の状態を確認できませんでした。もう一度お試しください。",

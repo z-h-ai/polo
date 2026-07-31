@@ -1221,6 +1221,7 @@
   "settings.shortcuts.title": "Shortcuts",
   "settings.terminalFeatures.description": "Start Polo from any project and use terminal workflows.",
   "settings.terminalFeatures.error.installFailed": "Polo could not install terminal features. Try again.",
+  "settings.terminalFeatures.error.invalidCommand": "Choose one of these terminal setup operations: {{operations}}.",
   "settings.terminalFeatures.error.ipcFailed": "Polo could not communicate with terminal setup. Try again.",
   "settings.terminalFeatures.error.profileMalformed": "The Polo terminal configuration in {{path}} is malformed and was not changed.",
   "settings.terminalFeatures.error.statusFailed": "Polo could not check terminal feature status. Try again.",

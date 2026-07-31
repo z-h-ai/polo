@@ -30,9 +30,10 @@ try {
     & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
 
     $state = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
-    Assert-True ($state.schemaVersion -eq 2) "Polo did not write the SHA-256 ownership state schema."
+    Assert-True ($state.schemaVersion -eq 3) "Polo did not write the identity-bound ownership state schema."
     Assert-True ($state.files.Count -eq 3) "Polo did not record both launchers and the root pointer."
     Assert-True ([bool]$state.files[0].sha256) "Polo did not record a managed launcher SHA-256."
+    Assert-True ([bool]$state.files[0].identity) "Polo did not record a managed launcher filesystem identity."
     Assert-True (-not $state.pathEntryAddedByPolo) "Polo incorrectly claimed a pre-existing PATH entry."
     $launcher = Get-Content (Join-Path $binDir "polo.cmd") -Raw
     $canonicalLauncher = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) "..\bin\polo.cmd") -Raw
@@ -90,7 +91,11 @@ try {
     }
     Assert-True $upgradeStopped "Upgrade replaced a launcher whose SHA-256 no longer matched state."
 
-    & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+    try {
+        & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+    } catch {
+        # An ownership conflict makes uninstall incomplete and must return nonzero.
+    }
     Assert-True (Test-Path $managedLauncher) "Uninstall deleted a modified launcher."
     Assert-True (Test-Path (Join-Path $binDir "terminal-integration.json")) "Uninstall deleted ownership state after a conflict."
     Remove-Item -Recurse -Force $binDir
@@ -99,7 +104,11 @@ try {
     # enable the strict legacy allowlist.
     & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
     Set-Content (Join-Path $binDir "terminal-integration.json") -Value '{"schemaVersion":999}'
-    & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+    try {
+        & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+    } catch {
+        # Corrupt ownership state is a safe uninstall failure.
+    }
     Assert-True (Test-Path (Join-Path $binDir "polo.cmd")) "Uninstall deleted a launcher with corrupt state."
     Assert-True (Test-Path (Join-Path $binDir "polo-ai.cmd")) "Uninstall partially deleted files with corrupt state."
     Assert-True (Test-Path (Join-Path $binDir "polo-install-root.txt")) "Uninstall deleted the root pointer with corrupt state."
@@ -117,7 +126,7 @@ try {
     & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
 
     $migratedState = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
-    Assert-True ($migratedState.schemaVersion -eq 2) "Legacy launcher migration did not create hash state."
+    Assert-True ($migratedState.schemaVersion -eq 3) "Legacy launcher migration did not create identity-bound state."
     Assert-True $migratedState.pathEntryAddedByPolo "Polo did not claim its legacy PATH entry during upgrade."
 
     & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
