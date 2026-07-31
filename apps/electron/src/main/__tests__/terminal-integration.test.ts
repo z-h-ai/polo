@@ -183,6 +183,25 @@ describe('macOS terminal integration', () => {
     }
   })
 
+  it('restores the claimed shell profile when a local publication step fails', () => {
+    const options = setup()
+    const profile = join(options.homeDir!, '.zprofile')
+    const original = 'export ORIGINAL_PROFILE=1\n'
+    mkdirSync(options.homeDir!, { recursive: true })
+    writeFileSync(profile, original)
+    options.onBeforeTransactionStep = (step, path) => {
+      if (step === 'profile_publish' && path === profile) {
+        throw new Error('injected profile publication failure')
+      }
+    }
+
+    expect(() => installTerminalIntegration(options)).toThrow(TerminalIntegrationOperationError)
+    expect(readFileSync(profile, 'utf8')).toBe(original)
+    expect(existsSync(join(options.homeDir!, '.local', 'bin', 'polo'))).toBe(false)
+    expect(readdirSync(options.homeDir!).some(name => name.includes('.polo-claim-'))).toBe(false)
+    expect(readdirSync(options.homeDir!).some(name => name.includes('.polo-tmp-'))).toBe(false)
+  })
+
   it('keeps the managed launcher current across app version upgrades', () => {
     const options = setup()
     installTerminalIntegration(options)
@@ -364,6 +383,37 @@ describe('macOS terminal integration', () => {
     }
   })
 
+  it('restores the managed launcher when a local repair step fails after claim', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const originalTarget = readlinkSync(installed.launcherPath)
+    const movedResources = join(
+      dirname(dirname(dirname(options.resourcesPath))),
+      'Polo Failed Repair.app',
+      'Contents',
+      'Resources',
+    )
+    const movedTarget = join(movedResources, 'app', 'resources', 'bin', 'polo')
+    mkdirSync(dirname(movedTarget), { recursive: true })
+    writeFileSync(movedTarget, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const failedOptions: TerminalIntegrationOptions = {
+      ...options,
+      resourcesPath: movedResources,
+      onBeforeTransactionStep: (step, path) => {
+        if (step === 'launcher_publish' && path === installed.launcherPath) {
+          throw new Error('injected launcher publication failure')
+        }
+      },
+    }
+
+    expect(() => installTerminalIntegration(failedOptions)).toThrow(
+      TerminalIntegrationOperationError,
+    )
+    expect(readlinkSync(installed.launcherPath)).toBe(originalTarget)
+    expect(readdirSync(dirname(installed.launcherPath))
+      .some(name => name.includes('.polo-claim-'))).toBe(false)
+  })
+
   it('does not own or uninstall a user-created symlink to the packaged target', () => {
     const options = setup()
     const launcher = join(options.homeDir!, '.local', 'bin', 'polo')
@@ -509,6 +559,25 @@ describe('macOS terminal integration', () => {
     expect(readFileSync(profile, 'utf8')).toContain('export EDITOR=nano')
     expect(readFileSync(profile, 'utf8')).not.toContain('# >>> Polo CLI >>>')
     expect(status.installed).toBe(false)
+  })
+
+  it('keeps the launcher and restores the profile when uninstall publication fails', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    const profile = installed.profilePath!
+    const before = readFileSync(profile, 'utf8')
+    options.onBeforeTransactionStep = (step, path) => {
+      if (step === 'profile_publish' && path === profile) {
+        throw new Error('injected uninstall profile failure')
+      }
+    }
+
+    expect(() => uninstallTerminalIntegration(options)).toThrow(
+      TerminalIntegrationOperationError,
+    )
+    expect(readFileSync(profile, 'utf8')).toBe(before)
+    expect(lstatSync(installed.launcherPath).isSymbolicLink()).toBe(true)
+    expect(existsSync(join(options.homeDir!, '.polo-ai', 'terminal-integration.json'))).toBe(true)
   })
 
   it('repairs and uninstalls profiles left by a previous default shell', () => {

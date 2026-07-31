@@ -299,16 +299,22 @@ function transactionPath(path: string, purpose: 'claim' | 'tmp' | 'backup'): str
   return `${path}.polo-${purpose}-${process.pid}-${crypto.randomUUID()}`
 }
 
+function linkRegularFileNoReplace(source: string, path: string): boolean {
+  try {
+    linkSync(source, path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+    throw error
+  }
+}
+
 function publishRegularFileNoReplace(temp: string, path: string): boolean {
   try {
     // `link` fails with EEXIST and never follows a destination symlink. The
     // temporary file lives beside its destination, so this is an atomic
     // no-replace publication on every supported macOS filesystem.
-    linkSync(temp, path)
-    return true
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
-    throw error
+    return linkRegularFileNoReplace(temp, path)
   } finally {
     rmSync(temp, { force: true })
   }
@@ -330,7 +336,9 @@ function restoreClaimedLeafNoReplace(claimedPath: string, destination: string): 
   const claimed = captureLeaf(claimedPath)
   if (!claimed.exists) return true
   if (claimed.kind === 'file') {
-    return publishRegularFileNoReplace(claimedPath, destination)
+    const restored = linkRegularFileNoReplace(claimedPath, destination)
+    if (restored) rmSync(claimedPath, { force: true })
+    return restored
   }
   if (claimed.kind === 'symlink' && claimed.symlinkValue) {
     const restored = publishSymlinkNoReplace(destination, claimed.symlinkValue)
@@ -382,18 +390,31 @@ function updateManagedProfile(
   if (next === current) return
 
   const claimedPath = claimVerifiedLeaf(options, 'profile_claim', 'profile', path, snapshot)
-  if (claimedPath) backupClaimedRegularFile(claimedPath, path)
   const temp = transactionPath(path, 'tmp')
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(temp, next, { encoding: 'utf8', mode: snapshot.mode ?? 0o600 })
-  options.onBeforeTransactionStep?.('profile_publish', path)
-  if (!publishRegularFileNoReplace(temp, path)) {
-    // The pre-transaction content is already preserved in the explicit
-    // backup. A newly appeared user leaf wins; never restore over it.
+  let published = false
+  try {
+    if (claimedPath) backupClaimedRegularFile(claimedPath, path)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(temp, next, { encoding: 'utf8', mode: snapshot.mode ?? 0o600 })
+    options.onBeforeTransactionStep?.('profile_publish', path)
+    if (!publishRegularFileNoReplace(temp, path)) {
+      // The pre-transaction content is already preserved in the explicit
+      // backup. A newly appeared user leaf wins; never restore over it.
+      if (claimedPath) rmSync(claimedPath, { force: true })
+      throw new TerminalIntegrationConflictError('profile', path)
+    }
+    published = true
     if (claimedPath) rmSync(claimedPath, { force: true })
-    throw new TerminalIntegrationConflictError('profile', path)
+  } catch (error) {
+    rmSync(temp, { force: true })
+    if (!published && claimedPath && pathExists(claimedPath)) {
+      // A local failure after claim must not strand the user's original
+      // profile under a private transaction name. Restore only if the public
+      // leaf is still empty; a concurrently-created user leaf always wins.
+      restoreClaimedLeafNoReplace(claimedPath, path)
+    }
+    throw error
   }
-  if (claimedPath) rmSync(claimedPath, { force: true })
 }
 
 function isExecutable(path: string): boolean {
@@ -509,18 +530,27 @@ function installManagedLauncher(
   if (snapshot.kind === 'symlink' && snapshot.symlinkTarget === target) return true
 
   const claimedPath = claimVerifiedLeaf(options, 'launcher_claim', 'launcher', path, snapshot)
-  if (claimedPath && snapshot.kind === 'file') backupClaimedRegularFile(claimedPath, path)
-  mkdirSync(dirname(path), { recursive: true })
-  options.onBeforeTransactionStep?.('launcher_publish', path)
-  if (!publishSymlinkNoReplace(path, target)) {
-    // A caller may have installed a command after the verified old launcher
-    // was claimed. Restore only into an empty leaf and otherwise preserve both
-    // the new command and our verified rollback candidate/backup.
-    if (claimedPath) restoreClaimedLeafNoReplace(claimedPath, path)
-    return false
+  let published = false
+  try {
+    if (claimedPath && snapshot.kind === 'file') backupClaimedRegularFile(claimedPath, path)
+    mkdirSync(dirname(path), { recursive: true })
+    options.onBeforeTransactionStep?.('launcher_publish', path)
+    if (!publishSymlinkNoReplace(path, target)) {
+      // A caller may have installed a command after the verified old launcher
+      // was claimed. Restore only into an empty leaf and otherwise preserve both
+      // the new command and our verified rollback candidate/backup.
+      if (claimedPath) restoreClaimedLeafNoReplace(claimedPath, path)
+      return false
+    }
+    published = true
+    if (claimedPath) rmSync(claimedPath, { force: true })
+    return true
+  } catch (error) {
+    if (!published && claimedPath && pathExists(claimedPath)) {
+      restoreClaimedLeafNoReplace(claimedPath, path)
+    }
+    throw error
   }
-  if (claimedPath) rmSync(claimedPath, { force: true })
-  return true
 }
 
 function removeManagedLauncher(
@@ -538,10 +568,15 @@ function removeManagedLauncher(
     throw error
   }
   if (!claimedPath) return false
-  // Delete only the private, revalidated candidate. If a user recreated the
-  // command after the claim, it occupies the public path and is left alone.
-  rmSync(claimedPath, { force: true })
-  return true
+  try {
+    // Delete only the private, revalidated candidate. If a user recreated the
+    // command after the claim, it occupies the public path and is left alone.
+    rmSync(claimedPath, { force: true })
+    return true
+  } catch (error) {
+    restoreClaimedLeafNoReplace(claimedPath, path)
+    throw error
+  }
 }
 
 function getManagedBlockRange(content: string): { start: number; end: number } | null {
@@ -828,11 +863,14 @@ export function uninstallTerminalIntegration(
   try {
     const launcherPath = getLauncherPath(options)
     const state = readState(options)
-    removeManagedLauncher(options, launcherPath, state)
 
     for (const path of safeProfilePaths(options, state)) {
       updateManagedProfile(options, path, null)
     }
+    // Keep the owned launcher and state intact until every profile update has
+    // committed. A local filesystem failure can then be retried from Settings
+    // instead of leaving a half-uninstalled, ownerless command.
+    removeManagedLauncher(options, launcherPath, state)
     if (state) rmSync(statePath(options), { force: true })
 
     return getTerminalIntegrationStatus(options)

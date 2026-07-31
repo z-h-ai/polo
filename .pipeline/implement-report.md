@@ -2,82 +2,52 @@
 
 ## 变更摘要
 
-- 完成 Linux AppImage 安装路径的所有权封闭：
-  - 安装前同时校验 `~/.polo-ai/app/current`、AppImage、终端 launcher 和 ownership state；不再把未知常规文件、目录或符号链接当作可升级的 Polo 安装。
-  - 新增基于系统原子 rename primitive 的 no-replace helper。新 runtime、AppImage、回滚候选都以“不覆盖已存在目标”的方式发布，避免检查与移动之间的竞态覆盖用户文件。
-  - transaction 内保留 helper 和安装包自带 Bun；安装、失败回滚及冲突留档不依赖用户预装 Bun，也不依赖已经移动的 runtime。
-  - backup、publish、chmod 任一阶段失败都会核对 inode/hash 并恢复旧安装；遇到并发占用时保留用户目标和 rollback candidate，不递归跟随或删除用户 symlink。
-- 将 canonical wrapper 的用户可见错误和 `polo-ai` 弃用提示统一到 shared locale JSON：
-  - 新增生成脚本，产出 Unix/Windows wrapper 消息表，覆盖 `en/de/es/hu/ja/pl/zh-Hans`。
-  - Unix、Windows 的 `polo`/`polo-ai` 不再维护手写翻译分支；兼容 shim 统一委托 canonical wrapper 输出本地化迁移提示。
-  - CLI artifact build 会先生成消息表，`--check` 可阻止 locale 与 checked-in 产物漂移。
-- 将生成消息表和 Linux 原子 helper 纳入 electron-builder、afterPack、最终容器校验、runtime smoke、Windows/Linux 安装器以及文档工具 wrapper fixture；缺失任一文件会使打包/验收失败。
-- 补充 Linux 未受管 runtime/AppImage（常规文件与 symlink）、安装事务各失败点、7 locale wrapper、兼容 shim和 packaging contract 回归测试。
-- 更新 next release notes，说明 Linux no-clobber 升级和 wrapper locale 单一来源。
+- 审视了当前分支相对 `dev` 合适基线的完整 POO-14 变更、既有实现报告、历轮 reviewer 结论与最新提交，没有改写或删除既有正确实现。
+- 确认现有分支已经覆盖 CLI/server bundle、统一 `polo` wrapper、Electron runtime discovery、`polo run` 临时 headless server、三平台 terminal integration、最终容器验证与 release workflow。
+- 修复最新 macOS terminal integration CAS 事务的异常路径：
+  - profile 或 launcher 已被原子 claim 后，如果备份、临时文件写入或 publication hook 等本地步骤抛错，现在会以 no-replace 方式恢复原 leaf，不再把用户配置或受管 launcher 留在私有 `.polo-claim-*` 路径。
+  - regular-file rollback 不再在目标被并发占用时删除唯一 claim candidate；并发用户 leaf 始终优先，原 candidate 保留用于恢复。
+  - 卸载先完成所有 shell profile 的安全更新，再删除 launcher 与 ownership state；profile publication 失败时仍保留可重试的完整安装状态。
+- 增加确定性故障注入测试，覆盖 install profile publication failure、launcher repair publication failure、uninstall profile publication failure，并验证原配置、launcher、state 与事务残留。
+- 更新 pending release notes，记录 macOS 本地 publication failure 的安全恢复语义。
 
 ## 关键文件列表
 
-- `scripts/install-app.sh`
-- `apps/electron/resources/scripts/linux-terminal-integration.sh`
-- `apps/electron/resources/scripts/atomic-rename-no-replace.ts`
-- `scripts/install-app-shell.test.ts`
-- `scripts/linux-terminal-integration.test.ts`
-- `apps/electron/resources/bin/polo`
-- `apps/electron/resources/bin/polo.cmd`
-- `apps/electron/resources/bin/polo-ai`
-- `apps/electron/resources/bin/polo-ai.cmd`
-- `apps/electron/resources/bin/polo-messages.sh`
-- `apps/electron/resources/bin/polo-messages.cmd`
-- `scripts/generate-wrapper-messages.ts`
-- `scripts/__tests__/packaged-wrapper-i18n.test.ts`
-- `scripts/validate-cli-artifacts.ts`
-- `scripts/validate-cli-runtime.ts`
-- `apps/electron/electron-builder.yml`
-- `apps/electron/scripts/afterPack.cjs`
-- `apps/electron/scripts/validate-final-artifacts.sh`
-- `apps/electron/scripts/validate-final-artifacts.ps1`
-- `apps/electron/resources/scripts/windows-terminal-integration.ps1`
-- `packages/shared/src/i18n/locales/*.json`
+- `apps/electron/src/main/terminal-integration.ts`
+- `apps/electron/src/main/__tests__/terminal-integration.test.ts`
 - `apps/electron/resources/release-notes/next.md`
+- `.pipeline/implement-report.md`
 
 ## 自测结果
 
-- `bun run test`
-  - 通过，主测试集及后续 isolated suites 全部退出 0；无 failed suite。
-- POO-14 安装/包装器定向回归：
-  - `bun test scripts/install-app-shell.test.ts scripts/linux-terminal-integration.test.ts scripts/uninstall-app.test.ts scripts/__tests__/packaged-wrapper-i18n.test.ts scripts/__tests__/electron-artifact-pipeline.test.ts apps/electron/scripts/windows-terminal-integration.test.ts`
-  - `45 pass, 0 fail, 763 expect()`。
-- `python3 -m unittest apps.electron.resources.scripts.tests.test_polo_wrapper_smoke`
-  - `4 tests`，全部通过。
-- `bun run test:doc-tools`
-  - `23 tests`，全部通过。
-- `bun run typecheck:all`
-  - 通过。
-- `bun run lint:i18n:parity`
-  - 通过；7 个 locale 各 `1644` keys。
-- `bun run lint:i18n:sorted`
-  - 通过。
-- `bun run lint:i18n:coverage`
-  - 通过。
-- `bun run lint:shared`
-  - 通过，`0 errors`；9 条仓库既有 warnings。
-- `bun run lint:electron`
-  - 通过，`0 errors`；114 条仓库既有 warnings。
-- `bun run electron:build`
-  - 通过；CLI/server `0.10.0` 构建完成，packaged artifact validation 通过。
-- `bun run electron:validate:cli:runtime`
-  - 通过；覆盖 packaged discovery/server、自相对 symlink launcher、空格与非 ASCII 路径。
-- `bun run scripts/generate-wrapper-messages.ts --check`
-  - 通过；checked-in wrapper 消息表与 shared locale JSON 一致。
-- `bash -n scripts/install-app.sh apps/electron/resources/bin/polo apps/electron/resources/bin/polo-ai apps/electron/resources/scripts/linux-terminal-integration.sh`
-  - 通过。
-- `git diff --check`
-  - 通过。
-- `atomic-rename-no-replace.ts` 本机 primitive smoke：
-  - 首次 no-replace rename 成功；目标已存在时退出 `73` 且未覆盖目标。
+- macOS terminal integration 定向回归：
+  - `bun test apps/electron/src/main/__tests__/terminal-integration.test.ts apps/electron/src/main/__tests__/terminal-onboarding.test.ts apps/electron/src/main/__tests__/terminal-integration-command.test.ts`
+  - `44 pass / 0 fail / 173 expect()`。
+- 全量测试：
+  - `bun run test`
+  - 主套件 `4928 pass / 19 skip / 0 fail / 12580 expect()`，380 files；后续 server concurrency、file-lock race、CLI server spawner、Electron/UI isolated suites 全部通过。
+- 类型、lint 与文案门禁：
+  - `bun run typecheck:all`：通过。
+  - `bun run lint:electron`：退出 0，`0 errors / 114 warnings`；warnings 为仓库既有项。
+  - `bun run lint:shared`：退出 0，`0 errors / 9 warnings`；warnings 为仓库既有项。
+  - `bun run lint:i18n:parity`：通过，6 个非英文 locale 与英文各 `1644` keys。
+  - `bun run lint:i18n:sorted`、`bun run lint:i18n:coverage`：通过。
+  - `bun run test:doc-tools`：`23 tests` 全部通过。
+- 构建与 packaged runtime：
+  - `bun run electron:build`：通过；CLI/server `0.10.0`、Electron main/preload/renderer/resources 全部构建完成，packaged CLI artifact validation 通过。
+  - `bun run electron:validate:cli:runtime`：通过；覆盖 packaged server discovery、自相对 launcher、空格及非 ASCII 路径。
+  - `bun run scripts/generate-wrapper-messages.ts --check`：通过。
+  - `bash -n scripts/install-app.sh apps/electron/resources/bin/polo apps/electron/resources/bin/polo-ai apps/electron/resources/scripts/linux-terminal-integration.sh`：通过。
+- 当前代码重建 macOS arm64 最终容器：
+  - `bun run electron:dist:dev:mac`：通过；构建 ad-hoc signed、未公证的 development DMG/ZIP，builder 的 afterPack/afterAllArtifactBuild 门禁通过。
+  - `bun run electron:validate:artifacts:unix -- --mode smoke --release-dir apps/electron/release --arch arm64`：DMG 与 ZIP final-container CLI smoke 均通过，版本 `0.10.0`。
+  - DMG：`apps/electron/release/Polo-AI-arm64.dmg`，SHA-256 `c7a389f0e9ab2ba44ee845ef17168998c283f6372f1fd348d8015baa3e31fdad`。
+  - ZIP：`apps/electron/release/Polo-AI-arm64.zip`，SHA-256 `07f3042ed0765d0815e21ae119defec22822cb481cb3fe081b52a6346d3dcc79`。
+- `git diff --check`：通过。
 
 ## 遗留问题
 
-- 当前机器是 macOS，不能原生完成 Linux AppImage 与 Windows NSIS 的真实安装、PATH、升级、运行、卸载全生命周期；本轮完成了 installer/helper 的 fixture 回归和打包门禁，最终仍须由对应平台的 blocking workflow 执行生产产物验收。
-- 当前没有受控的固定 previous release artifact，未把 current artifact 冒充跨版本升级证据；previous → current 的真实三平台升级仍需 release workflow 使用固定旧产物验证。
-- macOS/Windows 的正式签名、公证、安装后全新 Terminal，以及最终 DMG/ZIP、NSIS、AppImage 的生产发布验收依赖发布凭据与相应 runner，本地没有虚报完成。
+- 当前宿主为 macOS arm64，本轮无法原生执行 Linux AppImage 与 Windows NSIS 的真实安装、previous-to-current 升级、PATH、App/CLI discovery、run、sessions 和卸载全生命周期；仓库中的对应 fixture、静态契约和 full workflow 门禁已通过本地测试，但不能替代相应原生 runner 证据。
+- 本轮 macOS 最终容器为 development/ad-hoc 构建，没有生产 Apple 签名身份、notarization 与 stapling；不能作为 production release acceptance。
+- 没有可用的可信固定 previous release 三平台产物，因此未执行真实 previous-to-current full lifecycle，也没有把 current artifact 冒充升级证据。
+- 未执行 push。
