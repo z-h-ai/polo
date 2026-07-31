@@ -2,44 +2,37 @@
 
 ## 变更摘要
 
-- 收口 Admin 业务实体 ID 的 Unicode 边界：共享 `AdminEntityIdSchema` 现在接受正常 Unicode（包括合法代理对），并拒绝未配对 UTF-16 surrogate；账号 ID、组织 ID、Group ID、Catalog App ID、本地 scope 与缓存统一复用该契约。
-- Catalog 同步 RPC 在读取凭据、访问缓存或发起网络请求前拒绝格式错误的组织 ID，稳定返回 `VALIDATION_ERROR`，不再允许 `encodeURIComponent` 抛出的 `URIError` 中断同步、缓存回退或 denied 清理链路。
-- Catalog 缓存 key 改为复用无碰撞的 JSON tuple 上下文编码，不再调用会对未配对 surrogate 抛错的 `encodeURIComponent`。
-- 缓存读取会根据记录内的结构化 `accountId + organizationId` 将旧 URI 编码 key 迁移为规范 tuple key；若损坏缓存为同一 scope 保存了重复记录，denied 记录优先，保持 fail closed。
-- 新增共享 schema、缓存迁移、防御性异常输入及 production RPC 接线回归测试。
+- 实现组织 App Catalog 同步、版本化缓存与失权/撤回 tombstone：登录及已登录启动会同步当前组织目录；网络失败保留上次成功缓存；登出、组织失权和目录撤回会立即关闭新的交付/启动能力，同时保留已安装 Bundle 的停止、卸载和受限日志管理闭环。
+- 将组织目录与个人外部 URL 应用分离：首页按最近使用、当前组织应用和外部应用展示；个人外部应用继续复用 `tabBrowser:getApps` / `tabBrowser:saveApps`，组织下发的远程 URL 由可信目录解析后直接在 WebView 打开。
+- 接入本地 Bundle 生命周期：安装前确认受信任的 Release 元数据和权限，安装/取消/重试/更新/卸载调用本地运行管理器；启动必须通过健康检查并返回 localhost 地址后才创建或激活 WebView 标签页。
+- 补齐跨账号、跨组织及异步竞态防护：Catalog scope 以完整账号、组织和 App ID 隔离；过期确认、过期启动、迟到日志、被撤回的 App、离线缓存和大目录批量状态查询均 fail closed，且不泄漏被拒绝目录的 Release/运行时元数据。
 
 ## 关键文件列表
 
-- `packages/shared/src/admin/schemas.ts`
 - `packages/shared/src/admin/app-catalog-cache.ts`
-- `packages/shared/src/admin/__tests__/schemas.test.ts`
-- `packages/shared/src/admin/__tests__/app-catalog-cache.test.ts`
-- `packages/server-core/src/handlers/rpc/admin.isolated.ts`
-- `.pipeline/implement-report.md`
+- `packages/shared/src/protocol/local-apps.ts`
+- `apps/electron/src/main/handlers/local-apps.ts`
+- `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
+- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
+- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
+- `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
+- `apps/electron/src/renderer/components/tab-browser/AddAppDialog.tsx`
 
 ## 自测结果
 
-- `bun run test`
-  - 通过；基础套件 4,836 pass、19 skip、0 fail（4,855 tests / 370 files），随后仓库全部 `*.isolated.ts` 套件通过。
-- `bun run validate:ci`
-  - 通过；全 workspace TypeScript、shared 定向测试、19 个文档工具测试及 i18n parity/sorted/coverage 全部通过；6 个 locale 各 1,706 keys。
-- `bun run typecheck:all`
-  - 通过。
-- `bun test ./packages/shared/src/admin/__tests__/schemas.test.ts ./packages/shared/src/admin/__tests__/app-catalog-cache.test.ts ./packages/shared/src/admin/__tests__/context-key.test.ts`
-  - 23 pass、0 fail。
-- `bun test ./packages/server-core/src/handlers/rpc/admin.isolated.ts`
-  - 60 pass、0 fail；包含 malformed UTF-16 组织 ID 在缓存访问前 fail closed 的 production RPC 回归。
-- `bun run lint:electron`
-  - 通过；0 errors、120 个仓库既有 warnings。
-- 对本次修改的 shared 文件执行 ESLint
-  - 通过；0 errors、0 warnings。
-- `bun run electron:build`
-  - 通过；main、preload、renderer、resources 和 assets 完整生产构建成功。
-- `git diff --check`
-  - 通过。
+- `bun run test`：通过；基础测试及仓库内全部 `*.isolated.ts` 测试均通过。
+- POL-51 定向测试：通过。
+  - `local-apps.isolated.ts`：22 pass。
+  - `admin-local-app-session-ending.isolated.ts`：23 pass。
+  - `useAppCatalog.interaction.isolated.ts`：29 pass。
+  - `HomePage.offline-start.interaction.isolated.ts`：1 pass。
+  - `HomePage.round2.interaction.isolated.ts`：14 pass。
+- `bun run typecheck:all`：通过。
+- `bun run electron:build`：通过（main、preload、renderer、resources 和 assets）。
+- `bun run lint:electron`：通过，0 errors；输出 120 个既有 warnings。
+- `git diff --check`：通过。
 
 ## 遗留问题
 
-- 本任务范围内无已知功能或安全遗留。
-- 全量 `bun run lint:shared` 仍会因 5 个与本任务无关的既有 `no-inline-source-auth-check` 错误失败，位置在 `resource-bundle.test.ts`、`token-refresh-manager.test.ts` 和 `token-refresh-manager.ts`；本次修改文件的 shared ESLint 已单独通过。
-- Electron lint 仍报告 120 个既有 warning；renderer 构建仍有既有大 chunk 提示，均未由本次变更新增。
+- 本任务范围内无已知功能性或安全遗留。
+- 现有 Electron lint warning 与两个 React 测试环境 warning（`act(...)` / Radix ref）未由本次变更新增，未阻断测试和构建。
