@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,7 +12,12 @@ afterEach(() => {
 })
 
 function buildArtifacts(outputDir: string): void {
-  const result = Bun.spawnSync([process.execPath, 'run', buildScript], {
+  const result = Bun.spawnSync([
+    process.execPath,
+    'run',
+    buildScript,
+    '--allow-test-output-override',
+  ], {
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -39,5 +44,42 @@ describe('packaged CLI artifact reproducibility', () => {
 
     expect(secondManifest.equals(firstManifest)).toBe(true)
     expect(JSON.parse(secondManifest.toString())).not.toHaveProperty('generatedAt')
+  })
+
+  it('fails redirected production build and dist before stale default validation', () => {
+    const outputDir = mkdtempSync(join(tmpdir(), 'polo-cli-production-redirect-'))
+    roots.push(outputDir)
+    const defaultManifestPath = join(
+      repoRoot,
+      'apps',
+      'electron',
+      'dist',
+      'cli',
+      'artifact-manifest.json',
+    )
+    const defaultManifest = existsSync(defaultManifestPath)
+      ? readFileSync(defaultManifestPath)
+      : null
+
+    for (const productionScript of ['electron:build', 'electron:dist']) {
+      const redirectedOutput = join(outputDir, productionScript.replace(':', '-'))
+      const result = Bun.spawnSync([process.execPath, 'run', productionScript], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          POLO_AI_CLI_ARTIFACT_OUTPUT_DIR: redirectedOutput,
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const diagnostics = result.stdout.toString() + result.stderr.toString()
+
+      expect(result.exitCode).not.toBe(0)
+      expect(diagnostics).toContain('production electron:build/electron:dist fail closed')
+      expect(existsSync(join(redirectedOutput, 'cli'))).toBe(false)
+      if (defaultManifest) {
+        expect(readFileSync(defaultManifestPath).equals(defaultManifest)).toBe(true)
+      }
+    }
   })
 })

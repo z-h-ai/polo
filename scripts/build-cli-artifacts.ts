@@ -3,8 +3,15 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { join, resolve } from 'node:path'
 
 const root = join(import.meta.dir, '..')
-const electronDist = process.env.POLO_AI_CLI_ARTIFACT_OUTPUT_DIR
-  ? resolve(process.env.POLO_AI_CLI_ARTIFACT_OUTPUT_DIR)
+const artifactOutputOverride = process.env.POLO_AI_CLI_ARTIFACT_OUTPUT_DIR
+if (artifactOutputOverride && !Bun.argv.includes('--allow-test-output-override')) {
+  throw new Error(
+    'POLO_AI_CLI_ARTIFACT_OUTPUT_DIR is test-only and requires the direct artifact builder ' +
+    'flag --allow-test-output-override; production electron:build/electron:dist fail closed.',
+  )
+}
+const electronDist = artifactOutputOverride
+  ? resolve(artifactOutputOverride)
   : join(root, 'apps', 'electron', 'dist')
 const cliDir = join(electronDist, 'cli')
 const serverDir = join(electronDist, 'server')
