@@ -5,6 +5,7 @@ copyright: Copyright © 2026 Polo AI
 electronVersion: "39.2.7"
 
 # Hook to compile macOS 26+ Liquid Glass icon after packaging
+beforePack: scripts/beforePack.cjs
 afterPack: scripts/afterPack.cjs
 
 directories:
@@ -35,6 +36,8 @@ files:
   - resources/bin/markitdown.cmd
   - resources/bin/polo-ai
   - resources/bin/polo-ai.cmd
+  - resources/bin/polo
+  - resources/bin/polo.cmd
   - resources/bin/pdf-tool
   - resources/bin/pdf-tool.cmd
   - resources/bin/xlsx-tool
@@ -56,6 +59,9 @@ files:
   - resources/bin/linux-x64/**/*
   # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
+  # The launcher lives under Resources/app while Bun is staged at
+  # Resources/vendor via platform extraResources below.
+  - "!vendor/bun/**/*"
   # Exclude everything from node_modules (will use extraResources for SDK)
   - "!node_modules/**/*"
 
@@ -116,6 +122,8 @@ mac:
     # ripgrep (used by packages/server-core/src/services/search.ts).
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    - from: vendor/bun/bun
+      to: vendor/bun/bun
     # WhatsApp worker subprocess (self-contained; Baileys bundled in).
     - from: ../../packages/messaging-whatsapp-worker/dist/worker.cjs
       to: messaging-whatsapp-worker/worker.cjs
@@ -211,6 +219,8 @@ linux:
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    - from: vendor/bun/bun
+      to: vendor/bun/bun
     # WhatsApp worker subprocess (self-contained; Baileys bundled in).
     - from: ../../packages/messaging-whatsapp-worker/dist/worker.cjs
       to: messaging-whatsapp-worker/worker.cjs

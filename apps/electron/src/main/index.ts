@@ -165,10 +165,10 @@ if (isDebugMode) {
 
   process.env.POLO_AI_SCRIPTS = scriptsDir
   process.env.POLO_AI_COMMANDS_ENTRY = app.isPackaged
-    ? join(app.getAppPath(), 'apps', 'cli', 'src', 'index.ts')
+    ? join(app.getAppPath(), 'dist', 'cli', 'polo-cli.js')
     : join(process.cwd(), 'apps', 'cli', 'src', 'index.ts')
   process.env.POLO_AI_CLI_ENTRY = app.isPackaged
-    ? join(app.getAppPath(), 'apps', 'cli', 'src', 'index.ts')
+    ? join(app.getAppPath(), 'dist', 'cli', 'polo-cli.js')
     : join(process.cwd(), 'apps', 'cli', 'src', 'index.ts')
   process.env.POLO_AI_COMMANDS_DOC_PATH = app.isPackaged
     ? join(resourcesBase, 'resources', 'docs', 'polo-ai.md')

@@ -5,6 +5,7 @@
  * and `POLO_AI_SERVER_TOKEN=` lines, and returns a handle to stop the server.
  */
 
+import { existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import type { Subprocess } from 'bun'
 import { createSafeRuntimeEnvironment } from '@polo-ai/shared/utils'
@@ -43,19 +44,43 @@ export interface SpawnServerOptions {
 // Auto-detect server entry
 // ---------------------------------------------------------------------------
 
-function findServerEntry(): string {
+export function findServerEntry(startDir = import.meta.dir): string {
+  if (process.env.POLO_AI_SERVER_ENTRY) {
+    if (!existsSync(process.env.POLO_AI_SERVER_ENTRY)) {
+      throw new Error(`Packaged server artifact not found: ${process.env.POLO_AI_SERVER_ENTRY}`)
+    }
+    return process.env.POLO_AI_SERVER_ENTRY
+  }
+
+  const packagedCandidate = resolve(startDir, '..', 'server', 'polo-server.js')
+  if (existsSync(packagedCandidate)) return packagedCandidate
+
   // Walk up from this file's directory to find the monorepo root.
   // Expected layout: apps/cli/src/server-spawner.ts → root/packages/server/src/index.ts
-  let dir = import.meta.dir
+  let dir = startDir
   for (let i = 0; i < 10; i++) {
     const candidate = join(dir, 'packages', 'server', 'src', 'index.ts')
-    if (Bun.file(candidate).size > 0) return candidate
+    if (existsSync(candidate)) return candidate
     dir = resolve(dir, '..')
   }
   throw new Error(
-    'Could not auto-detect server entry. ' +
-    'Pass --server-entry or ensure the monorepo layout includes packages/server/src/index.ts',
+    'Packaged Polo server artifact is missing. Reinstall Polo or pass --server-entry for development.',
   )
+}
+
+export function resolveBunExecutable(): string {
+  return process.env.POLO_AI_BUN || process.execPath
+}
+
+function inferPackagedEnvironment(serverEntry: string): Record<string, string> {
+  if (!serverEntry.endsWith(join('dist', 'server', 'polo-server.js'))) return {}
+  const appRoot = resolve(serverEntry, '..', '..', '..')
+  return {
+    POLO_AI_APP_ROOT: process.env.POLO_AI_APP_ROOT || appRoot,
+    POLO_AI_RESOURCES_PATH: process.env.POLO_AI_RESOURCES_PATH || join(appRoot, 'resources'),
+    POLO_AI_BUNDLED_ASSETS_ROOT: process.env.POLO_AI_BUNDLED_ASSETS_ROOT || appRoot,
+    POLO_AI_IS_PACKAGED: 'true',
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -67,11 +92,14 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   const startupTimeout = opts?.startupTimeout ?? 30_000
   const token = crypto.randomUUID()
   const startedAt = Date.now()
+  const bunExecutable = resolveBunExecutable()
 
   const secrets = (opts?.secrets ?? []).filter((value): value is string => !!value)
-  const proc: Subprocess = Bun.spawn(['bun', 'run', serverEntry], {
+  const proc: Subprocess = Bun.spawn([bunExecutable, 'run', serverEntry], {
     env: createSafeRuntimeEnvironment(process.env, {
+      ...inferPackagedEnvironment(serverEntry),
       ...opts?.env,
+      POLO_AI_BUN: bunExecutable,
       POLO_AI_SERVER_TOKEN: token,
       POLO_AI_RPC_PORT: '0',
       POLO_AI_RPC_HOST: '127.0.0.1',
