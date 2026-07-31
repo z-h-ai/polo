@@ -34,6 +34,11 @@ import {
 } from '@/lib/creator-skill-errors'
 import { translateCreatorSkillValidationIssue } from '@/lib/creator-skill-validation-issues'
 import { compareStableCreatorSkillVersion } from '@/lib/creator-skill-version'
+import {
+  CreatorSkillUploadError,
+  preflightCreatorSkillUploadFile,
+  uploadCreatorSkillArchive,
+} from '@/lib/creator-skill-upload'
 import type {
   CreatorArtifact,
   CreatorArtifactDetail,
@@ -82,6 +87,8 @@ export function CreatorArtifactsPanel({
   const { t } = useTranslation()
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [artifacts, setArtifacts] = useState<CreatorArtifact[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<CreatorArtifactDetail | null>(null)
   const [versionDetails, setVersionDetails] = useState<
@@ -108,6 +115,7 @@ export function CreatorArtifactsPanel({
   const [progress, setProgress] = useState<CreatorSkillOperationProgress | null>(null)
   const [operationId, setOperationId] = useState<string | null>(null)
   const [uploadOperationId, setUploadOperationId] = useState<string | null>(null)
+  const uploadAbortControllerRef = useRef<AbortController | null>(null)
   const [target, setTarget] = useState<{
     name: string
     path: string
@@ -158,6 +166,7 @@ export function CreatorArtifactsPanel({
         return
       }
       setArtifacts(result.artifacts)
+      setNextCursor(result.nextCursor ?? null)
       setSelectedId(current => (
         current && result.artifacts.some(item => item.id === current)
           ? current
@@ -175,6 +184,36 @@ export function CreatorArtifactsPanel({
       if (generation === requestGeneration.current) setLoading(false)
     }
   }, [canManage, organizationId, t])
+
+  const loadMoreArtifacts = useCallback(async () => {
+    const cursor = nextCursor
+    if (!cursor || loadingMore) return
+    const generation = requestGeneration.current
+    setLoadingMore(true)
+    try {
+      const capability = await window.electronAPI.creatorArtifactGetCapabilities()
+      if (!capability.success || generation !== requestGeneration.current) return
+      const result = await window.electronAPI.creatorArtifactList({
+        organizationId,
+        ...(!capability.creatorSkillArtifacts ? { type: 'web_app' as const } : {}),
+        includeDrafts: canManage,
+        cursor,
+      })
+      if (!result.success || generation !== requestGeneration.current) return
+      setArtifacts(current => {
+        const known = new Set(current.map(item => item.id))
+        return [...current, ...result.artifacts.filter(item => !known.has(item.id))]
+      })
+      setNextCursor(result.nextCursor ?? null)
+    } catch (caught) {
+      if (generation === requestGeneration.current) {
+        emitAdminAuthFailure(caught && typeof caught === 'object' ? caught as { code?: string; errorCode?: string; status?: number } : {})
+        setError(t('creatorSkills.errors.unknown'))
+      }
+    } finally {
+      if (generation === requestGeneration.current) setLoadingMore(false)
+    }
+  }, [canManage, loadingMore, nextCursor, organizationId, t])
 
   const loadDetail = useCallback((artifactId: string): Promise<void> => {
     const requestedOrganizationId = organizationId
@@ -319,6 +358,10 @@ export function CreatorArtifactsPanel({
       requestGeneration.current += 1
     }
   }, [loadArtifacts])
+
+  useEffect(() => () => {
+    uploadAbortControllerRef.current?.abort()
+  }, [])
 
   useEffect(() => {
     const selected = artifacts.find(item => item.id === selectedId)
@@ -485,33 +528,50 @@ export function CreatorArtifactsPanel({
 
   const uploadArchive = async (file: File) => {
     if (!detail || !draftVersionId) return
-    const archivePath = window.electronAPI.getFilePath(file)
-    if (!archivePath) {
-      setError(t('creatorSkills.errors.localFileRequired'))
-      return
-    }
     setAction('upload')
     const nextUploadOperationId = crypto.randomUUID()
     setUploadOperationId(nextUploadOperationId)
+    const controller = new AbortController()
+    uploadAbortControllerRef.current = controller
     setError(null)
     setIssues([])
     try {
-      const result = await window.electronAPI.creatorArtifactUploadArchive({
+      await preflightCreatorSkillUploadFile(file, detail.artifact.slug)
+      const grantResult = await window.electronAPI.creatorArtifactCreateUploadGrant({
         organizationId,
         artifactId: detail.artifact.id,
         versionId: draftVersionId,
-        archivePath,
-        operationId: nextUploadOperationId,
         idempotencyKey: idempotencyKey('version-upload'),
+      })
+      if (!grantResult.success) {
+        setError(resultMessage(t, grantResult))
+        return
+      }
+      const uploaded = await uploadCreatorSkillArchive(file, grantResult.grant, {
+        signal: controller.signal,
+      })
+      const result = await window.electronAPI.creatorArtifactCompleteUpload({
+        organizationId,
+        artifactId: detail.artifact.id,
+        versionId: draftVersionId,
+        uploadGeneration: grantResult.grant.uploadGeneration,
+        sizeBytes: uploaded.sizeBytes,
+        idempotencyKey: idempotencyKey('version-upload-complete'),
       })
       if (!result.success) {
         setIssues(result.validationIssues ?? [])
         setError(resultMessage(t, result))
         return
       }
-      setIssues(result.warnings ?? [])
       await loadDetail(detail.artifact.id)
+    } catch (caught) {
+      if (caught instanceof CreatorSkillUploadError) {
+        setError(resultMessage(t, { errorCode: caught.errorCode }))
+      } else {
+        setError(t('creatorSkills.errors.unknown'))
+      }
     } finally {
+      if (uploadAbortControllerRef.current === controller) uploadAbortControllerRef.current = null
       setAction(null)
       setUploadOperationId(null)
     }
@@ -865,6 +925,19 @@ export function CreatorArtifactsPanel({
               </span>
             </button>
           ))}
+          {nextCursor ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-2 w-full"
+              disabled={loadingMore}
+              onClick={() => { void loadMoreArtifacts() }}
+            >
+              {loadingMore ? <Spinner className="mr-1.5" /> : null}
+              {t('creatorSkills.artifacts.loadMore')}
+            </Button>
+          ) : null}
         </div>
       </aside>
 
@@ -1124,7 +1197,7 @@ export function CreatorArtifactsPanel({
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          void window.electronAPI.creatorArtifactCancelUpload(uploadOperationId)
+                          uploadAbortControllerRef.current?.abort()
                         }}
                       >
                         {t('common.cancel')}

@@ -592,7 +592,6 @@ export class AdminClient {
       artifactId: string;
       versionId: string;
       uploadGeneration: number;
-      archiveChecksum: string;
       sizeBytes: number;
       idempotencyKey: string;
     },
@@ -604,7 +603,6 @@ export class AdminClient {
         accessToken,
         headers: { 'Idempotency-Key': input.idempotencyKey },
         body: {
-          archiveChecksum: input.archiveChecksum,
           sizeBytes: input.sizeBytes,
         },
       },

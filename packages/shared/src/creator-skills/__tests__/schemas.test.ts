@@ -4,6 +4,7 @@ import {
   CreatorArtifactIdRpcInputSchema,
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
+  CreatorArtifactDetailSchema,
   CreatorSkillInstallRpcInputSchema,
   CreatorSkillUninstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
@@ -154,6 +155,28 @@ describe('Creator Skill boundary schemas', () => {
     expect(SkillArchivePolicySchema.safeParse({
       ...HARD_SKILL_ARCHIVE_POLICY,
       maxArchiveBytes: HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes + 1,
+    }).success).toBe(false)
+  })
+
+  it('accepts a SKILL.md up to the archive hard byte limit', () => {
+    const artifact = {
+      id: 'artifact-id',
+      organizationId: 'organization-id',
+      type: 'skill',
+      slug: 'review-helper',
+      status: 'published',
+      createdByUserId: 'user-id',
+      createdAt: '2026-07-30T00:00:00.000Z',
+      updatedAt: '2026-07-30T00:00:00.000Z',
+    }
+    const base = { artifact, versions: [] }
+    expect(CreatorArtifactDetailSchema.safeParse({
+      ...base,
+      skillContent: 'a'.repeat(5 * 1024 * 1024 + 1),
+    }).success).toBe(true)
+    expect(CreatorArtifactDetailSchema.safeParse({
+      ...base,
+      skillContent: 'a'.repeat(HARD_SKILL_ARCHIVE_POLICY.maxFileBytes + 1),
     }).success).toBe(false)
   })
 

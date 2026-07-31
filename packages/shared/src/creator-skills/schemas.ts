@@ -121,7 +121,21 @@ export const CreatorArtifactDetailSchema = z.object({
   artifact: CreatorArtifactSchema,
   versions: z.array(CreatorArtifactVersionSchema),
   selectedVersion: stableSemver.optional(),
-  skillContent: z.string().max(5 * 1024 * 1024).optional(),
+  // Zod's string max is measured in UTF-16 code units, while the archive
+  // policy is expressed in bytes.  Keep the transport boundary aligned with
+  // the absolute archive limit and validate the actual UTF-8 representation.
+  skillContent: z.string().superRefine((value, ctx) => {
+    if (new TextEncoder().encode(value).byteLength > HARD_SKILL_ARCHIVE_POLICY.maxFileBytes) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.too_big,
+        origin: 'string',
+        maximum: HARD_SKILL_ARCHIVE_POLICY.maxFileBytes,
+        inclusive: true,
+        type: 'string',
+        message: 'SKILL.md exceeds the maximum UTF-8 byte length',
+      })
+    }
+  }).optional(),
   fileTree: z.array(z.object({
     path: z.string().max(4_096),
     size: z.number().int().nonnegative(),
@@ -254,14 +268,19 @@ export const CreatorArtifactArchiveRpcInputSchema = z.object({
   idempotencyKey,
 }).strict()
 
-export const CreatorArtifactUploadRpcInputSchema = z.object({
+export const CreatorArtifactUploadGrantRpcInputSchema = z.object({
   organizationId: entityId,
   artifactId: entityId,
   versionId: entityId,
-  archivePath: z.string().min(1).max(32_768),
-  operationId: CreatorSkillOperationIdSchema,
   idempotencyKey,
 }).strict()
+
+export const CreatorArtifactUploadCompleteRpcInputSchema = CreatorArtifactUploadGrantRpcInputSchema
+  .extend({
+    uploadGeneration: z.number().int().positive(),
+    sizeBytes: z.number().int().nonnegative().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  })
+  .strict()
 
 export const CreatorArtifactRevokeRpcInputSchema =
   CreatorArtifactVersionRpcInputSchema.extend({

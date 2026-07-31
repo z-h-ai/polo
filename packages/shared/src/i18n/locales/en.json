@@ -350,6 +350,7 @@
   "creatorSkills.artifact.type.web_app": "Web App",
   "creatorSkills.artifact.webAppExistingFlow": "Web Apps continue to use the existing publishing and management flow.",
   "creatorSkills.artifacts.empty": "No Creator Skills yet",
+  "creatorSkills.artifacts.loadMore": "Load more works",
   "creatorSkills.artifacts.select": "Select a Creator Skill",
   "creatorSkills.artifacts.title": "Works",
   "creatorSkills.backups.confirmDelete": "Permanently delete this Creator Skill backup?",

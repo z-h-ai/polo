@@ -55,6 +55,7 @@ function deferred<T>() {
 }
 
 let listInput: unknown
+let listInputs: Array<Record<string, unknown>>
 let artifactListResponse: (
   input: Record<string, unknown>,
 ) => Promise<Record<string, unknown>> | Record<string, unknown>
@@ -71,6 +72,7 @@ let installResponse: (
 beforeEach(async () => {
   await i18n.changeLanguage('en')
   listInput = undefined
+  listInputs = []
   artifactListResponse = () => ({
     success: true as const,
     artifacts: [webApp, skill],
@@ -103,6 +105,7 @@ beforeEach(async () => {
       }),
       creatorArtifactList: async (input: unknown) => {
         listInput = input
+        listInputs.push(input as Record<string, unknown>)
         return artifactListResponse(input as Record<string, unknown>)
       },
       creatorArtifactGet: async (input: Record<string, unknown>) => {
@@ -279,6 +282,35 @@ describe('CreatorArtifactsPanel', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]!.textContent).toContain('Web App')
     expect(rows[1]!.textContent).toContain('Skill')
+  })
+
+  it('loads every catalog page with the same filters and deduplicates artifacts', async () => {
+    const secondSkill = {
+      ...skill,
+      id: 'skill-two',
+      slug: 'second-skill',
+      name: 'Second Skill',
+    }
+    artifactListResponse = input => input.cursor
+      ? {
+          success: true as const,
+          artifacts: [skill, secondSkill],
+        }
+      : {
+          success: true as const,
+          artifacts: [webApp, skill],
+          nextCursor: 'page-two',
+        }
+
+    renderPanel(true)
+    expect(await screen.findByText('Review Skill')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Load more works' }))
+    expect(await screen.findByText('Second Skill')).toBeTruthy()
+    expect(screen.getAllByTestId('creator-artifact-row')).toHaveLength(3)
+    expect(listInputs).toEqual([
+      { organizationId, includeDrafts: true },
+      { organizationId, includeDrafts: true, cursor: 'page-two' },
+    ])
   })
 
   it('uses the localized initial changelog for the first Skill version', async () => {

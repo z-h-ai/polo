@@ -96,6 +96,34 @@ const adminClientBehavior = {
     _accessToken: string,
     _input: unknown,
   ): Promise<any> => ({ artifacts: [] }),
+  createCreatorSkillUploadGrant: async (_accessToken: string, _input: unknown): Promise<any> => ({
+    method: 'PUT',
+    url: 'https://uploads.example.test/object',
+    expiresAt: '2030-01-01T00:00:00.000Z',
+    uploadGeneration: 1,
+  }),
+  completeCreatorSkillUpload: async (_accessToken: string, _input: unknown): Promise<any> => ({
+    version: {
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'uploaded',
+      archiveChecksum: 'a'.repeat(64),
+      uploadGeneration: 1,
+      createdAt: '2026-07-31T00:00:00.000Z',
+    },
+  }),
+  triggerCreatorSkillValidation: async (_accessToken: string, _input: unknown): Promise<any> => ({
+    version: {
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'validating',
+      archiveChecksum: 'a'.repeat(64),
+      uploadGeneration: 1,
+      createdAt: '2026-07-31T00:00:00.000Z',
+    },
+  }),
   createOrganization: async (_accessToken: string, _input: unknown): Promise<any> => {
     throw new Error('createOrganization behavior not configured')
   },
@@ -176,6 +204,21 @@ class MockAdminClient {
       accessToken,
     })
     return adminClientBehavior.listCreatorArtifacts(accessToken, input)
+  }
+
+  async createCreatorSkillUploadGrant(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'createCreatorSkillUploadGrant', args: [input], accessToken })
+    return adminClientBehavior.createCreatorSkillUploadGrant(accessToken, input)
+  }
+
+  async completeCreatorSkillUpload(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'completeCreatorSkillUpload', args: [input], accessToken })
+    return adminClientBehavior.completeCreatorSkillUpload(accessToken, input)
+  }
+
+  async triggerCreatorSkillValidation(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'triggerCreatorSkillValidation', args: [input], accessToken })
+    return adminClientBehavior.triggerCreatorSkillValidation(accessToken, input)
   }
 
   async createOrganization(accessToken: string, input: unknown) {
@@ -377,6 +420,14 @@ function createHarness() {
       handlers,
       RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS,
     ),
+    createCreatorSkillUploadGrant: requiredHandler(
+      handlers,
+      RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT,
+    ),
+    completeCreatorSkillUpload: requiredHandler(
+      handlers,
+      RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD,
+    ),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
     previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
     acceptOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN),
@@ -504,6 +555,34 @@ beforeEach(() => {
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
   adminClientBehavior.listCreatorArtifacts = async () => ({ artifacts: [] })
+  adminClientBehavior.createCreatorSkillUploadGrant = async () => ({
+    method: 'PUT',
+    url: 'https://uploads.example.test/object',
+    expiresAt: '2030-01-01T00:00:00.000Z',
+    uploadGeneration: 1,
+  })
+  adminClientBehavior.completeCreatorSkillUpload = async () => ({
+    version: {
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'uploaded',
+      archiveChecksum: 'a'.repeat(64),
+      uploadGeneration: 1,
+      createdAt: '2026-07-31T00:00:00.000Z',
+    },
+  })
+  adminClientBehavior.triggerCreatorSkillValidation = async () => ({
+    version: {
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'validating',
+      archiveChecksum: 'a'.repeat(64),
+      uploadGeneration: 1,
+      createdAt: '2026-07-31T00:00:00.000Z',
+    },
+  })
 })
 
 describe('registerAdminHandlers', () => {
@@ -513,6 +592,8 @@ describe('registerAdminHandlers', () => {
     expect(Object.keys(harness).sort()).toEqual([
       'acceptOrganizationJoin',
       'cancelOrganizationInvitation',
+      'completeCreatorSkillUpload',
+      'createCreatorSkillUploadGrant',
       'createOrganization',
       'createOrganizationInvitation',
       'createOrganizationJoinLink',
@@ -533,6 +614,64 @@ describe('registerAdminHandlers', () => {
       'updateOrganizationMember',
       'validate',
       'verifyPhoneAuthCode',
+    ])
+  })
+
+  it('issues an upload grant and finalizes metadata without receiving archive bytes or paths', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'user-1',
+      username: 'creator',
+    }
+    const { createCreatorSkillUploadGrant, completeCreatorSkillUpload } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    const base = {
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      versionId: 'version-id',
+      idempotencyKey: 'upload-request-1',
+    }
+
+    await expect(createCreatorSkillUploadGrant(context, {
+      ...base,
+      archivePath: '/renderer/controlled.zip',
+    })).resolves.toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' })
+    await expect(createCreatorSkillUploadGrant(context, base)).resolves.toMatchObject({
+      success: true,
+      grant: { method: 'PUT', uploadGeneration: 1 },
+    })
+    await expect(completeCreatorSkillUpload(context, {
+      ...base,
+      uploadGeneration: 1,
+      sizeBytes: 42,
+    })).resolves.toMatchObject({
+      success: true,
+      version: { status: 'validating' },
+    })
+    expect(adminClientCalls.filter(call => call.method.includes('CreatorSkill'))).toEqual([
+      {
+        method: 'createCreatorSkillUploadGrant',
+        args: [base],
+        accessToken: 'creator-access-token',
+      },
+      {
+        method: 'completeCreatorSkillUpload',
+        args: [{ ...base, uploadGeneration: 1, sizeBytes: 42 }],
+        accessToken: 'creator-access-token',
+      },
+      {
+        method: 'triggerCreatorSkillValidation',
+        args: [{
+          artifactId: 'artifact-id',
+          versionId: 'version-id',
+          uploadGeneration: 1,
+          archiveChecksum: 'a'.repeat(64),
+          idempotencyKey: 'upload-request-1',
+        }],
+        accessToken: 'creator-access-token',
+      },
     ])
   })
 

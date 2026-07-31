@@ -594,6 +594,41 @@ describe('Creator Skill workspace installer', () => {
     })
   })
 
+  it('rolls back when a staged Skill is modified after archive validation', async () => {
+    await withWorkspace(async root => {
+      const first = await packageGrant(root, '1.0.0')
+      expect((await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_BASE,
+        grant: first.grant,
+      }, { fetch: responseFetch(first.bytes) })).success).toBe(true)
+
+      const next = await packageGrant(root, '2.0.0')
+      const result = await installCreatorSkill(root, {
+        workspaceId: 'workspace-1',
+        operationId: OP_UPDATE,
+        grant: next.grant,
+        replaceExisting: true,
+      }, {
+        fetch: responseFetch(next.bytes),
+        beforeCommitSnapshot: async () => {
+          await writeFile(
+            join(root, '.creator-skill-ops', OP_UPDATE, 'stage', 'install-test', 'SKILL.md'),
+            `${skillContent('2.0.0')}\nTampered after validation.\n`,
+          )
+        },
+      })
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'content_digest_mismatch',
+      })
+      expect(await readFile(join(root, 'skills', 'install-test', 'SKILL.md'), 'utf8'))
+        .toBe(skillContent('1.0.0'))
+      expect((await readCreatorSkillsLedger(root)).installed[0]?.version).toBe('1.0.0')
+    })
+  })
+
   it('keeps raw Node filesystem errors server-only', async () => {
     await withWorkspace(async root => {
       const packaged = await packageGrant(root, '1.0.0')

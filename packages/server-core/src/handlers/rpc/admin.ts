@@ -26,13 +26,13 @@ import {
   CreatorArtifactIdRpcInputSchema,
   CreatorArtifactListRpcInputSchema,
   CreatorArtifactRevokeRpcInputSchema,
-  CreatorArtifactUploadRpcInputSchema,
+  CreatorArtifactUploadCompleteRpcInputSchema,
+  CreatorArtifactUploadGrantRpcInputSchema,
   CreatorArtifactVersionRpcInputSchema,
+  CreatorSkillArchiveError,
   CreatorSkillDownloadRpcInputSchema,
   CreatorSkillSafetyRpcInputSchema,
   CreateCreatorArtifactVersionRpcInputSchema,
-  CreatorSkillArchiveError,
-  preflightCreatorSkillArchive,
 } from '@polo-ai/shared/creator-skills'
 import {
   addLlmConnection,
@@ -50,7 +50,6 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
-import { readFile, stat } from 'node:fs/promises'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
@@ -81,8 +80,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT,
   RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_DRAFT,
   RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT_VERSION,
-  RPC_CHANNELS.admin.CANCEL_CREATOR_SKILL_UPLOAD,
-  RPC_CHANNELS.admin.UPLOAD_CREATOR_SKILL_ARCHIVE,
+  RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT,
+  RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD,
   RPC_CHANNELS.admin.PUBLISH_CREATOR_ARTIFACT_VERSION,
   RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_VERSION_DRAFT,
   RPC_CHANNELS.admin.SET_CREATOR_ARTIFACT_ARCHIVED,
@@ -98,7 +97,6 @@ type TokenValidationResult =
 
 export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
-  const creatorSkillUploadControllers = new Map<string, AbortController>()
   const callOrganization = async <T extends object>(
     operation: string,
     callback: (
@@ -618,108 +616,39 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     })
   })
 
-  server.handle(RPC_CHANNELS.admin.CANCEL_CREATOR_SKILL_UPLOAD, async (_ctx, operationId: unknown) => {
-    if (typeof operationId !== 'string') return { success: false }
-    const controller = creatorSkillUploadControllers.get(operationId)
-    if (!controller) return { success: false }
-    controller.abort()
-    return { success: true }
+  // Archive bytes must never traverse Electron's main/server-core process.
+  // This handler only issues a narrow, short-lived object-storage grant; the
+  // renderer uploads its user-selected File directly and can abort the PUT.
+  server.handle(RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactUploadGrantRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('createCreatorSkillUploadGrant', async (client, accessToken) => ({
+      grant: await client.createCreatorSkillUploadGrant(accessToken, input.data),
+    }))
   })
 
-  server.handle(RPC_CHANNELS.admin.UPLOAD_CREATOR_SKILL_ARCHIVE, async (_ctx, rawInput: unknown) => {
-    const input = CreatorArtifactUploadRpcInputSchema.safeParse(rawInput)
+  server.handle(RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD, async (_ctx, rawInput: unknown) => {
+    const input = CreatorArtifactUploadCompleteRpcInputSchema.safeParse(rawInput)
     if (!input.success) return adminInputError('VALIDATION_ERROR')
-    if (creatorSkillUploadControllers.has(input.data.operationId)) {
-      return {
-        success: false,
-        errorCode: 'duplicate_request',
-        message: getSafeAdminErrorMessage('duplicate_request'),
-      }
-    }
-    const controller = new AbortController()
-    creatorSkillUploadControllers.set(input.data.operationId, controller)
-    try {
-      return await callOrganization('uploadCreatorSkillArchive', async (client, accessToken, userId) => {
-        const archive = await stat(input.data.archivePath)
-        if (!archive.isFile()) {
-          throw new AdminError('Archive path is not a file', 'invalid_skill_archive')
-        }
-        const artifact = await client.getCreatorArtifact(
-          accessToken,
-          input.data.organizationId,
-          input.data.artifactId,
+    return callOrganization('completeCreatorSkillUpload', async (client, accessToken, userId) => {
+      const completed = await client.completeCreatorSkillUpload(accessToken, input.data)
+      const archiveChecksum = completed.version.archiveChecksum
+      if (!archiveChecksum) {
+        throw new AdminError(
+          'Admin service did not calculate the uploaded archive checksum',
+          'checksum_mismatch',
         )
-        if (artifact.artifact.type !== 'skill') {
-          throw new AdminError('Artifact is not a Skill', 'artifact_type_not_allowed')
-        }
-        const currentPolicy = await client.getCreatorSkillArchivePolicy(accessToken)
-        const validation = await preflightCreatorSkillArchive({
-          archivePath: input.data.archivePath,
-          slug: artifact.artifact.slug,
-          // This remains an early check. The Admin service performs the
-          // authoritative streaming validation after the upload completes.
-          policy: currentPolicy,
-        })
-        if (controller.signal.aborted) {
-          throw new AdminError(
-            'Creator Skill upload was cancelled',
-            'creator_skill_upload_cancelled',
-          )
-        }
-        const grant = await client.createCreatorSkillUploadGrant(accessToken, input.data)
-        let response: Response
-        try {
-          response = await fetch(grant.url, {
-            method: grant.method,
-            headers: grant.headers,
-            body: await readFile(input.data.archivePath),
-            redirect: 'error',
-            signal: controller.signal,
-          })
-        } catch (error) {
-          if (controller.signal.aborted) {
-            throw new AdminError(
-              'Creator Skill upload was cancelled',
-              'creator_skill_upload_cancelled',
-            )
-          }
-          throw error
-        }
-        if (!response.ok) {
-          throw new AdminError(
-            `Skill archive upload failed with HTTP ${response.status}`,
-            response.status === 403 ? 'upload_expired' : 'NETWORK_ERROR',
-            { status: response.status },
-          )
-        }
-        if (controller.signal.aborted) {
-          throw new AdminError(
-            'Creator Skill upload was cancelled',
-            'creator_skill_upload_cancelled',
-          )
-        }
-        await client.completeCreatorSkillUpload(accessToken, {
-          ...input.data,
-          uploadGeneration: grant.uploadGeneration,
-          archiveChecksum: validation.archiveChecksum,
-          sizeBytes: archive.size,
-        })
-        const result = await client.triggerCreatorSkillValidation(accessToken, {
-          artifactId: input.data.artifactId,
-          versionId: input.data.versionId,
-          uploadGeneration: grant.uploadGeneration,
-          archiveChecksum: validation.archiveChecksum,
-          idempotencyKey: input.data.idempotencyKey,
-        })
-        invalidateCreatorArtifactCache(userId, input.data.organizationId)
-        return {
-          ...result,
-          warnings: validation.warnings,
-        }
+      }
+      const result = await client.triggerCreatorSkillValidation(accessToken, {
+        artifactId: input.data.artifactId,
+        versionId: input.data.versionId,
+        uploadGeneration: input.data.uploadGeneration,
+        archiveChecksum,
+        idempotencyKey: input.data.idempotencyKey,
       })
-    } finally {
-      creatorSkillUploadControllers.delete(input.data.operationId)
-    }
+      invalidateCreatorArtifactCache(userId, input.data.organizationId)
+      return result
+    })
   })
 
   server.handle(RPC_CHANNELS.admin.PUBLISH_CREATOR_ARTIFACT_VERSION, async (_ctx, rawInput: unknown) => {

@@ -21,6 +21,7 @@ import {
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import {
+  CreatorSkillArchiveError,
   creatorSkillBackupTimestamp,
   directorySize,
   inferBackupCreatedAt,
@@ -40,6 +41,7 @@ import {
   type CreatorSkillBackup,
   type CreatorSkillBackupOperation,
   type CreatorSkillConflictDetails,
+  type CreatorSkillDownloadGrant,
   type CreatorSkillInstallConflict,
   type CreatorSkillInstallInput,
   type CreatorSkillOperationProgress,
@@ -1455,6 +1457,34 @@ async function assertPromotedTargetIdentity(
   }
 }
 
+async function assertDirectoryMatchesPublishedGrant(
+  directory: string,
+  grant: CreatorSkillDownloadGrant,
+): Promise<void> {
+  const scanned = await scanCreatorSkillDirectory(directory)
+  const expected = grant.manifest
+  const manifestMatches = scanned.manifest.length === expected.length
+    && scanned.manifest.every((entry, index) => {
+      const expectedEntry = expected[index]
+      return expectedEntry
+        && entry.path === expectedEntry.path
+        && entry.size === expectedEntry.size
+        && entry.sha256 === expectedEntry.sha256
+    })
+  if (!manifestMatches || scanned.contentDigest !== grant.contentDigest) {
+    throw new CreatorSkillArchiveError(
+      'content_digest_mismatch',
+      'Creator Skill changed after archive validation',
+      [{
+        code: 'content_digest_mismatch',
+        severity: 'error',
+        path: '',
+        message: 'The staged Skill no longer matches the published manifest',
+      }],
+    )
+  }
+}
+
 async function rollbackJournal(
   workspaceRoot: string,
   operationPath: string,
@@ -1717,6 +1747,10 @@ export async function installCreatorSkill(
       await assertCanonicalPathWhenPresent(targetPath, 'Creator Skill target')
       const oldLedger = await readLedgerSnapshot(canonicalWorkspace)
       await dependencies.beforeCommitSnapshot?.()
+      // The staging directory is inside the workspace and can be reached by
+      // another local process. Re-establish the published content identity at
+      // the commit boundary, not just after archive extraction.
+      await assertDirectoryMatchesPublishedGrant(join(stagePath, input.grant.slug), input.grant)
       const preCommitTargetIdentity = await inspectCreatorSkillTarget(targetPath)
       const changedDuringPreparation = !targetIdentitiesEqual(
         conflictState.targetIdentity,
@@ -1803,6 +1837,10 @@ export async function installCreatorSkill(
       })
       await rename(join(stagePath, input.grant.slug), targetPath)
       await assertPromotedTargetIdentity(targetPath, promotedDirectoryIdentity)
+      // A second scan catches a modification between the first scan and the
+      // rename. On failure the surrounding transaction rolls back the target
+      // and Ledger before the Skill becomes observable as installed.
+      await assertDirectoryMatchesPublishedGrant(targetPath, input.grant)
       journal.state = 'new_installed'
       await persistJournal(journalPath, journal, dependencies)
       await assertPromotedTargetIdentity(targetPath, promotedDirectoryIdentity)

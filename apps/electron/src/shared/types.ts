@@ -242,6 +242,7 @@ import type {
   CreatorArtifactCapability,
   CreatorArtifactCatalogPage,
   CreatorArtifactDetail,
+  CreatorSkillUploadGrant,
   CreatorArtifactVersion,
   CreatorSkillBackup,
   CreatorSkillConflictDetails,
@@ -259,6 +260,7 @@ export type {
   CreatorArtifactCapability,
   CreatorArtifactCatalogPage,
   CreatorArtifactDetail,
+  CreatorSkillUploadGrant,
   CreatorArtifactVersion,
   CreatorSkillBackup,
   CreatorSkillConflictDetails,
@@ -618,20 +620,25 @@ export interface ElectronAPI {
     changelog?: string
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
-  creatorArtifactUploadArchive(input: {
+  creatorArtifactCreateUploadGrant(input: {
     organizationId: string
     artifactId: string
     versionId: string
-    archivePath: string
-    operationId: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{
+    grant: CreatorSkillUploadGrant
+  }>>
+  creatorArtifactCompleteUpload(input: {
+    organizationId: string
+    artifactId: string
+    versionId: string
+    uploadGeneration: number
+    sizeBytes: number
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{
     version: CreatorArtifactVersion
     replayed?: boolean
-    warnings?: SkillValidationIssue[]
-    preflightContentDigest?: string
   }>>
-  creatorArtifactCancelUpload(operationId: string): Promise<{ success: boolean }>
   creatorArtifactPublishVersion(input: {
     organizationId: string
     artifactId: string

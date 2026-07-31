@@ -350,6 +350,7 @@
   "creatorSkills.artifact.type.web_app": "Web App",
   "creatorSkills.artifact.webAppExistingFlow": "Web App 继续使用现有发布与管理流程。",
   "creatorSkills.artifacts.empty": "还没有 Creator Skill",
+  "creatorSkills.artifacts.loadMore": "加载更多作品",
   "creatorSkills.artifacts.select": "选择一个 Creator Skill",
   "creatorSkills.artifacts.title": "作品",
   "creatorSkills.backups.confirmDelete": "永久删除这个创作者 Skill 备份？",
