@@ -30,6 +30,10 @@ $launcherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo.cmd"
 $legacyLauncherTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo-ai.cmd"
 $messageTemplate = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\polo-messages.cmd"
 
+# A native ownership test imports this script repeatedly in one
+# powershell.exe process. Add-Type cannot redefine a type name in that
+# process, so compile the interop helpers only once.
+if (-not ("PoloWindowsTerminalAtomic" -as [type])) {
 Add-Type -TypeDefinition @"
 using System;
 using System.ComponentModel;
@@ -326,6 +330,56 @@ public static class PoloWindowsTerminalAtomic {
             StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool ContainsPathEntry(string value, string binDir) {
+        if (value == null) value = String.Empty;
+        int start = 0;
+        for (int index = 0; index <= value.Length; index++) {
+            if (index != value.Length && value[index] != ';') continue;
+            if (index > start && SamePathEntry(value.Substring(start, index - start), binDir)) {
+                return true;
+            }
+            start = index + 1;
+        }
+        return false;
+    }
+
+    private static string RemoveLastPathEntry(string value, string binDir) {
+        int start = 0;
+        int matchStart = -1;
+        int matchEnd = -1;
+        for (int index = 0; index <= value.Length; index++) {
+            if (index != value.Length && value[index] != ';') continue;
+            if (index > start && SamePathEntry(value.Substring(start, index - start), binDir)) {
+                matchStart = start;
+                matchEnd = index;
+            }
+            start = index + 1;
+        }
+        if (matchStart < 0) return value;
+        if (matchEnd < value.Length) {
+            // Remove this entry and its following delimiter. This leaves every
+            // unrelated empty segment and trailing delimiter byte-for-byte intact.
+            return value.Remove(matchStart, matchEnd - matchStart + 1);
+        }
+        if (matchStart == 0) return String.Empty;
+        // The final entry has no following delimiter, so consume its preceding
+        // delimiter rather than manufacturing a new trailing separator.
+        return value.Remove(matchStart - 1, value.Length - matchStart + 1);
+    }
+
+    public static string MutatePathValue(string value, string binDir, bool ensurePresent) {
+        if (value == null) value = String.Empty;
+        bool present = ContainsPathEntry(value, binDir);
+        if (ensurePresent) {
+            if (present) return value;
+            return value.Length == 0 ? binDir : value + ";" + binDir;
+        }
+        // Install appends a single managed entry. Remove only the final
+        // matching token so pre-existing or subsequently user-added duplicates
+        // are never normalized away.
+        return RemoveLastPathEntry(value, binDir);
+    }
+
     public static PoloPathMutationResult MutateUserPath(
         string subKey,
         string valueName,
@@ -360,27 +414,12 @@ public static class PoloWindowsTerminalAtomic {
                 throw new InvalidOperationException(
                     "User PATH changed before the guarded rollback.");
             }
-            string[] rawEntries = before.Split(new char[] { ';' });
-            bool wasPresent = false;
-            foreach (string entry in rawEntries) {
-                if (entry.Length > 0 && SamePathEntry(entry, binDir)) {
-                    wasPresent = true;
-                    break;
-                }
-            }
+            bool wasPresent = ContainsPathEntry(before, binDir);
             string after;
             if (replacementValue != null) {
                 after = replacementValue;
             } else {
-                System.Collections.Generic.List<string> entries =
-                    new System.Collections.Generic.List<string>();
-                foreach (string entry in rawEntries) {
-                    if (entry.Length == 0) continue;
-                    if (!ensurePresent && SamePathEntry(entry, binDir)) continue;
-                    entries.Add(entry);
-                }
-                if (ensurePresent && !wasPresent) entries.Add(binDir);
-                after = String.Join(";", entries.ToArray());
+                after = MutatePathValue(before, binDir, ensurePresent);
             }
             bool changed = !String.Equals(before, after, StringComparison.Ordinal);
             if (!changed) {
@@ -430,6 +469,7 @@ public static class PoloWindowsTerminalAtomic {
     }
 }
 "@
+}
 
 function Invoke-TestMutationHook([string]$Step, [string]$Path, [string]$Candidate = "") {
     if ($TestMutationHook) {
@@ -481,12 +521,6 @@ function Test-ExactContent([string]$Path, [string[]]$AllowedContents) {
         }
     }
     return $false
-}
-
-function Test-PathEntry([string[]]$Entries, [string]$Path) {
-    return [bool]($Entries | Where-Object {
-        $_ -and $_.Trim().TrimEnd("\") -ieq $Path.TrimEnd("\")
-    } | Select-Object -First 1)
 }
 
 function Read-State([string]$Path = $stateFile) {
@@ -814,19 +848,12 @@ function Mutate-UserPathFile(
     if ($null -ne $ExpectedValue -and $before -cne $ExpectedValue) {
         throw "User PATH changed before the guarded rollback."
     }
-    $entries = @($before -split ";" | Where-Object { $_ })
-    $wasPresent = Test-PathEntry $entries $BinDir
-    if ($EnsurePresent) {
-        $afterEntries = @($entries)
-        if (-not $wasPresent) {
-            $afterEntries += $BinDir
-        }
-    } else {
-        $afterEntries = @($entries | Where-Object {
-            $_.Trim().TrimEnd("\") -ine $BinDir.TrimEnd("\")
-        })
-    }
-    $after = $afterEntries -join ";"
+    $wasPresent = [PoloWindowsTerminalAtomic]::ContainsPathEntry($before, $BinDir)
+    $after = [PoloWindowsTerminalAtomic]::MutatePathValue(
+        $before,
+        $BinDir,
+        $EnsurePresent
+    )
     $record = Publish-NewManagedFile $UserPathFile $after "path" $Published
     return [PSCustomObject]@{
         WasPresent = $wasPresent
@@ -903,6 +930,22 @@ function Complete-Claims([Collections.Generic.List[object]]$Claims) {
     )
 }
 
+function Discard-ClaimsAfterCommit(
+    [Collections.Generic.List[object]]$Claims,
+    [string]$Operation
+) {
+    try {
+        if (-not (Complete-Claims $Claims)) {
+            Write-Warning "Polo preserved transaction candidates that changed before $Operation cleanup."
+        }
+    } catch {
+        # Claims have already been removed from every public leaf. Do not turn
+        # a post-commit cleanup failure into a partial rollback; preserve any
+        # remaining private candidates for a later safe cleanup instead.
+        Write-Warning "Polo preserved transaction candidates after $Operation cleanup failed: $($_.Exception.Message)"
+    }
+}
+
 function Restore-AllClaims([Collections.Generic.List[object]]$Claims, [string]$StepPrefix) {
     for ($index = $Claims.Count - 1; $index -ge 0; $index--) {
         Restore-ClaimNoReplace $Claims[$index] $StepPrefix
@@ -970,9 +1013,7 @@ function Install-Transactional([bool]$CheckCommandConflict) {
             Undo-UserPathMutation $pathMutation $true
             Restore-AllClaims $claims "install-rollback"
         } else {
-            if (-not (Complete-Claims $claims)) {
-                Write-Warning "Polo preserved changed transaction candidates instead of deleting them."
-            }
+            Discard-ClaimsAfterCommit $claims "install"
         }
     }
 }
@@ -1017,18 +1058,19 @@ function Uninstall-Transactional {
                 throw "Polo stopped uninstall because a claimed file changed concurrently: $($claim.Path)"
             }
         }
-        if (-not (Complete-Claims $claims)) {
-            throw "Polo stopped uninstall because a claimed file changed before handle-bound cleanup."
-        }
-        $claims.Clear()
+        # Every public leaf is now atomically claimed and fully revalidated.
+        # That is the uninstall commit point. Cleanup may delete the private
+        # claims only after this point: a later filesystem error can therefore
+        # leave recoverable private candidates, but can never force a rollback
+        # that restores only a prefix of the old installation.
         $committed = $true
+        Discard-ClaimsAfterCommit $claims "uninstall"
+        $claims.Clear()
     } finally {
         if (-not $committed) {
             Remove-PublishedForRollback $published "uninstall-rollback"
             Undo-UserPathMutation $pathMutation $false
             Restore-AllClaims $claims "uninstall-rollback"
-        } else {
-            Complete-Claims $claims | Out-Null
         }
     }
 }

@@ -2,6 +2,8 @@
 
 ## Change summary
 
+- Fixed the follow-up Windows review findings: interop types now load once per PowerShell process; registry and file-backed PATH mutation preserve user-owned empty segments, trailing separators, and pre-existing entries; and irreversible claim cleanup occurs only after the install/uninstall transaction has committed.
+- Added native PowerShell coverage for exact file-backed and registry-backed PATH preservation across install/uninstall, plus source-contract assertions for repeat-safe interop loading and post-commit cleanup.
 - Reworked Windows terminal integration updates around identity-bound atomic claims, no-replace publication, handle-bound revalidation/deletion, and rollback that preserves concurrent replacements for `polo.cmd`, `polo-ai.cmd`, `polo-install-root.txt`, and ownership state.
 - Changed the real per-user PATH update to a transacted registry read/modify/write with guarded rollback, and kept the file-backed fixture on the same claim/no-replace model.
 - Added deterministic native PowerShell race coverage for install, repair, and uninstall across regular files, symlinks, rename/content/publication races, all managed leaves, and User PATH updates; wired it into the Windows isolated/full workflow gates.
@@ -26,6 +28,10 @@
 
 ## Validation performed
 
+- `bun test apps/electron/scripts/windows-terminal-integration.test.ts scripts/__tests__/electron-artifact-pipeline.test.ts`
+  - PASS: 14 tests, 0 failures, 303 assertions.
+- `bun run typecheck:all`
+  - PASS.
 - `bun test apps/electron/src/main/__tests__/terminal-integration-command.test.ts apps/electron/scripts/windows-terminal-integration.test.ts scripts/__tests__/electron-artifact-pipeline.test.ts packages/shared/src/i18n/__tests__/locale-registry.test.ts packages/shared/src/i18n/__tests__/locale-parity.test.ts`
   - PASS: 89 tests, 0 failures, 420 assertions.
 - `bun run typecheck:all`

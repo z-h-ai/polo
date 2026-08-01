@@ -24,8 +24,8 @@ try {
     Set-Content -Path (Join-Path $installDir "resources\app\package.json") -Value '{"version":"0.10.0"}' -Encoding ASCII
 
     # The user already owns this PATH entry before Polo is installed.
-    $originalPath = "$binDir;C:\User Tools"
-    Set-Content -Path $userPathFile -Value $originalPath -Encoding ASCII
+    $originalPath = "$binDir;;C:\User Tools;"
+    [IO.File]::WriteAllText($userPathFile, $originalPath)
 
     & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
 
@@ -57,9 +57,23 @@ try {
 
     & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
 
-    $afterUninstall = (Get-Content $userPathFile -Raw).Trim()
+    $afterUninstall = [IO.File]::ReadAllText($userPathFile)
     Assert-True ($afterUninstall -eq $originalPath) "Uninstall removed or changed the user's pre-existing PATH entry."
     Assert-True (-not (Test-Path (Join-Path $binDir "polo.cmd"))) "Managed launcher was not removed."
+
+    # PATH serialization belongs to the user. When Polo adds its own entry it
+    # preserves empty segments and trailing delimiters exactly, then removes
+    # only the entry it appended during uninstall.
+    $originalAbsentPath = "C:\User Tools;;C:\Other Tools;"
+    [IO.File]::WriteAllText($userPathFile, $originalAbsentPath)
+    & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
+    Assert-True (
+        [IO.File]::ReadAllText($userPathFile) -eq "$originalAbsentPath;$binDir"
+    ) "Install normalized user-owned PATH separators while appending Polo."
+    & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+    Assert-True (
+        [IO.File]::ReadAllText($userPathFile) -eq $originalAbsentPath
+    ) "Uninstall did not restore the exact user-owned PATH serialization."
 
     # Checked-in bytes and a matching App root are not ownership when state is
     # missing. A user may have created this exact layout.

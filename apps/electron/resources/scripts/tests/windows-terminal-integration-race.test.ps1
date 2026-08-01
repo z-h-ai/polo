@@ -286,6 +286,56 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $registry.State)) `
         "Install published ownership state after the registry transaction conflict."
 
+    # Registry-backed PATH updates must preserve the user's byte layout. This
+    # covers the production path rather than only the file-backed test fixture.
+    $registryPreservation = New-Case "registry-path-preservation"
+    $preservationSubKey = "Software\PoloAi\TerminalPathPreservation-$PID-$([Guid]::NewGuid().ToString('N'))"
+    $preservationKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($preservationSubKey)
+    $preservationBefore = "C:\User Tools;;C:\Other Tools;"
+    try {
+        $preservationKey.SetValue(
+            "TestPath",
+            $preservationBefore,
+            [Microsoft.Win32.RegistryValueKind]::ExpandString
+        )
+    } finally {
+        $preservationKey.Dispose()
+    }
+    try {
+        & $scriptPath -Mode Install -InstallDir $installDir -BinDir $registryPreservation.Bin `
+            -SkipCommandConflict -UserPathRegistrySubKey $preservationSubKey `
+            -UserPathRegistryValueName "TestPath"
+        $preservationKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($preservationSubKey)
+        try {
+            Assert-True (
+                $preservationKey.GetValue(
+                    "TestPath",
+                    $null,
+                    [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+                ) -ceq "$preservationBefore;$($registryPreservation.Bin)"
+            ) "Install normalized user-owned registry PATH separators."
+        } finally {
+            $preservationKey.Dispose()
+        }
+        & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $registryPreservation.Bin `
+            -UserPathRegistrySubKey $preservationSubKey `
+            -UserPathRegistryValueName "TestPath"
+        $preservationKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($preservationSubKey)
+        try {
+            Assert-True (
+                $preservationKey.GetValue(
+                    "TestPath",
+                    $null,
+                    [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+                ) -ceq $preservationBefore
+            ) "Uninstall did not restore the exact registry PATH serialization."
+        } finally {
+            $preservationKey.Dispose()
+        }
+    } finally {
+        [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($preservationSubKey, $false)
+    }
+
     # If a later publication fails, rollback restores the exact prior registry
     # value only when the value still equals Polo's committed update. A newer
     # non-transacted writer wins and is never overwritten by rollback.
