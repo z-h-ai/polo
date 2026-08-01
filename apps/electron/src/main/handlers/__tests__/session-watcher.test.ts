@@ -45,12 +45,22 @@ let tempDirs: string[] = []
 const CLIENT_A = 'session-watcher-client-a'
 const CLIENT_B = 'session-watcher-client-b'
 
-async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+async function triggerUntilObserved(
+  trigger: (attempt: number) => void,
+  condition: () => boolean,
+  timeoutMs = 3_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  while (!condition()) {
-    if (Date.now() >= deadline) throw new Error('timed out waiting for session watcher event')
-    await new Promise(resolve => setTimeout(resolve, 20))
+  let attempt = 0
+  while (Date.now() < deadline) {
+    trigger(attempt++)
+    const attemptDeadline = Math.min(deadline, Date.now() + 250)
+    while (Date.now() < attemptDeadline) {
+      if (condition()) return
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
   }
+  throw new Error('timed out waiting for retried session watcher event')
 }
 
 function makeTempSessionDir(): string {
@@ -107,7 +117,10 @@ function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
 // ---------------------------------------------------------------------------
 
 describe('session file watcher isolation', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    const { cleanupSessionFileWatchForClient } = await import('@polo-ai/server-core/handlers/rpc')
+    cleanupSessionFileWatchForClient(CLIENT_A)
+    cleanupSessionFileWatchForClient(CLIENT_B)
     for (const dir of tempDirs) {
       try { rmSync(dir, { recursive: true, force: true }) } catch {}
     }
@@ -131,9 +144,10 @@ describe('session file watcher isolation', () => {
     await watchHandler(makeCtx(CLIENT_B), 's2')
 
     // Trigger a change in s1
-    writeFileSync(join(dir1, 'output.txt'), 'hello')
-
-    await waitFor(() => pushCalls.some(p => p.target?.clientId === CLIENT_A))
+    await triggerUntilObserved(
+      attempt => writeFileSync(join(dir1, 'output.txt'), `hello-${attempt}`),
+      () => pushCalls.some(p => p.target?.clientId === CLIENT_A),
+    )
 
     // Only client-a should have received the notification
     const clientAPushes = pushCalls.filter(p => p.target?.clientId === CLIENT_A)
@@ -152,8 +166,10 @@ describe('session file watcher isolation', () => {
     pushCalls.length = 0
 
     // Trigger a change in s2
-    writeFileSync(join(dir2, 'data.json'), '{}')
-    await waitFor(() => pushCalls.some(p => p.target?.clientId === CLIENT_B))
+    await triggerUntilObserved(
+      attempt => writeFileSync(join(dir2, 'data.json'), JSON.stringify({ attempt })),
+      () => pushCalls.some(p => p.target?.clientId === CLIENT_B),
+    )
 
     // Client B should still receive notifications
     const clientBAfter = pushCalls.filter(p => p.target?.clientId === CLIENT_B)
@@ -193,10 +209,12 @@ describe('session file watcher isolation', () => {
     expect(s1Pushes.length).toBe(0)
 
     // Write to s2 — should trigger notification
-    writeFileSync(join(dir2, 'new.txt'), 'fresh')
-    await waitFor(() => pushCalls.some(p =>
-      p.args[0] === 's2' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED
-    ))
+    await triggerUntilObserved(
+      attempt => writeFileSync(join(dir2, 'new.txt'), `fresh-${attempt}`),
+      () => pushCalls.some(p =>
+        p.args[0] === 's2' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED
+      ),
+    )
 
     const s2Pushes = pushCalls.filter(p =>
       p.args[0] === 's2' && p.channel === RPC_CHANNELS.sessions.FILES_CHANGED
@@ -225,8 +243,10 @@ describe('session file watcher isolation', () => {
     expect(pushCalls.length).toBe(0)
 
     // Write a normal file — should trigger notification
-    writeFileSync(join(dir, 'result.txt'), 'output')
-    await waitFor(() => pushCalls.length > 0)
+    await triggerUntilObserved(
+      attempt => writeFileSync(join(dir, 'result.txt'), `output-${attempt}`),
+      () => pushCalls.length > 0,
+    )
 
     expect(pushCalls.length).toBeGreaterThanOrEqual(1)
 

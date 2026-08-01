@@ -13,12 +13,22 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+async function triggerUntilObserved(
+  trigger: (attempt: number) => void,
+  condition: () => boolean,
+  timeoutMs = 3_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  while (!condition()) {
-    if (Date.now() >= deadline) throw new Error('timed out waiting for session watcher event')
-    await wait(20)
+  let attempt = 0
+  while (Date.now() < deadline) {
+    trigger(attempt++)
+    const attemptDeadline = Math.min(deadline, Date.now() + 250)
+    while (Date.now() < attemptDeadline) {
+      if (condition()) return
+      await wait(20)
+    }
   }
+  throw new Error('timed out waiting for retried session watcher event')
 }
 
 const CLIENT_A = 'sessions-watchers-client-a'
@@ -111,11 +121,13 @@ describe('sessions file watchers', () => {
     await watch!({ clientId: CLIENT_A }, 'session-a')
     await watch!({ clientId: CLIENT_B }, 'session-b')
 
-    writeFileSync(join(sessionDirA, 'a.txt'), `a-${Date.now()}`)
-    writeFileSync(join(sessionDirB, 'b.txt'), `b-${Date.now()}`)
-    await waitFor(() =>
-      pushed.some(evt => evt.target?.clientId === CLIENT_A && evt.args[0] === 'session-a')
-      && pushed.some(evt => evt.target?.clientId === CLIENT_B && evt.args[0] === 'session-b'),
+    await triggerUntilObserved(
+      (attempt) => {
+        writeFileSync(join(sessionDirA, 'a.txt'), `a-${Date.now()}-${attempt}`)
+        writeFileSync(join(sessionDirB, 'b.txt'), `b-${Date.now()}-${attempt}`)
+      },
+      () => pushed.some(evt => evt.target?.clientId === CLIENT_A && evt.args[0] === 'session-a')
+        && pushed.some(evt => evt.target?.clientId === CLIENT_B && evt.args[0] === 'session-b'),
     )
 
     const aEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === CLIENT_A)
@@ -127,10 +139,14 @@ describe('sessions file watchers', () => {
     pushed.length = 0
     await unwatch!({ clientId: CLIENT_A })
 
-    writeFileSync(join(sessionDirA, 'a.txt'), `a2-${Date.now()}`)
-    writeFileSync(join(sessionDirB, 'b.txt'), `b2-${Date.now()}`)
-    await waitFor(() =>
-      pushed.some(evt => evt.target?.clientId === CLIENT_B && evt.args[0] === 'session-b'),
+    await triggerUntilObserved(
+      (attempt) => {
+        // Repeatedly exercise both paths. Delivery for B proves the platform
+        // watcher is live while the absence of A events verifies unwatch.
+        writeFileSync(join(sessionDirA, 'a.txt'), `a2-${Date.now()}-${attempt}`)
+        writeFileSync(join(sessionDirB, 'b.txt'), `b2-${Date.now()}-${attempt}`)
+      },
+      () => pushed.some(evt => evt.target?.clientId === CLIENT_B && evt.args[0] === 'session-b'),
     )
 
     const aEventsAfter = pushed.filter((evt) => evt.target?.clientId === CLIENT_A)
