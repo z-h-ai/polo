@@ -114,6 +114,50 @@ describe('top-level CLI help', () => {
     }
   }, 20_000)
 
+  it('returns exit 2 and empty stdout for unsupported exec legacy/debug options', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-exec-legacy-options-'))
+    tempDirs.push(root)
+    const cases = [
+      ['--no-spinner', 'hello'],
+      ['--disable-spinner', 'hello'],
+      ['--verbose', 'hello'],
+      ['-v', 'hello'],
+      ['--server-entry', join(root, 'server.ts'), 'hello'],
+      ['--timeout', '1000', 'hello'],
+      ['--workspace-dir', root, 'hello'],
+      ['--no-spinner', '--help'],
+      ['--verbose', '--version'],
+      ['--server-entry', join(root, 'server.ts'), '--help'],
+      ['--timeout', '1000', '--version'],
+      ['--workspace-dir', root, '--help'],
+    ]
+
+    for (const args of cases) {
+      const proc = Bun.spawn([
+        'bun',
+        'run',
+        join(import.meta.dir, 'index.ts'),
+        'exec',
+        ...args,
+      ], {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, POLO_AI_CONFIG_DIR: root },
+      })
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      expect(exitCode).toBe(2)
+      expect(stdout).toBe('')
+      expect(stderr).toContain('unsupported option for exec:')
+      expect(await Bun.file(join(root, 'cli-sessions')).exists()).toBe(false)
+    }
+  }, 20_000)
+
   it('repairs a SIGKILL-abandoned persistent exec Thread when sessions lists it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-sessions-repair-'))
     tempDirs.push(root)

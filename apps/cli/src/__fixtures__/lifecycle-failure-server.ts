@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline'
-import { readFile, unlink, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, unlink, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { dirname, resolve } from 'node:path'
 import { getProcessBirthIdentity } from '../cli-thread-store.ts'
@@ -9,15 +9,23 @@ const [bootstrapLine] = await once(input, 'line') as [string]
 input.close()
 const bootstrap = JSON.parse(bootstrapLine) as {
   owner?: { ownerFile?: string }
+  runtimeConfig?: { connection?: unknown }
 }
 const ownerFile = bootstrap.owner?.ownerFile
 const fixtureConfig = ownerFile
   ? JSON.parse(await readFile(
       resolve(dirname(ownerFile), '..', '..', '..', '..', '.polo-lifecycle-fixture.json'),
       'utf-8',
-    ).catch(() => '{}')) as { mode?: string; runtimeInfoFile?: string }
+    ).catch(() => '{}')) as { mode?: string; runtimeInfoFile?: string; traceFile?: string }
   : {}
 const mode = fixtureConfig.mode || 'hang'
+
+if (fixtureConfig.traceFile) {
+  await appendFile(fixtureConfig.traceFile, `${JSON.stringify({
+    type: 'bootstrap',
+    connection: bootstrap.runtimeConfig?.connection,
+  })}\n`)
+}
 
 const runtimeInfoFile = fixtureConfig.runtimeInfoFile
 if (runtimeInfoFile) {
@@ -35,11 +43,12 @@ const server = Bun.serve({
     return new Response('upgrade required', { status: 426 })
   },
   websocket: {
-    message(socket, message) {
+    async message(socket, message) {
       const envelope = JSON.parse(String(message)) as {
         id: string
         type: string
         channel?: string
+        args?: unknown[]
       }
       if (envelope.type === 'handshake') {
         socket.send(JSON.stringify({
@@ -53,6 +62,14 @@ const server = Bun.serve({
       }
       if (envelope.type !== 'request') return
 
+      if (fixtureConfig.traceFile) {
+        await appendFile(fixtureConfig.traceFile, `${JSON.stringify({
+          type: 'request',
+          channel: envelope.channel,
+          args: envelope.args,
+        })}\n`)
+      }
+
       const result = envelope.channel === 'sessions:create'
         ? { id: 'fixture-session' }
         : null
@@ -64,7 +81,26 @@ const server = Bun.serve({
       }))
 
       if (envelope.channel !== 'sessions:sendMessage') return
-      if (mode === 'disconnect') {
+      if (mode === 'complete') {
+        const sessionId = String(envelope.args?.[0] ?? 'fixture-session')
+        socket.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          type: 'event',
+          channel: 'session:event',
+          args: [{
+            type: 'text_complete',
+            sessionId,
+            text: 'fixture complete',
+            isIntermediate: false,
+          }],
+        }))
+        socket.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          type: 'event',
+          channel: 'session:event',
+          args: [{ type: 'complete', sessionId }],
+        }))
+      } else if (mode === 'disconnect') {
         setTimeout(() => socket.close(), 10)
       } else if (mode === 'heartbeat') {
         if (ownerFile) void unlink(ownerFile).catch(() => {})

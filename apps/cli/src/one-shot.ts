@@ -1023,7 +1023,12 @@ export async function executeTurn(
 
     const resolvedConnection = await resolveConnection(args, record, scope)
     await throwIfInterrupted()
-    if (resolvedConnection.connection) {
+    // A normal resume borrows the original Thread and its saved connection.
+    // Explicit invocation overrides configure only this runtime; persisting
+    // them here would silently change every later no-argument resume. New
+    // Threads (including resume --ephemeral clones) own their metadata and
+    // may safely record the effective non-secret connection snapshot.
+    if (resolvedConnection.connection && ownsNewThread) {
       await updateCliThread(record, {
         connection: {
           slug: resolvedConnection.connection.slug,

@@ -128,6 +128,16 @@ const UNSUPPORTED_OPTIONS = new Set([
   '--dangerously-bypass-hook-trust',
 ])
 
+const EXEC_UNSUPPORTED_LEGACY_OPTIONS = new Set([
+  '--disable-spinner',
+  '--no-spinner',
+  '--verbose',
+  '-v',
+  '--server-entry',
+  '--timeout',
+  '--workspace-dir',
+])
+
 export function findExecutionCommandIndex(argv: string[]): number {
   const args = argv.slice(2)
   for (let i = 0; i < args.length; i++) {
@@ -217,6 +227,13 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
     }
     if (UNSUPPORTED_OPTIONS.has(name)) {
       throw new UsageError(`unsupported option: ${name}`)
+    }
+    // These flags remain available to the legacy `run`/remote-server paths,
+    // but are not part of the public P0 exec surface. Reject them before
+    // parsing values so help/version can never turn a debug flag into a
+    // successful invocation.
+    if (command === 'exec' && EXEC_UNSUPPORTED_LEGACY_OPTIONS.has(name)) {
+      throw new UsageError(`unsupported option for exec: ${name}`)
     }
 
     switch (name) {

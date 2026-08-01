@@ -22,10 +22,11 @@ const args = parseExecutionArgs([
   mode === 'run-no-cleanup' ? 'run' : 'exec',
   ...(mode === 'run-no-cleanup' ? ['--no-cleanup'] : ['--json']),
   ...(mode === 'ephemeral' ? ['--ephemeral'] : []),
-  '--server-entry',
-  serverEntry,
   'hello',
 ])
+// Internal fixture injection: the public exec parser intentionally rejects
+// --server-entry because it is not part of the P0 command surface.
+args.serverEntry = serverEntry
 
 const exitCode = await executeTurn(args, 'hello', {
   async lifecycleStageHook(stage, state) {

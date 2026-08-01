@@ -104,7 +104,6 @@ describe('execution parser', () => {
       [argv('exec', 'sessions', '--api-key', 'secret-value'), '--api-key'],
       [argv('exec', 'sessions', '--base-url', 'https://example.test'), '--base-url'],
       [argv('exec', 'sessions', '--ephemeral'), '--ephemeral'],
-      [argv('exec', 'sessions', '--timeout', '1000'), '--timeout'],
       [argv('exec', 'delete', id, '--last'), '--last'],
       [argv('exec', 'delete', id, '--yolo'), '--yolo'],
       [argv('exec', 'delete', id, '--model', 'gpt-5'), '--model'],
@@ -137,6 +136,26 @@ describe('execution parser', () => {
 
     expect(parseExecutionArgs(argv('exec', 'sessions', '--help')).kind).toBe('help')
     expect(parseExecutionArgs(argv('exec', 'delete', id, '--version')).kind).toBe('version')
+  })
+
+  it('rejects legacy and debug options for exec before help or version dispatch', () => {
+    const cases: Array<[string[], string]> = [
+      [argv('exec', '--no-spinner', 'hello'), '--no-spinner'],
+      [argv('exec', '--disable-spinner', 'hello'), '--disable-spinner'],
+      [argv('exec', '--verbose', 'hello'), '--verbose'],
+      [argv('exec', '-v', 'hello'), '-v'],
+      [argv('exec', '--server-entry', '/tmp/server.ts', 'hello'), '--server-entry'],
+      [argv('exec', '--timeout', '1000', 'hello'), '--timeout'],
+      [argv('exec', '--workspace-dir', '/tmp', 'hello'), '--workspace-dir'],
+      [argv('exec', '--no-spinner', '--help'), '--no-spinner'],
+      [argv('exec', '--verbose', '--version'), '--verbose'],
+      [argv('exec', '--server-entry', '/tmp/server.ts', '--help'), '--server-entry'],
+      [argv('exec', '--timeout', '1000', '--version'), '--timeout'],
+      [argv('exec', '--workspace-dir', '/tmp', '--help'), '--workspace-dir'],
+    ]
+    for (const [value, option] of cases) {
+      expect(() => parseExecutionArgs(value)).toThrow(`unsupported option for exec: ${option}`)
+    }
   })
 
   it('rejects unknown, unsupported, missing, conflicting and extra args', () => {

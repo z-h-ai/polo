@@ -66,11 +66,11 @@ async function runLifecycleFailure(mode: 'disconnect' | 'heartbeat') {
   const proc = Bun.spawn([
     'bun',
     'run',
-    join(import.meta.dir, 'index.ts'),
+    join(import.meta.dir, '__fixtures__', 'one-shot-with-server.ts'),
+    root,
+    join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
     'exec',
     '--json',
-    '--server-entry',
-    join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
     'hello',
   ], {
     cwd: root,
@@ -221,10 +221,10 @@ describe('server spawner process integration', () => {
     const proc = Bun.spawn([
       'bun',
       'run',
-      join(import.meta.dir, 'index.ts'),
-      'exec',
-      '--server-entry',
+      join(import.meta.dir, '__fixtures__', 'one-shot-with-server.ts'),
+      root,
       join(root, 'missing-server-entry.ts'),
+      'exec',
       'hello',
     ], {
       cwd: root,
@@ -506,13 +506,13 @@ describe('server spawner process integration', () => {
       const proc = Bun.spawn([
         'bun',
         'run',
-        join(import.meta.dir, 'index.ts'),
+        join(import.meta.dir, '__fixtures__', 'one-shot-with-server.ts'),
+        root,
+        join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
         'exec',
         'resume',
         '--last',
         '--json',
-        '--server-entry',
-        join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
         '--',
         'continue',
       ], {
@@ -562,12 +562,12 @@ describe('server spawner process integration', () => {
       const command = [
         'bun',
         'run',
-        join(import.meta.dir, 'index.ts'),
+        join(import.meta.dir, '__fixtures__', 'one-shot-with-server.ts'),
+        root,
+        join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
         'exec',
         '--json',
         ...(ephemeral ? ['--ephemeral'] : []),
-        '--server-entry',
-        join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
         'hello',
       ]
       const proc = Bun.spawn(command, {
@@ -723,11 +723,14 @@ describe('server spawner process integration', () => {
       else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
     }
 
-    const runCli = async (args: string[]) => {
+    const runCli = async (args: string[], serverEntry?: string) => {
       const proc = Bun.spawn([
         'bun',
         'run',
-        join(import.meta.dir, 'index.ts'),
+        serverEntry
+          ? join(import.meta.dir, '__fixtures__', 'one-shot-with-server.ts')
+          : join(import.meta.dir, 'index.ts'),
+        ...(serverEntry ? [root, serverEntry] : []),
         ...args,
       ], {
         cwd: oldCwd,
@@ -767,11 +770,9 @@ describe('server spawner process integration', () => {
       'workspace-new',
       '-C',
       newCwd,
-      '--server-entry',
-      join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'),
       '--',
       'continue',
-    ])
+    ], join(import.meta.dir, '__fixtures__', 'lifecycle-failure-server.ts'))
     expect(resumed.exitCode, resumed.stderr).toBe(1)
 
     const metadata = JSON.parse(
@@ -817,11 +818,9 @@ describe('server spawner process integration', () => {
       'workspace-old',
       '-C',
       oldCwd,
-      '--server-entry',
-      join(root, 'missing-server.ts'),
       '--',
       'continue',
-    ])
+    ], join(root, 'missing-server.ts'))
     expect(lastOld.exitCode).toBe(1)
     expect(lastOld.stderr).toContain('Server process exited before printing')
     expect(lastOld.stderr).not.toContain('no resumable CLI exec Thread')

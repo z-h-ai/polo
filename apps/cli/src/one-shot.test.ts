@@ -493,6 +493,28 @@ describe('one-shot execution internals', () => {
     expect(stdout).toBe('ok\n')
   }, 15_000)
 
+  it('keeps explicit normal-resume connection overrides invocation-scoped', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-resume-override-scope-'))
+    tempDirs.push(temp)
+    const proc = Bun.spawn([
+      'bun',
+      'run',
+      join(import.meta.dir, '__fixtures__', 'resume-override-persistence.ts'),
+      temp,
+    ], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env },
+    })
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    expect(exitCode, stderr).toBe(0)
+    expect(stdout).toBe('ok\n')
+  }, 30_000)
+
   it('rejects base URL secrets before args or resolved connections reach metadata', async () => {
     for (const mode of ['args', 'resolved']) {
       const temp = await mkdtemp(join(tmpdir(), `polo-base-url-${mode}-`))
