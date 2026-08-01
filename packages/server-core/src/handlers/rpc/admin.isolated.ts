@@ -284,6 +284,7 @@ mock.module('@polo-ai/shared/admin', () => ({
   },
   getAppCatalogAccessMode: (accountId: string, organizationId: string) =>
     appCatalogAccess.get(`${accountId}:${organizationId}`) ?? 'offline',
+  getAppCatalogApps: (catalog: { apps?: unknown[] }) => catalog.apps ?? [],
   denyAppCatalogAccessForAccount: (accountId: string) => {
     for (const key of appCatalogAccess.keys()) {
       if (key.startsWith(`${accountId}:`)) appCatalogAccess.set(key, 'denied')
@@ -382,6 +383,8 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
+  getWorkspaceByNameOrId: () => null,
+  setSetupDeferred: () => {},
   getAdminUrl: () => configState.adminUrl,
   getAdminConfigVersion: () => configState.adminConfigVersion,
   setAdminConfigVersion: (version: string | undefined) => {
@@ -412,8 +415,6 @@ mock.module('@polo-ai/shared/config', () => ({
     configState.defaultConnection = slug
     return true
   },
-  getWorkspaceByNameOrId: () => null,
-  setSetupDeferred: () => {},
 }))
 
 mock.module('@polo-ai/shared/credentials', () => ({

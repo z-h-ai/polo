@@ -292,6 +292,7 @@ mock.module('@polo-ai/shared/admin', () => ({
   denyCachedAppCatalogAuthorization: () => null,
   denyCachedAppCatalogAuthorizationForAccount: () => [],
   getAppCatalogAccessMode: () => 'online',
+  getAppCatalogApps: (catalog: { apps?: unknown[] }) => catalog.apps ?? [],
   getCachedAppCatalog: () => null,
   listCachedAppCatalogs: () => [],
   resumeAppCatalogAccessForAccount: () => {},
@@ -332,6 +333,8 @@ mock.module('@polo-ai/shared/admin', () => ({
 }))
 
 mock.module('@polo-ai/shared/config', () => ({
+  getWorkspaceByNameOrId: () => null,
+  setSetupDeferred: () => {},
   getAdminUrl: () => configState.adminUrl,
   getAdminConfigVersion: () => configState.adminConfigVersion,
   setAdminConfigVersion: (version: string | undefined) => {
