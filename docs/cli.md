@@ -1,240 +1,171 @@
-# polo-ai — CLI Reference
+# polo — Terminal Reference
 
-Terminal client for Polo AI server. Connects over WebSocket (`ws://` or `wss://`) to a running headless server.
+`polo` is bundled with every Polo desktop release. It uses the Bun runtime,
+CLI bundle, and headless-server bundle inside the installed App, so ordinary
+users do not need Node.js, npm, Bun, or a Polo source checkout.
 
-## Prerequisites
+## Install Polo terminal features
 
-- [Bun](https://bun.sh/) runtime installed
-- For `run` and `--validate-server`: an API key via `--api-key`, `$LLM_API_KEY`, or a provider-specific env var (e.g., `$ANTHROPIC_API_KEY`)
-- For all other commands: a running Polo AI headless server with URL and token
+- **macOS:** launch Polo once and choose **Complete Now** in the setup prompt.
+  You can also use **Settings → Polo terminal features** to install, repair,
+  or uninstall it later. Polo installs a managed launcher at `~/.local/bin/polo`
+  and configures the default shell's PATH after your confirmation.
+- **Linux:** the AppImage installer creates `~/.local/bin/polo` and adds its
+  managed directory to the user PATH.
+- **Windows:** the installer creates `%LOCALAPPDATA%\Polo AI\bin\polo.cmd`
+  and adds that directory to the user PATH.
 
-## Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/anthropics/polo-ai.git
-cd polo-ai
-
-# Install dependencies
-bun install
-
-# Option A: Run directly
-bun run apps/cli/src/index.ts <command>
-
-# Option B: Link globally (adds polo-ai to PATH)
-cd apps/cli && bun link
-polo-ai <command>
-```
-
-### Quick Start
-
-The fastest way to try it out — no server setup needed:
+Open a new terminal after installation, then verify it:
 
 ```bash
-# Self-contained run (spawns a server automatically)
-ANTHROPIC_API_KEY=sk-... bun run apps/cli/src/index.ts run "Hello, world!"
+polo --version
+polo --help
 ```
 
-## Connection Options
+`polo-ai` is a compatibility shim until Polo 1.0. It prints a migration
+warning; use `polo` in documentation, scripts, and new integrations.
 
-| Flag | Env var | Default | Description |
-|------|---------|---------|-------------|
+### Quick start
+
+```bash
+# Start or focus the desktop App
+polo app
+
+# Run once from the current directory. If the App is not running, Polo starts
+# a temporary packaged headless server and removes it after the task finishes.
+ANTHROPIC_API_KEY=sk-... polo run "Hello, world!"
+```
+
+### Source development
+
+Development from a checkout still requires Bun:
+
+```bash
+bun run apps/cli/src/index.ts --help
+```
+
+This path is for contributors only. It is not the desktop-release installation
+flow and does not replace the packaged `polo` command.
+
+## Connection options
+
+| Flag | Environment variable | Default | Description |
+|------|----------------------|---------|-------------|
 | `--url <ws[s]://...>` | `POLO_AI_SERVER_URL` | — | Server WebSocket URL |
 | `--token <secret>` | `POLO_AI_SERVER_TOKEN` | — | Authentication token |
 | `--workspace <id>` | — | auto-detect | Workspace ID |
 | `--timeout <ms>` | — | `10000` | Request timeout |
-| `--tls-ca <path>` | `POLO_AI_TLS_CA` | — | Custom CA cert for self-signed TLS |
+| `--tls-ca <path>` | `POLO_AI_TLS_CA` | — | Custom CA certificate for a self-signed server |
 | `--json` | — | `false` | Raw JSON output for scripting |
-| `--send-timeout <ms>` | — | `300000` | Timeout for `send` command (5 min) |
+| `--send-timeout <ms>` | — | `300000` | Timeout for `send` (five minutes) |
 
-Flags take precedence over environment variables. If `--workspace` is omitted, the CLI auto-detects the first available workspace.
+Explicit `--url` / `--token` options take precedence over local App discovery.
+Without them, resource commands read Polo's private runtime-discovery file,
+validate the local PID, loopback endpoint, file permissions, and major version,
+then complete an RPC handshake. No port or token needs to be copied from the
+App. If no running App is available, resource commands explain how to start one
+with `polo app`; only `polo run` starts a temporary server automatically.
 
 ## Commands
 
-### Info & Health
+| Command | Description |
+|---------|-------------|
+| `polo app` | Start or focus the desktop App |
+| `polo run <prompt>` | Reuse the App or start a temporary server, run once, then exit |
+| `polo ping` | Verify connectivity (client ID and latency) |
+| `polo health` | Check credential-store health |
+| `polo versions` | Show server runtime versions |
+| `polo workspaces` | List workspaces |
+| `polo sessions` | List sessions in a workspace |
+| `polo connections` | List LLM connections |
+| `polo sources` | List configured sources |
+| `polo session create` | Create a session (`--name`, `--mode`) |
+| `polo session messages <id>` | Print a session's message history |
+| `polo session delete <id>` | Delete a session |
+| `polo send <id> <message>` | Send a message and stream output |
+| `polo cancel <id>` | Cancel an in-progress session |
+| `polo invoke <channel> [...]` | Invoke a raw RPC channel with JSON arguments |
+| `polo listen <channel>` | Subscribe to push events until interrupted |
+| `polo --validate-server` | Run the multi-step validation against a running App or explicit server |
 
-```bash
-polo-ai ping              # Verify connectivity (clientId + latency)
-polo-ai health            # Check credential store health
-polo-ai versions          # Show server runtime versions
-```
+### Run
 
-### Resource Listing
-
-```bash
-polo-ai workspaces        # List all workspaces
-polo-ai sessions          # List sessions in workspace
-polo-ai connections       # List LLM connections
-polo-ai sources           # List configured sources
-```
-
-### Session Operations
-
-```bash
-polo-ai session create [--name <n>] [--mode <m>]  # Create session
-polo-ai session messages <id>                       # Print message history
-polo-ai session delete <id>                         # Delete session
-polo-ai cancel <id>                                 # Cancel processing
-```
-
-### Send Message (Streaming)
-
-```bash
-# Send a message and stream the AI response in real time
-polo-ai send <session-id> <message>
-
-# Pipe text from stdin
-echo "Summarize this file" | polo-ai send <session-id>
-
-# Read from stdin explicitly
-cat document.txt | polo-ai send <session-id> --stdin
-```
-
-The `send` command subscribes to session events and streams them to stdout:
-- `text_delta` — text streamed inline
-- `tool_start` — `[tool: name]` marker
-- `tool_result` — tool output (truncated to 200 chars)
-- `error` — printed to stderr, exit code 1
-- `complete` — exit code 0
-- `interrupted` — exit code 130
-
-### Power User
-
-```bash
-# Raw RPC call — send any channel with JSON args
-polo-ai invoke <channel> [json-args...]
-
-# Subscribe to push events (Ctrl+C to stop)
-polo-ai listen <channel>
-```
-
-Examples:
-```bash
-polo-ai invoke system:homeDir
-polo-ai invoke sessions:get '"workspace-123"'
-polo-ai listen session:event
-```
-
-### Run (Self-Contained)
-
-```bash
-polo-ai run <prompt>
-polo-ai run --workspace-dir ./project --source github "List open PRs"
-```
-
-The `run` command is fully self-contained — it spawns a headless server, creates a session, sends the prompt, streams the response, and exits. No separate server setup needed. An API key is resolved from `--api-key`, `$LLM_API_KEY`, or a provider-specific env var (e.g., `$ANTHROPIC_API_KEY`, `$OPENAI_API_KEY`).
+`polo run` registers the current directory as a workspace when necessary,
+creates a temporary session, streams the result, and removes that session by
+default. When it cannot reuse a verified running App, it uses the packaged
+headless server instead. SIGINT and SIGTERM cancel the session and clean up the
+temporary server.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--workspace-dir <path>` | — | Register a workspace directory before running |
-| `--source <slug>` | — | Enable a source (repeatable) |
-| `--output-format <fmt>` | `text` | Output format: `text` or `stream-json` |
+| `--workspace-dir <path>` | — | Use this directory as the workspace |
+| `--source <slug>` | — | Enable a source; repeat for multiple sources |
+| `--output-format <format>` | `text` | `text` or `stream-json` |
 | `--mode <mode>` | `allow-all` | Permission mode for the session |
-| `--no-cleanup` | `false` | Skip session deletion on exit |
-| `--server-entry <path>` | — | Custom server entry point |
-
-**LLM Configuration:**
-
-| Flag | Env Fallback | Default | Description |
-|------|-------------|---------|-------------|
-| `--provider <name>` | `LLM_PROVIDER` | `anthropic` | Provider: `anthropic`, `openai`, `google`, `openrouter`, `groq`, `mistral`, `xai`, etc. |
-| `--model <id>` | `LLM_MODEL` | (provider default) | Model ID (e.g., `claude-sonnet-4-5-20250929`, `gpt-4o`, `gemini-2.0-flash`) |
-| `--api-key <key>` | `LLM_API_KEY` | (provider env) | API key — also checks provider-specific vars like `$OPENAI_API_KEY` |
-| `--base-url <url>` | `LLM_BASE_URL` | — | Custom endpoint for proxies, OpenRouter, or self-hosted models |
+| `--no-cleanup` | `false` | Keep the created session after the run |
+| `--server-entry <path>` | — | Development-only custom server entry |
+| `--provider <name>` | `anthropic` | LLM provider, or `$LLM_PROVIDER` |
+| `--model <id>` | provider default | Model ID, or `$LLM_MODEL` |
+| `--api-key <key>` | provider environment | API key, or `$LLM_API_KEY` |
+| `--base-url <url>` | — | Custom endpoint, or `$LLM_BASE_URL` |
 
 ```bash
-# Multi-provider examples
-polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-polo-ai run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
+polo run "Summarize the README"
+polo run --workspace-dir ./my-project --source github "List open PRs"
+polo run --provider openai --model gpt-4o "Summarize this repo"
+OPENAI_API_KEY=... polo run --provider openai "Hello"
+echo "Analyze this code" | polo run
 ```
 
-Prompt can also be piped via stdin:
-```bash
-echo "Summarize this file" | polo-ai run
-cat error.log | polo-ai run "What's causing these errors?"
-```
-
-### Validate Server
+### Sessions and scripting
 
 ```bash
-# Against a running server
-polo-ai --validate-server --url ws://127.0.0.1:9100 --token <token>
+# List sessions from the running desktop App
+polo sessions
 
-# Self-contained (auto-spawns a server)
-polo-ai --validate-server
+# Send a message and stream its response
+polo send abc-123 "Run the test suite and report results"
+
+# Work with JSON output
+WORKSPACES=$(polo --json workspaces | jq -r '.[].id')
+SESSION_ID=$(polo --json session create --name "CI Run" | jq -r '.id')
+polo session delete "$SESSION_ID"
 ```
 
-When no `--url` is provided, `--validate-server` automatically spawns a local headless server (same as the `run` command), runs the validation, and shuts it down.
-
-Runs a 21-step integration test covering the full server lifecycle including source and skill creation:
-
-1. Connect + handshake
-2. `credentials:healthCheck`
-3. `system:versions`
-4. `system:homeDir`
-5. `workspaces:get`
-6. `sessions:get`
-7. `LLM_Connection:list`
-8. `sources:get`
-9. `sessions:create` (temporary `__cli-validate-*` session)
-10. `sessions:getMessages`
-11. Send message + stream (text response)
-12. Send message + tool use (Bash tool)
-13. `sources:create` (temporary Cat Facts API source)
-14. Send + source mention (uses the created source)
-15. Send + skill create (writes SKILL.md via Bash)
-16. `skills:get` (verify skill appears)
-17. Send + skill mention (invokes the created skill)
-18. `skills:delete` (cleanup)
-19. `sources:delete` (cleanup)
-20. `sessions:delete` (cleanup)
-21. Disconnect
-
-**Note:** This test mutates workspace state — it creates and deletes a temporary session, source, and skill. All resources are cleaned up on completion. Continues on failure and reports a summary. Use `--json` for machine-readable output.
-
-## Scripting Patterns
+### Validate a running server
 
 ```bash
-# Get workspace IDs
-WORKSPACES=$(polo-ai --json workspaces | jq -r '.[].id')
+# Discover and validate a running Polo App
+polo --validate-server
 
-# Count sessions per workspace
-for ws in $WORKSPACES; do
-  COUNT=$(polo-ai --json --workspace "$ws" sessions | jq length)
-  echo "$ws: $COUNT sessions"
-done
-
-# Create a session and capture its ID
-SESSION_ID=$(polo-ai --json session create --name "CI Run" | jq -r '.id')
-
-# Send a message and wait for completion
-polo-ai send "$SESSION_ID" "Run the test suite and report results"
-
-# Clean up
-polo-ai session delete "$SESSION_ID"
+# Validate an explicitly selected remote server
+polo --validate-server --url ws://127.0.0.1:9100 --token <token>
 ```
+
+`--validate-server` validates a running App when no `--url` is supplied. Run
+`polo app` first, or use `polo run` for the self-contained temporary-server
+workflow. Validation creates temporary resources and removes them on completion.
 
 ## TLS / wss://
 
-For remote servers with TLS:
-
 ```bash
-# Trusted certificate (Let's Encrypt, etc.)
-polo-ai --url wss://server.example.com:9100 ping
+# Trusted certificate
+polo --url wss://server.example.com:9100 ping
 
 # Self-signed certificate
-polo-ai --url wss://server.example.com:9100 --tls-ca /path/to/ca.pem ping
+polo --url wss://server.example.com:9100 --tls-ca /path/to/ca.pem ping
 ```
 
-The `--tls-ca` flag sets `NODE_EXTRA_CA_CERTS` before connecting. You can also set `POLO_AI_TLS_CA` in your environment.
+`--tls-ca` sets `NODE_EXTRA_CA_CERTS` before the client connects. You can also
+set `POLO_AI_TLS_CA` in the environment.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `Connection timeout` | Server not running or unreachable | Check server is started, verify URL |
-| `AUTH_FAILED` | Wrong token | Check `POLO_AI_SERVER_TOKEN` matches server |
-| `PROTOCOL_VERSION_UNSUPPORTED` | Version mismatch | Update CLI and server to same version |
-| `WebSocket connection error` | Network issue or TLS problem | For self-signed certs, use `--tls-ca` |
-| `No workspace available` | Workspace not yet created | Create one via desktop app or API |
+| `Polo App is not running` | A resource command could not discover the App | Run `polo app`, then retry; or pass `--url` and `--token` for a remote server |
+| Runtime is stale or unreachable | The App exited or its RPC endpoint is unavailable | Restart with `polo app` and retry |
+| `AUTH_FAILED` | Wrong remote token | Check `POLO_AI_SERVER_TOKEN` or the `--token` value |
+| Version incompatibility | App and CLI major versions differ | Update Polo so the installed App and terminal launcher match |
+| `No workspace available` | No workspace exists in the running App | Create one in Polo, or use `polo run --workspace-dir <path>` |
+| `WebSocket connection error` | Network issue or TLS problem | Verify the server URL; for self-signed TLS use `--tls-ca` |
