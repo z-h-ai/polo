@@ -37,6 +37,7 @@ export const KEYS = {
 
   // Tabs (workspace-scoped)
   tabs: 'tabs', // Used as: tabs-${workspaceId}
+  homeRecentApps: 'home-recent-apps',
 
   // Working directory
   recentWorkingDirs: 'recent-working-dirs',

@@ -112,7 +112,11 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
 import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
-import { hasLocalAppRuntimeManager, shutdownLocalAppRuntime } from './local-app-runtime'
+import {
+  getScopedLocalAppRuntimeRegistry,
+  hasLocalAppRuntimeManager,
+  shutdownLocalAppRuntime,
+} from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
   BeforeQuitCleanupCoordinator,
@@ -756,6 +760,49 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
+            onAdminSessionEnding: (accountId: string) =>
+              getScopedLocalAppRuntimeRegistry().stopAccount(accountId),
+            onAdminSessionStarted: (accountId: string) => {
+              getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
+            },
+            onAdminCatalogScopeDenied: (
+              accountId: string,
+              organizationId: string,
+            ) => getScopedLocalAppRuntimeRegistry().stopOrganization(
+              accountId,
+              organizationId,
+            ),
+            onAdminCatalogAppsWithdrawn: (
+              accountId: string,
+              organizationId: string,
+              catalogAppIds: readonly string[],
+            ) => getScopedLocalAppRuntimeRegistry().stopApps(
+              catalogAppIds.map(catalogAppId => ({
+                kind: 'catalog' as const,
+                accountId,
+                organizationId,
+                catalogAppId,
+              })),
+            ),
+            onAdminCatalogAppsAuthorized: (
+              accountId: string,
+              organizationId: string,
+              catalogAppIds: readonly string[],
+            ) => getScopedLocalAppRuntimeRegistry().authorizeApps(
+              catalogAppIds.map(catalogAppId => ({
+                kind: 'catalog' as const,
+                accountId,
+                organizationId,
+                catalogAppId,
+              })),
+            ),
+            getRetainedCatalogAppIds: (
+              accountId: string,
+              organizationId: string,
+            ) => getScopedLocalAppRuntimeRegistry().getRetainedCatalogAppIds(
+              accountId,
+              organizationId,
+            ),
           }
         },
         // Headless: register only core handlers (no GUI handlers for browser, settings, etc.)

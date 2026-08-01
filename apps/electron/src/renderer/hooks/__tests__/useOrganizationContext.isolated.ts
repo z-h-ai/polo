@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement, useEffect, useState } from 'react'
+import type {
+  OrganizationContextStorage,
+  OrganizationContextStoragePatch,
+} from '@polo-ai/shared/config/organization-context'
 
 GlobalRegistrator.register()
 
@@ -9,7 +13,12 @@ const { useOrganizationContextState } = await import('../useOrganizationContext'
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 const {
   clearPendingOrganizationJoinToken,
+  createOrganizationContextKey,
+  createOrganizationScopedStorageKey,
   getStoredActiveOrganizationId,
+  getUnavailableOrganizationTombstone,
+  getVerifiedOrganizationContext,
+  resetOrganizationStorageMemoryForTests,
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
 } = await import('@/lib/organization-storage')
@@ -91,10 +100,16 @@ let organizationAcceptJoin = mock(async (
   },
   replayed: false,
 }))
+let organizationContextStorageByAccount = new Map<
+  string,
+  OrganizationContextStorage
+>()
 
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
+  resetOrganizationStorageMemoryForTests()
+  organizationContextStorageByAccount = new Map()
   organizationList = mock(async (): Promise<OrganizationListResult> => ({
     success: true as const,
     organizations,
@@ -142,6 +157,31 @@ beforeEach(() => {
       organizationCreate: (...args: [Parameters<typeof organizationCreate>[0]]) =>
         organizationCreate(...args),
       organizationAcceptJoin: (...args: [string]) => organizationAcceptJoin(...args),
+      getOrganizationContextStorage: async (accountId: string) =>
+        organizationContextStorageByAccount.get(accountId) ?? null,
+      updateOrganizationContextStorage: async (
+        accountId: string,
+        patch: OrganizationContextStoragePatch,
+      ) => {
+        const next = {
+          ...(organizationContextStorageByAccount.get(accountId) ?? {}),
+        }
+        if (patch.verifiedContext === null) delete next.verifiedContext
+        else if (patch.verifiedContext) {
+          next.verifiedContext = patch.verifiedContext
+        }
+        if (patch.unavailableTombstone === null) {
+          delete next.unavailableTombstone
+        } else if (patch.unavailableTombstone) {
+          next.unavailableTombstone = patch.unavailableTombstone
+        }
+        if (next.verifiedContext || next.unavailableTombstone) {
+          organizationContextStorageByAccount.set(accountId, next)
+          return next
+        }
+        organizationContextStorageByAccount.delete(accountId)
+        return null
+      },
     },
   })
 })
@@ -180,7 +220,7 @@ describe('useOrganizationContextState', () => {
     expect(result.current.activeOrganizationId).toBe(organizations[1].id)
     expect(result.current.organizationMembershipRole).toBe('member')
     expect(result.current.organizationContextKey).toBe(
-      `account-1:${organizations[1].id}`,
+      createOrganizationContextKey('account-1', organizations[1].id),
     )
     expect(getStoredActiveOrganizationId('account-1')).toBe(organizations[1].id)
     expect(getStoredActiveOrganizationId('account-2')).toBeNull()
@@ -221,6 +261,164 @@ describe('useOrganizationContextState', () => {
     expect(getStoredActiveOrganizationId('returning-account')).toBe(organizations[0].id)
   })
 
+  it('restores the verified organization on valid-token and refresh network failures', async () => {
+    const online = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await online.result.current.bootstrap('offline-account')
+    })
+    act(() => {
+      online.result.current.selectOrganization(organizations[1].id)
+    })
+    online.unmount()
+
+    expect(await getVerifiedOrganizationContext('offline-account')).toMatchObject({
+      activeOrganizationId: organizations[1].id,
+      organizationSummaries: organizations,
+    })
+
+    for (const errorCode of ['NETWORK_ERROR', 'TIMEOUT'] as const) {
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: false,
+        errorCode,
+        status: errorCode === 'NETWORK_ERROR' ? 503 : undefined,
+      }))
+      const offline = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        expect(await offline.result.current.bootstrap('offline-account')).toBe('ready')
+      })
+      expect(offline.result.current.activeOrganizationId).toBe(organizations[1].id)
+      expect(offline.result.current.organizationMembershipRole).toBe('member')
+      expect(offline.result.current.organizationSummaries).toEqual(organizations)
+      offline.unmount()
+    }
+  })
+
+  it('fails closed and removes the organization cache after an explicit 403', async () => {
+    const online = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await online.result.current.bootstrap('revoked-account')
+    })
+    act(() => {
+      online.result.current.selectOrganization(organizations[0].id)
+    })
+    online.unmount()
+
+    const authFailures: string[] = []
+    const unsubscribe = subscribeToAdminAuthFailures(error => {
+      authFailures.push(error.code)
+    })
+    organizationList = mock(async (): Promise<OrganizationListResult> => ({
+      success: false,
+      errorCode: 'FORBIDDEN',
+      status: 403,
+    }))
+    const revoked = renderHook(() => useOrganizationContextState())
+    await act(async () => {
+      await revoked.result.current.bootstrap('revoked-account').catch(() => {})
+    })
+
+    expect(revoked.result.current.flowState).toBe('loading')
+    expect(revoked.result.current.activeOrganizationId).toBeNull()
+    expect(await getVerifiedOrganizationContext('revoked-account')).toBeNull()
+    expect(authFailures).toEqual(['FORBIDDEN'])
+    unsubscribe()
+  })
+
+  it('retains a read-only tombstone when the current organization is removed or suspended', async () => {
+    for (const nextOrganizations of [
+      [],
+      [{
+        ...organizations[0],
+        membership: {
+          ...organizations[0].membership,
+          status: 'suspended' as const,
+        },
+      }],
+    ]) {
+      localStorage.clear()
+      organizationContextStorageByAccount.clear()
+      const unavailableMembershipStatus = nextOrganizations.length > 0
+        ? 'suspended'
+        : 'removed'
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: true,
+        organizations: [organizations[0]],
+      }))
+      const online = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        expect(await online.result.current.bootstrap('lost-membership'))
+          .toBe('ready')
+      })
+      expect(online.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: true,
+        organizations: nextOrganizations,
+      }))
+      await act(async () => {
+        await online.result.current.refreshOrganizations()
+      })
+      expect(online.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+      expect(online.result.current.flowState).toBe('ready')
+      expect(online.result.current.activeOrganization).toMatchObject({
+        id: organizations[0].id,
+        status: 'suspended',
+        membership: { status: unavailableMembershipStatus },
+      })
+      expect(getStoredActiveOrganizationId('lost-membership')).toBeNull()
+      expect(await getVerifiedOrganizationContext('lost-membership'))
+        .toMatchObject({ activeOrganizationId: null })
+      expect(await getUnavailableOrganizationTombstone('lost-membership'))
+        .toMatchObject({
+          organization: {
+            id: organizations[0].id,
+            status: 'suspended',
+            membership: { status: unavailableMembershipStatus },
+          },
+        })
+      expect(() => {
+        online.result.current.selectOrganization(organizations[0].id)
+      }).toThrow()
+      online.unmount()
+
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: true,
+        organizations: nextOrganizations,
+      }))
+      const rebuilt = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        expect(await rebuilt.result.current.bootstrap('lost-membership'))
+          .toBe('ready')
+      })
+      expect(rebuilt.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+      expect(rebuilt.result.current.activeOrganization).toMatchObject({
+        status: 'suspended',
+        membership: { status: unavailableMembershipStatus },
+      })
+      rebuilt.unmount()
+
+      organizationList = mock(async (): Promise<OrganizationListResult> => ({
+        success: false,
+        errorCode: 'NETWORK_ERROR',
+        status: 503,
+      }))
+      const offline = renderHook(() => useOrganizationContextState())
+      await act(async () => {
+        expect(await offline.result.current.bootstrap('lost-membership'))
+          .toBe('ready')
+      })
+      expect(offline.result.current.activeOrganizationId)
+        .toBe(organizations[0].id)
+      expect(offline.result.current.flowState).toBe('ready')
+      expect(offline.result.current.activeOrganization?.membership.status)
+        .toBe(unavailableMembershipStatus)
+      offline.unmount()
+    }
+  })
+
   it('discards account A bootstrap after clearing A and bootstrapping account B', async () => {
     let resolveAccountA!: (value: OrganizationListResult) => void
     let resolveAccountB!: (value: OrganizationListResult) => void
@@ -236,12 +434,18 @@ describe('useOrganizationContextState', () => {
     act(() => {
       bootstrapAccountA = result.current.bootstrap('account-a')
     })
+    await act(async () => {
+      await Promise.resolve()
+    })
     act(() => {
       result.current.clearAccount('account-a')
     })
     let bootstrapAccountB!: ReturnType<typeof result.current.bootstrap>
     act(() => {
       bootstrapAccountB = result.current.bootstrap('account-b')
+    })
+    await act(async () => {
+      await Promise.resolve()
     })
 
     await act(async () => {
@@ -540,5 +744,37 @@ describe('useOrganizationContextState', () => {
       organizations.map(item => item.name),
     )
     expect(result.current.flowState).toBe('ready')
+  })
+
+  it('uses collision-free context keys for colon, Unicode, and long entity IDs', () => {
+    const collidingLegacyPairs = [
+      ['account:west', '组织'],
+      ['account', 'west:组织'],
+    ] as const
+    const first = createOrganizationContextKey(...collidingLegacyPairs[0])
+    const second = createOrganizationContextKey(...collidingLegacyPairs[1])
+
+    expect(first).not.toBe(second)
+    expect(JSON.parse(first)).toEqual(collidingLegacyPairs[0])
+    expect(JSON.parse(second)).toEqual(collidingLegacyPairs[1])
+    expect(createOrganizationScopedStorageKey(
+      ...collidingLegacyPairs[0],
+      'recent-apps',
+    )).not.toBe(createOrganizationScopedStorageKey(
+      ...collidingLegacyPairs[1],
+      'recent-apps',
+    ))
+    expect(createOrganizationScopedStorageKey(
+      ...collidingLegacyPairs[0],
+      'recent-apps',
+    )).toStartWith('polo-organization:v2:')
+
+    const longAccountId = `账号:${'a'.repeat(509)}`
+    const longOrganizationId = `组织:${'界'.repeat(509)}`
+    const longKey = createOrganizationContextKey(
+      longAccountId,
+      longOrganizationId,
+    )
+    expect(JSON.parse(longKey)).toEqual([longAccountId, longOrganizationId])
   })
 })

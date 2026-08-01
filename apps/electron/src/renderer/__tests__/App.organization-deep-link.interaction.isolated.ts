@@ -4,6 +4,10 @@ import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import { createElement } from 'react'
 import type { ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
+import type {
+  OrganizationContextStorage,
+  OrganizationContextStoragePatch,
+} from '@polo-ai/shared/config/organization-context'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -13,6 +17,7 @@ function passthrough({ children }: { children?: ReactNode }) {
 }
 
 let loginRouteRenderCount = 0
+let lastOnboardingFinish: (() => void) | null = null
 
 mock.module('@polo-ai/ui', () => ({
   TooltipProvider: passthrough,
@@ -35,6 +40,7 @@ mock.module('sonner', () => ({
 mock.module('@/components/onboarding', () => ({
   OnboardingWizard: ({ onFinish }: { onFinish: () => void }) => {
     loginRouteRenderCount += 1
+    lastOnboardingFinish = onFinish
     return createElement(
       'div',
       { 'data-testid': 'login-route' },
@@ -73,10 +79,17 @@ mock.module('@/components/app-shell/AppShell', () => ({
   AppShell: ({
     contextValue,
   }: {
-    contextValue: { onAdminLogout?: () => Promise<void> }
+    contextValue: {
+      currentAdminUser?: { userId: string } | null
+      onAdminLogout?: () => Promise<void>
+      onReset?: () => void
+    }
   }) => createElement(
     'div',
-    { 'data-testid': 'ready-route' },
+    {
+      'data-testid': 'ready-route',
+      'data-account-id': contextValue.currentAdminUser?.userId ?? '',
+    },
     createElement(
       'button',
       {
@@ -87,6 +100,14 @@ mock.module('@/components/app-shell/AppShell', () => ({
       },
       'Log out',
     ),
+    createElement(
+      'button',
+      {
+        type: 'button',
+        onClick: contextValue.onReset,
+      },
+      'Reset app',
+    ),
   ),
 }))
 
@@ -95,7 +116,19 @@ mock.module('@/components/workspace', () => ({
 }))
 
 mock.module('@/components/ResetConfirmationDialog', () => ({
-  ResetConfirmationDialog: () => null,
+  ResetConfirmationDialog: ({
+    open,
+    onConfirm,
+  }: {
+    open: boolean
+    onConfirm: () => void
+  }) => open
+    ? createElement(
+        'button',
+        { type: 'button', onClick: onConfirm },
+        'Confirm reset',
+      )
+    : null,
 }))
 
 mock.module('@/components/SplashScreen', () => ({
@@ -214,6 +247,12 @@ type Deferred<T> = {
   resolve: (value: T) => void
 }
 
+type SessionChangedLogoutResult = {
+  success: false
+  errorCode: 'SESSION_CHANGED'
+  message: string
+}
+
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(resolvePromise => {
@@ -226,6 +265,12 @@ const account = {
   userId: 'account-app-wiring',
   username: 'phone_user',
   displayName: 'Phone User',
+}
+
+const replacementAccount = {
+  userId: 'account-app-wiring-b',
+  username: 'replacement_user',
+  displayName: 'Replacement User',
 }
 
 const organization = {
@@ -245,6 +290,16 @@ const organizationSummary = {
   memberCount: 1,
 }
 
+const replacementOrganizationSummary = {
+  ...organizationSummary,
+  id: '31111111-1111-4111-8111-111111111111',
+  name: 'Replacement Studio',
+  membership: {
+    ...organizationSummary.membership,
+    id: '41111111-1111-4111-8111-111111111111',
+  },
+}
+
 const previewResult: PreviewResult = {
   success: true,
   organization,
@@ -258,11 +313,28 @@ const previewResult: PreviewResult = {
 }
 
 let authenticated = false
+let currentAccount = account
 let activeWorkspaceId: string | null = null
 let listedOrganizations: typeof organizationSummary[] = []
 let previewRequests: Deferred<PreviewResult>[] = []
 let previewJoinCallCount = 0
 let adminLogoutCallCount = 0
+let commonLogoutCallCount = 0
+let catalogSyncCallCount = 0
+let catalogSyncResult:
+  | { success: true }
+  | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+    } = { success: true }
+let pendingAdminLogout: Deferred<SessionChangedLogoutResult> | null = null
+let pendingCommonLogout: Deferred<SessionChangedLogoutResult> | null = null
+let organizationContextStorageByAccount = new Map<
+  string,
+  OrganizationContextStorage
+>()
 let deepLinkNavigateListener:
   | ((navigation: { joinToken?: string }) => void)
   | null = null
@@ -290,7 +362,7 @@ const electronAPI = new Proxy<Record<string, unknown>>({
     ? {
         loggedIn: true,
         adminUrl: 'https://admin.example.test',
-        ...account,
+        ...currentAccount,
       }
     : {
         loggedIn: false,
@@ -299,9 +371,9 @@ const electronAPI = new Proxy<Record<string, unknown>>({
     ? {
         loggedIn: true,
         user: {
-          id: account.userId,
-          username: account.username,
-          displayName: account.displayName,
+          id: currentAccount.userId,
+          username: currentAccount.username,
+          displayName: currentAccount.displayName,
         },
       }
     : {
@@ -309,9 +381,21 @@ const electronAPI = new Proxy<Record<string, unknown>>({
         errorCode: 'UNAUTHORIZED',
       },
   adminSyncConnections: async () => ({ success: true }),
+  adminSyncAppCatalog: async () => {
+    catalogSyncCallCount += 1
+    return catalogSyncResult
+  },
   adminLogout: async () => {
     adminLogoutCallCount += 1
+    if (pendingAdminLogout) return pendingAdminLogout.promise
     authenticated = false
+    return { success: true as const }
+  },
+  logout: async () => {
+    commonLogoutCallCount += 1
+    if (pendingCommonLogout) return pendingCommonLogout.promise
+    authenticated = false
+    return { success: true as const }
   },
   adminAcquirePhoneAuthChallenge: async () => ({ success: false }),
   adminGetAuthConfig: async () => ({ phoneAuthEnabled: false }),
@@ -324,6 +408,31 @@ const electronAPI = new Proxy<Record<string, unknown>>({
     success: true,
     organizations: listedOrganizations,
   }),
+  getOrganizationContextStorage: async (accountId: string) =>
+    organizationContextStorageByAccount.get(accountId) ?? null,
+  updateOrganizationContextStorage: async (
+    accountId: string,
+    patch: OrganizationContextStoragePatch,
+  ) => {
+    const next = {
+      ...(organizationContextStorageByAccount.get(accountId) ?? {}),
+    }
+    if (patch.verifiedContext === null) delete next.verifiedContext
+    else if (patch.verifiedContext) {
+      next.verifiedContext = patch.verifiedContext
+    }
+    if (patch.unavailableTombstone === null) {
+      delete next.unavailableTombstone
+    } else if (patch.unavailableTombstone) {
+      next.unavailableTombstone = patch.unavailableTombstone
+    }
+    if (next.verifiedContext || next.unavailableTombstone) {
+      organizationContextStorageByAccount.set(accountId, next)
+      return next
+    }
+    organizationContextStorageByAccount.delete(accountId)
+    return null
+  },
   organizationPreviewJoin: async () => {
     previewJoinCallCount += 1
     const request = deferred<PreviewResult>()
@@ -371,19 +480,33 @@ Object.defineProperty(window, 'electronAPI', {
 const { act, cleanup, render, screen, waitFor } = await import('@testing-library/react')
 const userEvent = (await import('@testing-library/user-event')).default
 const { default: App } = await import('../App')
+const { emitAdminAuthFailure } = await import('@/lib/admin-auth-failure')
+const {
+  getStoredActiveOrganizationId,
+  resetOrganizationStorageMemoryForTests,
+} = await import('@/lib/organization-storage')
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
   // eslint-disable-next-line polo-ai/no-localstorage -- isolate the real organization persistence between App integration cases
   localStorage.clear()
   sessionStorage.clear()
+  resetOrganizationStorageMemoryForTests()
+  organizationContextStorageByAccount = new Map()
   authenticated = false
+  currentAccount = account
   activeWorkspaceId = null
   listedOrganizations = []
   previewRequests = []
   previewJoinCallCount = 0
   adminLogoutCallCount = 0
+  commonLogoutCallCount = 0
+  catalogSyncCallCount = 0
+  catalogSyncResult = { success: true }
+  pendingAdminLogout = null
+  pendingCommonLogout = null
   loginRouteRenderCount = 0
+  lastOnboardingFinish = null
   deepLinkNavigateListener = null
 })
 
@@ -452,5 +575,156 @@ describe('App deferred organization deep-link wiring', () => {
     expect(screen.getByTestId('login-route')).toBeTruthy()
     expect(screen.queryByTestId('organization-route')).toBeNull()
     expect(loginRouteRenderCount).toBe(loginRenderCountAfterLogout)
+  })
+
+  it('keeps the App account context when startup Catalog sync returns organization 403', async () => {
+    authenticated = true
+    activeWorkspaceId = 'workspace-1'
+    listedOrganizations = [organizationSummary]
+    catalogSyncResult = {
+      success: false,
+      errorCode: 'FORBIDDEN',
+      message: 'Admin request is not permitted',
+      status: 403,
+    }
+    render(createElement(I18nextProvider, { i18n }, createElement(App)))
+
+    await screen.findByTestId('ready-route')
+    await waitFor(() => expect(catalogSyncCallCount).toBe(1))
+    expect(screen.queryByTestId('login-route')).toBeNull()
+    await waitFor(() => {
+      expect(organizationContextStorageByAccount.get(account.userId))
+        .toMatchObject({
+          verifiedContext: { activeOrganizationId: organization.id },
+        })
+    })
+    expect(getStoredActiveOrganizationId(account.userId)).toBe(organization.id)
+  })
+
+  it('clears the App account context for an actual account-disabled failure', async () => {
+    authenticated = true
+    activeWorkspaceId = 'workspace-1'
+    listedOrganizations = [organizationSummary]
+    render(createElement(I18nextProvider, { i18n }, createElement(App)))
+
+    await screen.findByTestId('ready-route')
+    await waitFor(() => {
+      expect(organizationContextStorageByAccount.get(account.userId))
+        .toMatchObject({
+          verifiedContext: { activeOrganizationId: organization.id },
+        })
+    })
+
+    act(() => {
+      expect(emitAdminAuthFailure({
+        code: 'ACCOUNT_DISABLED',
+        status: 403,
+      })).toBe(true)
+    })
+
+    await screen.findByTestId('login-route')
+    expect(screen.queryByTestId('ready-route')).toBeNull()
+    await waitFor(() => {
+      expect(organizationContextStorageByAccount.get(account.userId))
+        .toBeUndefined()
+    })
+    expect(getStoredActiveOrganizationId(account.userId)).toBeNull()
+  })
+
+  it('discards a stale logout continuation after another account logs in', async () => {
+    activeWorkspaceId = 'workspace-1'
+    listedOrganizations = [organizationSummary]
+    const user = userEvent.setup({ document: window.document })
+    render(createElement(I18nextProvider, { i18n }, createElement(App)))
+
+    await screen.findByTestId('login-route')
+    authenticated = true
+    await user.click(screen.getByRole('button', { name: 'Complete login' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
+        .toBe(account.userId)
+    })
+
+    pendingAdminLogout = deferred()
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await waitFor(() => expect(adminLogoutCallCount).toBe(1))
+
+    currentAccount = replacementAccount
+    listedOrganizations = [replacementOrganizationSummary]
+    act(() => {
+      lastOnboardingFinish?.()
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
+        .toBe(replacementAccount.userId)
+    })
+
+    await act(async () => {
+      pendingAdminLogout?.resolve({
+        success: false,
+        errorCode: 'SESSION_CHANGED',
+        message: 'Admin session changed',
+      })
+      await pendingAdminLogout?.promise
+    })
+
+    expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
+      .toBe(replacementAccount.userId)
+    expect(screen.queryByTestId('login-route')).toBeNull()
+    expect(organizationContextStorageByAccount.get(replacementAccount.userId))
+      .toMatchObject({
+        verifiedContext: {
+          activeOrganizationId: replacementOrganizationSummary.id,
+        },
+      })
+  })
+
+  it('discards a stale common-reset continuation after another account logs in', async () => {
+    activeWorkspaceId = 'workspace-1'
+    listedOrganizations = [organizationSummary]
+    const user = userEvent.setup({ document: window.document })
+    render(createElement(I18nextProvider, { i18n }, createElement(App)))
+
+    await screen.findByTestId('login-route')
+    authenticated = true
+    await user.click(screen.getByRole('button', { name: 'Complete login' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
+        .toBe(account.userId)
+    })
+
+    pendingCommonLogout = deferred()
+    await user.click(screen.getByRole('button', { name: 'Reset app' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm reset' }))
+    await waitFor(() => expect(commonLogoutCallCount).toBe(1))
+
+    currentAccount = replacementAccount
+    listedOrganizations = [replacementOrganizationSummary]
+    act(() => {
+      lastOnboardingFinish?.()
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
+        .toBe(replacementAccount.userId)
+    })
+
+    await act(async () => {
+      pendingCommonLogout?.resolve({
+        success: false,
+        errorCode: 'SESSION_CHANGED',
+        message: 'Admin session changed',
+      })
+      await pendingCommonLogout?.promise
+    })
+
+    expect(screen.getByTestId('ready-route').getAttribute('data-account-id'))
+      .toBe(replacementAccount.userId)
+    expect(screen.queryByTestId('login-route')).toBeNull()
+    expect(organizationContextStorageByAccount.get(replacementAccount.userId))
+      .toMatchObject({
+        verifiedContext: {
+          activeOrganizationId: replacementOrganizationSummary.id,
+        },
+      })
   })
 })

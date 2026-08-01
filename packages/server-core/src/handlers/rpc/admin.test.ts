@@ -288,6 +288,15 @@ const mockCredentialManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
+  denyAppCatalogAccessForAccount: () => {},
+  denyCachedAppCatalogAuthorization: () => null,
+  denyCachedAppCatalogAuthorizationForAccount: () => [],
+  getAppCatalogAccessMode: () => 'online',
+  getCachedAppCatalog: () => null,
+  listCachedAppCatalogs: () => [],
+  resumeAppCatalogAccessForAccount: () => {},
+  saveAppCatalog: () => {},
+  setAppCatalogAccessMode: () => {},
   getSafeAdminErrorMessage: (errorCode: string, status?: number) => {
     if (typeof status === 'number' && status >= 500) {
       return 'Admin service is temporarily unavailable'

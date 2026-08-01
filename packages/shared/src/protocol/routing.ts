@@ -134,6 +134,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.tabBrowser.SAVE_APPS,
 
   // localApps — downloaded bundles and processes live on this device
+  RPC_CHANNELS.localApps.GET_HOST_INFO,
   RPC_CHANNELS.localApps.INSTALL,
   RPC_CHANNELS.localApps.CANCEL_INSTALL,
   RPC_CHANNELS.localApps.START,
@@ -143,6 +144,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
   RPC_CHANNELS.localApps.GET_INSTALLED_APPS,
   RPC_CHANNELS.localApps.GET_RUNTIME_STATUS,
+  RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES,
+  RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
   RPC_CHANNELS.localApps.GET_LOGS,
 
   // notification — local OS notifications
@@ -237,6 +240,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.LOGOUT,
   RPC_CHANNELS.admin.GET_STATUS,
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
+  RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
@@ -263,6 +267,12 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.REVOKE_CREATOR_ARTIFACT_VERSION,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
+
+  // preferences — device-local launcher and verified Admin organization state
+  RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
 ])
 
 // ---------------------------------------------------------------------------

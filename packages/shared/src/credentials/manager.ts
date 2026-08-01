@@ -283,6 +283,8 @@ export class CredentialManager {
     userId: string;
     username: string;
     displayName?: string;
+    role?: string;
+    groupIds?: string[];
   } | null> {
     const cred = await this.get({ type: 'admin_token' });
     if (!cred || !cred.refreshToken || !cred.expiresAt || !cred.userId || !cred.username) {
@@ -296,6 +298,8 @@ export class CredentialManager {
       userId: cred.userId,
       username: cred.username,
       displayName: cred.displayName,
+      role: cred.adminRole,
+      groupIds: cred.adminGroupIds,
     };
   }
 
@@ -307,6 +311,8 @@ export class CredentialManager {
     userId: string;
     username: string;
     displayName?: string;
+    role?: string;
+    groupIds?: string[];
   }): Promise<void> {
     await this.set({ type: 'admin_token' }, {
       value: data.accessToken,
@@ -315,6 +321,8 @@ export class CredentialManager {
       userId: data.userId,
       username: data.username,
       displayName: data.displayName,
+      adminRole: data.role,
+      adminGroupIds: data.groupIds,
     });
   }
 

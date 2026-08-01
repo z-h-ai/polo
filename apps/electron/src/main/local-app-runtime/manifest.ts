@@ -1,4 +1,5 @@
 import { isAbsolute, normalize, sep } from 'path'
+import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
 import type {
   LocalAppArchitecture,
   LocalAppPlatform,
@@ -6,7 +7,6 @@ import type {
 } from '@polo-ai/shared/protocol'
 import { LocalAppRuntimeError } from './runtime-error'
 
-const APP_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/
 const VERSION_PATTERN = /^[0-9A-Za-z](?:[0-9A-Za-z._+-]{0,126}[0-9A-Za-z])?$/
 const VALID_RUNTIMES = new Set(['static', 'python', 'js'])
 const VALID_PLATFORMS = new Set<LocalAppPlatform>(['darwin', 'win32', 'linux'])
@@ -48,6 +48,16 @@ function requireStringArray(value: unknown, field: string, allowEmpty = false): 
     return invalid(`polo-app.json field "${field}" has too many items`)
   }
   return value.map((item, index) => requireString(item, `${field}[${index}]`))
+}
+
+function requireBusinessAppId(value: unknown): string {
+  const parsed = AdminEntityIdSchema.safeParse(value)
+  if (!parsed.success) {
+    return invalid(
+      'polo-app.json field "appId" must satisfy the Admin entity ID contract',
+    )
+  }
+  return parsed.data
 }
 
 /**
@@ -114,10 +124,10 @@ export function validatePoloAppManifest(
     })
   }
 
-  const appId = requireString(raw.appId, 'appId', { maxLength: 128 })
-  if (!APP_ID_PATTERN.test(appId)) {
-    invalid('polo-app.json appId must use lowercase letters, digits, dots, dashes, or underscores', { appId })
-  }
+  // This is a business entity id, not a filesystem component. Catalog ids may
+  // contain NUL, uppercase, or Unicode and follow Admin's 512-character
+  // contract. Runtime ids and paths remain subject to their stricter rules.
+  const appId = requireBusinessAppId(raw.appId)
 
   const version = requireString(raw.version, 'version', { maxLength: 128 })
   if (!VERSION_PATTERN.test(version) || version === '.' || version === '..') {

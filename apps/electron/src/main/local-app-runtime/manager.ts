@@ -23,6 +23,7 @@ import { createServer as createNetServer } from 'net'
 import { arch as hostArch, platform as hostPlatform } from 'os'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { spawn, type ChildProcess } from 'child_process'
+import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
 import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@polo-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
@@ -117,7 +118,13 @@ interface ManagedRuntime {
 
 type ActiveReleaseIdentity = Pick<
   LocalAppInstallRequest,
-  'appId' | 'version' | 'checksum' | 'sizeBytes' | 'platform' | 'arch'
+  | 'appId'
+  | 'expectedManifestAppId'
+  | 'version'
+  | 'checksum'
+  | 'sizeBytes'
+  | 'platform'
+  | 'arch'
 >
 
 interface ActiveInstall {
@@ -205,6 +212,17 @@ export interface LocalAppRuntimeManagerOptions {
   windowsJobObjectOwnerFactory?: () => Promise<WindowsJobObjectOwner>
   /** Test/embedding seam for the Windows snapshot fallback. */
   windowsProcessTreeOwnerFactory?: (rootPid: number) => WindowsProcessTreeOwner
+  /** Optional observer used by hosts/tests that consume install phase events. */
+  onInstallProgress?: (
+    appId: string,
+    progress: LocalAppInstallProgress,
+  ) => void
+  /** Test/embedding seam fired after a process is lifecycle-tracked. */
+  onManagedProcessStarted?: (
+    appId: string,
+    kind: 'dependency-preparation' | 'runtime',
+    pid: number | undefined,
+  ) => void
 }
 
 const noopLogger: LocalAppRuntimeLogger = {
@@ -278,6 +296,17 @@ function validateRequestIdentifier(value: unknown, field: 'appId' | 'version'): 
   return value
 }
 
+function validateManifestBusinessAppId(value: unknown): string {
+  const parsed = AdminEntityIdSchema.safeParse(value)
+  if (!parsed.success) {
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'expectedManifestAppId is invalid',
+    )
+  }
+  return parsed.data
+}
+
 function delay(milliseconds: number): Promise<void> {
   return new Promise(resolveDelay => setTimeout(resolveDelay, milliseconds))
 }
@@ -299,6 +328,9 @@ export class LocalAppRuntimeManager {
   private readonly processSpawner: typeof spawn
   private readonly windowsJobObjectOwnerFactory: () => Promise<WindowsJobObjectOwner>
   private readonly windowsProcessTreeOwnerFactory: (rootPid: number) => WindowsProcessTreeOwner
+  private readonly onInstallProgress?: LocalAppRuntimeManagerOptions['onInstallProgress']
+  private readonly onManagedProcessStarted?:
+    LocalAppRuntimeManagerOptions['onManagedProcessStarted']
   private readonly activeInstalls = new Map<string, ActiveInstall>()
   private readonly runtimes = new Map<string, ManagedRuntime>()
   private readonly managedProcesses = new Map<string, ManagedProcessOperation>()
@@ -311,6 +343,7 @@ export class LocalAppRuntimeManager {
     status: 'downloading' | 'installing'
     progress: LocalAppInstallProgress
   }>()
+  private readonly runtimeStateGenerations = new Map<string, number>()
   private readonly logWriters = new Map<string, BoundedLogWriter>()
   private initializationPromise?: Promise<void>
   private shutdownPromise?: Promise<void>
@@ -339,6 +372,8 @@ export class LocalAppRuntimeManager {
       ?? createWindowsJobObjectOwner
     this.windowsProcessTreeOwnerFactory = options.windowsProcessTreeOwnerFactory
       ?? createWindowsProcessTreeOwner
+    this.onInstallProgress = options.onInstallProgress
+    this.onManagedProcessStarted = options.onManagedProcessStarted
   }
 
   initialize(): Promise<void> {
@@ -710,6 +745,93 @@ export class LocalAppRuntimeManager {
     return this.getLogWriter(safeAppId).readTail(tail)
   }
 
+  async getFailureRecoveryLogs(
+    appId: string,
+    options: LocalAppLogsOptions = {},
+  ): Promise<string> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    const capturedGeneration = this.getRuntimeStateGeneration(safeAppId)
+    const assertStableBrokenState = async (): Promise<void> => {
+      if (
+        this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs are only available for failure recovery',
+        )
+      }
+      const status = await this.getRuntimeStatus(safeAppId)
+      if (
+        status.status !== 'broken'
+        || this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs are only available for failure recovery',
+        )
+      }
+    }
+
+    await assertStableBrokenState()
+    const logs = await this.getLogs(safeAppId, options)
+    // The snapshot is held in main-process memory until the same generation
+    // and broken state are revalidated. A concurrent restart therefore cannot
+    // make post-recovery output observable through the renderer RPC.
+    await assertStableBrokenState()
+    return logs
+  }
+
+  async getRetainedManagementLogs(
+    appId: string,
+    options: LocalAppLogsOptions = {},
+  ): Promise<string> {
+    const safeAppId = validateRequestIdentifier(appId, 'appId')
+    const capturedGeneration = this.getRuntimeStateGeneration(safeAppId)
+    const assertStableRetainedInstallation = async (): Promise<void> => {
+      if (
+        this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs require a retained local installation',
+        )
+      }
+      const status = await this.getRuntimeStatus(safeAppId)
+      if (
+        !status.currentVersion
+        || ![
+          'installed',
+          'running',
+          'stopped',
+          'broken',
+          'update_available',
+        ].includes(status.status)
+        || this.getRuntimeStateGeneration(safeAppId) !== capturedGeneration
+        || this.lifecycleQueues.has(safeAppId)
+        || this.activeInstalls.has(safeAppId)
+      ) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Organization app logs require a retained local installation',
+        )
+      }
+    }
+
+    await assertStableRetainedInstallation()
+    const logs = await this.getLogs(safeAppId, options)
+    // A retained-data read must not cross an install/start/stop generation:
+    // once lifecycle state changes, the caller must request a fresh bounded
+    // tail under the new state instead of receiving a stale log snapshot.
+    await assertStableRetainedInstallation()
+    return logs
+  }
+
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     if (this.shutdownPromise) return this.shutdownPromise
@@ -860,6 +982,10 @@ export class LocalAppRuntimeManager {
   }
 
   private enqueueLifecycle<T>(appId: string, operation: () => Promise<T>): Promise<T> {
+    this.runtimeStateGenerations.set(
+      appId,
+      this.getRuntimeStateGeneration(appId) + 1,
+    )
     const previous = this.lifecycleQueues.get(appId) ?? Promise.resolve()
     const result = previous.catch(() => {}).then(operation)
     const tracked: TrackedLifecycleOperation = { appId, promise: result }
@@ -874,6 +1000,10 @@ export class LocalAppRuntimeManager {
       if (this.lifecycleQueues.get(appId) === tail) this.lifecycleQueues.delete(appId)
     })
     return result
+  }
+
+  private getRuntimeStateGeneration(appId: string): number {
+    return this.runtimeStateGenerations.get(appId) ?? 0
   }
 
   private async performStop(appId: string): Promise<LocalAppRuntimeStatus> {
@@ -898,6 +1028,9 @@ export class LocalAppRuntimeManager {
       throw new LocalAppRuntimeError('INVALID_REQUEST', 'install request must be an object')
     }
     const appId = validateRequestIdentifier(request.appId, 'appId')
+    const expectedManifestAppId = request.expectedManifestAppId === undefined
+      ? appId
+      : validateManifestBusinessAppId(request.expectedManifestAppId)
     const version = validateRequestIdentifier(request.version, 'version')
     const platform = normalizePlatform(request.platform)
     const arch = normalizeArchitecture(request.arch)
@@ -939,6 +1072,7 @@ export class LocalAppRuntimeManager {
     }
     return {
       appId,
+      expectedManifestAppId,
       version,
       downloadUrl: downloadUrl.toString(),
       checksum: normalizeChecksum(request.checksum),
@@ -953,6 +1087,7 @@ export class LocalAppRuntimeManager {
     right: LocalAppInstallRequest,
   ): boolean {
     return left.appId === right.appId
+      && left.expectedManifestAppId === right.expectedManifestAppId
       && left.version === right.version
       && left.checksum === right.checksum
       && left.sizeBytes === right.sizeBytes
@@ -963,6 +1098,7 @@ export class LocalAppRuntimeManager {
   private getReleaseIdentity(request: LocalAppInstallRequest): ActiveReleaseIdentity {
     return {
       appId: request.appId,
+      expectedManifestAppId: request.expectedManifestAppId,
       version: request.version,
       checksum: request.checksum,
       sizeBytes: request.sizeBytes,
@@ -1053,7 +1189,11 @@ export class LocalAppRuntimeManager {
         },
       )
     }
-    if (existingVersion && await this.isInstalledVersionUsable(request.appId, request.version)) {
+    if (existingVersion && await this.isInstalledVersionUsable(
+      request.appId,
+      request.version,
+      request.expectedManifestAppId,
+    )) {
       const installed = (await this.getInstalledApps()).find(app => app.appId === request.appId)
       if (!installed) {
         throw new LocalAppRuntimeError('NOT_INSTALLED', `Metadata for ${request.appId} is incomplete`)
@@ -1070,15 +1210,18 @@ export class LocalAppRuntimeManager {
       this.throwIfCancelled(signal)
 
       this.setInstallProgress(request, 'verifying', request.sizeBytes)
+      await this.verifyBundleChecksum(request, archivePath, signal)
+      this.throwIfCancelled(signal)
+
       this.setInstallProgress(request, 'extracting', request.sizeBytes)
       await extractBundleArchive(archivePath, extractedPath, signal)
       this.throwIfCancelled(signal)
 
       const manifest = await this.loadAndValidateManifest(extractedPath)
-      if (manifest.appId !== request.appId) {
+      if (manifest.appId !== request.expectedManifestAppId) {
         throw new LocalAppRuntimeError(
           'INVALID_MANIFEST',
-          `Manifest appId "${manifest.appId}" does not match release appId "${request.appId}"`,
+          `Manifest appId "${manifest.appId}" does not match expected business appId "${request.expectedManifestAppId}"`,
         )
       }
       if (manifest.version !== request.version) {
@@ -1215,7 +1358,6 @@ export class LocalAppRuntimeManager {
     }
 
     const output = await open(destination, 'wx')
-    const hash = createHash('sha256')
     let downloaded = 0
     try {
       for await (const rawChunk of response.body as unknown as AsyncIterable<Uint8Array>) {
@@ -1228,7 +1370,6 @@ export class LocalAppRuntimeManager {
             `Bundle exceeds declared size ${request.sizeBytes}`,
           )
         }
-        hash.update(chunk)
         await output.write(chunk)
         this.setInstallProgress(request, 'downloading', downloaded)
       }
@@ -1241,6 +1382,20 @@ export class LocalAppRuntimeManager {
         `Downloaded ${downloaded} bytes, expected ${request.sizeBytes}`,
       )
     }
+  }
+
+  private async verifyBundleChecksum(
+    request: LocalAppInstallRequest,
+    archivePath: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const hash = createHash('sha256')
+    const input = createReadStream(archivePath, { signal })
+    for await (const rawChunk of input) {
+      this.throwIfCancelled(signal)
+      hash.update(rawChunk)
+    }
+    this.throwIfCancelled(signal)
     const checksum = hash.digest('hex')
     if (checksum !== request.checksum) {
       throw new LocalAppRuntimeError(
@@ -1266,6 +1421,7 @@ export class LocalAppRuntimeManager {
       status: phase === 'downloading' ? 'downloading' : 'installing',
       progress,
     })
+    this.onInstallProgress?.(request.appId, progress)
   }
 
   private async loadAndValidateManifest(bundleDir: string): Promise<PoloAppManifest> {
@@ -2249,6 +2405,7 @@ export class LocalAppRuntimeManager {
       processTreeOwnerAssigned,
     }
     this.managedProcesses.set(operation.id, operation)
+    this.onManagedProcessStarted?.(appId, kind, child.pid)
     return operation
   }
 
@@ -2781,11 +2938,15 @@ export class LocalAppRuntimeManager {
     return absolute
   }
 
-  private async isInstalledVersionUsable(appId: string, version: string): Promise<boolean> {
+  private async isInstalledVersionUsable(
+    appId: string,
+    version: string,
+    expectedManifestAppId = appId,
+  ): Promise<boolean> {
     try {
       const manifest = await this.loadAndValidateManifest(this.getVersionDir(appId, version))
       await this.validateRequiredFiles(this.getVersionDir(appId, version), manifest)
-      return manifest.appId === appId && manifest.version === version
+      return manifest.appId === expectedManifestAppId && manifest.version === version
     } catch {
       return false
     }

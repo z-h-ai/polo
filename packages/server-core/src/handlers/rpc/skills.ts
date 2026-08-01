@@ -103,7 +103,7 @@ function createCreatorSkillDownloadFetch(
   const adminUrl = getAdminUrl()
   const adminOrigin = adminUrl ? new URL(adminUrl).origin : null
 
-  return async (
+  const downloadFetch = async (
     input: Parameters<typeof fetch>[0],
     init?: Parameters<typeof fetch>[1],
   ) => {
@@ -130,6 +130,10 @@ function createCreatorSkillDownloadFetch(
       headers,
     })
   }
+
+  return Object.assign(downloadFetch, {
+    preconnect: fetchImpl.preconnect.bind(fetchImpl),
+  }) as typeof fetch
 }
 
 async function canonicalizePotentialPath(path: string): Promise<string> {

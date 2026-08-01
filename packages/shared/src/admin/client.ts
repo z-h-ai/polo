@@ -14,6 +14,7 @@ import {
   type AdminValidateResponse,
   type VerifyPhoneAuthCodeInput,
   type AcceptOrganizationJoinResponse,
+  type AppCatalogFetchResult,
   type CreateOrganizationInput,
   type CreateOrganizationInvitationInput,
   type CreateOrganizationInvitationResponse,
@@ -69,6 +70,7 @@ import {
   CreatorSkillSafetyStatusSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
+  AppCatalogResponseSchema,
 } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -79,9 +81,13 @@ const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_TOKEN',
   'UNAUTHORIZED',
   'FORBIDDEN',
+  'MEMBERSHIP_REMOVED',
+  'MEMBERSHIP_SUSPENDED',
+  'ORGANIZATION_UNAVAILABLE',
   'NOT_FOUND',
   'VALIDATION_ERROR',
   'SERVER_ERROR',
+  'TIMEOUT',
   'NETWORK_ERROR',
   'UNKNOWN_ERROR',
   'phone_auth_disabled',
@@ -126,7 +132,10 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
   account_disabled: 'ACCOUNT_DISABLED',
   forbidden: 'FORBIDDEN',
   invalid_token: 'INVALID_TOKEN',
+  membership_removed: 'MEMBERSHIP_REMOVED',
+  membership_suspended: 'MEMBERSHIP_SUSPENDED',
   not_found: 'NOT_FOUND',
+  organization_unavailable: 'ORGANIZATION_UNAVAILABLE',
   token_expired: 'TOKEN_EXPIRED',
   token_revoked: 'TOKEN_REVOKED',
   unauthorized: 'UNAUTHORIZED',
@@ -141,9 +150,13 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   INVALID_TOKEN: 'Admin session is no longer valid',
   UNAUTHORIZED: 'Admin session is no longer valid',
   FORBIDDEN: 'Admin request is not permitted',
+  MEMBERSHIP_REMOVED: 'Organization membership is no longer available',
+  MEMBERSHIP_SUSPENDED: 'Organization membership is suspended',
+  ORGANIZATION_UNAVAILABLE: 'Organization is no longer available',
   NOT_FOUND: 'Admin resource was not found',
   VALIDATION_ERROR: 'Admin request was rejected',
   SERVER_ERROR: 'Admin service is temporarily unavailable',
+  TIMEOUT: 'Admin request timed out',
   NETWORK_ERROR: 'Failed to reach admin server',
   UNKNOWN_ERROR: 'Admin request failed',
   phone_auth_disabled: 'Phone authentication is unavailable',
@@ -185,6 +198,7 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;
+export const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 15_000;
 
 export function getSafeAdminErrorMessage(
   errorCode: AdminErrorCode,
@@ -204,14 +218,30 @@ export interface AdminClientTokenStore {
 export class AdminClient {
   private readonly adminUrl: string;
   private readonly tokenStore?: AdminClientTokenStore;
+  private readonly requestTimeoutMs: number;
 
-  constructor(adminUrl: string, options?: { tokenStore?: AdminClientTokenStore }) {
+  constructor(adminUrl: string, options?: {
+    tokenStore?: AdminClientTokenStore;
+    requestTimeoutMs?: number;
+  }) {
     const normalized = adminUrl.trim().replace(/\/+$/, '');
     if (!normalized) {
       throw new AdminError('Admin URL is required', 'VALIDATION_ERROR');
     }
+    const requestTimeoutMs = options?.requestTimeoutMs
+      ?? DEFAULT_ADMIN_REQUEST_TIMEOUT_MS;
+    if (
+      !Number.isSafeInteger(requestTimeoutMs)
+      || requestTimeoutMs <= 0
+    ) {
+      throw new AdminError(
+        'Admin request timeout is invalid',
+        'VALIDATION_ERROR',
+      );
+    }
     this.adminUrl = normalized;
     this.tokenStore = options?.tokenStore;
+    this.requestTimeoutMs = requestTimeoutMs;
   }
 
   async login(identifier: string, password: string): Promise<AdminLoginResponse> {
@@ -321,6 +351,29 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
+  }
+
+  async getAppCatalog(
+    accessToken: string,
+    organizationId: string,
+    appConfigVersion?: string,
+  ): Promise<AppCatalogFetchResult> {
+    const query = new URLSearchParams({ organizationId });
+    if (appConfigVersion) query.set('version', appConfigVersion);
+    const response = await this.request<unknown>(`/api/apps?${query.toString()}`, {
+      method: 'GET',
+      accessToken,
+      allowNotModified: true,
+    });
+    if (response === undefined) return { notModified: true };
+    const catalog = this.readSuccessResponse(response, AppCatalogResponseSchema);
+    if (catalog.apps.some(app => app.organizationId !== organizationId)) {
+      throw new AdminError(
+        'Admin app catalog contains an app from another organization',
+        'SERVER_ERROR',
+      );
+    }
+    return { notModified: false, ...catalog };
   }
 
   async createOrganization(
@@ -789,6 +842,7 @@ export class AdminClient {
     body?: unknown;
     headers?: Record<string, string>;
     retryingAfterRefresh?: boolean;
+    allowNotModified?: boolean;
   }): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
@@ -801,18 +855,61 @@ export class AdminClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    let response: Response;
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutError = new AdminError(
+      'Admin request timed out',
+      'TIMEOUT',
+    );
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort(timeoutError);
+        reject(timeoutError);
+      }, this.requestTimeoutMs);
+    });
+
+    let response: Response | undefined;
+    let data: unknown;
     try {
-      response = await fetch(`${this.adminUrl}${path}`, {
-        method: options.method,
-        headers,
-        body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-      });
+      ({ response, data } = await Promise.race([
+        (async () => {
+          const fetchedResponse = await fetch(`${this.adminUrl}${path}`, {
+            method: options.method,
+            headers,
+            body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+            signal: controller.signal,
+          });
+          // Preserve a definitive authorization status as soon as the response
+          // headers arrive. The body remains deadline-bounded, but a half-open
+          // 401/403 body must not be reclassified as a transport timeout.
+          response = fetchedResponse;
+          return {
+            response: fetchedResponse,
+            data: await this.readJson(fetchedResponse),
+          };
+        })(),
+        timeoutPromise,
+      ]));
     } catch (error) {
-      throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
+      if (response?.status === 401 || response?.status === 403) {
+        data = undefined;
+      } else {
+        if (timedOut || error === timeoutError) throw timeoutError;
+        throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR', { cause: error });
+      }
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
 
-    const data = await this.readJson(response);
+    if (!response) {
+      throw new AdminError('Failed to reach admin server', 'NETWORK_ERROR');
+    }
+
+    if (response.status === 304 && options.allowNotModified) {
+      return undefined as T;
+    }
 
     if (
       response.status === 401 &&
@@ -823,8 +920,17 @@ export class AdminClient {
     ) {
       const refreshToken = await this.tokenStore.getRefreshToken();
       if (refreshToken) {
-        const refreshed = await this.refresh(refreshToken);
-        await this.tokenStore.onTokensRefreshed?.(refreshed);
+        const originalAuthenticationError = this.createError(response, data);
+        let refreshed: AdminRefreshResponse;
+        try {
+          refreshed = await this.refresh(refreshToken);
+          await this.tokenStore.onTokensRefreshed?.(refreshed);
+        } catch {
+          // A protected endpoint has already provided a definitive
+          // authentication result. A refresh transport/service failure must
+          // not overwrite that 401 and turn it into restricted offline access.
+          throw originalAuthenticationError;
+        }
         return this.request<T>(path, {
           ...options,
           accessToken: refreshed.accessToken,

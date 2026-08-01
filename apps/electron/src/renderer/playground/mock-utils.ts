@@ -299,6 +299,8 @@ export const mockElectronAPI = {
   writePreferences: async (prefs: unknown) => {
     console.log('[Playground] writePreferences called:', prefs)
   },
+  getHomeRecentApps: async () => [],
+  setHomeRecentApps: async (_contextKey: string, apps: unknown[]) => apps,
 
   // FreeFormInput required mocks
   getAutoCapitalisation: async () => false,

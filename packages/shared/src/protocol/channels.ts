@@ -161,6 +161,7 @@ export const RPC_CHANNELS = {
     SAVE_APPS: 'tab-browser:saveApps',
   },
   localApps: {
+    GET_HOST_INFO: 'local-apps:getHostInfo',
     INSTALL: 'local-apps:install',
     CANCEL_INSTALL: 'local-apps:cancelInstall',
     START: 'local-apps:start',
@@ -170,6 +171,8 @@ export const RPC_CHANNELS = {
     SET_AVAILABLE_RELEASE: 'local-apps:setAvailableRelease',
     GET_INSTALLED_APPS: 'local-apps:getInstalledApps',
     GET_RUNTIME_STATUS: 'local-apps:getRuntimeStatus',
+    GET_RUNTIME_STATUSES: 'local-apps:getRuntimeStatuses',
+    RESOLVE_REMOTE_URL: 'local-apps:resolveRemoteUrl',
     GET_LOGS: 'local-apps:getLogs',
   },
   auth: {
@@ -201,6 +204,7 @@ export const RPC_CHANNELS = {
     LOGOUT: 'admin:logout',
     GET_STATUS: 'admin:getStatus',
     SYNC_CONNECTIONS: 'admin:syncConnections',
+    SYNC_APP_CATALOG: 'admin:syncAppCatalog',
     LIST_ORGANIZATIONS: 'admin:listOrganizations',
     CREATE_ORGANIZATION: 'admin:createOrganization',
     PREVIEW_ORGANIZATION_JOIN: 'admin:previewOrganizationJoin',
@@ -277,6 +281,10 @@ export const RPC_CHANNELS = {
   preferences: {
     READ: 'preferences:read',
     WRITE: 'preferences:write',
+    GET_HOME_RECENT_APPS: 'preferences:getHomeRecentApps',
+    SET_HOME_RECENT_APPS: 'preferences:setHomeRecentApps',
+    GET_ORGANIZATION_CONTEXT_STORAGE: 'preferences:getOrganizationContextStorage',
+    UPDATE_ORGANIZATION_CONTEXT_STORAGE: 'preferences:updateOrganizationContextStorage',
   },
   drafts: {
     GET: 'drafts:get',

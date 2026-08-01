@@ -78,13 +78,39 @@ describe('CHANNEL_MAP runtime contract', () => {
     } as unknown as RpcClient
     const api = buildClientApi(client, CHANNEL_MAP)
 
-    await api.localApps.setAvailableRelease('demo.app', { version: '2.0.0' })
+    const catalogScope = {
+      kind: 'catalog' as const,
+      accountId: 'account-1',
+      organizationId: 'organization-1',
+      catalogAppId: 'demo.app',
+    }
+    await api.localApps.setAvailableRelease(catalogScope, { version: '2.0.0' })
 
     expect(invoke).toHaveBeenCalledWith(
       RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
-      'demo.app',
+      catalogScope,
       { version: '2.0.0' },
     )
+  })
+
+  it('routes host metadata and app catalog sync through local-only RPC', async () => {
+    const calls: unknown[][] = []
+    const client = {
+      invoke: mock(async (...args: unknown[]) => {
+        calls.push(args)
+        return { success: true }
+      }),
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    await api.localApps.getHostInfo()
+    await api.adminSyncAppCatalog('organization-1', { force: true })
+
+    expect(calls).toEqual([
+      [RPC_CHANNELS.localApps.GET_HOST_INFO],
+      [RPC_CHANNELS.admin.SYNC_APP_CATALOG, 'organization-1', { force: true }],
+    ])
   })
 
   it('forwards phone auth and password calls through the typed local RPC surface', async () => {

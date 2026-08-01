@@ -169,10 +169,12 @@ export function registerTransferHandlers(server: RpcServer): void {
       throw new Error('Missing chunk data')
     }
 
+    // Refresh at request arrival, before filesystem I/O can yield long enough
+    // for the previous deadline to delete an otherwise active transfer.
+    rescheduleTransferCleanup(transfer)
     const chunkPath = join(transfer.dir, `chunk-${String(opts.index).padStart(6, '0')}`)
     await writeFile(chunkPath, opts.data, 'utf-8')
     transfer.received.add(opts.index)
-    rescheduleTransferCleanup(transfer)
 
     if ((opts.index + 1) % 10 === 0 || opts.index === transfer.chunkCount - 1) {
       console.log(`[Transfer:server] Received chunk ${opts.index + 1}/${transfer.chunkCount} for ${transfer.id.slice(0, 8)}`)

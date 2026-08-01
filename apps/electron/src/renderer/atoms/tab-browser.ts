@@ -45,6 +45,22 @@ export const openAppTabAtom = atom(
       return
     }
 
+    const existing = get(openTabsAtom).find((tab) => tab.appId === app.id)
+    if (existing) {
+      set(openTabsAtom, get(openTabsAtom).map(tab => (
+        tab.id === existing.id
+          ? {
+              ...tab,
+              title: app.name,
+              favicon: app.iconUrl ?? tab.favicon,
+              url: app.url,
+            }
+          : tab
+      )))
+      set(activeTabIdAtom, existing.id)
+      return
+    }
+
     const tab: TabInstance = {
       id: createTabId('webapp'),
       appId: app.id,

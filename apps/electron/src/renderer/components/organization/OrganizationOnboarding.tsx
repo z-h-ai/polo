@@ -342,6 +342,10 @@ function JoinOrganizationCard(props: OrganizationOnboardingProps) {
 
 function SelectOrganizationCard(props: OrganizationOnboardingProps) {
   const { t } = useTranslation()
+  const selectableOrganizations = props.organizations.filter(
+    organization => organization.status !== 'suspended'
+      && organization.membership.status === 'active',
+  )
 
   return (
     <section className="rounded-2xl border border-border/60 bg-background p-6 shadow-minimal">
@@ -350,7 +354,7 @@ function SelectOrganizationCard(props: OrganizationOnboardingProps) {
         <p className="mt-2 text-sm text-muted-foreground">{t('organization.select.subtitle')}</p>
       </div>
       <div className="mt-6 space-y-2">
-        {props.organizations.map(organization => (
+        {selectableOrganizations.map(organization => (
           <button
             key={organization.id}
             data-testid="organization-select-row"

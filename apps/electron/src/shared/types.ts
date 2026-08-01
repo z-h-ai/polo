@@ -212,9 +212,13 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  CatalogLocalAppScope,
   LocalAppAvailableRelease,
-  LocalAppInstallRequest,
+  LocalAppBatchStatusRequest,
+  LocalAppCatalogInstallRequest,
   LocalAppInstalledApp,
+  LocalAppRestrictedInstalledApp,
+  LocalAppRemoteUrlResult,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
   LocalAppLogsOptions,
@@ -235,6 +239,7 @@ import type {
   OrganizationMember,
   OrganizationMembership,
   OrganizationSummary,
+  AppCatalogSyncResult,
   UpdateOrganizationMemberInput,
 } from '@polo-ai/shared/admin/types'
 import type {
@@ -296,6 +301,10 @@ export interface AdminRpcErrorPayload {
   validationIssues?: SkillValidationIssue[]
 }
 
+export type SessionLogoutResult =
+  | { success: true }
+  | ({ success: false } & AdminRpcErrorPayload)
+
 export type AdminLoginResult =
   | { success: true; user: AdminUser }
   | ({ success: false } & AdminRpcErrorPayload)
@@ -334,7 +343,7 @@ export type AdminSetPasswordResult =
   | ({ success: false } & AdminRpcErrorPayload)
 
 export type AdminValidateResult =
-  | { loggedIn: true; user: AdminUser; configVersion: string }
+  | { loggedIn: true; user: AdminUser; configVersion: string; offline?: boolean }
   | ({ loggedIn: false } & AdminRpcErrorPayload)
 
 export interface AdminStatusResult {
@@ -524,25 +533,33 @@ export interface ElectronAPI {
 
   // Local App Bundle installation and runtime
   localApps: {
-    install(request: LocalAppInstallRequest): Promise<LocalAppInstalledApp>
-    cancelInstall(appId: string): Promise<boolean>
-    start(appId: string): Promise<LocalAppStartResult>
-    stop(appId: string): Promise<LocalAppRuntimeStatus>
-    restart(appId: string): Promise<LocalAppStartResult>
-    uninstall(appId: string, options?: LocalAppUninstallOptions): Promise<void>
+    getHostInfo(): Promise<{
+      platform: 'darwin' | 'win32' | 'linux'
+      arch: 'arm64' | 'x64'
+    }>
+    install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
+    cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
+    start(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
     setAvailableRelease(
-      appId: string,
+      app: CatalogLocalAppScope,
       release: LocalAppAvailableRelease | null,
     ): Promise<LocalAppRuntimeStatus>
-    getInstalledApps(): Promise<LocalAppInstalledApp[]>
-    getRuntimeStatus(appId: string): Promise<LocalAppRuntimeStatus>
-    getLogs(appId: string, options?: LocalAppLogsOptions): Promise<string>
+    getInstalledApps(
+      scope: CatalogLocalAppScope,
+    ): Promise<Array<LocalAppInstalledApp | LocalAppRestrictedInstalledApp>>
+    getRuntimeStatus(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    getRuntimeStatuses(request: LocalAppBatchStatusRequest): Promise<LocalAppRuntimeStatus[]>
+    resolveRemoteUrl(scope: CatalogLocalAppScope): Promise<LocalAppRemoteUrlResult>
+    getLogs(app: CatalogLocalAppScope, options?: LocalAppLogsOptions): Promise<string>
   }
 
   // Auth
   showLogoutConfirmation(): Promise<boolean>
   showDeleteSessionConfirmation(name: string): Promise<boolean>
-  logout(): Promise<void>
+  logout(): Promise<SessionLogoutResult>
 
   // Admin auth
   adminLogin(identifier: string, password: string): Promise<AdminLoginResult>
@@ -553,9 +570,13 @@ export interface ElectronAPI {
   adminVerifyPhoneAuthCode(phone: string, code: string): Promise<AdminVerifyPhoneAuthCodeResult>
   adminSetPassword(password: string): Promise<AdminSetPasswordResult>
   adminValidate(): Promise<AdminValidateResult>
-  adminLogout(): Promise<{ success: boolean }>
+  adminLogout(): Promise<SessionLogoutResult>
   adminGetStatus(): Promise<AdminStatusResult>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
+  adminSyncAppCatalog(
+    organizationId: string,
+    options?: { force?: boolean },
+  ): Promise<AppCatalogSyncResult>
   onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
   organizationList(): Promise<OrganizationRpcResult<{ organizations: OrganizationSummary[] }>>
   organizationCreate(input: CreateOrganizationInput): Promise<OrganizationRpcResult<CreateOrganizationResponse>>
@@ -778,6 +799,28 @@ export interface ElectronAPI {
   // User Preferences
   readPreferences(): Promise<{ content: string; exists: boolean; path: string }>
   writePreferences(content: string): Promise<{ success: boolean; error?: string }>
+  getHomeRecentApps(
+    contextKey: string,
+  ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  setHomeRecentApps(
+    contextKey: string,
+    apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
+  ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  getOrganizationContextStorage(
+    accountId: string,
+  ): Promise<
+    import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
+    | null
+  >
+  updateOrganizationContextStorage(
+    accountId: string,
+    patch: import(
+      '@polo-ai/shared/config/organization-context'
+    ).OrganizationContextStoragePatch,
+  ): Promise<
+    import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
+    | null
+  >
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>
