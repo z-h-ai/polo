@@ -10,6 +10,7 @@ import { AdminLoginStep } from "./AdminLoginStep"
 import { AdminKickedStep } from "./AdminKickedStep"
 import type { ApiKeySubmitData } from "../apisetup"
 import type { CustomEndpointApi } from '@config/llm-connections'
+import type { AdminSendPhoneAuthCodeResult } from '../../../shared/types'
 
 export type OnboardingStep =
   | 'admin-login'
@@ -30,6 +31,7 @@ export interface OnboardingState {
   completionStatus: 'saving' | 'complete'
   apiSetupMethod: ApiSetupMethod | null
   isExistingUser: boolean
+  phoneAuthEnabled?: boolean
   errorMessage?: string
   gitBashStatus?: GitBashStatus
   isRecheckingGitBash?: boolean
@@ -47,7 +49,9 @@ interface OnboardingWizardProps {
   onSubmitCredential: (data: ApiKeySubmitData) => void
   onStartOAuth?: (methodOverride?: ApiSetupMethod) => void
   onFinish: () => void
-  onAdminLogin?: (username: string, password: string) => void
+  onAdminLogin?: (identifier: string, password: string) => void
+  onAdminSendPhoneCode?: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
+  onAdminVerifyPhoneCode?: (phone: string, code: string) => Promise<boolean>
   onAdminRelogin?: () => void
 
   // Claude OAuth (two-step flow)
@@ -100,6 +104,8 @@ export function OnboardingWizard({
   onBack,
   onFinish,
   onAdminLogin,
+  onAdminSendPhoneCode,
+  onAdminVerifyPhoneCode,
   onAdminRelogin,
   // Git Bash (Windows)
   onBrowseGitBash,
@@ -115,6 +121,10 @@ export function OnboardingWizard({
           <AdminLoginStep
             errorMessage={state.errorMessage}
             isLoading={state.loginStatus === 'waiting'}
+            phoneAuthEnabled={state.phoneAuthEnabled}
+            onClearError={onClearError!}
+            onSendPhoneCode={onAdminSendPhoneCode!}
+            onVerifyPhoneCode={onAdminVerifyPhoneCode!}
             onSubmit={onAdminLogin!}
           />
         )
@@ -160,6 +170,7 @@ export function OnboardingWizard({
 
   return (
     <div
+      data-testid="onboarding-wizard"
       className={cn(
         "bg-foreground-2 overflow-y-auto",
         !className?.includes('h-full') && "h-dvh",

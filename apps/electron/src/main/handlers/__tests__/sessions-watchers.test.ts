@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { RPC_CHANNELS } from '../../../shared/types'
@@ -9,13 +9,17 @@ import type { HandlerDeps } from '../handler-deps'
 
 type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | any
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 describe('sessions file watchers', () => {
   const handlers = new Map<string, HandlerFn>()
   const pushed: Array<{ channel: string; target: any; args: any[] }> = []
+  const watchers = new Map<string, {
+    closed: boolean
+    listener: (eventType: string, filename: string | Buffer | null) => void
+  }>()
+  const pushWaiters: Array<{
+    clientId: string
+    resolve: () => void
+  }> = []
 
   let tempRoot = ''
   let sessionDirA = ''
@@ -24,6 +28,8 @@ describe('sessions file watchers', () => {
   beforeEach(() => {
     handlers.clear()
     pushed.length = 0
+    watchers.clear()
+    pushWaiters.length = 0
 
     tempRoot = mkdtempSync(join(tmpdir(), 'craft-session-watchers-'))
     sessionDirA = join(tempRoot, 'session-a')
@@ -37,6 +43,13 @@ describe('sessions file watchers', () => {
       },
       push(channel, target, ...args) {
         pushed.push({ channel, target, args })
+        const targetClientId = target.to === 'client'
+          ? target.clientId
+          : null
+        for (let index = pushWaiters.length - 1; index >= 0; index -= 1) {
+          if (pushWaiters[index]!.clientId !== targetClientId) continue
+          pushWaiters.splice(index, 1)[0]!.resolve()
+        }
       },
       async invokeClient() {
         return null
@@ -78,10 +91,42 @@ describe('sessions file watchers', () => {
         dispose: () => {},
         get size() { return 0 },
       } as unknown as HandlerDeps['oauthFlowStore'],
+      sessionFileWatchFactory: (path, _options, listener) => {
+        const watcher = { closed: false, listener }
+        watchers.set(path, watcher)
+        return {
+          close() {
+            watcher.closed = true
+          },
+        }
+      },
     }
 
     registerSessionsHandlers(server, deps)
   })
+
+  function emitFileChange(path: string, filename: string): void {
+    const watcher = watchers.get(path)
+    if (!watcher || watcher.closed) return
+    watcher.listener('rename', filename)
+  }
+
+  function waitForClientPush(clientId: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        const waiterIndex = pushWaiters.findIndex(
+          waiter => waiter.resolve === resolvePush,
+        )
+        if (waiterIndex >= 0) pushWaiters.splice(waiterIndex, 1)
+        reject(new Error(`Timed out waiting for watcher push to ${clientId}`))
+      }, 2_000)
+      const resolvePush = () => {
+        clearTimeout(timeout)
+        resolve()
+      }
+      pushWaiters.push({ clientId, resolve: resolvePush })
+    })
+  }
 
   afterEach(() => {
     cleanupSessionFileWatchForClient('client-a')
@@ -99,11 +144,12 @@ describe('sessions file watchers', () => {
 
     await watch!({ clientId: 'client-a' }, 'session-a')
     await watch!({ clientId: 'client-b' }, 'session-b')
-    await wait(50)
 
-    writeFileSync(join(sessionDirA, 'a.txt'), `a-${Date.now()}`)
-    writeFileSync(join(sessionDirB, 'b.txt'), `b-${Date.now()}`)
-    await wait(300)
+    const clientAChanged = waitForClientPush('client-a')
+    const clientBChanged = waitForClientPush('client-b')
+    emitFileChange(sessionDirA, 'a.txt')
+    emitFileChange(sessionDirB, 'b.txt')
+    await Promise.all([clientAChanged, clientBChanged])
 
     const aEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-a')
     const bEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-b')
@@ -114,9 +160,10 @@ describe('sessions file watchers', () => {
     pushed.length = 0
     await unwatch!({ clientId: 'client-a' })
 
-    writeFileSync(join(sessionDirA, 'a.txt'), `a2-${Date.now()}`)
-    writeFileSync(join(sessionDirB, 'b.txt'), `b2-${Date.now()}`)
-    await wait(300)
+    const clientBAfterChanged = waitForClientPush('client-b')
+    emitFileChange(sessionDirA, 'a.txt')
+    emitFileChange(sessionDirB, 'b.txt')
+    await clientBAfterChanged
 
     const aEventsAfter = pushed.filter((evt) => evt.target?.clientId === 'client-a')
     const bEventsAfter = pushed.filter((evt) => evt.target?.clientId === 'client-b')
@@ -130,13 +177,11 @@ describe('sessions file watchers', () => {
     expect(watch).toBeTruthy()
 
     await watch!({ clientId: 'client-a' }, 'session-a')
-    await wait(50)
 
     cleanupSessionFileWatchForClient('client-a')
     pushed.length = 0
 
-    writeFileSync(join(sessionDirA, 'after-cleanup.txt'), `x-${Date.now()}`)
-    await wait(300)
+    emitFileChange(sessionDirA, 'after-cleanup.txt')
 
     expect(pushed.length).toBe(0)
   })

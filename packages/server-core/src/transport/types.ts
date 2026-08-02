@@ -8,6 +8,8 @@ export interface RequestContext {
   clientId: string
   workspaceId: string | null
   webContentsId: number | null
+  /** Aborted when the server-side handler deadline is reached. */
+  signal?: AbortSignal
 }
 
 export type HandlerFn = (ctx: RequestContext, ...args: any[]) => Promise<any> | any

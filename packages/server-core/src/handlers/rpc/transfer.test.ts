@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, jest } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { HandlerFn, RequestContext, RpcServer } from '../../transport/types'
@@ -42,6 +42,7 @@ function ctx(clientId: string): RequestContext {
     clientId,
     workspaceId: 'ws-1',
     webContentsId: 1,
+    signal: new AbortController().signal,
   }
 }
 
@@ -62,6 +63,7 @@ function encodeParts(value: unknown, splitAt?: number) {
 }
 
 afterEach(() => {
+  jest.useRealTimers()
   delete process.env.POLO_AI_TRANSFER_TTL_MS
   __resetTransferStateForTests()
 })
@@ -161,6 +163,7 @@ describe('chunked transfer handlers', () => {
   })
 
   it('refreshes TTL as chunks arrive so slow healthy uploads survive', async () => {
+    jest.useFakeTimers()
     process.env.POLO_AI_TRANSFER_TTL_MS = '40'
 
     const { start, chunk, commit } = createHarness()
@@ -177,14 +180,14 @@ describe('chunked transfer handlers', () => {
       checksum: payload.checksum,
     }) as { transferId: string }
 
-    await new Promise(resolve => setTimeout(resolve, 25))
+    jest.advanceTimersByTime(25)
     await chunk(ctx('client-1'), {
       transferId,
       index: 0,
       data: payload.chunks[0],
     })
 
-    await new Promise(resolve => setTimeout(resolve, 25))
+    jest.advanceTimersByTime(25)
     await chunk(ctx('client-1'), {
       transferId,
       index: 1,

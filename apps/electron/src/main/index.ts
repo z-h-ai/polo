@@ -72,7 +72,11 @@ import { existsSync, readFileSync } from 'fs'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
-import { registerCoreRpcHandlers, cleanupSessionFileWatchForClient } from '@polo-ai/server-core/handlers/rpc'
+import {
+  clearClientActiveSession,
+  cleanupSessionFileWatchForClient,
+  registerCoreRpcHandlers,
+} from '@polo-ai/server-core/handlers/rpc'
 import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
@@ -94,6 +98,9 @@ import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { initializeBackendHostRuntime } from '@polo-ai/shared/agent/backend'
 import { setPowerShellValidatorRoot } from '@polo-ai/shared/agent'
 import { handleDeepLink } from './deep-link'
+import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
+import { findDeepLinkArgument } from './deep-link-argv'
+import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import { BrowserPaneManager } from './browser-pane-manager'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
@@ -105,6 +112,16 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
 import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@polo-ai/server-core/services'
+import {
+  getScopedLocalAppRuntimeRegistry,
+  hasLocalAppRuntimeManager,
+  shutdownLocalAppRuntime,
+} from './local-app-runtime'
+import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
+import {
+  BeforeQuitCleanupCoordinator,
+  canQuitAfterLocalAppShutdown,
+} from './local-app-runtime/quit-guard'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -142,9 +159,16 @@ if (isDebugMode) {
   process.env.POLO_AI_UV = bundledUvExists ? uvBinary : (fallbackUv ?? uvBinary)
 
   // Bun runtime (packaged builds should prefer bundled runtime over PATH)
-  const bunBinary = join(resourcesBase, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
+  const bunBinary = resolveBundledBunPath({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+    appResourcesBase: resourcesBase,
+  })
   if (existsSync(bunBinary)) {
     process.env.POLO_AI_BUN = bunBinary
+  } else if (!app.isPackaged) {
+    process.env.POLO_AI_BUN = process.env.POLO_AI_BUN || 'bun'
   }
 
   process.env.POLO_AI_SCRIPTS = scriptsDir
@@ -313,11 +337,11 @@ registerThumbnailScheme()
 // Handle deeplink on macOS (when app is already running)
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  mainLog.info('Received deeplink:', url)
+  mainLog.info('Received deeplink', describeDeepLinkForLog(url))
 
   if (windowManager) {
-    handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
-      mainLog.error('Failed to handle deep link:', err)
+    handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(() => {
+      mainLog.error('Failed to handle deep link', describeDeepLinkForLog(url))
     })
   } else {
     // App not ready - store for later
@@ -330,14 +354,22 @@ const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
 } else {
+  if (process.platform !== 'darwin') {
+    const initialUrl = findDeepLinkArgument(process.argv, DEEPLINK_SCHEME)
+    if (initialUrl) {
+      mainLog.info('Received deeplink from initial argv', describeDeepLinkForLog(initialUrl))
+      pendingDeepLink = initialUrl
+    }
+  }
+
   app.on('second-instance', (_event, commandLine, _workingDirectory) => {
     // Someone tried to run a second instance, we should focus our window.
     // On Windows/Linux, the deeplink is in commandLine
-    const url = commandLine.find(arg => arg.startsWith(`${DEEPLINK_SCHEME}://`))
+    const url = findDeepLinkArgument(commandLine, DEEPLINK_SCHEME)
     if (url && windowManager) {
-      mainLog.info('Received deeplink from second instance:', url)
-      handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
-        mainLog.error('Failed to handle deep link:', err)
+      mainLog.info('Received deeplink from second instance', describeDeepLinkForLog(url))
+      handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(() => {
+        mainLog.error('Failed to handle deep link', describeDeepLinkForLog(url))
       })
     } else if (windowManager) {
       // No deep link - just focus the first window
@@ -382,7 +414,10 @@ async function createInitialWindows(): Promise<void> {
       if (!validWorkspaceIds.includes(saved.workspaceId)) continue
 
       // Restore main window with focused mode if it was saved
-      mainLog.info(`Restoring window: workspaceId=${saved.workspaceId}, focused=${saved.focused ?? false}, url=${saved.url ?? 'none'}`)
+      mainLog.info(
+        `Restoring window: workspaceId=${saved.workspaceId}, focused=${saved.focused ?? false}`,
+        describeUrlForLog(saved.url ?? 'none'),
+      )
       const win = windowManager.createWindow({
         workspaceId: saved.workspaceId,
         focused: saved.focused,
@@ -480,6 +515,13 @@ app.whenReady().then(async () => {
   try {
     // Initialize window manager
     windowManager = new WindowManager()
+
+    // Deep-link action results may only come from the app's own renderer
+    // windows — embedded browser-pane pages must not be able to forge acks.
+    const wm = windowManager
+    getDeepLinkCallbackBridge().setTrustedSenderCheck(
+      (wcId) => wm.getWindowByWebContentsId(wcId) != null
+    )
 
     // Create the application menu (needs windowManager for New Window action)
     createApplicationMenu(windowManager)
@@ -718,6 +760,49 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
+            onAdminSessionEnding: (accountId: string) =>
+              getScopedLocalAppRuntimeRegistry().stopAccount(accountId),
+            onAdminSessionStarted: (accountId: string) => {
+              getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
+            },
+            onAdminCatalogScopeDenied: (
+              accountId: string,
+              organizationId: string,
+            ) => getScopedLocalAppRuntimeRegistry().stopOrganization(
+              accountId,
+              organizationId,
+            ),
+            onAdminCatalogAppsWithdrawn: (
+              accountId: string,
+              organizationId: string,
+              catalogAppIds: readonly string[],
+            ) => getScopedLocalAppRuntimeRegistry().stopApps(
+              catalogAppIds.map(catalogAppId => ({
+                kind: 'catalog' as const,
+                accountId,
+                organizationId,
+                catalogAppId,
+              })),
+            ),
+            onAdminCatalogAppsAuthorized: (
+              accountId: string,
+              organizationId: string,
+              catalogAppIds: readonly string[],
+            ) => getScopedLocalAppRuntimeRegistry().authorizeApps(
+              catalogAppIds.map(catalogAppId => ({
+                kind: 'catalog' as const,
+                accountId,
+                organizationId,
+                catalogAppId,
+              })),
+            ),
+            getRetainedCatalogAppIds: (
+              accountId: string,
+              organizationId: string,
+            ) => getScopedLocalAppRuntimeRegistry().getRetainedCatalogAppIds(
+              accountId,
+              organizationId,
+            ),
           }
         },
         // Headless: register only core handlers (no GUI handlers for browser, settings, etc.)
@@ -725,7 +810,7 @@ app.whenReady().then(async () => {
         registerAllRpcHandlers: isHeadless
           ? (server, deps, serverCtx) => registerCoreRpcHandlers(server, deps, serverCtx)
           : registerAllRpcHandlers,
-        setSessionEventSink: (sm, sink) => sm.setEventSink(sink),
+        setSessionEventSink: (sm, sink) => sm.setEventSink(getDeepLinkCallbackBridge().wrapEventSink(sink)),
         initializeSessionManager: (sm) => sm.initialize(),
         initModelRefreshService: () => initModelRefreshService(async (slug: string) => {
           const { getCredentialManager } = await import('@polo-ai/shared/credentials')
@@ -749,6 +834,7 @@ app.whenReady().then(async () => {
             if (cId === clientId) { clientMap.delete(wcId); break }
           }
           cleanupSessionFileWatchForClient(clientId)
+          clearClientActiveSession(clientId)
         },
       })
 
@@ -789,7 +875,7 @@ app.whenReady().then(async () => {
         // Always install — this lets workspaces enable messaging at runtime
         // without a process restart.
         const baseSink = instance.wsServer.push.bind(instance.wsServer)
-        instance.sessionManager.setEventSink(messagingHandle.wrapSink(baseSink))
+        instance.sessionManager.setEventSink(getDeepLinkCallbackBridge().wrapEventSink(messagingHandle.wrapSink(baseSink)))
         if (messagingHandle.registry.size > 0) {
           mainLog.info(`[messaging] Fan-out sink active for ${messagingHandle.registry.size} workspace(s)`)
         }
@@ -1115,7 +1201,7 @@ app.whenReady().then(async () => {
 
     // Process pending deep link from cold start
     if (pendingDeepLink) {
-      mainLog.info('Processing pending deep link:', pendingDeepLink)
+      mainLog.info('Processing pending deep link', describeDeepLinkForLog(pendingDeepLink))
       await handleDeepLink(pendingDeepLink, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined)
       pendingDeepLink = null
     }
@@ -1157,8 +1243,7 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Track if we're in the process of quitting (to avoid re-entry)
-let isQuitting = false
+const beforeQuitCleanup = new BeforeQuitCleanupCoordinator()
 
 /**
  * Capture the current multi-window state and persist it to disk.
@@ -1182,88 +1267,113 @@ function captureAndSaveWindowState(reason: 'before-quit' | 'pre-update'): number
   return windows.length
 }
 
-// Save window state and clean up resources before quitting
-app.on('before-quit', async (event) => {
-  // Avoid re-entry when we call app.exit()
-  if (isQuitting) return
-  isQuitting = true
-
-  // Ensure Cmd+Q/app quit bypasses layered window close interception (Cmd+W behavior).
-  windowManager?.setAppQuitting(true)
-
-  if (windowManager) {
-    const windows = windowManager.getWindowStates()
-    // Empty-snapshot guard: during update-quit, electron-updater has already
-    // destroyed all BrowserWindows by the time before-quit fires. The pre-update
-    // hook already saved the real state — don't let this late save overwrite it.
-    if (windows.length === 0 && isUpdating()) {
-      mainLog.warn('[window-state] skip save: empty snapshot during update-quit (pre-update snapshot wins)')
-    } else {
-      captureAndSaveWindowState('before-quit')
-    }
-    // Diagnostic correlation with installUpdate's [update-flow] log.
-    mainLog.info('[update-flow] before-quit save', {
-      windowCount: windows.length,
-      electronWindowCount: BrowserWindow.getAllWindows().length,
-      isUpdating: isUpdating(),
-      reason: isUpdating() ? 'update-quit' : 'user-quit',
-    })
+// Save window state and clean up resources before quitting.
+app.on('before-quit', (event) => {
+  if (beforeQuitCleanup.isExitAllowed()) return
+  const mustStopLocalApps = hasLocalAppRuntimeManager()
+  if (!sessionManager && !mustStopLocalApps) {
+    windowManager?.setAppQuitting(true)
+    return
   }
 
-  // Flush all pending session writes before quitting
-  if (sessionManager) {
-    // Prevent quit until sessions are flushed
-    event.preventDefault()
-    try {
-      await sessionManager.flushAllSessions()
-      mainLog.info('Flushed all pending session writes')
-    } catch (error) {
-      mainLog.error('Failed to flush sessions:', error)
+  const attempt = beforeQuitCleanup.begin(event, async () => {
+    // Ensure Cmd+Q/app quit bypasses layered window close interception (Cmd+W behavior).
+    windowManager?.setAppQuitting(true)
+
+    if (windowManager) {
+      const windows = windowManager.getWindowStates()
+      // Empty-snapshot guard: during update-quit, electron-updater has already
+      // destroyed all BrowserWindows by the time before-quit fires. The pre-update
+      // hook already saved the real state — don't let this late save overwrite it.
+      if (windows.length === 0 && isUpdating()) {
+        mainLog.warn('[window-state] skip save: empty snapshot during update-quit (pre-update snapshot wins)')
+      } else {
+        captureAndSaveWindowState('before-quit')
+      }
+      // Diagnostic correlation with installUpdate's [update-flow] log.
+      mainLog.info('[update-flow] before-quit save', {
+        windowCount: windows.length,
+        electronWindowCount: BrowserWindow.getAllWindows().length,
+        isUpdating: isUpdating(),
+        reason: isUpdating() ? 'update-quit' : 'user-quit',
+      })
     }
-    // Clean up SessionManager resources (file watchers, timers, etc.)
-    sessionManager.cleanup()
 
-    // Clean up browser pane instances
-    if (browserPaneManager) {
-      browserPaneManager.destroyAll()
-    }
-
-    // Clean up OAuth flow store (stop periodic cleanup timer)
-    if (oauthFlowStore) {
-      oauthFlowStore.dispose()
-    }
-
-    // Stop all model refresh timers
-    getModelRefreshService().stopAll()
-
-    // Stop messaging gateways so the WhatsApp worker subprocess exits cleanly.
-    if (messagingHandle) {
-      try {
-        await messagingHandle.dispose()
-      } catch (err) {
-        mainLog.error('[messaging] dispose failed:', err)
+    if (mustStopLocalApps) {
+      const canQuit = await canQuitAfterLocalAppShutdown(
+        shutdownLocalAppRuntime,
+        {
+          info: message => mainLog.info(message),
+          error: (message, error) => mainLog.error(message, error),
+        },
+      )
+      if (!canQuit) {
+        windowManager?.setAppQuitting(false)
+        mainLog.error('Quit cancelled because local app runtimes were not fully stopped')
+        return false
       }
     }
 
-    // Clean up power manager (release power blocker)
-    const { cleanup: cleanupPowerManager } = await import('./power-manager')
-    cleanupPowerManager()
+    // Flush all pending session writes before quitting
+    if (sessionManager) {
+      try {
+        await sessionManager.flushAllSessions()
+        mainLog.info('Flushed all pending session writes')
+      } catch (error) {
+        mainLog.error('Failed to flush sessions:', error)
+      }
+      // Clean up SessionManager resources (file watchers, timers, etc.)
+      sessionManager.cleanup()
 
-    // Release the server lock file so the next launch doesn't see a stale PID.
-    // This must happen regardless of the exit path (normal quit or update quit).
-    releaseServerLock()
+      // Clean up browser pane instances
+      if (browserPaneManager) {
+        browserPaneManager.destroyAll()
+      }
 
-    // If update is in progress, let electron-updater handle the quit flow
-    // Force exit breaks the NSIS installer on Windows
+      // Clean up OAuth flow store (stop periodic cleanup timer)
+      if (oauthFlowStore) {
+        oauthFlowStore.dispose()
+      }
+
+      // Stop all model refresh timers
+      getModelRefreshService().stopAll()
+
+      // Stop messaging gateways so the WhatsApp worker subprocess exits cleanly.
+      if (messagingHandle) {
+        try {
+          await messagingHandle.dispose()
+        } catch (err) {
+          mainLog.error('[messaging] dispose failed:', err)
+        }
+      }
+
+      // Clean up power manager (release power blocker)
+      const { cleanup: cleanupPowerManager } = await import('./power-manager')
+      cleanupPowerManager()
+
+      // Release the server lock file so the next launch doesn't see a stale PID.
+      // This must happen regardless of the exit path (normal quit or update quit).
+      releaseServerLock()
+    }
+
+    return true
+  })
+  if (!attempt.started || !attempt.promise) return
+
+  void attempt.promise.then((canExit) => {
+    if (!canExit) return
+    // If update is in progress, let electron-updater handle the quit flow.
+    // Force exit breaks the NSIS installer on Windows.
     if (isUpdating()) {
       mainLog.info('Update in progress, letting electron-updater handle quit')
       app.quit()
-      return
+    } else {
+      app.exit(0)
     }
-
-    // Now actually quit
-    app.exit(0)
-  }
+  }).catch((error) => {
+    windowManager?.setAppQuitting(false)
+    mainLog.error('Quit preparation failed:', error)
+  })
 })
 
 // Handle uncaught exceptions — forward to Sentry explicitly since registering

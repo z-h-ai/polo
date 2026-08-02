@@ -127,12 +127,13 @@ async function getExpectedChannels(): Promise<Set<string>> {
   ])
 
   // GUI handler channels (remain in electron)
-  const [browser, guiSystem, guiWorkspace, guiSettings, tabBrowser] = await Promise.all([
+  const [browser, guiSystem, guiWorkspace, guiSettings, tabBrowser, localApps] = await Promise.all([
     import('../browser'),
     import('../system'),
     import('../workspace'),
     import('../settings'),
     import('../tab-browser'),
+    import('../local-apps'),
   ])
 
   return new Set([
@@ -158,6 +159,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...guiWorkspace.GUI_HANDLED_CHANNELS,
     ...guiSettings.GUI_HANDLED_CHANNELS,
     ...tabBrowser.HANDLED_CHANNELS,
+    ...localApps.HANDLED_CHANNELS,
   ])
 }
 

@@ -278,6 +278,9 @@ export const mockElectronAPI = {
     void _callback
     return () => {}
   },
+  sendDeepLinkActionResult: (result: unknown) => {
+    console.log('[Playground] sendDeepLinkActionResult called:', result)
+  },
 
   // Debug menu actions invoked by the mobile menu's Debug sub-page in dev mode.
   // The real implementations call into the auto-updater; the playground just logs.
@@ -296,6 +299,8 @@ export const mockElectronAPI = {
   writePreferences: async (prefs: unknown) => {
     console.log('[Playground] writePreferences called:', prefs)
   },
+  getHomeRecentApps: async () => [],
+  setHomeRecentApps: async (_contextKey: string, apps: unknown[]) => apps,
 
   // FreeFormInput required mocks
   getAutoCapitalisation: async () => false,

@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -34,6 +35,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
+  const { t } = useTranslation()
   const { installedApps, addApp, openApp } = useTabShell()
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -51,7 +53,7 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     if (!isValid) {
-      toast.error('Enter a name and a valid HTTPS or local HTTP URL.')
+      toast.error(t('homeApps.addExternal.invalidForm'))
       return
     }
 
@@ -79,14 +81,16 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
     }}>
       <DialogContent className="sm:max-w-[420px]">
         <DialogHeader>
-          <DialogTitle>Add app</DialogTitle>
+          <DialogTitle>{t('homeApps.addExternal.title')}</DialogTitle>
           <DialogDescription>
-            Add an internal web app or local service to the launcher.
+            {t('homeApps.addExternal.description')}
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="tab-app-name">Name</label>
+            <label className="text-sm font-medium" htmlFor="tab-app-name">
+              {t('common.name')}
+            </label>
             <input
               id="tab-app-name"
               className="h-9 w-full rounded-md border border-foreground/15 bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -97,23 +101,31 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="tab-app-url">URL</label>
+            <label className="text-sm font-medium" htmlFor="tab-app-url">
+              {t('common.url')}
+            </label>
             <input
               id="tab-app-url"
               className="h-9 w-full rounded-md border border-foreground/15 bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
               value={url}
-              placeholder="https://intranet.example.com"
+              placeholder={t('homeApps.addExternal.urlPlaceholder')}
               onChange={(event) => setUrl(event.target.value)}
             />
             {url && !isValidWebAppUrl(normalizedUrl) && (
-              <p className="text-xs text-destructive">Use HTTPS, or HTTP only for localhost/private network hosts.</p>
+              <p className="text-xs text-destructive">
+                {t('homeApps.addExternal.urlInvalid')}
+              </p>
             )}
             {duplicate && (
-              <p className="text-xs text-amber-600">This URL is already installed. You can still add another shortcut.</p>
+              <p className="text-xs text-amber-600">
+                {t('homeApps.addExternal.duplicate')}
+              </p>
             )}
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="tab-app-icon">Icon</label>
+            <label className="text-sm font-medium" htmlFor="tab-app-icon">
+              {t('homeApps.addExternal.icon')}
+            </label>
             <input
               id="tab-app-icon"
               type="file"
@@ -124,18 +136,22 @@ export function AddAppDialog({ open, onOpenChange }: AddAppDialogProps) {
                 if (!file) return
                 if (file.size > MAX_ICON_BYTES) {
                   event.target.value = ''
-                  toast.error('Icon file must be under 256 KB.')
+                  toast.error(t('homeApps.addExternal.iconTooLarge'))
                   return
                 }
                 void readFileAsDataUrl(file).then(setIconUrl).catch(() => {
-                  toast.error('Could not read icon file.')
+                  toast.error(t('homeApps.addExternal.iconReadFailed'))
                 })
               }}
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={!isValid}>Add and open</Button>
+            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" disabled={!isValid}>
+              {t('homeApps.addExternal.submit')}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

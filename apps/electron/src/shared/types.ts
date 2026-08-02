@@ -205,39 +205,161 @@ import type {
   PermissionModeState,
   BrowserInstanceInfo,
   DeepLinkNavigation,
+  DeepLinkActionResult,
   TestAutomationPayload,
   TestAutomationResult,
   WindowCloseRequest,
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  CatalogLocalAppScope,
+  LocalAppAvailableRelease,
+  LocalAppBatchStatusRequest,
+  LocalAppCatalogInstallRequest,
+  LocalAppInstalledApp,
+  LocalAppRestrictedInstalledApp,
+  LocalAppRemoteUrlResult,
+  LocalAppRuntimeStatus,
+  LocalAppStartResult,
+  LocalAppLogsOptions,
+  LocalAppUninstallOptions,
 } from '@polo-ai/shared/protocol'
-import type { AdminUser } from '@polo-ai/shared/admin/types'
+import type {
+  AcceptOrganizationJoinResponse,
+  AdminUser,
+  CreateOrganizationInput,
+  CreateOrganizationInvitationInput,
+  CreateOrganizationInvitationResponse,
+  CreateOrganizationJoinLinkInput,
+  CreateOrganizationJoinLinkResponse,
+  CreateOrganizationResponse,
+  OrganizationInvitation,
+  OrganizationJoinLink,
+  OrganizationJoinPreview,
+  OrganizationMember,
+  OrganizationMembership,
+  OrganizationSummary,
+  AppCatalogSyncResult,
+  UpdateOrganizationMemberInput,
+} from '@polo-ai/shared/admin/types'
+import type {
+  CreatorArtifact,
+  CreatorArtifactCapability,
+  CreatorArtifactCatalogPage,
+  CreatorArtifactDetail,
+  CreatorSkillUploadGrant,
+  CreatorArtifactVersion,
+  CreatorSkillBackup,
+  CreatorSkillConflictDetails,
+  CreatorSkillDownloadGrant,
+  CreatorSkillInstallConflict,
+  CreatorSkillInstallIdentity,
+  CreatorSkillInstallRpcInput,
+  CreatorSkillOperationProgress,
+  CreatorSkillOperationResult,
+  CreatorSkillSafetyStatus,
+  SkillValidationIssue,
+} from '@polo-ai/shared/creator-skills'
+export type {
+  CreatorArtifact,
+  CreatorArtifactCapability,
+  CreatorArtifactCatalogPage,
+  CreatorArtifactDetail,
+  CreatorSkillUploadGrant,
+  CreatorArtifactVersion,
+  CreatorSkillBackup,
+  CreatorSkillConflictDetails,
+  CreatorSkillDownloadGrant,
+  CreatorSkillInstallConflict,
+  CreatorSkillInstallIdentity,
+  CreatorSkillInstallRpcInput,
+  CreatorSkillOperationProgress,
+  CreatorSkillOperationResult,
+  CreatorSkillSafetyStatus,
+  SkillValidationIssue,
+} from '@polo-ai/shared/creator-skills'
+export type {
+  CreateOrganizationInput,
+  CreateOrganizationInvitationInput,
+  CreateOrganizationJoinLinkInput,
+  OrganizationInvitation,
+  OrganizationJoinLink,
+  OrganizationJoinPreview,
+  OrganizationMember,
+  OrganizationMembership,
+  OrganizationRole,
+  OrganizationSummary,
+  OrganizationType,
+} from '@polo-ai/shared/admin/types'
 import type { AppDefinition } from './tab-browser-types'
 
 export interface AdminRpcErrorPayload {
   errorCode?: string
   message?: string
   status?: number
+  retryAfter?: number
+  validationIssues?: SkillValidationIssue[]
 }
+
+export type SessionLogoutResult =
+  | { success: true }
+  | ({ success: false } & AdminRpcErrorPayload)
 
 export type AdminLoginResult =
   | { success: true; user: AdminUser }
   | ({ success: false } & AdminRpcErrorPayload)
 
+export interface AdminAuthConfigResult extends AdminRpcErrorPayload {
+  phoneAuthEnabled: boolean
+}
+
+export type AdminPhoneAuthChallengeConfigResult =
+  | {
+      success: true
+      type: 'browser_redirect'
+      issuerUrl: string
+    }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type AdminSendPhoneAuthCodeResult =
+  | {
+      success: true
+      accepted: boolean
+      expiresIn: number
+      resendAfter: number
+    }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type AdminPhoneAuthChallengeResult =
+  | { success: true; challengeToken: string }
+  | { success: false; errorCode: 'phone_auth_configuration_error' }
+
+export type AdminVerifyPhoneAuthCodeResult =
+  | { success: true; user: AdminUser; isNewUser: boolean }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type AdminSetPasswordResult =
+  | { success: true }
+  | ({ success: false } & AdminRpcErrorPayload)
+
 export type AdminValidateResult =
-  | { loggedIn: true; user: AdminUser; configVersion: string }
+  | { loggedIn: true; user: AdminUser; configVersion: string; offline?: boolean }
   | ({ loggedIn: false } & AdminRpcErrorPayload)
 
 export interface AdminStatusResult {
   adminUrl?: string
   loggedIn: boolean
+  userId: string | null
   username: string | null
   displayName: string | null
 }
 
 export type AdminSyncConnectionsResult =
   | { success: true; configVersion: string; connectionCount: number; defaultConnection: string | null }
+  | ({ success: false } & AdminRpcErrorPayload)
+
+export type OrganizationRpcResult<T extends object> =
+  | ({ success: true } & T)
   | ({ success: false } & AdminRpcErrorPayload)
 
 export interface ElectronAPI {
@@ -403,23 +525,228 @@ export interface ElectronAPI {
 
   // Deep link navigation listener (for external poloai:// URLs)
   onDeepLinkNavigate(callback: (nav: DeepLinkNavigation) => void): () => void
+  sendDeepLinkActionResult(result: DeepLinkActionResult): void
 
   // Tab browser app launcher configuration
   getTabBrowserApps(): Promise<AppDefinition[]>
   saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
 
+  // Local App Bundle installation and runtime
+  localApps: {
+    getHostInfo(): Promise<{
+      platform: 'darwin' | 'win32' | 'linux'
+      arch: 'arm64' | 'x64'
+    }>
+    install(request: LocalAppCatalogInstallRequest): Promise<LocalAppInstalledApp>
+    cancelInstall(app: CatalogLocalAppScope): Promise<boolean>
+    start(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    stop(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    restart(app: CatalogLocalAppScope): Promise<LocalAppStartResult>
+    uninstall(app: CatalogLocalAppScope, options?: LocalAppUninstallOptions): Promise<void>
+    setAvailableRelease(
+      app: CatalogLocalAppScope,
+      release: LocalAppAvailableRelease | null,
+    ): Promise<LocalAppRuntimeStatus>
+    getInstalledApps(
+      scope: CatalogLocalAppScope,
+    ): Promise<Array<LocalAppInstalledApp | LocalAppRestrictedInstalledApp>>
+    getRuntimeStatus(app: CatalogLocalAppScope): Promise<LocalAppRuntimeStatus>
+    getRuntimeStatuses(request: LocalAppBatchStatusRequest): Promise<LocalAppRuntimeStatus[]>
+    resolveRemoteUrl(scope: CatalogLocalAppScope): Promise<LocalAppRemoteUrlResult>
+    getLogs(app: CatalogLocalAppScope, options?: LocalAppLogsOptions): Promise<string>
+  }
+
   // Auth
   showLogoutConfirmation(): Promise<boolean>
   showDeleteSessionConfirmation(name: string): Promise<boolean>
-  logout(): Promise<void>
+  logout(): Promise<SessionLogoutResult>
 
   // Admin auth
-  adminLogin(username: string, password: string): Promise<AdminLoginResult>
+  adminLogin(identifier: string, password: string): Promise<AdminLoginResult>
+  adminGetAuthConfig(): Promise<AdminAuthConfigResult>
+  adminGetPhoneAuthChallengeConfig(): Promise<AdminPhoneAuthChallengeConfigResult>
+  adminAcquirePhoneAuthChallenge(): Promise<AdminPhoneAuthChallengeResult>
+  adminSendPhoneAuthCode(phone: string, challengeToken: string): Promise<AdminSendPhoneAuthCodeResult>
+  adminVerifyPhoneAuthCode(phone: string, code: string): Promise<AdminVerifyPhoneAuthCodeResult>
+  adminSetPassword(password: string): Promise<AdminSetPasswordResult>
   adminValidate(): Promise<AdminValidateResult>
-  adminLogout(): Promise<{ success: boolean }>
+  adminLogout(): Promise<SessionLogoutResult>
   adminGetStatus(): Promise<AdminStatusResult>
   adminSyncConnections(): Promise<AdminSyncConnectionsResult>
+  adminSyncAppCatalog(
+    organizationId: string,
+    options?: { force?: boolean },
+  ): Promise<AppCatalogSyncResult>
   onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
+  organizationList(): Promise<OrganizationRpcResult<{ organizations: OrganizationSummary[] }>>
+  organizationCreate(input: CreateOrganizationInput): Promise<OrganizationRpcResult<CreateOrganizationResponse>>
+  organizationPreviewJoin(token: string): Promise<OrganizationRpcResult<OrganizationJoinPreview>>
+  organizationAcceptJoin(token: string): Promise<OrganizationRpcResult<AcceptOrganizationJoinResponse>>
+  organizationListMembers(organizationId: string): Promise<OrganizationRpcResult<{ members: OrganizationMember[] }>>
+  organizationListInvitations(organizationId: string): Promise<OrganizationRpcResult<{ invitations: OrganizationInvitation[] }>>
+  organizationCreateInvitation(
+    organizationId: string,
+    input: CreateOrganizationInvitationInput,
+  ): Promise<OrganizationRpcResult<CreateOrganizationInvitationResponse>>
+  organizationCancelInvitation(
+    organizationId: string,
+    invitationId: string,
+  ): Promise<OrganizationRpcResult<{ invitation: Pick<OrganizationInvitation, 'id' | 'status' | 'cancelledAt'> }>>
+  organizationCreateJoinLink(
+    organizationId: string,
+    input: CreateOrganizationJoinLinkInput,
+  ): Promise<OrganizationRpcResult<CreateOrganizationJoinLinkResponse>>
+  organizationRevokeJoinLink(
+    organizationId: string,
+    joinLinkId: string,
+  ): Promise<OrganizationRpcResult<{ joinLink: Pick<OrganizationJoinLink, 'id' | 'status' | 'revokedAt'> }>>
+  organizationUpdateMember(
+    organizationId: string,
+    memberId: string,
+    input: UpdateOrganizationMemberInput,
+  ): Promise<OrganizationRpcResult<{ membership: OrganizationMembership }>>
+  organizationRemoveMember(
+    organizationId: string,
+    memberId: string,
+    reason?: string,
+  ): Promise<OrganizationRpcResult<{ membership: OrganizationMembership }>>
+  creatorArtifactGetCapabilities(): Promise<OrganizationRpcResult<CreatorArtifactCapability>>
+  creatorArtifactList(input: {
+    organizationId: string
+    type?: 'web_app' | 'skill'
+    includeDrafts?: boolean
+    cursor?: string
+  }): Promise<OrganizationRpcResult<CreatorArtifactCatalogPage>>
+  creatorArtifactGet(input: {
+    organizationId: string
+    artifactId: string
+    version?: string
+    referencePath?: string
+  }): Promise<OrganizationRpcResult<CreatorArtifactDetail>>
+  creatorArtifactCreate(input: {
+    organizationId: string
+    type: 'skill'
+    slug: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ artifact: CreatorArtifact; replayed?: boolean }>>
+  creatorArtifactDeleteDraft(input: {
+    organizationId: string
+    artifactId: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ artifact: CreatorArtifact; replayed?: boolean }>>
+  creatorArtifactCreateVersion(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+    changelog?: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{
+    version: CreatorArtifactVersion
+    upload: CreatorSkillUploadGrant
+    replayed?: boolean
+  }>>
+  creatorArtifactCreateUploadGrant(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{
+    grant: CreatorSkillUploadGrant
+  }>>
+  creatorArtifactCompleteUpload(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+    uploadGeneration: number
+    sizeBytes: number
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{
+    version: CreatorArtifactVersion
+    replayed?: boolean
+  }>>
+  creatorArtifactPublishVersion(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  creatorArtifactDeleteVersionDraft(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  creatorArtifactSetArchived(input: {
+    organizationId: string
+    artifactId: string
+    archived: boolean
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ artifact: CreatorArtifact; replayed?: boolean }>>
+  creatorArtifactRevokeVersion(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+    reason: string
+    idempotencyKey: string
+  }): Promise<OrganizationRpcResult<{ version: CreatorArtifactVersion; replayed?: boolean }>>
+  creatorSkillGetDownloadGrant(input: {
+    organizationId: string
+    artifactId: string
+    version: string
+  }): Promise<OrganizationRpcResult<CreatorSkillDownloadGrant>>
+  creatorSkillGetSafetyStatus(input: {
+    artifactId: string
+    version: string
+    archiveChecksum: string
+  }): Promise<OrganizationRpcResult<CreatorSkillSafetyStatus>>
+  creatorSkillGetTarget(input: { workspaceId: string }): Promise<
+    | {
+        success: true
+        workspaceId: string
+        name: string
+        path: string
+        writable: boolean
+      }
+    | { success: false; errorCode: string }
+  >
+  creatorSkillInstall(input: CreatorSkillInstallRpcInput): Promise<CreatorSkillOperationResult>
+  creatorSkillCancel(operationId: string): Promise<{ success: boolean }>
+  creatorSkillUninstall(input: {
+    workspaceId: string
+    operationId: string
+    slug: string
+    forceDeleteModified?: boolean
+    forceDeleteCredential?: string
+  }): Promise<CreatorSkillOperationResult>
+  creatorSkillListBackups(input: { workspaceId: string }): Promise<
+    { success: true; backups: CreatorSkillBackup[] }
+    | { success: false; errorCode: string }
+  >
+  creatorSkillDeleteBackups(input: {
+    workspaceId: string
+    backup?: {
+      slug: string
+      backupId: string
+    }
+  }): Promise<
+    { success: true; deleted: number }
+    | { success: false; errorCode: string }
+  >
+  creatorSkillUpdateSafetyStatus(input: {
+    workspaceId: string
+    status: CreatorSkillSafetyStatus
+    checkedAt: string
+  }): Promise<{ success: boolean; errorCode?: string }>
+  creatorSkillIgnoreVersion(input: {
+    workspaceId: string
+    artifactId: string
+    version: string
+    archiveChecksum: string
+    ignoredVersion: string
+  }): Promise<{ success: boolean; errorCode?: string }>
+  onCreatorSkillProgress(
+    callback: (progress: CreatorSkillOperationProgress) => void,
+  ): () => void
 
   // Credential health check (startup validation)
   getCredentialHealth(): Promise<CredentialHealthStatus>
@@ -472,6 +799,28 @@ export interface ElectronAPI {
   // User Preferences
   readPreferences(): Promise<{ content: string; exists: boolean; path: string }>
   writePreferences(content: string): Promise<{ success: boolean; error?: string }>
+  getHomeRecentApps(
+    contextKey: string,
+  ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  setHomeRecentApps(
+    contextKey: string,
+    apps: import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[],
+  ): Promise<import('@polo-ai/shared/config/home-recent').HomeRecentAppPreference[]>
+  getOrganizationContextStorage(
+    accountId: string,
+  ): Promise<
+    import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
+    | null
+  >
+  updateOrganizationContextStorage(
+    accountId: string,
+    patch: import(
+      '@polo-ai/shared/config/organization-context'
+    ).OrganizationContextStoragePatch,
+  ): Promise<
+    import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
+    | null
+  >
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>
@@ -514,7 +863,14 @@ export interface ElectronAPI {
   // Skills
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
-  deleteSkill(workspaceId: string, skillSlug: string): Promise<void>
+  deleteSkill(input: {
+    workspaceId: string
+    skillSlug: string
+  }): Promise<{
+    managed: boolean
+    detached: boolean
+    forceDeleteCredential?: string
+  }>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
 

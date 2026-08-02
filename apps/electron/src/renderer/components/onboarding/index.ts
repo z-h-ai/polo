@@ -19,6 +19,7 @@ export { LocalModelStep, type LocalModelSubmitData } from './LocalModelStep'
 export { ReauthScreen } from './ReauthScreen'
 export { GitBashWarning, type GitBashStatus } from './GitBashWarning'
 export { AdminLoginStep } from './AdminLoginStep'
+export { PhoneAuthStep } from './PhoneAuthStep'
 export { AdminKickedStep } from './AdminKickedStep'
 
 // Main wizard container

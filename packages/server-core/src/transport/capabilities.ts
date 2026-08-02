@@ -25,6 +25,9 @@ export const CLIENT_OPEN_FILE_DIALOG = 'client:openFileDialog'
 /** Capability: drive a local `BrowserPaneManager` instance for a remote agent. */
 export const CLIENT_BROWSER_INVOKE = 'client:browser:invoke'
 
+/** Commit-boundary recheck using the desktop account's local Admin session. */
+export const CLIENT_CREATOR_SKILL_COMMIT_CHECK = 'client:creatorSkillCommitCheck'
+
 /** All capabilities a local Electron client advertises on handshake. */
 export const LOCAL_CLIENT_CAPABILITIES: readonly string[] = [
   CLIENT_OPEN_EXTERNAL,
@@ -33,6 +36,7 @@ export const LOCAL_CLIENT_CAPABILITIES: readonly string[] = [
   CLIENT_CONFIRM_DIALOG,
   CLIENT_OPEN_FILE_DIALOG,
   CLIENT_BROWSER_INVOKE,
+  CLIENT_CREATOR_SKILL_COMMIT_CHECK,
 ]
 
 // ---------------------------------------------------------------------------

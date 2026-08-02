@@ -331,6 +331,7 @@ function SidebarUserMenu({ config }: { config: SidebarUserMenuConfig }) {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
+            data-testid="sidebar-user-menu-trigger"
             type="button"
             className="group flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left outline-none hover:bg-sidebar-hover data-[state=open]:bg-sidebar-hover focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           >
@@ -363,12 +364,17 @@ function SidebarUserMenu({ config }: { config: SidebarUserMenuConfig }) {
               <User className="h-3.5 w-3.5" />
               <span>{t('sidebar.userMenu.profile')}</span>
             </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onSelect={config.onSettings} className="gap-2 px-2 py-1.5 text-[13px]">
+            <StyledDropdownMenuItem
+              data-testid="sidebar-user-menu-settings"
+              onSelect={config.onSettings}
+              className="gap-2 px-2 py-1.5 text-[13px]"
+            >
               <Settings2 className="h-3.5 w-3.5" />
               <span>{t('sidebar.settings')}</span>
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator className="my-1" />
             <StyledDropdownMenuItem
+              data-testid="sidebar-user-menu-logout"
               onSelect={() => {
                 void config.onLogout()
               }}

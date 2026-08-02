@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, mock } from 'bun:test'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { ElectronAPI } from '../../shared/types'
+import { buildClientApi } from '../build-api'
 import { CHANNEL_MAP } from '../channel-map'
 
 type AnyFn = (...args: any[]) => any
@@ -9,12 +12,14 @@ type FunctionKeys<T> = {
 }[keyof T] & string
 
 type BrowserPaneKeys = `browserPane.${FunctionKeys<ElectronAPI['browserPane']>}`
+type LocalAppKeys = `localApps.${FunctionKeys<ElectronAPI['localApps']>}`
 
 // Methods excluded from CHANNEL_MAP because they are implemented directly in the preload
 // (no IPC round-trip to the main process). Each reads local state or orchestrates client-side.
 type ApiToChannelMapKeys = Exclude<
   FunctionKeys<ElectronAPI>,
   | 'performOAuth'
+  | 'adminAcquirePhoneAuthChallenge' // preload opens the system challenge page and receives its loopback callback
   | 'getTransportConnectionState'
   | 'getRuntimeEnvironment'
   | 'onTransportConnectionStateChanged'
@@ -26,9 +31,10 @@ type ApiToChannelMapKeys = Exclude<
   | 'invokeOnServer' // direct IPC to main process — cross-server RPC
   | 'transferSessionToWorkspace' // direct IPC to main process — orchestrated remote transfer
   | 'onTransferProgress' // direct IPC listener — chunk upload progress
+  | 'sendDeepLinkActionResult' // direct IPC to main process — webview protocol callback ack
   | 'changeLanguage' // direct IPC to main process — syncs i18n language
   | 'getFilePath' // renderer-local — webUtils.getPathForFile, no IPC round-trip
-> | BrowserPaneKeys
+> | BrowserPaneKeys | LocalAppKeys
 type ChannelMapKeys = keyof typeof CHANNEL_MAP & string
 
 type AssertNever<T extends never> = true
@@ -58,5 +64,79 @@ describe('CHANNEL_MAP runtime contract', () => {
     const values = Object.values(CHANNEL_MAP)
     expect(values.some((entry) => entry.type === 'listener')).toBe(true)
     expect(values.some((entry) => entry.type === 'invoke')).toBe(true)
+  })
+
+  it('routes catalog update metadata through the local-app RPC surface', async () => {
+    expect(CHANNEL_MAP['localApps.setAvailableRelease']).toEqual({
+      type: 'invoke',
+      channel: RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+    })
+    const invoke = mock(async () => ({ status: 'update_available' }))
+    const client = {
+      invoke,
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    const catalogScope = {
+      kind: 'catalog' as const,
+      accountId: 'account-1',
+      organizationId: 'organization-1',
+      catalogAppId: 'demo.app',
+    }
+    await api.localApps.setAvailableRelease(catalogScope, { version: '2.0.0' })
+
+    expect(invoke).toHaveBeenCalledWith(
+      RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE,
+      catalogScope,
+      { version: '2.0.0' },
+    )
+  })
+
+  it('routes host metadata and app catalog sync through local-only RPC', async () => {
+    const calls: unknown[][] = []
+    const client = {
+      invoke: mock(async (...args: unknown[]) => {
+        calls.push(args)
+        return { success: true }
+      }),
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    await api.localApps.getHostInfo()
+    await api.adminSyncAppCatalog('organization-1', { force: true })
+
+    expect(calls).toEqual([
+      [RPC_CHANNELS.localApps.GET_HOST_INFO],
+      [RPC_CHANNELS.admin.SYNC_APP_CATALOG, 'organization-1', { force: true }],
+    ])
+  })
+
+  it('forwards phone auth and password calls through the typed local RPC surface', async () => {
+    const calls: unknown[][] = []
+    const invoke = mock(async (...args: unknown[]) => {
+      calls.push(args)
+      return { success: true }
+    })
+    const client = {
+      invoke,
+      on: mock(() => () => {}),
+    } as unknown as RpcClient
+    const api = buildClientApi(client, CHANNEL_MAP)
+
+    await api.adminGetAuthConfig()
+    await api.adminGetPhoneAuthChallengeConfig()
+    await api.adminSendPhoneAuthCode('13800138000', 'issuer-signed-token')
+    await api.adminVerifyPhoneAuthCode('13800138000', '123456')
+    await api.adminSetPassword('password-123')
+
+    expect(calls).toEqual([
+      [RPC_CHANNELS.admin.GET_AUTH_CONFIG],
+      [RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG],
+      [RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE, '13800138000', 'issuer-signed-token'],
+      [RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE, '13800138000', '123456'],
+      [RPC_CHANNELS.admin.SET_PASSWORD, 'password-123'],
+    ])
   })
 })

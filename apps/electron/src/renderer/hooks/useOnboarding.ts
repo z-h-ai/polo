@@ -18,7 +18,11 @@ import type { ProviderChoice } from '@/components/onboarding/ProviderSelectStep'
 import type { LocalModelSubmitData } from '@/components/onboarding/LocalModelStep'
 import type { ApiKeySubmitData } from '@/components/apisetup'
 import type { CustomEndpointConfig } from '@config/llm-connections'
-import type { SetupNeeds, LlmConnectionSetup } from '../../shared/types'
+import type {
+  AdminSendPhoneAuthCodeResult,
+  LlmConnectionSetup,
+  SetupNeeds,
+} from '../../shared/types'
 
 interface UseOnboardingOptions {
   /** Called when onboarding is complete */
@@ -38,6 +42,12 @@ interface UseOnboardingOptions {
   editingSlug?: string | null
   /** Set of slugs already in use (for generating unique slugs when creating new) */
   existingSlugs?: Set<string>
+  /**
+   * Returns an opaque token issued by the configured human/device challenge.
+   * Electron intentionally has no fallback token: without a real issuer, phone
+   * authentication is reported as unavailable and password login remains usable.
+   */
+  phoneAuthChallengeProvider?: () => Promise<string | null>
 }
 
 interface UseOnboardingReturn {
@@ -56,7 +66,9 @@ interface UseOnboardingReturn {
 
   // Credentials
   handleSubmitCredential: (data: ApiKeySubmitData) => void
-  handleAdminLogin: (username: string, password: string) => void
+  handleAdminLogin: (identifier: string, password: string) => void
+  handleAdminSendPhoneCode: (phone: string) => Promise<AdminSendPhoneAuthCodeResult>
+  handleAdminVerifyPhoneCode: (phone: string, code: string) => Promise<boolean>
   handleAdminRelogin: () => void
   showAdminKicked: () => void
 
@@ -109,23 +121,104 @@ export function resolveInitialStep(initialSetupNeeds: SetupNeeds | undefined, fa
 }
 
 export function mapAdminLoginError(error: unknown): string {
-  const errorLike = error as { errorCode?: string; message?: string } | undefined
-  if (errorLike?.errorCode === 'INVALID_CREDENTIALS') {
+  const errorLike = error as { errorCode?: string; message?: string; status?: number } | undefined
+  if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
+    return i18n.t('onboarding.adminLogin.genericError')
+  }
+  if (errorLike?.errorCode === 'INVALID_CREDENTIALS' || errorLike?.errorCode === 'invalid_credentials') {
     return i18n.t('onboarding.adminLogin.invalidCredentials')
   }
-  if (errorLike?.errorCode === 'ACCOUNT_DISABLED') {
+  if (errorLike?.errorCode === 'ACCOUNT_DISABLED' || errorLike?.errorCode === 'account_disabled') {
     return i18n.t('onboarding.adminLogin.accountDisabled')
   }
   if (errorLike?.errorCode === 'NETWORK_ERROR') {
     return i18n.t('onboarding.adminLogin.networkError')
   }
-
   const message = error instanceof Error ? error.message : errorLike?.message
   if (message && /network|fetch|failed to reach|connection/i.test(message)) {
     return i18n.t('onboarding.adminLogin.networkError')
   }
 
   return message || i18n.t('onboarding.adminLogin.genericError')
+}
+
+export function mapAdminPhoneAuthError(error: unknown): string {
+  const errorLike = error as {
+    errorCode?: string
+    message?: string
+    retryAfter?: number
+    status?: number
+  } | undefined
+
+  if (typeof errorLike?.status === 'number' && errorLike.status >= 500) {
+    return i18n.t('onboarding.adminLogin.phoneAuthUnavailable')
+  }
+
+  switch (errorLike?.errorCode) {
+    case 'invalid_phone':
+      return i18n.t('onboarding.adminLogin.invalidPhone')
+    case 'verification_code_invalid':
+      return i18n.t('onboarding.adminLogin.verificationCodeInvalid')
+    case 'verification_code_expired':
+      return i18n.t('onboarding.adminLogin.verificationCodeExpired')
+    case 'verification_attempts_exceeded':
+      return i18n.t('onboarding.adminLogin.verificationAttemptsExceeded')
+    case 'sms_rate_limited':
+      return i18n.t('onboarding.adminLogin.smsRateLimited', {
+        count: Math.max(1, Math.ceil(errorLike.retryAfter ?? 60)),
+      })
+    case 'invalid_credentials':
+      return i18n.t('onboarding.adminLogin.challengeFailed')
+    case 'phone_auth_disabled':
+      return i18n.t('onboarding.adminLogin.phoneAuthDisabled')
+    case 'phone_not_registered':
+      return i18n.t('onboarding.adminLogin.phoneNotRegistered')
+    case 'sms_send_failed':
+    case 'phone_auth_configuration_error':
+      return i18n.t('onboarding.adminLogin.phoneAuthUnavailable')
+    case 'NETWORK_ERROR':
+      return i18n.t('onboarding.adminLogin.networkError')
+  }
+
+  if (
+    error instanceof Error && /network|fetch|failed to reach|connection/i.test(error.message)
+  ) {
+    return i18n.t('onboarding.adminLogin.networkError')
+  }
+
+  return i18n.t('onboarding.adminLogin.genericError')
+}
+
+export function resolvePhoneAuthAvailability(
+  serverEnabled: boolean,
+  challengeProvider: UseOnboardingOptions['phoneAuthChallengeProvider'],
+  discoveryAvailable: boolean,
+): boolean {
+  return (
+    serverEnabled
+    && discoveryAvailable
+    && typeof challengeProvider === 'function'
+  )
+}
+
+export async function sendPhoneAuthCodeWithChallenge(
+  phone: string,
+  challengeProvider: UseOnboardingOptions['phoneAuthChallengeProvider'],
+  send: (phone: string, challengeToken: string) => Promise<AdminSendPhoneAuthCodeResult>,
+): Promise<AdminSendPhoneAuthCodeResult> {
+  if (!challengeProvider) {
+    return { success: false, errorCode: 'phone_auth_configuration_error' }
+  }
+
+  try {
+    const challengeToken = await challengeProvider()
+    if (!challengeToken?.trim()) {
+      return { success: false, errorCode: 'phone_auth_configuration_error' }
+    }
+    return await send(phone, challengeToken)
+  } catch {
+    return { success: false, errorCode: 'phone_auth_configuration_error' }
+  }
 }
 
 export function resolveAdminLoginSuccessState(state: OnboardingState): OnboardingState {
@@ -151,6 +244,7 @@ export function resolveAdminReloginState(state: OnboardingState): OnboardingStat
     ...state,
     step: 'admin-login',
     loginStatus: 'idle',
+    phoneAuthEnabled: undefined,
     errorMessage: undefined,
   }
 }
@@ -265,6 +359,7 @@ export function useOnboarding({
   onConfigSaved,
   editingSlug = null,
   existingSlugs = new Set(),
+  phoneAuthChallengeProvider,
 }: UseOnboardingOptions): UseOnboardingReturn {
   const resolvedInitialStep = resolveInitialStep(initialSetupNeeds, initialStep)
 
@@ -293,6 +388,41 @@ export function useOnboarding({
       }
     })
   }, [initialSetupNeeds?.needsAdminLogin])
+
+  useEffect(() => {
+    if (state.step !== 'admin-login' || state.phoneAuthEnabled !== undefined) return
+    let cancelled = false
+    window.electronAPI.adminGetAuthConfig()
+      .then(async result => {
+        if (!cancelled) {
+          const discovery = result.phoneAuthEnabled
+            ? await window.electronAPI.adminGetPhoneAuthChallengeConfig()
+                .catch(() => ({ success: false as const }))
+            : { success: false as const }
+          if (cancelled) return
+          const phoneAuthEnabled = resolvePhoneAuthAvailability(
+            result.phoneAuthEnabled,
+            phoneAuthChallengeProvider,
+            discovery.success,
+          )
+          setState(s => ({
+            ...s,
+            phoneAuthEnabled,
+            ...(result.phoneAuthEnabled && !phoneAuthEnabled
+              ? { errorMessage: mapAdminPhoneAuthError({ errorCode: 'phone_auth_configuration_error' }) }
+              : {}),
+          }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setState(s => ({ ...s, phoneAuthEnabled: false }))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [phoneAuthChallengeProvider, state.step, state.phoneAuthEnabled])
 
   // Check Git Bash on Windows at mount. If missing, redirect to git-bash step.
   useEffect(() => {
@@ -461,11 +591,11 @@ export function useOnboarding({
     }
   }, [state.step, state.gitBashStatus, initialStep, onDismiss])
 
-  const handleAdminLogin = useCallback(async (username: string, password: string) => {
+  const handleAdminLogin = useCallback(async (identifier: string, password: string) => {
     setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
 
     try {
-      const result = await window.electronAPI.adminLogin(username, password)
+      const result = await window.electronAPI.adminLogin(identifier, password)
       if (result.success) {
         setState(resolveAdminLoginSuccessState)
         onConfigSaved?.()
@@ -475,6 +605,64 @@ export function useOnboarding({
       setState(s => resolveAdminLoginFailureState(s, result))
     } catch (error) {
       setState(s => resolveAdminLoginFailureState(s, error))
+    }
+  }, [onConfigSaved])
+
+  const handleAdminSendPhoneCode = useCallback(async (
+    phone: string,
+  ): Promise<AdminSendPhoneAuthCodeResult> => {
+    setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
+
+    try {
+      const result = await sendPhoneAuthCodeWithChallenge(
+        phone,
+        phoneAuthChallengeProvider,
+        (normalizedPhone, challengeToken) =>
+          window.electronAPI.adminSendPhoneAuthCode(normalizedPhone, challengeToken),
+      )
+      if (result.success) {
+        setState(s => ({ ...s, loginStatus: 'idle', errorMessage: undefined }))
+        return result
+      }
+      setState(s => ({
+        ...s,
+        loginStatus: 'error',
+        errorMessage: mapAdminPhoneAuthError(result),
+      }))
+      return result
+    } catch (error) {
+      setState(s => ({
+        ...s,
+        loginStatus: 'error',
+        errorMessage: mapAdminPhoneAuthError(error),
+      }))
+      return { success: false, errorCode: 'NETWORK_ERROR' }
+    }
+  }, [phoneAuthChallengeProvider])
+
+  const handleAdminVerifyPhoneCode = useCallback(async (phone: string, code: string): Promise<boolean> => {
+    setState(s => ({ ...s, loginStatus: 'waiting', errorMessage: undefined }))
+
+    try {
+      const result = await window.electronAPI.adminVerifyPhoneAuthCode(phone, code)
+      if (result.success) {
+        setState(resolveAdminLoginSuccessState)
+        onConfigSaved?.()
+        return true
+      }
+      setState(s => ({
+        ...s,
+        loginStatus: 'error',
+        errorMessage: mapAdminPhoneAuthError(result),
+      }))
+      return false
+    } catch (error) {
+      setState(s => ({
+        ...s,
+        loginStatus: 'error',
+        errorMessage: mapAdminPhoneAuthError(error),
+      }))
+      return false
     }
   }, [onConfigSaved])
 
@@ -949,6 +1137,8 @@ export function useOnboarding({
     handleSelectApiSetupMethod,
     handleSubmitCredential,
     handleAdminLogin,
+    handleAdminSendPhoneCode,
+    handleAdminVerifyPhoneCode,
     handleAdminRelogin,
     showAdminKicked,
     handleSubmitLocalModel,

@@ -7,13 +7,15 @@
 
 import {
   existsSync,
+  lstatSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   statSync,
 } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { isAbsolute, join, relative, resolve, sep } from 'path';
 import matter from 'gray-matter';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
@@ -296,19 +298,47 @@ export function getSkillIconPath(workspaceRoot: string, slug: string): string | 
  * @param slug - Skill directory name
  */
 export function deleteSkill(workspaceRoot: string, slug: string): boolean {
-  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
-  const skillDir = join(skillsDir, slug);
-
-  if (!existsSync(skillDir)) {
-    return false;
-  }
-
   try {
+    if (
+      !slug
+      || slug.length > 255
+      || slug === '.'
+      || slug === '..'
+      || slug.includes('/')
+      || slug.includes('\\')
+      || slug.includes('\0')
+    ) return false;
+
+    const canonicalWorkspace = realpathSync(resolve(workspaceRoot));
+    const skillsDir = getWorkspaceSkillsPath(canonicalWorkspace);
+    if (!existsSync(skillsDir)) return false;
+    const canonicalSkillsDir = realpathSync(skillsDir);
+    if (!isStrictChildPath(canonicalWorkspace, canonicalSkillsDir)) return false;
+
+    const skillDir = resolve(canonicalSkillsDir, slug);
+    if (!isStrictChildPath(canonicalSkillsDir, skillDir) || !existsSync(skillDir)) {
+      return false;
+    }
+    // Refuse all directory-entry symlinks. Even though rm normally unlinks the
+    // link itself, deletion must never depend on platform-specific traversal.
+    const skillStats = lstatSync(skillDir);
+    if (skillStats.isSymbolicLink() || !skillStats.isDirectory()) return false;
+    const canonicalSkillDir = realpathSync(skillDir);
+    if (!isStrictChildPath(canonicalSkillsDir, canonicalSkillDir)) return false;
+
     rmSync(skillDir, { recursive: true });
     return true;
   } catch {
     return false;
   }
+}
+
+function isStrictChildPath(parent: string, candidate: string): boolean {
+  const child = relative(parent, candidate);
+  return child !== ''
+    && child !== '..'
+    && !child.startsWith(`..${sep}`)
+    && !isAbsolute(child);
 }
 
 // ============================================================

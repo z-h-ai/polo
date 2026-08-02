@@ -113,6 +113,28 @@ describe('Transport — error code preservation', () => {
     }
     expect((caught as { code?: string }).code).toBe('HANDLER_ERROR')
   })
+
+  it('preserves structured handler error details as receiver data', async () => {
+    const { server, client } = await startPair()
+    server.handle('local-app-timeout', async () => {
+      throw Object.assign(new Error('health check timed out'), {
+        code: 'START_TIMEOUT',
+        details: { healthUrl: 'http://127.0.0.1:43123/health', timeoutMs: 1_000 },
+      })
+    })
+
+    let caught: unknown
+    try {
+      await client.invoke('local-app-timeout')
+    } catch (err) {
+      caught = err
+    }
+    expect((caught as { code?: string }).code).toBe('START_TIMEOUT')
+    expect((caught as { data?: unknown }).data).toEqual({
+      healthUrl: 'http://127.0.0.1:43123/health',
+      timeoutMs: 1_000,
+    })
+  })
 })
 
 describe('Transport — capability introspection', () => {

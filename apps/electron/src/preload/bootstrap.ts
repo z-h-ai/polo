@@ -22,6 +22,7 @@ import { WsRpcClient, type TransportConnectionState } from '../transport/client'
 import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
+import { buildAdminPreloadApi } from './admin-api'
 import { createCallbackServer } from '@polo-ai/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@polo-ai/shared/auth/chatgpt-oauth-config'
 import {
@@ -31,6 +32,7 @@ import {
   CLIENT_CONFIRM_DIALOG,
   CLIENT_OPEN_FILE_DIALOG,
   CLIENT_BROWSER_INVOKE,
+  CLIENT_CREATOR_SKILL_COMMIT_CHECK,
   LOCAL_CLIENT_CAPABILITIES,
 } from '@polo-ai/server-core/transport'
 import type { ConfirmDialogSpec, FileDialogSpec, BrowserCapabilityRequest } from '@polo-ai/server-core/transport'
@@ -185,6 +187,41 @@ client.handleCapability(CLIENT_BROWSER_INVOKE, async (req: BrowserCapabilityRequ
   return await ipcRenderer.invoke('__browser:invoke', req)
 })
 
+client.handleCapability(CLIENT_CREATOR_SKILL_COMMIT_CHECK, async (identity: {
+  artifactId: string
+  version: string
+  archiveChecksum: string
+}) => {
+  const capability = await client.invoke(
+    RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES,
+  ) as {
+    success?: boolean
+    creatorSkillArtifacts?: boolean
+    errorCode?: string
+  }
+  if (!capability.success || capability.creatorSkillArtifacts !== true) {
+    return {
+      success: false,
+      creatorSkillArtifacts: false,
+      errorCode: capability.errorCode ?? 'creator_skill_feature_disabled',
+    }
+  }
+  const safety = await client.invoke(
+    RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
+    identity,
+  ) as {
+    success?: boolean
+    status?: 'active' | 'revoked' | 'archived'
+    errorCode?: string
+  }
+  return {
+    success: safety.success === true,
+    creatorSkillArtifacts: true,
+    status: safety.status,
+    errorCode: safety.errorCode,
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Build ElectronAPI proxy
 // ---------------------------------------------------------------------------
@@ -263,20 +300,26 @@ client.onConnectionStateChanged((state) => {
 ;(api as any).reconnectTransport = async () => {
   client.reconnectNow()
 }
+;(api as ElectronAPI).sendDeepLinkActionResult = (result) => {
+  ipcRenderer.send(RPC_CHANNELS.deeplink.ACTION_RESULT, result)
+}
 
-// Admin auth — explicit preload surface for admin-managed deployments.
-;(api as ElectronAPI).adminLogin = (username: string, password: string) =>
-  client.invoke(RPC_CHANNELS.admin.LOGIN, username, password)
-;(api as ElectronAPI).adminValidate = () =>
-  client.invoke(RPC_CHANNELS.admin.VALIDATE)
-;(api as ElectronAPI).adminLogout = () =>
-  client.invoke(RPC_CHANNELS.admin.LOGOUT)
-;(api as ElectronAPI).adminGetStatus = () =>
-  client.invoke(RPC_CHANNELS.admin.GET_STATUS)
-;(api as ElectronAPI).adminSyncConnections = () =>
-  client.invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS)
-;(api as ElectronAPI).onAdminReauthRequired = (callback) =>
-  client.on('admin:reauthRequired', callback)
+// Admin auth — explicit, testable preload surface for admin-managed deployments.
+// Plaintext loopback issuers are a build-time capability. The production
+// preload build pins this constant to false; only the local native E2E bundle
+// pins it to true. Renderer input, discovery data, and runtime environment
+// variables therefore cannot weaken the production HTTPS requirement.
+declare const __POLO_AI_TRUSTED_PHONE_AUTH_E2E__: boolean
+const trustedPhoneAuthE2eMode = (
+  typeof __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === 'boolean'
+  && __POLO_AI_TRUSTED_PHONE_AUTH_E2E__ === true
+)
+Object.assign(api, buildAdminPreloadApi(client, {
+  allowInsecureLoopbackIssuer: trustedPhoneAuthE2eMode,
+  openExternal: trustedPhoneAuthE2eMode
+    ? url => ipcRenderer.invoke('__phone-auth-e2e:open-external', url)
+    : url => shell.openExternal(url),
+}))
 
 // ── performOAuth ─────────────────────────────────────────────────────────
 // Multi-step orchestration: callback server (local) → oauth:start (server) →

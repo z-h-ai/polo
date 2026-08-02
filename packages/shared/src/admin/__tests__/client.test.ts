@@ -53,9 +53,281 @@ describe('AdminClient', () => {
       'Content-Type': 'application/json',
     });
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
-      username: 'admin',
+      identifier: 'admin',
       password: 'secret',
     }));
+  });
+
+  it('returns only the supported auth config field', async () => {
+    mockJsonFetch({
+      phoneAuthEnabled: true,
+      selfRegistrationEnabled: true,
+      internalProvider: 'must-not-leak',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.getAuthConfig();
+
+    expect(result).toEqual({ phoneAuthEnabled: true });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/config');
+    expect(fetchCalls[0]!.init.method).toBe('GET');
+  });
+
+  it('discovers the public browser redirect challenge contract', async () => {
+    mockJsonFetch({
+      type: 'browser_redirect',
+      issuerUrl: 'https://challenge.example.com/phone-auth',
+      verifierUrl: 'https://secret.example.com/must-not-leak',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.getPhoneAuthChallengeConfig();
+
+    expect(result).toEqual({
+      type: 'browser_redirect',
+      issuerUrl: 'https://challenge.example.com/phone-auth',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/auth/phone/challenge/config',
+    );
+    expect(fetchCalls[0]!.init.method).toBe('GET');
+  });
+
+  it('fails closed when the challenge discovery payload is invalid', async () => {
+    mockJsonFetch({
+      type: 'unknown',
+      issuerUrl: 'https://challenge.example.com/phone-auth',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.getPhoneAuthChallengeConfig()).rejects.toMatchObject({
+      errorCode: 'phone_auth_configuration_error',
+    });
+  });
+
+  it('sends phone code input and returns stable timing fields', async () => {
+    mockJsonFetch({
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 60,
+      providerRequestId: 'must-not-leak',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.sendPhoneAuthCode({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    });
+
+    expect(result).toEqual({ accepted: true, expiresIn: 300, resendAfter: 60 });
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    }));
+  });
+
+  it('verifies a phone code without returning server-only fields', async () => {
+    const response = {
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'user-1',
+        username: 'phone_user',
+        displayName: null,
+        role: 'user',
+        groupIds: [],
+        phone: '13800138000',
+        internalSecret: 'must-not-leak',
+        profile: {
+          internalSecret: 'nested-must-not-leak',
+        },
+      },
+      isNewUser: true,
+      internalGrant: 'must-not-leak',
+    };
+    mockJsonFetch(response);
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.verifyPhoneAuthCode({
+      phone: '13800138000',
+      code: '123456',
+    });
+
+    expect(result).toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'user-1',
+        username: 'phone_user',
+        displayName: null,
+        role: 'user',
+        groupIds: [],
+      },
+      isNewUser: true,
+    });
+    expect(JSON.stringify(result)).not.toContain('13800138000');
+    expect(JSON.stringify(result)).not.toContain('internalSecret');
+  });
+
+  it('rejects malformed Admin users at the response boundary', async () => {
+    mockJsonFetch({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'user-1',
+        username: 'phone_user',
+        displayName: null,
+        role: 'user',
+        groupIds: 'not-an-array',
+      },
+      isNewUser: false,
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.verifyPhoneAuthCode({
+      phone: '13800138000',
+      code: '123456',
+    })).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+      message: 'Admin response is invalid',
+    });
+  });
+
+  it('rejects malformed phone auth success fields before returning credentials', async () => {
+    const user = {
+      id: 'user-1',
+      username: 'phone_user',
+      displayName: null,
+      role: 'user',
+      groupIds: [],
+    };
+    const invalidResponses = [
+      {
+        accessToken: { token: 'object-token' },
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'access-token',
+        refreshToken: null,
+        expiresIn: 3600,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresIn: -1,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'x'.repeat(16_385),
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+        user,
+        isNewUser: false,
+      },
+      {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+        user,
+        isNewUser: 'true',
+      },
+    ];
+
+    for (const response of invalidResponses) {
+      mockJsonFetch(response);
+      const client = new AdminClient('https://admin.example.com');
+
+      await expect(client.verifyPhoneAuthCode({
+        phone: '13800138000',
+        code: '123456',
+      })).rejects.toMatchObject({
+        errorCode: 'SERVER_ERROR',
+        message: 'Admin response is invalid',
+      });
+    }
+  });
+
+  it('rejects malformed send-code timing fields', async () => {
+    for (const response of [
+      { accepted: true, expiresIn: '300', resendAfter: 60 },
+      { accepted: true, expiresIn: 300, resendAfter: -1 },
+      { accepted: 'true', expiresIn: 300, resendAfter: 60 },
+    ]) {
+      mockJsonFetch(response);
+      const client = new AdminClient('https://admin.example.com');
+
+      await expect(client.sendPhoneAuthCode({
+        phone: '13800138000',
+        challengeToken: 'verified-challenge',
+      })).rejects.toMatchObject({
+        errorCode: 'SERVER_ERROR',
+        message: 'Admin response is invalid',
+      });
+    }
+  });
+
+  it('sets a password with bearer auth', async () => {
+    mockJsonFetch({ success: true, authorizationChanged: true });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.setPassword('access-token', { password: 'password-123' });
+
+    expect(result).toEqual({ success: true });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/password');
+    expect(fetchCalls[0]!.init.headers).toEqual({
+      Accept: 'application/json',
+      Authorization: 'Bearer access-token',
+      'Content-Type': 'application/json',
+    });
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({ password: 'password-123' }));
+  });
+
+  it('keeps only retryAfter from stable phone auth errors', async () => {
+    mockJsonFetch({
+      error: 'sms_rate_limited',
+      message: 'sms_rate_limited',
+      details: { retryAfter: 31.2 },
+      providerSecret: 'must-not-leak',
+    }, 429);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.sendPhoneAuthCode({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    })).rejects.toMatchObject({
+      errorCode: 'sms_rate_limited',
+      status: 429,
+      details: { retryAfter: 32 },
+    });
+  });
+
+  it('uses a safe message for provider and server failures', async () => {
+    mockJsonFetch({
+      error: 'sms_send_failed',
+      message: 'provider secret and stack',
+    }, 502);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.sendPhoneAuthCode({
+      phone: '13800138000',
+      challengeToken: 'verified-challenge',
+    })).rejects.toMatchObject({
+      errorCode: 'sms_send_failed',
+      message: 'Admin service is temporarily unavailable',
+    });
   });
 
   it('sends refresh request as JSON', async () => {
@@ -79,6 +351,35 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
       refreshToken: 'old-refresh-token',
     }));
+  });
+
+  it('applies strict session response validation to login and refresh', async () => {
+    mockJsonFetch({
+      accessToken: ' ',
+      refreshToken: 'refresh-token',
+      expiresIn: 3600,
+      user: {
+        id: 'user-1',
+        username: 'admin',
+        displayName: 'Admin',
+        role: 'admin',
+        groupIds: [],
+      },
+    });
+    const loginClient = new AdminClient('https://admin.example.com');
+    await expect(loginClient.login('admin', 'secret')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+    });
+
+    mockJsonFetch({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      expiresIn: 31_536_001,
+    });
+    const refreshClient = new AdminClient('https://admin.example.com');
+    await expect(refreshClient.refresh('old-refresh-token')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+    });
   });
 
   it('sends validate request with bearer access token', async () => {
@@ -108,6 +409,45 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.init.body).toBeUndefined();
   });
 
+  it('strictly validates both validate response variants', async () => {
+    mockJsonFetch({ valid: false, internalReason: 'must-not-leak' });
+    const invalidSessionClient = new AdminClient('https://admin.example.com');
+    expect(await invalidSessionClient.validate('access-token')).toEqual({
+      valid: false,
+    });
+
+    mockJsonFetch({
+      valid: true,
+      configVersion: null,
+      user: {
+        id: 'user-1',
+        username: 'admin',
+        displayName: 'Admin',
+        role: 'admin',
+        groupIds: [],
+      },
+    });
+    const malformedClient = new AdminClient('https://admin.example.com');
+    await expect(malformedClient.validate('access-token')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+    });
+  });
+
+  it('logs out with the current access token and no refresh-token body', async () => {
+    mockJsonFetch({ success: true });
+
+    const client = new AdminClient('https://admin.example.com');
+    await client.logout('access-token');
+
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/auth/logout');
+    expect(fetchCalls[0]!.init.method).toBe('POST');
+    expect(fetchCalls[0]!.init.headers).toEqual({
+      Accept: 'application/json',
+      Authorization: 'Bearer access-token',
+    });
+    expect(fetchCalls[0]!.init.body).toBeUndefined();
+  });
+
   it('throws AdminError for server error responses', async () => {
     mockJsonFetch({
       errorCode: 'INVALID_CREDENTIALS',
@@ -124,6 +464,234 @@ describe('AdminClient', () => {
       expect((error as AdminError).errorCode).toBe('INVALID_CREDENTIALS');
       expect((error as AdminError).status).toBe(401);
       expect((error as AdminError).message).toBe('Invalid username or password');
+    }
+  });
+
+  it('never exposes unknown 4xx upstream messages, secrets, or stacks', async () => {
+    mockJsonFetch({
+      error: 'upstream_private_failure',
+      message: 'AccessKeyId=LTAI-DO-NOT-LEAK',
+      error_description: 'Error: private failure\\n    at /srv/admin/secret.ts:42',
+      stack: 'private-stack',
+    }, 418);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    try {
+      await client.login('admin', 'secret');
+      throw new Error('expected throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AdminError);
+      expect(error).toMatchObject({
+        errorCode: 'VALIDATION_ERROR',
+        status: 418,
+        message: 'Admin request was rejected',
+      });
+      const serialized = JSON.stringify({
+        message: (error as AdminError).message,
+        details: (error as AdminError).details,
+      });
+      expect(serialized).not.toContain('LTAI');
+      expect(serialized).not.toContain('/srv/admin');
+      expect(serialized).not.toContain('private-stack');
+    }
+  });
+
+  it('uses a local generic message for non-JSON and 5xx responses', async () => {
+    fetchCalls = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      fetchCalls.push({ url, init: init ?? {} });
+      return new Response(
+        'AccessKeySecret=do-not-leak\\nError at /srv/private.ts:9',
+        { status: 502, statusText: 'Private upstream exception' },
+      );
+    }) as typeof globalThis.fetch;
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.login('admin', 'secret')).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+      status: 502,
+      message: 'Admin service is temporarily unavailable',
+    });
+  });
+
+  it('times out both a hanging fetch and a hanging response body', async () => {
+    for (const phase of ['fetch', 'body'] as const) {
+      let capturedSignal: AbortSignal | undefined;
+      let abortCount = 0;
+      const hangUntilAbort = (signal: AbortSignal) =>
+        new Promise<never>((_resolve, reject) => {
+          const onAbort = () => {
+            abortCount += 1;
+            signal.removeEventListener('abort', onAbort);
+            reject(signal.reason);
+          };
+          signal.addEventListener('abort', onAbort);
+        });
+      globalThis.fetch = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        capturedSignal = init?.signal as AbortSignal;
+        if (phase === 'fetch') return hangUntilAbort(capturedSignal);
+        return {
+          ok: true,
+          status: 200,
+          text: () => hangUntilAbort(capturedSignal!),
+        } as unknown as Response;
+      }) as typeof globalThis.fetch;
+
+      const client = new AdminClient('https://admin.example.com', {
+        requestTimeoutMs: 10,
+      });
+      await expect(client.getAuthConfig()).rejects.toMatchObject({
+        errorCode: 'TIMEOUT',
+        message: 'Admin request timed out',
+      });
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(abortCount).toBe(1);
+    }
+  });
+
+  it('preserves 401 and 403 response authorization when their bodies never finish', async () => {
+    for (const [status, errorCode] of [
+      [401, 'UNAUTHORIZED'],
+      [403, 'FORBIDDEN'],
+    ] as const) {
+      let capturedSignal: AbortSignal | undefined;
+      let abortCount = 0;
+      globalThis.fetch = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        capturedSignal = init?.signal as AbortSignal;
+        return {
+          ok: false,
+          status,
+          text: () => new Promise<never>((_resolve, reject) => {
+            const onAbort = () => {
+              abortCount += 1;
+              capturedSignal!.removeEventListener('abort', onAbort);
+              reject(capturedSignal!.reason);
+            };
+            capturedSignal!.addEventListener('abort', onAbort);
+          }),
+        } as unknown as Response;
+      }) as typeof globalThis.fetch;
+
+      const client = new AdminClient('https://admin.example.com', {
+        requestTimeoutMs: 10,
+      });
+      await expect(client.getAppCatalog(
+        'access-token',
+        '11111111-1111-4111-8111-111111111111',
+      )).rejects.toMatchObject({
+        errorCode,
+        status,
+      });
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(abortCount).toBe(1);
+      await Bun.sleep(20);
+      expect(abortCount).toBe(1);
+    }
+  });
+
+  it('clears the request deadline after the response body is consumed', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      capturedSignal = init?.signal as AbortSignal;
+      return new Response(JSON.stringify({ phoneAuthEnabled: true }), {
+        status: 200,
+      });
+    }) as typeof globalThis.fetch;
+    const client = new AdminClient('https://admin.example.com', {
+      requestTimeoutMs: 10,
+    });
+
+    await expect(client.getAuthConfig()).resolves.toEqual({
+      phoneAuthEnabled: true,
+    });
+    await Bun.sleep(20);
+    expect(capturedSignal?.aborted).toBe(false);
+  });
+
+  it('drops retryAfter values outside the stable numeric range', async () => {
+    for (const retryAfter of [-1, 0, 86_401, '60', { seconds: 60 }]) {
+      mockJsonFetch({
+        error: 'sms_rate_limited',
+        message: 'AccessKeyId=LTAI-DO-NOT-LEAK',
+        retryAfter,
+      }, 429);
+      const client = new AdminClient('https://admin.example.com');
+
+      try {
+        await client.sendPhoneAuthCode({
+          phone: '13800138000',
+          challengeToken: 'verified-challenge',
+        });
+        throw new Error('expected throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(AdminError);
+        expect((error as AdminError).details).toBeUndefined();
+        expect((error as AdminError).message).toBe(
+          'Phone authentication request was rate limited',
+        );
+      }
+    }
+  });
+
+  it('normalizes lowercase admin auth errors used by polo-admin', async () => {
+    mockJsonFetch({
+      error: 'account_disabled',
+      message: 'account_disabled',
+    }, 403);
+
+    const client = new AdminClient('https://admin.example.com');
+
+    await expect(client.login('admin', 'secret')).rejects.toMatchObject({
+      errorCode: 'ACCOUNT_DISABLED',
+      status: 403,
+    });
+  });
+
+  it('preserves explicit membership loss codes on non-auth HTTP statuses', async () => {
+    for (const [errorCode, status, safeMessage] of [
+      [
+        'MEMBERSHIP_REMOVED',
+        409,
+        'Organization membership is no longer available',
+      ],
+      [
+        'MEMBERSHIP_SUSPENDED',
+        423,
+        'Organization membership is suspended',
+      ],
+      [
+        'ORGANIZATION_UNAVAILABLE',
+        409,
+        'Organization is no longer available',
+      ],
+    ] as const) {
+      mockJsonFetch({
+        errorCode,
+        message: 'private server authorization detail',
+      }, status);
+      const client = new AdminClient('https://admin.example.com');
+
+      await expect(client.listOrganizations('access-token')).rejects.toMatchObject({
+        errorCode,
+        status,
+        message: safeMessage,
+      });
     }
   });
 
@@ -191,5 +759,515 @@ describe('AdminClient', () => {
       'https://admin.example.com/api/auth/validate',
     ]);
     expect((fetchCalls[2]!.init.headers as Record<string, string>).Authorization).toBe('Bearer fresh-access-token');
+  });
+
+  it('preserves protected 401 when VALIDATE refresh is unreachable or Catalog refresh returns 5xx', async () => {
+    for (const testCase of [
+      {
+        name: 'validate-network',
+        protectedPath: '/api/auth/validate',
+        invoke: (client: AdminClient) => client.validate('locally-unexpired-token'),
+        refreshResponse: null,
+      },
+      {
+        name: 'catalog-5xx',
+        protectedPath: '/api/organizations/organization-1/apps',
+        invoke: (client: AdminClient) => client.getAppCatalog(
+          'locally-unexpired-token',
+          'organization-1',
+        ),
+        refreshResponse: new Response(JSON.stringify({
+          errorCode: 'SERVER_ERROR',
+          message: 'temporarily unavailable',
+        }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      },
+    ]) {
+      fetchCalls = [];
+      globalThis.fetch = (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const url = typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        fetchCalls.push({ url, init: init ?? {} });
+        if (url.endsWith('/api/auth/refresh')) {
+          if (!testCase.refreshResponse) {
+            throw new TypeError('network disconnected');
+          }
+          return testCase.refreshResponse.clone();
+        }
+        expect(url).toContain(testCase.protectedPath);
+        return new Response(JSON.stringify({
+          errorCode: 'TOKEN_REVOKED',
+          message: 'definitive protected endpoint rejection',
+        }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+      const client = new AdminClient('https://admin.example.com', {
+        tokenStore: {
+          getRefreshToken: () => 'refresh-token',
+        },
+      });
+
+      await expect(testCase.invoke(client)).rejects.toMatchObject({
+        errorCode: 'TOKEN_REVOKED',
+        status: 401,
+        message: 'Admin session is no longer valid',
+      });
+      expect(fetchCalls.map(call => call.url)).toHaveLength(2);
+      expect(fetchCalls[1]!.url).toBe(
+        'https://admin.example.com/api/auth/refresh',
+      );
+    }
+  });
+
+  it('lists organizations and strips fields outside the client contract', async () => {
+    mockJsonFetch({
+      organizations: [{
+        id: 'organization-1',
+        type: 'creator_space',
+        name: 'Studio',
+        purpose: 'Publish apps',
+        visibility: 'private',
+        status: 'active',
+        createdAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        membership: {
+          id: 'membership-1',
+          role: 'owner',
+          status: 'active',
+          joinedAt: '2026-07-29T12:00:00.000Z',
+          updatedAt: '2026-07-29T12:00:00.000Z',
+          internalPolicy: 'must-not-leak',
+        },
+        memberCount: 1,
+        billingPlan: 'must-not-leak',
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.listOrganizations('organization-access-token');
+
+    expect(result).toEqual({
+      organizations: [{
+        id: 'organization-1',
+        type: 'creator_space',
+        name: 'Studio',
+        purpose: 'Publish apps',
+        visibility: 'private',
+        status: 'active',
+        createdAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        membership: {
+          id: 'membership-1',
+          role: 'owner',
+          status: 'active',
+          joinedAt: '2026-07-29T12:00:00.000Z',
+          updatedAt: '2026-07-29T12:00:00.000Z',
+        },
+        memberCount: 1,
+      }],
+    });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/me/organizations');
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('fetches a validated organization app catalog with version comparison', async () => {
+    mockJsonFetch({
+      appConfigVersion: 2,
+      apps: [{
+        id: 'app-1',
+        organizationId: 'organization-1',
+        name: 'Knowledge base',
+        description: 'Internal documentation',
+        iconUrl: 'https://cdn.example.com/icon.png',
+        creatorName: 'Acme',
+        deliveryMode: 'local_bundle',
+        permissions: ['Read files selected by you'],
+        currentRelease: {
+          id: 'release-2',
+          version: '2.0.0',
+          runtime: 'static',
+          checksum: `sha256:${'A'.repeat(64)}`,
+          sizeBytes: 1024,
+          platform: 'any',
+          arch: 'any',
+          internalBuildId: 'must-not-leak',
+        },
+        sortOrder: 1,
+        groupIds: ['must-not-leak'],
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.getAppCatalog(
+      'organization-access-token',
+      'organization-1',
+      '1',
+    );
+
+    expect(result).toEqual({
+      notModified: false,
+      appConfigVersion: '2',
+      apps: [{
+        id: 'app-1',
+        organizationId: 'organization-1',
+        name: 'Knowledge base',
+        description: 'Internal documentation',
+        iconUrl: 'https://cdn.example.com/icon.png',
+        creatorName: 'Acme',
+        deliveryMode: 'local_bundle',
+        permissions: ['Read files selected by you'],
+        currentRelease: {
+          id: 'release-2',
+          version: '2.0.0',
+          runtime: 'static',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 1024,
+        },
+        sortOrder: 1,
+      }],
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/apps?version=1',
+    );
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('requests a short-lived POL-52 download grant and normalizes its metadata', async () => {
+    mockJsonFetch({
+      releaseId: 'release-2',
+      downloadUrl: 'https://admin.example.com/api/download/file?token=signed',
+      expiresAt: '2026-08-01T12:10:00.000Z',
+      checksum: `sha256:${'B'.repeat(64)}`,
+      sizeBytes: 2048,
+      runtime: 'static',
+      platform: 'any',
+      arch: 'any',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppReleaseDownload(
+      'organization-access-token',
+      'organization-1',
+      'app-1',
+      'release-2',
+    )).resolves.toEqual({
+      releaseId: 'release-2',
+      downloadUrl: 'https://admin.example.com/api/download/file?token=signed',
+      expiresAt: '2026-08-01T12:10:00.000Z',
+      checksum: 'b'.repeat(64),
+      sizeBytes: 2048,
+      runtime: 'static',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/apps/app-1/releases/release-2/download',
+    );
+    expect(fetchCalls[0]!.init).toMatchObject({ method: 'POST' });
+    expect(fetchCalls[0]!.init.body).toBeUndefined();
+  });
+
+  it('rejects an app catalog containing another organization identity', async () => {
+    mockJsonFetch({
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'remote-app',
+        organizationId: 'organization-b',
+        name: 'Remote App',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://catalog.example.com/remote',
+        sortOrder: 0,
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppCatalog(
+      'organization-access-token',
+      'organization-a',
+    )).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+      message: 'Admin app catalog contains an app from another organization',
+    });
+  });
+
+  it('returns notModified for a 304 app catalog response', async () => {
+    fetchCalls = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      fetchCalls.push({ url, init: init ?? {} });
+      return new Response(null, { status: 304 });
+    }) as typeof globalThis.fetch;
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppCatalog(
+      'organization-access-token',
+      'organization-1',
+      'apps-v2',
+    )).resolves.toEqual({ notModified: true });
+  });
+
+  it('accepts the POL-56 member response shape when user.phone is omitted', async () => {
+    mockJsonFetch({
+      members: [{
+        id: 'membership-1',
+        role: 'manager',
+        status: 'active',
+        joinedAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        user: {
+          id: 'user-1',
+          username: 'manager-user',
+          displayName: 'Manager User',
+          internalProfile: 'must-not-leak',
+        },
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.listOrganizationMembers(
+      'organization-access-token',
+      'organization-1',
+    );
+
+    expect(result).toEqual({
+      members: [{
+        id: 'membership-1',
+        role: 'manager',
+        status: 'active',
+        joinedAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: '2026-07-29T12:00:00.000Z',
+        user: {
+          id: 'user-1',
+          username: 'manager-user',
+          displayName: 'Manager User',
+        },
+      }],
+    });
+    expect(fetchCalls[0]!.url)
+      .toBe('https://admin.example.com/api/organizations/organization-1/members');
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('creates organizations with an idempotency key in both trusted boundaries', async () => {
+    mockJsonFetch({
+      organization: {
+        id: 'organization-1',
+        type: 'enterprise_workspace',
+        name: 'Acme',
+        purpose: 'Internal apps',
+      },
+      membership: {
+        id: 'membership-1',
+        role: 'owner',
+        status: 'active',
+      },
+      replayed: false,
+    }, 201);
+
+    const client = new AdminClient('https://admin.example.com');
+    const input = {
+      type: 'enterprise_workspace' as const,
+      name: 'Acme',
+      purpose: 'Internal apps',
+      idempotencyKey: 'organization-request-1',
+    };
+    const result = await client.createOrganization('organization-access-token', input);
+
+    expect(result).toMatchObject({
+      organization: { id: 'organization-1' },
+      membership: { role: 'owner' },
+      replayed: false,
+    });
+    expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/organizations');
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify(input));
+    expect(fetchCalls[0]!.init.headers).toMatchObject({
+      Authorization: 'Bearer organization-access-token',
+      'Idempotency-Key': 'organization-request-1',
+    });
+  });
+
+  it('previews join links publicly and accepts them with the current account', async () => {
+    const token = 'join-token-12345678901234567890';
+    const preview = {
+      organization: {
+        id: 'organization-1',
+        type: 'creator_space',
+        name: 'Studio',
+        purpose: 'Publish apps',
+      },
+      join: {
+        kind: 'join_link',
+        effectiveStatus: 'active',
+        expiresAt: null,
+        usesRemaining: null,
+        requiresPhoneMatch: false,
+      },
+    } as const;
+    mockJsonFetch(preview);
+    const client = new AdminClient('https://admin.example.com');
+
+    expect(await client.previewOrganizationJoin(token)).toEqual(preview);
+    expect(fetchCalls[0]!.url).toBe(
+      `https://admin.example.com/api/join/${token}/preview`,
+    );
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBeUndefined();
+
+    mockJsonFetch({
+      membership: {
+        id: 'membership-1',
+        organizationId: 'organization-1',
+        userId: 'user-1',
+        role: 'member',
+        status: 'active',
+      },
+      replayed: true,
+    });
+    expect(await client.acceptOrganizationJoin('organization-access-token', token))
+      .toMatchObject({
+        membership: { organizationId: 'organization-1', role: 'member' },
+        replayed: true,
+      });
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('lists Creator Skills through the capability-filtered catalog boundary', async () => {
+    mockJsonFetch({
+      artifacts: [{
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        name: 'Review Helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+        serverStorageKey: 'must-not-leak',
+      }],
+      nextCursor: 'next',
+      internalPolicy: 'must-not-leak',
+    });
+    const client = new AdminClient('https://admin.example.com');
+
+    const result = await client.listCreatorArtifacts('creator-access-token', {
+      organizationId: 'organization-1',
+      type: 'skill',
+      includeDrafts: true,
+      cursor: 'current',
+    });
+
+    expect(result).toEqual({
+      artifacts: [{
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        name: 'Review Helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      }],
+      nextCursor: 'next',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/artifacts'
+      + '?type=skill&includeDrafts=true&cursor=current&capability=creatorSkillArtifacts',
+    );
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer creator-access-token');
+  });
+
+  it('binds Creator Artifact mutations to an idempotency key', async () => {
+    mockJsonFetch({
+      artifact: {
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        status: 'draft',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      },
+      replayed: false,
+    }, 201);
+    const client = new AdminClient('https://admin.example.com');
+
+    await client.createCreatorArtifact('creator-access-token', {
+      organizationId: 'organization-1',
+      type: 'skill',
+      slug: 'review-helper',
+      idempotencyKey: 'artifact-request-1',
+    });
+
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      slug: 'review-helper',
+    }));
+    expect(fetchCalls[0]!.init.headers).toMatchObject({
+      Authorization: 'Bearer creator-access-token',
+      'Idempotency-Key': 'artifact-request-1',
+    });
+  });
+
+  it('derives Creator Skill safety from the published artifact detail contract', async () => {
+    mockJsonFetch({
+      artifact: {
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      },
+      versions: [{
+        id: 'version-1',
+        artifactId: 'artifact-1',
+        version: '1.0.0',
+        status: 'published',
+        archiveChecksum: 'a'.repeat(64),
+        createdAt: '2026-07-30T00:00:00.000Z',
+        uploadGeneration: 1,
+      }],
+    });
+    const client = new AdminClient('https://admin.example.com');
+    const input = {
+      artifactId: 'artifact-1',
+      version: '1.0.0',
+      archiveChecksum: 'a'.repeat(64),
+    };
+
+    expect(await client.getCreatorSkillSafetyStatus(
+      'creator-access-token',
+      input,
+    )).toEqual({
+      ...input,
+      status: 'active',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/artifacts/artifact-1?version=1.0.0',
+    );
+    expect(fetchCalls[0]!.init.method).toBe('GET');
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer creator-access-token');
   });
 });

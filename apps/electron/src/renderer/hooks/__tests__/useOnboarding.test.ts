@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'bun:test'
-import { setupI18n } from '@polo-ai/shared/i18n/setupI18n'
+import { describe, it, expect, mock } from 'bun:test'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import {
   resolveSlugForMethod,
   apiSetupMethodToConnectionSetup,
@@ -7,6 +7,10 @@ import {
   resolveInitialStep,
   resolveAdminLoginSuccessState,
   resolveAdminLoginFailureState,
+  mapAdminLoginError,
+  mapAdminPhoneAuthError,
+  resolvePhoneAuthAvailability,
+  sendPhoneAuthCodeWithChallenge,
   resolveAdminReloginState,
   resolveAdminKickedState,
 } from '../useOnboarding'
@@ -227,14 +231,104 @@ describe('admin onboarding flow', () => {
     expect(next.errorMessage).toBe('Username or password is incorrect.')
   })
 
+  it('maps stable phone auth errors without exposing server messages', () => {
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'verification_code_expired',
+      message: 'internal provider detail',
+    })).toBe('The verification code has expired. Request a new one.')
+
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'sms_rate_limited',
+      retryAfter: 42,
+    })).toBe('Too many requests. Try again in 42 seconds.')
+
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'phone_auth_configuration_error',
+      message: 'secret stack',
+      status: 503,
+    })).toBe('Phone verification is temporarily unavailable. Please try again later.')
+
+    expect(mapAdminPhoneAuthError({
+      success: false,
+      errorCode: 'invalid_credentials',
+      message: 'challenge verifier secret detail',
+    })).toBe('Verification challenge failed. Please try again.')
+  })
+
+  it('maps all 5xx login and phone failures before business codes or messages', () => {
+    expect(mapAdminLoginError({
+      errorCode: 'INVALID_CREDENTIALS',
+      message: 'sensitive upstream credential detail',
+      status: 500,
+    })).toBe(i18n.t('onboarding.adminLogin.genericError'))
+
+    expect(mapAdminPhoneAuthError({
+      errorCode: 'verification_code_expired',
+      message: 'sensitive provider stack',
+      status: 500,
+    })).toBe(i18n.t('onboarding.adminLogin.phoneAuthUnavailable'))
+
+    expect(mapAdminPhoneAuthError({
+      errorCode: 'sms_rate_limited',
+      message: 'sensitive rate-limit backend detail',
+      retryAfter: 86_400,
+      status: 503,
+    })).toBe(i18n.t('onboarding.adminLogin.phoneAuthUnavailable'))
+  })
+
+  it('falls back to password login when no real challenge issuer is configured', () => {
+    expect(resolvePhoneAuthAvailability(true, undefined, true)).toBe(false)
+    expect(resolvePhoneAuthAvailability(false, async () => 'signed-token', true)).toBe(false)
+    expect(resolvePhoneAuthAvailability(true, async () => 'signed-token', false)).toBe(false)
+    expect(resolvePhoneAuthAvailability(true, async () => 'signed-token', true)).toBe(true)
+  })
+
+  it('does not send a code without an issuer-signed challenge token', async () => {
+    const send = mock(async () => ({
+      success: true as const,
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 60,
+    }))
+
+    expect(await sendPhoneAuthCodeWithChallenge('13800138000', undefined, send)).toEqual({
+      success: false,
+      errorCode: 'phone_auth_configuration_error',
+    })
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('passes the opaque challenge token through without transforming it', async () => {
+    const send = mock(async () => ({
+      success: true as const,
+      accepted: true,
+      expiresIn: 300,
+      resendAfter: 47,
+    }))
+
+    const result = await sendPhoneAuthCodeWithChallenge(
+      '13800138000',
+      async () => 'issuer-signed-opaque-token',
+      send,
+    )
+
+    expect(result).toMatchObject({ success: true, resendAfter: 47 })
+    expect(send).toHaveBeenCalledWith('13800138000', 'issuer-signed-opaque-token')
+  })
+
   it('moves from kicked back to admin-login when relogin is requested', () => {
     const next = resolveAdminReloginState(adminState({
       step: 'admin-kicked',
+      phoneAuthEnabled: true,
       errorMessage: 'stale error',
     }))
 
     expect(next.step).toBe('admin-login')
     expect(next.loginStatus).toBe('idle')
+    expect(next.phoneAuthEnabled).toBeUndefined()
     expect(next.errorMessage).toBeUndefined()
   })
 

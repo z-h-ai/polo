@@ -55,6 +55,7 @@ import { buildSemanticHistoryKey, canRunInitialRestore } from './navigation-hist
 import * as storage from '@/lib/local-storage'
 import type {
   DeepLinkNavigation,
+  DeepLinkActionResult,
   Session,
   NavigationState,
   SessionFilter,
@@ -674,97 +675,160 @@ export function NavigationProvider({
     async (parsed: ParsedRoute, options?: { newPanel?: boolean; targetLaneId?: 'main' }) => {
       if (!workspaceId) return
 
+      const callbackId = parsed.params.callbackId
+      const reportActionResult = (result: Omit<DeepLinkActionResult, 'callbackId'>) => {
+        if (!callbackId) return
+        window.electronAPI.sendDeepLinkActionResult({ callbackId, ...result })
+      }
+      const reportActionError = (code: NonNullable<DeepLinkActionResult['error']>['code'], error: unknown) => {
+        reportActionResult({
+          error: {
+            code,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        })
+      }
+
       switch (parsed.name) {
         case 'new-session': {
-          const createOptions: import('../../shared/types').CreateSessionOptions = {}
-          if (parsed.params.mode) {
-            const parsedMode = parsePermissionMode(parsed.params.mode)
-            if (parsedMode) {
-              createOptions.permissionMode = parsedMode
+          try {
+            const createOptions: import('../../shared/types').CreateSessionOptions = {}
+            if (callbackId) {
+              const parsedMode = parsed.params.mode ? parsePermissionMode(parsed.params.mode) : null
+              if (parsedMode === 'allow-all') {
+                createOptions.permissionMode = 'ask'
+              } else {
+                createOptions.permissionMode = parsedMode ?? 'safe'
+              }
+            } else if (parsed.params.mode) {
+              const parsedMode = parsePermissionMode(parsed.params.mode)
+              if (parsedMode) {
+                createOptions.permissionMode = parsedMode
+              }
+            }
+            if (parsed.params.workdir) {
+              createOptions.workingDirectory = parsed.params.workdir as 'user_default' | 'none' | string
+            }
+            if (parsed.params.model) {
+              createOptions.model = parsed.params.model
+            }
+            if (parsed.params.systemPrompt) {
+              createOptions.systemPromptPreset = parsed.params.systemPrompt as 'default' | 'mini' | string
+            }
+            const session = await onCreateSession(workspaceId, createOptions)
+            reportActionResult({ sessionId: session.id })
+
+            if (parsed.params.name) {
+              await window.electronAPI.sessionCommand(session.id, { type: 'rename', name: parsed.params.name })
+            }
+
+            if (parsed.params.status) {
+              updateSessionMeta(session.id, { sessionStatus: parsed.params.status })
+            }
+            if (parsed.params.label) {
+              updateSessionMeta(session.id, { labels: [parsed.params.label] })
+            }
+
+            if (parsed.params.status) {
+              await window.electronAPI.sessionCommand(session.id, { type: 'setSessionStatus', state: parsed.params.status })
+            }
+            if (parsed.params.label) {
+              await window.electronAPI.sessionCommand(session.id, { type: 'setLabels', labels: [parsed.params.label] })
+            }
+
+            // Determine navigation filter
+            const filter: import('../../shared/types').SessionFilter =
+              parsed.params.status ? { kind: 'state', stateId: parsed.params.status } :
+              parsed.params.label ? { kind: 'label', labelId: parsed.params.label } :
+              { kind: 'allSessions' }
+
+            if (options?.newPanel) {
+              // Open the new session in a new panel using lane-aware routing (pushPanel auto-focuses it)
+              pushPanel({
+                route: routes.view.allSessions(session.id) as ViewRoute,
+                targetLaneId: options.targetLaneId,
+                intent: 'explicit',
+              })
+            } else {
+              // Navigate the focused panel to the new session
+              const newState: NavigationState = {
+                navigator: 'sessions',
+                filter,
+                details: { type: 'session', sessionId: session.id },
+              }
+              const route = buildRouteFromNavigationState(newState) as ViewRoute
+              store.set(updateFocusedPanelRouteAtom, route)
+              // Session selection sync handled by effect
+            }
+
+            // Parse badges from params
+            let badges: ContentBadge[] | undefined
+            if (parsed.params.badges) {
+              try {
+                badges = JSON.parse(parsed.params.badges) as ContentBadge[]
+              } catch (e) {
+                console.warn('[Navigation] Failed to parse badges param:', e)
+              }
+            }
+
+            // Handle input: either auto-send or pre-fill
+            if (parsed.params.input) {
+              const shouldSend = parsed.params.send === 'true'
+              if (shouldSend) {
+                setTimeout(() => {
+                  void window.electronAPI.sendMessage(
+                    session.id,
+                    parsed.params.input!,
+                    undefined,
+                    undefined,
+                    badges ? { badges } : undefined
+                  ).catch(error => {
+                    if (callbackId) {
+                      reportActionError('internal_error', error)
+                    } else {
+                      console.warn('[Navigation] Failed to send initial deep-link message:', error)
+                    }
+                  })
+                }, 100)
+              } else if (onInputChange) {
+                setTimeout(() => {
+                  onInputChange(session.id, parsed.params.input!)
+                }, 100)
+              }
+            }
+          } catch (error) {
+            // Callers invoke this via floating promises (deep link listener,
+            // pending navigation) — never rethrow, or the rejection goes unhandled.
+            if (callbackId) {
+              reportActionError('internal_error', error)
+            } else {
+              console.error('[Navigation] new-session action failed:', error)
+              toast.error(t('toast.failedToCreateSession'))
             }
           }
-          if (parsed.params.workdir) {
-            createOptions.workingDirectory = parsed.params.workdir as 'user_default' | 'none' | string
-          }
-          if (parsed.params.model) {
-            createOptions.model = parsed.params.model
-          }
-          if (parsed.params.systemPrompt) {
-            createOptions.systemPromptPreset = parsed.params.systemPrompt as 'default' | 'mini' | string
-          }
-          const session = await onCreateSession(workspaceId, createOptions)
+          break
+        }
 
-          if (parsed.params.name) {
-            await window.electronAPI.sessionCommand(session.id, { type: 'rename', name: parsed.params.name })
-          }
-
-          if (parsed.params.status) {
-            updateSessionMeta(session.id, { sessionStatus: parsed.params.status })
-          }
-          if (parsed.params.label) {
-            updateSessionMeta(session.id, { labels: [parsed.params.label] })
-          }
-
-          if (parsed.params.status) {
-            await window.electronAPI.sessionCommand(session.id, { type: 'setSessionStatus', state: parsed.params.status })
-          }
-          if (parsed.params.label) {
-            await window.electronAPI.sessionCommand(session.id, { type: 'setLabels', labels: [parsed.params.label] })
-          }
-
-          // Determine navigation filter
-          const filter: import('../../shared/types').SessionFilter =
-            parsed.params.status ? { kind: 'state', stateId: parsed.params.status } :
-            parsed.params.label ? { kind: 'label', labelId: parsed.params.label } :
-            { kind: 'allSessions' }
-
-          if (options?.newPanel) {
-            // Open the new session in a new panel using lane-aware routing (pushPanel auto-focuses it)
-            pushPanel({
-              route: routes.view.allSessions(session.id) as ViewRoute,
-              targetLaneId: options.targetLaneId,
-              intent: 'explicit',
+        case 'send-message': {
+          if (!callbackId || !parsed.id || !parsed.params.input) {
+            reportActionResult({
+              error: {
+                code: 'invalid_action',
+                message: 'send-message requires callbackId, sessionId, and input',
+              },
             })
-          } else {
-            // Navigate the focused panel to the new session
-            const newState: NavigationState = {
-              navigator: 'sessions',
-              filter,
-              details: { type: 'session', sessionId: session.id },
-            }
-            const route = buildRouteFromNavigationState(newState) as ViewRoute
-            store.set(updateFocusedPanelRouteAtom, route)
-            // Session selection sync handled by effect
+            break
           }
 
-          // Parse badges from params
-          let badges: ContentBadge[] | undefined
-          if (parsed.params.badges) {
-            try {
-              badges = JSON.parse(parsed.params.badges) as ContentBadge[]
-            } catch (e) {
-              console.warn('[Navigation] Failed to parse badges param:', e)
-            }
-          }
-
-          // Handle input: either auto-send or pre-fill
-          if (parsed.params.input) {
-            const shouldSend = parsed.params.send === 'true'
-            if (shouldSend) {
-              setTimeout(() => {
-                window.electronAPI.sendMessage(
-                  session.id,
-                  parsed.params.input!,
-                  undefined,
-                  undefined,
-                  badges ? { badges } : undefined
-                )
-              }, 100)
-            } else if (onInputChange) {
-              setTimeout(() => {
-                onInputChange(session.id, parsed.params.input!)
-              }, 100)
-            }
+          try {
+            await window.electronAPI.sendMessage(parsed.id, parsed.params.input)
+            reportActionResult({ sessionId: parsed.id })
+          } catch (error) {
+            // SessionManager rejects with `Session ${id} not found` for missing
+            // sessions; anything else (transport, persistence, …) is internal.
+            const message = error instanceof Error ? error.message : String(error)
+            const isSessionNotFound = /session\b[^]*\bnot found/i.test(message)
+            reportActionError(isSessionNotFound ? 'session_not_found' : 'internal_error', error)
           }
           break
         }
@@ -826,10 +890,16 @@ export function NavigationProvider({
           break
 
         default:
+          reportActionResult({
+            error: {
+              code: 'invalid_action',
+              message: `Unknown action: ${parsed.name}`,
+            },
+          })
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta]
+    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta, t]
   )
 
   // =========================================================================
@@ -1092,6 +1162,7 @@ export function NavigationProvider({
     if (!workspaceId) return
 
     const cleanup = window.electronAPI.onDeepLinkNavigate((nav: DeepLinkNavigation) => {
+      if (nav.joinToken) return
       let route: string | null = null
 
       if (nav.view) {
@@ -1103,6 +1174,9 @@ export function NavigationProvider({
         }
         const otherParams = { ...nav.actionParams }
         delete otherParams.id
+        if (nav.callbackId) {
+          otherParams.callbackId = nav.callbackId
+        }
         if (Object.keys(otherParams).length > 0) {
           const params = new URLSearchParams(otherParams)
           route += `?${params.toString()}`

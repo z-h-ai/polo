@@ -120,6 +120,21 @@ export const CHANNEL_MAP = {
   getTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.GET_APPS),
   saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
 
+  // Local App Bundle runtime
+  'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
+  'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
+  'localApps.cancelInstall': invoke(RPC_CHANNELS.localApps.CANCEL_INSTALL),
+  'localApps.start': invoke(RPC_CHANNELS.localApps.START),
+  'localApps.stop': invoke(RPC_CHANNELS.localApps.STOP),
+  'localApps.restart': invoke(RPC_CHANNELS.localApps.RESTART),
+  'localApps.uninstall': invoke(RPC_CHANNELS.localApps.UNINSTALL),
+  'localApps.setAvailableRelease': invoke(RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE),
+  'localApps.getInstalledApps': invoke(RPC_CHANNELS.localApps.GET_INSTALLED_APPS),
+  'localApps.getRuntimeStatus': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS),
+  'localApps.getRuntimeStatuses': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES),
+  'localApps.resolveRemoteUrl': invoke(RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL),
+  'localApps.getLogs': invoke(RPC_CHANNELS.localApps.GET_LOGS),
+
   // Auth
   showLogoutConfirmation: invoke(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION),
   showDeleteSessionConfirmation: invoke(RPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION),
@@ -128,11 +143,44 @@ export const CHANNEL_MAP = {
 
   // Admin auth
   adminLogin: invoke(RPC_CHANNELS.admin.LOGIN),
+  adminGetAuthConfig: invoke(RPC_CHANNELS.admin.GET_AUTH_CONFIG),
+  adminGetPhoneAuthChallengeConfig: invoke(RPC_CHANNELS.admin.GET_PHONE_AUTH_CHALLENGE_CONFIG),
+  adminSendPhoneAuthCode: invoke(RPC_CHANNELS.admin.SEND_PHONE_AUTH_CODE),
+  adminVerifyPhoneAuthCode: invoke(RPC_CHANNELS.admin.VERIFY_PHONE_AUTH_CODE),
+  adminSetPassword: invoke(RPC_CHANNELS.admin.SET_PASSWORD),
   adminValidate: invoke(RPC_CHANNELS.admin.VALIDATE),
   adminLogout: invoke(RPC_CHANNELS.admin.LOGOUT),
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
   adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+  adminSyncAppCatalog: invoke(RPC_CHANNELS.admin.SYNC_APP_CATALOG),
   onAdminReauthRequired: listener('admin:reauthRequired'),
+  organizationList: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
+  organizationCreate: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION),
+  organizationPreviewJoin: invoke(RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
+  organizationAcceptJoin: invoke(RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN),
+  organizationListMembers: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATION_MEMBERS),
+  organizationListInvitations: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATION_INVITATIONS),
+  organizationCreateInvitation: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION_INVITATION),
+  organizationCancelInvitation: invoke(RPC_CHANNELS.admin.CANCEL_ORGANIZATION_INVITATION),
+  organizationCreateJoinLink: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION_JOIN_LINK),
+  organizationRevokeJoinLink: invoke(RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK),
+  organizationUpdateMember: invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER),
+  organizationRemoveMember: invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER),
+  creatorArtifactGetCapabilities: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES),
+  creatorArtifactList: invoke(RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS),
+  creatorArtifactGet: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT),
+  creatorArtifactCreate: invoke(RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT),
+  creatorArtifactDeleteDraft: invoke(RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_DRAFT),
+  creatorArtifactCreateVersion: invoke(RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT_VERSION),
+  creatorArtifactCreateUploadGrant: invoke(RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT),
+  creatorArtifactCompleteUpload: invoke(RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD),
+  creatorArtifactPublishVersion: invoke(RPC_CHANNELS.admin.PUBLISH_CREATOR_ARTIFACT_VERSION),
+  creatorArtifactDeleteVersionDraft: invoke(RPC_CHANNELS.admin.DELETE_CREATOR_ARTIFACT_VERSION_DRAFT),
+  creatorArtifactSetArchived: invoke(RPC_CHANNELS.admin.SET_CREATOR_ARTIFACT_ARCHIVED),
+  creatorArtifactRevokeVersion: invoke(RPC_CHANNELS.admin.REVOKE_CREATOR_ARTIFACT_VERSION),
+  creatorSkillGetDownloadGrant: invoke(RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT),
+  creatorSkillGetSafetyStatus: invoke(RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS),
+  creatorSkillGetTarget: invoke(RPC_CHANNELS.creatorSkills.GET_TARGET),
 
   // Onboarding
   getAuthState: invoke(RPC_CHANNELS.onboarding.GET_AUTH_STATE),
@@ -201,6 +249,14 @@ export const CHANNEL_MAP = {
   // User Preferences
   readPreferences: invoke(RPC_CHANNELS.preferences.READ),
   writePreferences: invoke(RPC_CHANNELS.preferences.WRITE),
+  getHomeRecentApps: invoke(RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS),
+  setHomeRecentApps: invoke(RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS),
+  getOrganizationContextStorage: invoke(
+    RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+  ),
+  updateOrganizationContextStorage: invoke(
+    RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  ),
 
   // Session Drafts
   getDraft: invoke(RPC_CHANNELS.drafts.GET),
@@ -244,6 +300,14 @@ export const CHANNEL_MAP = {
   openSkillInEditor: invoke(RPC_CHANNELS.skills.OPEN_EDITOR),
   openSkillInFinder: invoke(RPC_CHANNELS.skills.OPEN_FINDER),
   onSkillsChanged: listener(RPC_CHANNELS.skills.CHANGED),
+  creatorSkillInstall: invoke(RPC_CHANNELS.creatorSkills.INSTALL),
+  creatorSkillCancel: invoke(RPC_CHANNELS.creatorSkills.CANCEL),
+  creatorSkillUninstall: invoke(RPC_CHANNELS.creatorSkills.UNINSTALL),
+  creatorSkillListBackups: invoke(RPC_CHANNELS.creatorSkills.LIST_BACKUPS),
+  creatorSkillDeleteBackups: invoke(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS),
+  creatorSkillUpdateSafetyStatus: invoke(RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS),
+  creatorSkillIgnoreVersion: invoke(RPC_CHANNELS.creatorSkills.IGNORE_VERSION),
+  onCreatorSkillProgress: listener(RPC_CHANNELS.creatorSkills.PROGRESS),
 
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),

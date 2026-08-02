@@ -14,7 +14,14 @@
  * baseline count and validating relative to it.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -593,8 +600,55 @@ describe('deleteSkill', () => {
     expect(skillExists(workspaceRoot, 'to-delete')).toBe(false);
   });
 
+  it('loads and deletes legacy safe basenames outside Creator slug rules', () => {
+    const skillsDir = join(workspaceRoot, 'skills');
+    createSkill(skillsDir, 'foo--bar');
+
+    expect(loadWorkspaceSkills(workspaceRoot).map(skill => skill.slug))
+      .toContain('foo--bar');
+    expect(deleteSkill(workspaceRoot, 'foo--bar')).toBe(true);
+    expect(skillExists(workspaceRoot, 'foo--bar')).toBe(false);
+  });
+
   it('should return false for non-existent skill', () => {
     const result = deleteSkill(workspaceRoot, 'nonexistent');
     expect(result).toBe(false);
+  });
+
+  it('rejects traversal, absolute, and mixed-separator slugs without deleting the workspace', () => {
+    const sentinel = join(workspaceRoot, 'workspace-sentinel.txt');
+    writeFileSync(sentinel, 'keep');
+
+    const invalidSlugs = [
+      '..',
+      '../outside',
+      join(tempDir, 'absolute-outside'),
+      '..\\outside',
+      '../\\outside',
+      'nested/skill',
+      'C:\\outside',
+    ];
+
+    for (const slug of invalidSlugs) {
+      expect(deleteSkill(workspaceRoot, slug)).toBe(false);
+      expect(existsSync(workspaceRoot)).toBe(true);
+      expect(existsSync(sentinel)).toBe(true);
+    }
+  });
+
+  it('refuses to delete a skill directory symlink that escapes the workspace', () => {
+    const outside = join(tempDir, 'outside-skill');
+    const sentinel = join(outside, 'sentinel.txt');
+    mkdirSync(outside);
+    writeFileSync(sentinel, 'keep');
+    symlinkSync(
+      outside,
+      join(workspaceRoot, 'skills', 'linked-skill'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    expect(deleteSkill(workspaceRoot, 'linked-skill')).toBe(false);
+    expect(existsSync(workspaceRoot)).toBe(true);
+    expect(existsSync(sentinel)).toBe(true);
   });
 });

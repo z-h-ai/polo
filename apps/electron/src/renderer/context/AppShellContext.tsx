@@ -53,7 +53,7 @@ export interface AppShellContextType {
   /** Blocking account/config/quota state for the chat input area */
   chatAccessStatus?: ChatAccessStatus | null
   /** Signed-in Admin user, when Admin auth is configured */
-  currentAdminUser?: Pick<AdminStatusResult, 'username' | 'displayName'> | null
+  currentAdminUser?: Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null
   /** Log out the current Admin user and return to login */
   onAdminLogout?: () => Promise<void>
   /** Refresh LLM connections from config */
@@ -72,6 +72,8 @@ export interface AppShellContextType {
   skills?: LoadedSkill[]
   /** Working directory of the active session — needed for project-level skill resolution */
   activeSessionWorkingDirectory?: string
+  /** Active session used to bind workspace-scoped Creator Skill mutations. */
+  activeSessionId?: string
   /** All label configs (tree) for label menu and badge display */
   labels?: import('@polo-ai/shared/labels').LabelConfig[]
   /** Callback when session labels change */

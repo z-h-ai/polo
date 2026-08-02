@@ -8,7 +8,7 @@
       "module": "shared",
       "dependencies": [],
       "filePath": "POL-25.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "packages/shared/src/credentials/types.ts",
         "packages/shared/src/credentials/manager.ts",
@@ -25,7 +25,7 @@
       "module": "server-core",
       "dependencies": ["POL-25"],
       "filePath": "POL-26.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "packages/shared/src/protocol/channels.ts",
         "packages/server-core/src/handlers/rpc/admin.ts",
@@ -39,7 +39,7 @@
       "module": "shared",
       "dependencies": ["POL-25"],
       "filePath": "POL-27.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "packages/shared/src/auth/state.ts"
       ]
@@ -51,7 +51,7 @@
       "module": "server-core",
       "dependencies": ["POL-25", "POL-26"],
       "filePath": "POL-29.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "packages/shared/src/config/llm-connections.ts",
         "packages/server-core/src/handlers/rpc/admin.ts"
@@ -64,7 +64,7 @@
       "module": "electron",
       "dependencies": ["POL-26", "POL-27"],
       "filePath": "POL-31.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "apps/electron/src/renderer/components/onboarding/AdminLoginStep.tsx",
         "apps/electron/src/renderer/components/onboarding/AdminKickedStep.tsx",
@@ -79,7 +79,7 @@
       "module": "electron",
       "dependencies": ["POL-26", "POL-27"],
       "filePath": "POL-32.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "apps/electron/src/renderer/components/app-shell/LeftSidebar.tsx",
         "apps/electron/src/renderer/components/chat/ChatInputZone.tsx"
@@ -92,7 +92,7 @@
       "module": "electron",
       "dependencies": ["POL-31"],
       "filePath": "POL-33.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "apps/electron/src/renderer/components/chat/ChatPage.tsx"
       ]
@@ -104,7 +104,7 @@
       "module": "electron",
       "dependencies": ["POL-27", "POL-31", "POL-32", "POL-29"],
       "filePath": "POL-30.md",
-      "status": "todo",
+      "status": "done",
       "files": [
         "apps/electron/src/renderer/App.tsx",
         "apps/electron/src/main/index.ts"

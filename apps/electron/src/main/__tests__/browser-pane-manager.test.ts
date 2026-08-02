@@ -11,6 +11,10 @@ const createdWindows: any[] = []
 let toolbarLoadFailuresRemaining = 0
 const mockShellOpenExternal = mock(async () => {})
 const mockIpcMainHandle = mock(() => {})
+const mainLogEntries: unknown[][] = []
+const captureMainLog = (...args: unknown[]) => {
+  mainLogEntries.push(args)
+}
 
 async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs
@@ -186,6 +190,9 @@ mock.module('electron', () => ({
   shell: {
     openExternal: mockShellOpenExternal,
   },
+  webContents: {
+    fromId: mock(() => undefined),
+  },
   session: {
     fromPartition: mock(() => ({
       setPermissionCheckHandler: mock(() => {}),
@@ -201,7 +208,12 @@ mock.module('electron', () => ({
 }))
 
 mock.module('../logger', () => {
-  const stubLog = { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} }
+  const stubLog = {
+    info: captureMainLog,
+    error: captureMainLog,
+    warn: captureMainLog,
+    debug: captureMainLog,
+  }
   return {
     mainLog: stubLog,
     sessionLog: stubLog,
@@ -261,6 +273,7 @@ describe('BrowserPaneManager', () => {
   beforeEach(() => {
     createdWindows.length = 0
     toolbarLoadFailuresRemaining = 0
+    mainLogEntries.length = 0
     mockShellOpenExternal.mockClear()
     mockIpcMainHandle.mockClear()
     manager = new BrowserPaneManager()
@@ -314,6 +327,36 @@ describe('BrowserPaneManager', () => {
     expect(result).toEqual({ action: 'deny' })
     await Bun.sleep(0)
     expect(mockShellOpenExternal).toHaveBeenCalledWith('poloai://settings')
+  })
+
+  it('redacts join tokens from window.open, popup, and will-navigate logs', async () => {
+    const joinToken = 'browser-pane-join-token-abcdefghijklmnopqrstuvwxyz'
+    const joinUrl = `poloai://join/${joinToken}`
+    manager.createInstance('popup-secret')
+    const instance = (manager as any).instances.get('popup-secret')
+    const pageWebContents = instance.pageView.webContents
+    const openHandler = pageWebContents.setWindowOpenHandler.mock.calls[0][0]
+
+    expect(openHandler({
+      url: joinUrl,
+      disposition: 'new-popup',
+      frameName: 'join-popup',
+    })).toEqual({ action: 'deny' })
+
+    const popupWindow = createMockWindow({ width: 520, height: 720 })
+    pageWebContents._emit('did-create-window', popupWindow, { url: joinUrl })
+
+    const preventDefault = mock(() => {})
+    const willNavigate = pageWebContents._listeners['will-navigate'][0]
+    willNavigate({ preventDefault }, joinUrl)
+    await Bun.sleep(0)
+
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    const serializedLogs = JSON.stringify(mainLogEntries)
+    expect(serializedLogs).not.toContain(joinToken)
+    expect(serializedLogs).not.toContain(joinUrl)
+    expect(serializedLogs).toContain('"routeType":"join"')
+    expect(serializedLogs).toMatch(/"fingerprint":"[a-f0-9]{12}"/)
   })
 
   it('destroys child popups when parent instance is destroyed', () => {
