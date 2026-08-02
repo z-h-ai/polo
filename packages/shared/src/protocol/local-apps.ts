@@ -103,6 +103,7 @@ export interface LocalAppInstallRequest {
 
 export interface LocalAppCatalogReleaseFingerprint {
   version: string
+  runtime: LocalAppRuntimeKind
   checksum: string
   sizeBytes: number
   platform: LocalAppPlatform | null

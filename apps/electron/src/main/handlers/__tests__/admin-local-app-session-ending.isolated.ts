@@ -342,6 +342,7 @@ function installRequest(): LocalAppCatalogInstallRequest {
     permissions: [],
     release: {
       version: release.version,
+      runtime: release.runtime,
       checksum: release.checksum,
       sizeBytes: release.sizeBytes,
       platform: release.platform ?? null,

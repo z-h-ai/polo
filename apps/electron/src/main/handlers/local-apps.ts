@@ -1,4 +1,5 @@
 import {
+  AdminClient,
   getAppCatalogAccessMode,
   getAppCatalogApps,
   getCachedAppCatalog,
@@ -6,6 +7,7 @@ import {
   type AppReleaseSummary,
   type CatalogApp,
 } from '@polo-ai/shared/admin'
+import { getAdminUrl } from '@polo-ai/shared/config'
 import {
   compareCatalogSemVer,
   normalizeCatalogSemVer,
@@ -235,11 +237,83 @@ function matchesConfirmedRelease(
       (permission, index) => permission === currentPermissions[index],
     )
     && confirmed.version === release.version
+    && confirmed.runtime === release.runtime
     && confirmed.checksum === release.checksum
     && confirmed.sizeBytes === release.sizeBytes
     && confirmed.platform === (release.platform ?? null)
     && confirmed.arch === (release.arch ?? null),
   )
+}
+
+async function resolveCatalogDownload(
+  scope: CatalogLocalAppScope,
+  release: AppReleaseSummary,
+): Promise<{
+  downloadUrl: string
+  checksum: string
+  sizeBytes: number
+  platform?: 'darwin' | 'win32' | 'linux'
+  arch?: 'arm64' | 'x64'
+}> {
+  if (!release.id) {
+    if (release.downloadUrl) {
+      return {
+        downloadUrl: release.downloadUrl,
+        checksum: release.checksum,
+        sizeBytes: release.sizeBytes,
+        platform: release.platform,
+        arch: release.arch,
+      }
+    }
+    throw new LocalAppRuntimeError(
+      'INVALID_REQUEST',
+      'The authorized Catalog release has no download identity',
+    )
+  }
+
+  const tokensBefore = await getCredentialManager().getAdminTokens()
+  const adminUrl = getAdminUrl()
+  if (!tokensBefore || tokensBefore.userId !== scope.accountId || !adminUrl) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'The Catalog download session is unavailable',
+    )
+  }
+  const download = await new AdminClient(adminUrl).getAppReleaseDownload(
+    tokensBefore.accessToken,
+    scope.organizationId,
+    scope.catalogAppId,
+    release.id,
+  )
+
+  const tokensAfter = await getCredentialManager().getAdminTokens()
+  const current = await requireAuthorizedCatalogApp(scope)
+  const currentRelease = current.app.currentRelease
+  if (
+    !tokensAfter
+    || tokensAfter.userId !== tokensBefore.userId
+    || tokensAfter.accessToken !== tokensBefore.accessToken
+    || !currentRelease
+    || currentRelease.id !== release.id
+    || currentRelease.version !== release.version
+    || currentRelease.runtime !== release.runtime
+    || currentRelease.checksum !== release.checksum
+    || currentRelease.sizeBytes !== release.sizeBytes
+    || currentRelease.platform !== release.platform
+    || currentRelease.arch !== release.arch
+    || download.releaseId !== release.id
+    || download.runtime !== release.runtime
+    || download.checksum !== release.checksum
+    || download.sizeBytes !== release.sizeBytes
+    || download.platform !== release.platform
+    || download.arch !== release.arch
+  ) {
+    throw new LocalAppRuntimeError(
+      'RELEASE_CHANGED',
+      'The authorized Catalog release changed while requesting a download',
+    )
+  }
+  return download
 }
 
 function clearCatalogUpdateState(
@@ -408,14 +482,15 @@ export function registerLocalAppHandlers(server: RpcServer): void {
           'The authorized Catalog release has an invalid SemVer version',
         )
       }
+      const download = await resolveCatalogDownload(reference, release)
       return getScopedLocalAppRuntimeRegistry().install({
         scope: reference,
         version: release.version,
-        downloadUrl: release.downloadUrl,
-        checksum: release.checksum,
-        sizeBytes: release.sizeBytes,
-        platform: release.platform ?? hostPlatform(),
-        arch: release.arch ?? hostArchitecture(),
+        downloadUrl: download.downloadUrl,
+        checksum: download.checksum,
+        sizeBytes: download.sizeBytes,
+        platform: download.platform ?? hostPlatform(),
+        arch: download.arch ?? hostArchitecture(),
       }, { signal: ctx.signal })
     },
   )

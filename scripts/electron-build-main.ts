@@ -4,19 +4,22 @@
  */
 
 import { spawn } from "bun";
-import { existsSync, readFileSync, statSync, mkdirSync } from "fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import { join } from "path";
 
 const ROOT_DIR = join(import.meta.dir, "..");
 const DIST_DIR = join(ROOT_DIR, "apps/electron/dist");
+const ELECTRON_RESOURCES_DIR = join(ROOT_DIR, "apps/electron/resources");
 const OUTPUT_FILE = join(DIST_DIR, "main.cjs");
 const INTERCEPTOR_SOURCE = join(ROOT_DIR, "packages/shared/src/unified-network-interceptor.ts");
 const INTERCEPTOR_OUTPUT = join(DIST_DIR, "interceptor.cjs");
 const SESSION_TOOLS_CORE_DIR = join(ROOT_DIR, "packages/session-tools-core");
 const SESSION_SERVER_DIR = join(ROOT_DIR, "packages/session-mcp-server");
 const SESSION_SERVER_OUTPUT = join(SESSION_SERVER_DIR, "dist/index.js");
+const SESSION_SERVER_RESOURCE_DIR = join(ELECTRON_RESOURCES_DIR, "session-mcp-server");
 const PI_AGENT_SERVER_DIR = join(ROOT_DIR, "packages/pi-agent-server");
 const PI_AGENT_SERVER_OUTPUT = join(PI_AGENT_SERVER_DIR, "dist/index.js");
+const PI_AGENT_SERVER_RESOURCE_DIR = join(ELECTRON_RESOURCES_DIR, "pi-agent-server");
 const WA_WORKER_DIR = join(ROOT_DIR, "packages/messaging-whatsapp-worker");
 const WA_WORKER_SOURCE = join(WA_WORKER_DIR, "src/worker.ts");
 const WA_WORKER_OUTPUT = join(WA_WORKER_DIR, "dist/worker.cjs");
@@ -257,6 +260,50 @@ async function buildPiAgentServer(): Promise<void> {
   console.log("✅ Pi agent server built successfully");
 }
 
+function stageSessionServerResource(): void {
+  if (!existsSync(SESSION_SERVER_OUTPUT)) {
+    console.error("❌ Session server output not found at", SESSION_SERVER_OUTPUT);
+    process.exit(1);
+  }
+
+  rmSync(SESSION_SERVER_RESOURCE_DIR, { recursive: true, force: true });
+  mkdirSync(SESSION_SERVER_RESOURCE_DIR, { recursive: true });
+  cpSync(SESSION_SERVER_OUTPUT, join(SESSION_SERVER_RESOURCE_DIR, "index.js"));
+  console.log("📦 Staged Session MCP Server resource");
+}
+
+function stagePiAgentServerResource(): void {
+  if (!existsSync(join(PI_AGENT_SERVER_DIR, "src"))) {
+    console.log("⏭️  Pi agent server resource skipped (package not found)");
+    return;
+  }
+
+  if (!existsSync(PI_AGENT_SERVER_OUTPUT)) {
+    console.error("❌ Pi agent server output not found at", PI_AGENT_SERVER_OUTPUT);
+    process.exit(1);
+  }
+
+  const koffiSource = join(ROOT_DIR, "node_modules/koffi");
+  if (!existsSync(koffiSource)) {
+    console.error("❌ koffi dependency not found at", koffiSource);
+    process.exit(1);
+  }
+
+  rmSync(PI_AGENT_SERVER_RESOURCE_DIR, { recursive: true, force: true });
+  mkdirSync(PI_AGENT_SERVER_RESOURCE_DIR, { recursive: true });
+  cpSync(PI_AGENT_SERVER_OUTPUT, join(PI_AGENT_SERVER_RESOURCE_DIR, "index.js"));
+  cpSync(koffiSource, join(PI_AGENT_SERVER_RESOURCE_DIR, "node_modules/koffi"), {
+    recursive: true,
+    force: true,
+  });
+  console.log("📦 Staged Pi Agent Server resource");
+}
+
+function stageSubprocessResources(): void {
+  stageSessionServerResource();
+  stagePiAgentServerResource();
+}
+
 // Build the WhatsApp worker (Baileys-backed subprocess spawned by WhatsAppAdapter)
 async function buildWhatsAppWorker(): Promise<void> {
   if (!existsSync(WA_WORKER_SOURCE)) {
@@ -327,6 +374,10 @@ async function main(): Promise<void> {
 
   // Build Pi agent server (subprocess for Pi SDK sessions)
   await buildPiAgentServer();
+
+  // Stage subprocess bundles into apps/electron/resources so electron-builder
+  // includes them in packaged apps.
+  stageSubprocessResources();
 
   // Build unified network interceptor (CJS bundle for Node.js --require)
   await buildInterceptor();

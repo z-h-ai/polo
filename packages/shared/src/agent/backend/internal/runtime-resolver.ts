@@ -170,10 +170,18 @@ function resolveInterceptorBundlePath(hostRuntime: BackendHostRuntimeContext): s
 
 function resolveServerPath(hostRuntime: BackendHostRuntimeContext, serverName: string): string | undefined {
   if (hostRuntime.isPackaged) {
-    return firstExistingPath([
+    const candidates = [
       join(hostRuntime.appRootPath, 'resources', serverName, 'index.js'),
+      ...(hostRuntime.resourcesPath
+        ? [
+            join(hostRuntime.resourcesPath, 'app', 'resources', serverName, 'index.js'),
+            join(hostRuntime.resourcesPath, 'resources', serverName, 'index.js'),
+            join(hostRuntime.resourcesPath, serverName, 'index.js'),
+          ]
+        : []),
       join(hostRuntime.appRootPath, 'dist', 'resources', serverName, 'index.js'),
-    ]);
+    ];
+    return firstExistingPath(candidates);
   }
   return resolveUpwards(
     hostRuntime.appRootPath,

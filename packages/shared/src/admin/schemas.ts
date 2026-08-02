@@ -52,6 +52,18 @@ const httpUrl = z.string().url().max(16_384).refine(value => {
   return protocol === 'https:' || protocol === 'http:'
 })
 
+const catalogChecksum = z.string()
+  .regex(/^(?:sha256:)?[a-fA-F0-9]{64}$/)
+  .transform(value => value.replace(/^sha256:/, '').toLowerCase())
+const catalogPlatform = z.enum(['darwin', 'win32', 'linux', 'any'])
+  .transform(value => value === 'any' ? undefined : value)
+const catalogArchitecture = z.enum(['arm64', 'x64', 'any'])
+  .transform(value => value === 'any' ? undefined : value)
+const catalogVersion = z.union([
+  nonBlankString(512),
+  z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).transform(String),
+])
+
 export const MainlandChinaPhoneSchema = z.string().regex(/^1[3-9]\d{9}$/)
 
 export function isValidMainlandChinaPhone(value: string): boolean {
@@ -152,13 +164,25 @@ export const ListOrganizationsResponseSchema = z.object({
 })
 
 export const AppReleaseSummarySchema = z.object({
+  id: entityId.optional(),
   version: nonBlankString(128),
   runtime: z.enum(['static', 'python', 'js']),
-  downloadUrl: httpUrl,
-  checksum: z.string().regex(/^[a-fA-F0-9]{64}$/),
+  downloadUrl: httpUrl.optional(),
+  checksum: catalogChecksum,
   sizeBytes: z.number().int().min(0),
-  platform: z.enum(['darwin', 'win32', 'linux']).optional(),
-  arch: z.enum(['arm64', 'x64']).optional(),
+  platform: catalogPlatform.optional(),
+  arch: catalogArchitecture.optional(),
+})
+
+export const AppReleaseDownloadSchema = z.object({
+  releaseId: entityId,
+  downloadUrl: httpUrl,
+  expiresAt: organizationDate,
+  checksum: catalogChecksum,
+  sizeBytes: z.number().int().min(0),
+  runtime: z.enum(['static', 'python', 'js']),
+  platform: catalogPlatform.optional(),
+  arch: catalogArchitecture.optional(),
 })
 
 export const CatalogAppSchema = z.object({
@@ -191,7 +215,7 @@ export const CatalogAppSchema = z.object({
 })
 
 export const AppCatalogResponseSchema = z.object({
-  appConfigVersion: nonBlankString(512),
+  appConfigVersion: catalogVersion,
   apps: z.array(CatalogAppSchema).max(10_000),
 }).superRefine((catalog, context) => {
   const appIds = new Set<string>()

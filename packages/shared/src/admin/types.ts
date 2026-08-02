@@ -169,11 +169,24 @@ export interface ListOrganizationsResponse {
 export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle';
 
 export interface AppReleaseSummary {
+  id?: string;
   version: string;
   runtime: LocalAppRuntimeKind;
-  downloadUrl: string;
+  /** Legacy Catalogs may include a URL; current POL-52 issues one on demand. */
+  downloadUrl?: string;
   checksum: string;
   sizeBytes: number;
+  platform?: LocalAppPlatform;
+  arch?: LocalAppArchitecture;
+}
+
+export interface AppReleaseDownload {
+  releaseId: string;
+  downloadUrl: string;
+  expiresAt: string;
+  checksum: string;
+  sizeBytes: number;
+  runtime: LocalAppRuntimeKind;
   platform?: LocalAppPlatform;
   arch?: LocalAppArchitecture;
 }

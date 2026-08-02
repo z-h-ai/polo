@@ -1230,6 +1230,7 @@ describe('useAppCatalog scoped async state', () => {
       permissions: ['camera', 'selected files'],
       release: {
         version: '1.0.0',
+        runtime: 'static',
         checksum: 'a'.repeat(64),
         sizeBytes: 100,
         platform: 'darwin',

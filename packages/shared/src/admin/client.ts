@@ -15,6 +15,7 @@ import {
   type VerifyPhoneAuthCodeInput,
   type AcceptOrganizationJoinResponse,
   type AppCatalogFetchResult,
+  type AppReleaseDownload,
   type CreateOrganizationInput,
   type CreateOrganizationInvitationInput,
   type CreateOrganizationInvitationResponse,
@@ -71,6 +72,7 @@ import {
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
   AppCatalogResponseSchema,
+  AppReleaseDownloadSchema,
 } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -358,13 +360,17 @@ export class AdminClient {
     organizationId: string,
     appConfigVersion?: string,
   ): Promise<AppCatalogFetchResult> {
-    const query = new URLSearchParams({ organizationId });
+    const query = new URLSearchParams();
     if (appConfigVersion) query.set('version', appConfigVersion);
-    const response = await this.request<unknown>(`/api/apps?${query.toString()}`, {
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}/apps${suffix}`,
+      {
       method: 'GET',
       accessToken,
       allowNotModified: true,
-    });
+      },
+    );
     if (response === undefined) return { notModified: true };
     const catalog = this.readSuccessResponse(response, AppCatalogResponseSchema);
     if (catalog.apps.some(app => app.organizationId !== organizationId)) {
@@ -374,6 +380,21 @@ export class AdminClient {
       );
     }
     return { notModified: false, ...catalog };
+  }
+
+  async getAppReleaseDownload(
+    accessToken: string,
+    organizationId: string,
+    appId: string,
+    releaseId: string,
+  ): Promise<AppReleaseDownload> {
+    const response = await this.request<unknown>(
+      `/api/organizations/${encodeURIComponent(organizationId)}`
+        + `/apps/${encodeURIComponent(appId)}`
+        + `/releases/${encodeURIComponent(releaseId)}/download`,
+      { method: 'POST', accessToken },
+    );
+    return this.readSuccessResponse(response, AppReleaseDownloadSchema);
   }
 
   async createOrganization(

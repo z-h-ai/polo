@@ -343,8 +343,28 @@ function cleanupPol53Run(requireEvidence: boolean): void {
         }
 
         const result = await prisma.$transaction(async (tx) => {
+          async function deleteOwnedOrganizations(user) {
+            if (!user) return 0;
+            const organizations = await tx.organization.findMany({
+              where: { createdByUserId: user.id },
+              select: { id: true },
+            });
+            const organizationIds = organizations.map((item) => item.id);
+            if (organizationIds.length === 0) return 0;
+            const where = { organizationId: { in: organizationIds } };
+            await tx.organizationAuditLog.deleteMany({ where });
+            await tx.organizationInvitation.deleteMany({ where });
+            await tx.organizationJoinLink.deleteMany({ where });
+            await tx.organizationMembership.deleteMany({ where });
+            await tx.organizationAppConfig.deleteMany({ where: { organizationId: { in: organizationIds } } });
+            return (await tx.organization.deleteMany({
+              where: { id: { in: organizationIds }, createdByUserId: user.id },
+            })).count;
+          }
+
           async function deleteTargetUser(user, uniqueWhere) {
             if (!user) return { user: 0, sessions: 0, audits: 0 };
+            const organizations = await deleteOwnedOrganizations(user);
             const audits = (await tx.adminAuditLog.deleteMany({
               where: {
                 OR: [
@@ -363,7 +383,7 @@ function cleanupPol53Run(requireEvidence: boolean): void {
             const deletedUser = (await tx.user.deleteMany({
               where: { id: user.id, ...uniqueWhere },
             })).count;
-            return { user: deletedUser, sessions, audits };
+            return { user: deletedUser, sessions, audits, organizations };
           }
 
           const phoneCleanup = await deleteTargetUser(

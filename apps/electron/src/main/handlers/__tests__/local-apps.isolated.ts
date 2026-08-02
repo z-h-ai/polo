@@ -29,6 +29,21 @@ let catalog: AppCatalogCacheEntry = createCatalog(1)
 
 const getCachedAppCatalog = mock(() => catalog)
 const getAppCatalogAccessMode = mock(() => accessMode)
+const getAppReleaseDownload = mock(async (
+  _accessToken: string,
+  _organizationId: string,
+  _appId: string,
+  releaseId: string,
+) => ({
+  releaseId,
+  downloadUrl: 'https://catalog.example/signed-download',
+  expiresAt: '2026-08-01T12:10:00.000Z',
+  checksum: 'a'.repeat(64),
+  sizeBytes: 321,
+  runtime: 'static' as const,
+  platform: 'darwin' as const,
+  arch: 'arm64' as const,
+}))
 const scopedInstall = mock(async (request: {
   scope: CatalogLocalAppScope
   version: string
@@ -139,6 +154,9 @@ const scopedRegistry = {
 }
 
 mock.module('@polo-ai/shared/admin', () => ({
+  AdminClient: class {
+    getAppReleaseDownload = getAppReleaseDownload
+  },
   getCachedAppCatalog,
   getAppCatalogAccessMode,
   isAppCatalogAccessDeniedForAccount: () => accountAccessDenied,
@@ -148,10 +166,14 @@ mock.module('@polo-ai/shared/admin', () => ({
   ],
 }))
 
+mock.module('@polo-ai/shared/config', () => ({
+  getAdminUrl: () => 'https://admin.example.com',
+}))
+
 mock.module('@polo-ai/shared/credentials', () => ({
   getCredentialManager: () => ({
     getAdminTokens: async () => signedInAccountId
-      ? { userId: signedInAccountId }
+      ? { userId: signedInAccountId, accessToken: `${signedInAccountId}-access` }
       : null,
   }),
 }))
@@ -228,6 +250,7 @@ function scope(catalogAppId = '应用.App-ID'): CatalogLocalAppScope {
 function confirmedRelease() {
   return {
     version: 'v1.2.3',
+    runtime: 'static' as const,
     checksum: 'a'.repeat(64),
     sizeBytes: 321,
     platform: 'darwin' as const,
@@ -248,6 +271,7 @@ describe('local app main-process authorization boundary', () => {
     accountAccessDenied = false
     appAccessDenied = false
     catalog = createCatalog(1)
+    getAppReleaseDownload.mockClear()
     handlers.clear()
     for (const handlerMock of [
       getCachedAppCatalog,
@@ -295,6 +319,36 @@ describe('local app main-process authorization boundary', () => {
       },
     } satisfies RpcServer
     registerLocalAppHandlers(server)
+  })
+
+  it('requests a short-lived download grant for the currently authorized release', async () => {
+    const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
+    catalog.apps[0] = {
+      ...catalog.apps[0]!,
+      currentRelease: {
+        ...catalog.apps[0]!.currentRelease!,
+        id: 'release-1',
+        downloadUrl: undefined,
+      },
+    }
+
+    await expect(install(context, {
+      scope: scope(),
+      appConfigVersion: 'version-1',
+      permissions: [],
+      release: confirmedRelease(),
+    })).resolves.toMatchObject({ status: 'installed' })
+
+    expect(getAppReleaseDownload).toHaveBeenCalledWith(
+      'account-a-access',
+      'organization-a',
+      '应用.App-ID',
+      'release-1',
+    )
+    expect(scopedInstall).toHaveBeenCalledWith(expect.objectContaining({
+      downloadUrl: 'https://catalog.example/signed-download',
+      checksum: 'a'.repeat(64),
+    }), expect.anything())
   })
 
   it('constructs catalog installation metadata only from the authorized cached release', async () => {

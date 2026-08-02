@@ -771,7 +771,7 @@ describe('AdminClient', () => {
       },
       {
         name: 'catalog-5xx',
-        protectedPath: '/api/apps?',
+        protectedPath: '/api/organizations/organization-1/apps',
         invoke: (client: AdminClient) => client.getAppCatalog(
           'locally-unexpired-token',
           'organization-1',
@@ -883,7 +883,7 @@ describe('AdminClient', () => {
 
   it('fetches a validated organization app catalog with version comparison', async () => {
     mockJsonFetch({
-      appConfigVersion: 'apps-v2',
+      appConfigVersion: 2,
       apps: [{
         id: 'app-1',
         organizationId: 'organization-1',
@@ -894,13 +894,13 @@ describe('AdminClient', () => {
         deliveryMode: 'local_bundle',
         permissions: ['Read files selected by you'],
         currentRelease: {
+          id: 'release-2',
           version: '2.0.0',
           runtime: 'static',
-          downloadUrl: 'https://cdn.example.com/app.zip',
-          checksum: 'a'.repeat(64),
+          checksum: `sha256:${'A'.repeat(64)}`,
           sizeBytes: 1024,
-          platform: 'darwin',
-          arch: 'arm64',
+          platform: 'any',
+          arch: 'any',
           internalBuildId: 'must-not-leak',
         },
         sortOrder: 1,
@@ -912,12 +912,12 @@ describe('AdminClient', () => {
     const result = await client.getAppCatalog(
       'organization-access-token',
       'organization-1',
-      'apps-v1',
+      '1',
     );
 
     expect(result).toEqual({
       notModified: false,
-      appConfigVersion: 'apps-v2',
+      appConfigVersion: '2',
       apps: [{
         id: 'app-1',
         organizationId: 'organization-1',
@@ -928,22 +928,53 @@ describe('AdminClient', () => {
         deliveryMode: 'local_bundle',
         permissions: ['Read files selected by you'],
         currentRelease: {
+          id: 'release-2',
           version: '2.0.0',
           runtime: 'static',
-          downloadUrl: 'https://cdn.example.com/app.zip',
           checksum: 'a'.repeat(64),
           sizeBytes: 1024,
-          platform: 'darwin',
-          arch: 'arm64',
         },
         sortOrder: 1,
       }],
     });
     expect(fetchCalls[0]!.url).toBe(
-      'https://admin.example.com/api/apps?organizationId=organization-1&version=apps-v1',
+      'https://admin.example.com/api/organizations/organization-1/apps?version=1',
     );
     expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
       .toBe('Bearer organization-access-token');
+  });
+
+  it('requests a short-lived POL-52 download grant and normalizes its metadata', async () => {
+    mockJsonFetch({
+      releaseId: 'release-2',
+      downloadUrl: 'https://admin.example.com/api/download/file?token=signed',
+      expiresAt: '2026-08-01T12:10:00.000Z',
+      checksum: `sha256:${'B'.repeat(64)}`,
+      sizeBytes: 2048,
+      runtime: 'static',
+      platform: 'any',
+      arch: 'any',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppReleaseDownload(
+      'organization-access-token',
+      'organization-1',
+      'app-1',
+      'release-2',
+    )).resolves.toEqual({
+      releaseId: 'release-2',
+      downloadUrl: 'https://admin.example.com/api/download/file?token=signed',
+      expiresAt: '2026-08-01T12:10:00.000Z',
+      checksum: 'b'.repeat(64),
+      sizeBytes: 2048,
+      runtime: 'static',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/apps/app-1/releases/release-2/download',
+    );
+    expect(fetchCalls[0]!.init).toMatchObject({ method: 'POST' });
+    expect(fetchCalls[0]!.init.body).toBeUndefined();
   });
 
   it('rejects an app catalog containing another organization identity', async () => {
