@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import {
   getSetupNeeds,
+  getValidClaudeOAuthTokenWithManager,
   performTokenRefresh,
   _resetRefreshMutex,
   type AuthState,
@@ -318,6 +319,169 @@ describe('performTokenRefresh', () => {
       expect(failedNativeResult.accessToken).toBeNull();
       expect(failedNativeResult.migrationRequired).toBeUndefined();
     });
+  });
+});
+
+describe('connection-scoped Claude OAuth', () => {
+  beforeEach(() => {
+    _resetRefreshMutex();
+  });
+
+  function createIdentityManager(options: {
+    selected?: {
+      accessToken: string;
+      refreshToken?: string;
+      expiresAt?: number;
+      source?: 'native' | 'cli';
+    };
+    global?: { accessToken: string };
+  }) {
+    const identities = new Map<string, typeof options.selected>();
+    if (options.selected) identities.set('selected-anthropic', { ...options.selected });
+    const global = options.global ? { ...options.global } : undefined;
+    const writes: string[] = [];
+    const deletes: string[] = [];
+    let legacyReads = 0;
+
+    return {
+      manager: {
+        getLlmOAuth: async (slug: string) => identities.get(slug) ?? null,
+        compareAndSwap: async (
+          id: { type: string; connectionSlug?: string },
+          expected: { value: string; refreshToken?: string },
+          replacement: { value: string; refreshToken?: string; expiresAt?: number; source?: 'native' | 'cli' } | null,
+        ) => {
+          const slug = id.connectionSlug!;
+          const current = identities.get(slug);
+          if (
+            !current
+            || current.accessToken !== expected.value
+            || current.refreshToken !== expected.refreshToken
+          ) {
+            return {
+              updated: false,
+              current: current ? { ...current, value: current.accessToken } : null,
+            };
+          }
+          if (replacement) {
+            writes.push(slug);
+            identities.set(slug, {
+              accessToken: replacement.value,
+              refreshToken: replacement.refreshToken,
+              expiresAt: replacement.expiresAt,
+              source: replacement.source,
+            });
+          } else {
+            deletes.push(`${id.type}::${slug}`);
+            identities.delete(slug);
+          }
+          return { updated: true, current: replacement };
+        },
+        delete: async (id: { type: string; connectionSlug?: string }) => {
+          deletes.push(`${id.type}::${id.connectionSlug ?? 'global'}`);
+          return id.connectionSlug ? identities.delete(id.connectionSlug) : false;
+        },
+        getClaudeOAuthCredentials: async () => {
+          legacyReads++;
+          return global ?? null;
+        },
+      },
+      identities,
+      global,
+      writes,
+      deletes,
+      legacyReads: () => legacyReads,
+    };
+  }
+
+  it('uses the selected llm_oauth identity and never reads a different global identity', async () => {
+    const state = createIdentityManager({
+      selected: { accessToken: 'selected-token', expiresAt: Date.now() + 3_600_000 },
+      global: { accessToken: 'wrong-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async () => { throw new Error('valid credentials must not refresh'); },
+    );
+
+    expect(result.accessToken).toBe('selected-token');
+    expect(state.legacyReads()).toBe(0);
+    expect(state.global?.accessToken).toBe('wrong-global-token');
+  });
+
+  it('refreshes and writes only the selected llm_oauth identity', async () => {
+    const state = createIdentityManager({
+      selected: {
+        accessToken: 'expired-selected-token',
+        refreshToken: 'selected-refresh-token',
+        expiresAt: Date.now() - 1,
+      },
+      global: { accessToken: 'untouched-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async refreshToken => ({
+        accessToken: `refreshed:${refreshToken}`,
+        refreshToken: 'rotated-refresh-token',
+        expiresAt: Date.now() + 3_600_000,
+      }),
+    );
+
+    expect(result.accessToken).toBe('refreshed:selected-refresh-token');
+    expect(state.writes).toEqual(['selected-anthropic']);
+    expect(state.identities.get('selected-anthropic')?.refreshToken).toBe('rotated-refresh-token');
+    expect(state.legacyReads()).toBe(0);
+    expect(state.global?.accessToken).toBe('untouched-global-token');
+  });
+
+  it('preserves the selected and global identities on a transient refresh failure', async () => {
+    const state = createIdentityManager({
+      selected: {
+        accessToken: 'expired-selected-token',
+        refreshToken: 'selected-refresh-token',
+        expiresAt: Date.now() - 1,
+      },
+      global: { accessToken: 'untouched-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async () => { throw new Error('network timeout'); },
+    );
+
+    expect(result.accessToken).toBeNull();
+    expect(state.deletes).toEqual([]);
+    expect(state.identities.get('selected-anthropic')?.accessToken).toBe('expired-selected-token');
+    expect(state.global?.accessToken).toBe('untouched-global-token');
+  });
+
+  it('clears only the selected llm_oauth identity when its refresh token is invalid', async () => {
+    const state = createIdentityManager({
+      selected: {
+        accessToken: 'expired-selected-token',
+        refreshToken: 'invalid-refresh-token',
+        expiresAt: Date.now() - 1,
+        source: 'native',
+      },
+      global: { accessToken: 'untouched-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async () => { throw new Error('invalid_grant'); },
+    );
+
+    expect(result.accessToken).toBeNull();
+    expect(state.deletes).toEqual(['llm_oauth::selected-anthropic']);
+    expect(state.identities.has('selected-anthropic')).toBe(false);
+    expect(state.legacyReads()).toBe(0);
+    expect(state.global?.accessToken).toBe('untouched-global-token');
   });
 });
 

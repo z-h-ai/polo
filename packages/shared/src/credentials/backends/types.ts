@@ -7,6 +7,11 @@
 
 import type { CredentialId, StoredCredential } from '../types.ts';
 
+export interface CredentialCompareAndSwapResult {
+  updated: boolean;
+  current: StoredCredential | null;
+}
+
 export interface CredentialBackend {
   /** Backend name for logging/debugging */
   readonly name: string;
@@ -22,6 +27,13 @@ export interface CredentialBackend {
 
   /** Set/update a credential */
   set(id: CredentialId, credential: StoredCredential): Promise<void>;
+
+  /** Atomically replace/delete a credential only if its token identity matches. */
+  compareAndSwap?(
+    id: CredentialId,
+    expected: Pick<StoredCredential, 'value' | 'refreshToken'>,
+    replacement: StoredCredential | null,
+  ): Promise<CredentialCompareAndSwapResult>;
 
   /** Delete a credential */
   delete(id: CredentialId): Promise<boolean>;

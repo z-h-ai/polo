@@ -6,6 +6,7 @@
  */
 
 import type { CredentialBackend } from './backends/types.ts';
+import type { CredentialCompareAndSwapResult } from './backends/types.ts';
 import type { CredentialId, CredentialType, StoredCredential, CredentialHealthStatus, CredentialHealthIssue } from './types.ts';
 import type { LlmAuthType, LlmProviderType } from '../config/llm-connections.ts';
 import { SecureStorageBackend } from './backends/secure-storage.ts';
@@ -170,6 +171,28 @@ export class CredentialManager {
   }
 
   /**
+   * Cross-process compare-and-swap used for OAuth rotation. A stale refresher
+   * cannot overwrite or delete a newer token written by another process.
+   */
+  async compareAndSwap(
+    id: CredentialId,
+    expected: Pick<StoredCredential, 'value' | 'refreshToken'>,
+    replacement: StoredCredential | null,
+  ): Promise<CredentialCompareAndSwapResult> {
+    await this.ensureInitialized();
+    if (!this.writeBackend?.compareAndSwap) {
+      throw new Error('Credential backend does not support atomic compare-and-swap');
+    }
+    const result = await this.writeBackend.compareAndSwap(id, expected, replacement);
+    const key = invocationCredentialKey(id);
+    if (invocationCredentials.has(key)) {
+      if (result.current) invocationCredentials.set(key, { ...result.current });
+      else invocationCredentials.delete(key);
+    }
+    return result;
+  }
+
+  /**
    * Delete a credential from all backends.
    * Automatically initializes if needed.
    */
@@ -188,7 +211,8 @@ export class CredentialManager {
       }
     }
 
-    return deleted;
+    const deletedInvocation = invocationCredentials.delete(invocationCredentialKey(id));
+    return deleted || deletedInvocation;
   }
 
   deleteSync(id: CredentialId): boolean {
@@ -211,7 +235,8 @@ export class CredentialManager {
       }
     }
 
-    return deleted;
+    const deletedInvocation = invocationCredentials.delete(invocationCredentialKey(id));
+    return deleted || deletedInvocation;
   }
 
   /**
@@ -435,6 +460,7 @@ export class CredentialManager {
     expiresAt?: number;
     /** OIDC id_token (used by OpenAI/Codex) */
     idToken?: string;
+    source?: 'native' | 'cli';
   } | null> {
     const cred = await this.get({ type: 'llm_oauth', connectionSlug });
     if (!cred) return null;
@@ -443,6 +469,7 @@ export class CredentialManager {
       refreshToken: cred.refreshToken,
       expiresAt: cred.expiresAt,
       idToken: cred.idToken,
+      source: cred.source as 'native' | 'cli' | undefined,
     };
   }
 
@@ -457,12 +484,14 @@ export class CredentialManager {
     expiresAt?: number;
     /** OIDC id_token (used by OpenAI/Codex) */
     idToken?: string;
+    source?: 'native' | 'cli';
   }): Promise<void> {
     await this.set({ type: 'llm_oauth', connectionSlug }, {
       value: credentials.accessToken,
       refreshToken: credentials.refreshToken,
       expiresAt: credentials.expiresAt,
       idToken: credentials.idToken,
+      source: credentials.source,
     });
   }
 

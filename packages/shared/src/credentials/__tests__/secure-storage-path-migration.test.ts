@@ -173,7 +173,8 @@ describe('secure storage CONFIG_DIR compatibility', () => {
     }).get(adminCredential);
 
     expect(result).toBeNull();
-    expect(existsSync(currentPath)).toBe(false);
+    expect(existsSync(currentPath)).toBe(true);
+    expect(readFileSync(currentPath)).toEqual(Buffer.from('corrupted-current-instance'));
     expect(await new SecureStorageBackend({
       credentialsDir: legacyDirectory,
       legacyCredentialsDir: legacyDirectory,

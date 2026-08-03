@@ -212,6 +212,130 @@ describe('one-shot execution internals', () => {
     }
   })
 
+  it('copies only runtime configuration and excludes unrelated workspace secrets', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-snapshot-allowlist-'))
+    tempDirs.push(temp)
+    const appRoot = join(temp, 'app')
+    const workspaceRoot = join(temp, 'workspace')
+    const threadRoot = join(temp, 'thread')
+    const secret = 'Bearer must-never-enter-cli-thread'
+    await mkdir(join(appRoot, 'permissions'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'sources', 'example'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'skills', 'example'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'messaging'), { recursive: true })
+    await mkdir(threadRoot, { recursive: true })
+    await writeFile(join(appRoot, 'permissions', 'default.json'), '{}\n')
+    await writeFile(join(workspaceRoot, 'config.json'), '{"name":"Workspace"}\n')
+    await writeFile(join(workspaceRoot, 'permissions.json'), '{"allowedTools":[]}\n')
+    await writeFile(join(workspaceRoot, 'sources', 'example', 'config.json'), '{"type":"local"}\n')
+    await writeFile(join(workspaceRoot, 'skills', 'example', 'SKILL.md'), '# Example\n')
+    await writeFile(join(workspaceRoot, 'automations.json'), JSON.stringify({
+      webhook: { authorization: secret },
+    }))
+    await writeFile(join(workspaceRoot, 'automations-history.jsonl'), `${secret}\n`)
+    await writeFile(join(workspaceRoot, 'messaging', 'retry-queue.json'), JSON.stringify({ secret }))
+    await writeFile(join(workspaceRoot, 'views.json'), JSON.stringify({ basicAuth: secret }))
+
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = appRoot
+    try {
+      const record = {
+        directory: threadRoot,
+        sessionsRoot: join(threadRoot, 'sessions'),
+        ownerFile: join(threadRoot, 'owner.json'),
+        metadata: {
+          version: 1,
+          threadId: crypto.randomUUID(),
+          origin: 'cli-exec',
+          configurationScopeId: 'workspace-1',
+          configurationWorkspacePath: workspaceRoot,
+          workingDirectory: temp,
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          persistence: 'persistent',
+        },
+      } satisfies CliThreadRecord
+
+      const snapshot = await createConfigurationSnapshot(record, {
+        id: 'workspace-1',
+        path: workspaceRoot,
+      })
+      expect(await Bun.file(join(snapshot, 'config.json')).exists()).toBe(true)
+      expect(await Bun.file(join(snapshot, 'permissions.json')).exists()).toBe(true)
+      expect(await Bun.file(join(snapshot, 'sources', 'example', 'config.json')).exists()).toBe(true)
+      expect(await Bun.file(join(snapshot, 'skills', 'example', 'SKILL.md')).exists()).toBe(true)
+      for (const excluded of [
+        'automations.json',
+        'automations-history.jsonl',
+        'messaging',
+        'views.json',
+      ]) {
+        expect(await Bun.file(join(snapshot, excluded)).exists()).toBe(false)
+      }
+      const copiedFiles = [
+        join(snapshot, 'config.json'),
+        join(snapshot, 'permissions.json'),
+        join(snapshot, 'sources', 'example', 'config.json'),
+        join(snapshot, 'skills', 'example', 'SKILL.md'),
+      ]
+      for (const file of copiedFiles) {
+        expect(await readFile(file, 'utf-8')).not.toContain(secret)
+      }
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
+  })
+
+  it('constructs a minimal global manifest without copying app-state secrets', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'polo-global-snapshot-allowlist-'))
+    tempDirs.push(temp)
+    const appRoot = join(temp, 'app')
+    const threadRoot = join(temp, 'thread')
+    const secret = 'Basic must-never-enter-global-cli-thread'
+    await mkdir(join(appRoot, 'permissions'), { recursive: true })
+    await mkdir(join(appRoot, 'sources', 'example'), { recursive: true })
+    await mkdir(threadRoot, { recursive: true })
+    await writeFile(join(appRoot, 'permissions', 'default.json'), '{}\n')
+    await writeFile(join(appRoot, 'config.json'), JSON.stringify({
+      activeWorkspaceId: 'private-workspace',
+      connection: { apiKey: secret },
+    }))
+    await writeFile(join(appRoot, 'automations.json'), JSON.stringify({ authorization: secret }))
+    await writeFile(join(appRoot, 'sources', 'example', 'config.json'), '{"type":"local"}\n')
+
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
+    process.env.POLO_AI_CONFIG_DIR = appRoot
+    try {
+      const record = {
+        directory: threadRoot,
+        sessionsRoot: join(threadRoot, 'sessions'),
+        ownerFile: join(threadRoot, 'owner.json'),
+        metadata: {
+          version: 1,
+          threadId: crypto.randomUUID(),
+          origin: 'cli-exec',
+          configurationScopeId: 'global',
+          configurationWorkspacePath: appRoot,
+          workingDirectory: temp,
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          persistence: 'persistent',
+        },
+      } satisfies CliThreadRecord
+
+      const snapshot = await createConfigurationSnapshot(record, { id: 'global', path: appRoot })
+      expect(await Bun.file(join(snapshot, 'automations.json')).exists()).toBe(false)
+      const manifest = await readFile(join(snapshot, 'config.json'), 'utf8')
+      expect(manifest).not.toContain(secret)
+      expect(manifest).not.toContain('private-workspace')
+      expect(await Bun.file(join(snapshot, 'sources', 'example', 'config.json')).exists()).toBe(true)
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
+    }
+  })
+
   it('keeps provider typed_error terminal even if complete follows', async () => {
     let listener: ((value: unknown) => void) | undefined
     const client = {

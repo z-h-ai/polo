@@ -187,12 +187,14 @@ function runtimeWorkspace(scope: ConfigurationScope): Workspace {
   }
 }
 
-const GLOBAL_SNAPSHOT_ENTRIES = new Set([
+const CONFIGURATION_SNAPSHOT_ENTRIES = new Set([
+  'config.json',
   'sources',
   'skills',
   'statuses',
   'labels',
   '.claude-plugin',
+  'permissions.json',
 ])
 
 async function makePrivateTree(path: string): Promise<void> {
@@ -219,8 +221,14 @@ export async function createConfigurationSnapshot(
       throw error
     })
     for (const entry of entries) {
-      if (entry.name === 'sessions') continue
-      if (scope.id === 'global' && !GLOBAL_SNAPSHOT_ENTRIES.has(entry.name)) continue
+      // A CLI Thread only needs the immutable configuration inputs consumed by
+      // the agent runtime. Copying arbitrary workspace state would persist
+      // unrelated automation, messaging, history, or retry-queue secrets.
+      if (!CONFIGURATION_SNAPSHOT_ENTRIES.has(entry.name)) continue
+      // Global config.json contains application state and connection metadata;
+      // the CLI runtime receives its selected connection through the invocation
+      // bootstrap and gets a minimal global workspace manifest below.
+      if (scope.id === 'global' && entry.name === 'config.json') continue
       await cp(join(scope.path, entry.name), join(snapshotRoot, entry.name), {
         recursive: true,
         force: false,
