@@ -63,7 +63,7 @@ export interface AppShellContextType {
   /** Get draft input text for a session - reads from ref without triggering re-renders */
   getDraft: (sessionId: string) => string
   /** Get persisted attachment refs (path + name) for a session's draft - no file IO */
-  getDraftAttachmentRefs: (sessionId: string) => import('@polo-ai/shared/config').DraftAttachmentRef[]
+  getDraftAttachmentRefs: (sessionId: string) => import('@z-h-ai/shared/config').DraftAttachmentRef[]
   /** Hydrate persisted attachment refs into full FileAttachment objects (async, reads files) */
   hydrateDraftAttachments: (sessionId: string) => Promise<FileAttachment[]>
   /** All enabled sources for this workspace - provided by AppShell component */
@@ -75,7 +75,7 @@ export interface AppShellContextType {
   /** Active session used to bind workspace-scoped Creator Skill mutations. */
   activeSessionId?: string
   /** All label configs (tree) for label menu and badge display */
-  labels?: import('@polo-ai/shared/labels').LabelConfig[]
+  labels?: import('@z-h-ai/shared/labels').LabelConfig[]
   /** Callback when session labels change */
   onSessionLabelsChange?: (sessionId: string, labels: string[]) => void
   /** Enabled permission modes for Shift+Tab cycling */

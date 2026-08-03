@@ -14,9 +14,9 @@
 
 import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import type { PushTarget } from '@polo-ai/shared/protocol'
-import type { CredentialManager } from '@polo-ai/shared/credentials'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import type { PushTarget } from '@z-h-ai/shared/protocol'
+import type { CredentialManager } from '@z-h-ai/shared/credentials'
 import type {
   ISessionManager,
   IMessagingGatewayRegistry,

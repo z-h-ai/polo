@@ -1,72 +1,47 @@
-# POO-21 Implement Report
-
-## Change Summary
-- Fixed the merged-worktree Electron Creator Skill install path so the real download fetch uses the current Admin auth token instead of relying on a stale credential cache.
-- Normalized the Admin download origin check so `localhost` and `127.0.0.1` loopback URLs share the same authenticated fetch path.
-- Added a live-token bridge from the Electron E2E harness into the server-core runtime via `PlatformServices.getAdminAccessToken`.
-- Kept the shared Admin safety-status fix from the prior commit so the client now derives safety from the published artifact detail contract.
-
-## Key Files
-- `packages/server-core/src/handlers/rpc/skills.ts`
-- `packages/server-core/src/runtime/platform.ts`
-- `apps/electron/e2e/creator-skill/main.ts`
-- `packages/shared/src/admin/client.ts`
-- `packages/shared/src/admin/__tests__/client.test.ts`
-
-## Self-Test Results
-- `bun test packages/shared/src/admin/__tests__/client.test.ts` passed.
-- `bun test ./packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts` passed.
-- `bun run scripts/electron-creator-skill-e2e.ts` passed against a real isolated Admin server.
-- Final E2E evidence: `creator_skill_e2e_pass` with `progressStages: ["download","validate","prepare","commit","refresh"]`, `skillsChangedCount: 3`, and `backupsCount: 2`.
-
-## Verification Environment
-- Admin server: `bun run dev` in `/Users/wow/project/z-h-ai/polo-admin-dir/dev`
-- Admin DB: `postgresql://postgres:postgres@localhost:5432/polo_admin_test`
-- Admin secret: `JWT_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
-- DB reset/seed commands:
-  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/polo_admin_test bun run scripts/reset-test-db.ts`
-  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/polo_admin_test bun run scripts/seed-test-db.ts`
-
-## Remaining Issues
-- None for POO-21 in this worktree.
-
----
-
-# POL-51 实现报告
+# POO-26 Implement Report
 
 ## 变更摘要
 
-- 实现组织 App Catalog 同步、版本化缓存与失权/撤回 tombstone：登录及已登录启动会同步当前组织目录；网络失败保留上次成功缓存；登出、组织失权和目录撤回会立即关闭新的交付/启动能力，同时保留已安装 Bundle 的停止、卸载和受限日志管理闭环。
-- 将组织目录与个人外部 URL 应用分离：首页按最近使用、当前组织应用和外部应用展示；个人外部应用继续复用 `tabBrowser:getApps` / `tabBrowser:saveApps`，组织下发的远程 URL 由可信目录解析后直接在 WebView 打开。
-- 接入本地 Bundle 生命周期：安装前确认受信任的 Release 元数据和权限，安装/取消/重试/更新/卸载调用本地运行管理器；启动必须通过健康检查并返回 localhost 地址后才创建或激活 WebView 标签页。
-- 补齐跨账号、跨组织及异步竞态防护：Catalog scope 以完整账号、组织和 App ID 隔离；过期确认、过期启动、迟到日志、被撤回的 App、离线缓存和大目录批量状态查询均 fail closed，且不泄漏被拒绝目录的 Release/运行时元数据。
+- 将 shared package 与 Polo 仓库内所有消费点从 `@polo-ai/shared` 统一迁移到 `@z-h-ai/shared`，版本提升到 `0.11.0`，同步更新 workspace dependencies、TypeScript paths、测试 mock、构建引用和 `bun.lock`。
+- 固定 GitHub Packages 私有发布边界：`publishConfig.registry=https://npm.pkg.github.com`、`access=restricted`，Creator Skill 两个公开入口同时提供生成后的 CommonJS runtime 与 `.d.ts`，不让跨仓消费者编译 `src/creator-skills/**`。
+- 删除旧的手工 public declaration shadow files；新增 npm pack 负向过滤，制品不包含 Creator Skill 私有源码、测试、开发者绝对路径、未追踪手工文件或 `workspace:*` 依赖。
+- 重写 clean-consumer proof：在系统临时目录创建无 Polo/Admin sibling 的最小消费者，生成 lockfile 后删除 install tree，再执行 frozen `npm ci`；验证 CommonJS、ESM、TypeScript 6、Next.js 16/Turbopack production build、真实 `next start` API route，以及 POO-21 fixture metadata/manifest/contentDigest 基线。
+- 新增 `shared-v*` GitHub Actions 发布工作流：tag/version gate 后只 pack 一次，验证同一 tarball，再对同一文件执行 GitHub build-provenance attestation 和 `npm publish`，并保留 SHA、npm integrity、frozen lock 与 registry metadata 证据。
+- 新增 POL-59 交接文档，明确版本/registry、公开 exports、验证命令、token 注入规则、迁移步骤、独立验收边界和回滚方式。
 
 ## 关键文件列表
 
-- `packages/shared/src/admin/app-catalog-cache.ts`
-- `packages/shared/src/protocol/local-apps.ts`
-- `apps/electron/src/main/handlers/local-apps.ts`
-- `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
-- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
-- `apps/electron/src/renderer/components/tab-browser/AddAppDialog.tsx`
+- `packages/shared/package.json`
+- `packages/shared/scripts/verify-creator-skills-package.ts`
+- `packages/shared/scripts/build-creator-skills.ts`
+- `packages/shared/src/.npmignore`
+- `packages/shared/dist/creator-skills/**`
+- `.github/workflows/publish-shared-package.yml`
+- `docs/shared-package-publishing.md`
+- `bun.lock`
+- Polo 内所有原 `@polo-ai/shared` workspace dependency、import、TypeScript path 与测试 mock 消费点
 
 ## 自测结果
 
-- `bun run test`：通过；基础测试及仓库内全部 `*.isolated.ts` 测试均通过。
-- POL-51 定向测试：通过。
-  - `local-apps.isolated.ts`：22 pass。
-  - `admin-local-app-session-ending.isolated.ts`：23 pass。
-  - `useAppCatalog.interaction.isolated.ts`：29 pass。
-  - `HomePage.offline-start.interaction.isolated.ts`：1 pass。
-  - `HomePage.round2.interaction.isolated.ts`：14 pass。
+- `bun install --frozen-lockfile`：通过；新的 workspace package 名称与 `0.11.0` lock metadata 可 frozen 安装。
 - `bun run typecheck:all`：通过。
-- `bun run electron:build`：通过（main、preload、renderer、resources 和 assets）。
-- `bun run lint:electron`：通过，0 errors；输出 120 个既有 warnings。
+- `bun test packages/shared/src/creator-skills`：通过，73 pass / 0 fail。
+- `bun run test`：通过；仓库全量普通测试及逐文件 `*.isolated.ts` 测试全部退出 0。
+- `bun run electron:build`：通过；main、preload、renderer、resources、assets 全部构建成功，证明仓库内 namespace 迁移未破坏 Electron bundling。
+- `bun run packages/shared/scripts/verify-creator-skills-package.ts --output-dir /tmp/poo26-final-proof.DrxbEv`：通过。
+  - tarball：`z-h-ai-shared-0.11.0.tgz`
+  - SHA-256：`84639408006e419ecf947d1611ac98704080f702293c1caf9ed9370a0621fb23`
+  - npm/frozen-lock integrity：`sha512-GbBN74488syTh4HQtWPQJZhOmEBrFCqSpoyA5USeMvUGR5A+UHuFI3QXGEYNgG49tcxJLJmfZRnkpHpRenbE2Q==`
+  - Node `v24.14.0` CommonJS require 与 ESM import：通过。
+  - TypeScript `6.0.3` `tsc --noEmit`：通过。
+  - Next.js `16.2.7` Turbopack production build + `next start` + 真实 API 请求：通过。
+  - fixture slug/frontmatter/metadata/canonical manifest/contentDigest：通过，digest 保持 `f9999556728593a5f0f5f3e22f89b1e86793ae5232f7e11e68324ef82927136c`。
+  - Creator Skill 私有源码/测试、所有 package 测试、开发者路径、untracked 手工产物、`workspace:*` 发布依赖负向检查：通过。
 - `git diff --check`：通过。
+- `bun run lint:shared`：未通过；命中 5 个与本任务无关且本分支未修改的既有 `craft-shared/no-inline-source-auth-check` 错误（`resource-bundle.test.ts`、`token-refresh-manager.test.ts`、`token-refresh-manager.ts`）及 9 个既有 unused-disable warning。本任务修改文件未产生 lint 报错。
 
 ## 遗留问题
 
-- 本任务范围内无已知功能性或安全遗留。
-- 现有 Electron lint warning 与两个 React 测试环境 warning（`act(...)` / Radix ref）未由本次变更新增，未阻断测试和构建。
+- 按任务纪律未执行 push，因此尚未创建/推送 `shared-v0.11.0`，也尚未实际向 GitHub Packages 发布；当前本机 tarball 只作为验证制品，不能作为 POL-59 最终依赖来源。
+- 发布后仍必须在 GitHub package settings 向 `z-h-ai/polo-admin` 授予 Actions read access，并由 tagged workflow 产出实际 `published-package.json` 和 GitHub artifact attestation。该外部发布/授权门禁完成前，POO-26 的“已发布且 POL-59 可从 registry 安装”验收项应保持 blocker/escalation，不能宣称端到端完成。
+- POL-59 仍需独立迁移 dependency/lockfile 并完成 clean `npm ci`、Next production `/api/capabilities`、数据库/对象存储角色边界及 Electron ledger/journal 闭环；shared package proof 不替代 POL-59 验收。

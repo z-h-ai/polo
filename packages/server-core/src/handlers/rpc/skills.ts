@@ -1,15 +1,15 @@
 import { basename, dirname, join, resolve, sep } from 'path'
 import { constants as fsConstants, existsSync, readdirSync, statSync } from 'fs'
 import { access, realpath, stat } from 'node:fs/promises'
-import { RPC_CHANNELS, type SkillFile } from '@polo-ai/shared/protocol'
-import { getAdminUrl, getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { RPC_CHANNELS, type SkillFile } from '@z-h-ai/shared/protocol'
+import { getAdminUrl, getWorkspaceByNameOrId } from '@z-h-ai/shared/config'
 import {
   CLIENT_CREATOR_SKILL_COMMIT_CHECK,
   pushTyped,
   type RequestContext,
   type RpcServer,
 } from '@polo-ai/server-core/transport'
-import { CredentialManager } from '@polo-ai/shared/credentials'
+import { CredentialManager } from '@z-h-ai/shared/credentials'
 import type { HandlerDeps } from '../handler-deps'
 import {
   CreatorSkillBackupDeleteRpcInputSchema,
@@ -30,8 +30,8 @@ import {
   recoverCreatorSkillOperations,
   uninstallCreatorSkill,
   updateCreatorSkillInstallationMetadata,
-} from '@polo-ai/shared/creator-skills'
-import type { LoadedSkill } from '@polo-ai/shared/skills'
+} from '@z-h-ai/shared/creator-skills'
+import type { LoadedSkill } from '@z-h-ai/shared/skills'
 import { getClientActiveSession } from './client-active-session'
 
 function currentWorkspaceId(ctx: RequestContext, deps: HandlerDeps): string | null {
@@ -226,7 +226,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const existing = recoveryByWorkspaceRoot.get(workspaceRoot)
     if (existing) return existing
     const recovery = recoverCreatorSkillOperations(workspaceRoot).then(() => {
-      return import('@polo-ai/shared/skills').then(({ invalidateSkillsCache }) => {
+      return import('@z-h-ai/shared/skills').then(({ invalidateSkillsCache }) => {
         invalidateSkillsCache()
       })
     }).catch(error => {
@@ -252,7 +252,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     workingDirectory?: string,
   ): Promise<LoadedSkill[]> => {
     const [{ loadAllSkills }, ledger] = await Promise.all([
-      import('@polo-ai/shared/skills'),
+      import('@z-h-ai/shared/skills'),
       readCreatorSkillsLedger(workspaceRoot),
     ])
     const installedBySlug = new Map(ledger.installed.map(item => [item.slug, item]))
@@ -265,7 +265,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   }
 
   const broadcastSkillsChanged = async (workspaceId: string, workspaceRoot: string) => {
-    const { invalidateSkillsCache } = await import('@polo-ai/shared/skills')
+    const { invalidateSkillsCache } = await import('@z-h-ai/shared/skills')
     invalidateSkillsCache()
     const skills = await loadSkillsWithCreatorState(workspaceRoot)
     pushTyped(
@@ -304,7 +304,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       return []
     }
 
-    const { getWorkspaceSkillsPath } = await import('@polo-ai/shared/workspaces')
+    const { getWorkspaceSkillsPath } = await import('@z-h-ai/shared/workspaces')
 
     const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
     const skillDir = join(skillsDir, skillSlug)
@@ -389,7 +389,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
       detached = result.detached === true
       forceDeleteCredential = result.forceDeleteCredential
     } else {
-      const { deleteSkill } = await import('@polo-ai/shared/skills')
+      const { deleteSkill } = await import('@z-h-ai/shared/skills')
       deleteSkill(workspace.rootPath, skillSlug)
     }
     await broadcastSkillsChanged(workspace.id, workspace.rootPath)
@@ -638,7 +638,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!workspace) throw new Error('Workspace not found')
     if (workspace.remoteServer) throw new Error('Open in editor is not available for remote workspaces')
 
-    const { getWorkspaceSkillsPath } = await import('@polo-ai/shared/workspaces')
+    const { getWorkspaceSkillsPath } = await import('@z-h-ai/shared/workspaces')
 
     const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
     const skillFile = join(skillsDir, skillSlug, 'SKILL.md')
@@ -651,7 +651,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!workspace) throw new Error('Workspace not found')
     if (workspace.remoteServer) throw new Error('Show in Finder is not available for remote workspaces')
 
-    const { getWorkspaceSkillsPath } = await import('@polo-ai/shared/workspaces')
+    const { getWorkspaceSkillsPath } = await import('@z-h-ai/shared/workspaces')
 
     const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
     const skillDir = join(skillsDir, skillSlug)

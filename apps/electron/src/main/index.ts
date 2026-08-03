@@ -59,7 +59,7 @@ Sentry.init({
 })
 
 // Initialize i18n for main process (menus, dialogs, etc.)
-import { setupI18n, i18n } from '@polo-ai/shared/i18n'
+import { setupI18n, i18n } from '@z-h-ai/shared/i18n'
 setupI18n()
 
 // Set anonymous machine ID for Sentry user tracking (no PII — just a hash).
@@ -69,7 +69,7 @@ Sentry.setUser({ id: machineId })
 
 import { join, delimiter } from 'path'
 import { existsSync, readFileSync } from 'fs'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
 import {
@@ -82,32 +82,32 @@ import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { getCredentialManager } from '@z-h-ai/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@polo-ai/server-core/services'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
-import { getWorkspaces, getWorkspaceByNameOrId, loadStoredConfig, addWorkspace, saveConfig } from '@polo-ai/shared/config'
-import { getDefaultWorkspacesDir } from '@polo-ai/shared/workspaces'
-import { initializeDocs } from '@polo-ai/shared/docs'
-import { initializeReleaseNotes } from '@polo-ai/shared/release-notes'
-import { ensureDefaultPermissions } from '@polo-ai/shared/agent/permissions-config'
-import { ensureToolIcons, ensurePresetThemes } from '@polo-ai/shared/config'
-import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
-import { initializeBackendHostRuntime } from '@polo-ai/shared/agent/backend'
-import { setPowerShellValidatorRoot } from '@polo-ai/shared/agent'
+import { getWorkspaces, getWorkspaceByNameOrId, loadStoredConfig, addWorkspace, saveConfig } from '@z-h-ai/shared/config'
+import { getDefaultWorkspacesDir } from '@z-h-ai/shared/workspaces'
+import { initializeDocs } from '@z-h-ai/shared/docs'
+import { initializeReleaseNotes } from '@z-h-ai/shared/release-notes'
+import { ensureDefaultPermissions } from '@z-h-ai/shared/agent/permissions-config'
+import { ensureToolIcons, ensurePresetThemes } from '@z-h-ai/shared/config'
+import { setBundledAssetsRoot } from '@z-h-ai/shared/utils'
+import { initializeBackendHostRuntime } from '@z-h-ai/shared/agent/backend'
+import { setPowerShellValidatorRoot } from '@z-h-ai/shared/agent'
 import { handleDeepLink } from './deep-link'
 import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
 import { findDeepLinkArgument } from './deep-link-argv'
 import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import { BrowserPaneManager } from './browser-pane-manager'
-import { OAuthFlowStore } from '@polo-ai/shared/auth'
+import { OAuthFlowStore } from '@z-h-ai/shared/auth'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath, getMessagingGatewayLogFilePath, messagingGatewayLog } from './logger'
-import { setPerfEnabled, enableDebug } from '@polo-ai/shared/utils'
-import { registerPiModelResolver } from '@polo-ai/shared/config'
-import { getPiModelsForAuthProvider, getAllPiModels } from '@polo-ai/shared/config'
+import { setPerfEnabled, enableDebug } from '@z-h-ai/shared/utils'
+import { registerPiModelResolver } from '@z-h-ai/shared/config'
+import { getPiModelsForAuthProvider, getAllPiModels } from '@z-h-ai/shared/config'
 import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeCount } from './notifications'
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
 import { WsRpcClient, type EventSink } from '@polo-ai/server-core/transport'
@@ -620,7 +620,7 @@ app.whenReady().then(async () => {
     if (!isClientOnly) {
       // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)
       if (process.platform === 'win32') {
-        const { getGitBashPath, clearGitBashPath } = await import('@polo-ai/shared/config')
+        const { getGitBashPath, clearGitBashPath } = await import('@z-h-ai/shared/config')
         const gitBashPath = getGitBashPath()
         if (gitBashPath) {
           const validation = await validateGitBashPath(gitBashPath)
@@ -658,7 +658,7 @@ app.whenReady().then(async () => {
       const resolveClientId = (wcId: number) => clientMap.get(wcId)
 
       // Read embedded server config (Server settings page)
-      const { getServerConfig } = await import('@polo-ai/shared/config')
+      const { getServerConfig } = await import('@z-h-ai/shared/config')
       const embeddedServerConfig = getServerConfig()
       const serverModeEnabled = embeddedServerConfig.enabled && !isClientOnly
 
@@ -813,7 +813,7 @@ app.whenReady().then(async () => {
         setSessionEventSink: (sm, sink) => sm.setEventSink(getDeepLinkCallbackBridge().wrapEventSink(sink)),
         initializeSessionManager: (sm) => sm.initialize(),
         initModelRefreshService: () => initModelRefreshService(async (slug: string) => {
-          const { getCredentialManager } = await import('@polo-ai/shared/credentials')
+          const { getCredentialManager } = await import('@z-h-ai/shared/credentials')
           const manager = getCredentialManager()
           const [apiKey, oauth] = await Promise.all([
             manager.getLlmApiKey(slug).catch(() => null),
@@ -887,7 +887,7 @@ app.whenReady().then(async () => {
 
       // Remove workspace from config (cleanup stale entries)
       ipcMain.handle('workspace:remove', async (_event, workspaceId: string) => {
-        const { removeWorkspace: remove } = await import('@polo-ai/shared/config')
+        const { removeWorkspace: remove } = await import('@z-h-ai/shared/config')
         return remove(workspaceId)
       })
 
@@ -908,7 +908,7 @@ app.whenReady().then(async () => {
       ipcMain.handle('session:transferToRemoteWorkspace', async (_event, sessionId: string, targetWorkspaceId: string, sessionIndex?: number, sessionCount?: number) => {
         const idx = sessionIndex ?? 0
         const count = sessionCount ?? 1
-        const { getWorkspaceByNameOrId } = await import('@polo-ai/shared/config')
+        const { getWorkspaceByNameOrId } = await import('@z-h-ai/shared/config')
         const { connectToRemote } = await import('./handlers/workspace')
         const { CHUNKED_TRANSFER_THRESHOLD, getChunkCount, invokeChunked, prepareChunkedPayload } = await import('./chunked-rpc')
 
@@ -1042,13 +1042,13 @@ app.whenReady().then(async () => {
       }
 
       instance.wsServer.handle(RPC_CHANNELS.settings.GET_SERVER_CONFIG, async () => {
-        const { getServerConfig: getConfig } = await import('@polo-ai/shared/config')
+        const { getServerConfig: getConfig } = await import('@z-h-ai/shared/config')
         return getConfig()
       })
 
       instance.wsServer.handle(RPC_CHANNELS.settings.SET_SERVER_CONFIG, async (_ctx: unknown, config: unknown) => {
-        const { setServerConfig: setConfig } = await import('@polo-ai/shared/config')
-        const cfg = config as import('@polo-ai/shared/config/server-config').ServerConfig
+        const { setServerConfig: setConfig } = await import('@z-h-ai/shared/config')
+        const cfg = config as import('@z-h-ai/shared/config/server-config').ServerConfig
         // Validate port range
         if (cfg.port < 1024 || cfg.port > 65535) {
           throw new Error(`Port must be between 1024 and 65535, got ${cfg.port}`)
@@ -1064,7 +1064,7 @@ app.whenReady().then(async () => {
       })
 
       instance.wsServer.handle(RPC_CHANNELS.settings.GET_SERVER_STATUS, async () => {
-        const { getServerConfig: getConfig } = await import('@polo-ai/shared/config')
+        const { getServerConfig: getConfig } = await import('@z-h-ai/shared/config')
         const saved = getConfig()
         const protocol = runningServerState.tls ? 'wss' : 'ws'
 
@@ -1145,7 +1145,7 @@ app.whenReady().then(async () => {
     // Skip in thin-client mode — credentials are managed by the remote server.
     if (!isClientOnly) {
       try {
-        const { getCredentialManager } = await import('@polo-ai/shared/credentials')
+        const { getCredentialManager } = await import('@z-h-ai/shared/credentials')
         const credentialManager = getCredentialManager()
         const health = await credentialManager.checkHealth()
         if (!health.healthy) {
@@ -1170,7 +1170,7 @@ app.whenReady().then(async () => {
     // Runs after init so config and auth state are available.
     // Derives values from the default LLM connection instead of legacy config fields.
     try {
-      const { getLlmConnection, getDefaultLlmConnection } = await import('@polo-ai/shared/config')
+      const { getLlmConnection, getDefaultLlmConnection } = await import('@z-h-ai/shared/config')
       const workspaces = getWorkspaces()
       const defaultConnSlug = getDefaultLlmConnection()
       const defaultConn = defaultConnSlug ? getLlmConnection(defaultConnSlug) : null

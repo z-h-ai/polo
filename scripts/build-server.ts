@@ -522,7 +522,7 @@ function createRootConfig(config: ServerBuildConfig): void {
       moduleResolution: 'bundler',
       paths: {
         '@polo-ai/server-core/*': ['./packages/server-core/src/*'],
-        '@polo-ai/shared/*': ['./packages/shared/src/*'],
+        '@z-h-ai/shared/*': ['./packages/shared/src/*'],
         '@polo-ai/core/*': ['./packages/core/src/*'],
         '@polo-ai/session-tools-core/*': ['./packages/session-tools-core/src/*'],
       },

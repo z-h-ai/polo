@@ -1,0 +1,7 @@
+**/__tests__/**
+**/*.test.ts
+**/*.isolated.ts
+**/__tmp_*/**
+creator-skills/**
+creator-skills.public.d.ts
+creator-skills.fixtures.public.d.ts

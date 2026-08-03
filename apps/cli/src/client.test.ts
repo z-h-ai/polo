@@ -4,7 +4,7 @@ import {
   serializeEnvelope,
   deserializeEnvelope,
 } from '@polo-ai/server-core/transport'
-import type { MessageEnvelope } from '@polo-ai/shared/protocol'
+import type { MessageEnvelope } from '@z-h-ai/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Mock WS server helpers

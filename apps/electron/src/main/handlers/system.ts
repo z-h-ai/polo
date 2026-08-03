@@ -2,9 +2,9 @@ import { resolve } from 'path'
 import { join } from 'path'
 import { homedir } from 'os'
 import { execSync } from 'child_process'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@polo-ai/shared/config'
-import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@z-h-ai/shared/config'
+import { classifyExternalUrl, formatBlockedUrlError } from '@z-h-ai/shared/utils/url-safety'
 import { isUsableGitBashPath, validateGitBashPath } from '@polo-ai/server-core/services'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import type { RpcServer } from '@polo-ai/server-core/transport'
@@ -96,12 +96,12 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
 
   // Release notes
   server.handle(RPC_CHANNELS.releaseNotes.GET, async () => {
-    const { getCombinedReleaseNotes } = require('@polo-ai/shared/release-notes') as typeof import('@polo-ai/shared/release-notes')
+    const { getCombinedReleaseNotes } = require('@z-h-ai/shared/release-notes') as typeof import('@z-h-ai/shared/release-notes')
     return getCombinedReleaseNotes()
   })
 
   server.handle(RPC_CHANNELS.releaseNotes.GET_LATEST_VERSION, async () => {
-    const { getLatestReleaseVersion } = require('@polo-ai/shared/release-notes') as typeof import('@polo-ai/shared/release-notes')
+    const { getLatestReleaseVersion } = require('@z-h-ai/shared/release-notes') as typeof import('@z-h-ai/shared/release-notes')
     return getLatestReleaseVersion()
   })
 
@@ -295,12 +295,12 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
   })
 
   server.handle(RPC_CHANNELS.update.DISMISS, async (_ctx, version: string) => {
-    const { setDismissedUpdateVersion } = await import('@polo-ai/shared/config')
+    const { setDismissedUpdateVersion } = await import('@z-h-ai/shared/config')
     setDismissedUpdateVersion(version)
   })
 
   server.handle(RPC_CHANNELS.update.GET_DISMISSED, async () => {
-    const { getDismissedUpdateVersion } = await import('@polo-ai/shared/config')
+    const { getDismissedUpdateVersion } = await import('@z-h-ai/shared/config')
     return getDismissedUpdateVersion()
   })
 
@@ -408,12 +408,12 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
   })
 
   server.handle(RPC_CHANNELS.notification.GET_ENABLED, async () => {
-    const { getNotificationsEnabled } = await import('@polo-ai/shared/config/storage')
+    const { getNotificationsEnabled } = await import('@z-h-ai/shared/config/storage')
     return getNotificationsEnabled()
   })
 
   server.handle(RPC_CHANNELS.notification.SET_ENABLED, async (_ctx, enabled: boolean) => {
-    const { setNotificationsEnabled } = await import('@polo-ai/shared/config/storage')
+    const { setNotificationsEnabled } = await import('@z-h-ai/shared/config/storage')
     setNotificationsEnabled(enabled)
 
     if (enabled) {

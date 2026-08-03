@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { setupI18n } from '@polo-ai/shared/i18n/setupI18n'
+import { setupI18n } from '@z-h-ai/shared/i18n/setupI18n'
 
 // Bootstrap i18next with bundled English resources before importing the
 // component-under-test so its top-level i18n.t() calls return real strings.

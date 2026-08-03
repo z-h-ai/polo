@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { ComponentEntry } from './types'
-import { generateCallbackPage, type AppType } from '@polo-ai/shared/auth/callback-page'
+import { generateCallbackPage, type AppType } from '@z-h-ai/shared/auth/callback-page'
 
 /**
  * Preview component that renders OAuth callback HTML in a sandboxed iframe.

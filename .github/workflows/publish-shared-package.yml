@@ -1,0 +1,82 @@
+name: Publish shared package
+
+on:
+  push:
+    tags:
+      - "shared-v*"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-shared-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  prove-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact ref
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+
+      - name: Install repository dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "const p=require('./packages/shared/package.json'); if (process.env.RELEASE_TAG !== 'shared-v' + p.version) throw new Error('tag/version mismatch')"
+
+      - name: Build, pack, and run clean-consumer proof
+        run: bun run packages/shared/scripts/verify-creator-skills-package.ts --output-dir "$RUNNER_TEMP/shared-package-artifact"
+
+      - name: Attest the verified tarball
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ runner.temp }}/shared-package-artifact/z-h-ai-shared-0.11.0.tgz
+
+      - name: Configure GitHub Packages authentication
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+          registry-url: https://npm.pkg.github.com
+          scope: "@z-h-ai"
+
+      - name: Publish the verified tarball
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish "$RUNNER_TEMP/shared-package-artifact/z-h-ai-shared-0.11.0.tgz" --access restricted --registry https://npm.pkg.github.com
+
+      - name: Capture immutable registry metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm view @z-h-ai/shared@0.11.0 name version dist.tarball dist.integrity dist.shasum --json --registry https://npm.pkg.github.com > "$RUNNER_TEMP/shared-package-artifact/published-package.json"
+
+      - name: Upload proof and integrity evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: z-h-ai-shared-0.11.0-proof
+          path: ${{ runner.temp }}/shared-package-artifact
+          if-no-files-found: error
+          retention-days: 90

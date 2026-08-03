@@ -8,7 +8,7 @@
  * 3. Complete
  */
 import { useState, useCallback, useEffect } from 'react'
-import { i18n } from '@polo-ai/shared/i18n'
+import { i18n } from '@z-h-ai/shared/i18n'
 import type {
   OnboardingState,
   OnboardingStep,

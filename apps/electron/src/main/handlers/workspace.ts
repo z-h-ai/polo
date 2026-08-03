@@ -1,4 +1,4 @@
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
 

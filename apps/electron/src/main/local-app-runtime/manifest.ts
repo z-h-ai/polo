@@ -1,10 +1,10 @@
 import { isAbsolute, normalize, sep } from 'path'
-import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
+import { AdminEntityIdSchema } from '@z-h-ai/shared/admin/schemas'
 import type {
   LocalAppArchitecture,
   LocalAppPlatform,
   PoloAppManifest,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import { LocalAppRuntimeError } from './runtime-error'
 
 const VERSION_PATTERN = /^[0-9A-Za-z](?:[0-9A-Za-z._+-]{0,126}[0-9A-Za-z])?$/

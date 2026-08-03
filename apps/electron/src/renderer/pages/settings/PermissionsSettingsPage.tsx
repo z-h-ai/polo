@@ -17,7 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { Loader2 } from 'lucide-react'
 import { useAppShellContext, useActiveWorkspace } from '@/context/AppShellContext'
-import { type PermissionsConfigFile } from '@polo-ai/shared/agent/modes'
+import { type PermissionsConfigFile } from '@z-h-ai/shared/agent/modes'
 import {
   PermissionsDataTable,
   type PermissionRow,
@@ -27,7 +27,7 @@ import {
   SettingsCard,
 } from '@/components/settings'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
-import { getDocUrl } from '@polo-ai/shared/docs/doc-links'
+import { getDocUrl } from '@z-h-ai/shared/docs/doc-links'
 import { routes } from '@/lib/navigate'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 

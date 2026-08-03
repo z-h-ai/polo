@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import type { BrowserInstanceInfo } from '@polo-ai/shared/protocol'
+import type { BrowserInstanceInfo } from '@z-h-ai/shared/protocol'
 
 mock.module('electron', () => ({
   ipcMain: { handle: () => {}, on: () => {} },

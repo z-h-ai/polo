@@ -3,7 +3,7 @@
  *
  * These were previously in apps/electron/src/shared/types.ts.
  * Extracted here so handler code in @polo-ai/server-core can import
- * from @polo-ai/shared/protocol without reaching into the app.
+ * from @z-h-ai/shared/protocol without reaching into the app.
  */
 
 import type {

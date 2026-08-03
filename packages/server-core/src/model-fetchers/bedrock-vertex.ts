@@ -4,9 +4,9 @@
  * Provider-agnostic wrapper that delegates model discovery to backend drivers.
  */
 
-import type { ModelFetcher, ModelFetchResult, ModelFetcherCredentials } from '@polo-ai/shared/config'
-import type { LlmConnection } from '@polo-ai/shared/config'
-import { fetchBackendModels } from '@polo-ai/shared/agent/backend'
+import type { ModelFetcher, ModelFetchResult, ModelFetcherCredentials } from '@z-h-ai/shared/config'
+import type { LlmConnection } from '@z-h-ai/shared/config'
+import { fetchBackendModels } from '@z-h-ai/shared/agent/backend'
 import { getHostRuntime } from './runtime'
 
 export class BedrockVertexModelFetcher implements ModelFetcher {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, jest } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { HandlerFn, RequestContext, RpcServer } from '../../transport/types'
 import {
   __resetTransferStateForTests,

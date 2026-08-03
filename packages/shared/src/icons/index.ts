@@ -1,7 +1,7 @@
 /**
  * Icons module - re-exports all icon types and constants.
  *
- * Import via: `import { IconSize, ResolvedEntityIcon } from '@polo-ai/shared/icons'`
+ * Import via: `import { IconSize, ResolvedEntityIcon } from '@z-h-ai/shared/icons'`
  */
 export {
   type IconConfig,

@@ -24,7 +24,7 @@ import type {
   BrowserWaitArgs,
   BrowserWaitResult,
 } from '../handlers/browser-pane-manager-interface'
-import type { BrowserInstanceInfo } from '@polo-ai/shared/protocol'
+import type { BrowserInstanceInfo } from '@z-h-ai/shared/protocol'
 
 const NOT_AVAILABLE = 'Browser automation is not available in headless mode'
 

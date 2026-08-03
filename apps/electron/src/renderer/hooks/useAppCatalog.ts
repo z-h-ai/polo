@@ -1,26 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { i18n } from '@polo-ai/shared/i18n'
+import { i18n } from '@z-h-ai/shared/i18n'
 import type {
   AppCatalogCacheEntry,
   CatalogApp,
   DeniedAppCatalogSnapshot,
-} from '@polo-ai/shared/admin'
+} from '@z-h-ai/shared/admin'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
-} from '@polo-ai/shared/admin/authorization'
+} from '@z-h-ai/shared/admin/authorization'
 import {
   compareCatalogSemVer,
   normalizeCatalogSemVer,
-} from '@polo-ai/shared/admin/semver'
-import { getAppCatalogApps } from '@polo-ai/shared/admin/catalog-view'
+} from '@z-h-ai/shared/admin/semver'
+import { getAppCatalogApps } from '@z-h-ai/shared/admin/catalog-view'
 import {
   createLocalAppScopeKey,
   normalizeLocalAppPermissions,
   type CatalogLocalAppScope,
   type LocalAppRuntimeStatus,
   type LocalAppStartResult,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import { useOptionalOrganizationContext } from '@/context/OrganizationContext'
 import {
   emitAdminCatalogSessionAuthFailure,

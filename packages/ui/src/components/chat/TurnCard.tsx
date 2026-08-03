@@ -4,7 +4,7 @@ import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1 } from '@polo-ai/core'
 import { normalizePath, pathStartsWith, stripPathPrefix } from '@polo-ai/core/utils'
-import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
+import { isParentTaskTool } from '@z-h-ai/shared/utils/toolNames'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   ChevronRight,

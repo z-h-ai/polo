@@ -13,8 +13,8 @@
  * returns the absolute path. Paste/web-drag keep the filename-only synthetic path.
  */
 
-import type { FileAttachment } from '@polo-ai/shared/protocol'
-import type { DraftAttachmentContent, DraftAttachmentRef } from '@polo-ai/shared/config'
+import type { FileAttachment } from '@z-h-ai/shared/protocol'
+import type { DraftAttachmentContent, DraftAttachmentRef } from '@z-h-ai/shared/config'
 
 /** Per-attachment cap on inlined draft content. Huge pastes are dropped from the draft
  *  (with a warn) rather than bloating drafts.json. Tuned to the same 20 MB limit the

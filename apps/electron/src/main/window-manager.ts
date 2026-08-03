@@ -4,8 +4,8 @@ import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
 import { release } from 'os'
 import { fileURLToPath } from 'url'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
-import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
+import { getWorkspaceByNameOrId } from '@z-h-ai/shared/config'
+import { classifyExternalUrl, formatBlockedUrlError } from '@z-h-ai/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
 import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
@@ -59,7 +59,7 @@ export class WindowManager {
   private windows: Map<number, ManagedWindow> = new Map()  // webContents.id → ManagedWindow
   private focusedModeWindows: Set<number> = new Set()  // webContents.id of windows in focused mode
   private pendingCloseTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Fallback timeouts for window close
-  private eventSink: ((channel: string, target: import('@polo-ai/shared/protocol').PushTarget, ...args: any[]) => void) | null = null
+  private eventSink: ((channel: string, target: import('@z-h-ai/shared/protocol').PushTarget, ...args: any[]) => void) | null = null
   private clientResolver: ((wcId: number) => string | undefined) | null = null
   private keyboardCloseIntents: Set<number> = new Set()  // webContents.id flagged by Cmd/Ctrl+W before close
   private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
@@ -71,7 +71,7 @@ export class WindowManager {
    * instead of webContents.send. Called after server creation.
    */
   setRpcEventSink(
-    sink: (channel: string, target: import('@polo-ai/shared/protocol').PushTarget, ...args: any[]) => void,
+    sink: (channel: string, target: import('@z-h-ai/shared/protocol').PushTarget, ...args: any[]) => void,
     resolver: (wcId: number) => string | undefined
   ): void {
     this.eventSink = sink
@@ -79,7 +79,7 @@ export class WindowManager {
   }
 
   /** Return current RPC event sink, if transport has been initialized. */
-  getRpcEventSink(): ((channel: string, target: import('@polo-ai/shared/protocol').PushTarget, ...args: any[]) => void) | null {
+  getRpcEventSink(): ((channel: string, target: import('@z-h-ai/shared/protocol').PushTarget, ...args: any[]) => void) | null {
     return this.eventSink
   }
 

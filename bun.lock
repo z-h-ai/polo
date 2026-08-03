@@ -121,7 +121,7 @@
       },
       "dependencies": {
         "@polo-ai/server-core": "workspace:*",
-        "@polo-ai/shared": "workspace:*",
+        "@z-h-ai/shared": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -141,7 +141,6 @@
         "@polo-ai/core": "workspace:*",
         "@polo-ai/messaging-gateway": "workspace:*",
         "@polo-ai/server-core": "workspace:*",
-        "@polo-ai/shared": "workspace:*",
         "@polo-ai/ui": "workspace:*",
         "@radix-ui/react-context-menu": "^2.2.16",
         "@radix-ui/react-dialog": "^1.1.15",
@@ -150,6 +149,7 @@
         "@radix-ui/react-popover": "^1.1.15",
         "@radix-ui/react-switch": "^1.2.6",
         "@tanstack/react-table": "^8.21.3",
+        "@z-h-ai/shared": "workspace:*",
         "chrono-node": "^2.9.0",
         "cmdk": "^1.1.1",
         "electron-log": "^5.4.3",
@@ -217,8 +217,8 @@
       "name": "@polo-ai/webui",
       "version": "0.10.0",
       "dependencies": {
-        "@polo-ai/shared": "workspace:*",
         "@polo-ai/ui": "workspace:*",
+        "@z-h-ai/shared": "workspace:*",
         "i18next": "^26.0.3",
         "i18next-browser-languagedetector": "^8.2.1",
         "jotai": "^2.16.0",
@@ -247,7 +247,7 @@
         "@polo-ai/core": "workspace:*",
         "@polo-ai/messaging-whatsapp-worker": "workspace:*",
         "@polo-ai/server-core": "workspace:*",
-        "@polo-ai/shared": "workspace:*",
+        "@z-h-ai/shared": "workspace:*",
         "grammy": "^1.35.0",
       },
       "devDependencies": {
@@ -296,7 +296,7 @@
         "@polo-ai/core": "workspace:*",
         "@polo-ai/messaging-gateway": "workspace:*",
         "@polo-ai/server-core": "workspace:*",
-        "@polo-ai/shared": "workspace:*",
+        "@z-h-ai/shared": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",
@@ -310,7 +310,7 @@
       "dependencies": {
         "@mariozechner/pi-ai": "0.73.1",
         "@polo-ai/core": "workspace:*",
-        "@polo-ai/shared": "workspace:*",
+        "@z-h-ai/shared": "workspace:*",
         "jose": "^6.0.0",
         "sharp": "0.34.5",
         "ws": "^8.19.0",
@@ -329,7 +329,7 @@
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.11.0",
         "@polo-ai/session-tools-core": "workspace:*",
-        "@polo-ai/shared": "workspace:*",
+        "@z-h-ai/shared": "workspace:*",
         "zod": "^3.23.0",
       },
       "devDependencies": {
@@ -350,16 +350,14 @@
       },
     },
     "packages/shared": {
-      "name": "@polo-ai/shared",
-      "version": "0.10.0",
+      "name": "@z-h-ai/shared",
+      "version": "0.11.0",
       "dependencies": {
         "@isaacs/ttlcache": "^2.1.4",
         "@leeoniya/ufuzzy": "^1.0.19",
         "@mariozechner/pi-agent-core": "0.73.1",
         "@mariozechner/pi-ai": "0.73.1",
         "@mariozechner/pi-coding-agent": "0.73.1",
-        "@polo-ai/core": "workspace:*",
-        "@polo-ai/session-tools-core": "workspace:*",
         "bash-parser": "^0.5.0",
         "croner": "^10.0.1",
         "date-fns": "^4.1.0",
@@ -388,9 +386,9 @@
       "dependencies": {
         "@paper-design/shaders-react": "^0.0.69",
         "@polo-ai/core": "workspace:*",
-        "@polo-ai/shared": "workspace:*",
         "@types/mdast": "^4.0.0",
         "@uiw/react-json-view": "^2.0.0-alpha.40",
+        "@z-h-ai/shared": "workspace:*",
         "beautiful-mermaid": "*",
         "fflate": "^0.8.2",
         "nice-ticks": "^1.0.2",
@@ -1054,8 +1052,6 @@
 
     "@polo-ai/session-tools-core": ["@polo-ai/session-tools-core@workspace:packages/session-tools-core"],
 
-    "@polo-ai/shared": ["@polo-ai/shared@workspace:packages/shared"],
-
     "@polo-ai/ui": ["@polo-ai/ui@workspace:packages/ui"],
 
     "@polo-ai/viewer": ["@polo-ai/viewer@workspace:apps/viewer"],
@@ -1661,6 +1657,8 @@
     "@whiskeysockets/eslint-config": ["@whiskeysockets/eslint-config@github:whiskeysockets/eslint-config#299e838", { "dependencies": { "@typescript-eslint/eslint-plugin": "^8.37.0", "@typescript-eslint/parser": "^8.37.0", "eslint-plugin-simple-import-sort": "^12.1.1" }, "peerDependencies": { "eslint": "^9.31.0", "typescript": ">=4" } }, "WhiskeySockets-eslint-config-299e838", "sha512-xEDOVzkTjnpMpel8TwEU93CbCtnxyLAmqTEWAa8ywOR6ub9i2FH2OIAoAOXRoJEbGWO1GUMd20L7M5ePCRWXhw=="],
 
     "@xmldom/xmldom": ["@xmldom/xmldom@0.8.11", "", {}, "sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw=="],
+
+    "@z-h-ai/shared": ["@z-h-ai/shared@workspace:packages/shared"],
 
     "abbrev": ["abbrev@3.0.1", "", {}, "sha512-AO2ac6pjRB3SJmGJo+v5/aK6Omggp6fsLrs6wN9bd35ulu4cCwaAU9+7ZhXjeqHVkaHThLuzH0nZr0YpCDhygg=="],
 

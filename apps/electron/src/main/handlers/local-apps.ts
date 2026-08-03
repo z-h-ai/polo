@@ -6,18 +6,18 @@ import {
   isAppCatalogAccessDeniedForAccount,
   type AppReleaseSummary,
   type CatalogApp,
-} from '@polo-ai/shared/admin'
-import { getAdminUrl } from '@polo-ai/shared/config'
+} from '@z-h-ai/shared/admin'
+import { getAdminUrl } from '@z-h-ai/shared/config'
 import {
   compareCatalogSemVer,
   normalizeCatalogSemVer,
-} from '@polo-ai/shared/admin/semver'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+} from '@z-h-ai/shared/admin/semver'
+import { getCredentialManager } from '@z-h-ai/shared/credentials'
 import {
   normalizeLocalAppPermissions,
   projectLocalAppStatusForCatalogAccess,
   RPC_CHANNELS,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import type {
   CatalogLocalAppScope,
   LocalAppAvailableRelease,
@@ -26,7 +26,7 @@ import type {
   LocalAppLogsOptions,
   LocalAppRuntimeStatus,
   LocalAppUninstallOptions,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import {
   getScopedLocalAppRuntimeRegistry,

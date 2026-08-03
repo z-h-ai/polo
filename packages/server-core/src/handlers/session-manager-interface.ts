@@ -8,9 +8,9 @@
 
 import type { Workspace, WorkspaceInfo, ActiveSessionInfo } from '@polo-ai/core/types'
 import type { StoredAttachment, AnnotationV1 } from '@polo-ai/core/types'
-import type { PermissionMode } from '@polo-ai/shared/agent/mode-types'
-import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
-import type { AuthResult } from '@polo-ai/shared/agent'
+import type { PermissionMode } from '@z-h-ai/shared/agent/mode-types'
+import type { ThinkingLevel } from '@z-h-ai/shared/agent/thinking-levels'
+import type { AuthResult } from '@z-h-ai/shared/agent'
 import type {
   Session,
   SessionStatus,
@@ -22,8 +22,8 @@ import type {
   PermissionModeState,
   UnreadSummary,
   ShareResult,
-} from '@polo-ai/shared/protocol'
-import type { SessionBundle, DispatchMode } from '@polo-ai/shared/sessions'
+} from '@z-h-ai/shared/protocol'
+import type { SessionBundle, DispatchMode } from '@z-h-ai/shared/sessions'
 import type { EventSink } from '../transport'
 
 export interface ISessionManager {
@@ -162,7 +162,7 @@ export interface ISessionManager {
   exportRemoteSessionTransfer(
     sessionId: string,
     workspaceId: string,
-  ): Promise<import('@polo-ai/shared/protocol').RemoteSessionTransferPayload | null>
+  ): Promise<import('@z-h-ai/shared/protocol').RemoteSessionTransferPayload | null>
 
   /**
    * Import a session bundle into a target workspace.
@@ -180,8 +180,8 @@ export interface ISessionManager {
    */
   importRemoteSessionTransfer(
     workspaceId: string,
-    payload: import('@polo-ai/shared/protocol').RemoteSessionTransferPayload,
-  ): Promise<import('@polo-ai/shared/protocol').ImportRemoteSessionTransferResult>
+    payload: import('@z-h-ai/shared/protocol').RemoteSessionTransferPayload,
+  ): Promise<import('@z-h-ai/shared/protocol').ImportRemoteSessionTransferResult>
 
   // ---------------------------------------------------------------------------
   // Utilities

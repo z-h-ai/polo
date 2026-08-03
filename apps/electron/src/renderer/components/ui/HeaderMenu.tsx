@@ -19,7 +19,7 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
 } from './styled-dropdown'
-import { type DocFeature, getDocUrl } from '@polo-ai/shared/docs/doc-links'
+import { type DocFeature, getDocUrl } from '@z-h-ai/shared/docs/doc-links'
 
 interface HeaderMenuProps {
   /** Route string for Open in New Window action */

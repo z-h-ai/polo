@@ -8,7 +8,7 @@ type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | a
 const getDefaultThinkingLevelMock = mock(() => 'think')
 const setDefaultThinkingLevelMock = mock((_level: string) => true)
 
-mock.module('@polo-ai/shared/config', () => ({
+mock.module('@z-h-ai/shared/config', () => ({
   getPreferencesPath: () => '/tmp/preferences.json',
   getSessionDraft: () => null,
   setSessionDraft: () => {},

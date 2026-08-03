@@ -39,7 +39,7 @@
     "@polo-ai/core": "workspace:*",
     "@polo-ai/messaging-gateway": "workspace:*",
     "@polo-ai/server-core": "workspace:*",
-    "@polo-ai/shared": "workspace:*",
+    "@z-h-ai/shared": "workspace:*",
     "@polo-ai/ui": "workspace:*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

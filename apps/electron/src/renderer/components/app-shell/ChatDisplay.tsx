@@ -42,8 +42,8 @@ import {
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
-import type { PermissionMode } from "@polo-ai/shared/agent/modes"
-import type { ThinkingLevel } from "@polo-ai/shared/agent/thinking-levels"
+import type { PermissionMode } from "@z-h-ai/shared/agent/modes"
+import type { ThinkingLevel } from "@z-h-ai/shared/agent/thinking-levels"
 import {
   TurnCard,
   UserMessageBubble,
@@ -186,7 +186,7 @@ interface ChatDisplayProps {
   skills?: LoadedSkill[]
   // Label selection (for #labels)
   /** Available label configs (tree) for label menu and badge display */
-  labels?: import('@polo-ai/shared/labels').LabelConfig[]
+  labels?: import('@z-h-ai/shared/labels').LabelConfig[]
   /** Callback when labels change */
   onLabelsChange?: (labels: string[]) => void
   // State/status selection (for # menu and ActiveOptionBadges)

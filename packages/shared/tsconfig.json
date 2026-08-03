@@ -25,8 +25,8 @@
     "paths": {
       "@polo-ai/core": ["../core/src/index.ts"],
       "@polo-ai/core/*": ["../core/src/*"],
-      "@polo-ai/shared": ["./src/index.ts"],
-      "@polo-ai/shared/*": ["./src/*"]
+      "@z-h-ai/shared": ["./src/index.ts"],
+      "@z-h-ai/shared/*": ["./src/*"]
     }
   },
   "include": ["src/**/*"],

@@ -1,4 +1,4 @@
-import type { CreatorSkillSafetyStatus } from '@polo-ai/shared/creator-skills'
+import type { CreatorSkillSafetyStatus } from '@z-h-ai/shared/creator-skills'
 
 export interface CreatorSkillSafetyRefreshIdentity {
   workspaceId: string

@@ -166,16 +166,16 @@ export default [
       'no-restricted-imports': ['error', {
         paths: [
           {
-            name: '@polo-ai/shared/codex',
-            message: 'Use provider-agnostic APIs from @polo-ai/shared/agent/backend instead.',
+            name: '@z-h-ai/shared/codex',
+            message: 'Use provider-agnostic APIs from @z-h-ai/shared/agent/backend instead.',
           },
           {
-            name: '@polo-ai/shared/agent/claude-agent',
-            message: 'Provider backends must stay behind @polo-ai/shared/agent/backend.',
+            name: '@z-h-ai/shared/agent/claude-agent',
+            message: 'Provider backends must stay behind @z-h-ai/shared/agent/backend.',
           },
           {
-            name: '@polo-ai/shared/agent/pi-agent',
-            message: 'Provider backends must stay behind @polo-ai/shared/agent/backend.',
+            name: '@z-h-ai/shared/agent/pi-agent',
+            message: 'Provider backends must stay behind @z-h-ai/shared/agent/backend.',
           },
         ],
       }],
@@ -189,7 +189,7 @@ export default [
       'no-restricted-syntax': ['error',
         {
           selector: "CallExpression[callee.name='fetch']",
-          message: 'Do not call provider APIs directly in Electron model fetchers. Delegate to fetchBackendModels() from @polo-ai/shared/agent/backend.',
+          message: 'Do not call provider APIs directly in Electron model fetchers. Delegate to fetchBackendModels() from @z-h-ai/shared/agent/backend.',
         },
         {
           selector: "ImportDeclaration[source.value='@anthropic-ai/claude-agent-sdk']",

@@ -1,5 +1,5 @@
 import { Menu, app, shell, BrowserWindow } from 'electron'
-import { i18n } from '@polo-ai/shared/i18n'
+import { i18n } from '@z-h-ai/shared/i18n'
 import { RPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
 import { EDIT_MENU, VIEW_MENU, WINDOW_MENU } from '../shared/menu-schema'
 import type { MenuItem } from '../shared/menu-schema'

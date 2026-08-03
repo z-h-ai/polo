@@ -18,7 +18,7 @@ import { DataTableOverlay } from '@polo-ai/ui'
 import { LabelIcon } from '@/components/ui/label-icon'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
-import type { LabelConfig } from '@polo-ai/shared/labels'
+import type { LabelConfig } from '@z-h-ai/shared/labels'
 
 interface LabelsDataTableProps {
   /** Label tree (root-level nodes with nested children) */

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
-import { loadSource, loadWorkspaceSources, getSourceCredentialManager } from '@polo-ai/shared/sources'
-import { createPendingFlow } from '@polo-ai/shared/auth'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import { getWorkspaceByNameOrId } from '@z-h-ai/shared/config'
+import { loadSource, loadWorkspaceSources, getSourceCredentialManager } from '@z-h-ai/shared/sources'
+import { createPendingFlow } from '@z-h-ai/shared/auth'
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 

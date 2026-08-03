@@ -1,5 +1,5 @@
 import { app, session, shell } from 'electron'
-import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
+import { classifyExternalUrl, formatBlockedUrlError } from '@z-h-ai/shared/utils/url-safety'
 import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
 import { describeUrlForLog } from './deep-link-log'
 import { windowLog } from './logger'

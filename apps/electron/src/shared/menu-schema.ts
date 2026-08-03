@@ -13,7 +13,7 @@
  */
 
 import { RPC_CHANNELS } from './types'
-import { FEATURE_FLAGS } from '@polo-ai/shared/feature-flags'
+import { FEATURE_FLAGS } from '@z-h-ai/shared/feature-flags'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

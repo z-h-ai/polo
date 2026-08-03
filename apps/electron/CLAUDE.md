@@ -96,7 +96,7 @@ apps/webui/          — Web thin client
 
 Additionally, `no-restricted-imports` blocks:
 - `react-hotkeys-hook` → use action registry
-- Provider SDKs in `src/main/` → use `@polo-ai/shared/agent/backend` abstraction
+- Provider SDKs in `src/main/` → use `@z-h-ai/shared/agent/backend` abstraction
 - Direct `fetch` / SDK imports in `src/main/model-fetchers/` → delegate to backend APIs
 
 ## Build Notes
@@ -111,7 +111,7 @@ Additionally, `no-restricted-imports` blocks:
 ```
 @/*          → src/renderer/*
 @config/*    → ../../packages/shared/src/config/*
-@polo-ai/shared → ../../packages/shared/src/index.ts
+@z-h-ai/shared → ../../packages/shared/src/index.ts
 ```
 
 ## i18n

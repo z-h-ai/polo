@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import type { CatalogApp } from '@polo-ai/shared/admin'
-import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
+import type { CatalogApp } from '@z-h-ai/shared/admin'
+import { createLocalAppScopeKey } from '@z-h-ai/shared/protocol'
 import {
   BUSY_RUNTIME_STATUS_LIMIT,
   CATALOG_RUNTIME_STATUS_LIMIT,

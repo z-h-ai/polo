@@ -1,9 +1,9 @@
 import { existsSync } from 'node:fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, updateWorkspaceRemoteServer } from '@polo-ai/shared/config'
-import { perf } from '@polo-ai/shared/utils'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import { getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, updateWorkspaceRemoteServer } from '@z-h-ai/shared/config'
+import { perf } from '@z-h-ai/shared/utils'
 import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { isValidWorkspaceRootPath } from '../../utils/path-validation'
@@ -278,28 +278,28 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   // ============================================================
 
   server.handle(RPC_CHANNELS.theme.GET_APP, async () => {
-    const { loadAppTheme } = await import('@polo-ai/shared/config/storage')
+    const { loadAppTheme } = await import('@z-h-ai/shared/config/storage')
     return loadAppTheme()
   })
 
   // Preset themes (app-level)
   server.handle(RPC_CHANNELS.theme.GET_PRESETS, async () => {
-    const { loadPresetThemes } = await import('@polo-ai/shared/config/storage')
+    const { loadPresetThemes } = await import('@z-h-ai/shared/config/storage')
     return loadPresetThemes()
   })
 
   server.handle(RPC_CHANNELS.theme.LOAD_PRESET, async (_ctx, themeId: string) => {
-    const { loadPresetTheme } = await import('@polo-ai/shared/config/storage')
+    const { loadPresetTheme } = await import('@z-h-ai/shared/config/storage')
     return loadPresetTheme(themeId)
   })
 
   server.handle(RPC_CHANNELS.theme.GET_COLOR_THEME, async () => {
-    const { getColorTheme } = await import('@polo-ai/shared/config/storage')
+    const { getColorTheme } = await import('@z-h-ai/shared/config/storage')
     return getColorTheme()
   })
 
   server.handle(RPC_CHANNELS.theme.SET_COLOR_THEME, async (_ctx, themeId: string) => {
-    const { setColorTheme } = await import('@polo-ai/shared/config/storage')
+    const { setColorTheme } = await import('@z-h-ai/shared/config/storage')
     setColorTheme(themeId)
   })
 
@@ -310,8 +310,8 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
 
   // Workspace-level theme overrides
   server.handle(RPC_CHANNELS.theme.GET_WORKSPACE_COLOR_THEME, async (_ctx, workspaceId: string) => {
-    const { getWorkspaces } = await import('@polo-ai/shared/config/storage')
-    const { getWorkspaceColorTheme } = await import('@polo-ai/shared/workspaces/storage')
+    const { getWorkspaces } = await import('@z-h-ai/shared/config/storage')
+    const { getWorkspaceColorTheme } = await import('@z-h-ai/shared/workspaces/storage')
     const workspaces = getWorkspaces()
     const workspace = workspaces.find(w => w.id === workspaceId)
     if (!workspace) return null
@@ -319,8 +319,8 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   })
 
   server.handle(RPC_CHANNELS.theme.SET_WORKSPACE_COLOR_THEME, async (_ctx, workspaceId: string, themeId: string | null) => {
-    const { getWorkspaces } = await import('@polo-ai/shared/config/storage')
-    const { setWorkspaceColorTheme } = await import('@polo-ai/shared/workspaces/storage')
+    const { getWorkspaces } = await import('@z-h-ai/shared/config/storage')
+    const { setWorkspaceColorTheme } = await import('@z-h-ai/shared/workspaces/storage')
     const workspaces = getWorkspaces()
     const workspace = workspaces.find(w => w.id === workspaceId)
     if (!workspace) return
@@ -328,8 +328,8 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   })
 
   server.handle(RPC_CHANNELS.theme.GET_ALL_WORKSPACE_THEMES, async () => {
-    const { getWorkspaces } = await import('@polo-ai/shared/config/storage')
-    const { getWorkspaceColorTheme } = await import('@polo-ai/shared/workspaces/storage')
+    const { getWorkspaces } = await import('@z-h-ai/shared/config/storage')
+    const { getWorkspaceColorTheme } = await import('@z-h-ai/shared/workspaces/storage')
     const workspaces = getWorkspaces()
     const themes: Record<string, string | undefined> = {}
     for (const ws of workspaces) {
@@ -352,16 +352,16 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { listViews } = await import('@polo-ai/shared/views/storage')
+    const { listViews } = await import('@z-h-ai/shared/views/storage')
     return listViews(workspace.rootPath)
   })
 
   // Save views (replaces full array)
-  server.handle(RPC_CHANNELS.views.SAVE, async (_ctx, workspaceId: string, views: import('@polo-ai/shared/views').ViewConfig[]) => {
+  server.handle(RPC_CHANNELS.views.SAVE, async (_ctx, workspaceId: string, views: import('@z-h-ai/shared/views').ViewConfig[]) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { saveViews } = await import('@polo-ai/shared/views/storage')
+    const { saveViews } = await import('@z-h-ai/shared/views/storage')
     saveViews(workspace.rootPath, views)
     // Broadcast labels changed since views are used alongside labels in sidebar
     pushTyped(server, RPC_CHANNELS.labels.CHANGED, { to: 'workspace', workspaceId }, workspaceId)
@@ -374,9 +374,9 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   // Tool icon mappings — loads tool-icons.json and resolves each entry's icon to a data URL
   // for display in the Appearance settings page
   server.handle(RPC_CHANNELS.toolIcons.GET_MAPPINGS, async () => {
-    const { getToolIconsDir } = await import('@polo-ai/shared/config/storage')
-    const { loadToolIconConfig } = await import('@polo-ai/shared/utils/cli-icon-resolver')
-    const { encodeIconToDataUrl } = await import('@polo-ai/shared/utils/icon-encoder')
+    const { getToolIconsDir } = await import('@z-h-ai/shared/config/storage')
+    const { loadToolIconConfig } = await import('@z-h-ai/shared/utils/cli-icon-resolver')
+    const { encodeIconToDataUrl } = await import('@z-h-ai/shared/utils/icon-encoder')
     const { join } = await import('path')
 
     const toolIconsDir = getToolIconsDir()
@@ -400,7 +400,7 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
 
   // Logo URL resolution (uses Node.js filesystem cache for provider domains)
   server.handle(RPC_CHANNELS.logo.GET_URL, async (_ctx, serviceUrl: string, provider?: string) => {
-    const { getLogoUrl } = await import('@polo-ai/shared/utils/logo')
+    const { getLogoUrl } = await import('@z-h-ai/shared/utils/logo')
     const result = getLogoUrl(serviceUrl, provider)
     return result
   })

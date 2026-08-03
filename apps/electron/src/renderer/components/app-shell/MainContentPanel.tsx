@@ -34,7 +34,7 @@ import {
 } from '@/contexts/NavigationContext'
 import { useSessionSelection, useIsMultiSelectActive, useSelectedIds, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
-import { extractLabelId } from '@polo-ai/shared/labels'
+import { extractLabelId } from '@z-h-ai/shared/labels'
 import type { SessionStatusId } from '@/config/session-status-config'
 import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'

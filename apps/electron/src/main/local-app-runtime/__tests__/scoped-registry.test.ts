@@ -13,7 +13,7 @@ import type {
   LocalAppInstalledApp,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import { LocalAppRuntimeManager } from '../manager'
 import { LocalAppRuntimeError } from '../runtime-error'
 import {

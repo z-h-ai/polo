@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type {
   CredentialManager,
-} from '@polo-ai/shared/credentials'
+} from '@z-h-ai/shared/credentials'
 import type { ISessionManager } from '@polo-ai/server-core/handlers'
 
 import { MessagingGatewayRegistry } from '../registry'

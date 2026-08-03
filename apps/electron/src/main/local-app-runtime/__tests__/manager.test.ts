@@ -24,14 +24,14 @@ import { fetch as undiciFetch } from 'undici'
 import {
   LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
   LOCAL_APP_INSTALL_RPC_TIMEOUT_MS,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
   LocalAppInstallRequest,
   LocalAppPlatform,
   LocalAppRuntimeStatus,
   PoloAppManifest,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import {
   LocalAppRuntimeManager,
   type LocalAppRuntimeManagerOptions,

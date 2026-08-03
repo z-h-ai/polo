@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import type { AdminLlmConnection } from '@polo-ai/shared/admin'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import type { AdminLlmConnection } from '@z-h-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -272,7 +272,7 @@ const mockCredentialManager = {
   delete: deleteStoredCredential,
 }
 
-mock.module('@polo-ai/shared/admin', () => ({
+mock.module('@z-h-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
   setAppCatalogAccessMode: (
@@ -382,7 +382,7 @@ mock.module('@polo-ai/shared/admin', () => ({
   },
 }))
 
-mock.module('@polo-ai/shared/config', () => ({
+mock.module('@z-h-ai/shared/config', () => ({
   getWorkspaceByNameOrId: () => null,
   setSetupDeferred: () => {},
   getAdminUrl: () => configState.adminUrl,
@@ -417,7 +417,7 @@ mock.module('@polo-ai/shared/config', () => ({
   },
 }))
 
-mock.module('@polo-ai/shared/credentials', () => ({
+mock.module('@z-h-ai/shared/credentials', () => ({
   getCredentialManager: () => mockCredentialManager,
 }))
 

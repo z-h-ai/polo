@@ -12,14 +12,14 @@ import type {
   AppCatalogSyncResult,
   CatalogApp,
   DeniedAppCatalogSnapshot,
-} from '@polo-ai/shared/admin'
+} from '@z-h-ai/shared/admin'
 import type {
   CatalogLocalAppScope,
   LocalAppCatalogInstallRequest,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
-} from '@polo-ai/shared/protocol'
-import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
+import { createLocalAppScopeKey } from '@z-h-ai/shared/protocol'
 import { createOrganizationContextKey } from '@/lib/organization-storage'
 
 GlobalRegistrator.register()

@@ -8,7 +8,7 @@
  * so releaseBrowserOwnershipOnForcedStop() accepts IBrowserPaneManager.
  */
 
-import type { BrowserInstanceInfo } from '@polo-ai/shared/protocol'
+import type { BrowserInstanceInfo } from '@z-h-ai/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Supporting types — minimal subsets of BPM's internal types

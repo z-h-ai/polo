@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import type { RpcServer } from '@polo-ai/server-core/transport'
-import type { AppCatalogCacheEntry } from '@polo-ai/shared/admin'
+import type { AppCatalogCacheEntry } from '@z-h-ai/shared/admin'
 import type {
   CatalogLocalAppScope,
   LocalAppInstalledApp,
   LocalAppRuntimeStatus,
-} from '@polo-ai/shared/protocol'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 
 type Handler = (
   context: { clientId: string; signal: AbortSignal },
@@ -153,7 +153,7 @@ const scopedRegistry = {
   isInstalledAndReady,
 }
 
-mock.module('@polo-ai/shared/admin', () => ({
+mock.module('@z-h-ai/shared/admin', () => ({
   AdminClient: class {
     getAppReleaseDownload = getAppReleaseDownload
   },
@@ -166,11 +166,11 @@ mock.module('@polo-ai/shared/admin', () => ({
   ],
 }))
 
-mock.module('@polo-ai/shared/config', () => ({
+mock.module('@z-h-ai/shared/config', () => ({
   getAdminUrl: () => 'https://admin.example.com',
 }))
 
-mock.module('@polo-ai/shared/credentials', () => ({
+mock.module('@z-h-ai/shared/credentials', () => ({
   getCredentialManager: () => ({
     getAdminTokens: async () => signedInAccountId
       ? { userId: signedInAccountId, accessToken: `${signedInAccountId}-access` }

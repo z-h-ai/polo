@@ -10,8 +10,8 @@
  */
 
 import type { ISessionManager } from '@polo-ai/server-core/handlers'
-import { readFileAttachment } from '@polo-ai/shared/utils'
-import type { FileAttachment } from '@polo-ai/shared/protocol'
+import { readFileAttachment } from '@z-h-ai/shared/utils'
+import type { FileAttachment } from '@z-h-ai/shared/protocol'
 import {
   evaluateBindingAccess,
   executeRejection,

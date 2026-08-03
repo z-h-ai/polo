@@ -99,7 +99,7 @@ polo-ai/
 │   └── tui/         # Terminal CLI (deprecated)
 └── packages/
     ├── core/        # @polo-ai/core - Shared types
-    ├── shared/      # @polo-ai/shared - Business logic
+    ├── shared/      # @z-h-ai/shared - Business logic
     └── ui/          # @polo-ai/ui - React components
 ```
 

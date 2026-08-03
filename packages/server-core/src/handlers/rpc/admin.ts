@@ -19,12 +19,12 @@ import {
   type AdminRefreshResponse,
   type AdminUser,
   type DeniedAppCatalogSnapshot,
-} from '@polo-ai/shared/admin'
+} from '@z-h-ai/shared/admin'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
-} from '@polo-ai/shared/admin/authorization'
-import { createOrganizationContextKey } from '@polo-ai/shared/admin/context-key'
+} from '@z-h-ai/shared/admin/authorization'
+import { createOrganizationContextKey } from '@z-h-ai/shared/admin/context-key'
 import {
   AdminLoginRpcInputSchema,
   CatalogOrganizationIdRpcInputSchema,
@@ -38,7 +38,7 @@ import {
   SetAdminPasswordRpcInputSchema,
   UpdateOrganizationMemberRpcInputSchema,
   VerifyPhoneAuthCodeRpcInputSchema,
-} from '@polo-ai/shared/admin/schemas'
+} from '@z-h-ai/shared/admin/schemas'
 import {
   CreateCreatorArtifactRpcInputSchema,
   CreatorArtifactArchiveRpcInputSchema,
@@ -52,7 +52,7 @@ import {
   CreatorSkillDownloadRpcInputSchema,
   CreatorSkillSafetyRpcInputSchema,
   CreateCreatorArtifactVersionRpcInputSchema,
-} from '@polo-ai/shared/creator-skills'
+} from '@z-h-ai/shared/creator-skills'
 import {
   addLlmConnection,
   deleteLlmConnection,
@@ -63,9 +63,9 @@ import {
   setDefaultLlmConnection,
   updateLlmConnection,
   type LlmConnection,
-} from '@polo-ai/shared/config'
-import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/config'
+import { getCredentialManager, type CredentialManager } from '@z-h-ai/shared/credentials'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'

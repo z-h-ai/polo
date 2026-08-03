@@ -15,7 +15,7 @@
  * ```
  */
 
-import type { PushTarget } from '@polo-ai/shared/protocol'
+import type { PushTarget } from '@z-h-ai/shared/protocol'
 
 export type EventSinkFn = (channel: string, target: PushTarget, ...args: any[]) => void
 

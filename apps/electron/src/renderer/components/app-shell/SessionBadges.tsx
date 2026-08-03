@@ -1,9 +1,9 @@
 import { useMemo } from "react"
-import { parseLabelEntry } from "@polo-ai/shared/labels"
+import { parseLabelEntry } from "@z-h-ai/shared/labels"
 import { EntityListLabelBadge } from "@/components/ui/entity-list-label-badge"
 import { useSessionListContext } from "@/context/SessionListContext"
 import type { SessionMeta } from "@/atoms/sessions"
-import type { LabelConfig } from "@polo-ai/shared/labels"
+import type { LabelConfig } from "@z-h-ai/shared/labels"
 
 interface SessionBadgesProps {
   item: SessionMeta

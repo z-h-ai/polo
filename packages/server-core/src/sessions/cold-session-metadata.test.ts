@@ -7,7 +7,7 @@ import {
   loadSession,
   writeSessionJsonl,
   type StoredSession,
-} from '@polo-ai/shared/sessions'
+} from '@z-h-ai/shared/sessions'
 import type { StoredMessage } from '@polo-ai/core/types'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 

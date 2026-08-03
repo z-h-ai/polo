@@ -1,5 +1,5 @@
-import type { LabelConfig } from '@polo-ai/shared/labels'
-import { flattenLabelsWithParentPath } from '@polo-ai/shared/labels'
+import type { LabelConfig } from '@z-h-ai/shared/labels'
+import { flattenLabelsWithParentPath } from '@z-h-ai/shared/labels'
 
 export interface LabelMenuItem {
   id: string

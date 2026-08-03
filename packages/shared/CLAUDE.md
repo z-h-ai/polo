@@ -1,4 +1,4 @@
-# CLAUDE.md — `@polo-ai/shared`
+# CLAUDE.md — `@z-h-ai/shared`
 
 ## Purpose
 Core business logic package for Polo AI:

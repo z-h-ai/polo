@@ -23,10 +23,10 @@ import {
   type MessageEnvelope,
   type PushTarget,
   type ErrorCode,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import type { RpcServer, HandlerFn, RequestContext } from './types'
 import { serializeEnvelope, deserializeEnvelope } from './codec'
-import { createLogger } from '@polo-ai/shared/utils'
+import { createLogger } from '@z-h-ai/shared/utils'
 
 // ---------------------------------------------------------------------------
 // Client connection state

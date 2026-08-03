@@ -23,7 +23,7 @@ import { LabelIcon } from '@/components/ui/label-icon'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { toast } from 'sonner'
-import type { LabelConfig, AutoLabelRule } from '@polo-ai/shared/labels'
+import type { LabelConfig, AutoLabelRule } from '@z-h-ai/shared/labels'
 
 /**
  * Flattened auto-rule row: associates a rule with its parent label

@@ -13,7 +13,7 @@ import {
   PERMISSION_MODE_CONFIG,
   PERMISSION_MODE_ORDER,
   type PermissionMode,
-} from '@polo-ai/shared/agent/modes'
+} from '@z-h-ai/shared/agent/modes'
 
 // ============================================================================
 // Mode Icon (same SVG pattern as ActiveOptionBadges.PermissionModeIcon)

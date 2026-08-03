@@ -1,5 +1,5 @@
 import type { ImageProcessor } from '../runtime/platform'
-import { IMAGE_LIMITS } from '@polo-ai/shared/utils'
+import { IMAGE_LIMITS } from '@z-h-ai/shared/utils'
 
 export interface ImageResizeResult {
   /** Resized image buffer */

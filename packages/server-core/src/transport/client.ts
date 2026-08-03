@@ -17,7 +17,7 @@ import {
   isErrorCode,
   type ErrorCode,
   type MessageEnvelope,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import type { RpcClient } from './types'
 import { serializeEnvelope, deserializeEnvelope } from './codec'
 

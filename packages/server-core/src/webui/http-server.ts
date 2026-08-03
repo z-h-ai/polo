@@ -20,7 +20,7 @@ import {
   buildSessionCookie,
   buildLogoutCookie,
 } from './auth'
-import { generateCallbackPage } from '@polo-ai/shared/auth'
+import { generateCallbackPage } from '@z-h-ai/shared/auth'
 import type { PlatformServices } from '../runtime/platform'
 
 // ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       if (!configSession) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 })
       }
-      const { getActiveWorkspace } = await import('@polo-ai/shared/config/storage')
+      const { getActiveWorkspace } = await import('@z-h-ai/shared/config/storage')
       const active = getActiveWorkspace()
       return Response.json({
         defaultWorkspaceId: active?.id ?? null,

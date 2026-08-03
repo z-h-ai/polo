@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, mock, beforeEach } from 'bun:test'
 import { createBuiltInConnection } from '@polo-ai/server-core/domain'
-import type { LlmConnectionSetup } from '@polo-ai/shared/protocol'
+import type { LlmConnectionSetup } from '@z-h-ai/shared/protocol'
 
 // ============================================================
 // Simulated updateOnly guard logic

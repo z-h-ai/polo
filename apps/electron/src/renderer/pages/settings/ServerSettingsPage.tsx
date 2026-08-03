@@ -14,7 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@polo-ai/ui'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
-import type { ServerConfig, ServerStatus } from '@polo-ai/shared/config/server-config'
+import type { ServerConfig, ServerStatus } from '@z-h-ai/shared/config/server-config'
 
 import {
   SettingsSection,

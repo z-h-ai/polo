@@ -31,7 +31,7 @@ import type {
 } from '../../../shared/types'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
-import { PERMISSION_MODE_CONFIG } from '@polo-ai/shared/agent/mode-types'
+import { PERMISSION_MODE_CONFIG } from '@z-h-ai/shared/agent/mode-types'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import {

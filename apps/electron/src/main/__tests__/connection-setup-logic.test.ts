@@ -6,7 +6,7 @@ import {
   validateSetupTestInput,
   BUILT_IN_CONNECTION_TEMPLATES,
 } from '@polo-ai/server-core/domain'
-import type { ModelDefinition } from '@polo-ai/shared/config/models'
+import type { ModelDefinition } from '@z-h-ai/shared/config/models'
 
 // ============================================================
 // validateModelList

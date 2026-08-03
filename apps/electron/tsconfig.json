@@ -23,8 +23,8 @@
     "paths": {
       "@/*": ["src/renderer/*"],
       "@config/*": ["../../packages/shared/src/config/*"],
-      "@polo-ai/shared": ["../../packages/shared/src/index.ts"],
-      "@polo-ai/shared/*": ["../../packages/shared/src/*"]
+      "@z-h-ai/shared": ["../../packages/shared/src/index.ts"],
+      "@z-h-ai/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": ["src/**/*", "../../packages/shared/src/**/*.d.ts"],

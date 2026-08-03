@@ -6,7 +6,7 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import type { LlmConnection } from '@polo-ai/shared/config/llm-connections'
+import type { LlmConnection } from '@z-h-ai/shared/config/llm-connections'
 import {
   formatTokenCount,
   groupConnectionsByProvider,

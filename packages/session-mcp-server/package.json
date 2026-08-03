@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@polo-ai/session-tools-core": "workspace:*",
-    "@polo-ai/shared": "workspace:*",
+    "@z-h-ai/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.11.0",
     "zod": "^3.23.0"
   },

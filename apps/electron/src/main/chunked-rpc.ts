@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { WsRpcClient } from '../transport/client'
 
 /**

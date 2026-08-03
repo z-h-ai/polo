@@ -20,12 +20,12 @@ import { platform } from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
 import { mainLog } from './logger'
-import { getAppVersion } from '@polo-ai/shared/version'
+import { getAppVersion } from '@z-h-ai/shared/version'
 import {
   getDismissedUpdateVersion,
   clearDismissedUpdateVersion,
-} from '@polo-ai/shared/config'
-import { readJsonFileSync } from '@polo-ai/shared/utils/files'
+} from '@z-h-ai/shared/config'
+import { readJsonFileSync } from '@z-h-ai/shared/utils/files'
 import { RPC_CHANNELS, type UpdateInfo } from '../shared/types'
 import type { EventSink } from '@polo-ai/server-core/transport'
 

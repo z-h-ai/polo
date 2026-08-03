@@ -11,11 +11,11 @@
 import type { ContentBadge } from '@polo-ai/core'
 import type { MentionItemType } from '@/components/ui/mention-menu'
 import type { LoadedSkill, LoadedSource } from '../../shared/types'
-import { AGENTS_PLUGIN_NAME } from '@polo-ai/shared/skills/types'
+import { AGENTS_PLUGIN_NAME } from '@z-h-ai/shared/skills/types'
 import { getSourceIconSync, getSkillIconSync } from './icon-cache'
 
 // Import and re-export parsing functions from shared (pure string operations, no renderer deps)
-import { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, type ParsedMentions } from '@polo-ai/shared/mentions'
+import { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, type ParsedMentions } from '@z-h-ai/shared/mentions'
 export { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, type ParsedMentions }
 
 // ============================================================================

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, jest } from 'bun
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { LlmConnection } from '@polo-ai/shared/config'
+import type { LlmConnection } from '@z-h-ai/shared/config'
 
 const originalConfigDir = process.env.POLO_AI_CONFIG_DIR
 const testConfigDir = mkdtempSync(join(tmpdir(), 'sm-refresh-config-'))
@@ -48,7 +48,7 @@ function writeTestConfig(): void {
 
 writeTestConfig()
 
-const { resolveBackendContext } = await import('@polo-ai/shared/agent/backend')
+const { resolveBackendContext } = await import('@z-h-ai/shared/agent/backend')
 const { buildBackendRuntimeSignature, buildRestartRequiredSignature } = await import('./runtime-config.ts')
 const { SessionManager, createManagedSession } = await import('./SessionManager.ts')
 type BackendContext = ReturnType<typeof resolveBackendContext>

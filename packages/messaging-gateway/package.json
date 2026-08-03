@@ -16,7 +16,7 @@
     "@polo-ai/core": "workspace:*",
     "@polo-ai/messaging-whatsapp-worker": "workspace:*",
     "@polo-ai/server-core": "workspace:*",
-    "@polo-ai/shared": "workspace:*",
+    "@z-h-ai/shared": "workspace:*",
     "@larksuiteoapi/node-sdk": "^1.62.1",
     "grammy": "^1.35.0"
   },

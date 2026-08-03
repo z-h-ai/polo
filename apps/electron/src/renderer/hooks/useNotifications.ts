@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { Session } from '../../shared/types'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 
 /**
  * Draw a badge onto an icon image using Canvas

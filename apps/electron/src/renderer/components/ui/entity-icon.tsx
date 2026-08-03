@@ -16,8 +16,8 @@
 import * as React from 'react'
 import { CrossfadeAvatar } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
-import type { ResolvedEntityIcon, IconSize } from '@polo-ai/shared/icons'
-import { ICON_SIZE_CLASSES, ICON_EMOJI_SIZES } from '@polo-ai/shared/icons'
+import type { ResolvedEntityIcon, IconSize } from '@z-h-ai/shared/icons'
+import { ICON_SIZE_CLASSES, ICON_EMOJI_SIZES } from '@z-h-ai/shared/icons'
 
 /**
  * Any React component that accepts className prop.

@@ -14,8 +14,8 @@ import { Globe, HardDrive, Mail, Plug } from 'lucide-react'
 import { EntityIcon, type IconComponent } from '@/components/ui/entity-icon'
 import { useEntityIcon, logoUrlCache } from '@/lib/icon-cache'
 import { McpIcon } from '@/components/icons/McpIcon'
-import type { LoadedSource } from '@polo-ai/shared/sources/types'
-import type { IconSize, ResolvedEntityIcon } from '@polo-ai/shared/icons'
+import type { LoadedSource } from '@z-h-ai/shared/sources/types'
+import type { IconSize, ResolvedEntityIcon } from '@z-h-ai/shared/icons'
 import { SourceStatusIndicator, deriveConnectionStatus } from './source-status-indicator'
 
 // ============================================================================

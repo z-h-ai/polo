@@ -1,17 +1,17 @@
 /**
- * @polo-ai/shared
+ * @z-h-ai/shared
  *
  * Shared business logic for Polo AI.
  * Used by the Electron app.
  *
  * Import specific modules via subpath exports:
- *   import { PoloAi } from '@polo-ai/shared/agent';
- *   import { loadStoredConfig } from '@polo-ai/shared/config';
- *   import { getCredentialManager } from '@polo-ai/shared/credentials';
- *   import { PoloMcpClient } from '@polo-ai/shared/mcp';
- *   import { debug } from '@polo-ai/shared/utils';
- *   import { loadSource, createSource, getSourceCredentialManager } from '@polo-ai/shared/sources';
- *   import { createWorkspace, loadWorkspace } from '@polo-ai/shared/workspaces';
+ *   import { PoloAi } from '@z-h-ai/shared/agent';
+ *   import { loadStoredConfig } from '@z-h-ai/shared/config';
+ *   import { getCredentialManager } from '@z-h-ai/shared/credentials';
+ *   import { PoloMcpClient } from '@z-h-ai/shared/mcp';
+ *   import { debug } from '@z-h-ai/shared/utils';
+ *   import { loadSource, createSource, getSourceCredentialManager } from '@z-h-ai/shared/sources';
+ *   import { createWorkspace, loadWorkspace } from '@z-h-ai/shared/workspaces';
  *
  * Available modules:
  *   - agent: PoloAi SDK wrapper, plan tools

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import type { LlmConnection } from '@polo-ai/shared/config'
-import type { FileAttachment } from '@polo-ai/shared/protocol'
+import type { LlmConnection } from '@z-h-ai/shared/config'
+import type { FileAttachment } from '@z-h-ai/shared/protocol'
 import { buildBackendRuntimeSignature, filterAttachmentsForModelInput } from './runtime-config'
 
 const baseCompat: LlmConnection = {

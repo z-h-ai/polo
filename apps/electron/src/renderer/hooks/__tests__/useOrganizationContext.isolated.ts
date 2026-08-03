@@ -4,7 +4,7 @@ import { createElement, useEffect, useState } from 'react'
 import type {
   OrganizationContextStorage,
   OrganizationContextStoragePatch,
-} from '@polo-ai/shared/config/organization-context'
+} from '@z-h-ai/shared/config/organization-context'
 
 GlobalRegistrator.register()
 

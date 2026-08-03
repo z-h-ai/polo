@@ -9,8 +9,8 @@
 import { app, session } from 'electron';
 import { Agent, Dispatcher, ProxyAgent, setGlobalDispatcher } from 'undici';
 import { parseNoProxyRules, shouldBypassProxy, splitCommaSeparated, type NoProxyRule } from './network-proxy-utils';
-import { getNetworkProxySettings, setNetworkProxySettings } from '@polo-ai/shared/config/storage';
-import type { NetworkProxySettings } from '@polo-ai/shared/config/types';
+import { getNetworkProxySettings, setNetworkProxySettings } from '@z-h-ai/shared/config/storage';
+import type { NetworkProxySettings } from '@z-h-ai/shared/config/types';
 import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager';
 import log from './logger';
 
