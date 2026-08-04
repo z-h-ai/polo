@@ -7,6 +7,10 @@
  * - Migration detection for legacy CLI tokens
  */
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SecureStorageBackend } from '../../credentials/backends/secure-storage.ts';
 import {
   getSetupNeeds,
   getValidClaudeOAuthTokenWithManager,
@@ -346,6 +350,8 @@ describe('connection-scoped Claude OAuth', () => {
     return {
       manager: {
         getLlmOAuth: async (slug: string) => identities.get(slug) ?? null,
+        getPersistedLlmOAuth: async (slug: string) => identities.get(slug) ?? null,
+        withExclusiveLease: async <T>(_scope: string, operation: () => Promise<T>) => operation(),
         compareAndSwap: async (
           id: { type: string; connectionSlug?: string },
           expected: { value: string; refreshToken?: string },
@@ -482,6 +488,70 @@ describe('connection-scoped Claude OAuth', () => {
     expect(state.identities.has('selected-anthropic')).toBe(false);
     expect(state.legacyReads()).toBe(0);
     expect(state.global?.accessToken).toBe('untouched-global-token');
+  });
+
+  it('serializes refresh across processes so an invalid loser cannot delete a winner', async () => {
+    const credentialsDir = mkdtempSync(join(tmpdir(), 'polo-oauth-refresh-lease-'));
+    try {
+      const identity = { type: 'llm_oauth' as const, connectionSlug: 'selected-anthropic' };
+      await new SecureStorageBackend({ credentialsDir }).set(identity, {
+        value: 'expired-access-token',
+        refreshToken: 'rotating-refresh-token',
+        expiresAt: Date.now() - 1,
+        source: 'native',
+      });
+      const successStarted = join(credentialsDir, 'success-started');
+      const allowSuccess = join(credentialsDir, 'allow-success');
+      const invalidCalled = join(credentialsDir, 'invalid-called');
+      const worker = join(import.meta.dir, 'fixtures', 'oauth-refresh-worker.ts');
+      const success = Bun.spawn([
+        process.execPath,
+        worker,
+        credentialsDir,
+        'success',
+        successStarted,
+        allowSuccess,
+        invalidCalled,
+      ], { stdout: 'pipe', stderr: 'pipe' });
+
+      const deadline = Date.now() + 2_000;
+      while (!existsSync(successStarted) && Date.now() < deadline) await Bun.sleep(5);
+      expect(existsSync(successStarted)).toBe(true);
+
+      const invalid = Bun.spawn([
+        process.execPath,
+        worker,
+        credentialsDir,
+        'invalid',
+        successStarted,
+        allowSuccess,
+        invalidCalled,
+      ], { stdout: 'pipe', stderr: 'pipe' });
+      await Bun.sleep(80);
+      expect(existsSync(invalidCalled)).toBe(false);
+      writeFileSync(allowSuccess, 'continue');
+
+      const results = await Promise.all([success, invalid].map(async child => ({
+        exitCode: await child.exited,
+        stdout: await new Response(child.stdout).text(),
+        stderr: await new Response(child.stderr).text(),
+      })));
+      expect(results.map(({ exitCode, stderr }) => ({ exitCode, stderr }))).toEqual([
+        { exitCode: 0, stderr: '' },
+        { exitCode: 0, stderr: '' },
+      ]);
+      expect(results.map(result => JSON.parse(result.stdout).accessToken)).toEqual([
+        'winner-access-token',
+        'winner-access-token',
+      ]);
+      expect(existsSync(invalidCalled)).toBe(false);
+      expect(await new SecureStorageBackend({ credentialsDir }).get(identity)).toMatchObject({
+        value: 'winner-access-token',
+        refreshToken: 'winner-refresh-token',
+      });
+    } finally {
+      rmSync(credentialsDir, { recursive: true, force: true });
+    }
   });
 });
 

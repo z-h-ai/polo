@@ -131,11 +131,25 @@ export class CredentialManager {
   async get(id: CredentialId): Promise<StoredCredential | null> {
     const invocation = invocationCredentials.get(invocationCredentialKey(id));
     if (invocation) return { ...invocation };
+    return this.getFromBackends(id, false);
+  }
+
+  /** Read the shared backend directly, bypassing invocation overlays. */
+  async getPersisted(id: CredentialId): Promise<StoredCredential | null> {
+    return this.getFromBackends(id, true);
+  }
+
+  private async getFromBackends(
+    id: CredentialId,
+    fresh: boolean,
+  ): Promise<StoredCredential | null> {
     await this.ensureInitialized();
 
     for (const backend of this.backends) {
       try {
-        const cred = await backend.get(id);
+        const cred = fresh && backend.getFresh
+          ? await backend.getFresh(id)
+          : await backend.get(id);
         if (cred) {
           debug(`[CredentialManager] Found ${id.type} in ${backend.name}`);
           return cred;
@@ -190,6 +204,18 @@ export class CredentialManager {
       else invocationCredentials.delete(key);
     }
     return result;
+  }
+
+  /**
+   * Serialize a credential workflow across Electron and CLI processes without
+   * blocking unrelated identities. OAuth refresh uses one scope per connection.
+   */
+  async withExclusiveLease<T>(scope: string, operation: () => Promise<T>): Promise<T> {
+    await this.ensureInitialized();
+    if (!this.writeBackend?.withExclusiveLease) {
+      throw new Error('Credential backend does not support cross-process leases');
+    }
+    return this.writeBackend.withExclusiveLease(scope, operation);
   }
 
   /**
@@ -463,6 +489,28 @@ export class CredentialManager {
     source?: 'native' | 'cli';
   } | null> {
     const cred = await this.get({ type: 'llm_oauth', connectionSlug });
+    return this.toLlmOAuthCredentials(cred);
+  }
+
+  /** Re-read the shared OAuth generation while holding its refresh lease. */
+  async getPersistedLlmOAuth(connectionSlug: string): Promise<{
+    accessToken: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    idToken?: string;
+    source?: 'native' | 'cli';
+  } | null> {
+    const cred = await this.getPersisted({ type: 'llm_oauth', connectionSlug });
+    return this.toLlmOAuthCredentials(cred);
+  }
+
+  private toLlmOAuthCredentials(cred: StoredCredential | null): {
+    accessToken: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    idToken?: string;
+    source?: 'native' | 'cli';
+  } | null {
     if (!cred) return null;
     return {
       accessToken: cred.value,

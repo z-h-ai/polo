@@ -2,40 +2,41 @@
 
 ## 变更摘要
 
-本轮从当前 HEAD `f585c806` 继续，没有重新实施、回退或丢弃已有变更。针对 Ultra-Coding review 升级的五项 P0 安全/架构缺口完成修复：
+本轮从当前 HEAD `bf0c64ec` 继续，没有重新实施、回退或丢弃已有变更。按照独立 reviewer 报告 `.pipeline/review-report-independent-bf0c64ec.json`，以“最小完整方案”关闭四项运行时、并发与崩溃一致性阻塞：
 
-1. CLI 配置快照改为显式 allowlist，仅复制 `config.json`、`sources/`、`skills/`、`statuses/`、`labels/`、`.claude-plugin/` 与 `permissions.json` 等运行时输入；global scope 始终重建最小 manifest。`automations.json`、history、messaging、retry queue、views、应用连接状态及其中的 bearer/basic/Authorization secret 不再进入持久 Thread。
-2. Anthropic OAuth 从读取、刷新到失败清理都只使用 `llm_oauth::<connectionSlug>`。移除 CLI 链路对 `claude_oauth::global` 的读取、双写和双删；进程内 refresh mutex 也按 connection slug 隔离。
-3. OAuth token 轮换增加跨进程 compare-and-swap：旧刷新者不能覆盖或删除另一进程已经写入的新 token，刷新仅原子更新同一 credential identity。
-4. macOS/Linux/Windows 安装器均交付 `polo` 与 `polo-ai` 两个同实现 CLI 入口，并拒绝覆盖非 Polo 管理的命令。macOS 使用指向已安装 app bundle 的用户 PATH symlink；Linux 挂载 AppImage 后直接调用包内 CLI launcher，GUI 改由 `polo-gui` 显式启动；Windows 两个 `.cmd` 均调用安装目录内的 `polo.cmd`，GUI 同样使用 `polo-gui.cmd`。
-5. `credentials.enc` 改为同目录唯一 `0600` 临时文件、文件 fsync、原子 rename 及 Unix 父目录 fsync。写入或 rename 失败保留旧 store；不可解密文件不再自动删除，且拒绝被后续写入静默覆盖。
-6. credential writer lock 改为原子 lock directory，记录 `lockId`、PID、进程出生身份与 heartbeat。活进程不会因 mtime 或系统休眠被接管；仅确认 owner 已死亡或 PID 复用时才能原子移走旧锁；释放前校验 `lockId`，旧 owner 无法删除新锁。同步 credential 删除也进入同一锁协议。
+1. 进程出生身份查询移除 `Bun.spawnSync`，统一使用 `node:child_process.spawnSync`；真实 Node/Electron runtime 不再因缺少全局 Bun 而让 credential `set`、`delete`、CAS 失败。
+2. credential writer lock 改为完整私有 claim 文件加原子 hard-link 发布。正式锁从出现第一刻就包含 `lockId`、PID、进程出生身份与创建 generation；竞争者无法观察或接管半发布 owner。ownerless/malformed legacy 锁不再按 mtime 接管，而是 fail closed；只有确认进程死亡或 PID 复用时才能移动旧锁。heartbeat 使用 lockId 隔离 sidecar，迟到 heartbeat 和 release 都不能覆盖或删除新锁。
+3. Anthropic OAuth 按 `llm_oauth::<connectionSlug>` 获取独立跨进程 refresh lease。lease 内绕过 invocation overlay 和进程缓存重新读取共享 generation；只有仍过期的同一 identity 才发起 HTTP refresh，成功替换与 `invalid_grant` 清理继续受 CAS 保护。不同 connection identity 不共享锁。
+4. credential mutation 改为 copy-on-write。`set`、`delete`、同步 delete 和 CAS 都修改 store 副本；只有临时文件 fsync、原子 rename 和目录持久化成功后才发布新缓存。任何保存失败都会丢弃缓存并重新以磁盘文件为准。
+
+此前 `bf0c64ec` 已完成的配置快照 allowlist、OAuth identity 统一、三平台 CLI 安装入口、`credentials.enc` 原子替换等修复均保留。
 
 ## 关键文件
 
-- `apps/cli/src/one-shot.ts`、`apps/cli/src/one-shot.test.ts`
-  - workspace/global 配置快照 allowlist 与 secret 负向回归。
-- `packages/shared/src/auth/state.ts`、`packages/shared/src/auth/__tests__/state.test.ts`
-  - connection-scoped Anthropic OAuth、按 identity 的 refresh mutex、刷新成功/失败隔离回归。
-- `packages/shared/src/credentials/manager.ts`
-  - invocation overlay 对齐及 OAuth compare-and-swap 入口。
+- `packages/shared/src/utils/process-identity.ts`
+  - Node/Electron/Bun 通用的进程出生身份查询。
 - `packages/shared/src/credentials/backends/secure-storage.ts`
-  - 跨进程 owner lock、heartbeat、安全接管、原子凭据写入及损坏文件保留。
-- `packages/shared/src/credentials/backends/types.ts`
-  - credential backend compare-and-swap 契约。
+  - 原子文件 lease、安全接管、lockId heartbeat、identity-scoped lease 与 credential copy-on-write。
+- `packages/shared/src/credentials/backends/types.ts`、`packages/shared/src/credentials/manager.ts`
+  - fresh persisted read 和跨进程 scoped lease 契约；invocation overlay 与共享 credential generation 分离。
+- `packages/shared/src/auth/state.ts`
+  - OAuth refresh lease、lease 内共享 generation 重读、CAS 刷新与清理。
 - `packages/shared/src/credentials/__tests__/secure-storage-write-lock.test.ts`
-  - 三实例并发、活 owner 超时、死亡 owner 接管、旧 owner 迟到释放、rename 失败与 stale OAuth writer 回归。
-- `scripts/install-app.sh`、`scripts/install-app.ps1`、`scripts/install-cli-entrypoints.test.ts`
-  - 三平台双 CLI 入口、用户 PATH、GUI 显式入口与命令所有权保护。
+  - 原子 claim 发布暂停、legacy ownerless fail-closed、真实 Node runtime、同实例 rename 失败缓存一致性等回归。
+- `packages/shared/src/auth/__tests__/state.test.ts`
+  - 两个独立进程确定性复现并验证“成功者刷新、失败者 invalid_grant”反序竞争。
+- `packages/shared/src/credentials/__tests__/fixtures/secure-storage-node-worker.ts`
+  - 无全局 Bun 的 Node runtime credential set/CAS/delete 探针。
+- `packages/shared/src/auth/__tests__/fixtures/oauth-refresh-worker.ts`
+  - 跨进程 OAuth refresh lease 竞争探针。
 
 ## 验证结果
 
-- 专项回归：69 pass，0 fail。
-  - 覆盖 workspace/global secret 排除、connection-scoped OAuth、刷新成功/瞬时失败/invalid_grant、原子写失败、活 owner/system-suspend 等价场景、死亡 owner 接管、旧 owner 迟到释放、三个独立进程并发、stale token CAS 与三平台安装入口。
-- `NO_COLOR=1 bun test`
-  - 4897 pass、19 skip、0 fail，381 files。
+- 四项专项及相邻回归：42 pass，0 fail。
+- auth/credential 广泛回归：144 pass、6 skip、0 fail。
 - `NO_COLOR=1 bun run test`
-  - 普通全量测试及仓库全部 13 个 `*.isolated.ts` 测试通过。
+  - 普通全量：4901 pass、19 skip、0 fail，381 files。
+  - 仓库全部 `*.isolated.ts` 测试通过。
 - `NO_COLOR=1 bun run typecheck:all`
   - core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部通过。
 - 变更 shared 文件 ESLint
@@ -43,20 +44,19 @@
 - `NO_COLOR=1 bun run server:build:subprocess`
   - Session MCP：390 modules / 4.58 MB；Pi Agent：3999 modules / 20.41 MB。
 - `NO_COLOR=1 bun run electron:build`
-  - CLI/server/main/preload/renderer/resources/assets 全部构建成功，packaged CLI artifacts `0.10.0` 验证通过。
+  - CLI/server/main/preload/renderer/resources/assets 全部成功，packaged CLI artifacts `0.10.0` 验证通过。
 - macOS arm64 Electron directory assembly
   - `electron-builder --mac dir --arm64` 成功；afterPack 验证 `polo` 与 `polo-ai`。
-  - 从 `/`、干净 PATH、安装式 symlink 启动两个入口，均输出 `0.10.0`。
-- `bash -n scripts/install-app.sh`、`git diff --check`
-  - 均通过。
+- `git diff --check` 与变更文件 ESLint通过。
 
 ## 验证环境说明
 
-- macOS arm64 assembly 完成并验证后，已清理本轮生成且被 Git ignore 的 `apps/electron/release/mac-arm64`。若保留该目录，仓库根部递归 `bun test` 会再次发现 app bundle 内复制的测试源码并产生验证污染；清理后标准全量门禁通过。
-- 当前环境没有 PowerShell，因此 Windows installer 使用契约回归与 Windows packaged launcher layout 回归验证；未执行真实 Windows NSIS 安装。
+- macOS arm64 assembly 完成后，已清理本轮生成且被 Git ignore 的 `apps/electron/release/mac-arm64`，避免递归全量测试发现 app bundle 内复制的测试源码。
+- Node runtime 回归使用真实 `node --experimental-strip-types` 子进程，并确认 `globalThis.Bun` 不存在时 credential set/CAS/delete 全部工作。
+- 当前环境没有真实 Windows 或 Linux 主机；本轮未重新执行 Windows NSIS 和 Linux AppImage 实机安装。此前三平台 packaged layout/installer 契约回归仍保持通过。
 
 ## 遗留问题
 
-- 本轮五项 review 阻断范围内无已知遗留问题。
-- 未执行签名证书、notarization、DMG、NSIS 或真实 Linux AppImage/FUSE 安装；macOS arm64 directory assembly 与三平台 packaged layout 已验证。
+- 本轮四项独立 review 阻断范围内无已知遗留问题，尚待新的独立 reviewer 重新裁决。
+- 未执行签名证书、notarization、DMG、NSIS 或真实 Linux AppImage/FUSE 安装。
 - 用户已有 `.task/session-analysis/` 及 `.pipeline/fix-report-round1.md`、`.pipeline/fix-report-round2.md` 的删除状态保持未触碰，不纳入本轮提交。

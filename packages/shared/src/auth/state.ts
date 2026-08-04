@@ -198,6 +198,33 @@ export async function performTokenRefresh(
   }
 }
 
+async function refreshClaudeOAuthWithLease(
+  manager: ReturnType<typeof getCredentialManager>,
+  connectionSlug: string,
+  refreshTokenFn: ClaudeTokenRefresher,
+): Promise<TokenResult> {
+  return manager.withExclusiveLease(`llm-oauth-refresh:${connectionSlug}`, async () => {
+    // The invocation overlay may contain the generation captured at CLI
+    // startup. Once the cross-process lease is held, always re-read the shared
+    // store so a preceding Electron/CLI refresher is observed before HTTP.
+    const current = await manager.getPersistedLlmOAuth(connectionSlug);
+    if (!current?.accessToken) return { accessToken: null };
+    if (!isTokenExpired(current.expiresAt)) {
+      return { accessToken: current.accessToken };
+    }
+    if (!current.refreshToken) return { accessToken: null };
+
+    return performTokenRefresh(
+      manager,
+      current.refreshToken,
+      current.source,
+      connectionSlug,
+      current.accessToken,
+      refreshTokenFn,
+    );
+  });
+}
+
 // ============================================
 // Functions
 // ============================================
@@ -257,7 +284,7 @@ export async function getValidClaudeOAuthTokenWithManager(
           // Ignore errors from the other refresh attempt
         }
         // Re-read credentials after waiting (they may have been updated)
-        const updatedCreds = await manager.getLlmOAuth(connectionSlug);
+        const updatedCreds = await manager.getPersistedLlmOAuth(connectionSlug);
         if (updatedCreds?.accessToken && !isTokenExpired(updatedCreds.expiresAt)) {
           const expiresAtDate = updatedCreds.expiresAt ? new Date(updatedCreds.expiresAt).toISOString() : 'never';
           debug(`[auth] Got refreshed token from concurrent refresh (expires: ${expiresAtDate})`);
@@ -270,14 +297,7 @@ export async function getValidClaudeOAuthTokenWithManager(
 
       // Start the refresh and set the mutex
       debug('[auth] Starting token refresh (holding mutex)');
-      const refresh = performTokenRefresh(
-        manager,
-        creds.refreshToken,
-        creds.source,
-        connectionSlug,
-        creds.accessToken,
-        refreshTokenFn,
-      );
+      const refresh = refreshClaudeOAuthWithLease(manager, connectionSlug, refreshTokenFn);
       refreshInProgress.set(connectionSlug, refresh);
 
       try {

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 
 function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false
@@ -36,9 +37,14 @@ export function getProcessBirthIdentity(pid: number): string | null {
           `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
         ]
       : ['ps', '-o', 'lstart=', '-p', String(pid)]
-    const result = Bun.spawnSync(command, { stdout: 'pipe', stderr: 'ignore' })
-    if (result.exitCode !== 0) return null
-    const marker = new TextDecoder().decode(result.stdout).trim().replace(/\s+/g, ' ')
+    const [executable, ...args] = command
+    if (!executable) return null
+    const result = spawnSync(executable, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    if (result.status !== 0) return null
+    const marker = result.stdout.trim().replace(/\s+/g, ' ')
     return marker ? `${process.platform}-process-start:${marker}` : null
   } catch {
     return null

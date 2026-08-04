@@ -25,6 +25,9 @@ export interface CredentialBackend {
   /** Get a credential by ID */
   get(id: CredentialId): Promise<StoredCredential | null>;
 
+  /** Re-read a credential from durable storage, bypassing process-local cache. */
+  getFresh?(id: CredentialId): Promise<StoredCredential | null>;
+
   /** Set/update a credential */
   set(id: CredentialId, credential: StoredCredential): Promise<void>;
 
@@ -34,6 +37,9 @@ export interface CredentialBackend {
     expected: Pick<StoredCredential, 'value' | 'refreshToken'>,
     replacement: StoredCredential | null,
   ): Promise<CredentialCompareAndSwapResult>;
+
+  /** Run an operation under a cross-process, scope-specific lease. */
+  withExclusiveLease?<T>(scope: string, operation: () => Promise<T>): Promise<T>;
 
   /** Delete a credential */
   delete(id: CredentialId): Promise<boolean>;

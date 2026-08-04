@@ -38,6 +38,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -46,7 +47,7 @@ import {
   statSync,
   writeFileSync,
 } from 'fs';
-import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { hostname, userInfo, homedir } from 'os';
 import { join } from 'path';
 
@@ -72,7 +73,6 @@ const KEY_SIZE = 32;
 const PBKDF2_ITERATIONS = 100000;
 const WRITE_LOCK_TIMEOUT_MS = 5_000;
 const WRITE_LOCK_RETRY_MS = 25;
-const WRITE_LOCK_OWNER_GRACE_MS = 30_000;
 const WRITE_LOCK_HEARTBEAT_MS = 5_000;
 
 interface CredentialWriteLockOwner {
@@ -87,8 +87,11 @@ interface CredentialWriteLockOwner {
 export interface CredentialWriteLockOptions {
   timeoutMs?: number;
   retryMs?: number;
+  /** Retained for compatibility; ownerless locks now fail closed. */
   ownerGraceMs?: number;
   heartbeatMs?: number;
+  /** Fault-injection hook after a complete private claim exists but before publication. */
+  beforePublish?: (claimFile: string, lockPath: string) => void | Promise<void>;
 }
 
 export interface CredentialWriteLockHandle {
@@ -135,16 +138,18 @@ function parseWriteLockOwner(value: string): CredentialWriteLockOwner | null {
 }
 
 async function readWriteLockOwner(lockDirectory: string): Promise<CredentialWriteLockOwner | null> {
-  const value = await readFile(join(lockDirectory, 'owner.json'), 'utf8').catch(() => null);
+  const info = await stat(lockDirectory).catch(() => null);
+  if (!info) return null;
+  const ownerPath = info.isDirectory() ? join(lockDirectory, 'owner.json') : lockDirectory;
+  const value = await readFile(ownerPath, 'utf8').catch(() => null);
   return value === null ? null : parseWriteLockOwner(value);
 }
 
-async function writeWriteLockOwner(
-  lockDirectory: string,
+async function writeAtomicLockMetadata(
+  destination: string,
   owner: CredentialWriteLockOwner,
 ): Promise<void> {
-  const ownerFile = join(lockDirectory, 'owner.json');
-  const temporaryFile = join(lockDirectory, `.owner.${owner.lockId}.${randomUUID()}.tmp`);
+  const temporaryFile = `${destination}.${owner.lockId}.${randomUUID()}.tmp`;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(temporaryFile, 'wx', 0o600);
@@ -152,7 +157,7 @@ async function writeWriteLockOwner(
     await handle.sync();
     await handle.close();
     handle = undefined;
-    await rename(temporaryFile, ownerFile);
+    await rename(temporaryFile, destination);
   } catch (error) {
     await handle?.close().catch(() => {});
     await rm(temporaryFile, { force: true }).catch(() => {});
@@ -161,6 +166,7 @@ async function writeWriteLockOwner(
 }
 
 async function moveAbandonedWriteLock(lockDirectory: string): Promise<boolean> {
+  const owner = await readWriteLockOwner(lockDirectory);
   const abandoned = `${lockDirectory}.abandoned.${randomUUID()}`;
   try {
     await rename(lockDirectory, abandoned);
@@ -171,7 +177,29 @@ async function moveAbandonedWriteLock(lockDirectory: string): Promise<boolean> {
     throw error;
   }
   await rm(abandoned, { recursive: true, force: true });
+  if (owner) {
+    await rm(`${lockDirectory}.heartbeat.${owner.lockId}`, { force: true }).catch(() => {});
+  }
   return true;
+}
+
+async function createPrivateLockClaim(
+  lockPath: string,
+  owner: CredentialWriteLockOwner,
+): Promise<string> {
+  const claimFile = `${lockPath}.claim.${owner.lockId}.${randomUUID()}`;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(claimFile, 'wx', 0o600);
+    await handle.writeFile(JSON.stringify(owner));
+    await handle.sync();
+    await handle.close();
+    return claimFile;
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await rm(claimFile, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 /**
@@ -184,7 +212,6 @@ export async function acquireCredentialWriteLock(
 ): Promise<CredentialWriteLockHandle> {
   const timeoutMs = options.timeoutMs ?? WRITE_LOCK_TIMEOUT_MS;
   const retryMs = options.retryMs ?? WRITE_LOCK_RETRY_MS;
-  const ownerGraceMs = options.ownerGraceMs ?? WRITE_LOCK_OWNER_GRACE_MS;
   const heartbeatMs = options.heartbeatMs ?? WRITE_LOCK_HEARTBEAT_MS;
   const processIdentity = getProcessBirthIdentity(process.pid);
   if (!processIdentity) {
@@ -201,23 +228,23 @@ export async function acquireCredentialWriteLock(
   const deadline = Date.now() + timeoutMs;
 
   while (true) {
+    const claimFile = await createPrivateLockClaim(lockDirectory, owner);
     try {
-      await mkdir(lockDirectory, { mode: 0o700 });
-      try {
-        await writeWriteLockOwner(lockDirectory, owner);
-      } catch (error) {
-        await rm(lockDirectory, { recursive: true, force: true }).catch(() => {});
-        throw error;
-      }
+      await options.beforePublish?.(claimFile, lockDirectory);
+      // A fully initialized owner record becomes visible in one atomic link.
+      // Contenders can therefore never observe a live creator's half-published
+      // claim, and link() cannot replace an existing owner.
+      await link(claimFile, lockDirectory);
+      await rm(claimFile, { force: true });
       break;
     } catch (error) {
+      await rm(claimFile, { force: true }).catch(() => {});
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       const observed = await readWriteLockOwner(lockDirectory);
-      let canTakeOver = observed ? ownerIsDefinitelyGone(observed) : false;
-      if (!observed) {
-        const info = await stat(lockDirectory).catch(() => null);
-        canTakeOver = !!info && Date.now() - info.mtimeMs > ownerGraceMs;
-      }
+      // Missing/malformed owner metadata fails closed. Under the new protocol
+      // it cannot be produced by a live acquirer; legacy/corrupt artifacts need
+      // explicit recovery rather than an unsafe mtime-only takeover.
+      const canTakeOver = observed ? ownerIsDefinitelyGone(observed) : false;
       if (canTakeOver && await moveAbandonedWriteLock(lockDirectory)) continue;
       if (Date.now() >= deadline) {
         throw new Error('Timed out acquiring shared credential write lock');
@@ -228,11 +255,14 @@ export async function acquireCredentialWriteLock(
 
   let active = true;
   let heartbeatWrite = Promise.resolve();
+  const heartbeatFile = `${lockDirectory}.heartbeat.${owner.lockId}`;
   const heartbeat = setInterval(() => {
     if (!active) return;
     owner.heartbeatAt = Date.now();
     heartbeatWrite = heartbeatWrite
-      .then(() => writeWriteLockOwner(lockDirectory, owner))
+      // Heartbeats use a lockId-scoped sidecar. They never replace the stable
+      // ownership claim, so a delayed old heartbeat cannot overwrite a new lock.
+      .then(() => writeAtomicLockMetadata(heartbeatFile, owner))
       .catch(() => {});
   }, heartbeatMs);
   heartbeat.unref?.();
@@ -245,8 +275,16 @@ export async function acquireCredentialWriteLock(
       clearInterval(heartbeat);
       await heartbeatWrite;
       const observed = await readWriteLockOwner(lockDirectory);
-      if (observed?.lockId !== owner.lockId) return;
-      await rm(lockDirectory, { recursive: true, force: true });
+      if (observed?.lockId !== owner.lockId) {
+        await rm(heartbeatFile, { force: true });
+        return;
+      }
+      const released = `${lockDirectory}.released.${owner.lockId}.${randomUUID()}`;
+      await rename(lockDirectory, released).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      });
+      await rm(released, { recursive: true, force: true });
+      await rm(heartbeatFile, { force: true });
     },
   };
 }
@@ -267,31 +305,28 @@ function acquireCredentialWriteLockSync(lockDirectory: string): () => void {
   const deadline = Date.now() + WRITE_LOCK_TIMEOUT_MS;
 
   while (true) {
+    const claimFile = `${lockDirectory}.claim.${owner.lockId}.${randomUUID()}`;
     try {
-      mkdirSync(lockDirectory, { mode: 0o700 });
+      const descriptor = openSync(claimFile, 'wx', 0o600);
       try {
-        writeFileSync(join(lockDirectory, 'owner.json'), JSON.stringify(owner), {
-          encoding: 'utf8',
-          flag: 'wx',
-          mode: 0o600,
-        });
-      } catch (error) {
-        rmSync(lockDirectory, { recursive: true, force: true });
-        throw error;
+        writeFileSync(descriptor, JSON.stringify(owner));
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
       }
+      linkSync(claimFile, lockDirectory);
+      rmSync(claimFile, { force: true });
       break;
     } catch (error) {
+      try { rmSync(claimFile, { force: true }); } catch {}
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       let observed: CredentialWriteLockOwner | null = null;
       try {
-        observed = parseWriteLockOwner(readFileSync(join(lockDirectory, 'owner.json'), 'utf8'));
+        const info = statSync(lockDirectory);
+        const ownerPath = info.isDirectory() ? join(lockDirectory, 'owner.json') : lockDirectory;
+        observed = parseWriteLockOwner(readFileSync(ownerPath, 'utf8'));
       } catch {}
-      let canTakeOver = observed ? ownerIsDefinitelyGone(observed) : false;
-      if (!observed) {
-        try {
-          canTakeOver = Date.now() - statSync(lockDirectory).mtimeMs > WRITE_LOCK_OWNER_GRACE_MS;
-        } catch {}
-      }
+      const canTakeOver = observed ? ownerIsDefinitelyGone(observed) : false;
       if (canTakeOver) {
         const abandoned = `${lockDirectory}.abandoned.${randomUUID()}`;
         try {
@@ -310,10 +345,16 @@ function acquireCredentialWriteLockSync(lockDirectory: string): () => void {
   return () => {
     let observed: CredentialWriteLockOwner | null = null;
     try {
-      observed = parseWriteLockOwner(readFileSync(join(lockDirectory, 'owner.json'), 'utf8'));
+      const info = statSync(lockDirectory);
+      const ownerPath = info.isDirectory() ? join(lockDirectory, 'owner.json') : lockDirectory;
+      observed = parseWriteLockOwner(readFileSync(ownerPath, 'utf8'));
     } catch {}
     if (observed?.lockId === owner.lockId) {
-      rmSync(lockDirectory, { recursive: true, force: true });
+      const released = `${lockDirectory}.released.${owner.lockId}.${randomUUID()}`;
+      try {
+        renameSync(lockDirectory, released);
+        rmSync(released, { recursive: true, force: true });
+      } catch {}
     }
   };
 }
@@ -366,6 +407,16 @@ interface CredentialStore {
   metadata: {
     createdAt: number;
     updatedAt: number;
+  };
+}
+
+function cloneCredentialStore(store: CredentialStore): CredentialStore {
+  return {
+    version: 1,
+    credentials: Object.fromEntries(
+      Object.entries(store.credentials).map(([key, value]) => [key, { ...value }]),
+    ),
+    metadata: { ...store.metadata },
   };
 }
 
@@ -432,6 +483,11 @@ export class SecureStorageBackend implements CredentialBackend {
     return store.credentials[key] || null;
   }
 
+  async getFresh(id: CredentialId): Promise<StoredCredential | null> {
+    this.cachedStore = null;
+    return this.get(id);
+  }
+
   async set(id: CredentialId, credential: StoredCredential): Promise<void> {
     await this.withWriteLock(async () => {
       // Re-read after acquiring the cross-process lock so an OAuth refresh
@@ -450,6 +506,8 @@ export class SecureStorageBackend implements CredentialBackend {
             updatedAt: Date.now(),
           },
         };
+      } else {
+        store = cloneCredentialStore(store);
       }
 
       const key = credentialIdToAccount(id);
@@ -466,8 +524,8 @@ export class SecureStorageBackend implements CredentialBackend {
   ): Promise<CredentialCompareAndSwapResult> {
     return this.withWriteLock(async () => {
       this.cachedStore = null;
-      const store = await this.loadStore();
-      if (!store) {
+      const persistedStore = await this.loadStore();
+      if (!persistedStore) {
         if (existsSync(this.credentialsFile)) {
           throw new Error('Credential store is unreadable; refusing to overwrite it');
         }
@@ -475,7 +533,7 @@ export class SecureStorageBackend implements CredentialBackend {
       }
 
       const key = credentialIdToAccount(id);
-      const current = store.credentials[key] ?? null;
+      const current = persistedStore.credentials[key] ?? null;
       if (
         !current
         || current.value !== expected.value
@@ -484,6 +542,7 @@ export class SecureStorageBackend implements CredentialBackend {
         return { updated: false, current };
       }
 
+      const store = cloneCredentialStore(persistedStore);
       if (replacement) store.credentials[key] = replacement;
       else delete store.credentials[key];
       store.metadata.updatedAt = Date.now();
@@ -492,13 +551,38 @@ export class SecureStorageBackend implements CredentialBackend {
     });
   }
 
+  async withExclusiveLease<T>(scope: string, operation: () => Promise<T>): Promise<T> {
+    if (!existsSync(this.credentialsDir)) {
+      mkdirSync(this.credentialsDir, { recursive: true, mode: 0o700 });
+    }
+    const leaseDirectory = join(this.credentialsDir, '.credential-leases');
+    await mkdir(leaseDirectory, { recursive: true, mode: 0o700 });
+    const scopeHash = createHash('sha256').update(scope).digest('hex');
+    const lock = await acquireCredentialWriteLock(
+      join(leaseDirectory, `${scopeHash}.lock`),
+      {
+        ...this.writeLockOptions,
+        timeoutMs: this.writeLockOptions.timeoutMs ?? 60_000,
+      },
+    );
+    try {
+      // A preceding process may have rotated credentials while this process
+      // waited. Do not let the lease holder make decisions from its old cache.
+      this.cachedStore = null;
+      return await operation();
+    } finally {
+      await lock.release();
+    }
+  }
+
   async delete(id: CredentialId): Promise<boolean> {
     return this.withWriteLock(async () => {
       this.cachedStore = null;
-      const store = await this.loadStore();
-      if (!store) return false;
+      const persistedStore = await this.loadStore();
+      if (!persistedStore) return false;
       const key = credentialIdToAccount(id);
-      if (!(key in store.credentials)) return false;
+      if (!(key in persistedStore.credentials)) return false;
+      const store = cloneCredentialStore(persistedStore);
       delete store.credentials[key];
       store.metadata.updatedAt = Date.now();
       await this.saveStore(store);
@@ -513,12 +597,13 @@ export class SecureStorageBackend implements CredentialBackend {
     const release = acquireCredentialWriteLockSync(this.writeLockDirectory);
     try {
       this.cachedStore = null;
-      const store = this.loadStoreSync();
-      if (!store) return false;
+      const persistedStore = this.loadStoreSync();
+      if (!persistedStore) return false;
 
       const key = credentialIdToAccount(id);
-      if (!(key in store.credentials)) return false;
+      if (!(key in persistedStore.credentials)) return false;
 
+      const store = cloneCredentialStore(persistedStore);
       delete store.credentials[key];
       store.metadata.updatedAt = Date.now();
 
@@ -736,6 +821,9 @@ export class SecureStorageBackend implements CredentialBackend {
         try { closeSync(descriptor); } catch {}
       }
       try { rmSync(temporaryFile, { force: true }); } catch {}
+      // Never expose an uncommitted mutation from a long-lived Electron
+      // singleton. Re-read the authoritative file after any failed save.
+      this.cachedStore = null;
       throw error;
     }
     this.cachedStore = store;
