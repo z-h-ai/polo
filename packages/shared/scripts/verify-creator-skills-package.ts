@@ -18,14 +18,21 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, '..')
 const repositoryRoot = resolve(packageRoot, '../..')
+const publishStageRoot = join(packageRoot, 'dist', 'publish')
 const packageName = '@z-h-ai/shared'
 const packageVersion = '0.11.0'
 const registry = 'https://npm.pkg.github.com'
 const requiredEntries = [
-  'dist/creator-skills/index.cjs',
-  'dist/creator-skills/index.d.ts',
+  'dist/creator-skills/archive.d.ts',
   'dist/creator-skills/fixtures.cjs',
   'dist/creator-skills/fixtures.d.ts',
+  'dist/creator-skills/index.cjs',
+  'dist/creator-skills/index.d.ts',
+  'dist/creator-skills/installer.d.ts',
+  'dist/creator-skills/ledger.d.ts',
+  'dist/creator-skills/schemas.d.ts',
+  'dist/creator-skills/skill-content.d.ts',
+  'dist/creator-skills/types.d.ts',
 ] as const
 
 type PackManifestEntry = {
@@ -182,41 +189,24 @@ function validatePackManifest(manifest: PackManifestEntry[]): void {
     assert(paths.includes(requiredEntry), `tarball is missing ${requiredEntry}`)
   }
 
-  const forbidden = paths.filter(path => (
-    path.startsWith('src/creator-skills/')
-    || path === 'src/creator-skills.public.d.ts'
-    || path === 'src/creator-skills.fixtures.public.d.ts'
-    || path.startsWith('tests/')
-    || path.includes('/__tests__/')
-    || /(?:^|\/)[^/]+\.(?:test|isolated)\.[cm]?[jt]sx?$/.test(path)
-  ))
-  assert(forbidden.length === 0, `tarball leaked private source/tests: ${forbidden.join(', ')}`)
-
-  const tracked = new Set(
-    (gitOutput(['ls-files', '--', 'packages/shared']) ?? '')
-      .split('\n')
-      .filter(Boolean)
-      .map(path => path.replace(/^packages\/shared\//, '')),
-  )
-  const unexpectedUntracked = paths.filter(path => (
-    path !== 'package.json'
-    && !path.startsWith('dist/creator-skills/')
-    && !tracked.has(path)
-  ))
+  const allowed = new Set<string>(['package.json', ...requiredEntries])
+  const unexpectedUntracked = paths.filter(path => !allowed.has(path))
   assert(
     unexpectedUntracked.length === 0,
-    `tarball contains untracked manual artifacts: ${unexpectedUntracked.join(', ')}`,
+    `tarball contains files outside the publish-only boundary: ${unexpectedUntracked.join(', ')}`,
   )
+  assert(paths.length === allowed.size, 'tarball must contain only its manifest and built public entries')
 }
 
 async function packPackage(outputDir: string): Promise<{ tarball: string; summary: PackSummary }> {
   await mkdir(outputDir, { recursive: true })
+  await runCommand('bun', ['run', 'prepack'], { cwd: packageRoot })
   const result = await runCommandCapture('npm', [
     'pack',
     '--json',
     '--pack-destination',
     outputDir,
-  ], { cwd: packageRoot })
+  ], { cwd: publishStageRoot })
   if (result.stderr) process.stderr.write(result.stderr)
   const summaries = JSON.parse(result.stdout.trim()) as PackSummary[]
   assert(summaries.length === 1, 'npm pack did not return exactly one tarball')
@@ -237,6 +227,7 @@ async function inspectExtractedPackage(
   const packageJson = JSON.parse(await readFile(join(extractedRoot, 'package.json'), 'utf8')) as {
     name?: string
     version?: string
+    private?: boolean
     publishConfig?: { registry?: string }
     exports?: Record<string, unknown>
     dependencies?: Record<string, string>
@@ -244,9 +235,30 @@ async function inspectExtractedPackage(
   }
   assert(packageJson.name === packageName, `expected package name ${packageName}`)
   assert(packageJson.version === packageVersion, `expected package version ${packageVersion}`)
+  assert(packageJson.private !== true, 'staged package must be publishable')
   assert(packageJson.publishConfig?.registry === registry, `publish registry must be ${registry}`)
-  assert(packageJson.exports?.['./creator-skills'], 'creator-skills export is missing')
-  assert(packageJson.exports?.['./creator-skills/fixtures'], 'creator-skills fixtures export is missing')
+  const exports = packageJson.exports ?? {}
+  assert(exports['./creator-skills'], 'creator-skills export is missing')
+  assert(exports['./creator-skills/fixtures'], 'creator-skills fixtures export is missing')
+  assert(
+    Object.keys(exports).sort().join('\n') === './creator-skills\n./creator-skills/fixtures',
+    'published package must expose only the two supported Creator Skill subpaths',
+  )
+  const exportTargets = Object.values(exports).flatMap(value => (
+    typeof value === 'string'
+      ? [value]
+      : Object.values(value as Record<string, unknown>).filter(target => typeof target === 'string') as string[]
+  ))
+  assert(
+    exportTargets.every(target => !target.includes('/src/')),
+    'published exports must not point to private source',
+  )
+  assert(
+    exportTargets.every(target => !target.endsWith('.ts') || target.endsWith('.d.ts')),
+    'published runtime exports must not point to TypeScript source',
+  )
+  assert(!('main' in packageJson), 'published package root must not define main')
+  assert(!('types' in packageJson), 'published package root must not define types')
 
   const dependencySpecs = [
     ...Object.values(packageJson.dependencies ?? {}),
@@ -262,6 +274,7 @@ async function inspectExtractedPackage(
     Buffer.from('file:../../'),
   ]
   const paths = manifest?.map(entry => entry.path) ?? await listFiles(extractedRoot)
+  validatePackManifest(paths.map(path => ({ path, size: 0 })))
   for (const path of paths) {
     const fullPath = join(extractedRoot, path)
     const file = await readFile(fullPath)
@@ -406,6 +419,40 @@ async function proveNodeEntrypoints(consumerRoot: string): Promise<void> {
   await runCommand('node', ['--input-type=module', '-e', esmProof], { cwd: consumerRoot })
 }
 
+async function proveUnsupportedEntrypoints(consumerRoot: string): Promise<void> {
+  const commonJsProof = String.raw`
+    const assert = require('node:assert/strict');
+    for (const specifier of [
+      '${packageName}',
+      '${packageName}/protocol',
+      '${packageName}/package.json',
+    ]) {
+      assert.throws(
+        () => require(specifier),
+        error => error && error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+        specifier + ' must stay outside the published boundary',
+      );
+    }
+  `
+  await runCommand('node', ['-e', commonJsProof], { cwd: consumerRoot })
+
+  const esmProof = `
+    import assert from 'node:assert/strict';
+    for (const specifier of [
+      '${packageName}',
+      '${packageName}/protocol',
+      '${packageName}/package.json',
+    ]) {
+      await assert.rejects(
+        import(specifier),
+        error => error && error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+        specifier + ' must stay outside the published boundary',
+      );
+    }
+  `
+  await runCommand('node', ['--input-type=module', '-e', esmProof], { cwd: consumerRoot })
+}
+
 async function proveNextProductionRoute(consumerRoot: string, env: NodeJS.ProcessEnv): Promise<void> {
   await runCommand('npm', ['run', 'build'], { cwd: consumerRoot, env })
   const port = await getFreePort()
@@ -479,6 +526,7 @@ async function writeEvidence(
       npmCiFrozenInstall: 'passed',
       commonJsRequire: 'passed',
       esmImport: 'passed',
+      unsupportedSubpathsRejected: 'passed',
       typescriptNoEmit: 'passed',
       nextProductionBuild: 'passed',
       nextProductionRoute: 'passed',
@@ -520,6 +568,7 @@ async function main(): Promise<void> {
     await rm(join(consumerRoot, 'node_modules'), { recursive: true, force: true })
     await runCommand('npm', ['ci', '--no-audit', '--no-fund'], { cwd: consumerRoot, env: cleanEnv })
     await proveNodeEntrypoints(consumerRoot)
+    await proveUnsupportedEntrypoints(consumerRoot)
     await runCommand('npm', ['run', 'typecheck'], { cwd: consumerRoot, env: cleanEnv })
     await proveNextProductionRoute(consumerRoot, cleanEnv)
     await writeEvidence(outputDir, packed.tarball, packed.summary, consumerRoot)

@@ -1,0 +1,40 @@
+{
+  "name": "@z-h-ai/shared",
+  "version": "0.11.0",
+  "license": "Apache-2.0",
+  "description": "Published Creator Skill contracts for Polo AI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/z-h-ai/polo.git",
+    "directory": "packages/shared"
+  },
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "exports": {
+    "./creator-skills": {
+      "types": "./dist/creator-skills/index.d.ts",
+      "import": "./dist/creator-skills/index.cjs",
+      "require": "./dist/creator-skills/index.cjs",
+      "default": "./dist/creator-skills/index.cjs"
+    },
+    "./creator-skills/fixtures": {
+      "types": "./dist/creator-skills/fixtures.d.ts",
+      "import": "./dist/creator-skills/fixtures.cjs",
+      "require": "./dist/creator-skills/fixtures.cjs",
+      "default": "./dist/creator-skills/fixtures.cjs"
+    }
+  }
+}

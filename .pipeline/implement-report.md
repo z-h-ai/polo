@@ -1,47 +1,84 @@
-# POO-26 Implement Report
+# POO-26 修复实现报告
 
 ## 变更摘要
 
-- 将 shared package 与 Polo 仓库内所有消费点从 `@polo-ai/shared` 统一迁移到 `@z-h-ai/shared`，版本提升到 `0.11.0`，同步更新 workspace dependencies、TypeScript paths、测试 mock、构建引用和 `bun.lock`。
-- 固定 GitHub Packages 私有发布边界：`publishConfig.registry=https://npm.pkg.github.com`、`access=restricted`，Creator Skill 两个公开入口同时提供生成后的 CommonJS runtime 与 `.d.ts`，不让跨仓消费者编译 `src/creator-skills/**`。
-- 删除旧的手工 public declaration shadow files；新增 npm pack 负向过滤，制品不包含 Creator Skill 私有源码、测试、开发者绝对路径、未追踪手工文件或 `workspace:*` 依赖。
-- 重写 clean-consumer proof：在系统临时目录创建无 Polo/Admin sibling 的最小消费者，生成 lockfile 后删除 install tree，再执行 frozen `npm ci`；验证 CommonJS、ESM、TypeScript 6、Next.js 16/Turbopack production build、真实 `next start` API route，以及 POO-21 fixture metadata/manifest/contentDigest 基线。
-- 新增 `shared-v*` GitHub Actions 发布工作流：tag/version gate 后只 pack 一次，验证同一 tarball，再对同一文件执行 GitHub build-provenance attestation 和 `npm publish`，并保留 SHA、npm integrity、frozen lock 与 registry metadata 证据。
-- 新增 POL-59 交接文档，明确版本/registry、公开 exports、验证命令、token 注入规则、迁移步骤、独立验收边界和回滚方式。
+- 将 Polo monorepo 内部使用的开发 manifest 与跨仓发布 manifest 分离：开发
+  `package.json` 标记为 `private` 并继续保留现有源码 exports，
+  `package.publish.json` 只公开
+  `@z-h-ai/shared/creator-skills` 和
+  `@z-h-ai/shared/creator-skills/fixtures`。
+- `prepack` 先构建 Creator Skill CJS 与声明文件，再在 `dist/publish` 生成隔离、
+  可重复的 publish staging directory；流程不改写开发 manifest，失败时不会留下
+  manifest 备份或半恢复状态。
+- 发布制品仅携带 publish manifest、自包含 CJS bundle 和完整声明文件集合；运行时
+  依赖已内联，publish manifest 显式声明声明文件所需的 `zod` 类型依赖。
+- clean-consumer proof 改为只打包 staging directory，并新增 publish exports 精确集合、
+  禁止 `src/*.ts` runtime target、tarball 文件 allowlist，以及 package root、
+  `/protocol`、`/package.json` 在 CJS/ESM 下均返回
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` 的负向验证。
+- 恢复 `0.7.0` 历史 release note 中当时的 `@polo-ai/shared/protocol` 包名。
+- 更新 POL-59 交接文档，明确当前只有候选制品，tag、GitHub Packages package、
+  access grant、attestation 和 registry-backed proof 尚未产生；补充破坏性边界、
+  回滚和发布后 registry 验证步骤。
 
 ## 关键文件列表
 
 - `packages/shared/package.json`
+- `packages/shared/package.publish.json`
+- `packages/shared/scripts/stage-creator-skills-package.ts`
 - `packages/shared/scripts/verify-creator-skills-package.ts`
-- `packages/shared/scripts/build-creator-skills.ts`
-- `packages/shared/src/.npmignore`
-- `packages/shared/dist/creator-skills/**`
-- `.github/workflows/publish-shared-package.yml`
 - `docs/shared-package-publishing.md`
-- `bun.lock`
-- Polo 内所有原 `@polo-ai/shared` workspace dependency、import、TypeScript path 与测试 mock 消费点
+- `apps/electron/resources/release-notes/0.7.0.md`
+- `.pipeline/implement-report.md`
 
 ## 自测结果
 
-- `bun install --frozen-lockfile`：通过；新的 workspace package 名称与 `0.11.0` lock metadata 可 frozen 安装。
-- `bun run typecheck:all`：通过。
-- `bun test packages/shared/src/creator-skills`：通过，73 pass / 0 fail。
-- `bun run test`：通过；仓库全量普通测试及逐文件 `*.isolated.ts` 测试全部退出 0。
-- `bun run electron:build`：通过；main、preload、renderer、resources、assets 全部构建成功，证明仓库内 namespace 迁移未破坏 Electron bundling。
-- `bun run packages/shared/scripts/verify-creator-skills-package.ts --output-dir /tmp/poo26-final-proof.DrxbEv`：通过。
-  - tarball：`z-h-ai-shared-0.11.0.tgz`
-  - SHA-256：`84639408006e419ecf947d1611ac98704080f702293c1caf9ed9370a0621fb23`
-  - npm/frozen-lock integrity：`sha512-GbBN74488syTh4HQtWPQJZhOmEBrFCqSpoyA5USeMvUGR5A+UHuFI3QXGEYNgG49tcxJLJmfZRnkpHpRenbE2Q==`
-  - Node `v24.14.0` CommonJS require 与 ESM import：通过。
-  - TypeScript `6.0.3` `tsc --noEmit`：通过。
-  - Next.js `16.2.7` Turbopack production build + `next start` + 真实 API 请求：通过。
-  - fixture slug/frontmatter/metadata/canonical manifest/contentDigest：通过，digest 保持 `f9999556728593a5f0f5f3e22f89b1e86793ae5232f7e11e68324ef82927136c`。
-  - Creator Skill 私有源码/测试、所有 package 测试、开发者路径、untracked 手工产物、`workspace:*` 发布依赖负向检查：通过。
-- `git diff --check`：通过。
-- `bun run lint:shared`：未通过；命中 5 个与本任务无关且本分支未修改的既有 `craft-shared/no-inline-source-auth-check` 错误（`resource-bundle.test.ts`、`token-refresh-manager.test.ts`、`token-refresh-manager.ts`）及 9 个既有 unused-disable warning。本任务修改文件未产生 lint 报错。
+### Shared package 全量测试
+
+```sh
+bun run --cwd packages/shared test
+```
+
+结果：通过，`3021 pass / 18 skip / 0 fail`，共 3039 tests、6914 assertions。
+
+### 独立 clean-consumer package proof
+
+```sh
+bun run packages/shared/scripts/verify-creator-skills-package.ts \
+  --output-dir "$(mktemp -d /tmp/z-h-ai-shared-proof.XXXXXX)"
+```
+
+结果：通过。已实际完成：
+
+- staging publish manifest 与 tarball allowlist 检查；
+- 无 sibling checkout 的临时消费者 lockfile 生成、删除安装树后 `npm ci`；
+- Node CJS require 与 ESM import；
+- package root 和未支持 subpaths 的 CJS/ESM 负向解析；
+- TypeScript 6.0.3 `tsc --noEmit`；
+- Next.js 16.2.7 Turbopack production build；
+- `next start` 后真实请求 `/api/shared-skill-proof`；
+- fixture slug、metadata 与 canonical contentDigest
+  `f9999556728593a5f0f5f3e22f89b1e86793ae5232f7e11e68324ef82927136c`；
+- tarball 不含源码、测试、开发者绝对路径、额外手工文件或 `workspace:*` 依赖。
+
+本轮候选 tarball SHA-256：
+`25fd5d8d61013b6ce01692117f8b75d7220f8390ce31e7a7c04994268ff9d067`。
+
+### 基础一致性
+
+```sh
+git diff --check
+```
+
+结果：通过。
 
 ## 遗留问题
 
-- 按任务纪律未执行 push，因此尚未创建/推送 `shared-v0.11.0`，也尚未实际向 GitHub Packages 发布；当前本机 tarball 只作为验证制品，不能作为 POL-59 最终依赖来源。
-- 发布后仍必须在 GitHub package settings 向 `z-h-ai/polo-admin` 授予 Actions read access，并由 tagged workflow 产出实际 `published-package.json` 和 GitHub artifact attestation。该外部发布/授权门禁完成前，POO-26 的“已发布且 POL-59 可从 registry 安装”验收项应保持 blocker/escalation，不能宣称端到端完成。
-- POL-59 仍需独立迁移 dependency/lockfile 并完成 clean `npm ci`、Next production `/api/capabilities`、数据库/对象存储角色边界及 Electron ledger/journal 闭环；shared package proof 不替代 POL-59 验收。
+- 按本轮 coder 职责未执行 push、tag 或 publish；`shared-v0.11.0`、
+  `@z-h-ai/shared@0.11.0`、GitHub artifact attestation 和 package access grant
+  仍不存在，不能宣称 registry 发布完成。
+- 发布授权方和独立 reviewer 通过后，仍需由 tagged GitHub Actions 发布同一已验证
+  tarball，并从 GitHub Packages 精确版本执行 authenticated frozen clean install，
+  对齐 registry integrity 后重跑 Node/TypeScript/Next/route/fixture/负向边界验证。
+- POL-59 的版本依赖迁移、lockfile、真实 `/api/capabilities`、数据库、对象存储、角色
+  和 Electron ledger/journal 验收仍属于下游独立工作。
