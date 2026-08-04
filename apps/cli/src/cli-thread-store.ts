@@ -536,7 +536,11 @@ export async function acquireCliThreadLease(
 ): Promise<CliThreadLease> {
   const root = getCliSessionsRoot()
   await assertCanonicalControlledPath(root, record.directory)
-  await ensurePrivateDir(record.directory)
+  // An acquire operates on an existing Thread. Recreating this directory here
+  // opens a delete/acquire race: delete can atomically move the Thread after
+  // the containment check, then this call can recreate an empty directory and
+  // publish a lease for a Thread that no longer exists. The state-lock acquire
+  // below revalidates the existing directory and fails closed if delete won.
   const ownerFile = record.ownerFile
   const now = Date.now()
   const cliProcessIdentity = getProcessBirthIdentity(process.pid)
