@@ -20,6 +20,10 @@ Release integrity and provenance:
 - Build provenance:
   [`attestation 38702469`](https://github.com/z-h-ai/polo/attestations/38702469)
 - Workflow artifact: `z-h-ai-shared-0.11.1-proof`
+- Registry-backed verification run:
+  [`30930288240`](https://github.com/z-h-ai/polo/actions/runs/30930288240),
+  executed from proof tooling commit
+  `efb2f5f1e34ccec793bc0338901119fd534775a0`
 
 The package remains private. `z-h-ai/polo-admin` must have explicit Actions
 read access in the package settings before its repository `GITHUB_TOKEN` can
@@ -108,6 +112,13 @@ The candidate proof validates the exact tarball before publication. The
 registry proof then installs `@z-h-ai/shared@0.11.1` from GitHub Packages,
 checks its lockfile URL and integrity against `published-package.json`, and
 reruns the same consumer matrix.
+
+The authenticated manual verification run `30930288240` completed this matrix
+successfully and uploaded the candidate proof, registry lockfile,
+`registry-proof.json`, and both lifecycle proofs in
+`z-h-ai-shared-0.11.1-proof`. The registry lock resolves the immutable tarball
+URL and npm integrity listed above; the proof process exited by itself with no
+live descendant and did not require `SIGKILL` for the Next server.
 
 | Consumer | Verified version | Check |
 | --- | --- | --- |
