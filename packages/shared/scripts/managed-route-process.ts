@@ -36,6 +36,8 @@ async function abortableDelay(timeoutMs: number, signal: AbortSignal): Promise<v
   })
 }
 
+// Link the caller's cancellation to both fetch and retry sleeps. Every timer
+// and listener is removed in finally so a failed server cannot hold Bun open.
 export async function waitForRoute(
   url: string,
   signal: AbortSignal,
@@ -117,6 +119,8 @@ async function terminateChild(
   settled: Promise<ChildOutcome>,
   label: string,
 ): Promise<ManagedProcessLifecycle> {
+  // Preserve the first close/error outcome while allowing graceful shutdown;
+  // SIGKILL is evidence of degraded cleanup and is reported to the caller.
   const startedAt = Date.now()
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
     await settled
@@ -143,6 +147,9 @@ export async function proveManagedRouteProcess(
     retryIntervalMs?: number
   },
 ): Promise<{ response: Record<string, unknown>; lifecycle: ManagedProcessLifecycle }> {
+  // Route readiness and child exit race deliberately. The losing route promise
+  // is aborted and drained before listeners and pipes are removed, preventing
+  // unhandled rejections and inherited stdio from leaking into the proof runner.
   const observer = observeChild(child)
   const routeAbort = new AbortController()
   const stdoutListener = (chunk: Buffer): void => { process.stdout.write(chunk) }

@@ -1,11 +1,29 @@
 # `@z-h-ai/shared` publishing and POL-59 handoff
 
-## Release candidate boundary
+## Published release boundary
 
-The planned private package coordinate is `@z-h-ai/shared@0.11.1` in
-`https://npm.pkg.github.com`, with the planned immutable release tag
-`shared-v0.11.1`. Neither that tag, registry package, package access grant, nor
-attestation exists until the tagged publish workflow completes successfully.
+The approved private package coordinate is `@z-h-ai/shared@0.11.1` in
+`https://npm.pkg.github.com`. It was published from immutable tag
+`shared-v0.11.1` at commit
+`344309d56522b16db8ab261fdce93418ca12fffe` by GitHub Actions run
+[`30873738449`](https://github.com/z-h-ai/polo/actions/runs/30873738449).
+
+Release integrity and provenance:
+
+- Registry tarball:
+  `https://npm.pkg.github.com/download/@z-h-ai/shared/0.11.1/d2cb2b7ddcb30fb4ffe0e605763707b91f3801a2`
+- Tarball SHA-256:
+  `d4e3dc2e00967410d1abe16e68f9b439d0a897e120d71d7efc577e4b78b7b9b2`
+- npm integrity:
+  `sha512-Kitxxhd0L9VPQPBZE0LR5r+FZCoDxpiYaUNI5Qb/OEUuWCxY446JNFzmG4/zejm8Xf4K56Q4daD74UA71BzXdw==`
+- npm shasum: `d2cb2b7ddcb30fb4ffe0e605763707b91f3801a2`
+- Build provenance:
+  [`attestation 38702469`](https://github.com/z-h-ai/polo/attestations/38702469)
+- Workflow artifact: `z-h-ai-shared-0.11.1-proof`
+
+The package remains private. `z-h-ai/polo-admin` must have explicit Actions
+read access in the package settings before its repository `GITHUB_TOKEN` can
+install the package.
 
 `shared-v0.11.0` is an immutable failed publication-attempt tag at commit
 `27ec7083ecce131818b24026edef283eda10c380`. GitHub Actions run `30870120001`
@@ -38,7 +56,7 @@ the development manifest. The proof packs only that staging directory. This
 preserves existing monorepo source imports while ensuring the registry tarball
 carries only the two self-contained public exports.
 
-## Candidate integrity and compatibility evidence
+## Integrity and compatibility evidence
 
 Run the complete local candidate proof from the repository root:
 
@@ -56,7 +74,8 @@ bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts \
   --output-dir /tmp/z-h-ai-shared-proof
 ```
 
-The output directory contains:
+The output directory contains the candidate proof inputs used by the publish
+workflow:
 
 - `z-h-ai-shared-0.11.1.tgz`, the exact candidate tarball.
 - `proof.json`, including candidate tarball SHA-256, npm integrity, git commit
@@ -65,8 +84,13 @@ The output directory contains:
   and left no live descendant process.
 - `clean-consumer-package-lock.json`, including the local tarball install
   integrity used by the candidate proof.
-- Only after a successful tagged publication, `published-package.json`, with
-  the authenticated registry tarball URL and registry integrity.
+- `published-package.json`, with the authenticated registry tarball URL and
+  registry integrity.
+- `registry-clean-consumer-package-lock.json`, whose shared dependency resolves
+  the exact GitHub Packages URL above rather than a local `file:` source.
+- `registry-proof.json` and `registry-lifecycle-proof.json`, containing the
+  authenticated frozen install, Node, TypeScript, Next production route,
+  fixtures, package-boundary, and process-lifecycle results.
 
 The proof creates its consumer under the operating system temporary directory,
 outside the Polo repository. It creates a lockfile, deletes the install tree,
@@ -80,27 +104,28 @@ recalculates the POO-21 fixture manifest `contentDigest` through the canonical
 exported algorithm, and rejects source, tests, developer paths, undeclared
 files, `workspace:*` dependencies, or any public export targeting `src/*.ts`.
 
-This local proof validates the candidate only. It does not prove that version
-`0.11.1` is present or installable from GitHub Packages.
+The candidate proof validates the exact tarball before publication. The
+registry proof then installs `@z-h-ai/shared@0.11.1` from GitHub Packages,
+checks its lockfile URL and integrity against `published-package.json`, and
+reruns the same consumer matrix.
+
+| Consumer | Verified version | Check |
+| --- | --- | --- |
+| Node.js | 24.14.0 | CommonJS `require` and ESM `import` |
+| TypeScript | 6.0.3 | `tsc --noEmit` |
+| Next.js | 16.2.7 | Turbopack production build, `next start`, real API request |
+| Creator Skill fixtures | POO-21 baseline | metadata, slug/frontmatter validation, canonical manifest and `contentDigest` |
 
 ## Publishing and registry-backed verification
 
-After independent review approval:
+The tagged workflow proves, attests, publishes, queries, and registry-verifies
+the same package artifact. A manual dispatch with `verify_published=true` reruns
+the authenticated registry proof without attempting to republish the immutable
+version. It must produce every evidence file listed above.
 
-1. Merge the implementation commit into the authorized release source branch.
-2. Create and push annotated tag `shared-v0.11.1` at that exact commit. Preserve
-   the existing failed-attempt tag `shared-v0.11.0` unchanged.
-3. Let `.github/workflows/publish-shared-package.yml` finish. The workflow
-   proves, attests, publishes, and queries the same candidate tarball; do not
-   rebuild a second tarball for publication.
-4. In GitHub package settings, grant `z-h-ai/polo-admin` Actions read access.
-5. Retain the workflow proof artifact, `published-package.json`, and GitHub
-   build-provenance attestation with the release record.
-6. In a clean directory with authenticated `@z-h-ai` registry configuration,
-   install exact version `0.11.1` with a frozen lockfile. Confirm the lockfile
-   registry URL/integrity matches `published-package.json`, then rerun the Node,
-   TypeScript, Next build/start, route, fixtures, and unsupported-subpath checks
-   against the registry-installed package.
+Package access is verified separately from artifact correctness: add
+`z-h-ai/polo-admin` under **Manage Actions access** with read-only access, then
+run its installation check using the repository's own `GITHUB_TOKEN`.
 
 If publication, repository access, attestation, metadata lookup, or the
 registry-backed frozen install fails, stop and escalate. A local `npm pack`

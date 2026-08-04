@@ -55,7 +55,21 @@ type PackSummary = {
 type CliOptions = {
   outputDir?: string
   tarball?: string
+  registryVersion?: string
+  publishedMetadata?: string
   keepTemp: boolean
+}
+
+type ConsumerSource =
+  | { kind: 'tarball'; tarball: string }
+  | { kind: 'registry'; version: string; publishedMetadata: string }
+
+type PublishedPackageMetadata = {
+  name?: string
+  version?: string
+  'dist.tarball'?: string
+  'dist.integrity'?: string
+  'dist.shasum'?: string
 }
 
 type ProcessLifecycleEvidence = {
@@ -77,17 +91,38 @@ function parseArgs(argv: string[]): CliOptions {
       options.keepTemp = true
       continue
     }
-    if (arg === '--output-dir' || arg === '--tarball') {
+    if (
+      arg === '--output-dir'
+      || arg === '--tarball'
+      || arg === '--registry-version'
+      || arg === '--published-metadata'
+    ) {
       const value = argv[index + 1]
-      assert(value && !value.startsWith('--'), `${arg} requires a path`)
+      assert(value && !value.startsWith('--'), `${arg} requires a value`)
       if (arg === '--output-dir') options.outputDir = resolve(value)
-      else options.tarball = resolve(value)
+      else if (arg === '--tarball') options.tarball = resolve(value)
+      else if (arg === '--registry-version') options.registryVersion = value
+      else options.publishedMetadata = resolve(value)
       index += 1
       continue
     }
     throw new Error(`Unknown argument: ${arg}`)
   }
   assert(!(options.outputDir && options.tarball), '--output-dir and --tarball cannot be combined')
+  assert(
+    !(options.tarball && options.registryVersion),
+    '--tarball and --registry-version cannot be combined',
+  )
+  assert(
+    options.registryVersion ? Boolean(options.publishedMetadata) : !options.publishedMetadata,
+    '--registry-version and --published-metadata must be provided together',
+  )
+  if (options.registryVersion) {
+    assert(
+      options.registryVersion === packageVersion,
+      `registry proof version must match package manifest version ${packageVersion}`,
+    )
+  }
   return options
 }
 
@@ -208,16 +243,11 @@ async function packPackage(outputDir: string): Promise<{ tarball: string; summar
   return { tarball: join(outputDir, summary.filename), summary }
 }
 
-async function inspectExtractedPackage(
-  tarball: string,
-  tempRoot: string,
+async function inspectPackageDirectory(
+  packageDirectory: string,
   manifest?: PackManifestEntry[],
 ): Promise<void> {
-  const extractRoot = join(tempRoot, 'tarball-extract')
-  await mkdir(extractRoot)
-  await runCommand('tar', ['-xzf', tarball, '-C', extractRoot])
-  const extractedRoot = join(extractRoot, 'package')
-  const packageJson = JSON.parse(await readFile(join(extractedRoot, 'package.json'), 'utf8')) as {
+  const packageJson = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8')) as {
     name?: string
     version?: string
     private?: boolean
@@ -266,15 +296,26 @@ async function inspectExtractedPackage(
     Buffer.from('/Users/wow/project/'),
     Buffer.from('file:../../'),
   ]
-  const paths = manifest?.map(entry => entry.path) ?? await listFiles(extractedRoot)
+  const paths = manifest?.map(entry => entry.path) ?? await listFiles(packageDirectory)
   validatePackManifest(paths.map(path => ({ path, size: 0 })))
   for (const path of paths) {
-    const fullPath = join(extractedRoot, path)
+    const fullPath = join(packageDirectory, path)
     const file = await readFile(fullPath)
     for (const needle of forbiddenBytes) {
       assert(!file.includes(needle), `tarball file ${path} contains a developer/worktree path`)
     }
   }
+}
+
+async function inspectTarball(
+  tarball: string,
+  tempRoot: string,
+  manifest?: PackManifestEntry[],
+): Promise<void> {
+  const extractRoot = join(tempRoot, 'tarball-extract')
+  await mkdir(extractRoot)
+  await runCommand('tar', ['-xzf', tarball, '-C', extractRoot])
+  await inspectPackageDirectory(join(extractRoot, 'package'), manifest)
 }
 
 async function listFiles(root: string, current = ''): Promise<string[]> {
@@ -287,16 +328,29 @@ async function listFiles(root: string, current = ''): Promise<string[]> {
   return result
 }
 
-async function prepareConsumer(tempRoot: string, tarball: string): Promise<string> {
+async function prepareConsumer(tempRoot: string, source: ConsumerSource): Promise<string> {
   const consumerRoot = join(tempRoot, 'standalone-next-consumer')
-  const artifactsRoot = join(consumerRoot, 'artifacts')
   const routeRoot = join(consumerRoot, 'src', 'app', 'api', 'shared-skill-proof')
-  await mkdir(artifactsRoot, { recursive: true })
   await mkdir(routeRoot, { recursive: true })
-  const localTarball = join(artifactsRoot, basename(tarball))
-  await copyFile(tarball, localTarball)
+  let dependencySpec: string
+  let npmConfig = 'registry=https://registry.npmjs.org\n'
+  if (source.kind === 'tarball') {
+    const artifactsRoot = join(consumerRoot, 'artifacts')
+    await mkdir(artifactsRoot, { recursive: true })
+    const localTarball = join(artifactsRoot, basename(source.tarball))
+    await copyFile(source.tarball, localTarball)
+    dependencySpec = `file:artifacts/${basename(source.tarball)}`
+  } else {
+    assert(process.env.NODE_AUTH_TOKEN, 'registry proof requires NODE_AUTH_TOKEN')
+    dependencySpec = source.version
+    npmConfig += [
+      '@z-h-ai:registry=https://npm.pkg.github.com',
+      '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}',
+      '',
+    ].join('\n')
+  }
 
-  await writeFile(join(consumerRoot, '.npmrc'), 'registry=https://registry.npmjs.org\n')
+  await writeFile(join(consumerRoot, '.npmrc'), npmConfig)
   await writeFile(join(consumerRoot, 'package.json'), `${JSON.stringify({
     name: 'z-h-ai-shared-clean-consumer-proof',
     version: '1.0.0',
@@ -308,7 +362,7 @@ async function prepareConsumer(tempRoot: string, tarball: string): Promise<strin
       start: 'next start',
     },
     dependencies: {
-      [packageName]: `file:artifacts/${basename(tarball)}`,
+      [packageName]: dependencySpec,
       next: '16.2.7',
       react: '19.2.7',
       'react-dom': '19.2.7',
@@ -544,6 +598,107 @@ async function writeEvidence(
   console.log(JSON.stringify(evidence, null, 2))
 }
 
+async function writeRegistryEvidence(
+  outputDir: string,
+  source: Extract<ConsumerSource, { kind: 'registry' }>,
+  consumerRoot: string,
+  nextProcessLifecycle: ProcessLifecycleEvidence,
+): Promise<void> {
+  await mkdir(outputDir, { recursive: true })
+  const consumerLockPath = join(consumerRoot, 'package-lock.json')
+  const lockfile = JSON.parse(await readFile(consumerLockPath, 'utf8')) as {
+    packages?: Record<string, { integrity?: string; resolved?: string; version?: string }>
+  }
+  const installed = lockfile.packages?.[`node_modules/${packageName}`]
+  assert(installed?.version === source.version, 'registry lockfile resolved the wrong shared version')
+  assert(installed.integrity, 'registry lockfile is missing shared package integrity')
+  assert(
+    installed.resolved?.startsWith(`${registry}/download/${packageName}/${source.version}/`),
+    `registry lockfile did not resolve ${packageName} from GitHub Packages`,
+  )
+
+  const published = JSON.parse(
+    await readFile(source.publishedMetadata, 'utf8'),
+  ) as PublishedPackageMetadata
+  assert(published.name === packageName, 'published metadata has the wrong package name')
+  assert(published.version === source.version, 'published metadata has the wrong package version')
+  assert(published['dist.integrity'], 'published metadata is missing dist.integrity')
+  assert(published['dist.tarball'], 'published metadata is missing dist.tarball')
+  assert(
+    published['dist.integrity'] === installed.integrity,
+    'registry lockfile integrity does not match published metadata',
+  )
+  assert(
+    published['dist.tarball'] === installed.resolved,
+    'registry lockfile URL does not match published metadata',
+  )
+
+  const candidateProof = JSON.parse(
+    await readFile(join(outputDir, 'proof.json'), 'utf8'),
+  ) as { npmIntegrity?: string; npmShasum?: string; tarballSha256?: string }
+  assert(
+    candidateProof.npmIntegrity === published['dist.integrity'],
+    'published package integrity does not match the verified candidate tarball',
+  )
+  if (published['dist.shasum'] && candidateProof.npmShasum) {
+    assert(
+      candidateProof.npmShasum === published['dist.shasum'],
+      'published package shasum does not match the verified candidate tarball',
+    )
+  }
+
+  await copyFile(
+    consumerLockPath,
+    join(outputDir, 'registry-clean-consumer-package-lock.json'),
+  )
+  const releaseTag = `shared-v${source.version}`
+  const evidence = {
+    schemaVersion: 1,
+    package: `${packageName}@${source.version}`,
+    source: 'github-packages',
+    registry,
+    publishedTarball: published['dist.tarball'],
+    publishedIntegrity: published['dist.integrity'],
+    publishedShasum: published['dist.shasum'] ?? null,
+    candidateTarballSha256: candidateProof.tarballSha256 ?? null,
+    frozenLockIntegrity: installed.integrity,
+    frozenLockResolved: installed.resolved,
+    releaseTag,
+    releaseCommit: gitOutput(['rev-parse', `${releaseTag}^{}`]) ?? 'unknown',
+    proofToolCommit: gitOutput(['rev-parse', 'HEAD']) ?? 'unknown',
+    publicExports: [
+      `${packageName}/creator-skills`,
+      `${packageName}/creator-skills/fixtures`,
+    ],
+    compatibility: {
+      node: execFileSync('node', ['--version'], { encoding: 'utf8' }).trim(),
+      typescript: '6.0.3',
+      next: '16.2.7',
+      nextBundler: 'turbopack',
+    },
+    nextProductionProcess: nextProcessLifecycle,
+    checks: {
+      githubPackagesResolution: 'passed',
+      registryMetadataMatchesCandidateArtifact: 'passed',
+      npmCiFrozenInstall: 'passed',
+      commonJsRequire: 'passed',
+      esmImport: 'passed',
+      unsupportedSubpathsRejected: 'passed',
+      typescriptNoEmit: 'passed',
+      nextProductionBuild: 'passed',
+      nextProductionRoute: 'passed',
+      nextProductionProcessLifecycle: 'passed',
+      fixtureCanonicalDigest: 'passed',
+      negativeInstalledPackageBoundary: 'passed',
+    },
+  }
+  await writeFile(
+    join(outputDir, 'registry-proof.json'),
+    `${JSON.stringify(evidence, null, 2)}\n`,
+  )
+  console.log(JSON.stringify(evidence, null, 2))
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2))
   const tempRoot = await mkdtemp(join(tmpdir(), 'z-h-ai-shared-proof-'))
@@ -553,13 +708,24 @@ async function main(): Promise<void> {
       isAbsolute(tempRoot) && relative(repositoryRoot, tempRoot).startsWith(`..${sep}`),
       'clean consumer must be outside the Polo repository',
     )
-    const packed = options.tarball
-      ? { tarball: options.tarball, summary: undefined }
-      : await packPackage(outputDir)
-    await access(packed.tarball)
-    if (packed.summary) validatePackManifest(packed.summary.files)
-    await inspectExtractedPackage(packed.tarball, tempRoot, packed.summary?.files)
-    const consumerRoot = await prepareConsumer(tempRoot, packed.tarball)
+    let source: ConsumerSource
+    let packed: { tarball: string; summary: PackSummary | undefined } | undefined
+    if (options.registryVersion && options.publishedMetadata) {
+      source = {
+        kind: 'registry',
+        version: options.registryVersion,
+        publishedMetadata: options.publishedMetadata,
+      }
+    } else {
+      packed = options.tarball
+        ? { tarball: options.tarball, summary: undefined }
+        : await packPackage(outputDir)
+      await access(packed.tarball)
+      if (packed.summary) validatePackManifest(packed.summary.files)
+      await inspectTarball(packed.tarball, tempRoot, packed.summary?.files)
+      source = { kind: 'tarball', tarball: packed.tarball }
+    }
+    const consumerRoot = await prepareConsumer(tempRoot, source)
     const cleanEnv = {
       ...process.env,
       CI: '1',
@@ -573,22 +739,39 @@ async function main(): Promise<void> {
     })
     await rm(join(consumerRoot, 'node_modules'), { recursive: true, force: true })
     await runCommand('npm', ['ci', '--no-audit', '--no-fund'], { cwd: consumerRoot, env: cleanEnv })
+    if (source.kind === 'registry') {
+      await inspectPackageDirectory(join(consumerRoot, 'node_modules', packageName))
+    }
     await proveNodeEntrypoints(consumerRoot)
     await proveUnsupportedEntrypoints(consumerRoot)
     await runCommand('npm', ['run', 'typecheck'], { cwd: consumerRoot, env: cleanEnv })
     const nextProcessLifecycle = await proveNextProductionRoute(consumerRoot, cleanEnv)
-    await writeEvidence(
-      outputDir,
-      packed.tarball,
-      packed.summary,
-      consumerRoot,
-      nextProcessLifecycle,
-    )
-    if (process.env.CI && !process.env.SHARED_PACKAGE_PROOF_ALLOW_DIRTY && !options.tarball) {
+    if (source.kind === 'registry') {
+      await writeRegistryEvidence(outputDir, source, consumerRoot, nextProcessLifecycle)
+    } else {
+      assert(packed, 'candidate package metadata is missing')
+      await writeEvidence(
+        outputDir,
+        packed.tarball,
+        packed.summary,
+        consumerRoot,
+        nextProcessLifecycle,
+      )
+    }
+    if (
+      process.env.CI
+      && !process.env.SHARED_PACKAGE_PROOF_ALLOW_DIRTY
+      && !options.tarball
+      && source.kind === 'tarball'
+    ) {
       const status = gitOutput(['status', '--porcelain', '--untracked-files=no']) ?? ''
       assert(status.length === 0, `prepack output is not reproducible from the checked-out snapshot:\n${status}`)
     }
-    console.log(`Clean consumer proof passed: ${packed.tarball}`)
+    console.log(
+      source.kind === 'registry'
+        ? `Registry-backed clean consumer proof passed: ${packageName}@${source.version}`
+        : `Clean consumer proof passed: ${source.tarball}`,
+    )
     if (options.keepTemp) console.log(`Temporary consumer retained at ${tempRoot}`)
   } finally {
     if (!options.keepTemp) await rm(tempRoot, { recursive: true, force: true })

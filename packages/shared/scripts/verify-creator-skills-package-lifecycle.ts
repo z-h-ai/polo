@@ -13,6 +13,8 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
+// The proof runs in a detached process group so a watchdog can reap every
+// descendant, including Next.js grandchildren that outlive their direct parent.
 function processGroupExists(groupId: number): boolean {
   try {
     process.kill(-groupId, 0)
@@ -48,6 +50,7 @@ async function main(): Promise<void> {
   const forwardedArgs: string[] = []
   let outputDir: string | undefined
   let allowDirtySnapshot = false
+  let registryMode = false
   const args = process.argv.slice(2)
 
   for (let index = 0; index < args.length; index += 1) {
@@ -56,6 +59,7 @@ async function main(): Promise<void> {
       allowDirtySnapshot = true
       continue
     }
+    if (arg === '--registry-version') registryMode = true
     forwardedArgs.push(arg)
     if (arg === '--output-dir') {
       const value = args[index + 1]
@@ -111,6 +115,8 @@ async function main(): Promise<void> {
     assert(child.pid, 'proof process did not receive a pid')
     processGroupId = child.pid
 
+    // A timeout is always a regression failure. Success requires the proof to
+    // close its own streams and processes, then exit without watchdog help.
     const result = await Promise.race([
       settled,
       new Promise<never>((_resolvePromise, rejectPromise) => {
@@ -131,7 +137,8 @@ async function main(): Promise<void> {
       'proof command exited but left a live descendant in its process group',
     )
 
-    const proof = JSON.parse(await readFile(join(outputDir, 'proof.json'), 'utf8')) as {
+    const proofFilename = registryMode ? 'registry-proof.json' : 'proof.json'
+    const proof = JSON.parse(await readFile(join(outputDir, proofFilename), 'utf8')) as {
       package?: string
       checks?: Record<string, string>
       nextProductionProcess?: { forcedKill?: boolean }
@@ -157,8 +164,11 @@ async function main(): Promise<void> {
         noLiveDescendantProcess: 'passed',
       },
     }
+    const lifecycleFilename = registryMode
+      ? 'registry-lifecycle-proof.json'
+      : 'lifecycle-proof.json'
     await writeFile(
-      join(outputDir, 'lifecycle-proof.json'),
+      join(outputDir, lifecycleFilename),
       `${JSON.stringify(lifecycleEvidence, null, 2)}\n`,
     )
     console.log('CI-style proof lifecycle regression passed')
