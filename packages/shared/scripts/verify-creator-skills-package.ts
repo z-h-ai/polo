@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import type { ChildProcess } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import {
   access,
@@ -16,6 +15,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { proveManagedRouteProcess } from './managed-route-process.ts'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, '..')
@@ -159,60 +159,6 @@ async function getFreePort(): Promise<number> {
       server.close(error => error ? rejectPromise(error) : resolvePromise(address.port))
     })
   })
-}
-
-async function waitForRoute(url: string): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + 120_000
-  let lastError: unknown
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url)
-      const body = await response.text()
-      if (response.ok) return JSON.parse(body) as Record<string, unknown>
-      lastError = new Error(`unexpected response status ${response.status}: ${body}`)
-    } catch (error) {
-      lastError = error
-    }
-    await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
-  }
-  throw new Error(
-    `Timed out waiting for ${url}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
-  )
-}
-
-async function settlesWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<boolean> {
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      promise.then(() => true),
-      new Promise<boolean>(resolvePromise => {
-        timeout = setTimeout(() => resolvePromise(false), timeoutMs)
-      }),
-    ])
-  } finally {
-    if (timeout) clearTimeout(timeout)
-  }
-}
-
-async function terminateChild(
-  child: ChildProcess,
-  closed: Promise<void>,
-  label: string,
-): Promise<{ forcedKill: boolean; shutdownDurationMs: number }> {
-  const startedAt = Date.now()
-  if (child.exitCode !== null || child.signalCode !== null) {
-    await closed
-    return { forcedKill: false, shutdownDurationMs: Date.now() - startedAt }
-  }
-
-  child.kill('SIGTERM')
-  if (await settlesWithin(closed, 5_000)) {
-    return { forcedKill: false, shutdownDurationMs: Date.now() - startedAt }
-  }
-
-  child.kill('SIGKILL')
-  assert(await settlesWithin(closed, 5_000), `${label} did not exit after SIGKILL`)
-  return { forcedKill: true, shutdownDurationMs: Date.now() - startedAt }
 }
 
 async function sha256(path: string): Promise<string> {
@@ -520,41 +466,22 @@ async function proveNextProductionRoute(
     env: { ...env, PORT: String(port) },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  const stdoutListener = (chunk: Buffer): void => { process.stdout.write(chunk) }
-  const stderrListener = (chunk: Buffer): void => { process.stderr.write(chunk) }
-  const closed = new Promise<void>((resolvePromise, rejectPromise) => {
-    child.once('error', rejectPromise)
-    child.once('close', () => resolvePromise())
-  })
-  child.stdout.on('data', stdoutListener)
-  child.stderr.on('data', stderrListener)
-  let shutdown: { forcedKill: boolean; shutdownDurationMs: number } | undefined
-  try {
-    const response = await Promise.race([
-      waitForRoute(`http://127.0.0.1:${port}/api/shared-skill-proof`),
-      closed.then(() => {
-        throw new Error('Next production server exited before the proof route responded')
-      }),
-    ])
-    assert(response.valid === true, 'Next route did not validate the shared fixture')
-    assert(response.slug === 'review-helper', 'Next route fixture slug drifted')
-    assert(response.name === 'Review Helper', 'Next route fixture metadata drifted')
-    assert(response.digestMatches === true, 'Next route fixture contentDigest drifted')
-  } finally {
-    try {
-      shutdown = await terminateChild(child, closed, 'Next production server')
-    } finally {
-      child.stdout.off('data', stdoutListener)
-      child.stderr.off('data', stderrListener)
-      child.stdout.destroy()
-      child.stderr.destroy()
-    }
-  }
-  assert(shutdown, 'Next production server lifecycle evidence is missing')
+  const { response, lifecycle } = await proveManagedRouteProcess(
+    child,
+    `http://127.0.0.1:${port}/api/shared-skill-proof`,
+    {
+      label: 'Next production server',
+      earlyExitMessage: 'Next production server exited before the proof route responded',
+    },
+  )
+  assert(response.valid === true, 'Next route did not validate the shared fixture')
+  assert(response.slug === 'review-helper', 'Next route fixture slug drifted')
+  assert(response.name === 'Review Helper', 'Next route fixture metadata drifted')
+  assert(response.digestMatches === true, 'Next route fixture contentDigest drifted')
   return {
     command: 'node node_modules/next/dist/bin/next start',
     terminationSignal: 'SIGTERM',
-    ...shutdown,
+    ...lifecycle,
   }
 }
 

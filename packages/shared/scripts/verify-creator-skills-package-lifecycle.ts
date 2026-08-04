@@ -76,34 +76,43 @@ async function main(): Promise<void> {
   const timeoutMs = Number(process.env.SHARED_PACKAGE_PROOF_TIMEOUT_MS ?? defaultTimeoutMs)
   assert(Number.isFinite(timeoutMs) && timeoutMs > 0, 'proof timeout must be a positive number')
 
-  const child = spawn('bun', ['run', proofScript, ...forwardedArgs], {
-    cwd: repositoryRoot,
-    detached: true,
-    env: {
-      ...process.env,
-      CI: '1',
-      ...(allowDirtySnapshot ? { SHARED_PACKAGE_PROOF_ALLOW_DIRTY: '1' } : {}),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  assert(child.pid, 'proof process did not receive a pid')
-  const processGroupId = child.pid
+  let child: ReturnType<typeof spawn> | undefined
+  let processGroupId: number | undefined
+  let childErrorListener: ((error: Error) => void) | undefined
+  let childCloseListener: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined
   let stderr = ''
   const stdoutListener = (chunk: Buffer): void => { process.stdout.write(chunk) }
   const stderrListener = (chunk: Buffer): void => {
     stderr = `${stderr}${chunk.toString()}`.slice(-64_000)
     process.stderr.write(chunk)
   }
-  child.stdout.on('data', stdoutListener)
-  child.stderr.on('data', stderrListener)
-
   let watchdog: ReturnType<typeof setTimeout> | undefined
   try {
+    child = spawn('bun', ['run', proofScript, ...forwardedArgs], {
+      cwd: repositoryRoot,
+      detached: true,
+      env: {
+        ...process.env,
+        CI: '1',
+        ...(allowDirtySnapshot ? { SHARED_PACKAGE_PROOF_ALLOW_DIRTY: '1' } : {}),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const spawnedChild = child
+    const settled = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise, rejectPromise) => {
+      childErrorListener = rejectPromise
+      childCloseListener = (code, signal) => resolvePromise({ code, signal })
+      spawnedChild.once('error', childErrorListener)
+      spawnedChild.once('close', childCloseListener)
+    })
+    child.stdout?.on('data', stdoutListener)
+    child.stderr?.on('data', stderrListener)
+    if (!child.pid) await settled
+    assert(child.pid, 'proof process did not receive a pid')
+    processGroupId = child.pid
+
     const result = await Promise.race([
-      new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise, rejectPromise) => {
-        child.once('error', rejectPromise)
-        child.once('close', (code, signal) => resolvePromise({ code, signal }))
-      }),
+      settled,
       new Promise<never>((_resolvePromise, rejectPromise) => {
         watchdog = setTimeout(() => {
           rejectPromise(new Error(
@@ -154,14 +163,16 @@ async function main(): Promise<void> {
     )
     console.log('CI-style proof lifecycle regression passed')
   } catch (error) {
-    await terminateProcessGroup(processGroupId)
+    if (processGroupId) await terminateProcessGroup(processGroupId)
     throw error
   } finally {
     if (watchdog) clearTimeout(watchdog)
-    child.stdout.off('data', stdoutListener)
-    child.stderr.off('data', stderrListener)
-    child.stdout.destroy()
-    child.stderr.destroy()
+    if (childErrorListener) child?.off('error', childErrorListener)
+    if (childCloseListener) child?.off('close', childCloseListener)
+    child?.stdout?.off('data', stdoutListener)
+    child?.stderr?.off('data', stderrListener)
+    child?.stdout?.destroy()
+    child?.stderr?.destroy()
     if (removeOutputDir) await rm(outputDir, { recursive: true, force: true })
   }
 }

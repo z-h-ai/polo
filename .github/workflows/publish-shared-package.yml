@@ -48,6 +48,9 @@ jobs:
         id: package
         run: node -e "const fs=require('node:fs'); const source=require('./packages/shared/package.json'); const p=require('./packages/shared/package.publish.json'); if (source.name !== p.name || source.version !== p.version) throw new Error('source/publish package identity mismatch'); const stem=p.name.replace(/^@/, '').replace('/', '-'); const tarball=process.env.RUNNER_TEMP + '/shared-package-artifact/' + stem + '-' + p.version + '.tgz'; const artifact=stem + '-' + p.version + '-proof'; fs.appendFileSync(process.env.GITHUB_ENV, ['SHARED_VERSION=' + p.version, 'SHARED_TARBALL_PATH=' + tarball, ''].join('\\n')); fs.appendFileSync(process.env.GITHUB_OUTPUT, ['tarball_path=' + tarball, 'artifact_name=' + artifact, ''].join('\\n'))"
 
+      - name: Verify proof failure lifecycle
+        run: bun run --cwd packages/shared test:creator-skills-package-failures
+
       - name: Build, pack, and run clean-consumer proof
         run: bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --output-dir "$RUNNER_TEMP/shared-package-artifact"
 

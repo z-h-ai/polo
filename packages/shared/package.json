@@ -24,6 +24,7 @@
     "prepack": "bun run build && bun run stage:creator-skills-package",
     "test": "bun run build:creator-skills && bun test",
     "test:creator-skills-package": "bun run scripts/verify-creator-skills-package.ts",
+    "test:creator-skills-package-failures": "bun run scripts/verify-proof-failure-lifecycle.ts",
     "test:creator-skills-package-lifecycle": "bun run scripts/verify-creator-skills-package-lifecycle.ts",
     "test:watch": "bun test --watch",
     "sync:polo-ai-bash-patterns": "bun run src/config/sync-polo-ai-bash-patterns.ts"
