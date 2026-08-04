@@ -24,10 +24,14 @@ Release integrity and provenance:
   [`30930288240`](https://github.com/z-h-ai/polo/actions/runs/30930288240),
   executed from proof tooling commit
   `efb2f5f1e34ccec793bc0338901119fd534775a0`
+- Cross-repository access verification:
+  [`z-h-ai/polo-admin` run `30933864632`](https://github.com/z-h-ai/polo-admin/actions/runs/30933864632),
+  consumer commit
+  `51a595d33fb003a875df58ea7d1c37fd67afad10`
 
-The package remains private. `z-h-ai/polo-admin` must have explicit Actions
-read access in the package settings before its repository `GITHUB_TOKEN` can
-install the package.
+The package remains private. `z-h-ai/polo-admin` has explicit Actions read
+access in the package settings. Its repository-scoped `GITHUB_TOKEN` completed
+a frozen install and public-export check without a personal access token.
 
 `shared-v0.11.0` is an immutable failed publication-attempt tag at commit
 `27ec7083ecce131818b24026edef283eda10c380`. GitHub Actions run `30870120001`
@@ -120,6 +124,12 @@ successfully and uploaded the candidate proof, registry lockfile,
 URL and npm integrity listed above; the proof process exited by itself with no
 live descendant and did not require `SIGKILL` for the Next server.
 
+The downstream access run `30933864632` then used only the `z-h-ai/polo-admin`
+repository `GITHUB_TOKEN` with `packages: read`. Its frozen `npm ci` resolved
+the same immutable tarball URL and integrity, loaded both supported CommonJS
+entrypoints from `dist/creator-skills`, and uploaded
+`polo-admin-shared-package-access-proof`.
+
 | Consumer | Verified version | Check |
 | --- | --- | --- |
 | Node.js | 24.14.0 | CommonJS `require` and ESM `import` |
@@ -134,9 +144,10 @@ the same package artifact. A manual dispatch with `verify_published=true` reruns
 the authenticated registry proof without attempting to republish the immutable
 version. It must produce every evidence file listed above.
 
-Package access is verified separately from artifact correctness: add
-`z-h-ai/polo-admin` under **Manage Actions access** with read-only access, then
-run its installation check using the repository's own `GITHUB_TOKEN`.
+Package access was verified separately from artifact correctness:
+`z-h-ai/polo-admin` is listed under **Manage Actions access** with read-only
+access, and run `30933864632` proved installation using that repository's own
+`GITHUB_TOKEN`.
 
 If publication, repository access, attestation, metadata lookup, or the
 registry-backed frozen install fails, stop and escalate. A local `npm pack`
@@ -173,6 +184,12 @@ Then regenerate and commit POL-59's lockfile and independently run clean
 route. POL-59 must still complete its database, object-storage, role, and
 Electron ledger/journal acceptance; this package proof does not replace those
 checks.
+
+POL-59 completed the dependency, scope registry, and lockfile migration in
+commit
+[`1545d6fe96a6fab4f040db12a0f54d1aea901e21`](https://github.com/z-h-ai/polo-admin/commit/1545d6fe96a6fab4f040db12a0f54d1aea901e21).
+The downstream access proof above validates this committed lockfile from a
+GitHub-hosted runner without a sibling Polo checkout.
 
 ## Breaking change and rollback
 
