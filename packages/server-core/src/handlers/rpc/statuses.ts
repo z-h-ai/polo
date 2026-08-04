@@ -1,5 +1,5 @@
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import { getWorkspaceByNameOrId } from '@z-h-ai/shared/config'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -14,7 +14,7 @@ export function registerStatusesHandlers(server: RpcServer, _deps: HandlerDeps):
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { listStatuses } = await import('@polo-ai/shared/statuses')
+    const { listStatuses } = await import('@z-h-ai/shared/statuses')
     return listStatuses(workspace.rootPath)
   })
 
@@ -24,7 +24,7 @@ export function registerStatusesHandlers(server: RpcServer, _deps: HandlerDeps):
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { reorderStatuses } = await import('@polo-ai/shared/statuses')
+    const { reorderStatuses } = await import('@z-h-ai/shared/statuses')
     reorderStatuses(workspace.rootPath, orderedIds)
   })
 }

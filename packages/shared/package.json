@@ -1,8 +1,14 @@
 {
-  "name": "@polo-ai/shared",
-  "version": "0.10.0",
+  "name": "@z-h-ai/shared",
+  "version": "0.11.1",
+  "private": true,
   "license": "Apache-2.0",
   "description": "Shared business logic for Polo AI - agent, auth, config, credentials, MCP integration",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/z-h-ai/polo.git",
+    "directory": "packages/shared"
+  },
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -14,11 +20,21 @@
   "scripts": {
     "build:creator-skills": "bun run scripts/build-creator-skills.ts",
     "build": "bun run build:creator-skills",
-    "prepack": "bun run build",
+    "stage:creator-skills-package": "bun run scripts/stage-creator-skills-package.ts",
+    "prepack": "bun run build && bun run stage:creator-skills-package",
     "test": "bun run build:creator-skills && bun test",
     "test:creator-skills-package": "bun run scripts/verify-creator-skills-package.ts",
+    "test:creator-skills-package-failures": "bun run scripts/verify-proof-failure-lifecycle.ts",
+    "test:creator-skills-package-lifecycle": "bun run scripts/verify-creator-skills-package-lifecycle.ts",
     "test:watch": "bun test --watch",
     "sync:polo-ai-bash-patterns": "bun run src/config/sync-polo-ai-bash-patterns.ts"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -50,14 +66,14 @@
     "./skills": "./src/skills/index.ts",
     "./creator-skills": {
       "types": "./dist/creator-skills/index.d.ts",
-      "node": "./dist/creator-skills/index.cjs",
       "import": "./dist/creator-skills/index.cjs",
+      "require": "./dist/creator-skills/index.cjs",
       "default": "./dist/creator-skills/index.cjs"
     },
     "./creator-skills/fixtures": {
       "types": "./dist/creator-skills/fixtures.d.ts",
-      "node": "./dist/creator-skills/fixtures.cjs",
       "import": "./dist/creator-skills/fixtures.cjs",
+      "require": "./dist/creator-skills/fixtures.cjs",
       "default": "./dist/creator-skills/fixtures.cjs"
     },
     "./workspaces": "./src/workspaces/index.ts",

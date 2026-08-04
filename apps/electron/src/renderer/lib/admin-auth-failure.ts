@@ -1,6 +1,6 @@
 import {
   classifyAdminAuthorizationFailure,
-} from '@polo-ai/shared/admin/authorization'
+} from '@z-h-ai/shared/admin/authorization'
 
 export interface AdminErrorLike {
   code?: string

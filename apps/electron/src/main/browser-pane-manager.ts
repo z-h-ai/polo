@@ -19,8 +19,8 @@ import {
   type BrowserEmptyStateLaunchResult,
   type BrowserInstanceInfo,
 } from '../shared/types'
-import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@polo-ai/shared/config'
-import { CodedError } from '@polo-ai/shared/protocol'
+import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@z-h-ai/shared/config'
+import { CodedError } from '@z-h-ai/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
 import { getDeepLinkCallbackBridge } from './deep-link-callback-bridge'
 import type {

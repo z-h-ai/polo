@@ -10,7 +10,7 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement, type ReactNode } from 'react'
 import { createStore, Provider } from 'jotai'
 import { I18nextProvider } from 'react-i18next'
-import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
+import { i18n, setupI18n } from '@z-h-ai/shared/i18n/setupI18n'
 
 GlobalRegistrator.register()
 setupI18n()

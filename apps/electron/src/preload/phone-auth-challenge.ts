@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import {
   createCallbackServer,
   type CallbackServer,
-} from '@polo-ai/shared/auth/callback-server'
+} from '@z-h-ai/shared/auth/callback-server'
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import { RPC_CHANNELS } from '../shared/types'
 

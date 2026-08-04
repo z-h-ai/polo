@@ -11,8 +11,8 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { ViewConfig, CompiledView, ViewEvaluationContext } from '@polo-ai/shared/views'
-import { compileAllViews, evaluateViews, buildViewContext } from '@polo-ai/shared/views'
+import type { ViewConfig, CompiledView, ViewEvaluationContext } from '@z-h-ai/shared/views'
+import { compileAllViews, evaluateViews, buildViewContext } from '@z-h-ai/shared/views'
 import type { SessionMeta } from '../atoms/sessions'
 
 export interface UseViewsResult {

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { i18n } from '@polo-ai/shared/i18n'
+import { i18n } from '@z-h-ai/shared/i18n'
 import type { AdminSetPasswordResult } from '../../shared/types'
 
 export type AdminPasswordValidationError = 'too_short' | 'mismatch'

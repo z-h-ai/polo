@@ -17,7 +17,7 @@ import { Calendar } from './calendar'
 import { cn } from '@/lib/utils'
 import { parseDate } from 'chrono-node'
 import { format, parse } from 'date-fns'
-import type { LabelConfig } from '@polo-ai/shared/labels'
+import type { LabelConfig } from '@z-h-ai/shared/labels'
 
 export interface LabelValuePopoverProps {
   /** Label configuration (color, name, valueType) */

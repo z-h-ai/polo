@@ -4,15 +4,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { HandlerDeps } from '@polo-ai/server-core/handlers'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
-import type { AppCatalogCacheEntry } from '@polo-ai/shared/admin'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { AppCatalogCacheEntry } from '@z-h-ai/shared/admin'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type {
   CatalogLocalAppScope,
   LocalAppCatalogInstallRequest,
   LocalAppInstalledApp,
   LocalAppRuntimeStatus,
   LocalAppStartResult,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import {
   createCatalogRuntimeAppId,
   MAX_CATALOG_STATUS_SCOPES,
@@ -190,11 +190,11 @@ const credentialManager = {
   },
 }
 
-mock.module('@polo-ai/shared/credentials', () => ({
+mock.module('@z-h-ai/shared/credentials', () => ({
   getCredentialManager: () => credentialManager,
 }))
 
-mock.module('@polo-ai/shared/config', () => ({
+mock.module('@z-h-ai/shared/config', () => ({
   getAdminUrl: () => 'https://admin.example.com',
   getAdminConfigVersion: () => undefined,
   setAdminConfigVersion: () => {},
@@ -205,7 +205,7 @@ mock.module('@polo-ai/shared/config', () => ({
   setDefaultLlmConnection: () => true,
 }))
 
-mock.module('@polo-ai/shared/admin', () => ({
+mock.module('@z-h-ai/shared/admin', () => ({
   AdminClient: TestAdminClient,
   AdminError: TestAdminError,
   getSafeAdminErrorMessage: () => 'Admin request failed',

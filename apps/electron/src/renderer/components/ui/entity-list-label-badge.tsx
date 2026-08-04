@@ -1,10 +1,10 @@
 import { useState } from "react"
-import { parseLabelEntry, formatLabelEntry, formatDisplayValue } from "@polo-ai/shared/labels"
-import { resolveEntityColor } from "@polo-ai/shared/colors"
+import { parseLabelEntry, formatLabelEntry, formatDisplayValue } from "@z-h-ai/shared/labels"
+import { resolveEntityColor } from "@z-h-ai/shared/colors"
 import { useTheme } from "@/context/ThemeContext"
 import { LabelValuePopover } from "./label-value-popover"
 import { LabelValueTypeIcon } from "./label-icon"
-import type { LabelConfig } from "@polo-ai/shared/labels"
+import type { LabelConfig } from "@z-h-ai/shared/labels"
 
 interface EntityListLabelBadgeProps {
   label: LabelConfig

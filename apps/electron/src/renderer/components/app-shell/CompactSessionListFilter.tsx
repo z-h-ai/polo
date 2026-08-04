@@ -50,8 +50,8 @@ import {
   filterItems as filterLabelMenuItems,
   type LabelMenuItem,
 } from '@/components/ui/label-menu-utils'
-import { findLabelById } from '@polo-ai/shared/labels'
-import type { LabelConfig } from '@polo-ai/shared/labels'
+import { findLabelById } from '@z-h-ai/shared/labels'
+import type { LabelConfig } from '@z-h-ai/shared/labels'
 import { type SessionStatus, type SessionStatusId } from '@/config/session-status-config'
 import type { ChatGroupingMode } from './SessionList'
 

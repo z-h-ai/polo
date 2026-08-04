@@ -3,15 +3,15 @@ import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import type { AppCatalogCacheEntry, CatalogApp } from '@z-h-ai/shared/admin'
 import type {
   HomeRecentAppKind,
   HomeRecentAppPreference,
-} from '@polo-ai/shared/config/home-recent'
+} from '@z-h-ai/shared/config/home-recent'
 import {
   createLocalAppScopeKey,
   type LocalAppRuntimeStatus,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import { AppIcon } from './AppIcon'
 import {
   OrganizationAppCard,

@@ -4,16 +4,16 @@
  * Handles workspace resource export/import (sources, skills, automations).
  */
 
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
-import { getCredentialManager, SOURCE_CREDENTIAL_TYPES } from '@polo-ai/shared/credentials'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import { getWorkspaceByNameOrId } from '@z-h-ai/shared/config'
+import { getCredentialManager, SOURCE_CREDENTIAL_TYPES } from '@z-h-ai/shared/credentials'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import type {
   ResourceBundle,
   ResourceImportMode,
   ExportResourcesOptions,
-} from '@polo-ai/shared/resources'
+} from '@z-h-ai/shared/resources'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.resources.EXPORT,
@@ -28,7 +28,7 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
       const workspace = getWorkspaceByNameOrId(workspaceId)
       if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
 
-      const { exportResources } = await import('@polo-ai/shared/resources')
+      const { exportResources } = await import('@z-h-ai/shared/resources')
       const result = exportResources(workspace.rootPath, options)
 
       deps.platform.logger?.info(
@@ -50,7 +50,7 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
       const workspace = getWorkspaceByNameOrId(workspaceId)
       if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
 
-      const { importResources } = await import('@polo-ai/shared/resources')
+      const { importResources } = await import('@z-h-ai/shared/resources')
       const credManager = getCredentialManager()
 
       const result = await importResources(workspace.rootPath, bundle, mode, {

@@ -1,4 +1,4 @@
-import { isValidMainlandChinaPhone } from '@polo-ai/shared/admin/schemas'
+import { isValidMainlandChinaPhone } from '@z-h-ai/shared/admin/schemas'
 
 export function normalizeMainlandPhoneInput(value: string): string {
   const compact = value.replace(/[\s-]/g, "")

@@ -8,7 +8,7 @@
 import {
   PROTOCOL_VERSION,
   type MessageEnvelope,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import {
   serializeEnvelope,
   deserializeEnvelope,

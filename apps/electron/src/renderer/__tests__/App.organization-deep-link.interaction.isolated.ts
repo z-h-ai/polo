@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
-import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
+import { i18n, setupI18n } from '@z-h-ai/shared/i18n/setupI18n'
 import { createElement } from 'react'
 import type { ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import type {
   OrganizationContextStorage,
   OrganizationContextStoragePatch,
-} from '@polo-ai/shared/config/organization-context'
+} from '@z-h-ai/shared/config/organization-context'
 
 GlobalRegistrator.register()
 setupI18n()

@@ -28,7 +28,7 @@ import {
   type ToolRow,
 } from '@/components/info'
 import type { LoadedSource, McpToolWithPermission } from '../../shared/types'
-import type { PermissionsConfigFile } from '@polo-ai/shared/agent/modes'
+import type { PermissionsConfigFile } from '@z-h-ai/shared/agent/modes'
 
 interface SourceInfoPageProps {
   sourceSlug: string

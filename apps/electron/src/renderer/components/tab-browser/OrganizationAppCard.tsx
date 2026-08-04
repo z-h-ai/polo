@@ -1,8 +1,8 @@
 import * as Icons from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { CatalogApp } from '@polo-ai/shared/admin'
-import type { LocalAppRuntimeStatus } from '@polo-ai/shared/protocol'
+import type { CatalogApp } from '@z-h-ai/shared/admin'
+import type { LocalAppRuntimeStatus } from '@z-h-ai/shared/protocol'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,

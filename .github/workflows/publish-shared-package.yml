@@ -1,0 +1,103 @@
+name: Publish shared package
+
+on:
+  push:
+    tags:
+      - "shared-v*"
+  workflow_dispatch:
+    inputs:
+      verify_published:
+        description: Run the authenticated registry-backed consumer proof
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: publish-shared-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  prove-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact ref
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+
+      - name: Install repository dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "const developmentManifest=require('./packages/shared/package.json'); if (process.env.RELEASE_TAG !== 'shared-v' + developmentManifest.version) throw new Error('tag/version mismatch')"
+
+      - name: Resolve package artifact metadata
+        id: package
+        run: node -e "const fs=require('node:fs'); const developmentManifest=require('./packages/shared/package.json'); const publishManifest=require('./packages/shared/package.publish.json'); if (developmentManifest.name !== publishManifest.name || developmentManifest.version !== publishManifest.version) throw new Error('source/publish package identity mismatch'); const stem=publishManifest.name.replace(/^@/, '').replace('/', '-'); const tarball=process.env.RUNNER_TEMP + '/shared-package-artifact/' + stem + '-' + publishManifest.version + '.tgz'; const artifact=stem + '-' + publishManifest.version + '-proof'; fs.appendFileSync(process.env.GITHUB_ENV, ['SHARED_VERSION=' + publishManifest.version, 'SHARED_TARBALL_PATH=' + tarball, ''].join('\\n')); fs.appendFileSync(process.env.GITHUB_OUTPUT, ['tarball_path=' + tarball, 'artifact_name=' + artifact, ''].join('\\n'))"
+
+      - name: Verify proof failure lifecycle
+        run: bun run --cwd packages/shared test:creator-skills-package-failures
+
+      - name: Build, pack, and run clean-consumer proof
+        run: bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --output-dir "$RUNNER_TEMP/shared-package-artifact"
+
+      - name: Attest the verified tarball
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ steps.package.outputs.tarball_path }}
+
+      - name: Configure GitHub Packages authentication
+        if: startsWith(github.ref, 'refs/tags/') || inputs.verify_published
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+          registry-url: https://npm.pkg.github.com
+          scope: "@z-h-ai"
+
+      - name: Publish the verified tarball
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish "$SHARED_TARBALL_PATH" --access restricted --registry https://npm.pkg.github.com
+
+      - name: Capture immutable registry metadata
+        if: startsWith(github.ref, 'refs/tags/') || inputs.verify_published
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm view "@z-h-ai/shared@$SHARED_VERSION" name version dist.tarball dist.integrity dist.shasum --json --registry https://npm.pkg.github.com > "$RUNNER_TEMP/shared-package-artifact/published-package.json"
+
+      - name: Verify registry-backed clean consumer
+        if: startsWith(github.ref, 'refs/tags/') || inputs.verify_published
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --registry-version "$SHARED_VERSION" --published-metadata "$RUNNER_TEMP/shared-package-artifact/published-package.json" --output-dir "$RUNNER_TEMP/shared-package-artifact"
+
+      - name: Upload proof and integrity evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ runner.temp }}/shared-package-artifact
+          if-no-files-found: error
+          retention-days: 90

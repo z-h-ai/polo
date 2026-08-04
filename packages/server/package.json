@@ -28,7 +28,7 @@
     "@polo-ai/core": "workspace:*",
     "@polo-ai/messaging-gateway": "workspace:*",
     "@polo-ai/server-core": "workspace:*",
-    "@polo-ai/shared": "workspace:*"
+    "@z-h-ai/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.2",

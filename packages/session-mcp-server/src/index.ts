@@ -32,7 +32,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { isDeveloperFeedbackEnabled } from '@polo-ai/shared/feature-flags';
+import { isDeveloperFeedbackEnabled } from '@z-h-ai/shared/feature-flags';
 // Import from session-tools-core
 import {
   type SessionToolContext,

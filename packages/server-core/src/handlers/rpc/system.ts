@@ -2,9 +2,9 @@ import { resolve } from 'path'
 import { join } from 'path'
 import { homedir } from 'os'
 import { execSync } from 'child_process'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getWorkspaceByNameOrId, getGitBashPath, setGitBashPath, clearGitBashPath } from '@polo-ai/shared/config'
-import { classifyExternalUrl, formatBlockedUrlError } from '@polo-ai/shared/utils/url-safety'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import { getWorkspaceByNameOrId, getGitBashPath, setGitBashPath, clearGitBashPath } from '@z-h-ai/shared/config'
+import { classifyExternalUrl, formatBlockedUrlError } from '@z-h-ai/shared/utils/url-safety'
 import { isUsableGitBashPath, validateGitBashPath } from '@polo-ai/server-core/services'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import type { RpcServer } from '@polo-ai/server-core/transport'
@@ -170,12 +170,12 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
 
   // Release notes
   server.handle(RPC_CHANNELS.releaseNotes.GET, async () => {
-    const { getCombinedReleaseNotes } = require('@polo-ai/shared/release-notes') as typeof import('@polo-ai/shared/release-notes')
+    const { getCombinedReleaseNotes } = require('@z-h-ai/shared/release-notes') as typeof import('@z-h-ai/shared/release-notes')
     return getCombinedReleaseNotes()
   })
 
   server.handle(RPC_CHANNELS.releaseNotes.GET_LATEST_VERSION, async () => {
-    const { getLatestReleaseVersion } = require('@polo-ai/shared/release-notes') as typeof import('@polo-ai/shared/release-notes')
+    const { getLatestReleaseVersion } = require('@z-h-ai/shared/release-notes') as typeof import('@z-h-ai/shared/release-notes')
     return getLatestReleaseVersion()
   })
 

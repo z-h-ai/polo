@@ -5,14 +5,14 @@
  * No dependency on ipcMain, sessionManager, credential manager, or file I/O.
  */
 
-import type { ModelDefinition } from '@polo-ai/shared/config/models'
+import type { ModelDefinition } from '@z-h-ai/shared/config/models'
 import {
   type LlmConnection,
   type CustomEndpointApi,
   getDefaultModelsForConnection,
   getDefaultModelForConnection,
   defaultMidStreamBehavior,
-} from '@polo-ai/shared/config'
+} from '@z-h-ai/shared/config'
 
 // ============================================================
 // Error Parsing

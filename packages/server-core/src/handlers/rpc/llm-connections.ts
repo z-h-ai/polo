@@ -1,12 +1,12 @@
-import { RPC_CHANNELS, type LlmConnectionSetup } from '@polo-ai/shared/protocol'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@polo-ai/shared/config'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
-import { setSetupDeferred } from '@polo-ai/shared/config/storage'
+import { RPC_CHANNELS, type LlmConnectionSetup } from '@z-h-ai/shared/protocol'
+import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@z-h-ai/shared/config'
+import { getCredentialManager } from '@z-h-ai/shared/credentials'
+import { setSetupDeferred } from '@z-h-ai/shared/config/storage'
 import {
   resolveSetupTestConnectionHint,
   testBackendConnection,
   validateStoredBackendConnection,
-} from '@polo-ai/shared/agent/backend'
+} from '@z-h-ai/shared/agent/backend'
 import { getModelRefreshService } from '@polo-ai/server-core/model-fetchers'
 import { parseTestConnectionError, createBuiltInConnection, validateModelList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup } from '@polo-ai/server-core/domain'
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@polo-ai/server-core/handlers'
@@ -298,7 +298,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   // Unified connection test — uses the agent factory to spawn a real agent subprocess
   // and validate credentials via runMiniCompletion(). Same code path as actual chat.
-  server.handle(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('@polo-ai/shared/protocol').TestLlmConnectionParams): Promise<import('@polo-ai/shared/protocol').TestLlmConnectionResult> => {
+  server.handle(RPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('@z-h-ai/shared/protocol').TestLlmConnectionParams): Promise<import('@z-h-ai/shared/protocol').TestLlmConnectionResult> => {
     const { provider, apiKey, baseUrl, model, piAuthProvider, customEndpoint } = params
     const trimmedKey = apiKey?.trim() ?? ''
     const allowEmptyApiKey = !setupTestRequiresApiKey(baseUrl)
@@ -351,12 +351,12 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   // ============================================================
 
   server.handle(RPC_CHANNELS.pi.GET_API_KEY_PROVIDERS, async () => {
-    const { getPiApiKeyProviders } = await import('@polo-ai/shared/config')
+    const { getPiApiKeyProviders } = await import('@z-h-ai/shared/config')
     return getPiApiKeyProviders()
   })
 
   server.handle(RPC_CHANNELS.pi.GET_PROVIDER_BASE_URL, async (_ctx, provider: string) => {
-    const { getPiProviderBaseUrl } = await import('@polo-ai/shared/config')
+    const { getPiProviderBaseUrl } = await import('@z-h-ai/shared/config')
     return getPiProviderBaseUrl(provider)
   })
 
@@ -524,7 +524,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       deps.platform.logger?.info(`[LLM_CONNECTION_TEST] Error for ${slug}: ${msg.slice(0, 500)}`)
-      const { parseValidationError } = await import('@polo-ai/shared/config')
+      const { parseValidationError } = await import('@z-h-ai/shared/config')
       return { success: false, error: parseValidationError(msg) }
     }
   })
@@ -558,7 +558,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         }
       }
 
-      const { loadWorkspaceConfig, saveWorkspaceConfig } = await import('@polo-ai/shared/workspaces')
+      const { loadWorkspaceConfig, saveWorkspaceConfig } = await import('@z-h-ai/shared/workspaces')
       const config = loadWorkspaceConfig(workspace.rootPath)
       if (!config) {
         return { success: false, error: 'Failed to load workspace config' }
@@ -630,7 +630,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     flowId: string
   }> => {
     cleanupExpiredChatGptFlows()
-    const { prepareChatGptOAuth } = await import('@polo-ai/shared/auth')
+    const { prepareChatGptOAuth } = await import('@z-h-ai/shared/auth')
 
     const prepared = prepareChatGptOAuth()
     const flowId = randomUUID()
@@ -666,7 +666,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     }
 
     try {
-      const { exchangeChatGptTokens } = await import('@polo-ai/shared/auth')
+      const { exchangeChatGptTokens } = await import('@z-h-ai/shared/auth')
       const credentialManager = getCredentialManager()
 
       const tokens = await exchangeChatGptTokens(code, flow.codeVerifier)

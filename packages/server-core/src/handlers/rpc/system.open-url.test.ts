@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import { CLIENT_OPEN_EXTERNAL } from '@polo-ai/server-core/transport'
 import type { RpcServer, HandlerFn, RequestContext } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'

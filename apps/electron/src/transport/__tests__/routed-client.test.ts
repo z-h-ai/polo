@@ -51,7 +51,7 @@ function stubClient(overrides?: Partial<WsRpcClient>): WsRpcClient {
 }
 
 // Use real channel constants — RoutedClient routes based on isLocalOnly()
-import { isLocalOnly, RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { isLocalOnly, RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 
 const LOCAL_CHANNEL = RPC_CHANNELS.window.GET_WORKSPACE   // LOCAL_ONLY
 const REMOTE_CHANNEL = RPC_CHANNELS.sessions.GET           // REMOTE_ELIGIBLE

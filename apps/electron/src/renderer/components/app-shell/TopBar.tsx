@@ -27,7 +27,7 @@ import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 import type { Workspace } from "../../../shared/types"
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
 import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
-import { getDocUrl } from "@polo-ai/shared/docs/doc-links"
+import { getDocUrl } from "@z-h-ai/shared/docs/doc-links"
 import { AppMenu } from "../AppMenu"
 import { OrganizationSwitcher } from "@/components/organization/OrganizationSwitcher"
 

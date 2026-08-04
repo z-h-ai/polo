@@ -23,8 +23,8 @@ import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
 import { buildAdminPreloadApi } from './admin-api'
-import { createCallbackServer } from '@polo-ai/shared/auth/callback-server'
-import { CHATGPT_OAUTH_CONFIG } from '@polo-ai/shared/auth/chatgpt-oauth-config'
+import { createCallbackServer } from '@z-h-ai/shared/auth/callback-server'
+import { CHATGPT_OAUTH_CONFIG } from '@z-h-ai/shared/auth/chatgpt-oauth-config'
 import {
   CLIENT_OPEN_EXTERNAL,
   CLIENT_OPEN_PATH,

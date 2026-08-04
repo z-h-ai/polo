@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { TFunction } from 'i18next'
-import type { CatalogApp } from '@polo-ai/shared/admin'
-import type { LocalAppRuntimeStatus } from '@polo-ai/shared/protocol'
+import type { CatalogApp } from '@z-h-ai/shared/admin'
+import type { LocalAppRuntimeStatus } from '@z-h-ai/shared/protocol'
 import {
   canViewOrganizationAppLogs,
   primaryActionFor,

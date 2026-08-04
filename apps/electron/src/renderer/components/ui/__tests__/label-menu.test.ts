@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import type { LabelConfig } from '@polo-ai/shared/labels';
+import type { LabelConfig } from '@z-h-ai/shared/labels';
 import { createLabelMenuItems, filterItems } from '../label-menu-utils';
 
 describe('createLabelMenuItems', () => {

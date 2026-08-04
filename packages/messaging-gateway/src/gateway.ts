@@ -6,8 +6,8 @@
  */
 
 import type { ISessionManager } from '@polo-ai/server-core/handlers'
-import type { PushTarget } from '@polo-ai/shared/protocol'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { PushTarget } from '@z-h-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import {
   evaluateBindingAccess,
   evaluatePreBindingAccess,

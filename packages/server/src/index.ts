@@ -29,12 +29,12 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { readFileSync, existsSync } from 'node:fs'
 import { version as packageVersion } from '../package.json'
-import { enableDebug } from '@polo-ai/shared/utils/debug'
+import { enableDebug } from '@z-h-ai/shared/utils/debug'
 import { bootstrapServer, startHealthHttpServer, generateServerToken } from '@polo-ai/server-core/bootstrap'
 import { validateSession, createWebuiHandler, nodeHttpAdapter } from '@polo-ai/server-core/webui'
 import type { WebuiHandler } from '@polo-ai/server-core/webui'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
-import { getWorkspaces } from '@polo-ai/shared/config'
+import { getCredentialManager } from '@z-h-ai/shared/credentials'
+import { getWorkspaces } from '@z-h-ai/shared/config'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 
 // --generate-token: print a crypto-random token and exit
@@ -279,10 +279,10 @@ if (webuiHandler) {
   healthCheckFn = () => getHealthCheck(depsLike)
 
   // Wire up OAuth callback deps so /api/oauth/callback works
-  const { getSourceCredentialManager, loadWorkspaceSources } = await import('@polo-ai/shared/sources')
-  const { getWorkspaceByNameOrId } = await import('@polo-ai/shared/config')
+  const { getSourceCredentialManager, loadWorkspaceSources } = await import('@z-h-ai/shared/sources')
+  const { getWorkspaceByNameOrId } = await import('@z-h-ai/shared/config')
   const { pushTyped } = await import('@polo-ai/server-core/transport')
-  const { RPC_CHANNELS } = await import('@polo-ai/shared/protocol')
+  const { RPC_CHANNELS } = await import('@z-h-ai/shared/protocol')
 
   webuiHandler.setOAuthCallbackDeps({
     flowStore: instance.oauthFlowStore,

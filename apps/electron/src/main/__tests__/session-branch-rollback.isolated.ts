@@ -56,7 +56,7 @@ mock.module('../logger', () => {
   }
 })
 
-mock.module('@polo-ai/shared/config', () => ({
+mock.module('@z-h-ai/shared/config', () => ({
   getWorkspaceByNameOrId: (id: string) => (id === workspace.id ? workspace : null),
   getWorkspaces: () => [workspace],
   loadConfigDefaults: () => ({
@@ -117,7 +117,7 @@ mock.module('@polo-ai/shared/config', () => ({
   isAnthropicProvider: () => true,
 }))
 
-mock.module('@polo-ai/shared/workspaces', () => ({
+mock.module('@z-h-ai/shared/workspaces', () => ({
   loadWorkspaceConfig: () => ({
     defaults: {
       permissionMode: 'ask',
@@ -127,7 +127,7 @@ mock.module('@polo-ai/shared/workspaces', () => ({
   }),
 }))
 
-mock.module('@polo-ai/shared/agent', () => ({
+mock.module('@z-h-ai/shared/agent', () => ({
   ...actualSharedAgentModule,
   setPermissionMode: () => {},
   getPermissionModeDiagnostics: () => ({ mode: 'ask', source: 'test' }),
@@ -143,7 +143,7 @@ mock.module('@polo-ai/shared/agent', () => ({
   normalizeCanonicalBrowserToolName: (name: string) => name,
 }))
 
-mock.module('@polo-ai/shared/agent/backend', () => ({
+mock.module('@z-h-ai/shared/agent/backend', () => ({
   ...actualSharedAgentBackendModule,
   resolveSessionConnection: () => null,
   createBackendFromConnection: () => {
@@ -171,7 +171,7 @@ mock.module('@polo-ai/shared/agent/backend', () => ({
   validateStoredBackendConnection: async () => ({ success: false, error: 'stub' }),
 }))
 
-mock.module('@polo-ai/shared/sources', () => ({
+mock.module('@z-h-ai/shared/sources', () => ({
   loadWorkspaceSources: () => [],
   loadAllSources: () => [],
   getSourcesBySlugs: () => [],
@@ -192,7 +192,7 @@ mock.module('@polo-ai/shared/sources', () => ({
   API_OAUTH_PROVIDERS: [],
 }))
 
-mock.module('@polo-ai/shared/automations', () => ({
+mock.module('@z-h-ai/shared/automations', () => ({
   AutomationSystem: class AutomationSystem {
     constructor(..._args: unknown[]) {}
     setInitialSessionMetadata() {}
@@ -206,7 +206,7 @@ mock.module('@polo-ai/shared/automations', () => ({
   AUTOMATIONS_HISTORY_FILE: 'automations.history.jsonl',
 }))
 
-mock.module('@polo-ai/shared/sessions', () => ({
+mock.module('@z-h-ai/shared/sessions', () => ({
   listSessions: () => [],
   loadSession: (_root: string, id: string) => storedById.get(id) ?? null,
   saveSession: async (session: any) => {

@@ -1,4 +1,4 @@
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { AppDefinition } from '../../shared/tab-browser-types'
 
@@ -33,13 +33,13 @@ function normalizeApps(apps: unknown): AppDefinition[] {
 
 export function registerTabBrowserHandlers(server: RpcServer): void {
   server.handle(RPC_CHANNELS.tabBrowser.GET_APPS, async () => {
-    const { loadStoredConfig } = await import('@polo-ai/shared/config/storage')
+    const { loadStoredConfig } = await import('@z-h-ai/shared/config/storage')
     const config = loadStoredConfig()
     return normalizeApps(config?.tabBrowser?.installedApps)
   })
 
   server.handle(RPC_CHANNELS.tabBrowser.SAVE_APPS, async (_ctx, apps: AppDefinition[]) => {
-    const { loadStoredConfig, saveConfig } = await import('@polo-ai/shared/config/storage')
+    const { loadStoredConfig, saveConfig } = await import('@z-h-ai/shared/config/storage')
     const config = loadStoredConfig()
     if (!config) return
     config.tabBrowser = { installedApps: normalizeApps(apps) }

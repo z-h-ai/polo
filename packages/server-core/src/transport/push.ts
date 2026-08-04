@@ -2,7 +2,7 @@
  * Type-safe push helper — constrains args against BroadcastEventMap at compile time.
  */
 
-import type { BroadcastEventMap, PushTarget } from '@polo-ai/shared/protocol'
+import type { BroadcastEventMap, PushTarget } from '@z-h-ai/shared/protocol'
 import type { RpcServer } from './types'
 
 export function pushTyped<K extends keyof BroadcastEventMap & string>(

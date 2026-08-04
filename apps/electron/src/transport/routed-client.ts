@@ -13,7 +13,7 @@
 import type { WsRpcClient, TransportConnectionState } from './client'
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { RemoteServerConfig } from '@polo-ai/core/types'
-import { isLocalOnly, RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { isLocalOnly, RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Types

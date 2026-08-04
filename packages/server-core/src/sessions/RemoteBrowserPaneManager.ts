@@ -13,8 +13,8 @@
  * See docs/adr-transport-locality.md for the locality boundary definition.
  */
 
-import { CodedError } from '@polo-ai/shared/protocol'
-import type { BrowserInstanceInfo } from '@polo-ai/shared/protocol'
+import { CodedError } from '@z-h-ai/shared/protocol'
+import type { BrowserInstanceInfo } from '@z-h-ai/shared/protocol'
 import type {
   IBrowserPaneManager,
   BrowserScreenshotOptions,

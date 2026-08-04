@@ -1,5 +1,5 @@
 import { describe, it, expect, mock } from 'bun:test'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { RpcClient } from '@polo-ai/server-core/transport'
 import type { ElectronAPI } from '../../shared/types'
 import { buildClientApi } from '../build-api'

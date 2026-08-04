@@ -2,11 +2,11 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 
 import { searchLog } from "@/lib/logger"
-import { parseLabelEntry } from "@polo-ai/shared/labels"
-import { fuzzyScore } from "@polo-ai/shared/search"
+import { parseLabelEntry } from "@z-h-ai/shared/labels"
+import { fuzzyScore } from "@z-h-ai/shared/search"
 import { getSessionTitle, getSessionStatus } from "@/utils/session"
 import type { SessionMeta } from "@/atoms/sessions"
-import type { ViewConfig } from "@polo-ai/shared/views"
+import type { ViewConfig } from "@z-h-ai/shared/views"
 import type { SessionFilter } from "@/contexts/NavigationContext"
 
 // ---------------------------------------------------------------------------

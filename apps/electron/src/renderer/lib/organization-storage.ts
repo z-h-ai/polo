@@ -1,14 +1,14 @@
-import { ListOrganizationsResponseSchema } from '@polo-ai/shared/admin/schemas'
+import { ListOrganizationsResponseSchema } from '@z-h-ai/shared/admin/schemas'
 import {
   createOrganizationContextKey as createSharedOrganizationContextKey,
-} from '@polo-ai/shared/admin/context-key'
-import type { OrganizationSummary } from '@polo-ai/shared/admin'
+} from '@z-h-ai/shared/admin/context-key'
+import type { OrganizationSummary } from '@z-h-ai/shared/admin'
 import type {
   OrganizationContextStorage,
   OrganizationContextStoragePatch,
   UnavailableOrganizationTombstonePreference,
   VerifiedOrganizationContextPreference,
-} from '@polo-ai/shared/config/organization-context'
+} from '@z-h-ai/shared/config/organization-context'
 
 const ACTIVE_ORGANIZATION_PREFIX = 'polo-active-organization:'
 const VERIFIED_ORGANIZATION_CONTEXT_PREFIX = 'polo-verified-organization-context:'

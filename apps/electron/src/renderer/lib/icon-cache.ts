@@ -20,8 +20,8 @@
  */
 
 import { useState, useEffect, useMemo } from 'react'
-import { isEmoji } from '@polo-ai/shared/utils/icon-constants'
-import type { ResolvedEntityIcon } from '@polo-ai/shared/icons'
+import { isEmoji } from '@z-h-ai/shared/utils/icon-constants'
+import type { ResolvedEntityIcon } from '@z-h-ai/shared/icons'
 
 // ============================================================================
 // Types

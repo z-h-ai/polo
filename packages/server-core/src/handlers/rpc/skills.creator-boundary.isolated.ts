@@ -50,7 +50,7 @@ const [{
   registerSessionsHandlers,
   clearClientActiveSession,
 }] = await Promise.all([
-  import('@polo-ai/shared/protocol'),
+  import('@z-h-ai/shared/protocol'),
   Promise.all([
     import('./skills'),
     import('./sessions'),

@@ -2,7 +2,7 @@
  * Messaging RPC handlers — UI ↔ Server communication for messaging config and bindings.
  */
 
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { RpcServer } from '../../transport/types'
 import type { HandlerDeps } from '../handler-deps'
 import type {

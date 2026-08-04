@@ -19,8 +19,8 @@
     "noUnusedParameters": false,
     "baseUrl": ".",
     "paths": {
-      "@polo-ai/shared": ["../shared/src/index.ts"],
-      "@polo-ai/shared/*": ["../shared/src/*"]
+      "@z-h-ai/shared": ["../shared/src/index.ts"],
+      "@z-h-ai/shared/*": ["../shared/src/*"]
     }
   },
   "include": ["src/**/*", "../shared/src/agent/bash-parser.d.ts"],

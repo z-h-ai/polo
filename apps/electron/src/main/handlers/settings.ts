@@ -1,4 +1,4 @@
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
 
@@ -14,7 +14,7 @@ export const GUI_HANDLED_CHANNELS = [
 export function registerSettingsGuiHandlers(server: RpcServer, _deps: HandlerDeps): void {
   // Set keep awake while running setting (requires Electron power-manager)
   server.handle(RPC_CHANNELS.power.SET_KEEP_AWAKE, async (_ctx, enabled: boolean) => {
-    const { setKeepAwakeWhileRunning } = await import('@polo-ai/shared/config/storage')
+    const { setKeepAwakeWhileRunning } = await import('@z-h-ai/shared/config/storage')
     const { setKeepAwakeSetting } = await import('../power-manager')
     // Save to config
     setKeepAwakeWhileRunning(enabled)
@@ -23,7 +23,7 @@ export function registerSettingsGuiHandlers(server: RpcServer, _deps: HandlerDep
   })
 
   // Set network proxy settings (requires Electron session proxy)
-  server.handle(RPC_CHANNELS.settings.SET_NETWORK_PROXY, async (_ctx, settings: import('@polo-ai/shared/config/types').NetworkProxySettings) => {
+  server.handle(RPC_CHANNELS.settings.SET_NETWORK_PROXY, async (_ctx, settings: import('@z-h-ai/shared/config/types').NetworkProxySettings) => {
     const { updateConfiguredProxySettings } = await import('../network-proxy')
     await updateConfiguredProxySettings(settings)
   })

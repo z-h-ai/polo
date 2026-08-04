@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
-import type { AppCatalogCacheEntry, CatalogApp } from '@polo-ai/shared/admin'
+import type { AppCatalogCacheEntry, CatalogApp } from '@z-h-ai/shared/admin'
 import {
   createLocalAppScopeKey,
   type CatalogLocalAppScope,
   type LocalAppRuntimeStatus,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 
 const accountId = 'review-account'
 const organizationId = 'northstar-studio'

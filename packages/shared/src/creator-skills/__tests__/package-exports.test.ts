@@ -2,14 +2,14 @@ import { describe, expect, it } from 'bun:test'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 
-describe('@polo-ai/shared Creator Skill package exports', () => {
+describe('@z-h-ai/shared Creator Skill package exports', () => {
   it('loads validation, DTOs, schemas, and fixtures through declared package exports', () => {
     const repositoryRoot = resolve(import.meta.dir, '../../../../..')
     const require = createRequire(import.meta.url)
-    const creatorSkillsPath = require.resolve('@polo-ai/shared/creator-skills', {
+    const creatorSkillsPath = require.resolve('@z-h-ai/shared/creator-skills', {
       paths: [repositoryRoot],
     })
-    const fixturesPath = require.resolve('@polo-ai/shared/creator-skills/fixtures', {
+    const fixturesPath = require.resolve('@z-h-ai/shared/creator-skills/fixtures', {
       paths: [repositoryRoot],
     })
     const script = `
@@ -18,10 +18,10 @@ describe('@polo-ai/shared Creator Skill package exports', () => {
         CREATOR_SKILL_FIXTURE_CONTENT,
         CREATOR_SKILL_FIXTURE_SLUG,
         validateCreatorSkillArchive,
-      } from '@polo-ai/shared/creator-skills'
+      } from '@z-h-ai/shared/creator-skills'
       import {
         CREATOR_SKILL_FIXTURE_METADATA,
-      } from '@polo-ai/shared/creator-skills/fixtures'
+      } from '@z-h-ai/shared/creator-skills/fixtures'
       if (
         typeof validateCreatorSkillArchive !== 'function'
         || typeof CreatorSkillDownloadGrantSchema?.safeParse !== 'function'

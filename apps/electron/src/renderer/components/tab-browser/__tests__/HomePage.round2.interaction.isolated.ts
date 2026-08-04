@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:tes
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
-import { i18n, setupI18n } from '@polo-ai/shared/i18n'
+import { i18n, setupI18n } from '@z-h-ai/shared/i18n'
 import type {
   AppCatalogCacheEntry,
   CatalogApp,
   DeniedAppCatalogSnapshot,
-} from '@polo-ai/shared/admin'
-import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/admin'
+import { createLocalAppScopeKey } from '@z-h-ai/shared/protocol'
 import {
   BUILTIN_APP_DEFINITIONS,
 } from '../../../../shared/tab-browser-types'

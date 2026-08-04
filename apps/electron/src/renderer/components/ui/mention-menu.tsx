@@ -6,7 +6,7 @@ import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { creatorSkillHasStaleSafetyStatus } from '@/lib/creator-skill-safety-display'
 import type { LoadedSkill, LoadedSource, FileSearchResult } from '../../../shared/types'
-import { AGENTS_PLUGIN_NAME } from '@polo-ai/shared/skills/types'
+import { AGENTS_PLUGIN_NAME } from '@z-h-ai/shared/skills/types'
 
 // ============================================================================
 // Types

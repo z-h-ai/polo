@@ -1,9 +1,9 @@
 import * as React from 'react'
 import type { CSSProperties } from 'react'
-import type { StatusConfig } from '@polo-ai/shared/statuses'
-import { isEmoji } from '@polo-ai/shared/utils/icon-constants'
-import { resolveEntityColor, getDefaultStatusColor } from '@polo-ai/shared/colors'
-import type { EntityColor } from '@polo-ai/shared/colors'
+import type { StatusConfig } from '@z-h-ai/shared/statuses'
+import { isEmoji } from '@z-h-ai/shared/utils/icon-constants'
+import { resolveEntityColor, getDefaultStatusColor } from '@z-h-ai/shared/colors'
+import type { EntityColor } from '@z-h-ai/shared/colors'
 import { StatusIcon } from '@/components/ui/status-icon'
 import { iconCache } from '@/lib/icon-cache'
 

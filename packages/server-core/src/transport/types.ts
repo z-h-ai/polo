@@ -2,7 +2,7 @@
  * Transport-layer interfaces for the WS-based RPC.
  */
 
-import type { PushTarget } from '@polo-ai/shared/protocol'
+import type { PushTarget } from '@z-h-ai/shared/protocol'
 
 export interface RequestContext {
   clientId: string

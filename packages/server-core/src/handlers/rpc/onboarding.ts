@@ -3,12 +3,12 @@
  *
  * Handles workspace setup and configuration persistence.
  */
-import { getAuthState, getSetupNeeds } from '@polo-ai/shared/auth'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
-import { setSetupDeferred } from '@polo-ai/shared/config'
-import { prepareClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState, prepareMcpOAuth } from '@polo-ai/shared/auth'
-import { validateMcpConnection } from '@polo-ai/shared/mcp'
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import { getAuthState, getSetupNeeds } from '@z-h-ai/shared/auth'
+import { getCredentialManager } from '@z-h-ai/shared/credentials'
+import { setSetupDeferred } from '@z-h-ai/shared/config'
+import { prepareClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState, prepareMcpOAuth } from '@z-h-ai/shared/auth'
+import { validateMcpConnection } from '@z-h-ai/shared/mcp'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 

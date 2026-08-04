@@ -14,7 +14,7 @@
     "test": "bun test src/"
   },
   "dependencies": {
-    "@polo-ai/shared": "workspace:*",
+    "@z-h-ai/shared": "workspace:*",
     "@polo-ai/server-core": "workspace:*"
   },
   "devDependencies": {

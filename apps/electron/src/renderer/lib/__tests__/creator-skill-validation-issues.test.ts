@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
-import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
+import { i18n, setupI18n } from '@z-h-ai/shared/i18n/setupI18n'
 import { translateCreatorSkillValidationIssue } from '../creator-skill-validation-issues'
 
 beforeAll(async () => {

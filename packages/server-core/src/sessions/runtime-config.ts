@@ -1,6 +1,6 @@
-import type { AgentProvider, LlmAuthType } from '@polo-ai/shared/agent/backend'
-import { isCompatProvider, modelSupportsImages, type LlmConnection } from '@polo-ai/shared/config'
-import type { FileAttachment } from '@polo-ai/shared/protocol'
+import type { AgentProvider, LlmAuthType } from '@z-h-ai/shared/agent/backend'
+import { isCompatProvider, modelSupportsImages, type LlmConnection } from '@z-h-ai/shared/config'
+import type { FileAttachment } from '@z-h-ai/shared/protocol'
 
 export interface BackendRuntimeSignatureInput {
   connection: LlmConnection | null

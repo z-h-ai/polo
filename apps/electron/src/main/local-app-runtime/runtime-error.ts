@@ -1,4 +1,4 @@
-import type { LocalAppErrorCode, LocalAppErrorPayload } from '@polo-ai/shared/protocol'
+import type { LocalAppErrorCode, LocalAppErrorPayload } from '@z-h-ai/shared/protocol'
 
 export class LocalAppRuntimeError extends Error {
   readonly code: LocalAppErrorCode

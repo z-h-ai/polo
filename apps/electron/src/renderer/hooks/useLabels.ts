@@ -8,8 +8,8 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { LabelConfig } from '@polo-ai/shared/labels'
-import { flattenLabels } from '@polo-ai/shared/labels'
+import type { LabelConfig } from '@z-h-ai/shared/labels'
+import { flattenLabels } from '@z-h-ai/shared/labels'
 
 export interface UseLabelsResult {
   /** Label tree (root-level nodes with nested children) */

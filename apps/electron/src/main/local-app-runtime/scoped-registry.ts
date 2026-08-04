@@ -11,9 +11,9 @@ import type {
   LocalAppScope,
   LocalAppStartResult,
   LocalAppUninstallOptions,
-} from '@polo-ai/shared/protocol'
-import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
-import { normalizeCatalogSemVer } from '@polo-ai/shared/admin/semver'
+} from '@z-h-ai/shared/protocol'
+import { AdminEntityIdSchema } from '@z-h-ai/shared/admin/schemas'
+import { normalizeCatalogSemVer } from '@z-h-ai/shared/admin/semver'
 import {
   LocalAppRuntimeManager,
   type LocalAppRuntimeLogger,

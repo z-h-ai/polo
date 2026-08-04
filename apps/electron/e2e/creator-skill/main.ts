@@ -8,9 +8,9 @@ import {
   CREATOR_SKILL_FIXTURE_CONTENT,
   calculateContentDigest,
   type CreatorSkillOperationProgress,
-} from '@polo-ai/shared/creator-skills'
-import { AdminClient } from '@polo-ai/shared/admin'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+} from '@z-h-ai/shared/creator-skills'
+import { AdminClient } from '@z-h-ai/shared/admin'
+import { getCredentialManager } from '@z-h-ai/shared/credentials'
 import type { HandlerDeps } from '@polo-ai/server-core/handlers'
 import { registerCoreRpcHandlers } from '@polo-ai/server-core/handlers/rpc'
 import { bindClientActiveSession } from '@polo-ai/server-core/handlers/rpc/client-active-session'

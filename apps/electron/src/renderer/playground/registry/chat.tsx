@@ -12,7 +12,7 @@ import { EmptyStateHint, getHintCount, getHintTemplate } from '@/components/chat
 import { Button } from '@/components/ui/button'
 import { motion } from 'motion/react'
 import { ArrowUp, Paperclip, ChevronDown, Circle, Sparkles } from 'lucide-react'
-import type { LabelConfig } from '@polo-ai/shared/labels'
+import type { LabelConfig } from '@z-h-ai/shared/labels'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { FileAttachment, PermissionRequest, PermissionMode } from '../../../shared/types'
 import { cn } from '@/lib/utils'

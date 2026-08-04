@@ -5,16 +5,16 @@
  * with the icon size variant for consistent inline display.
  */
 
-import type { IconSize } from '@polo-ai/shared/icons'
-import type { EntityColor } from '@polo-ai/shared/colors'
-import { resolveEntityColor } from '@polo-ai/shared/colors'
+import type { IconSize } from '@z-h-ai/shared/icons'
+import type { EntityColor } from '@z-h-ai/shared/colors'
+import { resolveEntityColor } from '@z-h-ai/shared/colors'
 import { useTheme } from '@/context/ThemeContext'
 import { cn } from '@/lib/utils'
 import { Hash, CalendarDays, Type } from 'lucide-react'
-import type { LabelConfig } from '@polo-ai/shared/labels'
+import type { LabelConfig } from '@z-h-ai/shared/labels'
 
 interface LabelIconProps {
-  /** Label configuration (matches LabelConfig from @polo-ai/shared/labels) */
+  /** Label configuration (matches LabelConfig from @z-h-ai/shared/labels) */
   label: {
     id: string
     /** EntityColor: system color string or custom color object */

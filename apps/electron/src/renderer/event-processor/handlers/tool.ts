@@ -7,7 +7,7 @@
 
 import type { SessionState, ToolStartEvent, ToolResultEvent, TaskBackgroundedEvent, ShellBackgroundedEvent, TaskProgressEvent, TaskCompletedEvent } from '../types'
 import type { Message } from '../../../shared/types'
-import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
+import { isParentTaskTool } from '@z-h-ai/shared/utils/toolNames'
 import {
   findToolMessage,
   updateMessageAt,

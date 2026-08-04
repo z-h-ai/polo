@@ -16,7 +16,7 @@
 import {
   classifyExternalUrl,
   type UrlClassification,
-} from '@polo-ai/shared/utils/url-safety'
+} from '@z-h-ai/shared/utils/url-safety'
 
 export type OpenExternalUrlResult =
   | { opened: true }

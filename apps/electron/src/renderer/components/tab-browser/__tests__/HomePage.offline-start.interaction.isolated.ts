@@ -10,12 +10,12 @@ import {
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { createElement, useEffect } from 'react'
 import { I18nextProvider } from 'react-i18next'
-import { i18n, setupI18n } from '@polo-ai/shared/i18n'
-import type { CatalogLocalAppScope } from '@polo-ai/shared/protocol'
+import { i18n, setupI18n } from '@z-h-ai/shared/i18n'
+import type { CatalogLocalAppScope } from '@z-h-ai/shared/protocol'
 import type {
   OrganizationContextStorage,
   OrganizationContextStoragePatch,
-} from '@polo-ai/shared/config/organization-context'
+} from '@z-h-ai/shared/config/organization-context'
 import { BUILTIN_APP_DEFINITIONS } from '../../../../shared/tab-browser-types'
 
 GlobalRegistrator.register()

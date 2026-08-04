@@ -9,7 +9,7 @@ import { describe, it, expect, mock, beforeAll } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nextProvider } from 'react-i18next';
-import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n';
+import { i18n, setupI18n } from '@z-h-ai/shared/i18n/setupI18n';
 import type { LoadedSkill } from '../../../../shared/types';
 
 // mention-menu.tsx transitively imports pdfjs-dist via renderer component chain.

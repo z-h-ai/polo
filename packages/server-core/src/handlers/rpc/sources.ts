@@ -1,8 +1,8 @@
-import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
-import { loadWorkspaceSources } from '@polo-ai/shared/sources'
-import { safeJsonParse } from '@polo-ai/shared/utils/files'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
+import { RPC_CHANNELS } from '@z-h-ai/shared/protocol'
+import { getWorkspaceByNameOrId } from '@z-h-ai/shared/config'
+import { loadWorkspaceSources } from '@z-h-ai/shared/sources'
+import { safeJsonParse } from '@z-h-ai/shared/utils/files'
+import { getCredentialManager } from '@z-h-ai/shared/credentials'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -32,10 +32,10 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
   })
 
   // Create a new source
-  server.handle(RPC_CHANNELS.sources.CREATE, async (_ctx, workspaceId: string, config: Partial<import('@polo-ai/shared/sources').CreateSourceInput>) => {
+  server.handle(RPC_CHANNELS.sources.CREATE, async (_ctx, workspaceId: string, config: Partial<import('@z-h-ai/shared/sources').CreateSourceInput>) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-    const { createSource } = await import('@polo-ai/shared/sources')
+    const { createSource } = await import('@z-h-ai/shared/sources')
     return createSource(workspace.rootPath, {
       name: config.name || 'New Source',
       provider: config.provider || 'custom',
@@ -51,11 +51,11 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
   server.handle(RPC_CHANNELS.sources.DELETE, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-    const { deleteSource } = await import('@polo-ai/shared/sources')
+    const { deleteSource } = await import('@z-h-ai/shared/sources')
     deleteSource(workspace.rootPath, sourceSlug)
 
     // Clean up stale slug from workspace default sources
-    const { loadWorkspaceConfig, saveWorkspaceConfig } = await import('@polo-ai/shared/workspaces')
+    const { loadWorkspaceConfig, saveWorkspaceConfig } = await import('@z-h-ai/shared/workspaces')
     const config = loadWorkspaceConfig(workspace.rootPath)
     if (config?.defaults?.enabledSourceSlugs?.includes(sourceSlug)) {
       config.defaults.enabledSourceSlugs = config.defaults.enabledSourceSlugs.filter(s => s !== sourceSlug)
@@ -76,7 +76,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
   server.handle(RPC_CHANNELS.sources.SAVE_CREDENTIALS, async (_ctx, workspaceId: string, sourceSlug: string, credential: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-    const { loadSource, getSourceCredentialManager } = await import('@polo-ai/shared/sources')
+    const { loadSource, getSourceCredentialManager } = await import('@z-h-ai/shared/sources')
 
     const source = loadSource(workspace.rootPath, sourceSlug)
     if (!source) {
@@ -96,7 +96,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     if (!workspace) return null
 
     const { existsSync, readFileSync } = await import('fs')
-    const { getSourcePermissionsPath } = await import('@polo-ai/shared/agent')
+    const { getSourcePermissionsPath } = await import('@z-h-ai/shared/agent')
     const path = getSourcePermissionsPath(workspace.rootPath, sourceSlug)
 
     if (!existsSync(path)) return null
@@ -116,7 +116,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     if (!workspace) return null
 
     const { existsSync, readFileSync } = await import('fs')
-    const { getWorkspacePermissionsPath } = await import('@polo-ai/shared/agent')
+    const { getWorkspacePermissionsPath } = await import('@z-h-ai/shared/agent')
     const path = getWorkspacePermissionsPath(workspace.rootPath)
 
     if (!existsSync(path)) return null
@@ -133,7 +133,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
   // Get default permissions from ~/.polo-ai/permissions/default.json
   server.handle(RPC_CHANNELS.permissions.GET_DEFAULTS, async () => {
     const { existsSync, readFileSync } = await import('fs')
-    const { getAppPermissionsDir } = await import('@polo-ai/shared/agent')
+    const { getAppPermissionsDir } = await import('@z-h-ai/shared/agent')
     const { join } = await import('path')
 
     const defaultPath = join(getAppPermissionsDir(), 'default.json')
@@ -170,7 +170,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
         return { success: false, error: 'Source has not been tested yet' }
       }
 
-      const { PoloMcpClient } = await import('@polo-ai/shared/mcp')
+      const { PoloMcpClient } = await import('@z-h-ai/shared/mcp')
       let client: InstanceType<typeof PoloMcpClient>
 
       if (source.config.mcp.transport === 'stdio') {
@@ -210,7 +210,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
       const tools = await client.listTools()
       await client.close()
 
-      const { loadSourcePermissionsConfig, permissionsConfigCache } = await import('@polo-ai/shared/agent')
+      const { loadSourcePermissionsConfig, permissionsConfigCache } = await import('@z-h-ai/shared/agent')
       const permissionsConfig = loadSourcePermissionsConfig(workspace.rootPath, sourceSlug)
 
       const mergedConfig = permissionsConfigCache.getMergedConfig({

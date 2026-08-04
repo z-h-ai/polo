@@ -1,4 +1,4 @@
-import type { MessageEnvelope } from '@polo-ai/shared/protocol'
+import type { MessageEnvelope } from '@z-h-ai/shared/protocol'
 
 const WIRE_TYPE_KEY = '__craftRpcType'
 const WIRE_BASE64_KEY = 'base64'

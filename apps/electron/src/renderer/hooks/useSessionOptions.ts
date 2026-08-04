@@ -11,8 +11,8 @@
  */
 
 import type { PermissionMode } from '../../shared/types'
-import type { ThinkingLevel } from '@polo-ai/shared/agent/thinking-levels'
-import { DEFAULT_THINKING_LEVEL } from '@polo-ai/shared/agent/thinking-levels'
+import type { ThinkingLevel } from '@z-h-ai/shared/agent/thinking-levels'
+import { DEFAULT_THINKING_LEVEL } from '@z-h-ai/shared/agent/thinking-levels'
 
 /**
  * All session-scoped options in one place.

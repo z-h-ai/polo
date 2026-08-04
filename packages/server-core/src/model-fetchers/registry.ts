@@ -6,7 +6,7 @@
  * Adding a new LlmProviderType without registering a fetcher → compile error.
  */
 
-import type { ModelFetcherMap } from '@polo-ai/shared/config'
+import type { ModelFetcherMap } from '@z-h-ai/shared/config'
 import { AnthropicModelFetcher } from './anthropic'
 import { PiModelFetcher } from './pi'
 

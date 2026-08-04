@@ -1,72 +1,109 @@
-# POO-21 Implement Report
-
-## Change Summary
-- Fixed the merged-worktree Electron Creator Skill install path so the real download fetch uses the current Admin auth token instead of relying on a stale credential cache.
-- Normalized the Admin download origin check so `localhost` and `127.0.0.1` loopback URLs share the same authenticated fetch path.
-- Added a live-token bridge from the Electron E2E harness into the server-core runtime via `PlatformServices.getAdminAccessToken`.
-- Kept the shared Admin safety-status fix from the prior commit so the client now derives safety from the published artifact detail contract.
-
-## Key Files
-- `packages/server-core/src/handlers/rpc/skills.ts`
-- `packages/server-core/src/runtime/platform.ts`
-- `apps/electron/e2e/creator-skill/main.ts`
-- `packages/shared/src/admin/client.ts`
-- `packages/shared/src/admin/__tests__/client.test.ts`
-
-## Self-Test Results
-- `bun test packages/shared/src/admin/__tests__/client.test.ts` passed.
-- `bun test ./packages/server-core/src/handlers/rpc/skills.creator-boundary.isolated.ts` passed.
-- `bun run scripts/electron-creator-skill-e2e.ts` passed against a real isolated Admin server.
-- Final E2E evidence: `creator_skill_e2e_pass` with `progressStages: ["download","validate","prepare","commit","refresh"]`, `skillsChangedCount: 3`, and `backupsCount: 2`.
-
-## Verification Environment
-- Admin server: `bun run dev` in `/Users/wow/project/z-h-ai/polo-admin-dir/dev`
-- Admin DB: `postgresql://postgres:postgres@localhost:5432/polo_admin_test`
-- Admin secret: `JWT_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
-- DB reset/seed commands:
-  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/polo_admin_test bun run scripts/reset-test-db.ts`
-  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/polo_admin_test bun run scripts/seed-test-db.ts`
-
-## Remaining Issues
-- None for POO-21 in this worktree.
-
----
-
-# POL-51 实现报告
+# POO-26 GitHub Actions 发布故障修复报告
 
 ## 变更摘要
 
-- 实现组织 App Catalog 同步、版本化缓存与失权/撤回 tombstone：登录及已登录启动会同步当前组织目录；网络失败保留上次成功缓存；登出、组织失权和目录撤回会立即关闭新的交付/启动能力，同时保留已安装 Bundle 的停止、卸载和受限日志管理闭环。
-- 将组织目录与个人外部 URL 应用分离：首页按最近使用、当前组织应用和外部应用展示；个人外部应用继续复用 `tabBrowser:getApps` / `tabBrowser:saveApps`，组织下发的远程 URL 由可信目录解析后直接在 WebView 打开。
-- 接入本地 Bundle 生命周期：安装前确认受信任的 Release 元数据和权限，安装/取消/重试/更新/卸载调用本地运行管理器；启动必须通过健康检查并返回 localhost 地址后才创建或激活 WebView 标签页。
-- 补齐跨账号、跨组织及异步竞态防护：Catalog scope 以完整账号、组织和 App ID 隔离；过期确认、过期启动、迟到日志、被撤回的 App、离线缓存和大目录批量状态查询均 fail closed，且不泄漏被拒绝目录的 Release/运行时元数据。
+- clean-consumer 的 Next production route proof 不再通过 `npm run start`
+  生成不可控的 npm → Next 孙进程；现在直接以 Node 启动已安装的 Next CLI。
+- proof 在请求真实 API route 后向 Next 子进程发送 `SIGTERM` 并等待 `close`；5 秒
+  未退出才升级为 `SIGKILL`，再次等待退出。清理完成后移除 stdout/stderr listener
+  并销毁两条 pipe，避免 Bun 事件循环被孙进程继承的 pipe 持有。
+- 新增 CI 风格非交互生命周期回归入口。它以 piped stdio 和独立进程组启动完整
+  clean-consumer proof，必须观察到 proof 命令自行 `exit 0`，并检查整个进程组已无
+  活跃后代；watchdog 只会令测试失败并清理进程组，不是成功路径。
+- package、publish manifest、lockfile、workflow、tarball/metadata/artifact 命名和
+  POL-59 handoff 全部升级到 `0.11.1` / `shared-v0.11.1`。workflow 从 publish
+  manifest 动态派生版本和 tarball 路径，proof、attestation、publish、metadata
+  查询继续操作同一 tarball，job timeout 作为防御提高到 30 分钟。
+- 文档记录 `shared-v0.11.0` 仍不可变地指向
+  `27ec7083ecce131818b24026edef283eda10c380`；run `30870120001` 是 proof
+  通过但因孤儿 Next 进程超时、未执行 attest/publish 的失败尝试。POL-59 后续必须
+  消费 `0.11.1`，不得移动或复用 `shared-v0.11.0`。
+- 未修改 Creator Skill canonical contract、fixture 或 digest 算法。
 
-## 关键文件列表
+## 关键文件
 
-- `packages/shared/src/admin/app-catalog-cache.ts`
-- `packages/shared/src/protocol/local-apps.ts`
-- `apps/electron/src/main/handlers/local-apps.ts`
-- `apps/electron/src/main/local-app-runtime/scoped-registry.ts`
-- `apps/electron/src/renderer/hooks/useAppCatalog.ts`
-- `apps/electron/src/renderer/components/tab-browser/HomePage.tsx`
-- `apps/electron/src/renderer/components/tab-browser/OrganizationAppCard.tsx`
-- `apps/electron/src/renderer/components/tab-browser/AddAppDialog.tsx`
+- `packages/shared/scripts/verify-creator-skills-package.ts`
+- `packages/shared/scripts/verify-creator-skills-package-lifecycle.ts`
+- `packages/shared/package.json`
+- `packages/shared/package.publish.json`
+- `bun.lock`
+- `.github/workflows/publish-shared-package.yml`
+- `docs/shared-package-publishing.md`
+- `.pipeline/implement-report.md`
 
-## 自测结果
+## 实际自测
 
-- `bun run test`：通过；基础测试及仓库内全部 `*.isolated.ts` 测试均通过。
-- POL-51 定向测试：通过。
-  - `local-apps.isolated.ts`：22 pass。
-  - `admin-local-app-session-ending.isolated.ts`：23 pass。
-  - `useAppCatalog.interaction.isolated.ts`：29 pass。
-  - `HomePage.offline-start.interaction.isolated.ts`：1 pass。
-  - `HomePage.round2.interaction.isolated.ts`：14 pass。
-- `bun run typecheck:all`：通过。
-- `bun run electron:build`：通过（main、preload、renderer、resources 和 assets）。
-- `bun run lint:electron`：通过，0 errors；输出 120 个既有 warnings。
-- `git diff --check`：通过。
+### Shared 全量测试
 
-## 遗留问题
+```sh
+bun run --cwd packages/shared test
+```
 
-- 本任务范围内无已知功能性或安全遗留。
-- 现有 Electron lint warning 与两个 React 测试环境 warning（`act(...)` / Radix ref）未由本次变更新增，未阻断测试和构建。
+结果：通过，`3021 pass / 18 skip / 0 fail`，共 3039 tests、6914
+assertions，170 files。fixture/canonical tests 未出现漂移。
+
+### 相关类型检查
+
+```sh
+bunx tsc --noEmit --strict --target ESNext --module ESNext \
+  --moduleResolution bundler --types bun --skipLibCheck \
+  packages/shared/scripts/verify-creator-skills-package.ts \
+  packages/shared/scripts/verify-creator-skills-package-lifecycle.ts \
+  packages/shared/scripts/stage-creator-skills-package.ts
+bun run --cwd packages/shared tsc --noEmit
+```
+
+结果：均通过。第一条显式覆盖默认 shared tsconfig 未包含的 proof scripts；第二条
+覆盖 shared 源码。
+
+### 完整 clean-consumer 与进程退出回归
+
+```sh
+proof_output="$(mktemp -d /tmp/z-h-ai-shared-evidence.XXXXXX)"
+bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts \
+  --allow-dirty-snapshot --output-dir "$proof_output"
+```
+
+结果：通过。生命周期 wrapper 强制 `CI=1`、stdin ignored、stdout/stderr piped；
+`lifecycle-proof.json` 记录 proof 命令自行 `exitCode: 0`、无退出 signal、完整进程组
+已回收且没有活跃后代。`proof.json` 记录：
+
+- package：`@z-h-ai/shared@0.11.1`
+- tarball：`z-h-ai-shared-0.11.1.tgz`
+- SHA-256：`d4e3dc2e00967410d1abe16e68f9b439d0a897e120d71d7efc577e4b78b7b9b2`
+- npm integrity：
+  `sha512-Kitxxhd0L9VPQPBZE0LR5r+FZCoDxpiYaUNI5Qb/OEUuWCxY446JNFzmG4/zejm8Xf4K56Q4daD74UA71BzXdw==`
+- Next：Node 直接启动 CLI，`SIGTERM` 后 5ms 退出，`forcedKill: false`
+- Node CJS/ESM、unsupported subpaths、TypeScript 6.0.3、Next.js 16.2.7
+  Turbopack build、真实 route、tarball 负向边界全部通过
+- canonical fixture digest：
+  `f9999556728593a5f0f5f3e22f89b1e86793ae5232f7e11e68324ef82927136c`
+
+`--allow-dirty-snapshot` 只跳过实现阶段尚未 commit 时的 Git tracked-status 门禁；
+clean consumer 仍在仓库外临时目录中从 tarball 创建 lockfile、删除 `node_modules`
+后执行 frozen `npm ci`，生命周期与全部消费验证没有跳过。正式 workflow 不传该参数，
+会继续要求 checkout snapshot clean/reproducible。
+
+### Workflow、版本与基础一致性
+
+```sh
+ruby -e "require 'yaml'; YAML.load_file('.github/workflows/publish-shared-package.yml')"
+node -e "const a=require('./packages/shared/package.json'); const b=require('./packages/shared/package.publish.json'); if(a.version!=='0.11.1'||a.version!==b.version) process.exit(1)"
+git rev-parse 'shared-v0.11.0^{}'
+git diff --check
+```
+
+结果：通过；旧 tag 仍解析到
+`27ec7083ecce131818b24026edef283eda10c380`，未被删除或移动。
+
+## 遗留发布门禁
+
+- 按 coder 纪律未执行 push、tag 或 publish；本 commit 也不会创建
+  `shared-v0.11.1`。
+- 授权方仍需在 review 通过后创建并 push `shared-v0.11.1`，等待 workflow 完整完成
+  proof → attestation → 同一 tarball publish → registry metadata → artifact upload。
+- 必须确认 `@z-h-ai/shared@0.11.1` 的 GitHub Packages metadata/integrity 与本次
+  workflow 产物一致，并授予 `z-h-ai/polo-admin` Actions read access。
+- POL-59 仍需固定消费 `0.11.1`，执行 authenticated registry-backed frozen
+  `npm ci`、Node/TypeScript/Next/真实 `/api/capabilities` 及其数据库、对象存储、角色、
+  Electron ledger/journal 独立验收。完成本修复不等于 registry 发布或 POL-59 验收完成。

@@ -15,8 +15,8 @@
  *   await handle.dispose()                                            // on shutdown
  */
 
-import type { PushTarget } from '@polo-ai/shared/protocol'
-import type { CredentialManager } from '@polo-ai/shared/credentials'
+import type { PushTarget } from '@z-h-ai/shared/protocol'
+import type { CredentialManager } from '@z-h-ai/shared/credentials'
 import type { ISessionManager } from '@polo-ai/server-core/handlers'
 
 import { MessagingGatewayRegistry } from './registry'

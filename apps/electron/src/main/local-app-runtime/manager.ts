@@ -23,8 +23,8 @@ import { createServer as createNetServer } from 'net'
 import { arch as hostArch, platform as hostPlatform } from 'os'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'path'
 import { spawn, type ChildProcess } from 'child_process'
-import { AdminEntityIdSchema } from '@polo-ai/shared/admin/schemas'
-import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@polo-ai/shared/protocol'
+import { AdminEntityIdSchema } from '@z-h-ai/shared/admin/schemas'
+import { LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS } from '@z-h-ai/shared/protocol'
 import type {
   LocalAppArchitecture,
   LocalAppAvailableRelease,
@@ -39,7 +39,7 @@ import type {
   LocalAppStartResult,
   LocalAppUninstallOptions,
   PoloAppManifest,
-} from '@polo-ai/shared/protocol'
+} from '@z-h-ai/shared/protocol'
 import { extractBundleArchive } from './archive'
 import { BoundedLogWriter } from './bounded-log'
 import { assertSafeRelativePath, validatePoloAppManifest } from './manifest'

@@ -6,7 +6,7 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@polo-ai/core'
-import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
+import { isParentTaskTool } from '@z-h-ai/shared/utils/toolNames'
 import { storedToMessage } from '@polo-ai/core'
 
 export { storedToMessage }
