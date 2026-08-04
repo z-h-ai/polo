@@ -19,7 +19,7 @@ permissions:
 jobs:
   prove-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout exact ref
@@ -44,14 +44,18 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node -e "const p=require('./packages/shared/package.json'); if (process.env.RELEASE_TAG !== 'shared-v' + p.version) throw new Error('tag/version mismatch')"
 
+      - name: Resolve package artifact metadata
+        id: package
+        run: node -e "const fs=require('node:fs'); const source=require('./packages/shared/package.json'); const p=require('./packages/shared/package.publish.json'); if (source.name !== p.name || source.version !== p.version) throw new Error('source/publish package identity mismatch'); const stem=p.name.replace(/^@/, '').replace('/', '-'); const tarball=process.env.RUNNER_TEMP + '/shared-package-artifact/' + stem + '-' + p.version + '.tgz'; const artifact=stem + '-' + p.version + '-proof'; fs.appendFileSync(process.env.GITHUB_ENV, ['SHARED_VERSION=' + p.version, 'SHARED_TARBALL_PATH=' + tarball, ''].join('\\n')); fs.appendFileSync(process.env.GITHUB_OUTPUT, ['tarball_path=' + tarball, 'artifact_name=' + artifact, ''].join('\\n'))"
+
       - name: Build, pack, and run clean-consumer proof
-        run: bun run packages/shared/scripts/verify-creator-skills-package.ts --output-dir "$RUNNER_TEMP/shared-package-artifact"
+        run: bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --output-dir "$RUNNER_TEMP/shared-package-artifact"
 
       - name: Attest the verified tarball
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/attest-build-provenance@v3
         with:
-          subject-path: ${{ runner.temp }}/shared-package-artifact/z-h-ai-shared-0.11.0.tgz
+          subject-path: ${{ steps.package.outputs.tarball_path }}
 
       - name: Configure GitHub Packages authentication
         if: startsWith(github.ref, 'refs/tags/')
@@ -65,18 +69,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm publish "$RUNNER_TEMP/shared-package-artifact/z-h-ai-shared-0.11.0.tgz" --access restricted --registry https://npm.pkg.github.com
+        run: npm publish "$SHARED_TARBALL_PATH" --access restricted --registry https://npm.pkg.github.com
 
       - name: Capture immutable registry metadata
         if: startsWith(github.ref, 'refs/tags/')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm view @z-h-ai/shared@0.11.0 name version dist.tarball dist.integrity dist.shasum --json --registry https://npm.pkg.github.com > "$RUNNER_TEMP/shared-package-artifact/published-package.json"
+        run: npm view "@z-h-ai/shared@$SHARED_VERSION" name version dist.tarball dist.integrity dist.shasum --json --registry https://npm.pkg.github.com > "$RUNNER_TEMP/shared-package-artifact/published-package.json"
 
       - name: Upload proof and integrity evidence
         uses: actions/upload-artifact@v4
         with:
-          name: z-h-ai-shared-0.11.0-proof
+          name: ${{ steps.package.outputs.artifact_name }}
           path: ${{ runner.temp }}/shared-package-artifact
           if-no-files-found: error
           retention-days: 90

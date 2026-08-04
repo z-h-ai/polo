@@ -351,7 +351,7 @@
     },
     "packages/shared": {
       "name": "@z-h-ai/shared",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "dependencies": {
         "@isaacs/ttlcache": "^2.1.4",
         "@leeoniya/ufuzzy": "^1.0.19",

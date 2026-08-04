@@ -2,10 +2,20 @@
 
 ## Release candidate boundary
 
-The planned private package coordinate is `@z-h-ai/shared@0.11.0` in
+The planned private package coordinate is `@z-h-ai/shared@0.11.1` in
 `https://npm.pkg.github.com`, with the planned immutable release tag
-`shared-v0.11.0`. Neither the tag, registry package, package access grant, nor
+`shared-v0.11.1`. Neither that tag, registry package, package access grant, nor
 attestation exists until the tagged publish workflow completes successfully.
+
+`shared-v0.11.0` is an immutable failed publication-attempt tag at commit
+`27ec7083ecce131818b24026edef283eda10c380`. GitHub Actions run `30870120001`
+completed the candidate clean-consumer proof with SHA-256
+`25fd5d8d61013b6ce01692117f8b75d7220f8390ce31e7a7c04994268ff9d067`,
+but an orphaned `next-server` kept the proof process alive until the job timed
+out. Attestation, publish, registry metadata capture, and artifact upload never
+ran, and `@z-h-ai/shared@0.11.0` was not published. Do not delete, move, or
+reuse that tag; POL-59 must consume `0.11.1` after its successful publication
+and registry-backed verification.
 
 The published tarball supports exactly these cross-repository entrypoints:
 
@@ -36,11 +46,23 @@ Run the complete local candidate proof from the repository root:
 bun run packages/shared/scripts/verify-creator-skills-package.ts --output-dir /tmp/z-h-ai-shared-proof
 ```
 
+The CI workflow and lifecycle regression run the proof through the supervised
+entrypoint below. It uses piped non-interactive stdio, waits for the proof
+command to close by itself, and fails if any descendant remains alive; its
+watchdog is a failure guard, never a successful timeout path.
+
+```sh
+bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts \
+  --output-dir /tmp/z-h-ai-shared-proof
+```
+
 The output directory contains:
 
-- `z-h-ai-shared-0.11.0.tgz`, the exact candidate tarball.
+- `z-h-ai-shared-0.11.1.tgz`, the exact candidate tarball.
 - `proof.json`, including candidate tarball SHA-256, npm integrity, git commit
   and tag state, compatibility versions, and executed checks.
+- `lifecycle-proof.json`, proving the CI-style proof command exited by itself
+  and left no live descendant process.
 - `clean-consumer-package-lock.json`, including the local tarball install
   integrity used by the candidate proof.
 - Only after a successful tagged publication, `published-package.json`, with
@@ -50,20 +72,24 @@ The proof creates its consumer under the operating system temporary directory,
 outside the Polo repository. It creates a lockfile, deletes the install tree,
 runs `npm ci`, verifies CommonJS `require`, ESM `import`, `tsc --noEmit`, a
 Next.js 16.2.7 Turbopack production build, and a real `next start` API request.
+The route proof invokes the installed Next CLI directly through Node, sends
+`SIGTERM`, waits for process close, escalates to `SIGKILL` only on cleanup
+failure, and then removes listeners and closes both output streams.
 It verifies that package root, `/protocol`, and `/package.json` are rejected,
 recalculates the POO-21 fixture manifest `contentDigest` through the canonical
 exported algorithm, and rejects source, tests, developer paths, undeclared
 files, `workspace:*` dependencies, or any public export targeting `src/*.ts`.
 
 This local proof validates the candidate only. It does not prove that version
-`0.11.0` is present or installable from GitHub Packages.
+`0.11.1` is present or installable from GitHub Packages.
 
 ## Publishing and registry-backed verification
 
 After independent review approval:
 
 1. Merge the implementation commit into the authorized release source branch.
-2. Create and push annotated tag `shared-v0.11.0` at that exact commit.
+2. Create and push annotated tag `shared-v0.11.1` at that exact commit. Preserve
+   the existing failed-attempt tag `shared-v0.11.0` unchanged.
 3. Let `.github/workflows/publish-shared-package.yml` finish. The workflow
    proves, attests, publishes, and queries the same candidate tarball; do not
    rebuild a second tarball for publication.
@@ -71,7 +97,7 @@ After independent review approval:
 5. Retain the workflow proof artifact, `published-package.json`, and GitHub
    build-provenance attestation with the release record.
 6. In a clean directory with authenticated `@z-h-ai` registry configuration,
-   install exact version `0.11.0` with a frozen lockfile. Confirm the lockfile
+   install exact version `0.11.1` with a frozen lockfile. Confirm the lockfile
    registry URL/integrity matches `published-package.json`, then rerun the Node,
    TypeScript, Next build/start, route, fixtures, and unsupported-subpath checks
    against the registry-installed package.
@@ -88,7 +114,7 @@ dependency with the exact immutable version:
 ```json
 {
   "dependencies": {
-    "@z-h-ai/shared": "0.11.0"
+    "@z-h-ai/shared": "0.11.1"
   }
 }
 ```

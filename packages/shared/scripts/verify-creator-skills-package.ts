@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import {
   access,
   copyFile,
@@ -19,8 +21,11 @@ const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, '..')
 const repositoryRoot = resolve(packageRoot, '../..')
 const publishStageRoot = join(packageRoot, 'dist', 'publish')
-const packageName = '@z-h-ai/shared'
-const packageVersion = '0.11.0'
+const publishManifest = JSON.parse(
+  readFileSync(join(packageRoot, 'package.publish.json'), 'utf8'),
+) as { name: string; version: string }
+const packageName = publishManifest.name
+const packageVersion = publishManifest.version
 const registry = 'https://npm.pkg.github.com'
 const requiredEntries = [
   'dist/creator-skills/archive.d.ts',
@@ -51,6 +56,13 @@ type CliOptions = {
   outputDir?: string
   tarball?: string
   keepTemp: boolean
+}
+
+type ProcessLifecycleEvidence = {
+  command: string
+  terminationSignal: 'SIGTERM'
+  forcedKill: boolean
+  shutdownDurationMs: number
 }
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -166,6 +178,41 @@ async function waitForRoute(url: string): Promise<Record<string, unknown>> {
   throw new Error(
     `Timed out waiting for ${url}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
   )
+}
+
+async function settlesWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<boolean>(resolvePromise => {
+        timeout = setTimeout(() => resolvePromise(false), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
+async function terminateChild(
+  child: ChildProcess,
+  closed: Promise<void>,
+  label: string,
+): Promise<{ forcedKill: boolean; shutdownDurationMs: number }> {
+  const startedAt = Date.now()
+  if (child.exitCode !== null || child.signalCode !== null) {
+    await closed
+    return { forcedKill: false, shutdownDurationMs: Date.now() - startedAt }
+  }
+
+  child.kill('SIGTERM')
+  if (await settlesWithin(closed, 5_000)) {
+    return { forcedKill: false, shutdownDurationMs: Date.now() - startedAt }
+  }
+
+  child.kill('SIGKILL')
+  assert(await settlesWithin(closed, 5_000), `${label} did not exit after SIGKILL`)
+  return { forcedKill: true, shutdownDurationMs: Date.now() - startedAt }
 }
 
 async function sha256(path: string): Promise<string> {
@@ -453,32 +500,61 @@ async function proveUnsupportedEntrypoints(consumerRoot: string): Promise<void> 
   await runCommand('node', ['--input-type=module', '-e', esmProof], { cwd: consumerRoot })
 }
 
-async function proveNextProductionRoute(consumerRoot: string, env: NodeJS.ProcessEnv): Promise<void> {
+async function proveNextProductionRoute(
+  consumerRoot: string,
+  env: NodeJS.ProcessEnv,
+): Promise<ProcessLifecycleEvidence> {
   await runCommand('npm', ['run', 'build'], { cwd: consumerRoot, env })
   const port = await getFreePort()
-  const child = spawn('npm', ['run', 'start', '--', '--hostname', '127.0.0.1', '--port', String(port)], {
+  const nextCli = join(consumerRoot, 'node_modules', 'next', 'dist', 'bin', 'next')
+  await access(nextCli)
+  const child = spawn('node', [
+    nextCli,
+    'start',
+    '--hostname',
+    '127.0.0.1',
+    '--port',
+    String(port),
+  ], {
     cwd: consumerRoot,
     env: { ...env, PORT: String(port) },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  child.stdout.on('data', chunk => process.stdout.write(chunk))
-  child.stderr.on('data', chunk => process.stderr.write(chunk))
+  const stdoutListener = (chunk: Buffer): void => { process.stdout.write(chunk) }
+  const stderrListener = (chunk: Buffer): void => { process.stderr.write(chunk) }
+  const closed = new Promise<void>((resolvePromise, rejectPromise) => {
+    child.once('error', rejectPromise)
+    child.once('close', () => resolvePromise())
+  })
+  child.stdout.on('data', stdoutListener)
+  child.stderr.on('data', stderrListener)
+  let shutdown: { forcedKill: boolean; shutdownDurationMs: number } | undefined
   try {
-    const response = await waitForRoute(`http://127.0.0.1:${port}/api/shared-skill-proof`)
+    const response = await Promise.race([
+      waitForRoute(`http://127.0.0.1:${port}/api/shared-skill-proof`),
+      closed.then(() => {
+        throw new Error('Next production server exited before the proof route responded')
+      }),
+    ])
     assert(response.valid === true, 'Next route did not validate the shared fixture')
     assert(response.slug === 'review-helper', 'Next route fixture slug drifted')
     assert(response.name === 'Review Helper', 'Next route fixture metadata drifted')
     assert(response.digestMatches === true, 'Next route fixture contentDigest drifted')
   } finally {
-    child.kill('SIGTERM')
-    await new Promise<void>(resolvePromise => {
-      const timeout = setTimeout(resolvePromise, 10_000)
-      child.once('close', () => {
-        clearTimeout(timeout)
-        resolvePromise()
-      })
-    })
-    if (child.exitCode === null) child.kill('SIGKILL')
+    try {
+      shutdown = await terminateChild(child, closed, 'Next production server')
+    } finally {
+      child.stdout.off('data', stdoutListener)
+      child.stderr.off('data', stderrListener)
+      child.stdout.destroy()
+      child.stderr.destroy()
+    }
+  }
+  assert(shutdown, 'Next production server lifecycle evidence is missing')
+  return {
+    command: 'node node_modules/next/dist/bin/next start',
+    terminationSignal: 'SIGTERM',
+    ...shutdown,
   }
 }
 
@@ -487,6 +563,7 @@ async function writeEvidence(
   tarball: string,
   summary: PackSummary | undefined,
   consumerRoot: string,
+  nextProcessLifecycle: ProcessLifecycleEvidence,
 ): Promise<void> {
   await mkdir(outputDir, { recursive: true })
   const consumerLockPath = join(consumerRoot, 'package-lock.json')
@@ -522,6 +599,7 @@ async function writeEvidence(
       next: '16.2.7',
       nextBundler: 'turbopack',
     },
+    nextProductionProcess: nextProcessLifecycle,
     checks: {
       npmCiFrozenInstall: 'passed',
       commonJsRequire: 'passed',
@@ -530,6 +608,7 @@ async function writeEvidence(
       typescriptNoEmit: 'passed',
       nextProductionBuild: 'passed',
       nextProductionRoute: 'passed',
+      nextProductionProcessLifecycle: 'passed',
       fixtureCanonicalDigest: 'passed',
       negativeTarballBoundary: 'passed',
     },
@@ -570,9 +649,15 @@ async function main(): Promise<void> {
     await proveNodeEntrypoints(consumerRoot)
     await proveUnsupportedEntrypoints(consumerRoot)
     await runCommand('npm', ['run', 'typecheck'], { cwd: consumerRoot, env: cleanEnv })
-    await proveNextProductionRoute(consumerRoot, cleanEnv)
-    await writeEvidence(outputDir, packed.tarball, packed.summary, consumerRoot)
-    if (process.env.CI && !options.tarball) {
+    const nextProcessLifecycle = await proveNextProductionRoute(consumerRoot, cleanEnv)
+    await writeEvidence(
+      outputDir,
+      packed.tarball,
+      packed.summary,
+      consumerRoot,
+      nextProcessLifecycle,
+    )
+    if (process.env.CI && !process.env.SHARED_PACKAGE_PROOF_ALLOW_DIRTY && !options.tarball) {
       const status = gitOutput(['status', '--porcelain', '--untracked-files=no']) ?? ''
       assert(status.length === 0, `prepack output is not reproducible from the checked-out snapshot:\n${status}`)
     }

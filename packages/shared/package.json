@@ -1,6 +1,6 @@
 {
   "name": "@z-h-ai/shared",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Shared business logic for Polo AI - agent, auth, config, credentials, MCP integration",
@@ -24,6 +24,7 @@
     "prepack": "bun run build && bun run stage:creator-skills-package",
     "test": "bun run build:creator-skills && bun test",
     "test:creator-skills-package": "bun run scripts/verify-creator-skills-package.ts",
+    "test:creator-skills-package-lifecycle": "bun run scripts/verify-creator-skills-package-lifecycle.ts",
     "test:watch": "bun test --watch",
     "sync:polo-ai-bash-patterns": "bun run src/config/sync-polo-ai-bash-patterns.ts"
   },
