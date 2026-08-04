@@ -94,6 +94,9 @@ CLI runtime：
 - 每次 resume 重新形成当前配置快照。
 - resume 默认使用 Thread 原配置工作区；显式 `--workspace` 可以覆盖。
 - 原配置工作区已删除且未显式覆盖时，明确失败，不静默切换。
+- `config-snapshot/` 是受控 CLI Thread 内的可信本地配置副本，可以保留共享配置工作区中
+  `sources/`、`skills/` 已存在的 header、env、OAuth client secret 等配置值；它不属于
+  session、Thread metadata、JSONL 或日志。Unix/macOS 仍必须使用 `0700` 目录与 `0600` 文件权限。
 
 ### 3.3 共享配置写入边界
 
@@ -102,7 +105,7 @@ CLI 可以读取 Electron 使用的共享配置和凭据，但：
 - 不创建、删除或切换共享 LLM connection。
 - 不修改默认模型或 active workspace。
 - 命令行 provider、model、base URL 和凭据只作用于本次调用。
-- 命令行 API key、OAuth token 等秘密不写入 session、metadata、JSONL 或日志。
+- 命令行显式传入的 API key、OAuth token 等调用级秘密不写入配置快照、session、metadata、JSONL 或日志。
 
 唯一允许的共享凭据写入是既有 OAuth credential 的生命周期刷新：
 
@@ -612,7 +615,7 @@ CLI 启动时执行 opportunistic stale cleanup，不启动常驻清理 daemon�
 - [ ] `-C` 不注册 workspace，不在代码目录创建 Polo 文件。
 - [ ] provider/model/API key/base URL 参数不修改共享 connection、默认模型或 active workspace。
 - [ ] 只有既有 OAuth credential 的合法 token refresh 可以原子更新共享 credential。
-- [ ] API key、token 和 Authorization header 不进入 session、metadata、JSONL 或日志。
+- [ ] 命令行显式传入的 API key、token 和 Authorization header 不进入配置快照、session、metadata、JSONL 或日志；共享配置工作区原有的 source/skill 配置值允许进入受权限保护的 `config-snapshot/`。
 
 ### 11.3 Run
 

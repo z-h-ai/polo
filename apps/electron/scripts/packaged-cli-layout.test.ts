@@ -24,7 +24,7 @@ const {
     resourcesDir: string
     platform: string
     expectedVersion: string
-  }): { appDir: string; server: string; polo: string; poloAi: string }
+  }): { appDir: string; server: string; polo: string; poloAi: string; koffi: string }
 }
 
 const roots: string[] = []
@@ -46,7 +46,17 @@ function assemble(platform: 'darwin' | 'linux' | 'win32') {
   const cliDir = join(appDir, 'dist', 'cli')
   const serverDir = join(appDir, 'dist', 'server')
   const bunDir = join(resourcesDir, 'vendor', 'bun')
-  for (const dir of [binDir, cliDir, serverDir, bunDir]) mkdirSync(dir, { recursive: true })
+  const koffiDir = join(appDir, 'node_modules', 'koffi')
+  const koffiPlatform = platform === 'darwin'
+    ? (process.arch === 'x64' ? 'darwin_x64' : 'darwin_arm64')
+    : platform === 'linux'
+      ? (process.arch === 'arm64' ? 'linux_arm64' : 'linux_x64')
+      : (process.arch === 'arm64' ? 'win32_arm64' : 'win32_x64')
+  const koffiBuildDir = join(koffiDir, 'build', 'koffi', koffiPlatform)
+  for (const dir of [binDir, cliDir, serverDir, bunDir, koffiBuildDir]) mkdirSync(dir, { recursive: true })
+  writeFileSync(join(koffiDir, 'package.json'), '{}\n')
+  writeFileSync(join(koffiDir, 'index.js'), '// native loader\n')
+  writeFileSync(join(koffiBuildDir, 'koffi.node'), 'fixture')
 
   for (const launcher of ['polo', 'polo-ai', 'polo.cmd', 'polo-ai.cmd']) {
     copyFileSync(join(sourceBin, launcher), join(binDir, launcher))
@@ -98,6 +108,7 @@ describe('assembled Electron CLI layout', () => {
         expectedVersion: version,
       })
       expect(validated.appDir).toBe(layout.appDir)
+      expect(validated.koffi).toBe(join(layout.appDir, 'node_modules', 'koffi'))
       expect(readFileSync(join(layout.binDir, 'polo-ai'), 'utf8')).toContain('exec "$BIN_DIR/polo" "$@"')
       expect(readFileSync(join(layout.binDir, 'polo-ai.cmd'), 'utf8')).toContain('call "%~dp0polo.cmd" %*')
     })
@@ -110,6 +121,16 @@ describe('assembled Electron CLI layout', () => {
         platform,
         expectedVersion: version,
       })).toThrow('Packaged CLI payload is missing')
+    })
+
+    it(`rejects a missing native credential-lock dependency on ${platform}`, () => {
+      const layout = assemble(platform)
+      unlinkSync(join(layout.appDir, 'node_modules', 'koffi', 'index.js'))
+      expect(() => validatePackagedCliLayout({
+        resourcesDir: layout.resourcesDir,
+        platform,
+        expectedVersion: version,
+      })).toThrow('Packaged Koffi payload is missing')
     })
   }
 

@@ -78,6 +78,7 @@
     "date-fns": "^4.1.0",
     "i18next": "^26.0.3",
     "incr-regex-package": "^1.0.4",
+    "koffi": "^2.15.1",
     "shell-quote": "^1.8.3",
     "@mariozechner/pi-agent-core": "0.73.1",
     "@mariozechner/pi-ai": "0.73.1",

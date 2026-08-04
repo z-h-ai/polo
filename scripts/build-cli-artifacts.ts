@@ -44,6 +44,7 @@ const cliBuild = await Bun.build({
   target: 'bun',
   format: 'esm',
   minify: false,
+  external: ['koffi'],
 })
 if (!cliBuild.success) {
   throw new AggregateError(cliBuild.logs, 'CLI bundle build failed')
@@ -58,6 +59,7 @@ const serverBuild = await Bun.build({
   target: 'bun',
   format: 'esm',
   minify: false,
+  external: ['koffi'],
   plugins: [{
     name: 'markitdown-xlsx-interop',
     setup(builder) {

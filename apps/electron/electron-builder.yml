@@ -122,6 +122,9 @@ mac:
     # ripgrep (used by packages/server-core/src/services/search.ts).
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    # Native FFI used by the shared credential writer lock.
+    - from: ../../node_modules/koffi
+      to: app/node_modules/koffi
     - from: vendor/bun/bun
       to: vendor/bun/bun
     # WhatsApp worker subprocess (self-contained; Baileys bundled in).
@@ -185,7 +188,8 @@ win:
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
-    # Native FFI used by LocalAppRuntimeManager for Windows Job Objects.
+    # Native FFI used by the shared credential writer lock and by
+    # LocalAppRuntimeManager for Windows Job Objects.
     - from: ../../node_modules/koffi
       to: app/node_modules/koffi
     - from: vendor/bun/bun.exe
@@ -219,6 +223,9 @@ linux:
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    # Native FFI used by the shared credential writer lock.
+    - from: ../../node_modules/koffi
+      to: app/node_modules/koffi
     - from: vendor/bun/bun
       to: vendor/bun/bun
     # WhatsApp worker subprocess (self-contained; Baileys bundled in).

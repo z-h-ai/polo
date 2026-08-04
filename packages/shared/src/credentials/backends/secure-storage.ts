@@ -56,6 +56,10 @@ import type { CredentialId, StoredCredential } from '../types.ts';
 import { credentialIdToAccount, accountToCredentialId } from '../types.ts';
 import { CONFIG_DIR } from '../../config/paths.ts';
 import { getProcessBirthIdentity } from '../../utils/process-identity.ts';
+import {
+  acquireNativeCredentialWriteLock,
+  acquireNativeCredentialWriteLockSync,
+} from './native-write-lock.ts';
 
 const DEFAULT_CREDENTIALS_DIR = join(homedir(), '.polo-ai');
 
@@ -206,7 +210,7 @@ async function createPrivateLockClaim(
  * Cross-process credential writer lock. A live process is never evicted merely
  * because wall time advanced (for example during system sleep).
  */
-export async function acquireCredentialWriteLock(
+async function acquireLegacyCredentialWriteLock(
   lockDirectory: string,
   options: CredentialWriteLockOptions = {},
 ): Promise<CredentialWriteLockHandle> {
@@ -289,7 +293,7 @@ export async function acquireCredentialWriteLock(
   };
 }
 
-function acquireCredentialWriteLockSync(lockDirectory: string): () => void {
+function acquireLegacyCredentialWriteLockSync(lockDirectory: string): () => void {
   const processIdentity = getProcessBirthIdentity(process.pid);
   if (!processIdentity) {
     throw new Error(`Could not verify credential writer process identity for pid ${process.pid}`);
@@ -357,6 +361,71 @@ function acquireCredentialWriteLockSync(lockDirectory: string): () => void {
       } catch {}
     }
   };
+}
+
+/**
+ * Cross-version credential writer lease.
+ *
+ * The native OS lock is the correctness boundary for current Polo processes:
+ * flock/Windows mutex ownership is released by the kernel when a process exits,
+ * including SIGKILL. The existing identity-bearing file claim remains nested
+ * inside it only as a compatibility barrier for an already-running older Polo
+ * process. Because every current process holds the native lock before examining
+ * or reclaiming that legacy claim, stale takeover can no longer race between
+ * current writers.
+ */
+export async function acquireCredentialWriteLock(
+  lockDirectory: string,
+  options: CredentialWriteLockOptions = {},
+): Promise<CredentialWriteLockHandle> {
+  const timeoutMs = options.timeoutMs ?? WRITE_LOCK_TIMEOUT_MS;
+  const retryMs = options.retryMs ?? WRITE_LOCK_RETRY_MS;
+  const nativeLock = await acquireNativeCredentialWriteLock(
+    `${lockDirectory}.native-v2`,
+    { timeoutMs, retryMs },
+  );
+  try {
+    const legacyLock = await acquireLegacyCredentialWriteLock(lockDirectory, options);
+    let active = true;
+    return {
+      owner: legacyLock.owner,
+      async release(): Promise<void> {
+        if (!active) return;
+        active = false;
+        try {
+          await legacyLock.release();
+        } finally {
+          nativeLock.release();
+        }
+      },
+    };
+  } catch (error) {
+    nativeLock.release();
+    throw error;
+  }
+}
+
+function acquireCredentialWriteLockSync(lockDirectory: string): () => void {
+  const nativeLock = acquireNativeCredentialWriteLockSync(
+    `${lockDirectory}.native-v2`,
+    { timeoutMs: WRITE_LOCK_TIMEOUT_MS, retryMs: WRITE_LOCK_RETRY_MS },
+  );
+  try {
+    const releaseLegacyLock = acquireLegacyCredentialWriteLockSync(lockDirectory);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      try {
+        releaseLegacyLock();
+      } finally {
+        nativeLock.release();
+      }
+    };
+  } catch (error) {
+    nativeLock.release();
+    throw error;
+  }
 }
 
 /**

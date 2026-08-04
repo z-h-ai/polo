@@ -114,6 +114,57 @@ describe('top-level CLI help', () => {
     }
   }, 20_000)
 
+  it('prints command-aware help for exec management subcommands', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-management-help-'))
+    tempDirs.push(root)
+    const id = '123e4567-e89b-12d3-a456-426614174000'
+    const cases = [
+      {
+        args: ['exec', 'resume', id, '--help'],
+        usage: 'Usage: polo exec resume <thread_id> [PROMPT]',
+        includes: '--last',
+        excludes: 'List persistent Polo CLI exec Threads',
+      },
+      {
+        args: ['exec', 'sessions', '--help'],
+        usage: 'Usage: polo exec sessions [OPTIONS]',
+        includes: '--workspace <id>',
+        excludes: '--api-key',
+      },
+      {
+        args: ['exec', 'delete', id, '--help'],
+        usage: 'Usage: polo exec delete <thread_id> [OPTIONS]',
+        includes: '--json',
+        excludes: '--workspace',
+      },
+    ]
+
+    for (const testCase of cases) {
+      const proc = Bun.spawn([
+        'bun',
+        'run',
+        join(import.meta.dir, 'index.ts'),
+        ...testCase.args,
+      ], {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, POLO_AI_CONFIG_DIR: root },
+      })
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      expect(exitCode, stderr).toBe(0)
+      expect(stdout).toStartWith(testCase.usage)
+      expect(stdout).toContain(testCase.includes)
+      expect(stdout).not.toContain(testCase.excludes)
+    }
+    expect(await Bun.file(join(root, 'cli-sessions')).exists()).toBe(false)
+  }, 20_000)
+
   it('returns exit 2 and empty stdout for unsupported exec legacy/debug options', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-exec-legacy-options-'))
     tempDirs.push(root)

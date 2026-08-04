@@ -134,7 +134,20 @@ describe('execution parser', () => {
       )
     }
 
-    expect(parseExecutionArgs(argv('exec', 'sessions', '--help')).kind).toBe('help')
+    expect(parseExecutionArgs(argv('exec', 'sessions', '--help'))).toMatchObject({
+      kind: 'help',
+      helpTarget: 'sessions',
+    })
+    expect(parseExecutionArgs(argv('exec', 'resume', id, '--help'))).toMatchObject({
+      kind: 'help',
+      helpTarget: 'resume',
+      threadId: id,
+    })
+    expect(parseExecutionArgs(argv('exec', 'delete', id, '--help'))).toMatchObject({
+      kind: 'help',
+      helpTarget: 'delete',
+      threadId: id,
+    })
     expect(parseExecutionArgs(argv('exec', 'delete', id, '--version')).kind).toBe('version')
   })
 

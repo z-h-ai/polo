@@ -81,14 +81,35 @@ function validatePayload(appDir, expectedVersion) {
   return { cli, server, manifestPath }
 }
 
+function validateKoffiPayload(appDir, platform) {
+  const platformDirectory = {
+    darwin: process.arch === 'x64' ? 'darwin_x64' : 'darwin_arm64',
+    linux: process.arch === 'arm64' ? 'linux_arm64' : 'linux_x64',
+    win32: process.arch === 'arm64' ? 'win32_arm64' : 'win32_x64',
+  }[platform]
+  if (!platformDirectory) throw new Error(`Unsupported packaged Koffi platform: ${platform}`)
+
+  const koffiRoot = path.join(appDir, 'node_modules', 'koffi')
+  const required = [
+    path.join(koffiRoot, 'package.json'),
+    path.join(koffiRoot, 'index.js'),
+    path.join(koffiRoot, 'build', 'koffi', platformDirectory, 'koffi.node'),
+  ]
+  for (const file of required) {
+    if (!existsSync(file)) throw new Error(`Packaged Koffi payload is missing: ${file}`)
+  }
+  return koffiRoot
+}
+
 function validatePackagedCliLayout({ resourcesDir, platform, expectedVersion }) {
   const appDir = path.join(resourcesDir, 'app')
   const binDir = path.join(appDir, 'resources', 'bin')
   const launchers = validateLauncherSources(binDir)
   const payload = validatePayload(appDir, expectedVersion)
+  const koffi = validateKoffiPayload(appDir, platform)
   const bun = path.join(resourcesDir, 'vendor', 'bun', platform === 'win32' ? 'bun.exe' : 'bun')
   if (!existsSync(bun)) throw new Error(`Packaged Bun runtime is missing: ${bun}`)
-  return { resourcesDir, appDir, binDir, bun, ...launchers, ...payload }
+  return { resourcesDir, appDir, binDir, bun, koffi, ...launchers, ...payload }
 }
 
 function validateSourceCliLayout(projectDir, platform) {

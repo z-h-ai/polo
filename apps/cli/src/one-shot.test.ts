@@ -212,13 +212,15 @@ describe('one-shot execution internals', () => {
     }
   })
 
-  it('copies only runtime configuration and excludes unrelated workspace secrets', async () => {
+  it('copies trusted source and skill configuration while excluding unrelated app state', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'polo-snapshot-allowlist-'))
     tempDirs.push(temp)
     const appRoot = join(temp, 'app')
     const workspaceRoot = join(temp, 'workspace')
     const threadRoot = join(temp, 'thread')
     const secret = 'Bearer must-never-enter-cli-thread'
+    const sourceSecret = 'Bearer source-config-token-is-trusted'
+    const skillSecret = 'skill-config-secret-is-trusted'
     await mkdir(join(appRoot, 'permissions'), { recursive: true })
     await mkdir(join(workspaceRoot, 'sources', 'example'), { recursive: true })
     await mkdir(join(workspaceRoot, 'skills', 'example'), { recursive: true })
@@ -227,8 +229,14 @@ describe('one-shot execution internals', () => {
     await writeFile(join(appRoot, 'permissions', 'default.json'), '{}\n')
     await writeFile(join(workspaceRoot, 'config.json'), '{"name":"Workspace"}\n')
     await writeFile(join(workspaceRoot, 'permissions.json'), '{"allowedTools":[]}\n')
-    await writeFile(join(workspaceRoot, 'sources', 'example', 'config.json'), '{"type":"local"}\n')
-    await writeFile(join(workspaceRoot, 'skills', 'example', 'SKILL.md'), '# Example\n')
+    await writeFile(join(workspaceRoot, 'sources', 'example', 'config.json'), JSON.stringify({
+      type: 'mcp',
+      headers: { Authorization: sourceSecret },
+    }))
+    await writeFile(
+      join(workspaceRoot, 'skills', 'example', 'SKILL.md'),
+      `# Example\n\nConfigured value: ${skillSecret}\n`,
+    )
     await writeFile(join(workspaceRoot, 'automations.json'), JSON.stringify({
       webhook: { authorization: secret },
     }))
@@ -264,6 +272,10 @@ describe('one-shot execution internals', () => {
       expect(await Bun.file(join(snapshot, 'permissions.json')).exists()).toBe(true)
       expect(await Bun.file(join(snapshot, 'sources', 'example', 'config.json')).exists()).toBe(true)
       expect(await Bun.file(join(snapshot, 'skills', 'example', 'SKILL.md')).exists()).toBe(true)
+      expect(await readFile(join(snapshot, 'sources', 'example', 'config.json'), 'utf-8'))
+        .toContain(sourceSecret)
+      expect(await readFile(join(snapshot, 'skills', 'example', 'SKILL.md'), 'utf-8'))
+        .toContain(skillSecret)
       for (const excluded of [
         'automations.json',
         'automations-history.jsonl',

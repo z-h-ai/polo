@@ -1230,7 +1230,9 @@ export async function executeTurn(
   return result.status === 'completed' ? 0 : 1
 }
 
-function printExecutionHelp(kind: 'run' | 'exec'): void {
+function printExecutionHelp(
+  kind: 'run' | 'exec' | 'resume' | 'sessions' | 'delete',
+): void {
   if (kind === 'run') {
     process.stdout.write(`Usage: polo run [OPTIONS] [PROMPT...]
 
@@ -1249,6 +1251,59 @@ Options:
   --provider/--model/--api-key/--base-url
   -h, --help             Show help
   -V, --version          Show version
+`)
+    return
+  }
+  if (kind === 'resume') {
+    process.stdout.write(`Usage: polo exec resume <thread_id> [PROMPT]
+       polo exec resume --last [PROMPT]
+
+Resume a persistent Polo CLI exec Thread in place.
+
+Options:
+  --last                  Select the most recently used matching Thread
+  --workspace <id>        Override the configuration workspace
+  -C, --cd <dir>          Override the execution directory
+  --yolo                  Use Polo allow-all permission mode
+  --dangerously-bypass-approvals-and-sandbox
+  --json                  Emit stable JSONL events
+  -m, --model <id>        Invocation-only model override
+  --provider <name>       Invocation-only provider override
+  --api-key <key>         Invocation-only credential override
+  --base-url <url>        Invocation-only endpoint override
+  --ephemeral             Resume from a temporary copy
+  --color <mode>          always, never, or auto (stderr only)
+  -o, --output-last-message <file>
+  -h, --help              Show help
+  -V, --version           Show version
+`)
+    return
+  }
+  if (kind === 'sessions') {
+    process.stdout.write(`Usage: polo exec sessions [OPTIONS]
+
+List persistent Polo CLI exec Threads for the matching scope and directory.
+
+Options:
+  --workspace <id>        Configuration workspace
+  -C, --cd <dir>          Execution directory
+  --json                  Emit one JSON object per Thread
+  --color <mode>          always, never, or auto (stderr only)
+  -h, --help              Show help
+  -V, --version           Show version
+`)
+    return
+  }
+  if (kind === 'delete') {
+    process.stdout.write(`Usage: polo exec delete <thread_id> [OPTIONS]
+
+Delete one inactive persistent Polo CLI exec Thread.
+
+Options:
+  --json                  Emit a JSON deletion result
+  --color <mode>          always, never, or auto (stderr only)
+  -h, --help              Show help
+  -V, --version           Show version
 `)
     return
   }
@@ -1409,7 +1464,7 @@ export async function runExecutionCommand(args: ExecutionArgs): Promise<number> 
     return 0
   }
   if (args.kind === 'help') {
-    printExecutionHelp(args.entryCommand)
+    printExecutionHelp(args.helpTarget ?? args.entryCommand)
     return 0
   }
   if (args.kind === 'sessions') return listSessionsCommand(args)

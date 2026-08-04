@@ -10,6 +10,7 @@ export type ExecutionCommandKind =
 export interface ExecutionArgs {
   entryCommand: 'run' | 'exec'
   kind: ExecutionCommandKind
+  helpTarget?: Exclude<ExecutionCommandKind, 'help' | 'version'>
   prompt?: string
   threadId?: string
   last: boolean
@@ -418,7 +419,11 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
     : undefined
 
   if (command === 'run') {
-    if (requestedTerminalKind) return args
+    if (requestedTerminalKind) {
+      return requestedTerminalKind === 'help'
+        ? { ...args, helpTarget: 'run' }
+        : args
+    }
     if (args.last) throw new UsageError('unsupported option for run: --last')
     args.prompt = positionals.join(' ')
     return args
@@ -487,12 +492,21 @@ export function parseExecutionArgs(argv: string[]): ExecutionArgs {
       throw new UsageError(`unsupported option for exec ${args.kind}: ${unsupportedOption}`)
     }
     if (requestedTerminalKind) {
-      return { ...args, kind: requestedTerminalKind }
+      return requestedTerminalKind === 'help'
+        ? { ...args, kind: 'help', helpTarget: args.kind }
+        : { ...args, kind: 'version' }
     }
     return args
   }
 
-  if (requestedTerminalKind) return { ...args, kind: requestedTerminalKind }
+  if (requestedTerminalKind) {
+    const helpTarget = args.kind === 'help'
+      ? 'exec'
+      : args.kind
+    return requestedTerminalKind === 'help'
+      ? { ...args, kind: 'help', helpTarget }
+      : { ...args, kind: 'version' }
+  }
 
   if (positionals.length > 1) {
     throw new UsageError(`exec accepts one prompt argument; unexpected argument: ${positionals[1]}`)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -139,21 +139,33 @@ describe('SecureStorageBackend shared writer lock', () => {
     expect(readdirSync(credentialsDir)).not.toContain('.credentials.write.lock')
   })
 
-  it('does not let a displaced owner release a newer lock', async () => {
-    const credentialsDir = mkdtempSync(join(tmpdir(), 'polo-late-lock-release-'))
+  it('allows only one concurrent dead-owner reclaimer to hold the lease', async () => {
+    const credentialsDir = mkdtempSync(join(tmpdir(), 'polo-concurrent-lock-reclaim-'))
     tempDirs.push(credentialsDir)
     const lockDirectory = join(credentialsDir, '.credentials.write.lock')
-    const displacedDirectory = join(credentialsDir, '.credentials.write.lock.displaced')
-    const first = await acquireCredentialWriteLock(lockDirectory, { heartbeatMs: 60_000 })
-    renameSync(lockDirectory, displacedDirectory)
-    const second = await acquireCredentialWriteLock(lockDirectory, { heartbeatMs: 60_000 })
+    writeFileSync(lockDirectory, JSON.stringify({
+      version: 1,
+      lockId: crypto.randomUUID(),
+      pid: 2_147_483_647,
+      processIdentity: 'dead-process-identity',
+      createdAt: 1,
+      heartbeatAt: 1,
+    }), { mode: 0o600 })
 
-    await first.release()
-    const current = JSON.parse(readFileSync(lockDirectory, 'utf8'))
-    expect(current.lockId).toBe(second.owner.lockId)
-
-    await second.release()
-    rmSync(displacedDirectory, { recursive: true, force: true })
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 48 }, () => acquireCredentialWriteLock(lockDirectory, {
+        timeoutMs: 100,
+        retryMs: 1,
+        heartbeatMs: 60_000,
+      })),
+    )
+    const winners = attempts
+      .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof acquireCredentialWriteLock>>> =>
+        result.status === 'fulfilled')
+      .map(result => result.value)
+    expect(winners).toHaveLength(1)
+    expect(attempts.filter(result => result.status === 'rejected')).toHaveLength(47)
+    await winners[0]!.release()
   })
 
   it('preserves the previous credential file when atomic replacement fails', async () => {
@@ -187,7 +199,7 @@ describe('SecureStorageBackend shared writer lock', () => {
     })
   })
 
-  it('publishes a complete claim atomically before entering the critical section', async () => {
+  it('holds the native gate while legacy claim publication is paused', async () => {
     const credentialsDir = mkdtempSync(join(tmpdir(), 'polo-atomic-lock-claim-'))
     tempDirs.push(credentialsDir)
     const lockPath = join(credentialsDir, '.credentials.write.lock')
@@ -210,21 +222,62 @@ describe('SecureStorageBackend shared writer lock', () => {
     })
     await claimReady
 
-    const second = await acquireCredentialWriteLock(lockPath, {
+    let secondAcquired = false
+    const secondPromise = acquireCredentialWriteLock(lockPath, {
       timeoutMs: 1_000,
       retryMs: 5,
       heartbeatMs: 60_000,
     })
-    let firstAcquired = false
-    void firstPromise.then(() => { firstAcquired = true })
-    unblockPublish()
+    void secondPromise.then(() => { secondAcquired = true })
     await Bun.sleep(30)
-    expect(firstAcquired).toBe(false)
+    expect(secondAcquired).toBe(false)
 
-    await second.release()
+    unblockPublish()
     const first = await firstPromise
-    expect(first.owner.lockId).not.toBe(second.owner.lockId)
+    await Bun.sleep(30)
+    expect(secondAcquired).toBe(false)
     await first.release()
+
+    const second = await secondPromise
+    expect(first.owner.lockId).not.toBe(second.owner.lockId)
+    await second.release()
+  })
+
+  it('lets the next process recover after the native lock owner is killed', async () => {
+    const credentialsDir = mkdtempSync(join(tmpdir(), 'polo-killed-native-lock-'))
+    tempDirs.push(credentialsDir)
+    const lockPath = join(credentialsDir, '.credentials.write.lock')
+    const readyPath = join(credentialsDir, 'holder-ready.json')
+    const worker = join(import.meta.dir, 'fixtures', 'credential-lock-holder.ts')
+    const child = Bun.spawn([process.execPath, worker, lockPath, readyPath], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    try {
+      const deadline = Date.now() + 2_000
+      while (!await Bun.file(readyPath).exists()) {
+        if (Date.now() >= deadline) throw new Error('lock holder did not become ready')
+        await Bun.sleep(10)
+      }
+      await expect(acquireCredentialWriteLock(lockPath, {
+        timeoutMs: 80,
+        retryMs: 5,
+      })).rejects.toThrow('Timed out acquiring shared credential write lock')
+
+      if (process.platform === 'win32') child.kill()
+      else child.kill('SIGKILL')
+      await child.exited
+
+      const recovered = await acquireCredentialWriteLock(lockPath, {
+        timeoutMs: 2_000,
+        retryMs: 5,
+      })
+      await recovered.release()
+    } finally {
+      if (child.exitCode === null) child.kill()
+      await child.exited
+    }
   })
 
   it('fails closed for a legacy ownerless lock instead of reclaiming it by mtime', async () => {
