@@ -107,6 +107,35 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(results[0]?.url).toBe('https://example.com');
   });
 
+  it('routes CLI search through the invocation credential proxy', async () => {
+    let calledUrl = '';
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calledUrl = input.toString();
+      return new Response(JSON.stringify({
+        output: [{
+          type: 'message',
+          content: [{
+            type: 'output_text',
+            text: 'Result',
+            annotations: [{ type: 'url_citation', url: 'https://example.com', title: 'Example' }],
+          }],
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const provider = new ChatGPTBackendSearchProvider(
+      'opaque.jwt.capability',
+      'acc_12345',
+      { apiBase: 'http://127.0.0.1:41234/codex' },
+    );
+    await provider.search('test query', 5);
+
+    expect(calledUrl).toBe('http://127.0.0.1:41234/codex/responses');
+  });
+
   it('parses SSE payload even when content-type is not event-stream', async () => {
     globalThis.fetch = (async () => {
       const sse = [

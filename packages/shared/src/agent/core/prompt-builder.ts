@@ -16,7 +16,10 @@ import { isLocalMcpEnabled } from '../../workspaces/storage.ts';
 import { formatPreferencesForPrompt } from '../../config/preferences.ts';
 import { formatSessionState } from '../mode-manager.ts';
 import { getDateTimeContext, getWorkingDirectoryContext } from '../../prompts/system.ts';
-import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../../sessions/storage.ts';
+import {
+  defaultWorkspaceSessionStorage,
+  type SessionStorage,
+} from '../../sessions/session-storage.ts';
 import type {
   PromptBuilderConfig,
   ContextBlockOptions,
@@ -44,11 +47,13 @@ import type {
 export class PromptBuilder {
   private config: PromptBuilderConfig;
   private workspaceRootPath: string;
+  private sessionStorage: SessionStorage;
   private pinnedPreferencesPrompt: string | null = null;
 
   constructor(config: PromptBuilderConfig) {
     this.config = config;
     this.workspaceRootPath = config.workspace?.rootPath ?? '';
+    this.sessionStorage = config.sessionStorage ?? defaultWorkspaceSessionStorage;
   }
 
   // ============================================================
@@ -75,9 +80,9 @@ export class PromptBuilder {
     // Add session state (permission mode, plans folder path, data folder path)
     const sessionId = this.config.session?.id ?? `temp-${Date.now()}`;
     const plansFolderPath = options.plansFolderPath ??
-      getSessionPlansPath(this.workspaceRootPath, sessionId);
+      this.sessionStorage.getPlansPath(this.workspaceRootPath, sessionId);
     const dataFolderPath = options.dataFolderPath ??
-      getSessionDataPath(this.workspaceRootPath, sessionId);
+      this.sessionStorage.getDataPath(this.workspaceRootPath, sessionId);
     parts.push(formatSessionState(sessionId, {
       plansFolderPath,
       dataFolderPath,
@@ -125,7 +130,7 @@ export class PromptBuilder {
   getWorkingDirectoryContext(): string | null {
     const sessionId = this.config.session?.id;
     const effectiveWorkingDir = this.config.session?.workingDirectory ??
-      (sessionId ? getSessionPath(this.workspaceRootPath, sessionId) : undefined);
+      (sessionId ? this.sessionStorage.getSessionPath(this.workspaceRootPath, sessionId) : undefined);
     const isSessionRoot = !this.config.session?.workingDirectory && !!sessionId;
 
     return getWorkingDirectoryContext(

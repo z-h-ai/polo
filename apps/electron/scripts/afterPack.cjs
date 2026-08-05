@@ -17,8 +17,23 @@
 
 const path = require('path');
 const fs = require('fs');
+const {
+  packagedResourcesDir,
+  validatePackagedCliLayout,
+} = require('./packaged-cli-layout.cjs');
 
 module.exports = async function afterPack(context) {
+  const resourcesDir = packagedResourcesDir(context);
+  const appVersion = JSON.parse(
+    fs.readFileSync(path.join(context.packager.projectDir, 'package.json'), 'utf8'),
+  ).version;
+  validatePackagedCliLayout({
+    resourcesDir,
+    platform: context.electronPlatformName,
+    expectedVersion: appVersion,
+  });
+  console.log(`Packaged polo and polo-ai launchers validated (${appVersion})`);
+
   // Only process macOS builds
   if (context.electronPlatformName !== 'darwin') {
     console.log('Skipping Liquid Glass icon (not macOS)');
@@ -26,7 +41,6 @@ module.exports = async function afterPack(context) {
   }
 
   const appPath = context.appOutDir;
-  const resourcesDir = path.join(appPath, 'Polo AI.app', 'Contents', 'Resources');
   const precompiledAssets = path.join(context.packager.projectDir, 'resources', 'Assets.car');
 
   console.log(`afterPack: projectDir=${context.packager.projectDir}`);

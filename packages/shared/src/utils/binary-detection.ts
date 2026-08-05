@@ -7,7 +7,7 @@
  * Extracted from api-tools.ts for centralized use.
  */
 
-import { mkdirSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 // ============================================================
@@ -322,7 +322,8 @@ export function saveBinaryResponse(
   const downloadsDir = join(sessionPath, 'downloads');
 
   try {
-    mkdirSync(downloadsDir, { recursive: true });
+    mkdirSync(downloadsDir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') chmodSync(downloadsDir, 0o700);
   } catch (err) {
     return {
       type: 'file_download_error',
@@ -337,7 +338,8 @@ export function saveBinaryResponse(
 
   while (counter < maxAttempts) {
     try {
-      writeFileSync(filePath, buffer, { flag: 'wx' });
+      writeFileSync(filePath, buffer, { flag: 'wx', mode: 0o600 });
+      if (process.platform !== 'win32') chmodSync(filePath, 0o600);
       return {
         type: 'file_download',
         path: filePath,

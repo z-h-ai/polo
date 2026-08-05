@@ -244,6 +244,17 @@ foreach ($dep in @("interceptor-common.ts", "feature-flags.ts", "interceptor-req
 # 6. Build Electron app
 Write-Host "Building Electron app..."
 
+# Build the standalone CLI and headless server payload consumed by the
+# self-locating polo/polo-ai launchers.
+Write-Host "  Building packaged CLI payload..."
+Push-Location $RootDir
+try {
+    bun run electron:build:cli
+    if ($LASTEXITCODE -ne 0) { throw "Packaged CLI payload build failed" }
+} finally {
+    Pop-Location
+}
+
 # Build main process with OAuth credentials
 Write-Host "  Building main process..."
 $MainArgs = @(

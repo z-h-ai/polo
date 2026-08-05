@@ -16,7 +16,10 @@
  */
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import { getSessionPlansPath, getSessionPath } from '../sessions/storage.ts';
+import {
+  defaultWorkspaceSessionStorage,
+  type SessionStorage,
+} from '../sessions/session-storage.ts';
 import { DOC_REFS } from '../docs/index.ts';
 import { createClaudeContext } from './claude-context.ts';
 import { basename } from 'node:path';
@@ -131,8 +134,12 @@ export function clearPlanFileState(sessionId: string): void {
 /**
  * Get the plans directory for a session
  */
-export function getSessionPlansDir(workspacePath: string, sessionId: string): string {
-  return getSessionPlansPath(workspacePath, sessionId);
+export function getSessionPlansDir(
+  workspacePath: string,
+  sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+): string {
+  return storage.getPlansPath(workspacePath, sessionId);
 }
 
 /**
@@ -217,9 +224,12 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
 export function getSessionScopedTools(
   sessionId: string,
   workspaceRootPath: string,
-  workspaceId?: string
+  workspaceId?: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
+  workingDirectory?: string,
 ): ReturnType<typeof createSdkMcpServer> {
-  const cacheKey = `${sessionId}::${workspaceRootPath}`;
+  const sessionPath = storage.getSessionPath(workspaceRootPath, sessionId);
+  const cacheKey = `${sessionId}::${sessionPath}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -230,6 +240,8 @@ export function getSessionScopedTools(
       sessionId,
       workspacePath: workspaceRootPath,
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
+      sessionStorage: storage,
+      workingDirectory,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         const callbacks = getSessionScopedToolCallbacks(sessionId);
@@ -266,7 +278,6 @@ export function getSessionScopedTools(
       .map(def => registryTool(def.name, def.inputSchema.shape));
 
     // Add call_llm — backend-specific (not in registry handler)
-    const sessionPath = getSessionPath(workspaceRootPath, sessionId);
     tools.push(
       createLLMTool({
         sessionId,

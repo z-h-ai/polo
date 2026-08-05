@@ -36,6 +36,55 @@ else
     error "Either curl or wget is required but neither is installed"
 fi
 
+CLI_BIN_DIR="$HOME/.local/bin"
+CLI_MANAGED_MARKER="# Managed by Polo AI CLI installer"
+
+ensure_cli_destination_available() {
+    destination="$1"
+    if [ ! -e "$destination" ] && [ ! -L "$destination" ]; then
+        return 0
+    fi
+    if [ -L "$destination" ]; then
+        existing_target=$(readlink "$destination")
+        case "$existing_target" in
+            *"Polo AI.app/Contents/Resources/app/resources/bin/polo"*|*"Polo AI.app/Contents/Resources/app/resources/bin/polo-ai"*) return 0 ;;
+        esac
+    elif grep -qF "$CLI_MANAGED_MARKER" "$destination" 2>/dev/null; then
+        return 0
+    elif grep -qF "# Polo AI launcher - handles Linux-specific AppImage issues" "$destination" 2>/dev/null \
+        && grep -qF "Polo-AI-x64.AppImage" "$destination" 2>/dev/null; then
+        # Recognize the legacy product-owned GUI wrapper so upgrades can replace
+        # polo-ai with the compatibility CLI alias required by the current CLI.
+        return 0
+    fi
+    error "Refusing to overwrite unmanaged command: $destination"
+}
+
+install_cli_symlink() {
+    source_path="$1"
+    destination="$2"
+    ensure_cli_destination_available "$destination"
+    [ -x "$source_path" ] || error "Packaged CLI launcher is missing: $source_path"
+    rm -f "$destination"
+    ln -s "$source_path" "$destination"
+}
+
+ensure_cli_bin_on_path() {
+    case ":$PATH:" in
+        *":$CLI_BIN_DIR:"*) return 0 ;;
+    esac
+    case "${SHELL:-}" in
+        */zsh) shell_profile="$HOME/.zprofile" ;;
+        */bash) shell_profile="$HOME/.bashrc" ;;
+        *) shell_profile="$HOME/.profile" ;;
+    esac
+    path_line='export PATH="$HOME/.local/bin:$PATH" # Polo AI CLI'
+    if [ ! -f "$shell_profile" ] || ! grep -qF '# Polo AI CLI' "$shell_profile"; then
+        printf '\n%s\n' "$path_line" >> "$shell_profile"
+        info "Added $CLI_BIN_DIR to PATH in $shell_profile (open a new terminal to use it)."
+    fi
+}
+
 # Check if yq is available (optional, for YAML parsing)
 HAS_YQ=false
 if command -v yq >/dev/null 2>&1; then
@@ -239,6 +288,8 @@ success "Checksum verified!"
 if [ "$OS_TYPE" = "darwin" ]; then
     # macOS installation (from ZIP)
     zip_path="$installer_path"
+    ensure_cli_destination_available "$CLI_BIN_DIR/polo"
+    ensure_cli_destination_available "$CLI_BIN_DIR/polo-ai"
 
     # Quit the app if it's running (use bundle ID for reliability)
     APP_BUNDLE_ID="com.poloai.app"
@@ -299,6 +350,16 @@ if [ "$OS_TYPE" = "darwin" ]; then
     # Remove quarantine attribute if present
     xattr -rd com.apple.quarantine "$INSTALL_DIR/$APP_NAME" 2>/dev/null || true
 
+    # Expose both documented command names. The packaged launchers resolve
+    # symlinks back into the app bundle, so no payload is copied out of the
+    # signed installation.
+    mkdir -p "$CLI_BIN_DIR"
+    APP_CLI_BIN="$INSTALL_DIR/$APP_NAME/Contents/Resources/app/resources/bin"
+    info "Installing polo and polo-ai commands to $CLI_BIN_DIR..."
+    install_cli_symlink "$APP_CLI_BIN/polo" "$CLI_BIN_DIR/polo"
+    install_cli_symlink "$APP_CLI_BIN/polo-ai" "$CLI_BIN_DIR/polo-ai"
+    ensure_cli_bin_on_path
+
     echo ""
     echo "─────────────────────────────────────────────────────────────────────────"
     echo ""
@@ -308,6 +369,8 @@ if [ "$OS_TYPE" = "darwin" ]; then
     echo ""
     printf "%b\n" "  You can launch it from ${BOLD}Applications${NC} or by running:"
     printf "%b\n" "    ${BOLD}open -a 'Polo AI'${NC}"
+    printf "%b\n" "  CLI: ${BOLD}polo exec \"hello\"${NC} (also available as polo-ai)"
+    printf "%b\n" "  If needed, add ${BOLD}$CLI_BIN_DIR${NC} to PATH."
     echo ""
 
 else
@@ -316,8 +379,13 @@ else
 
     # New paths
     APP_DIR="$HOME/.polo-ai/app"
-    WRAPPER_PATH="$INSTALL_DIR/polo-ai"
+    GUI_WRAPPER_PATH="$INSTALL_DIR/polo-gui"
+    POLO_CLI_PATH="$INSTALL_DIR/polo"
+    POLO_AI_CLI_PATH="$INSTALL_DIR/polo-ai"
     APPIMAGE_INSTALL_PATH="$APP_DIR/Polo-AI-x64.AppImage"
+    ensure_cli_destination_available "$POLO_CLI_PATH"
+    ensure_cli_destination_available "$POLO_AI_CLI_PATH"
+    ensure_cli_destination_available "$GUI_WRAPPER_PATH"
 
     # Kill the app if it's running
     if pgrep -f "Polo-AI.*AppImage" >/dev/null 2>&1; then
@@ -338,10 +406,12 @@ else
     mv "$appimage_path" "$APPIMAGE_INSTALL_PATH"
     chmod +x "$APPIMAGE_INSTALL_PATH"
 
-    # Create wrapper script
-    info "Creating launcher at $WRAPPER_PATH..."
-    cat > "$WRAPPER_PATH" << 'WRAPPER_EOF'
+    # Keep an explicit GUI launcher while polo and polo-ai become aliases for
+    # the non-interactive CLI contract.
+    info "Creating GUI launcher at $GUI_WRAPPER_PATH..."
+    cat > "$GUI_WRAPPER_PATH" << 'WRAPPER_EOF'
 #!/bin/bash
+# Managed by Polo AI CLI installer
 # Polo AI launcher - handles Linux-specific AppImage issues
 
 APPIMAGE_PATH="$HOME/.polo-ai/app/Polo-AI-x64.AppImage"
@@ -375,7 +445,69 @@ export APPIMAGE="$APPIMAGE_PATH"
 exec "$APPIMAGE_PATH" --no-sandbox "$@"
 WRAPPER_EOF
 
-    chmod +x "$WRAPPER_PATH"
+    chmod +x "$GUI_WRAPPER_PATH"
+
+cat > "$POLO_CLI_PATH" << 'CLI_WRAPPER_EOF'
+#!/bin/sh
+# Managed by Polo AI CLI installer
+APPIMAGE_PATH="$HOME/.polo-ai/app/Polo-AI-x64.AppImage"
+if [ ! -x "$APPIMAGE_PATH" ]; then
+    echo "Polo AI is not installed at $APPIMAGE_PATH" >&2
+    exit 1
+fi
+
+# Mount the AppImage without starting Electron, then invoke the real packaged
+# CLI launcher. Capturing the mount runtime's stdout keeps polo JSONL/stdout
+# protocol-clean.
+MOUNT_LOG=$(mktemp "${TMPDIR:-/tmp}/polo-appimage-mount.XXXXXX") || exit 1
+MOUNT_PID=""
+cleanup_mount() {
+    if [ -n "$MOUNT_PID" ]; then
+        kill "$MOUNT_PID" 2>/dev/null || true
+        wait "$MOUNT_PID" 2>/dev/null || true
+    fi
+    rm -f "$MOUNT_LOG"
+}
+trap cleanup_mount EXIT HUP INT TERM
+(trap '' HUP INT TERM; exec "$APPIMAGE_PATH" --appimage-mount >"$MOUNT_LOG" 2>&1) &
+MOUNT_PID=$!
+
+attempt=0
+MOUNT_DIR=""
+while [ "$attempt" -lt 100 ]; do
+    MOUNT_DIR=$(sed -n '/^\//{p;q;}' "$MOUNT_LOG" 2>/dev/null || true)
+    if [ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ]; then
+        break
+    fi
+    if ! kill -0 "$MOUNT_PID" 2>/dev/null; then
+        cat "$MOUNT_LOG" >&2
+        echo "Failed to mount the Polo AI AppImage" >&2
+        exit 1
+    fi
+    sleep 0.05
+    attempt=$((attempt + 1))
+done
+if [ -z "$MOUNT_DIR" ] || [ ! -d "$MOUNT_DIR" ]; then
+    echo "Timed out mounting the Polo AI AppImage" >&2
+    exit 1
+fi
+
+PACKAGED_CLI=$(find "$MOUNT_DIR" -path '*/resources/app/resources/bin/polo' -type f -print -quit)
+if [ -z "$PACKAGED_CLI" ] || [ ! -x "$PACKAGED_CLI" ]; then
+    echo "Packaged Polo CLI launcher is missing from the AppImage" >&2
+    exit 1
+fi
+"$PACKAGED_CLI" "$@"
+exit $?
+CLI_WRAPPER_EOF
+    cat > "$POLO_AI_CLI_PATH" << 'CLI_ALIAS_EOF'
+#!/bin/sh
+# Managed by Polo AI CLI installer
+BIN_DIR=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)
+exec "$BIN_DIR/polo" "$@"
+CLI_ALIAS_EOF
+    chmod +x "$POLO_CLI_PATH" "$POLO_AI_CLI_PATH"
+    ensure_cli_bin_on_path
 
     # Migrate old installation
     OLD_APPIMAGE="$INSTALL_DIR/Polo-AI-x64.AppImage"
@@ -387,9 +519,11 @@ WRAPPER_EOF
     success "Installation complete!"
     echo ""
     printf "%b\n" "  AppImage: ${BOLD}$APPIMAGE_INSTALL_PATH${NC}"
-    printf "%b\n" "  Launcher: ${BOLD}$WRAPPER_PATH${NC}"
+    printf "%b\n" "  GUI launcher: ${BOLD}$GUI_WRAPPER_PATH${NC}"
+    printf "%b\n" "  CLI launchers: ${BOLD}$POLO_CLI_PATH${NC}, ${BOLD}$POLO_AI_CLI_PATH${NC}"
     echo ""
-    printf "%b\n" "  Run with: ${BOLD}polo-ai${NC}"
+    printf "%b\n" "  Run CLI with: ${BOLD}polo exec \"hello\"${NC}"
+    printf "%b\n" "  Run GUI with: ${BOLD}polo-gui${NC}"
     echo ""
     printf "%b\n" "  Add to PATH if needed:"
     printf "%b\n" "    ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"

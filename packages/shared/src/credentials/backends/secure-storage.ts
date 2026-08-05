@@ -11,7 +11,7 @@
  *
  * This is more stable than the previous hostname-based derivation, which could
  * change with network/DHCP. Legacy key derivation is migrated within the same
- * instance file on first successful load.
+ * instance file on the next successful locked mutation.
  *
  * File format:
  *   [Header - 64 bytes]
@@ -29,18 +29,37 @@ import {
   createCipheriv,
   createDecipheriv,
   randomBytes,
+  randomUUID,
   pbkdf2Sync,
   createHash,
 } from 'crypto';
 import { execSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  linkSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
+import { link, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { hostname, userInfo, homedir } from 'os';
 import { join } from 'path';
 
-import type { CredentialBackend } from './types.ts';
+import type { CredentialBackend, CredentialCompareAndSwapResult } from './types.ts';
 import type { CredentialId, StoredCredential } from '../types.ts';
 import { credentialIdToAccount, accountToCredentialId } from '../types.ts';
 import { CONFIG_DIR } from '../../config/paths.ts';
+import { getProcessBirthIdentity } from '../../utils/process-identity.ts';
+import {
+  acquireNativeCredentialWriteLock,
+  acquireNativeCredentialWriteLockSync,
+} from './native-write-lock.ts';
 
 const DEFAULT_CREDENTIALS_DIR = join(homedir(), '.polo-ai');
 
@@ -56,6 +75,358 @@ const KEY_SIZE = 32;
 
 // PBKDF2 iterations (balance security vs startup time)
 const PBKDF2_ITERATIONS = 100000;
+const WRITE_LOCK_TIMEOUT_MS = 5_000;
+const WRITE_LOCK_RETRY_MS = 25;
+const WRITE_LOCK_HEARTBEAT_MS = 5_000;
+
+interface CredentialWriteLockOwner {
+  version: 1;
+  lockId: string;
+  pid: number;
+  processIdentity: string;
+  createdAt: number;
+  heartbeatAt: number;
+}
+
+export interface CredentialWriteLockOptions {
+  timeoutMs?: number;
+  retryMs?: number;
+  /** Retained for compatibility; ownerless locks now fail closed. */
+  ownerGraceMs?: number;
+  heartbeatMs?: number;
+  /** Fault-injection hook after a complete private claim exists but before publication. */
+  beforePublish?: (claimFile: string, lockPath: string) => void | Promise<void>;
+}
+
+export interface CredentialWriteLockHandle {
+  readonly owner: CredentialWriteLockOwner;
+  release(): Promise<void>;
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ownerIsDefinitelyGone(owner: CredentialWriteLockOwner): boolean {
+  if (!isProcessAlive(owner.pid)) return true;
+  const currentIdentity = getProcessBirthIdentity(owner.pid);
+  // A non-null mismatch proves PID reuse. If identity lookup is unavailable,
+  // fail closed and leave the apparently live owner in place.
+  return currentIdentity !== null && currentIdentity !== owner.processIdentity;
+}
+
+function parseWriteLockOwner(value: string): CredentialWriteLockOwner | null {
+  try {
+    const parsed = JSON.parse(value) as Partial<CredentialWriteLockOwner>;
+    if (
+      parsed.version !== 1
+      || typeof parsed.lockId !== 'string'
+      || !parsed.lockId
+      || !Number.isInteger(parsed.pid)
+      || (parsed.pid ?? 0) <= 0
+      || typeof parsed.processIdentity !== 'string'
+      || !parsed.processIdentity
+      || typeof parsed.createdAt !== 'number'
+      || typeof parsed.heartbeatAt !== 'number'
+    ) return null;
+    return parsed as CredentialWriteLockOwner;
+  } catch {
+    return null;
+  }
+}
+
+async function readWriteLockOwner(lockDirectory: string): Promise<CredentialWriteLockOwner | null> {
+  const info = await stat(lockDirectory).catch(() => null);
+  if (!info) return null;
+  const ownerPath = info.isDirectory() ? join(lockDirectory, 'owner.json') : lockDirectory;
+  const value = await readFile(ownerPath, 'utf8').catch(() => null);
+  return value === null ? null : parseWriteLockOwner(value);
+}
+
+async function writeAtomicLockMetadata(
+  destination: string,
+  owner: CredentialWriteLockOwner,
+): Promise<void> {
+  const temporaryFile = `${destination}.${owner.lockId}.${randomUUID()}.tmp`;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(temporaryFile, 'wx', 0o600);
+    await handle.writeFile(JSON.stringify(owner));
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryFile, destination);
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await rm(temporaryFile, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function moveAbandonedWriteLock(lockDirectory: string): Promise<boolean> {
+  const owner = await readWriteLockOwner(lockDirectory);
+  const abandoned = `${lockDirectory}.abandoned.${randomUUID()}`;
+  try {
+    await rename(lockDirectory, abandoned);
+  } catch (error) {
+    if (['ENOENT', 'EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+      return false;
+    }
+    throw error;
+  }
+  await rm(abandoned, { recursive: true, force: true });
+  if (owner) {
+    await rm(`${lockDirectory}.heartbeat.${owner.lockId}`, { force: true }).catch(() => {});
+  }
+  return true;
+}
+
+async function createPrivateLockClaim(
+  lockPath: string,
+  owner: CredentialWriteLockOwner,
+): Promise<string> {
+  const claimFile = `${lockPath}.claim.${owner.lockId}.${randomUUID()}`;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(claimFile, 'wx', 0o600);
+    await handle.writeFile(JSON.stringify(owner));
+    await handle.sync();
+    await handle.close();
+    return claimFile;
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await rm(claimFile, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * Cross-process credential writer lock. A live process is never evicted merely
+ * because wall time advanced (for example during system sleep).
+ */
+async function acquireLegacyCredentialWriteLock(
+  lockDirectory: string,
+  options: CredentialWriteLockOptions = {},
+): Promise<CredentialWriteLockHandle> {
+  const timeoutMs = options.timeoutMs ?? WRITE_LOCK_TIMEOUT_MS;
+  const retryMs = options.retryMs ?? WRITE_LOCK_RETRY_MS;
+  const heartbeatMs = options.heartbeatMs ?? WRITE_LOCK_HEARTBEAT_MS;
+  const processIdentity = getProcessBirthIdentity(process.pid);
+  if (!processIdentity) {
+    throw new Error(`Could not verify credential writer process identity for pid ${process.pid}`);
+  }
+  const owner: CredentialWriteLockOwner = {
+    version: 1,
+    lockId: randomUUID(),
+    pid: process.pid,
+    processIdentity,
+    createdAt: Date.now(),
+    heartbeatAt: Date.now(),
+  };
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const claimFile = await createPrivateLockClaim(lockDirectory, owner);
+    try {
+      await options.beforePublish?.(claimFile, lockDirectory);
+      // A fully initialized owner record becomes visible in one atomic link.
+      // Contenders can therefore never observe a live creator's half-published
+      // claim, and link() cannot replace an existing owner.
+      await link(claimFile, lockDirectory);
+      await rm(claimFile, { force: true });
+      break;
+    } catch (error) {
+      await rm(claimFile, { force: true }).catch(() => {});
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const observed = await readWriteLockOwner(lockDirectory);
+      // Missing/malformed owner metadata fails closed. Under the new protocol
+      // it cannot be produced by a live acquirer; legacy/corrupt artifacts need
+      // explicit recovery rather than an unsafe mtime-only takeover.
+      const canTakeOver = observed ? ownerIsDefinitelyGone(observed) : false;
+      if (canTakeOver && await moveAbandonedWriteLock(lockDirectory)) continue;
+      if (Date.now() >= deadline) {
+        throw new Error('Timed out acquiring shared credential write lock');
+      }
+      await new Promise(resolve => setTimeout(resolve, retryMs));
+    }
+  }
+
+  let active = true;
+  let heartbeatWrite = Promise.resolve();
+  const heartbeatFile = `${lockDirectory}.heartbeat.${owner.lockId}`;
+  const heartbeat = setInterval(() => {
+    if (!active) return;
+    owner.heartbeatAt = Date.now();
+    heartbeatWrite = heartbeatWrite
+      // Heartbeats use a lockId-scoped sidecar. They never replace the stable
+      // ownership claim, so a delayed old heartbeat cannot overwrite a new lock.
+      .then(() => writeAtomicLockMetadata(heartbeatFile, owner))
+      .catch(() => {});
+  }, heartbeatMs);
+  heartbeat.unref?.();
+
+  return {
+    owner,
+    async release(): Promise<void> {
+      if (!active) return;
+      active = false;
+      clearInterval(heartbeat);
+      await heartbeatWrite;
+      const observed = await readWriteLockOwner(lockDirectory);
+      if (observed?.lockId !== owner.lockId) {
+        await rm(heartbeatFile, { force: true });
+        return;
+      }
+      const released = `${lockDirectory}.released.${owner.lockId}.${randomUUID()}`;
+      await rename(lockDirectory, released).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      });
+      await rm(released, { recursive: true, force: true });
+      await rm(heartbeatFile, { force: true });
+    },
+  };
+}
+
+function acquireLegacyCredentialWriteLockSync(lockDirectory: string): () => void {
+  const processIdentity = getProcessBirthIdentity(process.pid);
+  if (!processIdentity) {
+    throw new Error(`Could not verify credential writer process identity for pid ${process.pid}`);
+  }
+  const owner: CredentialWriteLockOwner = {
+    version: 1,
+    lockId: randomUUID(),
+    pid: process.pid,
+    processIdentity,
+    createdAt: Date.now(),
+    heartbeatAt: Date.now(),
+  };
+  const deadline = Date.now() + WRITE_LOCK_TIMEOUT_MS;
+
+  while (true) {
+    const claimFile = `${lockDirectory}.claim.${owner.lockId}.${randomUUID()}`;
+    try {
+      const descriptor = openSync(claimFile, 'wx', 0o600);
+      try {
+        writeFileSync(descriptor, JSON.stringify(owner));
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      linkSync(claimFile, lockDirectory);
+      rmSync(claimFile, { force: true });
+      break;
+    } catch (error) {
+      try { rmSync(claimFile, { force: true }); } catch {}
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      let observed: CredentialWriteLockOwner | null = null;
+      try {
+        const info = statSync(lockDirectory);
+        const ownerPath = info.isDirectory() ? join(lockDirectory, 'owner.json') : lockDirectory;
+        observed = parseWriteLockOwner(readFileSync(ownerPath, 'utf8'));
+      } catch {}
+      const canTakeOver = observed ? ownerIsDefinitelyGone(observed) : false;
+      if (canTakeOver) {
+        const abandoned = `${lockDirectory}.abandoned.${randomUUID()}`;
+        try {
+          renameSync(lockDirectory, abandoned);
+          rmSync(abandoned, { recursive: true, force: true });
+          continue;
+        } catch {}
+      }
+      if (Date.now() >= deadline) {
+        throw new Error('Timed out acquiring shared credential write lock');
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, WRITE_LOCK_RETRY_MS);
+    }
+  }
+
+  return () => {
+    let observed: CredentialWriteLockOwner | null = null;
+    try {
+      const info = statSync(lockDirectory);
+      const ownerPath = info.isDirectory() ? join(lockDirectory, 'owner.json') : lockDirectory;
+      observed = parseWriteLockOwner(readFileSync(ownerPath, 'utf8'));
+    } catch {}
+    if (observed?.lockId === owner.lockId) {
+      const released = `${lockDirectory}.released.${owner.lockId}.${randomUUID()}`;
+      try {
+        renameSync(lockDirectory, released);
+        rmSync(released, { recursive: true, force: true });
+      } catch {}
+    }
+  };
+}
+
+/**
+ * Cross-version credential writer lease.
+ *
+ * The native OS lock is the correctness boundary for current Polo processes:
+ * flock/Windows mutex ownership is released by the kernel when a process exits,
+ * including SIGKILL. The existing identity-bearing file claim remains nested
+ * inside it only as a compatibility barrier for an already-running older Polo
+ * process. Because every current process holds the native lock before examining
+ * or reclaiming that legacy claim, stale takeover can no longer race between
+ * current writers.
+ */
+export async function acquireCredentialWriteLock(
+  lockDirectory: string,
+  options: CredentialWriteLockOptions = {},
+): Promise<CredentialWriteLockHandle> {
+  const timeoutMs = options.timeoutMs ?? WRITE_LOCK_TIMEOUT_MS;
+  const retryMs = options.retryMs ?? WRITE_LOCK_RETRY_MS;
+  const nativeLock = await acquireNativeCredentialWriteLock(
+    `${lockDirectory}.native-v2`,
+    { timeoutMs, retryMs },
+  );
+  try {
+    const legacyLock = await acquireLegacyCredentialWriteLock(lockDirectory, options);
+    let active = true;
+    return {
+      owner: legacyLock.owner,
+      async release(): Promise<void> {
+        if (!active) return;
+        active = false;
+        try {
+          await legacyLock.release();
+        } finally {
+          nativeLock.release();
+        }
+      },
+    };
+  } catch (error) {
+    nativeLock.release();
+    throw error;
+  }
+}
+
+function acquireCredentialWriteLockSync(lockDirectory: string): () => void {
+  const nativeLock = acquireNativeCredentialWriteLockSync(
+    `${lockDirectory}.native-v2`,
+    { timeoutMs: WRITE_LOCK_TIMEOUT_MS, retryMs: WRITE_LOCK_RETRY_MS },
+  );
+  try {
+    const releaseLegacyLock = acquireLegacyCredentialWriteLockSync(lockDirectory);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      try {
+        releaseLegacyLock();
+      } finally {
+        nativeLock.release();
+      }
+    };
+  } catch (error) {
+    nativeLock.release();
+    throw error;
+  }
+}
 
 /**
  * Get stable machine identifier using OS-native hardware UUID.
@@ -108,6 +479,16 @@ interface CredentialStore {
   };
 }
 
+function cloneCredentialStore(store: CredentialStore): CredentialStore {
+  return {
+    version: 1,
+    credentials: Object.fromEntries(
+      Object.entries(store.credentials).map(([key, value]) => [key, { ...value }]),
+    ),
+    metadata: { ...store.metadata },
+  };
+}
+
 export interface SecureStorageBackendOptions {
   /** Override used by isolated instances and tests. Defaults to CONFIG_DIR. */
   credentialsDir?: string;
@@ -122,6 +503,10 @@ export interface SecureStorageBackendOptions {
    * Preload.
    */
   allowLegacyPathMigration?: boolean;
+  /** Fault-injection hook used by atomic-write regression tests. */
+  beforeAtomicRename?: (temporaryFile: string, destinationFile: string) => void;
+  /** Shortened lock timing used only by isolated concurrency tests. */
+  writeLockOptions?: CredentialWriteLockOptions;
 }
 
 export class SecureStorageBackend implements CredentialBackend {
@@ -130,20 +515,28 @@ export class SecureStorageBackend implements CredentialBackend {
 
   private readonly credentialsDir: string;
   private readonly credentialsFile: string;
+  private readonly writeLockDirectory: string;
   private readonly legacyCredentialsFile: string;
   private readonly allowLegacyPathMigration: boolean;
+  private readonly beforeAtomicRename?: (temporaryFile: string, destinationFile: string) => void;
+  private readonly writeLockOptions: CredentialWriteLockOptions;
   private cachedStore: CredentialStore | null = null;
   private encryptionKey: Buffer | null = null;
   private salt: Buffer | null = null;
 
   constructor(options: SecureStorageBackendOptions = {}) {
-    this.credentialsDir = options.credentialsDir ?? CONFIG_DIR;
+    this.credentialsDir = options.credentialsDir
+      ?? process.env.POLO_AI_SHARED_CREDENTIALS_DIR
+      ?? CONFIG_DIR;
     this.credentialsFile = join(this.credentialsDir, 'credentials.enc');
+    this.writeLockDirectory = join(this.credentialsDir, '.credentials.write.lock');
     this.legacyCredentialsFile = join(
       options.legacyCredentialsDir ?? DEFAULT_CREDENTIALS_DIR,
       'credentials.enc',
     );
     this.allowLegacyPathMigration = options.allowLegacyPathMigration === true;
+    this.beforeAtomicRename = options.beforeAtomicRename;
+    this.writeLockOptions = options.writeLockOptions ?? {};
   }
 
   async isAvailable(): Promise<boolean> {
@@ -159,44 +552,135 @@ export class SecureStorageBackend implements CredentialBackend {
     return store.credentials[key] || null;
   }
 
+  async getFresh(id: CredentialId): Promise<StoredCredential | null> {
+    this.cachedStore = null;
+    return this.get(id);
+  }
+
   async set(id: CredentialId, credential: StoredCredential): Promise<void> {
-    let store = await this.loadStore();
+    await this.withWriteLock(async () => {
+      // Re-read after acquiring the cross-process lock so an OAuth refresh
+      // cannot overwrite a credential update made by Electron or another CLI.
+      this.cachedStore = null;
+      let store = await this.loadStore();
+      if (!store) {
+        if (existsSync(this.credentialsFile)) {
+          throw new Error('Credential store is unreadable; refusing to overwrite it');
+        }
+        store = {
+          version: 1,
+          credentials: {},
+          metadata: {
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        };
+      } else {
+        store = cloneCredentialStore(store);
+      }
 
-    if (!store) {
-      // Initialize new store
-      store = {
-        version: 1,
-        credentials: {},
-        metadata: {
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      };
+      const key = credentialIdToAccount(id);
+      store.credentials[key] = credential;
+      store.metadata.updatedAt = Date.now();
+      await this.saveStore(store);
+    });
+  }
+
+  async compareAndSwap(
+    id: CredentialId,
+    expected: Pick<StoredCredential, 'value' | 'refreshToken'>,
+    replacement: StoredCredential | null,
+  ): Promise<CredentialCompareAndSwapResult> {
+    return this.withWriteLock(async () => {
+      this.cachedStore = null;
+      const persistedStore = await this.loadStore();
+      if (!persistedStore) {
+        if (existsSync(this.credentialsFile)) {
+          throw new Error('Credential store is unreadable; refusing to overwrite it');
+        }
+        return { updated: false, current: null };
+      }
+
+      const key = credentialIdToAccount(id);
+      const current = persistedStore.credentials[key] ?? null;
+      if (
+        !current
+        || current.value !== expected.value
+        || current.refreshToken !== expected.refreshToken
+      ) {
+        return { updated: false, current };
+      }
+
+      const store = cloneCredentialStore(persistedStore);
+      if (replacement) store.credentials[key] = replacement;
+      else delete store.credentials[key];
+      store.metadata.updatedAt = Date.now();
+      await this.saveStore(store);
+      return { updated: true, current: replacement };
+    });
+  }
+
+  async withExclusiveLease<T>(scope: string, operation: () => Promise<T>): Promise<T> {
+    if (!existsSync(this.credentialsDir)) {
+      mkdirSync(this.credentialsDir, { recursive: true, mode: 0o700 });
     }
-
-    const key = credentialIdToAccount(id);
-    store.credentials[key] = credential;
-    store.metadata.updatedAt = Date.now();
-
-    await this.saveStore(store);
+    const leaseDirectory = join(this.credentialsDir, '.credential-leases');
+    await mkdir(leaseDirectory, { recursive: true, mode: 0o700 });
+    const scopeHash = createHash('sha256').update(scope).digest('hex');
+    const lock = await acquireCredentialWriteLock(
+      join(leaseDirectory, `${scopeHash}.lock`),
+      {
+        ...this.writeLockOptions,
+        timeoutMs: this.writeLockOptions.timeoutMs ?? 60_000,
+      },
+    );
+    try {
+      // A preceding process may have rotated credentials while this process
+      // waited. Do not let the lease holder make decisions from its old cache.
+      this.cachedStore = null;
+      return await operation();
+    } finally {
+      await lock.release();
+    }
   }
 
   async delete(id: CredentialId): Promise<boolean> {
-    return this.deleteSync(id);
+    return this.withWriteLock(async () => {
+      this.cachedStore = null;
+      const persistedStore = await this.loadStore();
+      if (!persistedStore) return false;
+      const key = credentialIdToAccount(id);
+      if (!(key in persistedStore.credentials)) return false;
+      const store = cloneCredentialStore(persistedStore);
+      delete store.credentials[key];
+      store.metadata.updatedAt = Date.now();
+      await this.saveStore(store);
+      return true;
+    });
   }
 
   deleteSync(id: CredentialId): boolean {
-    const store = this.loadStoreSync();
-    if (!store) return false;
+    if (!existsSync(this.credentialsDir)) {
+      mkdirSync(this.credentialsDir, { recursive: true, mode: 0o700 });
+    }
+    const release = acquireCredentialWriteLockSync(this.writeLockDirectory);
+    try {
+      this.cachedStore = null;
+      const persistedStore = this.loadStoreSync();
+      if (!persistedStore) return false;
 
-    const key = credentialIdToAccount(id);
-    if (!(key in store.credentials)) return false;
+      const key = credentialIdToAccount(id);
+      if (!(key in persistedStore.credentials)) return false;
 
-    delete store.credentials[key];
-    store.metadata.updatedAt = Date.now();
+      const store = cloneCredentialStore(persistedStore);
+      delete store.credentials[key];
+      store.metadata.updatedAt = Date.now();
 
-    this.saveStoreSync(store);
-    return true;
+      this.saveStoreSync(store);
+      return true;
+    } finally {
+      release();
+    }
   }
 
   async list(filter?: Partial<CredentialId>): Promise<CredentialId[]> {
@@ -225,13 +709,26 @@ export class SecureStorageBackend implements CredentialBackend {
     return this.loadStoreSync();
   }
 
+  private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+    if (!existsSync(this.credentialsDir)) {
+      mkdirSync(this.credentialsDir, { recursive: true, mode: 0o700 });
+    }
+
+    const lock = await acquireCredentialWriteLock(this.writeLockDirectory, this.writeLockOptions);
+    try {
+      return await operation();
+    } finally {
+      await lock.release();
+    }
+  }
+
   private loadStoreSync(): CredentialStore | null {
     // Return cached store if available
     if (this.cachedStore) return this.cachedStore;
 
     const instanceFileExists = existsSync(this.credentialsFile);
     if (instanceFileExists) {
-      return this.loadStoreFromFile(this.credentialsFile, true);
+      return this.loadStoreFromFile(this.credentialsFile);
     }
 
     // Profile isolation is the default. A trusted host may explicitly perform
@@ -243,10 +740,7 @@ export class SecureStorageBackend implements CredentialBackend {
       this.credentialsFile !== this.legacyCredentialsFile
       && existsSync(this.legacyCredentialsFile)
     ) {
-      const legacyStore = this.loadStoreFromFile(
-        this.legacyCredentialsFile,
-        false,
-      );
+      const legacyStore = this.loadStoreFromFile(this.legacyCredentialsFile);
       if (legacyStore) {
         this.saveStoreSync(legacyStore);
         return legacyStore;
@@ -256,10 +750,7 @@ export class SecureStorageBackend implements CredentialBackend {
     return null;
   }
 
-  private loadStoreFromFile(
-    filePath: string,
-    deleteIfCorrupted: boolean,
-  ): CredentialStore | null {
+  private loadStoreFromFile(filePath: string): CredentialStore | null {
     let fileData: Buffer;
     try {
       fileData = readFileSync(filePath);
@@ -269,13 +760,13 @@ export class SecureStorageBackend implements CredentialBackend {
 
     // Validate minimum size
     if (fileData.length < HEADER_SIZE + IV_SIZE + AUTH_TAG_SIZE) {
-      this.resetFailedLoad(filePath, deleteIfCorrupted);
+      this.resetFailedLoad();
       return null;
     }
 
     // Validate magic bytes
     if (!fileData.subarray(0, MAGIC_SIZE).equals(MAGIC_BYTES)) {
-      this.resetFailedLoad(filePath, deleteIfCorrupted);
+      this.resetFailedLoad();
       return null;
     }
 
@@ -302,14 +793,15 @@ export class SecureStorageBackend implements CredentialBackend {
     store = this.tryDecrypt(encryptedData, legacyKey);
 
     if (store) {
-      // Migration: re-save with new stable key so future loads use hardware UUID
+      // Defer migration until the next locked mutation. Re-encrypting during a
+      // read would create an uncoordinated writer that could overwrite a
+      // concurrent OAuth rotation from Electron or another CLI process.
       this.cachedStore = store;
-      this.saveStoreSync(store);
       return store;
     }
 
     // Both keys failed - the selected file is truly corrupted.
-    this.resetFailedLoad(filePath, deleteIfCorrupted);
+    this.resetFailedLoad();
     return null;
   }
 
@@ -369,8 +861,40 @@ export class SecureStorageBackend implements CredentialBackend {
     // Combine all parts
     const fileData = Buffer.concat([header, iv, authTag, ciphertext]);
 
-    // Write with restrictive permissions (owner read/write only)
-    writeFileSync(this.credentialsFile, fileData, { mode: 0o600 });
+    // Write to a unique same-directory file, flush it, then atomically replace
+    // the store. A crash or failed rename leaves the previous credential file
+    // intact and only the caller's temporary file is cleaned up.
+    const temporaryFile = join(
+      this.credentialsDir,
+      `.credentials.enc.${process.pid}.${randomUUID()}.tmp`,
+    );
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(temporaryFile, 'wx', 0o600);
+      writeFileSync(descriptor, fileData);
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      this.beforeAtomicRename?.(temporaryFile, this.credentialsFile);
+      renameSync(temporaryFile, this.credentialsFile);
+      if (process.platform !== 'win32') {
+        const directoryDescriptor = openSync(this.credentialsDir, 'r');
+        try {
+          fsyncSync(directoryDescriptor);
+        } finally {
+          closeSync(directoryDescriptor);
+        }
+      }
+    } catch (error) {
+      if (descriptor !== undefined) {
+        try { closeSync(descriptor); } catch {}
+      }
+      try { rmSync(temporaryFile, { force: true }); } catch {}
+      // Never expose an uncommitted mutation from a long-lived Electron
+      // singleton. Re-read the authoritative file after any failed save.
+      this.cachedStore = null;
+      throw error;
+    }
     this.cachedStore = store;
   }
 
@@ -405,16 +929,9 @@ export class SecureStorageBackend implements CredentialBackend {
     return pbkdf2Sync(legacyMachineId, salt, PBKDF2_ITERATIONS, KEY_SIZE, 'sha256');
   }
 
-  private resetFailedLoad(filePath: string, deleteIfCorrupted: boolean): void {
-    // Delete only a corrupted instance-owned file. A legacy fallback is a
-    // shared compatibility source and must remain untouched.
-    try {
-      if (deleteIfCorrupted && existsSync(filePath)) {
-        unlinkSync(filePath);
-      }
-    } catch {
-      // Ignore deletion errors
-    }
+  private resetFailedLoad(): void {
+    // Preserve unreadable stores for recovery. Callers must never turn a
+    // transient partial read or incompatible key into credential deletion.
     this.cachedStore = null;
     this.encryptionKey = null;
     this.salt = null;

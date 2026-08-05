@@ -38,6 +38,8 @@ interface DiagnosticConfig {
   providerType?: LlmProviderType;
   /** Base URL override (uses this instead of process.env.ANTHROPIC_BASE_URL) */
   baseUrl?: string;
+  /** Explicit session directory for captured API error lookup. */
+  sessionDir?: string;
 }
 
 interface CheckResult {
@@ -61,8 +63,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, defaultVal
  *
  * Provider-agnostic: HTTP status codes are universal.
  */
-async function checkCapturedApiError(providerLabel: string): Promise<CheckResult> {
-  const apiError = getLastApiError();
+async function checkCapturedApiError(providerLabel: string, sessionDir?: string): Promise<CheckResult> {
+  const apiError = getLastApiError(sessionDir);
 
   if (!apiError) {
     return { ok: true, detail: '✓ API error: None captured' };
@@ -393,7 +395,7 @@ async function checkMcpConnectivity(mcpUrl: string): Promise<CheckResult> {
  * providers get the captured API error check plus the raw error details.
  */
 export async function runErrorDiagnostics(config: DiagnosticConfig): Promise<DiagnosticResult> {
-  const { authType, workspaceId, rawError, providerType, baseUrl } = config;
+  const { authType, workspaceId, rawError, providerType, baseUrl, sessionDir } = config;
   const providerLabel = getProviderLabelFromType(providerType, baseUrl);
   const details: string[] = [];
   const defaultResult: CheckResult = { ok: true, detail: '? Check: Timeout' };
@@ -403,7 +405,7 @@ export async function runErrorDiagnostics(config: DiagnosticConfig): Promise<Dia
 
   // 0. FIRST: Check captured API error (most accurate source of truth)
   // This is provider-agnostic — HTTP status codes are universal.
-  checks.push(withTimeout(checkCapturedApiError(providerLabel), 1000, defaultResult));
+  checks.push(withTimeout(checkCapturedApiError(providerLabel, sessionDir), 1000, defaultResult));
 
   // Provider-specific checks: only run for Anthropic-based providers
   // Codex, Copilot, and Pi handle auth internally — no env-var-based checks apply.

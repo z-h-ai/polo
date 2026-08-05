@@ -9,6 +9,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Organization onboarding and switching** — Create a business workspace or creator space after sign-in, resume invitation links through authentication, switch organizations without leaking organization-scoped state, and let Owners and Managers manage members and invitations according to their role. (POO-13) (`56ce30d`)
 - **Creator Skills in Creator Spaces** — Publish validated, immutable Skill ZIP versions alongside Web Apps, inspect version-specific instructions and references, install or update them safely in the active workspace, preserve local edits in recoverable backups, and surface revocation status wherever Skills are used. (POO-21) (`2e0aba1`)
 - **Organization App catalog and launcher** — Discover Apps assigned by the active business workspace or creator space, open managed web Apps directly, and install, launch, update, inspect, stop, or uninstall local Bundle Apps without mixing them with personal external shortcuts. Cached authorization supports prepared Apps while temporarily offline and fails closed when membership changes. (POL-51) (`262c5fd`, `0fbf3f5`)
+- **Isolated CLI execution Threads** — Run `polo run` or the new Codex-style `polo exec` without exposing CLI sessions in Electron, keep configuration snapshots separate from the execution directory, stream stable JSONL, and persist, resume, list, or delete CLI-only Threads with safe lifecycle cleanup. (POO-16) (`fa39f93`)
 
 ## Improvements
 

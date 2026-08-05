@@ -9,6 +9,9 @@ import type { HandlerDeps } from '../handler-deps'
 
 type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | any
 
+const CLIENT_A = 'sessions-watchers-client-a'
+const CLIENT_B = 'sessions-watchers-client-b'
+
 describe('sessions file watchers', () => {
   const handlers = new Map<string, HandlerFn>()
   const pushed: Array<{ channel: string; target: any; args: any[] }> = []
@@ -129,8 +132,8 @@ describe('sessions file watchers', () => {
   }
 
   afterEach(() => {
-    cleanupSessionFileWatchForClient('client-a')
-    cleanupSessionFileWatchForClient('client-b')
+    cleanupSessionFileWatchForClient(CLIENT_A)
+    cleanupSessionFileWatchForClient(CLIENT_B)
     if (tempRoot) {
       rmSync(tempRoot, { recursive: true, force: true })
     }
@@ -142,31 +145,31 @@ describe('sessions file watchers', () => {
     expect(watch).toBeTruthy()
     expect(unwatch).toBeTruthy()
 
-    await watch!({ clientId: 'client-a' }, 'session-a')
-    await watch!({ clientId: 'client-b' }, 'session-b')
+    await watch!({ clientId: CLIENT_A }, 'session-a')
+    await watch!({ clientId: CLIENT_B }, 'session-b')
 
-    const clientAChanged = waitForClientPush('client-a')
-    const clientBChanged = waitForClientPush('client-b')
+    const clientAChanged = waitForClientPush(CLIENT_A)
+    const clientBChanged = waitForClientPush(CLIENT_B)
     emitFileChange(sessionDirA, 'a.txt')
     emitFileChange(sessionDirB, 'b.txt')
     await Promise.all([clientAChanged, clientBChanged])
 
-    const aEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-a')
-    const bEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === 'client-b')
+    const aEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === CLIENT_A)
+    const bEvents = pushed.filter((evt) => evt.target?.to === 'client' && evt.target?.clientId === CLIENT_B)
 
     expect(aEvents.some((evt) => evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED && evt.args[0] === 'session-a')).toBe(true)
     expect(bEvents.some((evt) => evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED && evt.args[0] === 'session-b')).toBe(true)
 
     pushed.length = 0
-    await unwatch!({ clientId: 'client-a' })
+    await unwatch!({ clientId: CLIENT_A })
 
-    const clientBAfterChanged = waitForClientPush('client-b')
+    const clientBAfterChanged = waitForClientPush(CLIENT_B)
     emitFileChange(sessionDirA, 'a.txt')
     emitFileChange(sessionDirB, 'b.txt')
     await clientBAfterChanged
 
-    const aEventsAfter = pushed.filter((evt) => evt.target?.clientId === 'client-a')
-    const bEventsAfter = pushed.filter((evt) => evt.target?.clientId === 'client-b')
+    const aEventsAfter = pushed.filter((evt) => evt.target?.clientId === CLIENT_A)
+    const bEventsAfter = pushed.filter((evt) => evt.target?.clientId === CLIENT_B)
 
     expect(aEventsAfter.length).toBe(0)
     expect(bEventsAfter.some((evt) => evt.channel === RPC_CHANNELS.sessions.FILES_CHANGED && evt.args[0] === 'session-b')).toBe(true)
@@ -176,9 +179,9 @@ describe('sessions file watchers', () => {
     const watch = handlers.get(RPC_CHANNELS.sessions.WATCH_FILES)
     expect(watch).toBeTruthy()
 
-    await watch!({ clientId: 'client-a' }, 'session-a')
+    await watch!({ clientId: CLIENT_A }, 'session-a')
 
-    cleanupSessionFileWatchForClient('client-a')
+    cleanupSessionFileWatchForClient(CLIENT_A)
     pushed.length = 0
 
     emitFileChange(sessionDirA, 'after-cleanup.txt')

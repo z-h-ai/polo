@@ -98,6 +98,8 @@ export interface Session {
   }
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
+  /** Host experience that owns the session. */
+  origin?: 'cli-run' | 'cli-exec'
   isArchived?: boolean
   archivedAt?: number
   supportsBranching?: boolean
@@ -124,6 +126,8 @@ export interface CreateSessionOptions {
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string
   hidden?: boolean
+  /** Host experience that owns the session. */
+  origin?: 'cli-run' | 'cli-exec'
   sessionStatus?: SessionStatus
   labels?: string[]
   isFlagged?: boolean

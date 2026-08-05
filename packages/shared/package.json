@@ -104,6 +104,7 @@
     "fflate": "^0.8.2",
     "i18next": "^26.0.3",
     "incr-regex-package": "^1.0.4",
+    "koffi": "^2.15.1",
     "shell-quote": "^1.8.3",
     "yauzl": "^2.10.0",
     "@mariozechner/pi-agent-core": "0.73.1",

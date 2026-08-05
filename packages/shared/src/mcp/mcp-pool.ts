@@ -13,7 +13,12 @@
  * - Runtime source switching without session restart
  */
 
-import { PoloMcpClient, type McpClientConfig, type PoolClient } from './client.ts';
+import {
+  PoloMcpClient,
+  type McpClientConfig,
+  type McpEnvironmentPolicy,
+  type PoolClient,
+} from './client.ts';
 import { ApiSourcePoolClient } from './api-source-pool-client.ts';
 import type { SdkMcpServerConfig } from '../agent/backend/types.ts';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -126,10 +131,21 @@ export class McpClientPool {
   /** Called after sync() connects/disconnects sources, so clients can be notified */
   onToolsChanged?: () => void;
 
-  constructor(options?: { debug?: (msg: string) => void; workspaceRootPath?: string; sessionPath?: string }) {
+  private readonly environmentPolicy: McpEnvironmentPolicy;
+
+  constructor(options?: {
+    debug?: (msg: string) => void;
+    workspaceRootPath?: string;
+    sessionPath?: string;
+    environmentPolicy?: McpEnvironmentPolicy;
+  }) {
     this.debugFn = options?.debug;
     this.workspaceRootPath = options?.workspaceRootPath;
     this.sessionPath = options?.sessionPath;
+    this.environmentPolicy = options?.environmentPolicy
+      ?? (process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot'
+        ? 'cli-one-shot'
+        : 'desktop');
   }
 
   /**
@@ -177,7 +193,12 @@ export class McpClientPool {
       this.debug(`Unknown MCP server type for ${slug}: ${(config as { type: string }).type}`);
       return;
     }
-    await this.registerClient(slug, new PoloMcpClient(clientConfig));
+    await this.registerClient(
+      slug,
+      new PoloMcpClient(clientConfig, {
+        environmentPolicy: this.environmentPolicy,
+      }),
+    );
     this.activeConfigs.set(slug, config);
   }
 

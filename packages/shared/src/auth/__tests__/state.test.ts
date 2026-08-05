@@ -7,8 +7,13 @@
  * - Migration detection for legacy CLI tokens
  */
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SecureStorageBackend } from '../../credentials/backends/secure-storage.ts';
 import {
   getSetupNeeds,
+  getValidClaudeOAuthTokenWithManager,
   performTokenRefresh,
   _resetRefreshMutex,
   type AuthState,
@@ -318,6 +323,235 @@ describe('performTokenRefresh', () => {
       expect(failedNativeResult.accessToken).toBeNull();
       expect(failedNativeResult.migrationRequired).toBeUndefined();
     });
+  });
+});
+
+describe('connection-scoped Claude OAuth', () => {
+  beforeEach(() => {
+    _resetRefreshMutex();
+  });
+
+  function createIdentityManager(options: {
+    selected?: {
+      accessToken: string;
+      refreshToken?: string;
+      expiresAt?: number;
+      source?: 'native' | 'cli';
+    };
+    global?: { accessToken: string };
+  }) {
+    const identities = new Map<string, typeof options.selected>();
+    if (options.selected) identities.set('selected-anthropic', { ...options.selected });
+    const global = options.global ? { ...options.global } : undefined;
+    const writes: string[] = [];
+    const deletes: string[] = [];
+    let legacyReads = 0;
+
+    return {
+      manager: {
+        getLlmOAuth: async (slug: string) => identities.get(slug) ?? null,
+        getPersistedLlmOAuth: async (slug: string) => identities.get(slug) ?? null,
+        withExclusiveLease: async <T>(_scope: string, operation: () => Promise<T>) => operation(),
+        compareAndSwap: async (
+          id: { type: string; connectionSlug?: string },
+          expected: { value: string; refreshToken?: string },
+          replacement: { value: string; refreshToken?: string; expiresAt?: number; source?: 'native' | 'cli' } | null,
+        ) => {
+          const slug = id.connectionSlug!;
+          const current = identities.get(slug);
+          if (
+            !current
+            || current.accessToken !== expected.value
+            || current.refreshToken !== expected.refreshToken
+          ) {
+            return {
+              updated: false,
+              current: current ? { ...current, value: current.accessToken } : null,
+            };
+          }
+          if (replacement) {
+            writes.push(slug);
+            identities.set(slug, {
+              accessToken: replacement.value,
+              refreshToken: replacement.refreshToken,
+              expiresAt: replacement.expiresAt,
+              source: replacement.source,
+            });
+          } else {
+            deletes.push(`${id.type}::${slug}`);
+            identities.delete(slug);
+          }
+          return { updated: true, current: replacement };
+        },
+        delete: async (id: { type: string; connectionSlug?: string }) => {
+          deletes.push(`${id.type}::${id.connectionSlug ?? 'global'}`);
+          return id.connectionSlug ? identities.delete(id.connectionSlug) : false;
+        },
+        getClaudeOAuthCredentials: async () => {
+          legacyReads++;
+          return global ?? null;
+        },
+      },
+      identities,
+      global,
+      writes,
+      deletes,
+      legacyReads: () => legacyReads,
+    };
+  }
+
+  it('uses the selected llm_oauth identity and never reads a different global identity', async () => {
+    const state = createIdentityManager({
+      selected: { accessToken: 'selected-token', expiresAt: Date.now() + 3_600_000 },
+      global: { accessToken: 'wrong-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async () => { throw new Error('valid credentials must not refresh'); },
+    );
+
+    expect(result.accessToken).toBe('selected-token');
+    expect(state.legacyReads()).toBe(0);
+    expect(state.global?.accessToken).toBe('wrong-global-token');
+  });
+
+  it('refreshes and writes only the selected llm_oauth identity', async () => {
+    const state = createIdentityManager({
+      selected: {
+        accessToken: 'expired-selected-token',
+        refreshToken: 'selected-refresh-token',
+        expiresAt: Date.now() - 1,
+      },
+      global: { accessToken: 'untouched-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async refreshToken => ({
+        accessToken: `refreshed:${refreshToken}`,
+        refreshToken: 'rotated-refresh-token',
+        expiresAt: Date.now() + 3_600_000,
+      }),
+    );
+
+    expect(result.accessToken).toBe('refreshed:selected-refresh-token');
+    expect(state.writes).toEqual(['selected-anthropic']);
+    expect(state.identities.get('selected-anthropic')?.refreshToken).toBe('rotated-refresh-token');
+    expect(state.legacyReads()).toBe(0);
+    expect(state.global?.accessToken).toBe('untouched-global-token');
+  });
+
+  it('preserves the selected and global identities on a transient refresh failure', async () => {
+    const state = createIdentityManager({
+      selected: {
+        accessToken: 'expired-selected-token',
+        refreshToken: 'selected-refresh-token',
+        expiresAt: Date.now() - 1,
+      },
+      global: { accessToken: 'untouched-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async () => { throw new Error('network timeout'); },
+    );
+
+    expect(result.accessToken).toBeNull();
+    expect(state.deletes).toEqual([]);
+    expect(state.identities.get('selected-anthropic')?.accessToken).toBe('expired-selected-token');
+    expect(state.global?.accessToken).toBe('untouched-global-token');
+  });
+
+  it('clears only the selected llm_oauth identity when its refresh token is invalid', async () => {
+    const state = createIdentityManager({
+      selected: {
+        accessToken: 'expired-selected-token',
+        refreshToken: 'invalid-refresh-token',
+        expiresAt: Date.now() - 1,
+        source: 'native',
+      },
+      global: { accessToken: 'untouched-global-token' },
+    });
+
+    const result = await getValidClaudeOAuthTokenWithManager(
+      'selected-anthropic',
+      state.manager as any,
+      async () => { throw new Error('invalid_grant'); },
+    );
+
+    expect(result.accessToken).toBeNull();
+    expect(state.deletes).toEqual(['llm_oauth::selected-anthropic']);
+    expect(state.identities.has('selected-anthropic')).toBe(false);
+    expect(state.legacyReads()).toBe(0);
+    expect(state.global?.accessToken).toBe('untouched-global-token');
+  });
+
+  it('serializes refresh across processes so an invalid loser cannot delete a winner', async () => {
+    const credentialsDir = mkdtempSync(join(tmpdir(), 'polo-oauth-refresh-lease-'));
+    try {
+      const identity = { type: 'llm_oauth' as const, connectionSlug: 'selected-anthropic' };
+      await new SecureStorageBackend({ credentialsDir }).set(identity, {
+        value: 'expired-access-token',
+        refreshToken: 'rotating-refresh-token',
+        expiresAt: Date.now() - 1,
+        source: 'native',
+      });
+      const successStarted = join(credentialsDir, 'success-started');
+      const allowSuccess = join(credentialsDir, 'allow-success');
+      const invalidCalled = join(credentialsDir, 'invalid-called');
+      const worker = join(import.meta.dir, 'fixtures', 'oauth-refresh-worker.ts');
+      const success = Bun.spawn([
+        process.execPath,
+        worker,
+        credentialsDir,
+        'success',
+        successStarted,
+        allowSuccess,
+        invalidCalled,
+      ], { stdout: 'pipe', stderr: 'pipe' });
+
+      const deadline = Date.now() + 2_000;
+      while (!existsSync(successStarted) && Date.now() < deadline) await Bun.sleep(5);
+      expect(existsSync(successStarted)).toBe(true);
+
+      const invalid = Bun.spawn([
+        process.execPath,
+        worker,
+        credentialsDir,
+        'invalid',
+        successStarted,
+        allowSuccess,
+        invalidCalled,
+      ], { stdout: 'pipe', stderr: 'pipe' });
+      await Bun.sleep(80);
+      expect(existsSync(invalidCalled)).toBe(false);
+      writeFileSync(allowSuccess, 'continue');
+
+      const results = await Promise.all([success, invalid].map(async child => ({
+        exitCode: await child.exited,
+        stdout: await new Response(child.stdout).text(),
+        stderr: await new Response(child.stderr).text(),
+      })));
+      expect(results.map(({ exitCode, stderr }) => ({ exitCode, stderr }))).toEqual([
+        { exitCode: 0, stderr: '' },
+        { exitCode: 0, stderr: '' },
+      ]);
+      expect(results.map(result => JSON.parse(result.stdout).accessToken)).toEqual([
+        'winner-access-token',
+        'winner-access-token',
+      ]);
+      expect(existsSync(invalidCalled)).toBe(false);
+      expect(await new SecureStorageBackend({ credentialsDir }).get(identity)).toMatchObject({
+        value: 'winner-access-token',
+        refreshToken: 'winner-refresh-token',
+      });
+    } finally {
+      rmSync(credentialsDir, { recursive: true, force: true });
+    }
   });
 });
 

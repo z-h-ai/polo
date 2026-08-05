@@ -9,6 +9,14 @@
 
 import { resolve } from 'path'
 import { CliRpcClient } from './client.ts'
+import {
+  UsageError,
+  findExecutionCommandIndex,
+  parseExecutionArgs,
+} from './execution-parser.ts'
+import { runExecutionCommand } from './one-shot.ts'
+import { PROVIDER_ENV_KEYS } from './provider-env.ts'
+import { colorModeFromArgv, stderrErrorLine } from './terminal-output.ts'
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -513,19 +521,6 @@ async function spawnLocalServer(args: CliArgs, opts?: { quiet?: boolean }): Prom
 // LLM connection helpers
 // ---------------------------------------------------------------------------
 
-const PROVIDER_ENV_KEYS: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  google: 'GOOGLE_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
-  groq: 'GROQ_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
-  xai: 'XAI_API_KEY',
-  cerebras: 'CEREBRAS_API_KEY',
-  huggingface: 'HUGGINGFACE_API_KEY',
-}
-
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -623,94 +618,6 @@ async function setupLlmConnection(
   process.stderr.write(`LLM connection configured: ${provider}${baseUrl ? ` (${baseUrl})` : ''}\n`)
 
   return { connectionSlug }
-}
-
-async function cmdRun(args: CliArgs): Promise<void> {
-  // Prompt = all positional args (no session ID needed, unlike send)
-  const message = await readPrompt(args.rest, args.rest)
-  if (!message.trim()) {
-    err('No prompt provided. Usage: run <message>')
-    process.exit(1)
-  }
-
-  const server = await spawnLocalServer(args)
-
-  let client: CliRpcClient | undefined = server.client
-  let sessionId: string | undefined
-
-  const cleanup = async () => {
-    if (sessionId && client?.isConnected && !args.noCleanup) {
-      await client.invoke('sessions:delete', sessionId).catch(() => {})
-    }
-    client?.destroy()
-    await server.stop()
-  }
-
-  // Signal handling — cancel + clean up on SIGINT/SIGTERM
-  const onSignal = async () => {
-    if (sessionId && client?.isConnected) {
-      await client.invoke('sessions:cancel', sessionId).catch(() => {})
-    }
-    await cleanup()
-    process.exit(130)
-  }
-  process.on('SIGINT', onSignal)
-  process.on('SIGTERM', onSignal)
-
-  try {
-    await client.connect()
-
-    // Bootstrap workspace from directory if specified
-    let bootstrappedWorkspaceId: string | undefined
-    if (args.workspaceDir) {
-      const absPath = resolve(args.workspaceDir)
-      const ws = (await client.invoke('workspaces:create', absPath, 'ci-workspace')) as { id: string }
-      bootstrappedWorkspaceId = ws.id
-      process.stderr.write(`Workspace registered: ${absPath}\n`)
-    }
-
-    // Auto-setup LLM connection from flags / env vars.
-    // When --base-url is provided, always create the custom endpoint connection
-    // (even if other connections exist) so the session routes through it.
-    const connections = (await client.invoke('LLM_Connection:list')) as any[]
-    let connectionSlug: string | undefined
-    if (shouldSetupLlmConnection(connections?.length ?? 0, args)) {
-      const result = await setupLlmConnection(client, args)
-      connectionSlug = result.connectionSlug
-    }
-
-    const workspaceId = bootstrappedWorkspaceId
-      ?? await resolveWorkspace(client, args.workspace)
-    if (bootstrappedWorkspaceId) {
-      await client.invoke('window:switchWorkspace', bootstrappedWorkspaceId).catch(() => {})
-    }
-    if (!workspaceId) {
-      err('No workspace found on server')
-      process.exit(1)
-    }
-
-    const session = (await client.invoke('sessions:create', workspaceId, {
-      permissionMode: args.mode || 'allow-all',
-      enabledSourceSlugs: args.sources.length > 0 ? args.sources : undefined,
-    })) as { id: string }
-    sessionId = session.id
-
-    if (args.model) {
-      await client.invoke('session:setModel', sessionId, workspaceId, args.model, connectionSlug)
-    }
-
-    const exitCode = await sendAndStream(client, sessionId, message, args)
-    await cleanup()
-    process.exit(exitCode)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    err(msg)
-    await cleanup()
-    process.exit(1)
-  } finally {
-    process.off('SIGINT', onSignal)
-    process.off('SIGTERM', onSignal)
-  }
 }
 
 async function cmdValidate(args: CliArgs): Promise<void> {
@@ -1890,34 +1797,42 @@ export async function runValidation(
 // Help
 // ---------------------------------------------------------------------------
 
-function printHelp(): void {
-  process.stdout.write(`polo-ai — Terminal client for Polo AI server
+export function printHelp(): void {
+  process.stdout.write(`polo — Terminal client for Polo AI
 
-Usage: polo-ai [options] <command> [args...]
+Usage: polo [options] <command> [args...]
 
-Connection:
+Compatibility: polo-ai is retained as an alias for polo.
+
+One-shot execution:
+  run <message...>       Run with streaming Polo text or stream-json output
+  exec [PROMPT]          Run non-interactively (safe permissions by default)
+  exec resume <id>       Continue a persistent CLI Thread
+  exec resume --last     Continue the most recently used matching Thread
+  exec sessions          List persistent CLI exec Threads
+  exec delete <id>       Delete an inactive CLI exec Thread
+
+  Each run or exec invocation starts an independent CLI runtime, even while
+  Electron is running. CLI Threads are stored outside Electron sessions.
+
+Execution options:
+  -C, --cd <path>        Agent working directory only; does not register a workspace
+  --workspace <id>       Configuration workspace (sources, skills, permissions)
+  --provider <name>      LLM provider
+  -m, --model <id>       Model to use
+  --api-key <key>        Invocation-only API key
+  --base-url <url>       Invocation-only custom API endpoint
+  --json                 JSONL events for exec
+  --yolo                 Use Polo allow-all application permissions
+  --ephemeral            Delete the CLI Thread after completion
+
+Remote server connection (legacy RPC commands):
   --url <ws[s]://...>    Server URL (default: $POLO_AI_SERVER_URL)
   --token <secret>       Auth token (default: $POLO_AI_SERVER_TOKEN)
-  --workspace <id>       Workspace ID (auto-detected if omitted)
   --timeout <ms>         Request timeout (default: 10000)
   --tls-ca <path>        Custom CA cert for self-signed TLS
-  --json                 Raw JSON output for scripting
 
-LLM Configuration (for 'run' command):
-  --provider <name>      LLM provider (default: anthropic, or $LLM_PROVIDER)
-                         Supported: anthropic, openai, google, openrouter, groq, mistral, deepseek, xai, ...
-  --model <id>           Model to use (or $LLM_MODEL)
-  --api-key <key>        API key (or $LLM_API_KEY, or provider-specific e.g. $OPENAI_API_KEY)
-  --base-url <url>       Custom API endpoint (or $LLM_BASE_URL)
-
-Commands:
-  run <message>          Spawn server, send message, stream response, exit
-                         --workspace-dir <path>  Use directory as workspace (creates if needed)
-                         --source <slug>     Enable source (repeatable)
-                         --mode <mode>       Permission mode (default: allow-all)
-                         --output-format     text or stream-json (default: text)
-                         --no-cleanup        Keep session after completion
-                         --server-entry      Path to server/index.ts
+Remote RPC commands:
   ping                   Verify connectivity (clientId + latency)
   health                 Check credential store health
   versions               Show server runtime versions
@@ -1936,21 +1851,20 @@ Commands:
                          --verbose, -v       Show server stderr output
 
 Examples:
-  polo-ai run "What files are in the current directory?"
-  polo-ai run --source craft-kb "Summarize today's daily note"
-  polo-ai run --workspace-dir .github/agents --source craft-public "Read the doc"
-  polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-  OPENAI_API_KEY=sk-... polo-ai run --provider openai "Hello"
-  GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... polo-ai run --provider deepseek --model deepseek-v4-flash "Hello"
-  echo "Analyze this code" | polo-ai run
-  polo-ai ping
-  polo-ai sessions
-  polo-ai send abc-123 "What files are in the current directory?"
-  echo "Summarize this" | polo-ai send abc-123
-  polo-ai --validate-server
-  polo-ai invoke system:homeDir
-  polo-ai --json workspaces | jq '.[].name'
+  polo exec --yolo --json "hello"
+  polo exec -C ./my-project "Summarize this repo"
+  polo exec resume --last "Continue"
+  polo exec sessions
+  polo exec delete 550e8400-e29b-41d4-a716-446655440000
+  polo run "What files are in the current directory?"
+  polo run --source craft-kb "Summarize today's daily note"
+  polo run --provider openai --model gpt-4o "Summarize this repo"
+  echo "Analyze this code" | polo run
+  polo ping
+  polo send abc-123 "What files are in the current directory?"
+  polo --validate-server
+  polo invoke system:homeDir
+  polo --json workspaces | jq '.[].name'
 `)
 }
 
@@ -1959,6 +1873,17 @@ Examples:
 // ---------------------------------------------------------------------------
 
 export async function main(argv: string[] = process.argv): Promise<void> {
+  if (findExecutionCommandIndex(argv) >= 0) {
+    try {
+      const exitCode = await runExecutionCommand(parseExecutionArgs(argv))
+      process.exit(exitCode)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      process.stderr.write(stderrErrorLine(message, colorModeFromArgv(argv)))
+      process.exit(error instanceof UsageError ? 2 : 1)
+    }
+  }
+
   const args = parseArgs(argv)
 
   // Set custom CA before any WS connections
@@ -1977,10 +1902,15 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     return
   }
 
-  // run is self-contained — spawns its own server
+  // The legacy full-server run implementation is intentionally sealed. The
+  // complete routing arity table above must have sent every run to one-shot;
+  // retaining this guard prevents future parser drift from reintroducing it.
   if (args.command === 'run') {
-    await cmdRun(args)
-    return
+    process.stderr.write(stderrErrorLine(
+      'run must use the isolated one-shot runner',
+      colorModeFromArgv(argv),
+    ))
+    process.exit(2)
   }
 
   // validate can spawn its own server or use --url

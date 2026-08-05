@@ -6,10 +6,30 @@
  */
 
 import type { CredentialBackend } from './backends/types.ts';
+import type { CredentialCompareAndSwapResult } from './backends/types.ts';
 import type { CredentialId, CredentialType, StoredCredential, CredentialHealthStatus, CredentialHealthIssue } from './types.ts';
 import type { LlmAuthType, LlmProviderType } from '../config/llm-connections.ts';
 import { SecureStorageBackend } from './backends/secure-storage.ts';
 import { debug } from '../utils/debug.ts';
+
+const invocationCredentials = new Map<string, StoredCredential>();
+
+function invocationCredentialKey(id: CredentialId): string {
+  return JSON.stringify(id);
+}
+
+/**
+ * Process-local, read-only credential overlay used by a CLI execution runtime.
+ * OAuth refreshes still go through the normal shared backend; only credentials
+ * explicitly supplied for this invocation are served from this map.
+ */
+export function setInvocationCredential(id: CredentialId, credential: StoredCredential): void {
+  invocationCredentials.set(invocationCredentialKey(id), { ...credential });
+}
+
+export function clearInvocationCredentials(): void {
+  invocationCredentials.clear();
+}
 
 export class CredentialManager {
   private backends: CredentialBackend[] = [];
@@ -109,11 +129,27 @@ export class CredentialManager {
    * Automatically initializes if needed.
    */
   async get(id: CredentialId): Promise<StoredCredential | null> {
+    const invocation = invocationCredentials.get(invocationCredentialKey(id));
+    if (invocation) return { ...invocation };
+    return this.getFromBackends(id, false);
+  }
+
+  /** Read the shared backend directly, bypassing invocation overlays. */
+  async getPersisted(id: CredentialId): Promise<StoredCredential | null> {
+    return this.getFromBackends(id, true);
+  }
+
+  private async getFromBackends(
+    id: CredentialId,
+    fresh: boolean,
+  ): Promise<StoredCredential | null> {
     await this.ensureInitialized();
 
     for (const backend of this.backends) {
       try {
-        const cred = await backend.get(id);
+        const cred = fresh && backend.getFresh
+          ? await backend.getFresh(id)
+          : await backend.get(id);
         if (cred) {
           debug(`[CredentialManager] Found ${id.type} in ${backend.name}`);
           return cred;
@@ -138,7 +174,48 @@ export class CredentialManager {
     }
 
     await this.writeBackend.set(id, credential);
+    const invocationKey = invocationCredentialKey(id);
+    if (invocationCredentials.has(invocationKey)) {
+      // OAuth refreshes are the one permitted shared write during a CLI
+      // invocation. Keep the process-local overlay aligned with the atomic
+      // shared update so later reads in the same Thread see the rotated token.
+      invocationCredentials.set(invocationKey, { ...credential });
+    }
     debug(`[CredentialManager] Saved ${id.type} to ${this.writeBackend.name}`);
+  }
+
+  /**
+   * Cross-process compare-and-swap used for OAuth rotation. A stale refresher
+   * cannot overwrite or delete a newer token written by another process.
+   */
+  async compareAndSwap(
+    id: CredentialId,
+    expected: Pick<StoredCredential, 'value' | 'refreshToken'>,
+    replacement: StoredCredential | null,
+  ): Promise<CredentialCompareAndSwapResult> {
+    await this.ensureInitialized();
+    if (!this.writeBackend?.compareAndSwap) {
+      throw new Error('Credential backend does not support atomic compare-and-swap');
+    }
+    const result = await this.writeBackend.compareAndSwap(id, expected, replacement);
+    const key = invocationCredentialKey(id);
+    if (invocationCredentials.has(key)) {
+      if (result.current) invocationCredentials.set(key, { ...result.current });
+      else invocationCredentials.delete(key);
+    }
+    return result;
+  }
+
+  /**
+   * Serialize a credential workflow across Electron and CLI processes without
+   * blocking unrelated identities. OAuth refresh uses one scope per connection.
+   */
+  async withExclusiveLease<T>(scope: string, operation: () => Promise<T>): Promise<T> {
+    await this.ensureInitialized();
+    if (!this.writeBackend?.withExclusiveLease) {
+      throw new Error('Credential backend does not support cross-process leases');
+    }
+    return this.writeBackend.withExclusiveLease(scope, operation);
   }
 
   /**
@@ -160,7 +237,8 @@ export class CredentialManager {
       }
     }
 
-    return deleted;
+    const deletedInvocation = invocationCredentials.delete(invocationCredentialKey(id));
+    return deleted || deletedInvocation;
   }
 
   deleteSync(id: CredentialId): boolean {
@@ -183,7 +261,8 @@ export class CredentialManager {
       }
     }
 
-    return deleted;
+    const deletedInvocation = invocationCredentials.delete(invocationCredentialKey(id));
+    return deleted || deletedInvocation;
   }
 
   /**
@@ -415,14 +494,38 @@ export class CredentialManager {
     expiresAt?: number;
     /** OIDC id_token (used by OpenAI/Codex) */
     idToken?: string;
+    source?: 'native' | 'cli';
   } | null> {
     const cred = await this.get({ type: 'llm_oauth', connectionSlug });
+    return this.toLlmOAuthCredentials(cred);
+  }
+
+  /** Re-read the shared OAuth generation while holding its refresh lease. */
+  async getPersistedLlmOAuth(connectionSlug: string): Promise<{
+    accessToken: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    idToken?: string;
+    source?: 'native' | 'cli';
+  } | null> {
+    const cred = await this.getPersisted({ type: 'llm_oauth', connectionSlug });
+    return this.toLlmOAuthCredentials(cred);
+  }
+
+  private toLlmOAuthCredentials(cred: StoredCredential | null): {
+    accessToken: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    idToken?: string;
+    source?: 'native' | 'cli';
+  } | null {
     if (!cred) return null;
     return {
       accessToken: cred.value,
       refreshToken: cred.refreshToken,
       expiresAt: cred.expiresAt,
       idToken: cred.idToken,
+      source: cred.source as 'native' | 'cli' | undefined,
     };
   }
 
@@ -437,12 +540,14 @@ export class CredentialManager {
     expiresAt?: number;
     /** OIDC id_token (used by OpenAI/Codex) */
     idToken?: string;
+    source?: 'native' | 'cli';
   }): Promise<void> {
     await this.set({ type: 'llm_oauth', connectionSlug }, {
       value: credentials.accessToken,
       refreshToken: credentials.refreshToken,
       expiresAt: credentials.expiresAt,
       idToken: credentials.idToken,
+      source: credentials.source,
     });
   }
 

@@ -64,7 +64,8 @@ function getPlatformRuntimeDir(): string {
 
 function inferPackagedMode(ctx?: ResolveScriptRuntimeContext): boolean {
   if (typeof ctx?.isPackaged === 'boolean') return ctx.isPackaged;
-  return process.env.POLO_AI_IS_PACKAGED === '1';
+  return process.env.POLO_AI_IS_PACKAGED === '1'
+    || process.env.POLO_AI_IS_PACKAGED === 'true';
 }
 
 function getProcessResourcesPath(): string | undefined {

@@ -97,6 +97,7 @@ export async function handleTransformData(
     const env = createScriptRuntimeEnv({
       language: args.language,
       dataDir,
+      credentialIsolation: ctx.credentialIsolation,
     });
 
     // Spawn subprocess with manual timeout that escalates to SIGKILL.
