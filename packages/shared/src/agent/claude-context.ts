@@ -61,8 +61,11 @@ import {
 } from '../sources/types.ts';
 import { isGoogleOAuthConfigured as isGoogleOAuthConfiguredImpl } from '../auth/google-oauth.ts';
 import { debug } from '../utils/debug.ts';
-import { getSessionPlansPath, getSessionPath, getSessionDataPath } from '../sessions/storage.ts';
 import { updatePreferences as updatePreferencesImpl } from '../config/preferences.ts';
+import {
+  defaultWorkspaceSessionStorage,
+  type SessionStorage,
+} from '../sessions/session-storage.ts';
 
 // Re-export types that may be needed by consumers
 export type { SessionToolContext, SessionToolCallbacks } from '@polo-ai/session-tools-core';
@@ -76,6 +79,8 @@ export interface ClaudeContextOptions {
   workspaceId: string;
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
+  sessionStorage?: SessionStorage;
+  workingDirectory?: string;
 }
 
 /**
@@ -90,6 +95,7 @@ export interface ClaudeContextOptions {
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
   const { sessionId, workspacePath, workspaceId, onPlanSubmitted, onAuthRequest } = options;
+  const sessionStorage = options.sessionStorage ?? defaultWorkspaceSessionStorage;
 
   // File system implementation
   const fs: FileSystemInterface = {
@@ -217,9 +223,11 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     workspacePath,
     get sourcesPath() { return join(workspacePath, 'sources'); },
     get skillsPath() { return join(workspacePath, 'skills'); },
-    plansFolderPath: getSessionPlansPath(workspacePath, sessionId),
-    sessionPath: getSessionPath(workspacePath, sessionId),
-    dataPath: getSessionDataPath(workspacePath, sessionId),
+    plansFolderPath: sessionStorage.getPlansPath(workspacePath, sessionId),
+    sessionPath: sessionStorage.getSessionPath(workspacePath, sessionId),
+    dataPath: sessionStorage.getDataPath(workspacePath, sessionId),
+    credentialIsolation: sessionStorage.owner === 'cli',
+    workingDirectory: options.workingDirectory,
     callbacks,
     fs,
     validators,

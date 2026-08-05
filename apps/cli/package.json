@@ -6,6 +6,7 @@
   "type": "module",
   "main": "src/index.ts",
   "bin": {
+    "polo": "src/index.ts",
     "polo-ai": "src/index.ts"
   },
   "scripts": {

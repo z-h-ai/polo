@@ -2,7 +2,14 @@ import { describe, it, expect, afterEach } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BLOCKED_ENV_VARS, createSanitizedEnv, createScriptRuntimeEnv } from './sandbox-env.ts';
+import {
+  BLOCKED_ENV_VARS,
+  TOOL_ENV_ALLOWLIST,
+  TOOL_ENV_ALLOWLIST_NAMES,
+  TOOL_ENV_ALLOWLIST_SHELL_PATTERN,
+  createSanitizedEnv,
+  createScriptRuntimeEnv,
+} from './sandbox-env.ts';
 
 describe('sandbox-env', () => {
   const createdDirs: string[] = [];
@@ -13,7 +20,7 @@ describe('sandbox-env', () => {
     }
   });
 
-  it('strips all blocked credential vars', () => {
+  it('preserves Electron custom env while stripping known credential vars', () => {
     const base: NodeJS.ProcessEnv = {
       SAFE_VAR: 'ok',
     };
@@ -30,6 +37,30 @@ describe('sandbox-env', () => {
     }
   });
 
+  it('uses an allowlist only for the CLI one-shot runtime profile', () => {
+    const sanitized = createSanitizedEnv({
+      PATH: '/bin',
+      SAFE_VAR: 'electron-custom-value',
+      OPENAI_API_KEY: 'secret',
+      POLO_AI_RUNTIME_PROFILE: 'cli-one-shot',
+    });
+
+    expect(sanitized.PATH).toBe('/bin');
+    expect(sanitized.SAFE_VAR).toBeUndefined();
+    expect(sanitized.OPENAI_API_KEY).toBeUndefined();
+    expect(sanitized.POLO_AI_RUNTIME_PROFILE).toBeUndefined();
+  });
+
+  it('derives the Set and Bash pattern from the same canonical allowlist', () => {
+    expect([...TOOL_ENV_ALLOWLIST].sort()).toEqual([...TOOL_ENV_ALLOWLIST_NAMES].sort());
+    expect(
+      TOOL_ENV_ALLOWLIST_SHELL_PATTERN
+        .split('|')
+        .filter(value => value !== 'LC_*')
+        .sort(),
+    ).toEqual([...TOOL_ENV_ALLOWLIST].sort());
+  });
+
   it('sets python/uv cache and temp dirs inside data directory', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'sandbox-env-python-'));
     createdDirs.push(dataDir);
@@ -37,12 +68,13 @@ describe('sandbox-env', () => {
     const env = createScriptRuntimeEnv({
       language: 'python3',
       dataDir,
+      credentialIsolation: true,
     }, {
       SAFE_VAR: 'ok',
       OPENAI_API_KEY: 'secret',
     });
 
-    expect(env.SAFE_VAR).toBe('ok');
+    expect(env.SAFE_VAR).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
 
     expect(env.TMPDIR).toBe(join(dataDir, '.tmp'));
@@ -56,6 +88,23 @@ describe('sandbox-env', () => {
     expect(existsSync(env.UV_CACHE_DIR!)).toBe(true);
     expect(existsSync(env.XDG_CACHE_HOME!)).toBe(true);
     expect(existsSync(env.PYTHONPYCACHEPREFIX!)).toBe(true);
+  });
+
+  it('keeps Electron script tool custom environment variables', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'sandbox-env-electron-'));
+    createdDirs.push(dataDir);
+
+    const env = createScriptRuntimeEnv({
+      language: 'node',
+      dataDir,
+      credentialIsolation: false,
+    }, {
+      POLO_CUSTOM_TOOL_ENV: 'desktop-value',
+      OPENAI_API_KEY: 'secret',
+    });
+
+    expect(env.POLO_CUSTOM_TOOL_ENV).toBe('desktop-value');
+    expect(env.OPENAI_API_KEY).toBeUndefined();
   });
 
   it('does not add python-specific cache vars for node runtime', () => {

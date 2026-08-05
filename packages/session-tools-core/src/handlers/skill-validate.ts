@@ -83,7 +83,7 @@ export async function handleSkillValidate(
 
   // Resolve workingDirectory: ctx first (if factories ever populate it), then session header
   const workingDirectory = ctx.workingDirectory
-    ?? resolveSessionWorkingDirectory(ctx.workspacePath, ctx.sessionId);
+    ?? resolveSessionWorkingDirectory(ctx.workspacePath, ctx.sessionId, ctx.sessionPath);
 
   // Resolve SKILL.md from all three tiers
   const resolved = resolveSkillMdPath(ctx, skillSlug, workingDirectory);

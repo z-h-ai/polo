@@ -12,6 +12,59 @@ const storedById = new Map<string, any>()
 const deletedIds: string[] = []
 let mockedProvider: 'anthropic' | 'pi' = 'anthropic'
 
+function createTestSessionStorage() {
+  return {
+    owner: 'electron' as const,
+    persistenceQueue: {
+      flush: async () => {},
+      flushAll: async () => {},
+      getLastWrittenSignature: () => undefined,
+    },
+    getSessionsRoot: (root: string) => `${root}/sessions`,
+    getSessionPath: (root: string, id: string) => `${root}/sessions/${id}`,
+    getSessionFilePath: (root: string, id: string) => `${root}/sessions/${id}/session.jsonl`,
+    getAttachmentsPath: (root: string, id: string) => `${root}/sessions/${id}/attachments`,
+    getPlansPath: (root: string, id: string) => `${root}/sessions/${id}/plans`,
+    getDataPath: (root: string, id: string) => `${root}/sessions/${id}/data`,
+    getDownloadsPath: (root: string, id: string) => `${root}/sessions/${id}/downloads`,
+    getLongResponsesPath: (root: string, id: string) => `${root}/sessions/${id}/long_responses`,
+    getMetaPath: (root: string, id: string) => `${root}/sessions/${id}/meta`,
+    ensureSessionsRoot: (root: string) => `${root}/sessions`,
+    ensureSession: (root: string, id: string) => `${root}/sessions/${id}`,
+    create: async (_root: string, opts: any) => {
+      const id = `child-${++idCounter}`
+      const now = Date.now()
+      const session = {
+        id,
+        name: opts?.name ?? null,
+        messages: [],
+        permissionMode: opts?.permissionMode ?? 'ask',
+        workingDirectory: opts?.workingDirectory,
+        hidden: !!opts?.hidden,
+        labels: [],
+        isFlagged: false,
+        sessionStatus: opts?.sessionStatus,
+        createdAt: now,
+        lastUsedAt: now,
+        workspaceRootPath,
+      }
+      storedById.set(id, session)
+      return session
+    },
+    load: (_root: string, id: string) => storedById.get(id) ?? null,
+    list: () => [],
+    save: async (session: any) => {
+      storedById.set(session.id, session)
+    },
+    flush: async () => {},
+    flushAll: async () => {},
+    delete: (_root: string, id: string) => {
+      deletedIds.push(id)
+      return storedById.delete(id)
+    },
+  }
+}
+
 // Partial-mock baseline: import real modules via file paths (avoids recursive mock imports)
 const actualSharedAgentModule = await import('../../../../../packages/shared/src/agent/index.ts')
 const actualSharedAgentBackendModule = await import('../../../../../packages/shared/src/agent/backend/index.ts')
@@ -291,7 +344,7 @@ describe('session branch rollback on preflight failure', () => {
   })
 
   it('deletes newly created child session when ensureBranchReady throws', async () => {
-    const manager = new SessionManager()
+    const manager = new SessionManager({ sessionStorage: createTestSessionStorage() as any })
 
     let destroyCalled = false
     let poolStopCalled = false
@@ -330,7 +383,7 @@ describe('session branch rollback on preflight failure', () => {
     source.sdkSessionId = undefined
     storedById.set('source-1', source)
 
-    const manager = new SessionManager()
+    const manager = new SessionManager({ sessionStorage: createTestSessionStorage() as any })
 
     await expect(
       manager.createSession('ws-1', {
@@ -346,7 +399,7 @@ describe('session branch rollback on preflight failure', () => {
   it('runs backend preflight for pi branches and rolls back on failure', async () => {
     mockedProvider = 'pi'
 
-    const manager = new SessionManager()
+    const manager = new SessionManager({ sessionStorage: createTestSessionStorage() as any })
     let getOrCreateAgentCalled = false
 
     ;(manager as any).ensureMessagesLoaded = async (_managed: any) => {}

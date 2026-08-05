@@ -42,6 +42,9 @@ export class CliRpcClient {
   private _clientId: string | null = null
   private _connected = false
   private _destroyed = false
+  private disconnectSettled = false
+  private readonly disconnectPromise: Promise<Error>
+  private resolveDisconnect!: (error: Error) => void
 
   private readonly url: string
   private readonly token: string | undefined
@@ -55,6 +58,15 @@ export class CliRpcClient {
     this.workspaceId = opts?.workspaceId
     this.requestTimeout = opts?.requestTimeout ?? 10_000
     this.connectTimeout = opts?.connectTimeout ?? 10_000
+    this.disconnectPromise = new Promise<Error>(resolve => {
+      this.resolveDisconnect = resolve
+    })
+  }
+
+  private signalDisconnect(error: Error): void {
+    if (this.disconnectSettled) return
+    this.disconnectSettled = true
+    this.resolveDisconnect(error)
   }
 
   /** Connect to the server and complete the handshake. Returns the assigned clientId. */
@@ -110,6 +122,8 @@ export class CliRpcClient {
         if (!this._connected) {
           clearTimeout(timer)
           reject(new Error('WebSocket connection error'))
+        } else {
+          this.signalDisconnect(new Error('WebSocket connection error'))
         }
       }
 
@@ -117,6 +131,8 @@ export class CliRpcClient {
         if (!this._connected) {
           clearTimeout(timer)
           reject(new Error('WebSocket closed before handshake'))
+        } else {
+          this.signalDisconnect(new Error('WebSocket disconnected'))
         }
         this._connected = false
         for (const [, req] of this.pending) {
@@ -168,9 +184,15 @@ export class CliRpcClient {
     }
   }
 
+  /** Resolves once when the connected transport closes or errors. */
+  waitForDisconnect(): Promise<Error> {
+    return this.disconnectPromise
+  }
+
   /** Close the connection and reject all pending requests. */
   destroy(): void {
     this._destroyed = true
+    if (this._connected) this.signalDisconnect(new Error('Client destroyed'))
     for (const [, req] of this.pending) {
       clearTimeout(req.timeout)
       req.reject(new Error('Client destroyed'))

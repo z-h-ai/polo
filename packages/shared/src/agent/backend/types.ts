@@ -21,6 +21,7 @@ import type { AuthRequest } from '../session-scoped-tools.ts';
 import type { McpClientPool } from '../../mcp/mcp-pool.ts';
 import type { Workspace } from '../../config/storage.ts';
 import type { SessionConfig as Session } from '../../sessions/storage.ts';
+import type { SessionStorage } from '../../sessions/session-storage.ts';
 import type { SourceManager } from '../core/source-manager.ts';
 
 // Import AbortReason and RecoveryMessage from core module (single source of truth)
@@ -169,6 +170,9 @@ export interface BackendHostRuntimeContext {
 export interface CoreBackendConfig {
   /** Workspace configuration */
   workspace: Workspace;
+
+  /** Runtime-owned session storage used for every Polo-managed artifact path. */
+  sessionStorage?: SessionStorage;
 
   /** Session configuration (for resume) */
   session?: Session;

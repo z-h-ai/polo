@@ -7,7 +7,7 @@
  * Callers orchestrate via their agent's runMiniCompletion() for summarization.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, relative } from 'path';
 import { debug } from './debug.ts';
@@ -148,6 +148,16 @@ export interface SaveResult {
   relativePath: string;
 }
 
+function ensurePrivateArtifactDirectory(path: string): void {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') chmodSync(path, 0o700);
+}
+
+function writePrivateArtifact(path: string, content: string | Buffer, flag?: 'wx'): void {
+  writeFileSync(path, content, { flag, mode: 0o600 });
+  if (process.platform !== 'win32') chmodSync(path, 0o600);
+}
+
 /**
  * Save large response to the session's long_responses/ folder.
  * Creates the folder if it doesn't exist.
@@ -166,14 +176,14 @@ export function saveLargeResponse(
 ): SaveResult | null {
   const responsesDir = join(sessionPath, LONG_RESPONSES_DIR);
   try {
-    mkdirSync(responsesDir, { recursive: true });
+    ensurePrivateArtifactDirectory(responsesDir);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
     const safeLabel = label.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
     const filename = `${timestamp}_${toolName}_${safeLabel}.txt`;
     const absolutePath = join(responsesDir, filename);
 
-    writeFileSync(absolutePath, content, 'utf-8');
+    writePrivateArtifact(absolutePath, content);
 
     const relativePath = relative(sessionPath, absolutePath);
 
@@ -219,12 +229,12 @@ function saveJsonArtifact(
 ): SavedJsonArtifact | null {
   const responsesDir = join(sessionPath, LONG_RESPONSES_DIR);
   try {
-    mkdirSync(responsesDir, { recursive: true });
+    ensurePrivateArtifactDirectory(responsesDir);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
     const safeTool = sanitizeFilename(toolName || 'tool_result');
     const filename = `${timestamp}_${safeTool}_${suffix}.json`;
     const absolutePath = join(responsesDir, filename);
-    writeFileSync(absolutePath, content, 'utf-8');
+    writePrivateArtifact(absolutePath, content);
     return {
       absolutePath,
       relativePath: relative(sessionPath, absolutePath),
@@ -260,7 +270,7 @@ function saveExtractedAsset(
 ): SavedAsset | null {
   try {
     const assetsDir = join(sessionPath, 'downloads', 'assets');
-    mkdirSync(assetsDir, { recursive: true });
+    ensurePrivateArtifactDirectory(assetsDir);
 
     const sha256 = createHash('sha256').update(buffer).digest('hex');
     const safeTool = sanitizeFilename(toolName || 'tool_result');
@@ -269,7 +279,9 @@ function saveExtractedAsset(
     const absolutePath = join(assetsDir, filename);
 
     if (!existsSync(absolutePath)) {
-      writeFileSync(absolutePath, buffer, { flag: 'wx' });
+      writePrivateArtifact(absolutePath, buffer, 'wx');
+    } else if (process.platform !== 'win32') {
+      chmodSync(absolutePath, 0o600);
     }
 
     return {

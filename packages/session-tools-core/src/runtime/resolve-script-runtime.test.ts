@@ -75,6 +75,24 @@ describe('resolveScriptRuntime', () => {
     }
   });
 
+  it('recognizes the headless server packaged-mode value', () => {
+    const prevPackaged = process.env.POLO_AI_IS_PACKAGED;
+    const prevNode = process.env.POLO_AI_NODE;
+    process.env.POLO_AI_IS_PACKAGED = 'true';
+    process.env.POLO_AI_NODE = 'node';
+
+    try {
+      expect(() => resolveScriptRuntime('node')).toThrow(
+        'do not allow PATH-based runtime resolution'
+      );
+    } finally {
+      if (prevPackaged === undefined) delete process.env.POLO_AI_IS_PACKAGED;
+      else process.env.POLO_AI_IS_PACKAGED = prevPackaged;
+      if (prevNode === undefined) delete process.env.POLO_AI_NODE;
+      else process.env.POLO_AI_NODE = prevNode;
+    }
+  });
+
   it('prefers POLO_AI_BUN for bun in dev', () => {
     const prev = process.env.POLO_AI_BUN;
     process.env.POLO_AI_BUN = '/tmp/custom-bun';

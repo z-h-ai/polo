@@ -435,9 +435,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     }
 
     const { searchSessions } = await import('@polo-ai/server-core/services')
-    const { getWorkspaceSessionsPath } = await import('@polo-ai/shared/workspaces')
-
-    const sessionsDir = getWorkspaceSessionsPath(workspace.rootPath)
+    const sessionsDir = sessionManager.getSessionsRoot(workspace.id)
+    if (!sessionsDir) return []
     log.debug(`SEARCH_SESSIONS: Searching "${query}" in ${sessionsDir}`)
 
     const results = await searchSessions(query, sessionsDir, {

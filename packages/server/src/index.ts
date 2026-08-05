@@ -33,8 +33,19 @@ import { enableDebug } from '@polo-ai/shared/utils/debug'
 import { bootstrapServer, startHealthHttpServer, generateServerToken } from '@polo-ai/server-core/bootstrap'
 import { validateSession, createWebuiHandler, nodeHttpAdapter } from '@polo-ai/server-core/webui'
 import type { WebuiHandler } from '@polo-ai/server-core/webui'
-import { getCredentialManager } from '@polo-ai/shared/credentials'
-import { getWorkspaces } from '@polo-ai/shared/config'
+import {
+  getCredentialManager,
+  setInvocationCredential,
+  type StoredCredential,
+} from '@polo-ai/shared/credentials'
+import {
+  getWorkspaces,
+  setInvocationLlmConnections,
+  type LlmConnection,
+  type Workspace,
+} from '@polo-ai/shared/config'
+import { RootedSessionStorage } from '@polo-ai/shared/sessions'
+import { processIdentityMatches } from '@polo-ai/shared/utils'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 
 // --generate-token: print a crypto-random token and exit
@@ -50,6 +61,89 @@ import { setSearchPlatform, setImageProcessor } from '@polo-ai/server-core/servi
 import type { HandlerDeps } from '@polo-ai/server-core/handlers'
 
 process.env.POLO_AI_IS_PACKAGED ??= 'false'
+
+interface CliRuntimeConfig {
+  sessionsRoot: string
+  controlledRoot: string
+  workspace: Workspace
+  connection?: LlmConnection
+}
+
+const isCliOneShot = process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot'
+if (isCliOneShot && process.platform !== 'win32') {
+  process.umask(0o077)
+}
+let cliRuntimeConfig: CliRuntimeConfig | undefined
+let cliInvocationCredential: StoredCredential | undefined
+let cliOwnerConfig: {
+  pid: number
+  ownerFile: string
+  leaseId: string
+  processIdentity: string
+} | undefined
+let cliParentDeath: Promise<void> | undefined
+
+async function readCliBootstrapFromParentPipe(): Promise<void> {
+  const reader = Bun.stdin.stream().getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (!buffer.includes('\n')) {
+    const { done, value } = await reader.read()
+    if (done) throw new Error('CLI parent pipe closed before runtime bootstrap')
+    buffer += decoder.decode(value, { stream: true })
+    if (buffer.length > 1024 * 1024) throw new Error('CLI runtime bootstrap payload is too large')
+  }
+  const line = buffer.slice(0, buffer.indexOf('\n'))
+  const parsed = JSON.parse(line) as {
+    runtimeConfig?: CliRuntimeConfig
+    credential?: StoredCredential
+    owner?: typeof cliOwnerConfig
+  }
+  if (!parsed.runtimeConfig || !parsed.owner) {
+    throw new Error('Incomplete CLI runtime bootstrap payload')
+  }
+  cliRuntimeConfig = parsed.runtimeConfig
+  cliInvocationCredential = parsed.credential
+  cliOwnerConfig = parsed.owner
+  cliParentDeath = (async () => {
+    while (true) {
+      const { done } = await reader.read()
+      if (done) return
+    }
+  })()
+}
+
+if (isCliOneShot) {
+  try {
+    await readCliBootstrapFromParentPipe()
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : 'Invalid CLI runtime bootstrap payload')
+    process.exit(1)
+  }
+  const runtimeConfig = cliRuntimeConfig
+  if (
+    !runtimeConfig?.sessionsRoot
+    || !runtimeConfig.controlledRoot
+    || !runtimeConfig.workspace?.id
+    || !runtimeConfig.workspace?.rootPath
+  ) {
+    console.error('Incomplete CLI runtime configuration')
+    process.exit(1)
+  }
+  cliRuntimeConfig = runtimeConfig
+  if (runtimeConfig.connection) {
+    setInvocationLlmConnections([runtimeConfig.connection], runtimeConfig.connection.slug)
+    if (cliInvocationCredential) {
+      setInvocationCredential(
+        {
+          type: runtimeConfig.connection.authType === 'oauth' ? 'llm_oauth' : 'llm_api_key',
+          connectionSlug: runtimeConfig.connection.slug,
+        },
+        cliInvocationCredential,
+      )
+    }
+  }
+}
 
 // Prevent unhandled rejections from crashing the server.
 // SDK subprocess abort can reject promises that propagate up unhandled;
@@ -131,7 +225,7 @@ let webuiNodeHandler: ReturnType<typeof nodeHttpAdapter> | undefined
 // after bootstrap completes, but the handler captures the closure.
 let healthCheckFn: (() => { status: string }) | null = null
 
-if (webuiEnabled && serverToken) {
+if (!isCliOneShot && webuiEnabled && serverToken) {
   const rpcPort = parseInt(process.env.POLO_AI_RPC_PORT ?? '9100', 10)
   const rpcProtocol = tls ? 'wss' as const : 'ws' as const
 
@@ -169,6 +263,10 @@ const instance = await (async () => {
       bundledAssetsRoot,
       serverVersion: process.env.POLO_AI_VERSION ?? packageVersion,
       tls,
+      bootstrapSharedConfig: !isCliOneShot,
+      useServerLock: !isCliOneShot,
+      startModelRefresh: !isCliOneShot,
+      shutdownDrainMs: isCliOneShot ? 0 : undefined,
       // When web UI is enabled, accept JWT session cookies on WebSocket upgrade
       validateSessionCookie: webuiEnabled && serverToken
         ? async (cookieHeader) => {
@@ -191,7 +289,10 @@ const instance = await (async () => {
         setSearchPlatform(platform)
         setImageProcessor(platform.imageProcessor)
       },
-      initModelRefreshService: () => initModelRefreshService(async (slug: string) => {
+      initModelRefreshService: () => isCliOneShot ? {
+        startAll: () => {},
+        stopAll: () => {},
+      } : initModelRefreshService(async (slug: string) => {
         const manager = getCredentialManager()
         const [apiKey, oauth] = await Promise.all([
           manager.getLlmApiKey(slug).catch(() => null),
@@ -204,26 +305,46 @@ const instance = await (async () => {
           oauthIdToken: oauth?.idToken,
         }
       }),
-      createSessionManager: () => new SessionManager(),
+      createSessionManager: () => isCliOneShot
+        ? new SessionManager({
+            profile: 'cli-one-shot',
+            sessionStorage: new RootedSessionStorage(cliRuntimeConfig!.sessionsRoot, {
+              secrets: cliInvocationCredential
+                ? [
+                    cliInvocationCredential.value,
+                    cliInvocationCredential.refreshToken,
+                    cliInvocationCredential.clientSecret,
+                    cliInvocationCredential.idToken,
+                    cliInvocationCredential.awsSessionToken,
+                  ]
+                : [],
+              controlledRoot: cliRuntimeConfig!.controlledRoot,
+            }),
+            workspace: cliRuntimeConfig!.workspace,
+          })
+        : new SessionManager(),
       bindRpcServer: (sm, server) => sm.setRpcServer(server),
       createHandlerDeps: ({ sessionManager, platform, oauthFlowStore }) => {
-        messagingHandle = createMessagingBootstrap({
-          sessionManager,
-          credentialManager: getCredentialManager(),
-          getMessagingDir: (wsId: string) =>
-            join(homedir(), '.polo-ai', 'workspaces', wsId, 'messaging'),
-          // Headless has no legacy messaging dir — workspaces start clean.
-          whatsapp: {
-            workerEntry: waWorkerEntry,
-            nodeBin: waNodeBin,
-            pairingMode: 'qr',
-          },
-        })
+        if (!isCliOneShot) {
+          messagingHandle = createMessagingBootstrap({
+            sessionManager,
+            credentialManager: getCredentialManager(),
+            getMessagingDir: (wsId: string) =>
+              join(homedir(), '.polo-ai', 'workspaces', wsId, 'messaging'),
+            // Headless has no legacy messaging dir — workspaces start clean.
+            whatsapp: {
+              workerEntry: waWorkerEntry,
+              nodeBin: waNodeBin,
+              pairingMode: 'qr',
+            },
+          })
+        }
         return {
           sessionManager,
+          sessionStorage: sessionManager.sessionStorage,
           platform,
           oauthFlowStore,
-          messagingRegistry: messagingHandle.registry,
+          messagingRegistry: messagingHandle?.registry,
         }
       },
       registerAllRpcHandlers: registerCoreRpcHandlers,
@@ -241,6 +362,9 @@ const instance = await (async () => {
       },
       cleanupSessionManager: async (sessionManager) => {
         try {
+          if (isCliOneShot) {
+            await sessionManager.cancelAllProcessing()
+          }
           await sessionManager.flushAllSessions()
         } finally {
           sessionManager.cleanup()
@@ -335,19 +459,87 @@ if (!isLocalBind && instance.protocol === 'ws') {
   }
 }
 
-const shutdown = async () => {
-  webuiHandler?.dispose()
-  healthServer?.stop()
-  if (messagingHandle) {
-    try {
-      await messagingHandle.dispose()
-    } catch (error) {
-      console.error('[messaging] dispose failed:', error)
+let shutdownPromise: Promise<void> | null = null
+const shutdown = (): Promise<void> => {
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = (async () => {
+    webuiHandler?.dispose()
+    healthServer?.stop()
+    if (messagingHandle) {
+      try {
+        await messagingHandle.dispose()
+      } catch (error) {
+        console.error('[messaging] dispose failed:', error)
+      }
     }
-  }
-  await instance.stop()
-  process.exit(0)
+    await instance.stop()
+  })()
+  return shutdownPromise
 }
 
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+const shutdownAndExit = async () => {
+  try {
+    await shutdown()
+    process.exit(0)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
+}
+
+process.on('SIGINT', shutdownAndExit)
+process.on('SIGTERM', shutdownAndExit)
+
+if (isCliOneShot) {
+  const ownerPid = cliOwnerConfig?.pid
+  const ownerFile = cliOwnerConfig?.ownerFile
+  const leaseId = cliOwnerConfig?.leaseId
+  const ownerProcessIdentity = cliOwnerConfig?.processIdentity
+
+  if (
+    typeof ownerPid !== 'number'
+    || !Number.isInteger(ownerPid)
+    || ownerPid <= 0
+    || !ownerFile
+    || !leaseId
+    || !ownerProcessIdentity
+  ) {
+    console.error('Incomplete CLI owner supervision configuration')
+    await shutdown()
+    process.exit(1)
+  }
+
+  let ownerLossHandled = false
+  const handleOwnerLoss = async () => {
+    if (ownerLossHandled) return
+    ownerLossHandled = true
+    clearInterval(ownerMonitor)
+    try {
+      await instance.sessionManager.cancelAllProcessing()
+      await shutdown()
+      process.exit(0)
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error))
+      process.exit(1)
+    }
+  }
+
+  const ownerMonitor = setInterval(async () => {
+    const ownerAlive = process.ppid === ownerPid
+      && processIdentityMatches(ownerPid, ownerProcessIdentity)
+
+    let leaseMatches = false
+    try {
+      const owner = JSON.parse(readFileSync(ownerFile, 'utf-8')) as { leaseId?: string }
+      leaseMatches = owner.leaseId === leaseId
+    } catch {
+      leaseMatches = false
+    }
+
+    if (!ownerAlive || !leaseMatches) {
+      await handleOwnerLoss()
+    }
+  }, 1000)
+  ownerMonitor.unref()
+  void cliParentDeath?.then(handleOwnerLoss, handleOwnerLoss)
+}

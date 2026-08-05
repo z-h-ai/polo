@@ -7,7 +7,15 @@
  * BundleFile.relativePath is always forward-slash separated for cross-platform portability.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'fs'
 import { join, relative, dirname, sep } from 'path'
 import { debug } from './debug.ts'
 
@@ -174,7 +182,15 @@ export function collectDirectoryFiles(dir: string, options?: CollectOptions): Bu
  *
  * @throws Error if any file fails path validation (path traversal, absolute path, etc.)
  */
-export function restoreFiles(targetDir: string, files: BundleFile[]): void {
+export function restoreFiles(
+  targetDir: string,
+  files: BundleFile[],
+  options: {
+    directoryMode?: number
+    fileMode?: number
+    assertSafePath?: (path: string, allowMissing: boolean) => void
+  } = {},
+): void {
   for (const file of files) {
     const error = validateBundleFile(file)
     if (error) {
@@ -191,12 +207,27 @@ export function restoreFiles(targetDir: string, files: BundleFile[]): void {
 
     // Ensure parent directory exists
     const parentDir = dirname(fullPath)
+    options.assertSafePath?.(parentDir, true)
     if (!existsSync(parentDir)) {
-      mkdirSync(parentDir, { recursive: true })
+      mkdirSync(parentDir, {
+        recursive: true,
+        mode: options.directoryMode,
+      })
+    }
+    options.assertSafePath?.(parentDir, false)
+    if (options.directoryMode !== undefined && process.platform !== 'win32') {
+      chmodSync(parentDir, options.directoryMode)
     }
 
     // Decode and write
     const content = Buffer.from(file.contentBase64, 'base64')
-    writeFileSync(fullPath, content)
+    options.assertSafePath?.(fullPath, true)
+    writeFileSync(fullPath, content, {
+      mode: options.fileMode,
+    })
+    options.assertSafePath?.(fullPath, false)
+    if (options.fileMode !== undefined && process.platform !== 'win32') {
+      chmodSync(fullPath, options.fileMode)
+    }
   }
 }

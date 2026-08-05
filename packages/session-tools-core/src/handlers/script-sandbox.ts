@@ -120,6 +120,7 @@ export async function handleScriptSandbox(
     const env = createScriptRuntimeEnv({
       language: args.language,
       dataDir,
+      credentialIsolation: ctx.credentialIsolation,
     });
 
     const startedAt = Date.now();

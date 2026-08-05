@@ -151,7 +151,10 @@ function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
 // ---------------------------------------------------------------------------
 
 describe('session file watcher isolation', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    const { cleanupSessionFileWatchForClient } = await import('@polo-ai/server-core/handlers/rpc')
+    cleanupSessionFileWatchForClient(CLIENT_A)
+    cleanupSessionFileWatchForClient(CLIENT_B)
     for (const dir of tempDirs) {
       try { rmSync(dir, { recursive: true, force: true }) } catch {}
     }

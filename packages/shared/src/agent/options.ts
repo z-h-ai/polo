@@ -1,14 +1,23 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { join } from "path";
 import { homedir } from "os";
-import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from "fs";
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    writeFileSync,
+    unlinkSync,
+    readdirSync,
+} from "fs";
 import { debug } from "../utils/debug";
 import { getProxyEnvVars } from "../config/proxy-env.ts";
+import { createSafeRuntimeEnvironment } from "../utils/runtime-env.ts";
 
 declare const POLO_AI_AGENT_CLI_VERSION: string | undefined;
 
 let customPathToClaudeCodeExecutable: string | null = null;
-let claudeConfigChecked = false;
+const claudeConfigCheckedHomes = new Set<string>();
 
 // UTF-8 BOM character — Windows editors/processes sometimes prepend this to files.
 // JSON parsers reject BOM, but the file content after BOM may be valid JSON.
@@ -33,11 +42,13 @@ const UTF8_BOM = '\uFEFF';
  * This runs once per process lifetime (not on every message), unless
  * resetClaudeConfigCheck() is called to force a re-check after error recovery.
  */
-function ensureClaudeConfig(): void {
-    if (claudeConfigChecked) return;
-    claudeConfigChecked = true;
+function ensureClaudeConfig(homeDir = homedir()): void {
+    if (claudeConfigCheckedHomes.has(homeDir)) return;
+    claudeConfigCheckedHomes.add(homeDir);
+    mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') chmodSync(homeDir, 0o700);
 
-    const configPath = join(homedir(), '.claude.json');
+    const configPath = join(homeDir, '.claude.json');
 
     // Clean up stale .backup file — if present and .claude.json is missing,
     // the CLI writes "A backup file exists at..." to stdout, crashing the SDK.
@@ -55,7 +66,6 @@ function ensureClaudeConfig(): void {
     // Clean up .corrupted.* files — these accumulate on Windows and signal
     // to the CLI that a previous corruption was detected, altering its stdout output.
     try {
-        const homeDir = homedir();
         const files = readdirSync(homeDir);
         for (const file of files) {
             if (file.startsWith('.claude.json.corrupted.')) {
@@ -120,7 +130,8 @@ function ensureClaudeConfig(): void {
  */
 function writeConfigSafe(configPath: string, content: string): void {
     try {
-        writeFileSync(configPath, content, 'utf-8');
+        writeFileSync(configPath, content, { encoding: 'utf-8', mode: 0o600 });
+        if (process.platform !== 'win32') chmodSync(configPath, 0o600);
     } catch (err: unknown) {
         const code = (err as NodeJS.ErrnoException)?.code;
         // EBUSY = file in use, EPERM = permission denied (often transient on Windows)
@@ -130,7 +141,8 @@ function writeConfigSafe(configPath: string, content: string): void {
             const start = Date.now();
             while (Date.now() - start < 100) { /* busy wait */ }
             try {
-                writeFileSync(configPath, content, 'utf-8');
+                writeFileSync(configPath, content, { encoding: 'utf-8', mode: 0o600 });
+                if (process.platform !== 'win32') chmodSync(configPath, 0o600);
                 debug('[options] Retry succeeded');
             } catch (retryErr) {
                 debug(`[options] Retry also failed: ${retryErr}`);
@@ -147,7 +159,7 @@ function writeConfigSafe(configPath: string, content: string): void {
  * at runtime — allows auto-repair before retrying the session.
  */
 export function resetClaudeConfigCheck(): void {
-    claudeConfigChecked = false;
+    claudeConfigCheckedHomes.clear();
 }
 
 /**
@@ -184,7 +196,28 @@ export function getPathToClaudeCodeExecutable(): string | undefined {
  */
 export function buildClaudeSubprocessEnv(
     envOverrides?: Record<string, string>,
+    options: { credentialIsolation?: boolean; privateHome?: string } = {},
 ): NodeJS.ProcessEnv {
+    if (options.credentialIsolation) {
+        if (!options.privateHome) {
+            throw new Error('Invocation-scoped Claude runtime requires a private home');
+        }
+        const allowedOverrides = Object.fromEntries(
+            Object.entries(envOverrides ?? {}).filter(([key]) =>
+                key === 'ANTHROPIC_BASE_URL'
+                || key === 'ANTHROPIC_API_KEY'
+                || key === 'CLAUDE_CODE_OAUTH_TOKEN'
+            ),
+        );
+        return createSafeRuntimeEnvironment(process.env, {
+            HOME: options.privateHome,
+            USERPROFILE: options.privateHome,
+            ...allowedOverrides,
+            POLO_AI_DEBUG:
+                (process.argv.includes('--debug') || process.env.POLO_AI_DEBUG === '1') ? '1' : '0',
+        });
+    }
+
     const env: NodeJS.ProcessEnv = {
         ...process.env,
         ...getProxyEnvVars(),
@@ -208,11 +241,18 @@ function nativeBinaryName(): string {
     return process.platform === 'win32' ? 'claude.exe' : 'claude';
 }
 
-export function getDefaultOptions(envOverrides?: Record<string, string>): Partial<Options> {
-    // Repair corrupted ~/.claude.json before the SDK subprocess reads it
-    ensureClaudeConfig();
+export function getDefaultOptions(
+    envOverrides?: Record<string, string>,
+    options: { credentialIsolation?: boolean; privateHome?: string } = {},
+): Partial<Options> {
+    if (options.credentialIsolation && !options.privateHome) {
+        throw new Error('Invocation-scoped Claude runtime requires a private home');
+    }
+    // Invocation-scoped runtimes repair only a Thread-private Claude home.
+    // Desktop retains the existing shared-home compatibility repair.
+    ensureClaudeConfig(options.credentialIsolation ? options.privateHome : undefined);
 
-    const env = buildClaudeSubprocessEnv(envOverrides);
+    const env = buildClaudeSubprocessEnv(envOverrides, options);
 
     // If custom path is set (e.g., for Electron packaged build), point the SDK at it.
     // This is the native `claude` binary, not a JS file.

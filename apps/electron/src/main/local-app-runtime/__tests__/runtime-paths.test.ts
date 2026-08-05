@@ -7,8 +7,8 @@ describe('resolveBundledBunPath', () => {
   const appResourcesBase = join(resourcesPath, 'app')
 
   it.each([
-    ['darwin', join(resourcesPath, 'app/vendor/bun/bun')],
-    ['linux', join(resourcesPath, 'app/vendor/bun/bun')],
+    ['darwin', join(resourcesPath, 'vendor/bun/bun')],
+    ['linux', join(resourcesPath, 'vendor/bun/bun')],
     ['win32', join(resourcesPath, 'vendor/bun/bun.exe')],
   ] as const)('matches the packaged %s electron-builder layout', (platform, expected) => {
     expect(resolveBundledBunPath({

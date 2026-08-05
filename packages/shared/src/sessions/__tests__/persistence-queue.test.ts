@@ -1,6 +1,19 @@
-import { describe, it, expect } from 'bun:test'
-import type { SessionHeader } from '../types'
-import { getHeaderMetadataSignature, mergeHeaderWithExternalMetadata } from '../persistence-queue'
+import { afterEach, describe, it, expect } from 'bun:test'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { SessionHeader, StoredSession } from '../types'
+import {
+  getHeaderMetadataSignature,
+  mergeHeaderWithExternalMetadata,
+  SessionPersistenceQueue,
+} from '../persistence-queue'
+
+const tempDirs: string[] = []
+
+afterEach(() => {
+  for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true })
+})
 
 function makeHeader(overrides: Partial<SessionHeader> = {}): SessionHeader {
   return {
@@ -94,5 +107,43 @@ describe('session persistence header conflict helpers', () => {
     const merged = mergeHeaderWithExternalMetadata(local, disk)
     expect(merged.name).toBe('External Name')
     expect(merged.labels).toEqual(['external'])
+  })
+
+  it('flushAll waits for a timer-started write and preserves the latest JSONL', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'polo-persistence-race-'))
+    tempDirs.push(workspaceRoot)
+    const sessionDir = join(workspaceRoot, 'sessions', 's1')
+    const queue = new SessionPersistenceQueue({
+      owner: 'cli',
+      ensureSessionsRoot() {
+        mkdirSync(join(workspaceRoot, 'sessions'), { recursive: true })
+        return join(workspaceRoot, 'sessions')
+      },
+      ensureSession() {
+        mkdirSync(sessionDir, { recursive: true })
+        return sessionDir
+      },
+      getSessionFilePath() {
+        return join(sessionDir, 'session.jsonl')
+      },
+    }, 1)
+    const session: StoredSession = {
+      ...makeHeader(),
+      workspaceRootPath: workspaceRoot,
+      messages: [{
+        id: 'm1',
+        type: 'assistant',
+        content: 'latest durable response',
+        timestamp: Date.now(),
+      }],
+    }
+
+    queue.enqueue(session)
+    await Bun.sleep(5)
+    await queue.flushAll()
+
+    const jsonl = readFileSync(join(sessionDir, 'session.jsonl'), 'utf8')
+    expect(jsonl).toContain('latest durable response')
+    expect(queue.pendingCount).toBe(0)
   })
 })

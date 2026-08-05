@@ -154,10 +154,13 @@ export function listSkillSlugs(workspaceRootPath: string): string[] {
  */
 export function resolveSessionWorkingDirectory(
   workspacePath: string,
-  sessionId: string
+  sessionId: string,
+  sessionPath?: string,
 ): string | undefined {
   try {
-    const sessionFile = join(workspacePath, 'sessions', sessionId, 'session.jsonl');
+    const sessionFile = sessionPath
+      ? join(sessionPath, 'session.jsonl')
+      : join(workspacePath, 'sessions', sessionId, 'session.jsonl');
     if (!existsSync(sessionFile)) return undefined;
     // Read first line only (header) — 8KB buffer is plenty
     const fd = openSync(sessionFile, 'r');

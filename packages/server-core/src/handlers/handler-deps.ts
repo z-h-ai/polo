@@ -4,6 +4,7 @@ import type { IOAuthFlowStore } from './oauth-flow-store-interface'
 import type { IBrowserPaneManager } from './browser-pane-manager-interface'
 import type { IWindowManager } from './window-manager-interface'
 import type { IMessagingGatewayRegistry } from './messaging-registry-interface'
+import type { SessionStorage } from '@polo-ai/shared/sessions'
 
 export interface SessionFileWatcher {
   close(): void
@@ -35,6 +36,8 @@ export interface HandlerDeps<
   TBrowserPaneManager extends IBrowserPaneManager = IBrowserPaneManager,
 > {
   sessionManager: TSessionManager
+  /** Runtime-owned path resolver for every session artifact. */
+  sessionStorage?: SessionStorage
   platform: PlatformServices
   windowManager?: TWindowManager
   browserPaneManager?: TBrowserPaneManager

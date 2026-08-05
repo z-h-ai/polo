@@ -53,6 +53,14 @@ export interface ServerBootstrapOptions<TSessionManager, THandlerDeps> {
    * When provided, the WsRpcServer serves HTTP (e.g. WebUI) on the same port.
    */
   httpHandler?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void
+  /** CLI one-shot runtimes do not own or mutate shared bootstrap artifacts. */
+  bootstrapSharedConfig?: boolean
+  /** CLI one-shot runtimes use Thread leases instead of the desktop server lock. */
+  useServerLock?: boolean
+  /** Disable background model refresh for bounded one-shot runtimes. */
+  startModelRefresh?: boolean
+  /** Drain delay before transport close. Desktop defaults to 2 seconds. */
+  shutdownDrainMs?: number
 }
 
 export interface ServerHandlerContext {
@@ -281,9 +289,13 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
 
   options.applyPlatformToSubsystems?.(platform)
 
-  bootstrapConfigArtifacts(platform)
-  ensureGlobalConfigExists(platform)
-  acquireServerLock(platform.logger)
+  if (options.bootstrapSharedConfig !== false) {
+    bootstrapConfigArtifacts(platform)
+    ensureGlobalConfigExists(platform)
+  }
+  if (options.useServerLock !== false) {
+    acquireServerLock(platform.logger)
+  }
 
   const modelRefreshService = options.initModelRefreshService()
   const sessionManager = options.createSessionManager()
@@ -346,7 +358,9 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
 
   await options.initializeSessionManager(sessionManager)
 
-  modelRefreshService.startAll()
+  if (options.startModelRefresh !== false) {
+    modelRefreshService.startAll()
+  }
 
   platform.logger.info(`Polo AI server listening on ${wsServer.protocol}://${rpcHost}:${wsServer.port}`)
 
@@ -354,6 +368,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
   const stop = async (): Promise<void> => {
     if (stopped) return
     stopped = true
+    let cleanupError: Error | null = null
 
     platform.logger.info('Shutting down...')
 
@@ -364,8 +379,10 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
         graceMs: 2000,
         timestamp: Date.now(),
       })
-      // Brief drain period so clients receive the notification
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      const shutdownDrainMs = options.shutdownDrainMs ?? 2000
+      if (shutdownDrainMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, shutdownDrainMs))
+      }
     } catch (error) {
       platform.logger.error('[bootstrap] Failed to send shutdown notification:', error)
     }
@@ -380,6 +397,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
       await options.cleanupSessionManager?.(sessionManager)
     } catch (error) {
       platform.logger.error('[bootstrap] Failed to clean up session manager:', error)
+      cleanupError = error instanceof Error ? error : new Error(String(error))
     }
 
     try {
@@ -394,7 +412,10 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
       platform.logger.error('[bootstrap] Failed to dispose OAuth flow store:', error)
     }
 
-    releaseServerLock()
+    if (options.useServerLock !== false) {
+      releaseServerLock()
+    }
+    if (cleanupError) throw cleanupError
   }
 
   return {
