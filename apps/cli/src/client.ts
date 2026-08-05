@@ -13,6 +13,7 @@ import {
   serializeEnvelope,
   deserializeEnvelope,
 } from '@polo-ai/server-core/transport'
+import { areMajorVersionsCompatible } from '@polo-ai/shared/runtime-discovery'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +30,7 @@ export interface CliClientOptions {
   workspaceId?: string
   requestTimeout?: number
   connectTimeout?: number
+  expectedServerVersion?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +42,7 @@ export class CliRpcClient {
   private pending = new Map<string, PendingRequest>()
   private listeners = new Map<string, Set<(...args: unknown[]) => void>>()
   private _clientId: string | null = null
+  private _serverVersion: string | null = null
   private _connected = false
   private _destroyed = false
   private disconnectSettled = false
@@ -51,6 +54,7 @@ export class CliRpcClient {
   private readonly workspaceId: string | undefined
   private readonly requestTimeout: number
   private readonly connectTimeout: number
+  private readonly expectedServerVersion: string | undefined
 
   constructor(url: string, opts?: CliClientOptions) {
     this.url = url
@@ -58,6 +62,7 @@ export class CliRpcClient {
     this.workspaceId = opts?.workspaceId
     this.requestTimeout = opts?.requestTimeout ?? 10_000
     this.connectTimeout = opts?.connectTimeout ?? 10_000
+    this.expectedServerVersion = opts?.expectedServerVersion
     this.disconnectPromise = new Promise<Error>(resolve => {
       this.resolveDisconnect = resolve
     })
@@ -72,6 +77,7 @@ export class CliRpcClient {
   /** Connect to the server and complete the handshake. Returns the assigned clientId. */
   async connect(): Promise<string> {
     if (this._destroyed) throw new Error('Client destroyed')
+    if (this._connected && this._clientId) return this._clientId
 
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -103,7 +109,24 @@ export class CliRpcClient {
 
         if (envelope.type === 'handshake_ack') {
           clearTimeout(timer)
+          if (this.expectedServerVersion && (
+            !envelope.serverVersion
+            || !areMajorVersionsCompatible(this.expectedServerVersion, envelope.serverVersion)
+          )) {
+            const err = new Error(
+              envelope.serverVersion
+                ? `Polo CLI ${this.expectedServerVersion} is not compatible with Polo server ${envelope.serverVersion}`
+                : 'Polo server did not report a version during health validation',
+            )
+            ;(err as Error & { code?: string }).code = envelope.serverVersion
+              ? 'VERSION_INCOMPATIBLE'
+              : 'SERVER_VERSION_UNVERIFIED'
+            reject(err)
+            this.ws?.close()
+            return
+          }
           this._clientId = envelope.clientId ?? null
+          this._serverVersion = envelope.serverVersion ?? null
           this._connected = true
           // Switch to normal message handler
           this.ws!.onmessage = (e) => {
@@ -209,6 +232,10 @@ export class CliRpcClient {
 
   get clientId(): string | null {
     return this._clientId
+  }
+
+  get serverVersion(): string | null {
+    return this._serverVersion
   }
 
   // -------------------------------------------------------------------------

@@ -61,6 +61,9 @@ function assemble(platform: 'darwin' | 'linux' | 'win32') {
   for (const launcher of ['polo', 'polo-ai', 'polo.cmd', 'polo-ai.cmd']) {
     copyFileSync(join(sourceBin, launcher), join(binDir, launcher))
   }
+  for (const messages of ['polo-messages.sh', 'polo-messages.cmd']) {
+    copyFileSync(join(sourceBin, messages), join(binDir, messages))
+  }
   const cli = join(cliDir, 'polo-cli.js')
   const cliPackage = join(cliDir, 'package.json')
   const server = join(serverDir, 'polo-server.js')
@@ -172,6 +175,6 @@ describe('assembled Electron CLI layout', () => {
     })
     expect(result.exitCode).toBe(1)
     expect(result.stdout.toString()).toBe('')
-    expect(result.stderr.toString()).toContain('Polo CLI server payload is missing:')
+    expect(result.stderr.toString()).toContain('[POLO_E_TERMINAL_FILES_MISSING]')
   })
 })

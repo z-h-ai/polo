@@ -3,15 +3,17 @@
 `polo` is the terminal entry point for Polo AI. The package also installs
 `polo-ai` as a compatibility alias; both names execute the same CLI.
 
-## Installation
+The desktop installer bundles the CLI, server artifact, and Bun runtime. Open a
+new terminal after installation, then verify it:
 
 ```bash
-bun install
-cd apps/cli
-bun link
+polo --version
+polo --help
 ```
 
-Use `polo` in new scripts and documentation.
+For source development, use `bun run apps/cli/src/index.ts --help`. Use `polo`
+in new scripts and documentation; `polo-ai` is a deprecated compatibility shim
+until Polo 1.0.
 
 ## One-shot execution
 
@@ -159,10 +161,12 @@ deletes it.
 ## Connected-server commands
 
 The existing connected-server commands remain available through the same
-binary. They use `--url`/`POLO_AI_SERVER_URL` and
-`--token`/`POLO_AI_SERVER_TOKEN`.
+binary. For local desktop use they discover and verify Electron's private
+runtime endpoint. Explicit `--url`/`POLO_AI_SERVER_URL` and
+`--token`/`POLO_AI_SERVER_TOKEN` values take precedence.
 
 ```bash
+polo app
 polo ping
 polo health
 polo versions

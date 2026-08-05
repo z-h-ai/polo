@@ -5,6 +5,7 @@ loadShellEnv()
 
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
+import { spawnSync } from 'child_process'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
 
@@ -59,7 +60,12 @@ Sentry.init({
 })
 
 // Initialize i18n for main process (menus, dialogs, etc.)
-import { setupI18n, i18n } from '@polo-ai/shared/i18n'
+import {
+  setupI18n,
+  i18n,
+  resolveSupportedLanguage,
+  translateRegistryMessage,
+} from '@polo-ai/shared/i18n'
 setupI18n()
 
 // Set anonymous machine ID for Sentry user tracking (no PII — just a hash).
@@ -88,7 +94,12 @@ import { setSearchPlatform, setImageProcessor } from '@polo-ai/server-core/servi
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
-import { getWorkspaces, getWorkspaceByNameOrId, loadStoredConfig, addWorkspace, saveConfig } from '@polo-ai/shared/config'
+import {
+  addWorkspace,
+  getWorkspaces,
+  getWorkspaceByNameOrId,
+  initializeStoredConfigIfMissing,
+} from '@polo-ai/shared/config'
 import { getDefaultWorkspacesDir } from '@polo-ai/shared/workspaces'
 import { initializeDocs } from '@polo-ai/shared/docs'
 import { initializeReleaseNotes } from '@polo-ai/shared/release-notes'
@@ -119,9 +130,35 @@ import {
 } from './local-app-runtime'
 import { resolveBundledBunPath } from './local-app-runtime/runtime-paths'
 import {
+  removeElectronRuntimeDiscovery,
+  writeElectronRuntimeDiscovery,
+  type ElectronRuntimeDiscoveryWriteResult,
+} from '@polo-ai/shared/runtime-discovery'
+import {
   BeforeQuitCleanupCoordinator,
   canQuitAfterLocalAppShutdown,
 } from './local-app-runtime/quit-guard'
+import {
+  getTerminalIntegrationStatus,
+  installTerminalIntegration,
+  setTerminalSetupDismissed,
+  toTerminalIntegrationErrorPayload,
+  uninstallTerminalIntegration,
+  type TerminalIntegrationOptions,
+} from './terminal-integration'
+import {
+  executeTerminalIntegrationCommand,
+  parseTerminalIntegrationCommand,
+  TerminalIntegrationCommandParseError,
+  type TerminalIntegrationCommand,
+} from './terminal-integration-command'
+import { runTerminalOnboarding } from './terminal-onboarding'
+import { runNonCriticalTerminalOnboarding } from './startup-continuation'
+import { TERMINAL_INTEGRATION_ERROR_KEYS } from '../shared/terminal-integration'
+import type {
+  TerminalIntegrationOperation,
+  TerminalIntegrationResult,
+} from '../shared/types'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -178,6 +215,13 @@ if (isDebugMode) {
   process.env.POLO_AI_CLI_ENTRY = app.isPackaged
     ? join(app.getAppPath(), 'dist', 'cli', 'polo-cli.js')
     : join(process.cwd(), 'apps', 'cli', 'src', 'index.ts')
+  process.env.POLO_AI_SERVER_ENTRY = app.isPackaged
+    ? join(app.getAppPath(), 'dist', 'server', 'polo-server.js')
+    : join(process.cwd(), 'packages', 'server', 'src', 'index.ts')
+  process.env.POLO_AI_DESKTOP_EXECUTABLE = process.execPath
+  if (process.platform === 'darwin') {
+    process.env.POLO_AI_DESKTOP_APP = join(process.resourcesPath, '..', '..')
+  }
   process.env.POLO_AI_COMMANDS_DOC_PATH = app.isPackaged
     ? join(resourcesBase, 'resources', 'docs', 'polo-ai.md')
     : join(process.cwd(), 'apps', 'electron', 'resources', 'docs', 'polo-ai.md')
@@ -200,6 +244,27 @@ if (isDebugMode) {
   }
 }
 
+// Windows and AppImage launchers enter here for terminal commands. Run the
+// packaged CLI with the embedded Bun runtime without initializing any windows.
+const poloCliArgIndex = process.argv.indexOf('--polo-cli')
+if (poloCliArgIndex >= 0) {
+  const bun = process.env.POLO_AI_BUN
+  const entry = process.env.POLO_AI_CLI_ENTRY
+  if (!bun || !entry || !existsSync(bun) || !existsSync(entry)) {
+    const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale
+    process.stderr.write(
+      `[POLO_E_TERMINAL_FILES_MISSING] ${translateRegistryMessage(systemLocale, 'cli.terminalFilesMissing')}\n`,
+    )
+    process.exit(1)
+  }
+  const result = spawnSync(bun, ['run', entry, ...process.argv.slice(poloCliArgIndex + 1)], {
+    stdio: 'inherit',
+    env: process.env,
+    cwd: process.cwd(),
+  })
+  process.exit(result.status ?? 1)
+}
+
 // Register Pi model resolver so llm-connections.ts can resolve Pi models
 // without importing @mariozechner/pi-ai (which breaks the Vite renderer build)
 registerPiModelResolver((piAuthProvider) =>
@@ -217,6 +282,11 @@ let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
 let adminResumeValidationInFlight: Promise<void> | null = null
+const electronRuntimeInstance = {
+  instanceId: randomUUID(),
+  startedAt: new Date().toISOString(),
+}
+let publishedElectronRuntime: ElectronRuntimeDiscoveryWriteResult | null = null
 
 const ADMIN_REAUTH_REQUIRED_CHANNEL = 'admin:reauthRequired'
 
@@ -226,6 +296,55 @@ const ADMIN_REAUTH_REQUIRED_CHANNEL = 'admin:reauthRequired'
 // through createMessagingBootstrap — do not construct MessagingGatewayRegistry
 // directly.
 let messagingHandle: MessagingBootstrapHandle | null = null
+
+function terminalIntegrationOptions(): TerminalIntegrationOptions {
+  return {
+    platform: process.platform,
+    homeDir: process.env.POLO_AI_TERMINAL_HOME,
+    shell: process.env.SHELL,
+    resourcesPath: process.resourcesPath,
+    appExecutable: process.execPath,
+    appVersion: app.getVersion(),
+  }
+}
+
+function terminalIntegrationIpcResult(
+  operation: TerminalIntegrationOperation,
+  run: () => ReturnType<typeof getTerminalIntegrationStatus>,
+): TerminalIntegrationResult {
+  try {
+    return { success: true, status: run() }
+  } catch (error) {
+    mainLog.error(`[terminal-integration] ${operation} failed`, error)
+    return {
+      success: false,
+      ...toTerminalIntegrationErrorPayload(error, operation),
+    }
+  }
+}
+
+function terminalSetupCopy() {
+  return {
+    conflictTitle: i18n.t('dialog.terminalSetup.conflictTitle'),
+    conflictMessage: i18n.t('dialog.terminalSetup.conflictMessage'),
+    conflictDetail: i18n.t('dialog.terminalSetup.conflictDetail'),
+    setupTitle: i18n.t('dialog.terminalSetup.setupTitle'),
+    setupDetail: i18n.t('dialog.terminalSetup.setupDetail'),
+    completeNow: i18n.t('dialog.terminalSetup.completeNow'),
+    notNow: i18n.t('dialog.terminalSetup.notNow'),
+    completeTitle: i18n.t('dialog.terminalSetup.completeTitle'),
+    completeMessage: i18n.t('dialog.terminalSetup.completeMessage'),
+    newTerminal: i18n.t('dialog.terminalSetup.newTerminal'),
+    failedTitle: i18n.t('dialog.terminalSetup.failedTitle'),
+    failedMessage: i18n.t('dialog.terminalSetup.failedMessage'),
+    skippedTitle: i18n.t('dialog.terminalSetup.skippedTitle'),
+    skippedMessage: i18n.t('dialog.terminalSetup.skippedMessage'),
+    skippedDetail: i18n.t('dialog.terminalSetup.skippedDetail'),
+    retry: i18n.t('common.retry'),
+    ok: i18n.t('common.ok'),
+    done: i18n.t('common.done'),
+  }
+}
 
 async function validateAdminSessionAfterResume(args: {
   protocol: 'ws' | 'wss'
@@ -272,6 +391,17 @@ async function validateAdminSessionAfterResume(args: {
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
+let terminalIntegrationCommand: TerminalIntegrationCommand | null = null
+let terminalIntegrationCommandParseError: TerminalIntegrationCommandParseError | null = null
+try {
+  terminalIntegrationCommand = parseTerminalIntegrationCommand(process.argv)
+} catch (error) {
+  if (error instanceof TerminalIntegrationCommandParseError) {
+    terminalIntegrationCommandParseError = error
+  } else {
+    throw error
+  }
+}
 
 // Set app name early (before app.whenReady) to ensure correct macOS menu bar title
 // Supports multi-instance dev: POLO_AI_APP_NAME env var (e.g., "Polo AI [1]")
@@ -394,9 +524,11 @@ async function createInitialWindows(): Promise<void> {
   // If no workspaces exist, create default "My Workspace" on first run
   if (workspaces.length === 0) {
     // Ensure config file exists (addWorkspace requires it)
-    if (!loadStoredConfig()) {
-      saveConfig({ workspaces: [], activeWorkspaceId: null, activeSessionId: null })
-    }
+    initializeStoredConfigIfMissing({
+      workspaces: [],
+      activeWorkspaceId: null,
+      activeSessionId: null,
+    })
     const defaultPath = join(getDefaultWorkspacesDir(), 'my-workspace')
     addWorkspace({ rootPath: defaultPath, name: 'My Workspace' })
     workspaces = getWorkspaces() // Refresh after creation
@@ -440,6 +572,43 @@ async function createInitialWindows(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (terminalIntegrationCommand || terminalIntegrationCommandParseError) {
+    await i18n.changeLanguage(resolveSupportedLanguage(app.getLocale()))
+    if (terminalIntegrationCommandParseError) {
+      process.stderr.write(
+        `[${terminalIntegrationCommandParseError.errorCode}] ${i18n.t(
+          'settings.terminalFeatures.error.invalidCommand',
+          terminalIntegrationCommandParseError.errorParams,
+        )}\n`,
+      )
+      app.exit(1)
+      return
+    }
+    try {
+      const status = executeTerminalIntegrationCommand(
+        terminalIntegrationCommand!,
+        terminalIntegrationOptions(),
+      )
+      process.stdout.write(`${JSON.stringify(status)}\n`)
+      app.exit(0)
+    } catch (error) {
+      const operation = terminalIntegrationCommand === 'repair'
+        ? 'install'
+        : terminalIntegrationCommand!
+      const payload = toTerminalIntegrationErrorPayload(error, operation)
+      process.stderr.write(
+        `[POLO_E_TERMINAL_INTEGRATION_${payload.errorCode.toUpperCase()}] ${i18n.t(
+          TERMINAL_INTEGRATION_ERROR_KEYS[payload.errorCode],
+          payload.errorParams,
+        )}\n`,
+      )
+      app.exit(1)
+    }
+    return
+  }
+
+  await i18n.changeLanguage(resolveSupportedLanguage(app.getLocale()))
+
   // Export packaged state as env var so logger.ts (and headless Bun) don't need 'electron'
   process.env.POLO_AI_IS_PACKAGED = app.isPackaged ? 'true' : 'false'
 
@@ -616,6 +785,21 @@ app.whenReady().then(async () => {
       const result = await dialog.showOpenDialog(win, spec)
       return { canceled: result.canceled, filePaths: result.filePaths }
     })
+    ipcMain.handle('terminal-integration:get-status', () =>
+      terminalIntegrationIpcResult('status', () =>
+        getTerminalIntegrationStatus(terminalIntegrationOptions())))
+    ipcMain.handle('terminal-integration:install', () =>
+      terminalIntegrationIpcResult('install', () => {
+        const result = installTerminalIntegration(terminalIntegrationOptions())
+        setTerminalSetupDismissed(terminalIntegrationOptions(), false)
+        return result
+      }))
+    ipcMain.handle('terminal-integration:uninstall', () =>
+      terminalIntegrationIpcResult('uninstall', () => {
+        const result = uninstallTerminalIntegration(terminalIntegrationOptions())
+        setTerminalSetupDismissed(terminalIntegrationOptions(), true)
+        return result
+      }))
 
     if (!isClientOnly) {
       // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)
@@ -838,6 +1022,26 @@ app.whenReady().then(async () => {
           clearClientActiveSession(clientId)
         },
       })
+
+      try {
+        publishedElectronRuntime = writeElectronRuntimeDiscovery({
+          pid: process.pid,
+          url: `${instance.protocol}://127.0.0.1:${instance.port}`,
+          token: instance.token,
+          version: app.getVersion(),
+          ...electronRuntimeInstance,
+        })
+        mainLog.info('[runtime-discovery] Local Electron endpoint published', {
+          path: publishedElectronRuntime.path,
+          pid: process.pid,
+          version: app.getVersion(),
+        })
+      } catch (error) {
+        mainLog.error(
+          '[runtime-discovery] Failed to publish local endpoint:',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
 
       // Capture module-level references for before-quit cleanup and deep-link handlers
       sessionManager = instance.sessionManager
@@ -1139,6 +1343,31 @@ app.whenReady().then(async () => {
     // In headless mode the server runs without any UI — skip window creation.
     if (!isHeadless) {
       await createInitialWindows()
+
+      if (app.isPackaged && process.platform === 'darwin') {
+        const terminalOptions = terminalIntegrationOptions()
+        const setupCopy = terminalSetupCopy()
+        const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+        await runNonCriticalTerminalOnboarding(
+          () => runTerminalOnboarding({
+            terminalOptions,
+            copy: setupCopy,
+            showMessageBox: (options) => dialog.showMessageBox(win, options),
+            formatError: error => i18n.t(
+              TERMINAL_INTEGRATION_ERROR_KEYS[error.errorCode],
+              error.errorParams,
+            ),
+            logError: error => mainLog.error(
+              '[terminal-integration] onboarding failed',
+              error,
+            ),
+          }),
+          error => mainLog.error(
+            '[terminal-integration] unexpected onboarding failure',
+            error,
+          ),
+        )
+      }
     }
 
     // Run credential health check at startup to detect issues early
@@ -1355,6 +1584,13 @@ app.on('before-quit', (event) => {
       // Release the server lock file so the next launch doesn't see a stale PID.
       // This must happen regardless of the exit path (normal quit or update quit).
       releaseServerLock()
+      if (publishedElectronRuntime) {
+        removeElectronRuntimeDiscovery({
+          path: publishedElectronRuntime.path,
+          expectedRecord: publishedElectronRuntime.record,
+        })
+        publishedElectronRuntime = null
+      }
     }
 
     return true
@@ -1387,4 +1623,14 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   mainLog.error('Unhandled rejection at:', promise, 'reason:', reason)
   Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)))
+})
+
+// Last-resort synchronous cleanup for initialization failures and forced exits.
+process.on('exit', () => {
+  if (!publishedElectronRuntime) return
+  removeElectronRuntimeDiscovery({
+    path: publishedElectronRuntime.path,
+    expectedRecord: publishedElectronRuntime.record,
+  })
+  publishedElectronRuntime = null
 })

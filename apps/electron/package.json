@@ -30,9 +30,10 @@
     "start:win": "bun run build:win && electron .",
     "dev": "vite dev",
     "typecheck": "tsc --noEmit",
-    "dist:mac": "bash scripts/build-dmg.sh arm64",
-    "dist:mac:x64": "bash scripts/build-dmg.sh x64",
-    "dist:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win.ps1",
+    "dist:mac": "bun run ../../scripts/electron-dist.ts --platform=darwin --arch=arm64",
+    "dist:mac:x64": "bun run ../../scripts/electron-dist.ts --platform=darwin --arch=x64",
+    "dist:win": "bun run ../../scripts/electron-dist.ts --platform=win32 --arch=x64",
+    "dist:linux": "bun run ../../scripts/electron-dist.ts --platform=linux --arch=x64",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix"
   },

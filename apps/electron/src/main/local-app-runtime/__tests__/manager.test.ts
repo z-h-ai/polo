@@ -52,6 +52,14 @@ let testRoot = ''
 let manager: LocalAppRuntimeManager | null = null
 let downloadServer: Server | null = null
 
+async function waitForProcessExit(pid: number, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await Bun.sleep(25)
+  }
+  return !isProcessAlive(pid)
+}
+
 beforeEach(async () => {
   testRoot = await mkdtemp(join(tmpdir(), 'polo-local-app-test-'))
 })
@@ -1605,8 +1613,8 @@ package = false
 
     expect(runtime.cancelInstall('demo.install-tree')).toBe(true)
     await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
-    expect(isProcessAlive(pids.root)).toBe(false)
-    expect(isProcessAlive(pids.child)).toBe(false)
+    expect(await waitForProcessExit(pids!.root)).toBe(true)
+    expect(await waitForProcessExit(pids!.child)).toBe(true)
   })
 
   it('blocks shutdown on retained dependency cleanup handles and succeeds after retry recovery', async () => {
@@ -1637,8 +1645,8 @@ package = false
     internals.forceKillProcessTree = originalForceKill
     await expect(runtime.shutdown()).resolves.toBeUndefined()
     expect(internals.managedProcesses.size).toBe(0)
-    expect(isProcessAlive(pids.root)).toBe(false)
-    expect(isProcessAlive(pids.child)).toBe(false)
+    expect(await waitForProcessExit(pids.root)).toBe(true)
+    expect(await waitForProcessExit(pids.child)).toBe(true)
   })
 
   it('blocks uninstall on retained dependency cleanup handles and removes files only after retry recovery', async () => {
@@ -1669,8 +1677,8 @@ package = false
     internals.forceKillProcessTree = originalForceKill
     await expect(runtime.uninstall(appId, { preserveData: false })).resolves.toBeUndefined()
     expect(internals.managedProcesses.size).toBe(0)
-    expect(isProcessAlive(pids.root)).toBe(false)
-    expect(isProcessAlive(pids.child)).toBe(false)
+    expect(await waitForProcessExit(pids.root)).toBe(true)
+    expect(await waitForProcessExit(pids.child)).toBe(true)
     await expect(stat(join(testRoot, `runtime/apps/${appId}`))).rejects.toThrow()
   })
 

@@ -256,12 +256,17 @@ already running. CLI Threads are stored separately from Electron sessions.
 
 ### Installation
 
-```bash
-# From the monorepo (requires Bun)
-bun run apps/cli/src/index.ts --help
+- macOS: launch Polo once and choose **Complete Now** when asked to complete
+  setup. The same actions are available later under **Settings → Polo terminal
+  features**.
+- Linux and Windows: the app installer creates `polo` and adds its managed
+  directory to the user PATH.
+- `polo-ai` remains a compatibility shim until Polo 1.0.
 
-# Or add to your PATH
-alias polo="bun run $(pwd)/apps/cli/src/index.ts"
+For source development:
+
+```bash
+bun run apps/cli/src/index.ts --help
 ```
 
 ### One-shot commands
@@ -298,12 +303,15 @@ sets.
 ### Remote server commands
 
 The legacy RPC commands connect to a running Polo AI server over WebSocket. They
-are separate from the isolated `run` and `exec` paths. Set
-`POLO_AI_SERVER_URL` and `POLO_AI_SERVER_TOKEN`, or pass `--url` and `--token`.
+are separate from the isolated `run` and `exec` paths. For local desktop use,
+they discover and verify the private Electron endpoint automatically. Explicit
+`POLO_AI_SERVER_URL`/`POLO_AI_SERVER_TOKEN` or `--url`/`--token` values take
+precedence.
 For self-signed TLS connections (`wss://`), use `--tls-ca <path>`.
 
 | Command | Description |
 |---------|-------------|
+| `app` | Start or focus the desktop App |
 | `ping` | Verify connectivity (clientId + latency) |
 | `health` | Check credential store health |
 | `versions` | Show server runtime versions |
@@ -321,6 +329,9 @@ For self-signed TLS connections (`wss://`), use `--tls-ca <path>`.
 | `--validate-server` | 21-step integration test (auto-spawns server if no `--url`) |
 
 ```bash
+# Start or focus the desktop app
+polo app
+
 # Quick connectivity check
 polo ping
 

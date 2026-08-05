@@ -1,4 +1,9 @@
 import { describe, it, expect, afterEach, mock, beforeEach } from 'bun:test'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
+import { writeElectronRuntimeDiscovery } from '@polo-ai/shared/runtime-discovery'
+import type { ErrorCode } from '@polo-ai/shared/protocol'
 import {
   serializeEnvelope,
   deserializeEnvelope,
@@ -10,8 +15,22 @@ import type { SpawnedServer } from './server-spawner.ts'
 // ---------------------------------------------------------------------------
 
 interface MockServerOptions {
+  /** Token published in runtime discovery for this server. */
+  token?: string
   /** What LLM_Connection:list returns */
   connections?: unknown[]
+  /** What workspaces:get returns */
+  workspaces?: unknown[]
+  /** Version returned by the WebSocket handshake */
+  serverVersion?: string
+  /** Simulate a legacy/custom server that predates versioned handshakes. */
+  omitServerVersion?: boolean
+  /** RPC errors returned after a successful handshake, keyed by channel. */
+  requestErrors?: Record<string, { code: ErrorCode; message: string }>
+  /** Called when this server receives a handshake, before replying. */
+  onHandshake?: () => void
+  /** Reject the handshake instead of acknowledging it. */
+  handshakeError?: { code: ErrorCode; message: string }
 }
 
 interface MockServer {
@@ -44,11 +63,12 @@ function pushSessionEvents(
 }
 
 function createMockServer(opts?: MockServerOptions): MockServer {
-  const token = 'test-token'
+  const token = opts?.token ?? 'test-token-0123456789'
   const invokedChannels: string[] = []
   const invokeArgs: Record<string, unknown[][]> = {}
   let createSessionArgs: unknown[] | undefined
   const connections = opts?.connections ?? []
+  const workspaces = opts?.workspaces ?? [{ id: 'ws-1', name: 'Test Workspace' }]
 
   const server = Bun.serve({
     port: 0,
@@ -62,12 +82,25 @@ function createMockServer(opts?: MockServerOptions): MockServer {
         const envelope = deserializeEnvelope(raw)
 
         if (envelope.type === 'handshake') {
-          ws.send(serializeEnvelope({
+          opts?.onHandshake?.()
+          if (opts?.handshakeError) {
+            ws.send(serializeEnvelope({
+              id: crypto.randomUUID(),
+              type: 'error',
+              error: opts.handshakeError,
+            }))
+            return
+          }
+          const acknowledgment = {
             id: crypto.randomUUID(),
             type: 'handshake_ack',
             clientId: 'run-test-client',
             protocolVersion: '1.0',
-          }))
+            ...(!opts?.omitServerVersion
+              ? { serverVersion: opts?.serverVersion ?? '0.10.0' }
+              : {}),
+          } as const
+          ws.send(serializeEnvelope(acknowledgment))
           return
         }
 
@@ -77,10 +110,21 @@ function createMockServer(opts?: MockServerOptions): MockServer {
           if (!invokeArgs[ch]) invokeArgs[ch] = []
           invokeArgs[ch].push(envelope.args ?? [])
 
+          const requestError = opts?.requestErrors?.[ch]
+          if (requestError) {
+            ws.send(serializeEnvelope({
+              id: envelope.id,
+              type: 'response',
+              channel: ch,
+              error: requestError,
+            }))
+            return
+          }
+
           let result: unknown
           switch (ch) {
             case 'workspaces:get':
-              result = [{ id: 'ws-1', name: 'Test Workspace' }]
+              result = workspaces
               break
             case 'workspaces:create':
               result = { id: 'ws-1', name: 'ci-workspace' }
@@ -154,7 +198,6 @@ function createMockServer(opts?: MockServerOptions): MockServer {
 // ---------------------------------------------------------------------------
 
 let mockWsServer: MockServer | null = null
-
 mock.module('./server-spawner.ts', () => ({
   spawnServer: async (): Promise<SpawnedServer> => {
     if (!mockWsServer) throw new Error('mockWsServer not initialized')
@@ -165,26 +208,57 @@ mock.module('./server-spawner.ts', () => ({
       startedAt: Date.now(),
       processIdentity: `test-process:${process.pid}`,
       diagnostics: () => '',
+      runtimeDir: join(tmpdir(), 'mock-polo-run-server'),
       stop: async () => {},
     }
   },
 }))
 
 // Import main AFTER mocking
-const { parseArgs } = await import('./index.ts')
+const {
+  connectForCommand,
+  main,
+  parseArgs,
+  resolveRunWorkspace,
+} = await import('./index.ts')
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('run command', () => {
+  const roots: string[] = []
+  let previousRuntimeFile: string | undefined
+  let previousServerUrl: string | undefined
+  let previousServerToken: string | undefined
+
   beforeEach(() => {
+    previousRuntimeFile = process.env.POLO_AI_RUNTIME_DISCOVERY_FILE
+    previousServerUrl = process.env.POLO_AI_SERVER_URL
+    previousServerToken = process.env.POLO_AI_SERVER_TOKEN
+    delete process.env.POLO_AI_SERVER_URL
+    delete process.env.POLO_AI_SERVER_TOKEN
+    const runtimeRoot = join(tmpdir(), `polo-run-runtime-${crypto.randomUUID()}`)
+    roots.push(runtimeRoot)
+    process.env.POLO_AI_RUNTIME_DISCOVERY_FILE = join(runtimeRoot, 'runtime', 'electron.json')
     mockWsServer = createMockServer()
   })
 
   afterEach(() => {
     mockWsServer?.close()
     mockWsServer = null
+    if (previousRuntimeFile === undefined) {
+      delete process.env.POLO_AI_RUNTIME_DISCOVERY_FILE
+    } else {
+      process.env.POLO_AI_RUNTIME_DISCOVERY_FILE = previousRuntimeFile
+    }
+    if (previousServerUrl === undefined) delete process.env.POLO_AI_SERVER_URL
+    else process.env.POLO_AI_SERVER_URL = previousServerUrl
+    if (previousServerToken === undefined) delete process.env.POLO_AI_SERVER_TOKEN
+    else process.env.POLO_AI_SERVER_TOKEN = previousServerToken
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('parseArgs: run with --source accumulates sources', () => {
@@ -215,6 +289,113 @@ describe('run command', () => {
       'run', 'test',
     ])
     expect(args.noCleanup).toBe(true)
+  })
+
+  it('keeps explicit remote resource commands independent of the installed App version', async () => {
+    mockWsServer?.close()
+    mockWsServer = createMockServer({ omitServerVersion: true })
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--url', mockWsServer.url,
+      '--token', mockWsServer.token,
+      'sessions',
+    ])
+
+    const client = await connectForCommand(args)
+    expect(client.serverVersion).toBeNull()
+    client.destroy()
+  })
+
+  it('preserves healthy discovery after a post-handshake handler error', async () => {
+    mockWsServer?.close()
+    mockWsServer = createMockServer({
+      requestErrors: {
+        'missing:handler': {
+          code: 'CHANNEL_NOT_FOUND',
+          message: 'No handler for: missing:handler',
+        },
+      },
+    })
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: mockWsServer.url,
+      token: mockWsServer.token,
+      version: '0.10.0',
+    })
+    const runtimePath = process.env.POLO_AI_RUNTIME_DISCOVERY_FILE!
+    const originalExit = process.exit
+    let caught: unknown
+    try {
+      process.exit = ((code?: number) => {
+        throw Object.assign(new Error(`process.exit(${code})`), { exitCode: code })
+      }) as typeof process.exit
+      await main([
+        'bun', 'index.ts',
+        'invoke', 'missing:handler',
+      ])
+    } catch (error) {
+      caught = error
+    } finally {
+      process.exit = originalExit
+    }
+
+    expect((caught as { exitCode?: number })?.exitCode).toBe(1)
+    expect(existsSync(runtimePath)).toBe(true)
+  })
+
+  it('does not delete an Electron replacement that races a handshake failure', async () => {
+    const replacementServer = createMockServer({
+      token: 'replacement-token-0123456789',
+    })
+    mockWsServer?.close()
+    let replacementInstanceId = ''
+    mockWsServer = createMockServer({
+      token: 'stale-token-0123456789',
+      handshakeError: {
+        code: 'AUTH_FAILED',
+        message: 'stale endpoint rejected the handshake',
+      },
+      onHandshake() {
+        const replacement = writeElectronRuntimeDiscovery({
+          pid: process.pid,
+          url: replacementServer.url,
+          token: replacementServer.token,
+          version: '0.10.0',
+          startedAt: '2026-07-30T12:00:01.000Z',
+        })
+        replacementInstanceId = replacement.record.instanceId
+      },
+    })
+    writeElectronRuntimeDiscovery({
+      pid: process.pid,
+      url: mockWsServer.url,
+      token: mockWsServer.token,
+      version: '0.10.0',
+      startedAt: '2026-07-30T12:00:00.000Z',
+    })
+    const args = parseArgs([
+      'bun', 'index.ts',
+      '--timeout', '500',
+      'sessions',
+    ])
+
+    try {
+      await expect(connectForCommand(args)).rejects.toThrow(
+        'stale endpoint rejected the handshake',
+      )
+      const runtimePath = process.env.POLO_AI_RUNTIME_DISCOVERY_FILE!
+      const replacement = await import('@polo-ai/shared/runtime-discovery')
+        .then(({ readElectronRuntimeDiscovery }) =>
+          readElectronRuntimeDiscovery({ path: runtimePath }))
+      expect(replacement.status).toBe('available')
+      if (replacement.status === 'available') {
+        expect(replacement.record.instanceId).toBe(replacementInstanceId)
+        expect(replacement.record.url).toBe(replacementServer.url)
+        expect(replacement.record.token).toBe(replacementServer.token)
+      }
+    } finally {
+      replacementServer.close()
+    }
   })
 
   it('creates session with correct workspace and options', async () => {
@@ -332,6 +513,67 @@ describe('run command', () => {
   it('parseArgs: workspaceDir defaults to undefined', () => {
     const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
     expect(args.workspaceDir).toBeUndefined()
+  })
+
+  it('registers the caller cwd for a fresh run without --workspace-dir', async () => {
+    const freshWorkspace = join(
+      tmpdir(),
+      `polo-run-fresh-${crypto.randomUUID()}`,
+      '项目 with spaces',
+    )
+    roots.push(join(freshWorkspace, '..'))
+    mkdirSync(freshWorkspace, { recursive: true })
+
+    const { CliRpcClient } = await import('./client.ts')
+    const client = new CliRpcClient(mockWsServer!.url, {
+      token: mockWsServer!.token,
+      requestTimeout: 5_000,
+    })
+    await client.connect()
+
+    const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
+    const workspace = await resolveRunWorkspace(client, args, freshWorkspace)
+
+    expect(workspace).toEqual({ id: 'ws-1', registeredPath: freshWorkspace })
+    expect(mockWsServer!.invokeArgs['workspaces:create']![0]).toEqual([
+      freshWorkspace,
+      basename(freshWorkspace),
+    ])
+    expect(mockWsServer!.invokedChannels).toEqual([
+      'workspaces:get',
+      'workspaces:create',
+      'window:switchWorkspace',
+    ])
+
+    client.destroy()
+  })
+
+  it('reuses an existing workspace registered for the caller cwd', async () => {
+    const workspacePath = join(tmpdir(), `polo-run-existing-${crypto.randomUUID()}`)
+    mockWsServer?.close()
+    mockWsServer = createMockServer({
+      workspaces: [{ id: 'existing-ws', name: 'Custom Name', rootPath: workspacePath }],
+    })
+
+    const { CliRpcClient } = await import('./client.ts')
+    const client = new CliRpcClient(mockWsServer.url, {
+      token: mockWsServer.token,
+      requestTimeout: 5_000,
+    })
+    await client.connect()
+
+    const args = parseArgs(['bun', 'index.ts', 'run', 'hello'])
+    expect(await resolveRunWorkspace(client, args, workspacePath)).toEqual({
+      id: 'existing-ws',
+      registeredPath: workspacePath,
+    })
+    expect(mockWsServer.invokedChannels).toEqual([
+      'workspaces:get',
+      'window:switchWorkspace',
+    ])
+    expect(mockWsServer.invokedChannels).not.toContain('workspaces:create')
+
+    client.destroy()
   })
 
   it('workspace:create returns ID used directly (no workspaces:get needed)', async () => {

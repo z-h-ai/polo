@@ -1,0 +1,369 @@
+name: Electron Full Artifact Lifecycle
+
+on:
+  release:
+    types:
+      - created
+  schedule:
+    - cron: "27 8 * * 2,5"
+  workflow_dispatch:
+    inputs:
+      previous_release_tag:
+        description: Fixed previous release tag used for cross-version upgrade
+        required: true
+        type: string
+      previous_release_version:
+        description: Electron package version embedded in the previous release
+        required: true
+        type: string
+      previous_release_commit_sha:
+        description: Full commit SHA referenced by the previous release tag
+        required: true
+        type: string
+      previous_macos_sha256:
+        description: SHA-256 of the previous Polo-AI-x64.zip
+        required: true
+        type: string
+      previous_windows_sha256:
+        description: SHA-256 of the previous Polo-AI-x64.exe
+        required: true
+        type: string
+      previous_linux_sha256:
+        description: SHA-256 of the previous Polo-AI-x64.AppImage
+        required: true
+        type: string
+      previous_installer_sha256:
+        description: SHA-256 of scripts/install-app.sh at the previous tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: electron-artifact-full-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-artifact-lifecycle:
+    name: ${{ matrix.platform }} full artifact lifecycle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-14
+            previous_name: Polo-AI-x64.zip
+            artifact_paths: |
+              apps/electron/release/Polo-AI-x64.dmg
+              apps/electron/release/Polo-AI-x64.zip
+              apps/electron/release/full-validation-macos.txt
+              apps/electron/release/full-validation-macos.log
+              apps/electron/release/release-signing-audit-Darwin.jsonl
+          - platform: windows
+            runner: windows-latest
+            previous_name: Polo-AI-x64.exe
+            artifact_paths: |
+              apps/electron/release/Polo-AI-x64.exe
+              apps/electron/release/full-validation-windows.txt
+              apps/electron/release/full-validation-windows.log
+              apps/electron/release/release-signing-audit-Windows.jsonl
+          - platform: linux
+            runner: ubuntu-latest
+            previous_name: Polo-AI-x64.AppImage
+            artifact_paths: |
+              apps/electron/release/Polo-AI-x64.AppImage
+              apps/electron/release/full-validation-linux.txt
+              apps/electron/release/full-validation-linux.log
+    runs-on: ${{ matrix.runner }}
+    env:
+      PREVIOUS_RELEASE_TAG: ${{ inputs.previous_release_tag || vars.POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG }}
+      PREVIOUS_RELEASE_VERSION: ${{ inputs.previous_release_version || vars.POLO_AI_FULL_E2E_PREVIOUS_RELEASE_VERSION }}
+      PREVIOUS_RELEASE_COMMIT_SHA: ${{ inputs.previous_release_commit_sha || vars.POLO_AI_FULL_E2E_PREVIOUS_RELEASE_COMMIT_SHA }}
+      EXPECTED_PREVIOUS_ARTIFACT_SHA256: ${{ (matrix.platform == 'macos' && (inputs.previous_macos_sha256 || vars.POLO_AI_FULL_E2E_PREVIOUS_MACOS_SHA256)) || (matrix.platform == 'windows' && (inputs.previous_windows_sha256 || vars.POLO_AI_FULL_E2E_PREVIOUS_WINDOWS_SHA256)) || (inputs.previous_linux_sha256 || vars.POLO_AI_FULL_E2E_PREVIOUS_LINUX_SHA256) }}
+      EXPECTED_PREVIOUS_INSTALLER_SHA256: ${{ inputs.previous_installer_sha256 || vars.POLO_AI_FULL_E2E_PREVIOUS_INSTALLER_SHA256 }}
+      POLO_AI_ARTIFACT_VALIDATION_MODE: full
+      POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ matrix.previous_name }}
+      POLO_AI_PREVIOUS_INSTALL_SCRIPT: ${{ github.workspace }}/previous/install-app.sh
+      POLO_AI_RELEASE_MACOS_TEAM_ID: ${{ vars.POLO_AI_RELEASE_MACOS_TEAM_ID }}
+      POLO_AI_RELEASE_MACOS_APP_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_APP_REQUIREMENT }}
+      POLO_AI_RELEASE_MACOS_UV_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_UV_REQUIREMENT }}
+      POLO_AI_RELEASE_WINDOWS_PUBLISHER: ${{ vars.POLO_AI_RELEASE_WINDOWS_PUBLISHER }}
+      POLO_AI_RELEASE_WINDOWS_THUMBPRINT: ${{ vars.POLO_AI_RELEASE_WINDOWS_THUMBPRINT }}
+      CSC_LINK: ${{ (matrix.platform == 'macos' && secrets.POLO_AI_MACOS_CSC_LINK) || (matrix.platform == 'windows' && secrets.POLO_AI_WINDOWS_CSC_LINK) || '' }}
+      CSC_KEY_PASSWORD: ${{ (matrix.platform == 'macos' && secrets.POLO_AI_MACOS_CSC_KEY_PASSWORD) || (matrix.platform == 'windows' && secrets.POLO_AI_WINDOWS_CSC_KEY_PASSWORD) || '' }}
+      APPLE_ID: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.platform == 'macos' && secrets.POLO_AI_APPLE_TEAM_ID || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require fixed previous release
+        shell: bash
+        run: |
+          missing=""
+          for name in \
+            PREVIOUS_RELEASE_TAG \
+            PREVIOUS_RELEASE_VERSION \
+            PREVIOUS_RELEASE_COMMIT_SHA \
+            EXPECTED_PREVIOUS_ARTIFACT_SHA256; do
+            if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+          done
+          if [ "${{ matrix.platform }}" != "windows" ] \
+            && [ -z "$EXPECTED_PREVIOUS_INSTALLER_SHA256" ]; then
+            missing="$missing EXPECTED_PREVIOUS_INSTALLER_SHA256"
+          fi
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            for name in \
+              POLO_AI_RELEASE_MACOS_TEAM_ID \
+              POLO_AI_RELEASE_MACOS_APP_REQUIREMENT \
+              POLO_AI_RELEASE_MACOS_UV_REQUIREMENT \
+              CSC_LINK \
+              CSC_KEY_PASSWORD \
+              APPLE_ID \
+              APPLE_APP_SPECIFIC_PASSWORD \
+              APPLE_TEAM_ID; do
+              if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+            done
+          fi
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            for name in \
+              POLO_AI_RELEASE_WINDOWS_PUBLISHER \
+              POLO_AI_RELEASE_WINDOWS_THUMBPRINT \
+              CSC_LINK \
+              CSC_KEY_PASSWORD; do
+              if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+            done
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing immutable previous-release contract fields:$missing"
+            exit 1
+          fi
+          if [ "${{ matrix.platform }}" = "macos" ] \
+            && [ "$POLO_AI_RELEASE_MACOS_TEAM_ID" != "$APPLE_TEAM_ID" ]; then
+            echo "::error::Expected macOS Team ID differs from the notarization credential Team ID."
+            exit 1
+          fi
+          semver_pattern="$(tr -d '\r\n' < scripts/strict-semver-pattern.txt)"
+          if [[ "$PREVIOUS_RELEASE_TAG" != v* ]] \
+            || ! [[ "${PREVIOUS_RELEASE_TAG#v}" =~ $semver_pattern ]]; then
+            echo "::error::Previous release must be a semantic immutable tag."
+            exit 1
+          fi
+          if ! [[ "$PREVIOUS_RELEASE_VERSION" =~ $semver_pattern ]]; then
+            echo "::error::Previous release version must be strict SemVer."
+            exit 1
+          fi
+
+      - name: Verify and download previous Unix release before setup
+        if: matrix.platform != 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/preflight-previous-release.sh \
+            --platform "${{ matrix.platform }}" \
+            --artifact-name "${{ matrix.previous_name }}" \
+            --output "previous/verified-contract-${{ matrix.platform }}.json"
+
+      - name: Verify and download previous Windows release before setup
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          & scripts/preflight-previous-release.ps1 `
+            -ArtifactName "${{ matrix.previous_name }}" `
+            -Output "previous/verified-contract-windows.json"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Previous Windows release preflight failed"
+          }
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Linux GUI and AppImage dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 xvfb
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prove clean platform runtime preparation contract
+        shell: bash
+        run: |
+          rm -rf \
+            apps/electron/vendor \
+            apps/electron/node_modules/@anthropic-ai \
+            apps/electron/node_modules/@vscode \
+            apps/electron/packages \
+            apps/electron/resources/bin/darwin-arm64 \
+            apps/electron/resources/bin/darwin-x64 \
+            apps/electron/resources/bin/linux-arm64 \
+            apps/electron/resources/bin/linux-x64 \
+            apps/electron/resources/bin/win32-arm64 \
+            apps/electron/resources/bin/win32-x64
+          bun test scripts/__tests__/prepare-platform-runtime.test.ts
+          test ! -e apps/electron/vendor/bun
+          test -z "$(find apps/electron/resources/bin -maxdepth 2 -type f -name 'uv*' -print -quit)"
+
+      - name: Revalidate persisted previous release contract
+        shell: bash
+        run: |
+          args=(
+            --repository "$GITHUB_REPOSITORY"
+            --tag "$PREVIOUS_RELEASE_TAG"
+            --expected-version "$PREVIOUS_RELEASE_VERSION"
+            --expected-commit "$PREVIOUS_RELEASE_COMMIT_SHA"
+            --resolved-version "$RESOLVED_PREVIOUS_VERSION"
+            --resolved-commit "$RESOLVED_PREVIOUS_COMMIT_SHA"
+            --current-version "$CURRENT_ELECTRON_VERSION"
+            --artifact "$POLO_AI_PREVIOUS_ARTIFACT"
+            --artifact-name "${{ matrix.previous_name }}"
+            --artifact-sha256 "$EXPECTED_PREVIOUS_ARTIFACT_SHA256"
+            --output "previous/verified-contract-${{ matrix.platform }}.json"
+          )
+          if [ "${{ matrix.platform }}" != "windows" ]; then
+            args+=(
+              --installer "$POLO_AI_PREVIOUS_INSTALL_SCRIPT"
+              --installer-sha256 "$EXPECTED_PREVIOUS_INSTALLER_SHA256"
+            )
+          fi
+          bun run scripts/validate-previous-release-contract.ts "${args[@]}"
+
+      - name: Run native Windows launcher ownership tests
+        if: matrix.platform == 'windows'
+        shell: powershell
+        run: |
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass `
+            -File apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows terminal integration tests failed"
+          }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass `
+            -File apps/electron/resources/scripts/tests/windows-terminal-integration-race.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows terminal integration race tests failed"
+          }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass `
+            -File apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows checked-in wrapper smoke failed"
+          }
+
+      - name: Build and run macOS full lifecycle gate
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/full-validation-macos.log"
+          bun run electron:dist:mac --arch=x64 2>&1 | tee "$log"
+          cp "$log" apps/electron/release/full-validation-macos.log
+
+      - name: Build and run Windows full lifecycle gate
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "full-validation-windows.log"
+          bun run electron:dist:win --arch=x64 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows full lifecycle gate failed with exit code $LASTEXITCODE"
+          }
+          Copy-Item -LiteralPath $log `
+            -Destination apps/electron/release/full-validation-windows.log
+
+      - name: Build and run Linux full lifecycle gate
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/full-validation-linux.log"
+          xvfb-run -a bash -c '
+            set -o pipefail
+            test -n "$DISPLAY"
+            test "$DISPLAY" != ":0.0"
+            export POLO_AI_E2E_EXPECTED_DISPLAY="$DISPLAY"
+            bun run electron:dist:linux --arch=x64 2>&1 | tee "$1"
+          ' _ "$log"
+          cp "$log" apps/electron/release/full-validation-linux.log
+
+      - name: Normalize validated Linux artifact name
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          if [ -f apps/electron/release/Polo-AI-x86_64.AppImage ]; then
+            mv apps/electron/release/Polo-AI-x86_64.AppImage \
+              apps/electron/release/Polo-AI-x64.AppImage
+          fi
+          test -f apps/electron/release/Polo-AI-x64.AppImage
+
+      - name: Record Unix validation result
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          result="apps/electron/release/full-validation-${{ matrix.platform }}.txt"
+          {
+            echo "mode=full"
+            echo "platform=${{ matrix.platform }}"
+            echo "commit=${GITHUB_SHA}"
+            echo "previous_release_tag=${PREVIOUS_RELEASE_TAG}"
+            echo "previous_release_version=${PREVIOUS_RELEASE_VERSION}"
+            echo "previous_release_commit=${PREVIOUS_RELEASE_COMMIT_SHA}"
+            echo "previous_artifact_sha256=${EXPECTED_PREVIOUS_ARTIFACT_SHA256}"
+            echo "previous_installer_sha256=${EXPECTED_PREVIOUS_INSTALLER_SHA256}"
+            if [ "${{ matrix.platform }}" = "macos" ]; then
+              shasum -a 256 \
+                apps/electron/release/Polo-AI-x64.dmg \
+                apps/electron/release/Polo-AI-x64.zip
+            else
+              sha256sum apps/electron/release/Polo-AI-x64.AppImage
+            fi
+            cat "previous/verified-contract-${{ matrix.platform }}.json"
+            grep -F 'macos-focus-state ' \
+              "apps/electron/release/full-validation-${{ matrix.platform }}.log" \
+              || true
+            grep -F 'release-signing-' \
+              "apps/electron/release/full-validation-${{ matrix.platform }}.log" \
+              || true
+          } > "$result"
+
+      - name: Record Windows validation result
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $hash = Get-FileHash apps/electron/release/Polo-AI-x64.exe -Algorithm SHA256
+          @(
+            "mode=full"
+            "platform=windows"
+            "commit=$env:GITHUB_SHA"
+            "previous_release_tag=$env:PREVIOUS_RELEASE_TAG"
+            "previous_release_version=$env:PREVIOUS_RELEASE_VERSION"
+            "previous_release_commit=$env:PREVIOUS_RELEASE_COMMIT_SHA"
+            "previous_artifact_sha256=$env:EXPECTED_PREVIOUS_ARTIFACT_SHA256"
+            "sha256=$($hash.Hash.ToLowerInvariant())  apps/electron/release/Polo-AI-x64.exe"
+            (Get-Content "previous/verified-contract-windows.json" -Raw)
+            (Get-Content "apps/electron/release/release-signing-audit-Windows.jsonl" -Raw)
+          ) | Set-Content apps/electron/release/full-validation-windows.txt
+
+      - name: Upload blocking artifacts and validation result
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-${{ matrix.platform }}-${{ github.sha }}
+          path: |
+            ${{ matrix.artifact_paths }}
+            previous/verified-contract-${{ matrix.platform }}.json
+          if-no-files-found: error
+          retention-days: 14

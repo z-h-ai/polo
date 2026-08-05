@@ -28,6 +28,9 @@ type ApiToChannelMapKeys = Exclude<
   | 'getSystemWarnings' // reads env var set at startup — no IPC needed
   | 'relaunchApp' // direct IPC to main process — not through WS RPC
   | 'removeWorkspace' // direct IPC to main process — modifies local config
+  | 'getTerminalIntegrationStatus' // direct IPC to main process — local launcher inspection
+  | 'installTerminalIntegration' // direct IPC to main process — local launcher mutation
+  | 'uninstallTerminalIntegration' // direct IPC to main process — local launcher mutation
   | 'invokeOnServer' // direct IPC to main process — cross-server RPC
   | 'transferSessionToWorkspace' // direct IPC to main process — orchestrated remote transfer
   | 'onTransferProgress' // direct IPC listener — chunk upload progress

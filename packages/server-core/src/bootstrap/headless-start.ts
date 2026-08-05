@@ -1,8 +1,8 @@
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs'
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs'
 import { uptime as osUptime } from 'node:os'
 import { join } from 'node:path'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
-import { ensureConfigDir, loadStoredConfig, saveConfig } from '@polo-ai/shared/config'
+import { ensureConfigDir, initializeStoredConfigIfMissing } from '@polo-ai/shared/config'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { WsRpcServer, type WsRpcTlsOptions } from '../transport/server'
@@ -127,7 +127,16 @@ export function generateServerToken(): string {
 // Startup lock file
 // ---------------------------------------------------------------------------
 
-const LOCK_FILE = join(CONFIG_DIR, '.server.lock')
+/**
+ * Server-process coordination is intentionally separate from user config.
+ *
+ * Normal long-lived servers keep the historical CONFIG_DIR lock. A temporary
+ * `polo run` server supplies a private POLO_AI_SERVER_RUNTIME_DIR so multiple
+ * invocations can share the user's config and credentials without contending
+ * on the long-lived Electron/server lock.
+ */
+const SERVER_RUNTIME_DIR = process.env.POLO_AI_SERVER_RUNTIME_DIR || CONFIG_DIR
+const LOCK_FILE = join(SERVER_RUNTIME_DIR, '.server.lock')
 
 interface LockPayload {
   pid: number
@@ -177,6 +186,10 @@ function isLockFromPreviousBoot(startedAt: number): boolean {
 }
 
 function acquireServerLock(logger: PlatformServices['logger']): void {
+  if (!existsSync(SERVER_RUNTIME_DIR)) {
+    mkdirSync(SERVER_RUNTIME_DIR, { recursive: true, mode: 0o700 })
+  }
+
   if (existsSync(LOCK_FILE)) {
     try {
       const content = readFileSync(LOCK_FILE, 'utf-8')
@@ -249,17 +262,15 @@ function bootstrapConfigArtifacts(platform: PlatformServices): void {
 }
 
 function ensureGlobalConfigExists(platform: PlatformServices): void {
-  const config = loadStoredConfig()
-  if (config) {
-    platform.logger.info('[bootstrap] Global config found')
-    return
-  }
-
-  saveConfig({
+  const created = initializeStoredConfigIfMissing({
     workspaces: [],
     activeWorkspaceId: null,
     activeSessionId: null,
   })
+  if (!created) {
+    platform.logger.info('[bootstrap] Global config found')
+    return
+  }
   platform.logger.info('[bootstrap] Initialized missing global config')
 }
 
