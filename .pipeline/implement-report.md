@@ -1,57 +1,74 @@
-# POO-16 实现报告
+# POO-26 实现报告
 
 ## 变更摘要
 
-本轮从当前 HEAD `a1059257` 继续，没有重新实施、回退或丢弃已有变更。逐项复核需求快照中的六个 reviewer 问题及 2026-08-04 人工裁决后确认，当前分支已经具备对应实现和回归测试：
+本轮在最新 `dev` 派生的 `POO-26/feat/shared-v0.12.0-contract` 上完成 `@z-h-ai/shared@0.12.0` 候选实现，未合并或 cherry-pick 旧 POO-26 大提交，也未 push、tag 或发布 registry package。
 
-1. 配置快照递归复制使用 `dereference: false`，复制后拒绝任何 symlink；外部目标不会进入持久 Thread。
-2. workspace exec 会把应用级 `permissions/default.json` 固化进调用开始时的 `config-snapshot/`；全新安装才回退 bundled default。
-3. intermediate assistant 文本在 `text_complete.isIntermediate` 时清空，不会拼入最终 stdout、`-o` 或 JSON agent message。
-4. `ExecEventAdapter` 从真实 session event 的 `tokenUsage` 映射 JSONL usage。
-5. `exec sessions/delete` 对 `--last`、`--yolo`、model/provider/credential 等 execution-only 参数报 usage error，真实 CLI 退出 2；管理子命令使用专属 help。
-6. `exec sessions` 会把 owner 和 lease 均失效的非终态持久 `cli-exec` Thread 修复为 `interrupted`。
+1. Creator Skill upload v2 契约强制 grant 提交 `sizeBytes + archiveChecksum`，grant 响应绑定 expected size/checksum、generation、过期时间和 COS 签名 headers；complete 强制提交同一 generation、size 和 checksum。
+2. AdminClient Safety 查询改为直接调用权威 `/api/installed-artifacts/status`，按 `artifactId + version + archiveChecksum` 精确匹配；删除通过 Member Artifact detail 推导 Safety 状态的 fallback。
+3. Electron renderer 使用纯浏览器、分块、可取消、恒定内存的增量 SHA-256，正式上传 helper 将同一文件身份贯穿 grant、COS PUT 和 complete；产品 UI 与 Creator Skill E2E 共用该 helper，renderer 不注入隐藏账号 Token。
+4. Member detail E2E 改为递归断言不得泄漏 `validationPolicy`、`storageKey`、内部 manifest、validator/checksum/time/issues 等管理和校验元数据。
+5. 选择性移植并更新 package publish manifest、staging、clean-consumer、Next/Turbopack route、进程生命周期与 registry proof 基础设施；开发 monorepo 包名保持不变，发布身份由 `packages/shared/package.publish.json` 独立固定为 `@z-h-ai/shared@0.12.0`。
 
-人工裁决边界保持不变：共享配置工作区中 source/skill 原有配置值允许保留在权限受控的快照中；命令行显式传入的 API key、token 和 Authorization header 仍不得进入持久化产物。credential writer lock 继续使用跨平台 OS 级 native lock。
+## 关键文件
 
-在重跑定向门禁时，既有 delete/acquire 并发回归稳定复现出一个额外生命周期竞态：`acquireCliThreadLease` 在第一次 containment 检查后调用 `ensurePrivateDir`，若 delete 恰好已把 Thread 原子移动到 trash，该调用会重新创建空 Thread 目录，导致 delete 与 acquire 同时成功。本轮移除 acquire 路径的目录创建；后续 state-lock 获取会重新验证现存 Thread，delete 先完成时 acquire 现在 fail closed。
+- `packages/shared/src/creator-skills/{types,schemas}.ts`、`packages/shared/src/admin/client.ts`
+  - strict v2 DTO/Zod/AdminClient 与权威 Safety endpoint。
+- `packages/server-core/src/handlers/rpc/admin.ts`
+  - complete 后对实际 size/checksum fail closed，再触发验证。
+- `apps/electron/src/renderer/lib/creator-skill-upload.ts`
+  - 纯 renderer 增量 SHA-256、取消、预检与严格上传 helper。
+- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
+  - 正式 UI 的 prepare → grant → PUT → complete 流程。
+- `apps/electron/e2e/creator-skill/{main,renderer}.ts`、`scripts/electron-creator-skill-e2e.ts`
+  - E2E 共用正式 helper，并更新 Member 脱敏断言。
+- `packages/shared/package.publish.json`、`.github/workflows/publish-shared-package.yml`
+  - 固定 0.12.0/GitHub Packages 发布身份和同一候选 tarball 的 proof/publish 流程。
+- `packages/shared/scripts/{stage-creator-skills-package,verify-creator-skills-package,verify-creator-skills-package-lifecycle,verify-proof-failure-lifecycle}.ts`
+  - staging、无 sibling frozen consumer、CJS/ESM、TypeScript、Next 16/Turbopack、真实 route、fixtures、strict v2、负向制品边界及失败生命周期证明。
+- `docs/shared-package-publishing.md`
+  - 0.12.0 候选、正式发布门禁、registry-backed proof 与 POL-59 下游交接说明。
 
-## 关键文件列表
+## 测试命令与结果
 
-- `apps/cli/src/cli-thread-store.ts`
-  - 修复 delete/acquire 竞态，禁止 lease acquire 重建已被删除的 Thread 目录。
-- `apps/cli/src/cli-thread-store.test.ts`
-  - 既有跨进程 30 轮 delete/acquire 互斥回归覆盖本轮修复；本轮未改测试文件。
-- `apps/cli/src/one-shot.ts`、`apps/cli/src/one-shot.test.ts`
-  - 配置 symlink、应用级权限快照、intermediate/final message 边界及回归。
-- `apps/cli/src/exec-event-adapter.ts`、`apps/cli/src/exec-event-adapter.test.ts`
-  - `tokenUsage` 到稳定 JSONL usage 的映射及回归。
-- `apps/cli/src/execution-parser.ts`、`apps/cli/src/execution-parser.test.ts`、`apps/cli/src/index.test.ts`
-  - 管理子命令参数白名单、退出码、专属 help 和 SIGKILL 后 sessions 修复回归。
-- `packages/shared/src/credentials/backends/native-write-lock.ts`
-  - POSIX `flock` / Windows named mutex 的 OS 级 credential writer lock。
-
-## 自测结果
-
-- 六项 reviewer 问题、credential lock 与 Thread store 定向回归：
-  - `NO_COLOR=1 bun test apps/cli/src/one-shot.test.ts apps/cli/src/exec-event-adapter.test.ts apps/cli/src/execution-parser.test.ts apps/cli/src/index.test.ts apps/cli/src/cli-thread-store.test.ts packages/shared/src/credentials/__tests__/secure-storage-write-lock.test.ts`
-  - 通过：64 pass，0 fail，530 expect。
-- delete/acquire 竞态压力复验：
-  - `for i in {1..5}; do NO_COLOR=1 bun test apps/cli/src/cli-thread-store.test.ts --test-name-pattern 'serializes delete and acquire' || exit 1; done`
-  - 通过：连续 5 轮，每轮 30 个跨进程竞争场景均只有一个操作成功。
-- 全量测试：
-  - `NO_COLOR=1 bun run test`
-  - 通过：普通全量 4906 pass、19 skip、0 fail，381 files；随后仓库全部 `*.isolated.ts` 测试通过，命令退出 0。
-- 全量类型检查：
-  - `NO_COLOR=1 bun run typecheck:all`
-  - 通过：core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部退出 0。
-- server subprocess 构建：
-  - `NO_COLOR=1 bun run server:build:subprocess`
-  - 通过：Session MCP 390 modules / 4.58 MB；Pi Agent 3999 modules / 20.41 MB。
+- `bun install --frozen-lockfile`
+  - 通过；frozen workspace 依赖安装完成。
+- `NO_COLOR=1 bun test packages/shared/src/creator-skills/__tests__ packages/shared/src/admin/__tests__/client.test.ts packages/server-core/src/handlers/rpc/admin.test.ts apps/electron/src/renderer/lib/__tests__/creator-skill-upload.test.ts`
+  - 通过：147 pass，0 fail，715 expect。
+- `NO_COLOR=1 bun test --isolate ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
+  - 通过：15 pass，0 fail；有一条既有 React `act(...)` warning，不影响退出码。
+- `NO_COLOR=1 bun run typecheck:all`
+  - 通过。
+- `NO_COLOR=1 bun x tsc --noEmit -p apps/electron/e2e/creator-skill/tsconfig.json`
+  - 通过。
+- `NO_COLOR=1 bun run electron:build`
+  - 通过；main、preload、renderer、resources 与 CLI production build 均成功。
+- Electron Creator Skill renderer E2E harness 单独以 `esbuild --platform=browser` 构建，并扫描禁止 `node:crypto`、`node:fs`、`require("crypto")`。
+  - 通过；新增实现未把 Node-only API 或依赖带入 renderer。
+- `bun run --cwd packages/shared prepack`
+  - 通过；生成可发布 staging 产物。
+- `bun run --cwd packages/shared test:creator-skills-package-failures`
+  - 通过；early-exit、spawn-error 与 wrapper cleanup 均完成，无遗留进程。
+- `NO_COLOR=1 bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --allow-dirty-snapshot --output-dir .pipeline/artifacts/shared-0.12.0-candidate`
+  - 通过；CI-style proof 自行退出，SIGTERM 后无强杀、无存活 descendant。
 - `git diff --check`
   - 通过。
 
-## 遗留问题
+## 候选 package 证据
 
-- 本轮 coder 范围内无已知遗留实现问题；仍需由独立 reviewer 按任务约定重新验收，不能以 coder 自测替代 review 终态。
-- 当前环境未执行 Windows/Linux 实机安装、签名、notarization、DMG、NSIS 或 AppImage/FUSE 安装。
-- 用户已有 `.task/session-analysis/` 未改动、未删除、未提交；`.pipeline/fix-report-round1.md`、`.pipeline/fix-report-round2.md` 的既有删除状态保持不纳入本轮提交。
+- 候选 tarball：`.pipeline/artifacts/shared-0.12.0-candidate/z-h-ai-shared-0.12.0.tgz`
+- package：`@z-h-ai/shared@0.12.0`
+- registry 配置：`https://npm.pkg.github.com`
+- SHA-256：`714f5977adfcf8bfdbff55113fdea402f7281df394f7c7018ec7599bd5c15376`
+- npm integrity：`sha512-qF4w7S7Wvud1qclnDxOrBu8nvMa8KIvOd6nYODWpl2yyak5MKmVDmvY30RbMyZqR9tjtxw2B5n4BWTQFXSIvuw==`
+- npm shasum：`c622a89cda8d0b25ede51f573ea588f00d54394b`
+- fixture canonical digest：`f9999556728593a5f0f5f3e22f89b1e86793ae5232f7e11e68324ef82927136c`
+- clean consumer：仓库外临时目录、tarball frozen `npm ci`；CJS、ESM、TypeScript 6.0.3、Next.js 16.2.7/Turbopack production build、真实 route、fixtures、strict upload v2 和负向 tarball 边界全部通过。
+- proof 文件：`.pipeline/artifacts/shared-0.12.0-candidate/proof.json`、`lifecycle-proof.json`、`clean-consumer-package-lock.json`。
+- 该候选在提交前以 `--allow-dirty-snapshot` 验证，因此 proof 明确记录起始 HEAD `d32b8782562d70fc48bafc86d0253c8df2976e96` 和 `gitSnapshotClean: false`；它是本地候选证据，不冒充 tag、release commit 或 registry 证据。
+
+## 遗留问题与停止边界
+
+- 按 coder 边界未 push、未创建 `shared-v0.12.0` tag、未发布 GitHub Packages，也未执行/伪造 registry-backed proof 或 polo-admin 自身 `GITHUB_TOKEN` package access proof。这些必须在 Ultra-Coding pass 后对正式发布的同一不可变制品执行。
+- 本机 `127.0.0.1:3000` Admin 服务不可用，因而未运行依赖隔离 Admin、真实腾讯 COS 和 Electron 的完整 Creator Skill E2E；本轮只完成 production Electron build、renderer helper/E2E harness 编译及相关单测。真实 COS smoke 仍是最终跨仓验收门禁。
+- POL-59 仍需在正式 0.12.0 发布后固定 dependency/lockfile、恢复 release gate 并执行其独立业务验收；POO-21 仍需复验 Electron 安装、更新、卸载与 Ledger/journal 闭环。

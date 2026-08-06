@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import {
   CreateCreatorArtifactRpcInputSchema,
   CreatorArtifactIdRpcInputSchema,
+  CreatorArtifactUploadCompleteRpcInputSchema,
+  CreatorArtifactUploadGrantRpcInputSchema,
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
@@ -82,6 +84,39 @@ describe('Creator Skill boundary schemas', () => {
       workspaceId: 'workspace-id',
       skillSlug: 'review-helper',
       injected: true,
+    }).success).toBe(false)
+  })
+
+  it('requires exact archive identity for upload grant and completion RPCs', () => {
+    const binding = {
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      sizeBytes: 1024,
+      archiveChecksum: 'A'.repeat(64),
+      idempotencyKey: 'upload-request-1',
+    }
+    expect(CreatorArtifactUploadGrantRpcInputSchema.parse(binding)).toEqual({
+      ...binding,
+      archiveChecksum: 'a'.repeat(64),
+    })
+    expect(CreatorArtifactUploadGrantRpcInputSchema.safeParse({
+      ...binding,
+      sizeBytes: undefined,
+    }).success).toBe(false)
+    expect(CreatorArtifactUploadGrantRpcInputSchema.safeParse({
+      ...binding,
+      archiveChecksum: undefined,
+    }).success).toBe(false)
+
+    expect(CreatorArtifactUploadCompleteRpcInputSchema.safeParse({
+      ...binding,
+      uploadGeneration: 2,
+    }).success).toBe(true)
+    expect(CreatorArtifactUploadCompleteRpcInputSchema.safeParse({
+      ...binding,
+      uploadGeneration: 2,
+      archiveChecksum: undefined,
     }).success).toBe(false)
   })
 

@@ -18781,15 +18781,13 @@ var CreatorArtifactVersionMutationResponseSchema = external_exports.object({
 var CreatorSkillUploadGrantSchema = external_exports.object({
   method: external_exports.literal("PUT"),
   url: external_exports.string().url().max(8192),
-  headers: external_exports.record(external_exports.string(), external_exports.string().max(8192)).optional(),
+  headers: external_exports.record(external_exports.string(), external_exports.string().max(8192)),
   expiresAt: isoDate,
-  uploadGeneration: external_exports.number().int().positive()
+  uploadGeneration: external_exports.number().int().positive(),
+  expectedSizeBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  expectedArchiveChecksum: checksum
 });
-var CreatorArtifactVersionCreatedResponseSchema = external_exports.object({
-  version: CreatorArtifactVersionSchema,
-  upload: CreatorSkillUploadGrantSchema,
-  replayed: external_exports.boolean().optional()
-});
+var CreatorArtifactVersionCreatedResponseSchema = CreatorArtifactVersionMutationResponseSchema;
 var CreatorSkillManifestEntrySchema = external_exports.object({
   path: external_exports.string().min(1).max(4096),
   size: external_exports.number().int().nonnegative().max(HARD_SKILL_ARCHIVE_POLICY.maxFileBytes),
@@ -18879,11 +18877,14 @@ var CreatorArtifactUploadGrantRpcInputSchema = external_exports.object({
   organizationId: entityId,
   artifactId: entityId,
   version: stableSemver,
+  sizeBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  archiveChecksum: checksum,
   idempotencyKey
 }).strict();
 var CreatorArtifactUploadCompleteRpcInputSchema = CreatorArtifactUploadGrantRpcInputSchema.extend({
   uploadGeneration: external_exports.number().int().positive(),
-  sizeBytes: external_exports.number().int().nonnegative().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes)
+  sizeBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  archiveChecksum: checksum
 }).strict();
 var CreatorArtifactRevokeRpcInputSchema = CreatorArtifactVersionRpcInputSchema.extend({
   reason: external_exports.string().trim().min(1).max(2e3)

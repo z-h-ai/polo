@@ -36,14 +36,13 @@ import { translateCreatorSkillValidationIssue } from '@/lib/creator-skill-valida
 import { compareStableCreatorSkillVersion } from '@/lib/creator-skill-version'
 import {
   CreatorSkillUploadError,
-  preflightCreatorSkillUploadFile,
+  prepareCreatorSkillUploadFile,
   uploadCreatorSkillArchive,
 } from '@/lib/creator-skill-upload'
 import type {
   CreatorArtifact,
   CreatorArtifactDetail,
   CreatorArtifactVersion,
-  CreatorSkillUploadGrant,
   CreatorSkillOperationProgress,
   SkillValidationIssue,
 } from '../../../shared/types'
@@ -112,7 +111,6 @@ export function CreatorArtifactsPanel({
   const [version, setVersion] = useState('1.0.0')
   const [changelog, setChangelog] = useState('')
   const [draftVersionId, setDraftVersionId] = useState<string | null>(null)
-  const [draftUploadGrant, setDraftUploadGrant] = useState<CreatorSkillUploadGrant | null>(null)
   const [installVersion, setInstallVersion] = useState('')
   const [progress, setProgress] = useState<CreatorSkillOperationProgress | null>(null)
   const [operationId, setOperationId] = useState<string | null>(null)
@@ -522,7 +520,6 @@ export function CreatorArtifactsPanel({
         return
       }
       setDraftVersionId(result.version.id)
-      setDraftUploadGrant(result.upload)
       await loadDetail(detail.artifact.id)
     } finally {
       setAction(null)
@@ -539,25 +536,23 @@ export function CreatorArtifactsPanel({
     setError(null)
     setIssues([])
     try {
-      await preflightCreatorSkillUploadFile(file, detail.artifact.slug)
-      let uploadGrant = draftUploadGrant
-      // A page reopen deliberately does not retain a signed URL. Renew it at
-      // the last responsible moment; this RPC carries no archive bytes.
-      if (!uploadGrant || Date.parse(uploadGrant.expiresAt) <= Date.now()) {
-        const renewed = await window.electronAPI.creatorArtifactCreateUploadGrant({
-          organizationId,
-          artifactId: detail.artifact.id,
-          version: draftVersion.version,
-          idempotencyKey: idempotencyKey('version-upload-grant'),
-        })
-        if (!renewed.success) {
-          setError(resultMessage(t, renewed))
-          return
-        }
-        uploadGrant = renewed.grant
-        setDraftUploadGrant(uploadGrant)
+      const prepared = await prepareCreatorSkillUploadFile(file, detail.artifact.slug, {
+        signal: controller.signal,
+      })
+      const granted = await window.electronAPI.creatorArtifactCreateUploadGrant({
+        organizationId,
+        artifactId: detail.artifact.id,
+        version: draftVersion.version,
+        sizeBytes: prepared.sizeBytes,
+        archiveChecksum: prepared.archiveChecksum,
+        idempotencyKey: idempotencyKey('version-upload-grant'),
+      })
+      if (!granted.success) {
+        setError(resultMessage(t, granted))
+        return
       }
-      const uploaded = await uploadCreatorSkillArchive(file, uploadGrant, {
+      const uploadGrant = granted.grant
+      const uploaded = await uploadCreatorSkillArchive(file, uploadGrant, prepared, {
         signal: controller.signal,
       })
       const result = await window.electronAPI.creatorArtifactCompleteUpload({
@@ -566,6 +561,7 @@ export function CreatorArtifactsPanel({
         version: draftVersion.version,
         uploadGeneration: uploadGrant.uploadGeneration,
         sizeBytes: uploaded.sizeBytes,
+        archiveChecksum: uploaded.archiveChecksum,
         idempotencyKey: idempotencyKey('version-upload-complete'),
       })
       if (!result.success) {
@@ -625,7 +621,6 @@ export function CreatorArtifactsPanel({
         return
       }
       setDraftVersionId(null)
-      setDraftUploadGrant(null)
       await loadDetail(detail.artifact.id)
     } finally {
       setAction(null)

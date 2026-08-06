@@ -11,6 +11,7 @@ const configDirectory = join(temporaryDirectory, 'config')
 const blankHtmlPath = join(temporaryDirectory, 'blank.html')
 const mainOutput = join(temporaryDirectory, 'main.cjs')
 const preloadOutput = join(temporaryDirectory, 'bootstrap-preload.cjs')
+const rendererHarnessOutput = join(temporaryDirectory, 'renderer-harness.js')
 const electronExecutable = require('electron') as string
 
 function validateLoopback(urlValue: string): void {
@@ -39,7 +40,7 @@ async function preflightAdminLoopback(urlValue: string): Promise<void> {
 async function main(): Promise<void> {
   validateLoopback(adminBaseUrl)
   await preflightAdminLoopback(adminBaseUrl)
-  const blankHtml = '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>'
+  const blankHtml = '<!doctype html><html><head><meta charset="utf-8"></head><body><script src="./renderer-harness.js"></script></body></html>'
   mkdirSync(workspaceRoot, { recursive: true })
   mkdirSync(configDirectory, { recursive: true })
   writeFileSync(blankHtmlPath, blankHtml)
@@ -77,6 +78,14 @@ async function main(): Promise<void> {
       format: 'cjs',
       outfile: preloadOutput,
       platform: 'node',
+    }),
+    build({
+      absWorkingDir: rootDirectory,
+      bundle: true,
+      entryPoints: ['apps/electron/e2e/creator-skill/renderer.ts'],
+      format: 'iife',
+      outfile: rendererHarnessOutput,
+      platform: 'browser',
     }),
   ])
 

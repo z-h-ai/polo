@@ -1757,9 +1757,15 @@ export function registerAdminHandlers(
     return callOrganization('completeCreatorSkillUpload', async (client, accessToken, userId) => {
       const completed = await client.completeCreatorSkillUpload(accessToken, input.data)
       const archiveChecksum = completed.archiveChecksum
-      if (!archiveChecksum) {
+      if (!archiveChecksum || archiveChecksum !== input.data.archiveChecksum) {
         throw new AdminError(
-          'Admin service did not calculate the uploaded archive checksum',
+          'Admin service did not bind the uploaded archive checksum',
+          'checksum_mismatch',
+        )
+      }
+      if (completed.sizeBytes !== input.data.sizeBytes) {
+        throw new AdminError(
+          'Admin service did not bind the uploaded archive size',
           'checksum_mismatch',
         )
       }
