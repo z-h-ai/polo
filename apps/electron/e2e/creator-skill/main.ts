@@ -187,6 +187,7 @@ function assertNoMemberMetadataLeak(value: unknown, path = '$'): void {
   }
   const forbiddenFields = new Set([
     'validationPolicy',
+    'uploadGeneration',
     'storageKey',
     'manifest',
     'validatorVersion',

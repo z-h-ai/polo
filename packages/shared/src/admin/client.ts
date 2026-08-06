@@ -33,7 +33,7 @@ import {
   type CreatorArtifactCapability,
   type CreatorArtifactCatalogPage,
   type CreatorArtifactDetail,
-  type CreatorArtifactVersion,
+  type CreatorArtifactManagerVersion,
   type CreatorSkillDownloadGrant,
   type CreatorSkillSafetyStatus,
   type CreatorSkillUploadGrant,
@@ -620,7 +620,7 @@ export class AdminClient {
     accessToken: string,
     input: CreateCreatorArtifactVersionInput,
   ): Promise<{
-    version: CreatorArtifactVersion;
+    version: CreatorArtifactManagerVersion;
     replayed?: boolean;
   }> {
     const response = await this.request<unknown>(
@@ -685,7 +685,7 @@ export class AdminClient {
       archiveChecksum: string;
       idempotencyKey: string;
     },
-  ): Promise<CreatorArtifactVersion> {
+  ): Promise<CreatorArtifactManagerVersion> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/upload-complete`,
       {
@@ -708,7 +708,7 @@ export class AdminClient {
       artifactId: string;
       version: string;
     },
-  ): Promise<CreatorArtifactVersion> {
+  ): Promise<CreatorArtifactManagerVersion> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/validate`,
       {
@@ -733,7 +733,7 @@ export class AdminClient {
       version: string;
       idempotencyKey: string;
     },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<{ version: CreatorArtifactManagerVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/publish`,
       {
@@ -753,7 +753,7 @@ export class AdminClient {
       version: string;
       idempotencyKey: string;
     },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<{ version: CreatorArtifactManagerVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}`,
       {
@@ -795,7 +795,7 @@ export class AdminClient {
       reason: string;
       idempotencyKey: string;
     },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<{ version: CreatorArtifactManagerVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/revoke`,
       {

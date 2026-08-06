@@ -96,6 +96,15 @@ const adminClientBehavior = {
     _accessToken: string,
     _input: unknown,
   ): Promise<any> => ({ artifacts: [] }),
+  getCreatorArtifact: async (
+    _accessToken: string,
+    _organizationId: string,
+    _artifactId: string,
+    _version?: string,
+    _referencePath?: string,
+  ): Promise<any> => {
+    throw new Error('getCreatorArtifact behavior not configured')
+  },
   createCreatorSkillUploadGrant: async (_accessToken: string, _input: unknown): Promise<any> => ({
     method: 'PUT',
     url: 'https://uploads.example.test/object',
@@ -204,6 +213,27 @@ class MockAdminClient {
       accessToken,
     })
     return adminClientBehavior.listCreatorArtifacts(accessToken, input)
+  }
+
+  async getCreatorArtifact(
+    accessToken: string,
+    organizationId: string,
+    artifactId: string,
+    version?: string,
+    referencePath?: string,
+  ) {
+    adminClientCalls.push({
+      method: 'getCreatorArtifact',
+      args: [organizationId, artifactId, version, referencePath],
+      accessToken,
+    })
+    return adminClientBehavior.getCreatorArtifact(
+      accessToken,
+      organizationId,
+      artifactId,
+      version,
+      referencePath,
+    )
   }
 
   async createCreatorSkillUploadGrant(accessToken: string, input: unknown) {
@@ -432,6 +462,10 @@ function createHarness() {
       handlers,
       RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS,
     ),
+    getCreatorArtifact: requiredHandler(
+      handlers,
+      RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT,
+    ),
     createCreatorSkillUploadGrant: requiredHandler(
       handlers,
       RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT,
@@ -567,6 +601,9 @@ beforeEach(() => {
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
   adminClientBehavior.listCreatorArtifacts = async () => ({ artifacts: [] })
+  adminClientBehavior.getCreatorArtifact = async () => {
+    throw new Error('getCreatorArtifact behavior not configured')
+  }
   adminClientBehavior.createCreatorSkillUploadGrant = async () => ({
     method: 'PUT',
     url: 'https://uploads.example.test/object',
@@ -610,6 +647,7 @@ describe('registerAdminHandlers', () => {
       'createOrganizationInvitation',
       'createOrganizationJoinLink',
       'getAuthConfig',
+      'getCreatorArtifact',
       'getPhoneAuthChallengeConfig',
       'listCreatorArtifacts',
       'listOrganizationInvitations',
@@ -683,6 +721,90 @@ describe('registerAdminHandlers', () => {
         accessToken: 'creator-access-token',
       },
     ])
+  })
+
+  it('fails closed before validation when completion returns another upload generation', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'user-1',
+      username: 'creator',
+    }
+    adminClientBehavior.completeCreatorSkillUpload = async () => ({
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'uploaded',
+      archiveChecksum: 'a'.repeat(64),
+      sizeBytes: 42,
+      uploadGeneration: 2,
+      createdAt: '2026-07-31T00:00:00.000Z',
+    })
+    const { completeCreatorSkillUpload } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+
+    await expect(completeCreatorSkillUpload(context, {
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      uploadGeneration: 1,
+      sizeBytes: 42,
+      archiveChecksum: 'a'.repeat(64),
+      idempotencyKey: 'upload-complete-1',
+    })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'version_conflict',
+    })
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'completeCreatorSkillUpload',
+    ])
+  })
+
+  it('strips upload generation from Member detail at the RPC boundary', async () => {
+    managerState.tokens = {
+      accessToken: 'member-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'member-1',
+      username: 'member',
+    }
+    adminClientBehavior.getCreatorArtifact = async () => ({
+      artifact: {
+        id: 'artifact-id',
+        organizationId: 'organization-id',
+        type: 'skill',
+        slug: 'review-helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      },
+      versions: [{
+        id: 'version-id',
+        artifactId: 'artifact-id',
+        version: '1.0.0',
+        status: 'published',
+        archiveChecksum: 'a'.repeat(64),
+        sizeBytes: 42,
+        uploadGeneration: 8,
+        createdAt: '2026-07-30T00:00:00.000Z',
+        publishedAt: '2026-07-30T00:01:00.000Z',
+      }],
+      selectedVersion: '1.0.0',
+    })
+    const { getCreatorArtifact } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+
+    const response = await getCreatorArtifact(context, {
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+    }) as { success: boolean; versions?: Array<Record<string, unknown>> }
+
+    expect(response.success).toBe(true)
+    expect(response.versions?.[0]).not.toHaveProperty('uploadGeneration')
   })
 
   it('forwards organization onboarding through the authenticated admin session', async () => {

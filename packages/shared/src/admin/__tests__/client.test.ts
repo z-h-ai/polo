@@ -1226,6 +1226,49 @@ describe('AdminClient', () => {
     });
   });
 
+  it('parses redacted Member detail and strips an accidental upload generation', async () => {
+    mockJsonFetch({
+      artifact: {
+        id: 'artifact-1',
+        organizationId: 'organization-1',
+        type: 'skill',
+        slug: 'review-helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      },
+      versions: [{
+        id: 'version-1',
+        artifactId: 'artifact-1',
+        version: '1.0.0',
+        status: 'published',
+        archiveChecksum: 'a'.repeat(64),
+        sizeBytes: 123,
+        createdAt: '2026-07-30T00:00:00.000Z',
+        publishedAt: '2026-07-30T00:01:00.000Z',
+        uploadGeneration: 9,
+      }],
+      selectedVersion: '1.0.0',
+    });
+    const client = new AdminClient('https://admin.example.com');
+
+    const detail = await client.getCreatorArtifact(
+      'member-access-token',
+      'organization-1',
+      'artifact-1',
+      '1.0.0',
+    );
+
+    expect(detail.versions[0]).not.toHaveProperty('uploadGeneration');
+    expect(detail.versions[0]).toMatchObject({
+      id: 'version-1',
+      status: 'published',
+      archiveChecksum: 'a'.repeat(64),
+    });
+  });
+
   it('binds upload grant and completion requests to size and checksum', async () => {
     const archiveChecksum = 'a'.repeat(64);
     const baseVersion = {
