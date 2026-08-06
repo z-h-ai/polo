@@ -177,16 +177,15 @@ export const CreatorArtifactVersionMutationResponseSchema = z.object({
 export const CreatorSkillUploadGrantSchema = z.object({
   method: z.literal('PUT'),
   url: z.string().url().max(8_192),
-  headers: z.record(z.string(), z.string().max(8_192)).optional(),
+  headers: z.record(z.string(), z.string().max(8_192)),
   expiresAt: isoDate,
   uploadGeneration: z.number().int().positive(),
+  expectedSizeBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  expectedArchiveChecksum: checksum,
 })
 
-export const CreatorArtifactVersionCreatedResponseSchema = z.object({
-  version: CreatorArtifactVersionSchema,
-  upload: CreatorSkillUploadGrantSchema,
-  replayed: z.boolean().optional(),
-})
+export const CreatorArtifactVersionCreatedResponseSchema =
+  CreatorArtifactVersionMutationResponseSchema
 
 export const CreatorSkillManifestEntrySchema = z.object({
   path: z.string().min(1).max(4_096),
@@ -294,13 +293,16 @@ export const CreatorArtifactUploadGrantRpcInputSchema = z.object({
   organizationId: entityId,
   artifactId: entityId,
   version: stableSemver,
+  sizeBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  archiveChecksum: checksum,
   idempotencyKey,
 }).strict()
 
 export const CreatorArtifactUploadCompleteRpcInputSchema = CreatorArtifactUploadGrantRpcInputSchema
   .extend({
     uploadGeneration: z.number().int().positive(),
-    sizeBytes: z.number().int().nonnegative().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+    sizeBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+    archiveChecksum: checksum,
   })
   .strict()
 

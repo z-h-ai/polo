@@ -191,6 +191,29 @@ function logStep(step: string): void {
   console.log(JSON.stringify({ event: 'creator_skill_step', step }))
 }
 
+function assertNoMemberMetadataLeak(value: unknown, path = '$'): void {
+  if (!value || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoMemberMetadataLeak(item, `${path}[${index}]`))
+    return
+  }
+  const forbiddenFields = new Set([
+    'validationPolicy',
+    'storageKey',
+    'manifest',
+    'validatorVersion',
+    'validatedArchiveChecksum',
+    'validatedAt',
+    'validationIssues',
+  ])
+  for (const [key, nested] of Object.entries(value)) {
+    if (forbiddenFields.has(key)) {
+      throw new Error(`Member artifact detail leaked ${key} at ${path}`)
+    }
+    assertNoMemberMetadataLeak(nested, `${path}.${key}`)
+  }
+}
+
 function createSkillArchive(content: string): Uint8Array {
   return zipSync({
     [`${workspace.slug}/SKILL.md`]: strToU8(content),
@@ -358,24 +381,10 @@ async function createVersion(
 ): Promise<{
   versionId: string
   version: string
-  upload: {
-    method: 'PUT'
-    url: string
-    headers?: Record<string, string>
-    expiresAt: string
-    uploadGeneration: number
-  }
 }> {
   const versionResult = await rendererAdminCall<{
     success: boolean
     version?: { id: string }
-    upload?: {
-      method: 'PUT'
-      url: string
-      headers?: Record<string, string>
-      expiresAt: string
-      uploadGeneration: number
-    }
   }>('creatorArtifactCreateVersion', {
     organizationId,
     artifactId,
@@ -383,10 +392,10 @@ async function createVersion(
     changelog,
     idempotencyKey: `creator-skill-version-${randomUUID()}`,
   })
-  if (!versionResult.success || !versionResult.version?.id || !versionResult.upload) {
+  if (!versionResult.success || !versionResult.version?.id) {
     throw new Error(`Failed to create version ${version}`)
   }
-  return { versionId: versionResult.version.id, version, upload: versionResult.upload }
+  return { versionId: versionResult.version.id, version }
 }
 
 async function uploadVersion(
@@ -394,39 +403,66 @@ async function uploadVersion(
   artifactId: string,
   version: string,
   archiveContent: string,
-  upload: {
-    method: 'PUT'
-    url: string
-    headers?: Record<string, string>
-    expiresAt: string
-    uploadGeneration: number
-  },
 ): Promise<{ archiveChecksum: string; contentDigest: string }> {
   const archive = createSkillArchive(archiveContent)
-  const archiveChecksum = createHash('sha256').update(archive).digest('hex')
   const contentDigest = calculateContentDigest([{
     path: 'SKILL.md',
     size: new TextEncoder().encode(archiveContent).byteLength,
     sha256: createHash('sha256').update(archiveContent).digest('hex'),
   }])
-  const uploadResult = await rendererCall<{ ok: boolean }>(`
-    const base64 = ${JSON.stringify(Buffer.from(archive).toString('base64'))}
-    const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
-    const file = new File([bytes], 'creator-skill.zip', { type: 'application/zip' })
-    const headers = ${JSON.stringify({
-      Authorization: `Bearer ${adminAccessToken}`,
-      ...(upload.headers ?? {}),
-    })}
-    const response = await fetch(${JSON.stringify(upload.url)}, {
-      method: ${JSON.stringify(upload.method)},
-      headers,
-      body: file,
-      redirect: 'error',
-    })
-    return { ok: response.ok }
+  const base64Archive = Buffer.from(archive).toString('base64')
+  const prepared = await rendererCall<{
+    handle: string
+    sizeBytes: number
+    archiveChecksum: string
+  }>(`
+    return await window.__creatorSkillUploadHarness.prepare(
+      ${JSON.stringify(base64Archive)},
+      'creator-skill.zip',
+      ${JSON.stringify(workspace.slug)},
+    )
   `)
-  if (!uploadResult.ok) {
-    throw new Error('Creator skill upload PUT failed in renderer')
+  const archiveChecksum = prepared.archiveChecksum
+  const grantResult = await rendererAdminCall<{
+    success: boolean
+    grant?: {
+      method: 'PUT'
+      url: string
+      headers: Record<string, string>
+      expiresAt: string
+      uploadGeneration: number
+      expectedSizeBytes: number
+      expectedArchiveChecksum: string
+    }
+  }>('creatorArtifactCreateUploadGrant', {
+    organizationId,
+    artifactId,
+    version,
+    sizeBytes: prepared.sizeBytes,
+    archiveChecksum,
+    idempotencyKey: `creator-skill-upload-grant-${randomUUID()}`,
+  })
+  const upload = grantResult.grant
+  if (
+    !grantResult.success
+    || !upload
+    || upload.expectedSizeBytes !== prepared.sizeBytes
+    || upload.expectedArchiveChecksum !== archiveChecksum
+  ) throw new Error('Creator skill upload grant was not bound to the archive identity')
+  const uploadResult = await rendererCall<{
+    sizeBytes: number
+    archiveChecksum: string
+  }>(`
+    return await window.__creatorSkillUploadHarness.upload(
+      ${JSON.stringify(prepared.handle)},
+      ${JSON.stringify(upload)},
+    )
+  `)
+  if (
+    uploadResult.sizeBytes !== prepared.sizeBytes
+    || uploadResult.archiveChecksum !== archiveChecksum
+  ) {
+    throw new Error('Creator skill upload helper returned a mismatched archive identity')
   }
 
   const staleCompleteResult = await rendererAdminCall<{ success: boolean }>(
@@ -451,7 +487,8 @@ async function uploadVersion(
     artifactId,
     version,
     uploadGeneration: upload.uploadGeneration,
-    sizeBytes: archive.length,
+    sizeBytes: prepared.sizeBytes,
+    archiveChecksum,
     idempotencyKey: `creator-skill-complete-${randomUUID()}`,
   })
   if (!completeResult.success) {
@@ -710,7 +747,6 @@ async function run(): Promise<void> {
     artifact.id,
     versionOne.version,
     CREATOR_SKILL_FIXTURE_CONTENT,
-    versionOne.upload,
   )
   await waitForValidatedVersion(organization.id, artifact.id, '1.0.0')
   await assertValidationPolicySnapshot(organization.id, artifact.id, '1.0.0')
@@ -805,6 +841,7 @@ async function run(): Promise<void> {
     ) {
       throw new Error('Published artifact detail is incorrect')
     }
+    assertNoMemberMetadataLeak(response)
   }
   {
     const response = await rendererAdminCall<{
@@ -900,7 +937,6 @@ async function run(): Promise<void> {
     artifact.id,
     versionTwo.version,
     updatedContent,
-    versionTwo.upload,
   )
   await waitForValidatedVersion(organization.id, artifact.id, '1.1.0')
   await assertValidationPolicySnapshot(organization.id, artifact.id, '1.1.0')

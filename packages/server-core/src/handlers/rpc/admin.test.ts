@@ -558,8 +558,11 @@ beforeEach(() => {
   adminClientBehavior.createCreatorSkillUploadGrant = async () => ({
     method: 'PUT',
     url: 'https://uploads.example.test/object',
+    headers: { 'content-type': 'application/zip' },
     expiresAt: '2030-01-01T00:00:00.000Z',
     uploadGeneration: 1,
+    expectedSizeBytes: 42,
+    expectedArchiveChecksum: 'a'.repeat(64),
   })
   adminClientBehavior.completeCreatorSkillUpload = async () => ({
     id: 'version-id',
@@ -567,6 +570,7 @@ beforeEach(() => {
     version: '1.0.0',
     status: 'uploaded',
     archiveChecksum: 'a'.repeat(64),
+    sizeBytes: 42,
     uploadGeneration: 1,
     createdAt: '2026-07-31T00:00:00.000Z',
   })
@@ -627,6 +631,8 @@ describe('registerAdminHandlers', () => {
       organizationId: 'organization-id',
       artifactId: 'artifact-id',
       version: '1.0.0',
+      sizeBytes: 42,
+      archiveChecksum: 'a'.repeat(64),
       idempotencyKey: 'upload-request-1',
     }
 
@@ -641,7 +647,6 @@ describe('registerAdminHandlers', () => {
     await expect(completeCreatorSkillUpload(context, {
       ...base,
       uploadGeneration: 1,
-      sizeBytes: 42,
     })).resolves.toMatchObject({
       success: true,
       version: { status: 'validating' },
@@ -654,7 +659,7 @@ describe('registerAdminHandlers', () => {
       },
       {
         method: 'completeCreatorSkillUpload',
-        args: [{ ...base, uploadGeneration: 1, sizeBytes: 42 }],
+        args: [{ ...base, uploadGeneration: 1 }],
         accessToken: 'creator-access-token',
       },
       {

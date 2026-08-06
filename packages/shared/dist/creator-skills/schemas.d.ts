@@ -640,9 +640,11 @@ export declare const CreatorArtifactVersionMutationResponseSchema: z.ZodObject<{
 export declare const CreatorSkillUploadGrantSchema: z.ZodObject<{
     method: z.ZodLiteral<"PUT">;
     url: z.ZodString;
-    headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    headers: z.ZodRecord<z.ZodString, z.ZodString>;
     expiresAt: z.ZodString;
     uploadGeneration: z.ZodNumber;
+    expectedSizeBytes: z.ZodNumber;
+    expectedArchiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
 }, z.core.$strip>;
 export declare const CreatorArtifactVersionCreatedResponseSchema: z.ZodObject<{
     version: z.ZodObject<{
@@ -739,13 +741,6 @@ export declare const CreatorArtifactVersionCreatedResponseSchema: z.ZodObject<{
             field?: string | undefined;
             suggestion?: string | undefined;
         }[] | null | undefined>>>;
-    }, z.core.$strip>;
-    upload: z.ZodObject<{
-        method: z.ZodLiteral<"PUT">;
-        url: z.ZodString;
-        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
-        expiresAt: z.ZodString;
-        uploadGeneration: z.ZodNumber;
     }, z.core.$strip>;
     replayed: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
@@ -879,6 +874,8 @@ export declare const CreatorArtifactUploadGrantRpcInputSchema: z.ZodObject<{
     organizationId: z.ZodString;
     artifactId: z.ZodString;
     version: z.ZodString;
+    sizeBytes: z.ZodNumber;
+    archiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
     idempotencyKey: z.ZodString;
 }, z.core.$strict>;
 export declare const CreatorArtifactUploadCompleteRpcInputSchema: z.ZodObject<{
@@ -888,6 +885,7 @@ export declare const CreatorArtifactUploadCompleteRpcInputSchema: z.ZodObject<{
     idempotencyKey: z.ZodString;
     uploadGeneration: z.ZodNumber;
     sizeBytes: z.ZodNumber;
+    archiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
 }, z.core.$strict>;
 export declare const CreatorArtifactRevokeRpcInputSchema: z.ZodObject<{
     organizationId: z.ZodString;
