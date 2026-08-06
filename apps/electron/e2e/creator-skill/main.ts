@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
+import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { zipSync, strToU8 } from 'fflate'
 import type { Workspace } from '@polo-ai/core/types'
@@ -8,6 +9,7 @@ import {
   CREATOR_SKILL_FIXTURE_CONTENT,
   calculateContentDigest,
   type CreatorSkillOperationProgress,
+  type CreatorSkillsLedger,
 } from '@polo-ai/shared/creator-skills'
 import { AdminClient } from '@polo-ai/shared/admin'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
@@ -52,6 +54,59 @@ const rpcServer = new WsRpcServer({
     }
   },
 })
+
+function readLedger(): CreatorSkillsLedger {
+  return JSON.parse(readFileSync(
+    join(workspace.rootPath, 'creator-skills.json'),
+    'utf8',
+  )) as CreatorSkillsLedger
+}
+
+/**
+ * Persist the same pre-commit journal a killed install leaves behind, then run
+ * startup recovery in a separate Electron-as-Node process. This crosses the
+ * process boundary instead of calling the recovery function in the live E2E
+ * process, so the proof covers durable on-disk restart behavior.
+ */
+function assertRestartRecovery(): void {
+  const ledgerPath = join(workspace.rootPath, 'creator-skills.json')
+  const ledgerBefore = readFileSync(ledgerPath, 'utf8')
+  const operationId = randomUUID()
+  const operationPath = join(workspace.rootPath, '.creator-skill-ops', operationId)
+  mkdirSync(join(operationPath, 'stage'), { recursive: true })
+  writeFileSync(join(operationPath, 'stage', 'partial-download'), 'crash debris')
+  writeFileSync(join(operationPath, 'journal.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    operationId,
+    action: 'install',
+    slug: workspace.slug,
+    targetPath: join(workspace.rootPath, 'skills', workspace.slug),
+    transactionBackupPath: join(operationPath, 'backup'),
+    ledgerPath,
+    oldLedger: null,
+    state: 'preparing',
+  }, null, 2)}\n`)
+
+  const script = [
+    "const { recoverCreatorSkillOperations } = require('@polo-ai/shared/creator-skills')",
+    'recoverCreatorSkillOperations(process.argv[1]).catch(error => { console.error(error); process.exitCode = 1 })',
+  ].join(';')
+  execFileSync(process.execPath, ['-e', script, workspace.rootPath], {
+    cwd: process.cwd(),
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'pipe',
+  })
+
+  if (existsSync(operationPath)) {
+    throw new Error('Restart recovery left the crashed operation journal behind')
+  }
+  if (readFileSync(ledgerPath, 'utf8') !== ledgerBefore) {
+    throw new Error('Restart recovery changed the committed Creator Skill Ledger')
+  }
+  if (!existsSync(join(workspace.rootPath, 'skills', workspace.slug, 'SKILL.md'))) {
+    throw new Error('Restart recovery removed the committed Creator Skill directory')
+  }
+}
 
 let window: BrowserWindow | null = null
 let completed = false
@@ -466,7 +521,11 @@ async function uploadVersion(
     throw new Error('Creator skill upload helper returned a mismatched archive identity')
   }
 
-  const staleCompleteResult = await rendererAdminCall<{ success: boolean }>(
+  const staleCompleteResult = await rendererAdminCall<{
+    success: boolean
+    errorCode?: string
+    status?: number
+  }>(
     'creatorArtifactCompleteUpload',
     {
       organizationId,
@@ -474,11 +533,15 @@ async function uploadVersion(
       version,
       uploadGeneration: upload.uploadGeneration + 1,
       sizeBytes: archive.length,
+      archiveChecksum,
       idempotencyKey: `creator-skill-stale-complete-${randomUUID()}`,
     },
   )
-  if (staleCompleteResult.success) {
-    throw new Error('Stale upload generation unexpectedly completed')
+  // The desktop AdminClient intentionally maps unknown server codes to its
+  // stable VALIDATION_ERROR boundary; HTTP 409 proves the complete request
+  // passed schema validation and reached the stale-generation conflict gate.
+  if (staleCompleteResult.success || staleCompleteResult.status !== 409) {
+    throw new Error(`Stale upload generation was not rejected by the generation gate: ${JSON.stringify(staleCompleteResult)}`)
   }
 
   const completeResult = await rendererAdminCall<{
@@ -917,6 +980,16 @@ async function run(): Promise<void> {
     manifest: downloadGrantOne.manifest ?? [],
     validationPolicy: downloadGrantOne.validationPolicy,
   })
+  const firstLedger = readLedger()
+  if (
+    firstLedger.schemaVersion !== 1
+    || firstLedger.installed.length !== 1
+    || firstLedger.installed[0]?.artifactId !== artifact.id
+    || firstLedger.installed[0]?.version !== '1.0.0'
+  ) {
+    throw new Error(`First install was not committed to the Creator Skill Ledger: ${JSON.stringify(firstLedger)}`)
+  }
+  assertRestartRecovery()
 
   // Publishing remains a manager operation; the member that installed the
   // first release must not be able to create the update.
@@ -1000,6 +1073,17 @@ async function run(): Promise<void> {
   if (existsSync(join(workspace.rootPath, 'skills', workspace.slug))) {
     throw new Error('Uninstall left the formal skill path behind')
   }
+  const finalLedger = readLedger()
+  if (finalLedger.schemaVersion !== 1 || finalLedger.installed.length !== 0) {
+    throw new Error(`Uninstall was not committed to the Creator Skill Ledger: ${JSON.stringify(finalLedger)}`)
+  }
+  const operationRoot = join(workspace.rootPath, '.creator-skill-ops')
+  const remainingOperations = existsSync(operationRoot)
+    ? readdirSync(operationRoot).filter(name => name !== 'locks')
+    : []
+  if (remainingOperations.length > 0) {
+    throw new Error(`Completed lifecycle left Creator Skill journals behind: ${remainingOperations.join(', ')}`)
+  }
 
   const finalBackups = await rendererCall<{ success: boolean; backups?: Array<{ slug: string }> }>(`
     return await window.electronAPI.creatorSkillListBackups({
@@ -1056,6 +1140,9 @@ async function run(): Promise<void> {
       progressStages: [...stages],
       skillsChangedCount: harnessState.skillsChanged.length,
       backupsCount: finalBackups.backups.length,
+      ledgerCommitted: true,
+      journalsCleaned: true,
+      restartRecoveryPassed: true,
     },
   }))
   app.quit()

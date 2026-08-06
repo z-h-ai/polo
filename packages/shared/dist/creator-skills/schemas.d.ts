@@ -733,7 +733,7 @@ export declare const CreatorArtifactVersionMutationResponseSchema: z.ZodObject<{
 export declare const CreatorSkillUploadGrantSchema: z.ZodObject<{
     method: z.ZodLiteral<"PUT">;
     url: z.ZodString;
-    headers: z.ZodRecord<z.ZodString, z.ZodString>;
+    headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     expiresAt: z.ZodString;
     uploadGeneration: z.ZodNumber;
     expectedSizeBytes: z.ZodNumber;

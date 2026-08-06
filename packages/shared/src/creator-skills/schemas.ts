@@ -186,7 +186,7 @@ export const CreatorArtifactVersionMutationResponseSchema = z.object({
 export const CreatorSkillUploadGrantSchema = z.object({
   method: z.literal('PUT'),
   url: z.string().url().max(8_192),
-  headers: z.record(z.string(), z.string().max(8_192)),
+  headers: z.record(z.string(), z.string().max(8_192)).optional(),
   expiresAt: isoDate,
   uploadGeneration: z.number().int().positive(),
   expectedSizeBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),

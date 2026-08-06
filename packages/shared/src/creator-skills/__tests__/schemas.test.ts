@@ -4,6 +4,7 @@ import {
   CreatorArtifactIdRpcInputSchema,
   CreatorArtifactUploadCompleteRpcInputSchema,
   CreatorArtifactUploadGrantRpcInputSchema,
+  CreatorSkillUploadGrantSchema,
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
@@ -17,6 +18,17 @@ import {
 import { HARD_SKILL_ARCHIVE_POLICY } from '../types'
 
 describe('Creator Skill boundary schemas', () => {
+  it('keeps upload response headers optional for older Admin implementations', () => {
+    expect(CreatorSkillUploadGrantSchema.parse({
+      method: 'PUT',
+      url: 'https://uploads.example.test/archive.zip',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      uploadGeneration: 1,
+      expectedSizeBytes: 123,
+      expectedArchiveChecksum: 'a'.repeat(64),
+    })).not.toHaveProperty('headers')
+  })
+
   it('strips unknown Admin response fields recursively', () => {
     const parsed = CreatorArtifactCatalogPageSchema.parse({
       artifacts: [{

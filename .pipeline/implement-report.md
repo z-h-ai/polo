@@ -51,3 +51,14 @@ The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, 
 ## Remaining acceptance gate
 
 The real cross-repository lifecycle gate is now satisfied. Final regression passed with `5283 passed / 19 skipped` in the 429-file standard suite, every isolated suite passing, `bun run typecheck:all` passing, and `bun run electron:build` passing. Do not mark POO-21 complete until a fresh independent reviewer returns `pass`.
+
+## 2026-08-06 reviewer round 1 remediation
+
+- Restored `CreatorSkillUploadGrant.headers` as an optional field in the source type, Zod response schema, and public package declaration. The new archive identity fields remain required, preserving the strict v2 contract without breaking older Admin responses.
+- Moved the renderer incremental SHA-256 implementation into a focused module and documented its FIPS 180-4 provenance, endian/padding rules, unsigned 32-bit arithmetic, bounded-memory purpose, and safe counter invariant.
+- Fixed the staging stale-generation check to send the full required archive identity. It now asserts the HTTP 409 conflict produced after schema validation instead of accepting any generic rejection.
+- Extended the real staging Electron E2E to read the committed Ledger after install, assert an empty Ledger and no journals after uninstall, and exercise startup recovery in a separate Electron-as-Node process against a deliberately persisted `preparing` crash journal.
+- The extended real Tencent COS staging lifecycle passed with `ledgerCommitted`, `journalsCleaned`, and `restartRecoveryPassed` all true. The rerun fixture was removed together with 2 users, 2 organizations, 2 artifacts, 3 versions, and all 3 COS objects.
+- Final standard suite evidence: one isolated full run passed `5303 / 5303` with 19 skips and 0 failures. Two prior full runs exposed the repository's existing RPC registration ordering flake (the same four tests passed immediately in isolation); the final full run and all isolated suites were green. `bun run typecheck:all` and `bun run electron:build` passed.
+
+The remaining release gate is an independent reviewer `pass` plus manual GitHub token revocation/replacement described in the POL-59 report.

@@ -133,7 +133,7 @@ export interface CreateCreatorArtifactVersionInput {
 export interface CreatorSkillUploadGrant {
   method: 'PUT'
   url: string
-  headers: Record<string, string>
+  headers?: Record<string, string>
   expiresAt: string
   uploadGeneration: number
   expectedSizeBytes: number

@@ -18785,7 +18785,7 @@ var CreatorArtifactVersionMutationResponseSchema = external_exports.object({
 var CreatorSkillUploadGrantSchema = external_exports.object({
   method: external_exports.literal("PUT"),
   url: external_exports.string().url().max(8192),
-  headers: external_exports.record(external_exports.string(), external_exports.string().max(8192)),
+  headers: external_exports.record(external_exports.string(), external_exports.string().max(8192)).optional(),
   expiresAt: isoDate,
   uploadGeneration: external_exports.number().int().positive(),
   expectedSizeBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
