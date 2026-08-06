@@ -3,6 +3,7 @@ export {
   CreatorArtifactCapabilitySchema,
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
+  CreatorArtifactDetailVersionSchema,
   CreatorArtifactMutationResponseSchema,
   CreatorArtifactVersionCreatedResponseSchema,
   CreatorArtifactVersionSchema,

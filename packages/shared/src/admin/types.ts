@@ -4,6 +4,7 @@ export type {
   CreatorArtifactCapability,
   CreatorArtifactCatalogPage,
   CreatorArtifactDetail,
+  CreatorArtifactManagerVersion,
   CreatorArtifactVersion,
   CreatorSkillDownloadGrant,
   CreatorSkillSafetyStatus,

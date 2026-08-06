@@ -7,6 +7,7 @@ import {
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
+  CreatorArtifactVersionMutationResponseSchema,
   CreatorSkillInstallRpcInputSchema,
   CreatorSkillUninstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
@@ -45,6 +46,45 @@ describe('Creator Skill boundary schemas', () => {
       }],
       nextCursor: 'cursor',
     })
+  })
+
+  it('keeps Member detail independent from manager upload generations', () => {
+    const artifact = {
+      id: 'artifact-id',
+      organizationId: 'organization-id',
+      type: 'skill',
+      slug: 'review-helper',
+      status: 'published' as const,
+      createdByUserId: 'user-id',
+      createdAt: '2026-07-30T00:00:00.000Z',
+      updatedAt: '2026-07-30T00:00:00.000Z',
+    }
+    const memberVersion = {
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'published' as const,
+      archiveChecksum: 'a'.repeat(64),
+      sizeBytes: 123,
+      createdAt: '2026-07-30T00:00:00.000Z',
+      publishedAt: '2026-07-30T00:01:00.000Z',
+    }
+
+    expect(CreatorArtifactDetailSchema.parse({
+      artifact,
+      versions: [memberVersion],
+    }).versions[0]).toEqual(memberVersion)
+
+    const stripped = CreatorArtifactDetailSchema.parse({
+      artifact,
+      versions: [{ ...memberVersion, uploadGeneration: 7 }],
+    })
+    expect(stripped.versions[0]).toEqual(memberVersion)
+    expect(stripped.versions[0]).not.toHaveProperty('uploadGeneration')
+
+    expect(CreatorArtifactVersionMutationResponseSchema.safeParse({
+      version: memberVersion,
+    }).success).toBe(false)
   })
 
   it('keeps legacy Web App identifiers opaque while enforcing Skill slugs', () => {

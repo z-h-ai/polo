@@ -24,6 +24,7 @@ import {
   CreateCreatorArtifactRpcInputSchema,
   CreatorArtifactArchiveRpcInputSchema,
   CreatorArtifactIdRpcInputSchema,
+  CreatorArtifactDetailSchema,
   CreatorArtifactListRpcInputSchema,
   CreatorArtifactRevokeRpcInputSchema,
   CreatorArtifactUploadCompleteRpcInputSchema,
@@ -570,14 +571,16 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT, async (_ctx, rawInput: unknown) => {
     const input = CreatorArtifactIdRpcInputSchema.safeParse(rawInput)
     if (!input.success) return adminInputError('VALIDATION_ERROR')
-    return callOrganization('getCreatorArtifact', (client, accessToken) =>
-      client.getCreatorArtifact(
+    return callOrganization('getCreatorArtifact', async (client, accessToken) => {
+      const detail = await client.getCreatorArtifact(
         accessToken,
         input.data.organizationId,
         input.data.artifactId,
         input.data.version,
         input.data.referencePath,
-      ))
+      )
+      return CreatorArtifactDetailSchema.parse(detail)
+    })
   })
 
   server.handle(RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT, async (_ctx, rawInput: unknown) => {
@@ -631,6 +634,12 @@ export function registerAdminHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (!input.success) return adminInputError('VALIDATION_ERROR')
     return callOrganization('completeCreatorSkillUpload', async (client, accessToken, userId) => {
       const completed = await client.completeCreatorSkillUpload(accessToken, input.data)
+      if (completed.uploadGeneration !== input.data.uploadGeneration) {
+        throw new AdminError(
+          'Admin service did not bind the upload generation',
+          'version_conflict',
+        )
+      }
       const archiveChecksum = completed.archiveChecksum
       if (!archiveChecksum || archiveChecksum !== input.data.archiveChecksum) {
         throw new AdminError(
