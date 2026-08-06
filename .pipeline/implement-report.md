@@ -30,6 +30,24 @@ The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, 
 - `bun run typecheck:all`, Creator Skill E2E TypeScript validation, and `bun run electron:build` passed on the merged tree.
 - The first full regression exposed a `dev`-side release preflight bug: redirected `electron:dist` prepared the complete runtime before reaching the CLI artifact fail-closed guard, so its 5-second regression timed out after about 103 seconds. `scripts/electron-dist.ts` now rejects the test-only output override before any runtime preparation. The focused regression passed in 67 ms, and the full rerun passed with `5282 passed / 19 skipped` plus every isolated suite.
 
+## 2026-08-06 real staging E2E fixes
+
+- The real staging E2E initially failed before launch because the main-process harness bundled `koffi` and esbuild attempted to inline all platform-specific `.node` binaries.
+- Marked `koffi` external and made the temporary harness resolve the repository native dependency; the authenticated download wrapper now treats Fetch `preconnect` as optional because Electron/Node Fetch does not guarantee that extension.
+- Fixed a stale cross-account Catalog result after Owner changes a Member role by invalidating the organization-wide cache on member update/remove. Added a regression proving a cached Member view observes a newly visible draft after promotion.
+- Aligned the authoritative Safety request with POL-59: `{ identities: [...] }` and algorithm-labelled `sha256:<digest>` on the wire, while retaining the canonical 64-character checksum inside the desktop contract.
+- Removed the contradictory E2E assertion that required Member detail to expose `validationPolicy`; the same response is still recursively checked to reject validation policy, manifest, upload generation, and internal validation metadata.
+
+## Real POL-59 staging acceptance
+
+`POO21_ADMIN_BASE_URL=http://127.0.0.1:3000 bun run electron:e2e:creator-skill` passed against the deployed staging Admin, validation/cleanup workers, PostgreSQL, and real Tencent COS through a loopback safety proxy. The proxy only kept the harness loopback-only invariant and rewrote the public download URL back to that local gateway; upstream API, direct PUT, workers, and COS remained real.
+
+- Owner created the Creator Space, draft, and versions; Member management and draft download were rejected.
+- Bob was promoted to Manager and published `1.0.0` and `1.1.0`, then demoted to Member for download and install.
+- Negative checks passed: invalid credentials/body, stale upload generation, Member management, and cross-user download token binding.
+- Electron install/update/uninstall passed with progress stages `download`, `validate`, `prepare`, `commit`, `refresh`; `skills:changed` fired three times and two cleanup-safe backups remained.
+- Accepted versions used distinct archive checksums/content digests; staging cleanup then removed 2 users, 8 retry organizations, 8 artifacts, 9 versions, and all 9 referenced COS objects. Post-cleanup database counts are zero for the fixture users, organizations, and artifacts.
+
 ## Remaining acceptance gate
 
-Do not mark POO-21 complete until the integrated branch passes its targeted shared/server-core/Electron suites and the cross-repository lifecycle is rerun against POL-59 staging with the strict v0.12.0 protocol. Final completion still requires a fresh independent reviewer `pass`.
+The real cross-repository lifecycle gate is now satisfied. Final regression passed with `5283 passed / 19 skipped` in the 429-file standard suite, every isolated suite passing, `bun run typecheck:all` passing, and `bun run electron:build` passing. Do not mark POO-21 complete until a fresh independent reviewer returns `pass`.

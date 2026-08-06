@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { build } from 'esbuild'
@@ -43,6 +43,7 @@ async function main(): Promise<void> {
   const blankHtml = '<!doctype html><html><head><meta charset="utf-8"></head><body><script src="./renderer-harness.js"></script></body></html>'
   mkdirSync(workspaceRoot, { recursive: true })
   mkdirSync(configDirectory, { recursive: true })
+  symlinkSync(join(rootDirectory, 'node_modules'), join(temporaryDirectory, 'node_modules'), 'dir')
   writeFileSync(blankHtmlPath, blankHtml)
   writeFileSync(join(configDirectory, 'config.json'), JSON.stringify({
     workspaces: [{
@@ -62,7 +63,7 @@ async function main(): Promise<void> {
       absWorkingDir: rootDirectory,
       bundle: true,
       entryPoints: ['apps/electron/e2e/creator-skill/main.ts'],
-      external: ['electron'],
+      external: ['electron', 'koffi'],
       format: 'cjs',
       outfile: mainOutput,
       platform: 'node',

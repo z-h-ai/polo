@@ -831,10 +831,16 @@ export class AdminClient {
       archiveChecksum: string;
     },
   ): Promise<CreatorSkillSafetyStatus> {
+    const canonicalChecksum = input.archiveChecksum.toLowerCase().replace(/^sha256:/, '');
     const response = await this.request<unknown>('/api/installed-artifacts/status', {
       method: 'POST',
       accessToken,
-      body: { artifacts: [input] },
+      body: {
+        identities: [{
+          ...input,
+          archiveChecksum: `sha256:${canonicalChecksum}`,
+        }],
+      },
     });
     const batch = this.readSuccessResponse(response, CreatorSkillSafetyStatusBatchSchema);
     if (batch.statuses.length !== 1) {
@@ -844,7 +850,7 @@ export class AdminClient {
     if (
       status.artifactId !== input.artifactId
       || status.version !== input.version
-      || status.archiveChecksum !== input.archiveChecksum.toLowerCase().replace(/^sha256:/, '')
+      || status.archiveChecksum !== canonicalChecksum
     ) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
     return status;
   }

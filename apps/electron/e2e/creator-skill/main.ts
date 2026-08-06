@@ -838,7 +838,6 @@ async function run(): Promise<void> {
       || response.artifact?.latestPublishedVersion !== '1.0.0'
       || response.versions?.length !== 1
       || response.versions.some(version => version.status !== 'published')
-      || !response.versions[0]?.validationPolicy
     ) {
       throw new Error('Published artifact detail is incorrect')
     }

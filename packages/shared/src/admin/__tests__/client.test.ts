@@ -1344,7 +1344,12 @@ describe('AdminClient', () => {
       'https://admin.example.com/api/installed-artifacts/status',
     );
     expect(fetchCalls[0]!.init.method).toBe('POST');
-    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({ artifacts: [input] }));
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      identities: [{
+        ...input,
+        archiveChecksum: `sha256:${input.archiveChecksum}`,
+      }],
+    }));
     expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
       .toBe('Bearer creator-access-token');
   });

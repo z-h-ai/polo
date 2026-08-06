@@ -1618,13 +1618,16 @@ export function registerAdminHandlers(
       if (!organizationId.success || !memberId.success || !input.success) {
         return adminInputError('VALIDATION_ERROR')
       }
-      return callOrganization('updateOrganizationMember', (client, accessToken) =>
-        client.updateOrganizationMember(
+      return callOrganization('updateOrganizationMember', async (client, accessToken, userId) => {
+        const result = await client.updateOrganizationMember(
           accessToken,
           organizationId.data,
           memberId.data,
           input.data,
-        ))
+        )
+        invalidateCreatorArtifactCache(userId, organizationId.data)
+        return result
+      })
     },
   )
 
@@ -1644,13 +1647,16 @@ export function registerAdminHandlers(
       if (!organizationId.success || !memberId.success || !input.success) {
         return adminInputError('VALIDATION_ERROR')
       }
-      return callOrganization('removeOrganizationMember', (client, accessToken) =>
-        client.removeOrganizationMember(
+      return callOrganization('removeOrganizationMember', async (client, accessToken, userId) => {
+        const result = await client.removeOrganizationMember(
           accessToken,
           organizationId.data,
           memberId.data,
           input.data.reason,
-        ))
+        )
+        invalidateCreatorArtifactCache(userId, organizationId.data)
+        return result
+      })
     },
   )
 

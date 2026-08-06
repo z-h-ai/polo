@@ -142,6 +142,18 @@ const adminClientBehavior = {
   acceptOrganizationJoin: async (_accessToken: string, _token: string): Promise<any> => {
     throw new Error('acceptOrganizationJoin behavior not configured')
   },
+  updateOrganizationMember: async (
+    _accessToken: string,
+    _organizationId: string,
+    _memberId: string,
+    _input: unknown,
+  ): Promise<any> => ({ membership: { role: 'manager', status: 'active' } }),
+  removeOrganizationMember: async (
+    _accessToken: string,
+    _organizationId: string,
+    _memberId: string,
+    _reason?: string,
+  ): Promise<any> => ({ membership: { role: 'member', status: 'removed' } }),
 }
 
 class MockAdminClient {
@@ -264,6 +276,34 @@ class MockAdminClient {
   async acceptOrganizationJoin(accessToken: string, token: string) {
     adminClientCalls.push({ method: 'acceptOrganizationJoin', args: [token], accessToken })
     return adminClientBehavior.acceptOrganizationJoin(accessToken, token)
+  }
+
+  async updateOrganizationMember(
+    accessToken: string,
+    organizationId: string,
+    memberId: string,
+    input: unknown,
+  ) {
+    adminClientCalls.push({
+      method: 'updateOrganizationMember',
+      args: [organizationId, memberId, input],
+      accessToken,
+    })
+    return adminClientBehavior.updateOrganizationMember(accessToken, organizationId, memberId, input)
+  }
+
+  async removeOrganizationMember(
+    accessToken: string,
+    organizationId: string,
+    memberId: string,
+    reason?: string,
+  ) {
+    adminClientCalls.push({
+      method: 'removeOrganizationMember',
+      args: [organizationId, memberId, reason],
+      accessToken,
+    })
+    return adminClientBehavior.removeOrganizationMember(accessToken, organizationId, memberId, reason)
   }
 }
 
@@ -632,6 +672,12 @@ beforeEach(() => {
     uploadGeneration: 1,
     createdAt: '2026-07-31T00:00:00.000Z',
   })
+  adminClientBehavior.updateOrganizationMember = async () => ({
+    membership: { role: 'manager', status: 'active' },
+  })
+  adminClientBehavior.removeOrganizationMember = async () => ({
+    membership: { role: 'member', status: 'removed' },
+  })
 })
 
 describe('registerAdminHandlers', () => {
@@ -955,6 +1001,57 @@ describe('registerAdminHandlers', () => {
     expect(await listCreatorArtifacts(context, input)).toMatchObject({
       success: true,
       artifacts: [],
+    })
+    expect(catalogRequests).toBe(2)
+  })
+
+  it('invalidates another member Catalog cache after an owner changes their role', async () => {
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    const memberId = '22222222-2222-4222-8222-222222222222'
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    const input = { organizationId, type: 'skill', includeDrafts: true }
+    let catalogRequests = 0
+    adminClientBehavior.listCreatorArtifacts = async () => {
+      catalogRequests += 1
+      return catalogRequests === 1
+        ? { artifacts: [] }
+        : { artifacts: [{ id: 'newly-visible-draft' }] }
+    }
+    const { listCreatorArtifacts, updateOrganizationMember } = createHarness()
+
+    managerState.tokens = {
+      accessToken: 'member-access-token',
+      refreshToken: 'member-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'member-user',
+      username: 'member',
+    }
+    expect(await listCreatorArtifacts(context, input)).toMatchObject({
+      success: true,
+      artifacts: [],
+    })
+
+    managerState.tokens = {
+      accessToken: 'owner-access-token',
+      refreshToken: 'owner-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'owner-user',
+      username: 'owner',
+    }
+    expect(await updateOrganizationMember(context, organizationId, memberId, {
+      role: 'manager',
+    })).toMatchObject({ success: true })
+
+    managerState.tokens = {
+      accessToken: 'member-access-token',
+      refreshToken: 'member-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'member-user',
+      username: 'member',
+    }
+    expect(await listCreatorArtifacts(context, input)).toMatchObject({
+      success: true,
+      artifacts: [{ id: 'newly-visible-draft' }],
     })
     expect(catalogRequests).toBe(2)
   })

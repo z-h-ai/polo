@@ -131,9 +131,13 @@ function createCreatorSkillDownloadFetch(
     })
   }
 
-  return Object.assign(authenticatedFetch, {
-    preconnect: fetchImpl.preconnect.bind(fetchImpl),
-  }) as typeof fetch
+  const preconnect = fetchImpl.preconnect
+  return Object.assign(
+    authenticatedFetch,
+    typeof preconnect === 'function'
+      ? { preconnect: preconnect.bind(fetchImpl) }
+      : {},
+  ) as typeof fetch
 }
 
 async function canonicalizePotentialPath(path: string): Promise<string> {
