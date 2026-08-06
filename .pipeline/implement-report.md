@@ -28,6 +28,7 @@ The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, 
 - Resolved overlapping Creator Skill/AdminClient changes together with the newer Catalog, authentication-timeout, Electron packaging, and CLI work from `dev`.
 - Focused Creator Skill suites passed: 88 standard tests, 10 isolated server-core boundary tests, and 15 isolated panel interaction tests.
 - `bun run typecheck:all`, Creator Skill E2E TypeScript validation, and `bun run electron:build` passed on the merged tree.
+- The first full regression exposed a `dev`-side release preflight bug: redirected `electron:dist` prepared the complete runtime before reaching the CLI artifact fail-closed guard, so its 5-second regression timed out after about 103 seconds. `scripts/electron-dist.ts` now rejects the test-only output override before any runtime preparation. The focused regression passed in 67 ms, and the full rerun passed with `5282 passed / 19 skipped` plus every isolated suite.
 
 ## Remaining acceptance gate
 
