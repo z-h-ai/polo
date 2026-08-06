@@ -94,7 +94,13 @@ const LOCK_OWNER_FILE = 'owner.json';
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 15_000;
 const INVALID_LOCK_GRACE_MS = 60_000;
-const syncWaitBuffer = new Int32Array(new SharedArrayBuffer(4));
+// SharedArrayBuffer requires cross-origin isolation, which is not available in
+// every context that imports this module (e.g. the Electron preload isolated
+// world). Atomics.wait — the only consumer — is illegal on the main thread
+// anyway, so fall back to a plain Int32Array where SharedArrayBuffer is absent.
+const syncWaitBuffer = typeof SharedArrayBuffer !== "undefined"
+  ? new Int32Array(new SharedArrayBuffer(4))
+  : new Int32Array(4);
 let currentProcessFingerprint: string | null | undefined;
 
 function sleepSync(milliseconds: number): void {
