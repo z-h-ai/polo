@@ -1,16 +1,39 @@
 # `@z-h-ai/shared@0.12.0` publishing and POL-59 handoff
 
-## Candidate boundary
+## Released boundary
 
 The follow-up release coordinate is `@z-h-ai/shared@0.12.0` in the private
 GitHub Packages registry `https://npm.pkg.github.com`. The release tag is
 `shared-v0.12.0`.
 
-Coder work stops at a locally verified candidate tarball. Do not push the
-branch, create or move the tag, or publish the package until Ultra-Coding has
-passed. Until the tagged workflow completes, there is no registry tarball URL,
-registry integrity, attestation, Actions run, or downstream access proof for
-0.12.0.
+The release was published only after Ultra-Coding passed. The immutable tag
+`shared-v0.12.0` points to release commit
+`7bbde0b78bcaafdc0e785ad404373820f5c4b7b5`.
+
+Formal evidence:
+
+- registry tarball:
+  `https://npm.pkg.github.com/download/@z-h-ai/shared/0.12.0/b5985703912ebfa02c171adbdee2c167d5408a0e`;
+- SHA-256:
+  `385609a812223c7dc3c947689bd915e68c69c7ff970247e0ea303059c3c98711`;
+- npm integrity:
+  `sha512-vWHogrXE3i7MqP3V6XgHv6ucCtwYzwnzarCUPAmwAUP76XX7OFykox5DpddRz3m1xYKOymYM+Hm7coxev7yj1w==`;
+- npm shasum: `b5985703912ebfa02c171adbdee2c167d5408a0e`;
+- publish and registry-backed proof:
+  [polo Actions run 31083340263](https://github.com/z-h-ai/polo/actions/runs/31083340263),
+  artifact `z-h-ai-shared-0.12.0-proof`;
+- the downloaded tarball's build-provenance attestation verifies against
+  `z-h-ai/polo`, workflow `publish-shared-package.yml`, tag
+  `shared-v0.12.0`, and release commit `7bbde0b7`;
+- downstream repository-token proof:
+  [polo-admin Actions run 31083974149](https://github.com/z-h-ai/polo-admin/actions/runs/31083974149),
+  consumer commit `78faee7e3e4d81782290d88a398882b4884aa2a2`, artifact
+  `polo-admin-shared-package-access-proof-v0.12.0`.
+
+Both registry and downstream proofs used frozen `npm ci` and matched the same
+immutable URL and integrity. The downstream proof additionally verified the
+two public exports and strict upload v2 schemas with the polo-admin
+repository's own `GITHUB_TOKEN`.
 
 The publish-only manifest is intentionally separate from the Polo monorepo
 development manifest. The monorepo keeps its internal `@polo-ai/shared`
