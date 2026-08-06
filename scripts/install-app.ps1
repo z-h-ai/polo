@@ -226,55 +226,19 @@ try {
 Write-Info "Cleaning up..."
 Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
 
-# Add command line shortcuts
-Write-Info "Adding 'polo' and 'polo-ai' commands to PATH..."
+# Install the unified terminal launcher using the same managed script as NSIS.
+Write-Info "Adding 'polo' command to PATH..."
 
-$binDir = "$env:LOCALAPPDATA\Polo AI\bin"
-$poloCmdFile = "$binDir\polo.cmd"
-$poloAiCmdFile = "$binDir\polo-ai.cmd"
-$guiCmdFile = "$binDir\polo-gui.cmd"
-$exePath = "$env:LOCALAPPDATA\Programs\Polo AI\Polo AI.exe"
-$packagedCliPath = "$env:LOCALAPPDATA\Programs\Polo AI\resources\app\resources\bin\polo.cmd"
-$managedMarker = "rem Managed by Polo AI CLI installer"
-
-# Create bin directory
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-
-if (-not (Test-Path $packagedCliPath)) {
-    Write-Err "Packaged CLI launcher is missing: $packagedCliPath"
+$installDir = "$env:LOCALAPPDATA\Programs\Polo AI"
+$terminalScript = "$installDir\resources\app\resources\scripts\windows-terminal-integration.ps1"
+if (-not (Test-Path $terminalScript)) {
+    Write-Err "Polo terminal setup script is missing: $terminalScript"
 }
-
-function Assert-ManagedCommandDestination {
-    param([string]$Path, [switch]$AllowLegacyGuiWrapper)
-    if (-not (Test-Path $Path)) { return }
-    $existing = Get-Content -Path $Path -Raw -ErrorAction SilentlyContinue
-    if ($existing -like "*$managedMarker*") { return }
-    if ($AllowLegacyGuiWrapper -and $existing -like "*Polo AI.exe*" -and $existing -like "*start*") { return }
-    Write-Err "Refusing to overwrite unmanaged command: $Path"
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $terminalScript -Mode Install -InstallDir $installDir
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "Polo terminal setup failed"
 }
-
-Assert-ManagedCommandDestination -Path $poloCmdFile
-Assert-ManagedCommandDestination -Path $poloAiCmdFile -AllowLegacyGuiWrapper
-Assert-ManagedCommandDestination -Path $guiCmdFile
-
-# Both public command names invoke the same packaged CLI implementation. Keep
-# GUI terminal launch available under the explicit polo-gui name.
-$poloCmdContent = "@echo off`r`n$managedMarker`r`ncall `"$packagedCliPath`" %*`r`nexit /b %ERRORLEVEL%"
-$poloAiCmdContent = "@echo off`r`n$managedMarker`r`ncall `"%~dp0polo.cmd`" %*`r`nexit /b %ERRORLEVEL%"
-$guiCmdContent = "@echo off`r`n$managedMarker`r`nstart `"`" `"$exePath`" %*"
-Set-Content -Path $poloCmdFile -Value $poloCmdContent -Encoding ASCII
-Set-Content -Path $poloAiCmdFile -Value $poloAiCmdContent -Encoding ASCII
-Set-Content -Path $guiCmdFile -Value $guiCmdContent -Encoding ASCII
-
-# Add to user PATH if not already there
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$binDir*") {
-    $newPath = "$userPath;$binDir"
-    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    Write-Success "Added to PATH (restart terminal to use 'polo' and 'polo-ai')"
-} else {
-    Write-Success "Commands 'polo' and 'polo-ai' are ready"
-}
+Write-Success "Command 'polo' is ready (restart Terminal if this is the first install)"
 
 Write-Host ""
 Write-Host "---------------------------------------------------------------------"
@@ -285,7 +249,7 @@ Write-Host "  Polo AI has been installed."
 Write-Host ""
 Write-Host "  Launch from:"
 Write-Host "    - Start Menu or desktop shortcut"
-Write-Host "    - CLI: polo exec `"hello`" (polo-ai is a compatibility alias)"
-Write-Host "    - GUI from terminal: polo-gui"
+Write-Host "    - App: polo app (restart terminal first)"
+Write-Host "    - Terminal: polo --help"
 Write-Host ""
 }

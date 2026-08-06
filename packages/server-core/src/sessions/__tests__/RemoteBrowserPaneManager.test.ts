@@ -93,6 +93,19 @@ describe('RemoteBrowserPaneManager — wire packaging', () => {
     expect((caught as { code?: string }).code).toBe('BROWSER_NO_CAPABLE_CLIENT')
   })
 
+  it('treats visual teardown as a no-op without a desktop browser host', async () => {
+    const { server, calls } = createFakeServer()
+    const bridge = new RemoteBrowserPaneManager({
+      sessionId: 'sess-1',
+      workspaceId: 'ws-1',
+      rpcServer: server,
+      getHostClient: () => null,
+    })
+
+    await bridge.clearVisualsForSession('sess-1')
+    expect(calls).toHaveLength(0)
+  })
+
   it('throws BROWSER_REMOTE_UPLOAD_NOT_SUPPORTED for uploadFile', async () => {
     const { server, calls } = createFakeServer()
     const bridge = new RemoteBrowserPaneManager({

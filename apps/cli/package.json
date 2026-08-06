@@ -11,6 +11,8 @@
   },
   "scripts": {
     "start": "bun run src/index.ts",
+    "build": "bun run ../../scripts/build-cli-artifacts.ts",
+    "pack": "bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun test src/"
   },

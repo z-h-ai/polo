@@ -21,7 +21,12 @@ import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { routes } from '@/lib/navigate'
 import { Spinner } from '@polo-ai/ui'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
-import type { NetworkProxySettings } from '../../../shared/types'
+import type {
+  NetworkProxySettings,
+  TerminalIntegrationErrorPayload,
+  TerminalIntegrationOperation,
+  TerminalIntegrationStatus,
+} from '../../../shared/types'
 
 import {
   SettingsSection,
@@ -32,6 +37,10 @@ import {
   SettingsInput,
 } from '@/components/settings'
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
+import {
+  getTerminalIntegrationErrorMessage,
+  getTerminalIntegrationStatusMessage,
+} from '@/lib/terminal-integration-status'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -114,6 +123,9 @@ export default function AppSettingsPage() {
   const isElectron = window.electronAPI.getRuntimeEnvironment() === 'electron'
   const updateChecker = useUpdateChecker()
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
+  const [terminalStatus, setTerminalStatus] = useState<TerminalIntegrationStatus | null>(null)
+  const [terminalBusy, setTerminalBusy] = useState(false)
+  const [terminalError, setTerminalError] = useState<TerminalIntegrationErrorPayload | null>(null)
 
   const handleCheckForUpdates = useCallback(async () => {
     setIsCheckingForUpdates(true)
@@ -147,6 +159,56 @@ export default function AppSettingsPage() {
 
   useEffect(() => {
     loadSettings()
+  }, [])
+
+  const loadTerminalStatus = useCallback(async () => {
+    setTerminalBusy(true)
+    setTerminalError(null)
+    try {
+      const result = await window.electronAPI.getTerminalIntegrationStatus()
+      if (result.success) {
+        setTerminalStatus(result.status)
+        setTerminalError(null)
+      } else {
+        setTerminalError(result)
+      }
+    } catch (error) {
+      console.error('[terminal-integration] status IPC failed', error)
+      setTerminalError({
+        errorCode: 'ipc_failed',
+        errorParams: { operation: 'status' },
+      })
+    } finally {
+      setTerminalBusy(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isElectron) return
+    void loadTerminalStatus()
+  }, [isElectron, loadTerminalStatus])
+
+  const handleTerminalAction = useCallback(async (action: 'install' | 'uninstall') => {
+    setTerminalBusy(true)
+    setTerminalError(null)
+    try {
+      const result = action === 'uninstall'
+        ? await window.electronAPI.uninstallTerminalIntegration()
+        : await window.electronAPI.installTerminalIntegration()
+      if (result.success) {
+        setTerminalStatus(result.status)
+      } else {
+        setTerminalError(result)
+      }
+    } catch (error) {
+      console.error(`[terminal-integration] ${action} IPC failed`, error)
+      setTerminalError({
+        errorCode: 'ipc_failed',
+        errorParams: { operation: action as TerminalIntegrationOperation },
+      })
+    } finally {
+      setTerminalBusy(false)
+    }
   }, [])
 
   const handleNotificationsEnabledChange = useCallback(async (enabled: boolean) => {
@@ -307,6 +369,65 @@ export default function AppSettingsPage() {
                   )}
                 </SettingsCard>
               </SettingsSection>
+
+              {isElectron && (terminalError !== null || terminalStatus?.supported) && (
+                <SettingsSection
+                  title={t("settings.terminalFeatures.title")}
+                  description={t("settings.terminalFeatures.description")}
+                >
+                  <SettingsCard>
+                    <SettingsRow
+                      label={!terminalStatus
+                        ? t("settings.terminalFeatures.statusUnavailable")
+                        : terminalStatus.installed
+                          ? t("settings.terminalFeatures.installed")
+                          : t("settings.terminalFeatures.notInstalled")}
+                      description={terminalError
+                        ? getTerminalIntegrationErrorMessage(terminalError, t)
+                        : terminalStatus
+                          ? getTerminalIntegrationStatusMessage(terminalStatus, t)
+                          : undefined}
+                    >
+                      <div className="flex items-center gap-2">
+                        {!terminalStatus ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={terminalBusy}
+                            onClick={() => void loadTerminalStatus()}
+                          >
+                            {terminalBusy ? t("common.loading") : t("common.retry")}
+                          </Button>
+                        ) : (
+                          <>
+                            {terminalStatus.installed && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={terminalBusy}
+                                onClick={() => void handleTerminalAction('uninstall')}
+                              >
+                                {t("settings.terminalFeatures.uninstall")}
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              disabled={terminalBusy || !!terminalStatus.conflict}
+                              onClick={() => void handleTerminalAction('install')}
+                            >
+                              {terminalBusy
+                                ? t("common.loading")
+                                : terminalStatus.installed
+                                  ? t("settings.terminalFeatures.repair")
+                                  : t("settings.terminalFeatures.install")}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </SettingsRow>
+                  </SettingsCard>
+                </SettingsSection>
+              )}
 
               {/* About */}
               <SettingsSection title={t("settings.about.title")}>

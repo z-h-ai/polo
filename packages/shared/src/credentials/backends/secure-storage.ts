@@ -773,7 +773,10 @@ export class SecureStorageBackend implements CredentialBackend {
     // Parse header
     // const flags = fileData.readUInt32LE(MAGIC_SIZE); // Reserved for future use
     const salt = fileData.subarray(MAGIC_SIZE + FLAGS_SIZE, MAGIC_SIZE + FLAGS_SIZE + SALT_SIZE);
-    this.salt = salt;
+    if (!this.salt?.equals(salt)) {
+      this.encryptionKey = null;
+    }
+    this.salt = Buffer.from(salt);
 
     // Extract encrypted data
     const encryptedData = fileData.subarray(HEADER_SIZE);

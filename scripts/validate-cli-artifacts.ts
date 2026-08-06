@@ -1,9 +1,26 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 
 const root = join(import.meta.dir, '..')
 const electronDir = join(root, 'apps', 'electron')
+const cliPath = join(electronDir, 'dist', 'cli', 'polo-cli.js')
+const serverPath = join(electronDir, 'dist', 'server', 'polo-server.js')
+const manifestPath = join(electronDir, 'dist', 'cli', 'artifact-manifest.json')
+const cliPackagePath = join(electronDir, 'dist', 'cli', 'package.json')
+const unixWrapper = join(electronDir, 'resources', 'bin', 'polo')
+const windowsWrapper = join(electronDir, 'resources', 'bin', 'polo.cmd')
+const unixMessages = join(electronDir, 'resources', 'bin', 'polo-messages.sh')
+const windowsMessages = join(electronDir, 'resources', 'bin', 'polo-messages.cmd')
+const windowsInstaller = join(electronDir, 'resources', 'scripts', 'windows-terminal-integration.ps1')
+const atomicRenameHelper = join(
+  electronDir,
+  'resources',
+  'scripts',
+  'atomic-rename-no-replace.ts',
+)
+const nsisInclude = join(electronDir, 'build', 'installer.nsh')
 const require = createRequire(import.meta.url)
 const { validateLauncherSources } = require(
   join(electronDir, 'scripts', 'packaged-cli-layout.cjs'),
@@ -11,20 +28,115 @@ const { validateLauncherSources } = require(
 
 validateLauncherSources(join(electronDir, 'resources', 'bin'))
 
-const cli = join(electronDir, 'dist', 'cli', 'polo-cli.js')
-const server = join(electronDir, 'dist', 'server', 'polo-server.js')
-const manifest = join(electronDir, 'dist', 'cli', 'artifact-manifest.json')
-for (const path of [cli, server, manifest]) {
+for (const path of [
+  cliPath,
+  serverPath,
+  manifestPath,
+  cliPackagePath,
+  unixWrapper,
+  windowsWrapper,
+  unixMessages,
+  windowsMessages,
+  windowsInstaller,
+  atomicRenameHelper,
+  nsisInclude,
+]) {
   if (!existsSync(path)) throw new Error(`Required packaged artifact is missing: ${path}`)
 }
 
-const expectedVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version as string
-const check = Bun.spawnSync([process.execPath, 'run', cli, '--version'], {
-  stdout: 'pipe',
-  stderr: 'pipe',
-})
-if (check.exitCode !== 0 || check.stdout.toString().trim() !== expectedVersion) {
-  throw new Error(`Packaged CLI --version failed: ${check.stderr.toString() || check.stdout.toString()}`)
+const versions = [
+  'package.json',
+  'apps/electron/package.json',
+  'apps/cli/package.json',
+  'packages/server/package.json',
+].map((path) => ({
+  path,
+  version: JSON.parse(readFileSync(join(root, path), 'utf8')).version as string,
+}))
+if (new Set(versions.map(({ version }) => version)).size !== 1) {
+  throw new Error(`CLI/App/server version mismatch: ${JSON.stringify(versions)}`)
 }
 
-console.log(`Packaged CLI artifacts validated (${expectedVersion})`)
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+  version?: string
+  artifacts?: {
+    cli?: { path?: string; sha256?: string }
+    cliPackage?: { path?: string; sha256?: string }
+    server?: { path?: string; sha256?: string }
+  }
+}
+if (manifest.version !== versions[0].version) {
+  throw new Error(`Artifact manifest version ${manifest.version} does not match App ${versions[0].version}`)
+}
+if (
+  manifest.artifacts?.cli?.path !== 'dist/cli/polo-cli.js'
+  || manifest.artifacts?.cliPackage?.path !== 'dist/cli/package.json'
+  || manifest.artifacts?.server?.path !== 'dist/server/polo-server.js'
+) {
+  throw new Error('Artifact manifest contains unexpected paths')
+}
+const sha256 = (path: string) =>
+  createHash('sha256').update(readFileSync(path)).digest('hex')
+if (
+  manifest.artifacts.cli.sha256 !== sha256(cliPath)
+  || manifest.artifacts.cliPackage.sha256 !== sha256(cliPackagePath)
+  || manifest.artifacts.server.sha256 !== sha256(serverPath)
+) {
+  throw new Error('Artifact manifest checksums do not match the CLI/server bundles')
+}
+
+const cliPackage = JSON.parse(readFileSync(cliPackagePath, 'utf8')) as Record<string, unknown>
+const expectedPackage = {
+  name: '@polo-ai/cli',
+  version: versions[0].version,
+  type: 'module',
+  main: './polo-cli.js',
+  bin: {
+    polo: './polo-cli.js',
+    'polo-ai': './polo-cli.js',
+  },
+  license: 'Apache-2.0',
+}
+if (JSON.stringify(cliPackage) !== JSON.stringify(expectedPackage)) {
+  throw new Error(
+    `Sanitized CLI package metadata is invalid: ${JSON.stringify(cliPackage)}`,
+  )
+}
+if ('dependencies' in cliPackage || 'devDependencies' in cliPackage || 'peerDependencies' in cliPackage) {
+  throw new Error('Sanitized CLI package metadata must not contain dependency fields')
+}
+
+const wrapper = readFileSync(unixWrapper, 'utf8')
+const windows = readFileSync(windowsWrapper, 'utf8')
+if (!wrapper.includes('dist/cli/polo-cli.js') || !windows.includes('dist\\cli\\polo-cli.js')) {
+  throw new Error('A Polo launcher does not point at the packaged CLI bundle')
+}
+
+const bundledBun = join(electronDir, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
+if (process.env.POLO_AI_REQUIRE_BUNDLED_RUNTIME === '1' && !existsSync(bundledBun)) {
+  throw new Error(`Bundled Bun runtime is missing: ${bundledBun}`)
+}
+const bunExecutable = existsSync(bundledBun) ? bundledBun : process.execPath
+const versionCheck = Bun.spawnSync([bunExecutable, 'run', cliPath, '--version'], {
+  stdout: 'pipe',
+  stderr: 'pipe',
+  env: { ...process.env, POLO_AI_RUNTIME_DISCOVERY_FILE: join(electronDir, '.validation-runtime.json') },
+})
+if (versionCheck.exitCode !== 0) {
+  throw new Error(`Packaged CLI --version failed: ${versionCheck.stderr.toString()}`)
+}
+const actualVersion = versionCheck.stdout.toString().trim()
+if (actualVersion !== versions[0].version) {
+  throw new Error(`Packaged CLI reports ${actualVersion}; expected ${versions[0].version}`)
+}
+
+const helpCheck = Bun.spawnSync([bunExecutable, 'run', cliPath, '--help'], {
+  stdout: 'pipe',
+  stderr: 'pipe',
+  env: { ...process.env, POLO_AI_RUNTIME_DISCOVERY_FILE: join(electronDir, '.validation-runtime.json') },
+})
+if (helpCheck.exitCode !== 0 || !helpCheck.stdout.toString().includes('Usage: polo ')) {
+  throw new Error(`Packaged CLI --help failed: ${helpCheck.stderr.toString()}`)
+}
+
+console.log(`✓ Packaged CLI artifacts validated (${actualVersion})`)

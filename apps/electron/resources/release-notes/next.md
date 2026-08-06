@@ -13,6 +13,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Unified Polo terminal command** — Desktop releases now include a version-matched CLI, packaged headless server, and Bun runtime behind the cross-platform `polo` command. The CLI discovers a running App securely, `polo run` works without a source checkout, and macOS can install, repair, or remove terminal support from the App. (POO-14) (`cd05b2d`)
+
 ## Bug Fixes
+
+- **Terminal packaging and upgrade safety** — Keep the macOS command attached to the current App bundle across moves and upgrades, preserve modified or user-owned Windows and Linux launchers with verified ownership state, and use the same self-relative packaged wrapper on every platform. macOS profile and launcher updates now claim a verified leaf, publish only into an empty destination, preserve concurrent regular-file or symlink replacements, and restore claimed user configuration after local publication failures; Windows launcher, compatibility shim, root pointer, ownership state, and PATH updates now use identity-bound claims, no-replace publication, guarded registry transactions, and handle-bound cleanup; Linux launcher, ownership state, PATH profile, and App replacement use the same no-clobber and rollback model without following user-owned runtime symlinks. Immutable previous-release tags use strict SemVer validation. Shell readiness checks are bounded, normal builds are gated on final-container smoke tests, and the three-platform release/nightly workflow verifies fixed previous assets before installing build tools, then runs install, discovery, real headless tasks, upgrade, and uninstall checks. Legacy releases are validated with their historical layout, packaged runtimes include checksum- and architecture-verified `uv`, release acceptance requires pinned signing identities, and terminal/discovery/wrapper failures are generated from the shared locale catalogs. (POO-14) (`7a5f553`, `233ada3`, `b4c14f9`, `cb18105`, `4ca546d`, `beb25e2`, `cabb49d`, `80d3f3f`, `55a1b60`, `eeae32c`, `40f4c7b`, `d1753a0`, `7a026f3`, `c103fae`)
 
 ## Breaking Changes

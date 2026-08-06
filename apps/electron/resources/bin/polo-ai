@@ -10,4 +10,5 @@ while [ -h "$SOURCE" ]; do
   esac
 done
 BIN_DIR=$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)
+export POLO_AI_DEPRECATED_SHIM=1
 exec "$BIN_DIR/polo" "$@"

@@ -5,11 +5,13 @@
  * and `POLO_AI_SERVER_TOKEN=` lines, and returns a handle to stop the server.
  */
 
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import type { Subprocess } from 'bun'
 import { createSafeRuntimeEnvironment } from '@polo-ai/shared/utils'
 import { getProcessBirthIdentity } from './cli-thread-store.ts'
+import { version as cliVersion } from '../package.json'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,6 +24,8 @@ export interface SpawnedServer {
   startedAt: number
   processIdentity: string
   diagnostics: () => string
+  /** Private lock/runtime namespace owned by this temporary server. */
+  runtimeDir: string
   stop: () => Promise<void>
 }
 
@@ -80,6 +84,7 @@ function inferPackagedEnvironment(serverEntry: string): Record<string, string> {
     POLO_AI_RESOURCES_PATH: process.env.POLO_AI_RESOURCES_PATH || join(appRoot, 'resources'),
     POLO_AI_BUNDLED_ASSETS_ROOT: process.env.POLO_AI_BUNDLED_ASSETS_ROOT || appRoot,
     POLO_AI_IS_PACKAGED: 'true',
+    POLO_AI_VERSION: process.env.POLO_AI_VERSION || cliVersion,
   }
 }
 
@@ -93,21 +98,38 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   const token = crypto.randomUUID()
   const startedAt = Date.now()
   const bunExecutable = resolveBunExecutable()
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'polo-run-server-'))
+  if (process.platform !== 'win32') chmodSync(runtimeDir, 0o700)
+  let runtimeCleaned = false
+  const cleanupRuntime = (): void => {
+    if (runtimeCleaned) return
+    runtimeCleaned = true
+    rmSync(runtimeDir, { recursive: true, force: true })
+  }
 
   const secrets = (opts?.secrets ?? []).filter((value): value is string => !!value)
-  const proc: Subprocess = Bun.spawn([bunExecutable, 'run', serverEntry], {
-    env: createSafeRuntimeEnvironment(process.env, {
-      ...inferPackagedEnvironment(serverEntry),
-      ...opts?.env,
-      POLO_AI_BUN: bunExecutable,
-      POLO_AI_SERVER_TOKEN: token,
-      POLO_AI_RPC_PORT: '0',
-      POLO_AI_RPC_HOST: '127.0.0.1',
-    }),
-    stdout: 'pipe',
-    stderr: 'pipe',
-    stdin: 'pipe',
-  })
+  let proc: Subprocess
+  try {
+    proc = Bun.spawn([bunExecutable, 'run', serverEntry], {
+      env: createSafeRuntimeEnvironment(process.env, {
+        ...inferPackagedEnvironment(serverEntry),
+        ...opts?.env,
+        POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR,
+        POLO_AI_BUN: bunExecutable,
+        POLO_AI_SERVER_RUNTIME_DIR: runtimeDir,
+        POLO_AI_SERVER_TOKEN: token,
+        POLO_AI_RPC_PORT: '0',
+        POLO_AI_RPC_HOST: '127.0.0.1',
+      }),
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: 'pipe',
+    })
+  } catch (error) {
+    cleanupRuntime()
+    throw error
+  }
+  const exited = proc.exited.finally(cleanupRuntime)
 
   if (opts?.bootstrapPayload !== undefined && proc.stdin) {
     const sink = proc.stdin as unknown as { write(value: string): number; flush(): Promise<number> }
@@ -166,12 +188,12 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   return new Promise<SpawnedServer>((resolve, reject) => {
     const timer = setTimeout(() => {
       proc.kill()
+      void exited
       reject(new Error(`Server did not start within ${startupTimeout}ms`))
     }, startupTimeout)
 
     let url = ''
     let buffer = ''
-
     const processLines = () => {
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? '' // keep incomplete last line in buffer
@@ -199,11 +221,12 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
             startedAt,
             processIdentity,
             diagnostics: () => redact(diagnosticBuffer + stderrCarry).slice(-MAX_DIAGNOSTIC_BYTES),
+            runtimeDir,
             stop: async () => {
               if (!stopPromise) {
                 stopPromise = (async () => {
                   if (proc.exitCode === null) proc.kill('SIGTERM')
-                  const exitCode = await proc.exited
+                  const exitCode = await exited
                   if (exitCode !== 0) {
                     throw new Error(`CLI runtime cleanup failed (exit ${exitCode})`)
                   }

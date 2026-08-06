@@ -39,10 +39,9 @@ export function registerTabBrowserHandlers(server: RpcServer): void {
   })
 
   server.handle(RPC_CHANNELS.tabBrowser.SAVE_APPS, async (_ctx, apps: AppDefinition[]) => {
-    const { loadStoredConfig, saveConfig } = await import('@polo-ai/shared/config/storage')
-    const config = loadStoredConfig()
-    if (!config) return
-    config.tabBrowser = { installedApps: normalizeApps(apps) }
-    saveConfig(config)
+    const { updateStoredConfig } = await import('@polo-ai/shared/config/storage')
+    updateStoredConfig(config => {
+      config.tabBrowser = { installedApps: normalizeApps(apps) }
+    })
   })
 }

@@ -15,7 +15,8 @@ python3 -m unittest \
   apps.electron.resources.scripts.tests.test_img_tool_smoke \
   apps.electron.resources.scripts.tests.test_ical_tool_smoke \
   apps.electron.resources.scripts.tests.test_doc_diff_smoke \
-  apps.electron.resources.scripts.tests.test_markitdown_smoke
+  apps.electron.resources.scripts.tests.test_markitdown_smoke \
+  apps.electron.resources.scripts.tests.test_polo_wrapper_smoke
 ```
 
 Or use the root script:
@@ -33,6 +34,8 @@ python3 -m unittest apps.electron.resources.scripts.tests.test_xlsx_tool_smoke
 ## Notes
 
 - Tests execute the **wrapper binaries** in `resources/bin/*` (not scripts directly).
+- Windows wrapper changes are also exercised by `windows-wrapper-smoke.test.ps1`
+  in the native Windows full-artifact job.
 - The shared harness configures `POLO_AI_UV`, `POLO_AI_SCRIPTS`, and `PATH`.
 - If bundled `uv` is missing for your platform, harness falls back to `uv` on PATH.
 - Tests create temporary fixtures at runtime and clean them up automatically.
