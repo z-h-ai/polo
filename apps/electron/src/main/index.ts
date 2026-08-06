@@ -3,7 +3,7 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, powerMonitor, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import { hostname, homedir } from 'os'
@@ -784,6 +784,15 @@ app.whenReady().then(async () => {
         || BrowserWindow.getAllWindows()[0]
       const result = await dialog.showOpenDialog(win, spec)
       return { canceled: result.canceled, filePaths: result.filePaths }
+    })
+    // Phone-auth E2E: follow the challenge issuer redirect server-side so the
+    // loopback callback server receives the code without opening a browser.
+    ipcMain.handle('__phone-auth-e2e:open-external', async (_event, url: string) => {
+      const response = await net.fetch(url, { redirect: 'follow' })
+      await response.text()
+      if (!response.ok) {
+        throw new Error(`Phone auth challenge browser returned ${response.status}`)
+      }
     })
     ipcMain.handle('terminal-integration:get-status', () =>
       terminalIntegrationIpcResult('status', () =>
