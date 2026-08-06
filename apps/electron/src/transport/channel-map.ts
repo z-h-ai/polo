@@ -121,6 +121,7 @@ export const CHANNEL_MAP = {
   saveTabBrowserApps: invoke(RPC_CHANNELS.tabBrowser.SAVE_APPS),
 
   // Local App Bundle runtime
+  'localApps.getHostInfo': invoke(RPC_CHANNELS.localApps.GET_HOST_INFO),
   'localApps.install': invoke(RPC_CHANNELS.localApps.INSTALL),
   'localApps.cancelInstall': invoke(RPC_CHANNELS.localApps.CANCEL_INSTALL),
   'localApps.start': invoke(RPC_CHANNELS.localApps.START),
@@ -130,6 +131,8 @@ export const CHANNEL_MAP = {
   'localApps.setAvailableRelease': invoke(RPC_CHANNELS.localApps.SET_AVAILABLE_RELEASE),
   'localApps.getInstalledApps': invoke(RPC_CHANNELS.localApps.GET_INSTALLED_APPS),
   'localApps.getRuntimeStatus': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUS),
+  'localApps.getRuntimeStatuses': invoke(RPC_CHANNELS.localApps.GET_RUNTIME_STATUSES),
+  'localApps.resolveRemoteUrl': invoke(RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL),
   'localApps.getLogs': invoke(RPC_CHANNELS.localApps.GET_LOGS),
 
   // Auth
@@ -149,6 +152,7 @@ export const CHANNEL_MAP = {
   adminLogout: invoke(RPC_CHANNELS.admin.LOGOUT),
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
   adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+  adminSyncAppCatalog: invoke(RPC_CHANNELS.admin.SYNC_APP_CATALOG),
   onAdminReauthRequired: listener('admin:reauthRequired'),
   organizationList: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
   organizationCreate: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION),
@@ -245,6 +249,14 @@ export const CHANNEL_MAP = {
   // User Preferences
   readPreferences: invoke(RPC_CHANNELS.preferences.READ),
   writePreferences: invoke(RPC_CHANNELS.preferences.WRITE),
+  getHomeRecentApps: invoke(RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS),
+  setHomeRecentApps: invoke(RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS),
+  getOrganizationContextStorage: invoke(
+    RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+  ),
+  updateOrganizationContextStorage: invoke(
+    RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  ),
 
   // Session Drafts
   getDraft: invoke(RPC_CHANNELS.drafts.GET),

@@ -24,10 +24,13 @@ interface GroundingMetadata {
 export class GoogleSearchProvider implements WebSearchProvider {
   name = 'Google';
 
-  constructor(private apiKey: string) {}
+  constructor(
+    private apiKey: string,
+    private apiBase: string = API_BASE,
+  ) {}
 
   async search(query: string, count: number): Promise<WebSearchResult[]> {
-    const url = `${API_BASE}/${GROUNDING_MODEL}:generateContent`;
+    const url = `${this.apiBase.replace(/\/$/, '')}/${GROUNDING_MODEL}:generateContent`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {

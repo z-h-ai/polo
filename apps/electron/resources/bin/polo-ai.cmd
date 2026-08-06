@@ -1,7 +1,6 @@
 @echo off
-set "POLO_AI_BUN_BIN=%POLO_AI_BUN%"
-if "%POLO_AI_BUN_BIN%"=="" set "POLO_AI_BUN_BIN=bun"
-set "POLO_AI_COMMANDS_BIN=%POLO_AI_COMMANDS_ENTRY%"
-if "%POLO_AI_COMMANDS_BIN%"=="" set "POLO_AI_COMMANDS_BIN=%POLO_AI_CLI_ENTRY%"
-if "%POLO_AI_CLI_JSON_ONLY%"=="" set "POLO_AI_CLI_JSON_ONLY=1"
-"%POLO_AI_BUN_BIN%" run "%POLO_AI_COMMANDS_BIN%" %*
+chcp 65001 >nul 2>&1
+setlocal
+set "POLO_AI_DEPRECATED_SHIM=1"
+call "%~dp0polo.cmd" %*
+exit /b %ERRORLEVEL%

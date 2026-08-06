@@ -1,0 +1,75 @@
+#!/bin/sh
+# Polo CLI launcher (managed by Polo AI)
+
+SOURCE=$0
+while [ -h "$SOURCE" ]; do
+  SOURCE_DIR=$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$SOURCE_DIR/$SOURCE" ;;
+  esac
+done
+
+BIN_DIR=$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)
+APP_ROOT=$(CDPATH= cd -- "$BIN_DIR/../.." && pwd)
+
+if [ -x "$APP_ROOT/vendor/bun/bun" ]; then
+  RESOURCES_ROOT="$APP_ROOT"
+else
+  RESOURCES_ROOT=$(CDPATH= cd -- "$APP_ROOT/.." && pwd)
+fi
+
+BUN="$RESOURCES_ROOT/vendor/bun/bun"
+CLI="$APP_ROOT/dist/cli/polo-cli.js"
+SERVER="$APP_ROOT/dist/server/polo-server.js"
+
+POLO_LOCALE="${POLO_AI_LOCALE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-en}}}}"
+MESSAGES="$BIN_DIR/polo-messages.sh"
+if [ ! -f "$MESSAGES" ]; then
+  printf '%s\n' '[POLO_E_TERMINAL_FILES_MISSING]' >&2
+  exit 1
+fi
+. "$MESSAGES"
+polo_load_wrapper_messages "$POLO_LOCALE"
+
+if [ "${POLO_AI_DEPRECATED_SHIM:-}" = "1" ]; then
+  printf '%s\n' "[POLO_W_DEPRECATED_COMMAND] $POLO_MSG_DEPRECATED" >&2
+  unset POLO_AI_DEPRECATED_SHIM
+fi
+
+if [ ! -x "$BUN" ]; then
+  printf '%s\n' "[POLO_E_BUNDLED_RUNTIME_MISSING] $POLO_MSG_RUNTIME" >&2
+  exit 1
+fi
+if [ ! -f "$CLI" ] || [ ! -f "$SERVER" ]; then
+  printf '%s\n' "[POLO_E_TERMINAL_FILES_MISSING] $POLO_MSG_FILES" >&2
+  exit 1
+fi
+
+export POLO_AI_BUN="$BUN"
+export POLO_AI_SERVER_ENTRY="$SERVER"
+export POLO_AI_APP_ROOT="$APP_ROOT"
+export POLO_AI_RESOURCES_PATH="$APP_ROOT/resources"
+export POLO_AI_BUNDLED_ASSETS_ROOT="$APP_ROOT"
+export POLO_AI_IS_PACKAGED=true
+export POLO_AI_CLI_JSON_ONLY="${POLO_AI_CLI_JSON_ONLY:-1}"
+
+case "$(uname -s)" in
+  Darwin)
+    export POLO_AI_DESKTOP_APP="$RESOURCES_ROOT/../.."
+    ;;
+  Linux)
+    if [ -n "$APPIMAGE" ]; then
+      export POLO_AI_APPIMAGE="$APPIMAGE"
+    else
+      INSTALLED_APPIMAGE_DIR=$(CDPATH= cd -- "$RESOURCES_ROOT/../.." && pwd)
+      INSTALLED_APPIMAGE="$INSTALLED_APPIMAGE_DIR/Polo-AI-x64.AppImage"
+      if [ -x "$INSTALLED_APPIMAGE" ]; then
+        export POLO_AI_APPIMAGE="$INSTALLED_APPIMAGE"
+      fi
+    fi
+    ;;
+esac
+
+exec "$BUN" run "$CLI" "$@"

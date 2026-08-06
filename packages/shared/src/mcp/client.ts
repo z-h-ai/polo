@@ -8,6 +8,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import {
+  createSanitizedEnv,
+  isToolEnvironmentVariableAllowed,
+} from '@polo-ai/session-tools-core';
 
 /**
  * HTTP transport config for remote MCP servers
@@ -32,6 +36,12 @@ export interface StdioMcpClientConfig {
  * Unified config supporting both transport types
  */
 export type McpClientConfig = HttpMcpClientConfig | StdioMcpClientConfig;
+
+export type McpEnvironmentPolicy = 'desktop' | 'cli-one-shot';
+
+export interface PoloMcpClientOptions {
+  environmentPolicy?: McpEnvironmentPolicy;
+}
 
 /**
  * Sensitive environment variables that should NOT be passed to MCP subprocesses.
@@ -59,6 +69,36 @@ const BLOCKED_ENV_VARS = [
   'NPM_TOKEN',
 ];
 
+const CREDENTIAL_ENV_NAME =
+  /(?:^|_)(?:api_?key|access_?token|auth(?:orization)?|bearer|credential|oauth|password|private_?key|secret|token)(?:_|$)/i;
+const CREDENTIAL_ENV_VALUE = [
+  /^(?:Bearer|Basic)\s+\S+/i,
+  /\b(?:sk|pk)-[A-Za-z0-9_-]{12,}\b/,
+  /\b(?:oauth|token|secret|credential)[-_][A-Za-z0-9._-]{8,}\b/i,
+  /^[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/,
+];
+
+function containsCredentialLikeValue(value: string): boolean {
+  return CREDENTIAL_ENV_VALUE.some((pattern) => pattern.test(value));
+}
+
+function buildCliOneShotStdioEnv(
+  configuredEnv: Record<string, string> | undefined,
+): Record<string, string> {
+  const env = createSanitizedEnv(process.env, true) as Record<string, string>;
+  for (const [key, value] of Object.entries(configuredEnv ?? {})) {
+    if (CREDENTIAL_ENV_NAME.test(key) || containsCredentialLikeValue(value)) {
+      throw new Error(
+        `CLI one-shot stdio MCP environment rejects credential-like variable: ${key}`,
+      );
+    }
+    if (isToolEnvironmentVariableAllowed(key)) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
 /**
  * Interface for clients managed by McpClientPool.
  * Both PoloMcpClient (remote MCP sources) and ApiSourcePoolClient (API sources) implement this.
@@ -74,7 +114,10 @@ export class PoloMcpClient {
   private transport: Transport;
   private connected = false;
 
-  constructor(config: McpClientConfig) {
+  constructor(
+    config: McpClientConfig,
+    options: PoloMcpClientOptions = {},
+  ) {
     this.client = new Client({
       name: 'polo-ai',
       version: '1.0.0',
@@ -82,18 +125,24 @@ export class PoloMcpClient {
 
     // Create transport based on config type
     if (config.transport === 'stdio') {
-      // Stdio transport for local MCP servers - merge with process env,
-      // but filter out sensitive credentials to prevent leaking secrets to subprocesses
+      const environmentPolicy = options.environmentPolicy
+        ?? (process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot'
+          ? 'cli-one-shot'
+          : 'desktop');
       const processEnv: Record<string, string> = {};
-      for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined && !BLOCKED_ENV_VARS.includes(key)) {
-          processEnv[key] = value;
+      if (environmentPolicy === 'desktop') {
+        for (const [key, value] of Object.entries(process.env)) {
+          if (value !== undefined && !BLOCKED_ENV_VARS.includes(key)) {
+            processEnv[key] = value;
+          }
         }
       }
       this.transport = new StdioClientTransport({
         command: config.command,
         args: config.args,
-        env: { ...processEnv, ...config.env },
+        env: environmentPolicy === 'cli-one-shot'
+          ? buildCliOneShotStdioEnv(config.env)
+          : { ...processEnv, ...config.env },
       });
     } else {
       // HTTP transport for remote MCP servers

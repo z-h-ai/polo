@@ -1,240 +1,186 @@
-# polo-ai — CLI Reference
+# Polo CLI
 
-Terminal client for Polo AI server. Connects over WebSocket (`ws://` or `wss://`) to a running headless server.
+`polo` is the terminal entry point for Polo AI. The package also installs
+`polo-ai` as a compatibility alias; both names execute the same CLI.
 
-## Prerequisites
-
-- [Bun](https://bun.sh/) runtime installed
-- For `run` and `--validate-server`: an API key via `--api-key`, `$LLM_API_KEY`, or a provider-specific env var (e.g., `$ANTHROPIC_API_KEY`)
-- For all other commands: a running Polo AI headless server with URL and token
-
-## Installation
+The desktop installer bundles the CLI, server artifact, and Bun runtime. Open a
+new terminal after installation, then verify it:
 
 ```bash
-# Clone the repository
-git clone https://github.com/anthropics/polo-ai.git
-cd polo-ai
-
-# Install dependencies
-bun install
-
-# Option A: Run directly
-bun run apps/cli/src/index.ts <command>
-
-# Option B: Link globally (adds polo-ai to PATH)
-cd apps/cli && bun link
-polo-ai <command>
+polo --version
+polo --help
 ```
 
-### Quick Start
+For source development, use `bun run apps/cli/src/index.ts --help`. Use `polo`
+in new scripts and documentation; `polo-ai` is a deprecated compatibility shim
+until Polo 1.0.
 
-The fastest way to try it out — no server setup needed:
+## One-shot execution
+
+`run` and `exec` always start a dedicated CLI runtime. They do not connect to a
+running Electron runtime, acquire its server lock, or put sessions in an
+Electron workspace. The configuration workspace supplies sources, skills,
+permissions, and model configuration; the execution directory is independent.
+
+Configuration workspace selection:
+
+1. `--workspace <id|name|path>`
+2. the active Polo workspace
+3. the global configuration scope
+
+Execution directory selection:
+
+1. `-C, --cd <directory>`
+2. the caller's current directory
+
+`-C` does not register a workspace and does not create Polo configuration or
+session files in the target directory.
+
+### `polo exec`
+
+`exec` is a non-interactive, Codex-style command. It defaults to Polo's `safe`
+permission mode and persists its CLI Thread for resume.
 
 ```bash
-# Self-contained run (spawns a server automatically)
-ANTHROPIC_API_KEY=sk-... bun run apps/cli/src/index.ts run "Hello, world!"
+polo exec "Explain this repository"
+polo exec --yolo --json "Run the tests"
+polo exec -C ./project -m gpt-5 "Fix the failing test"
+cat issue.txt | polo exec "Diagnose this issue"
 ```
 
-## Connection Options
+`--yolo` and `--dangerously-bypass-approvals-and-sandbox` select Polo's
+application-level `allow-all` mode. They do not claim to provide or disable an
+operating-system sandbox.
 
-| Flag | Env var | Default | Description |
-|------|---------|---------|-------------|
-| `--url <ws[s]://...>` | `POLO_AI_SERVER_URL` | — | Server WebSocket URL |
-| `--token <secret>` | `POLO_AI_SERVER_TOKEN` | — | Authentication token |
-| `--workspace <id>` | — | auto-detect | Workspace ID |
-| `--timeout <ms>` | — | `10000` | Request timeout |
-| `--tls-ca <path>` | `POLO_AI_TLS_CA` | — | Custom CA cert for self-signed TLS |
-| `--json` | — | `false` | Raw JSON output for scripting |
-| `--send-timeout <ms>` | — | `300000` | Timeout for `send` command (5 min) |
+Core options:
 
-Flags take precedence over environment variables. If `--workspace` is omitted, the CLI auto-detects the first available workspace.
+| Option | Meaning |
+|---|---|
+| `[PROMPT]` | One prompt argument; omit it or use `-` to read stdin |
+| `--yolo` | Use Polo `allow-all` |
+| `--dangerously-bypass-approvals-and-sandbox` | Alias for `--yolo` |
+| `--json` | Emit stable, one-event-per-line JSONL |
+| `-m, --model <id>` | Invocation-only model |
+| `-C, --cd <dir>` | Execution directory |
+| `--ephemeral` | Delete the temporary Thread after cleanup |
+| `--color always|never|auto` | Color policy for stderr only |
+| `-o, --output-last-message <file>` | Atomically write the final answer |
+| `--workspace <id|name|path>` | Configuration workspace |
+| `--provider <name>` | Invocation-only provider |
+| `--api-key <key>` | Invocation-only API key |
+| `--base-url <url>` | Invocation-only endpoint |
 
-## Commands
+If both a prompt and piped stdin are present, stdin is appended as a separate
+`<stdin>` context block. In normal mode, successful stdout contains only the
+final assistant message and one newline; progress and errors use stderr.
+`--json` stdout is JSONL only.
 
-### Info & Health
+Provider, model, endpoint, and API key overrides apply only to that invocation.
+They do not create shared connections or change Electron defaults. Secrets are
+not stored in Thread metadata, session JSONL, or CLI JSONL.
+
+### Resume and Thread management
 
 ```bash
-polo-ai ping              # Verify connectivity (clientId + latency)
-polo-ai health            # Check credential store health
-polo-ai versions          # Show server runtime versions
+polo exec resume <thread_id> "Continue"
+polo exec resume --last "Continue"
+polo exec resume --ephemeral <thread_id> "Try another approach"
+polo exec sessions
+polo exec delete <thread_id>
 ```
 
-### Resource Listing
+`resume` continues the original Thread in place and takes a fresh configuration
+snapshot. Only one executor can own a Thread at a time. `resume --last` is
+limited to the same configuration scope and normalized execution directory.
+`resume --ephemeral` runs a temporary copy without modifying the original
+Thread or its `lastUsedAt`.
+
+`exec sessions` lists only persistent `cli-exec` Threads in the current
+configuration scope and normalized execution directory. `exec delete` removes an
+entire inactive Thread and refuses active leases.
+
+### `polo run`
+
+`run` keeps streaming Polo output and defaults to an ephemeral CLI Thread:
 
 ```bash
-polo-ai workspaces        # List all workspaces
-polo-ai sessions          # List sessions in workspace
-polo-ai connections       # List LLM connections
-polo-ai sources           # List configured sources
+polo run "Explain this repository"
+polo run --output-format stream-json "Run the tests"
+polo run --workspace my-workspace -C ./project --source github "List open PRs"
 ```
 
-### Session Operations
+Useful options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--source <slug>` | — | Enable a source; repeatable |
+| `--output-format text|stream-json` | `text` | Native Polo stream format |
+| `--mode safe|ask|allow-all` | `allow-all` | Permission mode |
+| `--no-cleanup` | `false` | Keep a debug Thread in the CLI root |
+| `--send-timeout <ms>` | `300000` | Legacy `run` turn timeout |
+| `--workspace-dir <path>` | — | Compatibility shorthand for an already registered configuration workspace and execution directory |
+
+`--workspace-dir` no longer registers a workspace. Use `--workspace` and `-C`
+for explicit configuration/execution separation. `run --no-cleanup` prints its
+`thread_id` and absolute Thread directory to stderr; retained `cli-run` Threads
+cannot be resumed and do not appear in `exec sessions`.
+
+## Storage and lifecycle
+
+CLI Threads are stored separately from Electron sessions:
+
+```text
+~/.polo-ai/cli-sessions/<configuration-scope-id>/executions/<thread-id>/
+  thread.json
+  owner.json
+  config-snapshot/
+  sessions/
+```
+
+All Polo-managed session artifacts for a CLI Thread stay below that Thread.
+Electron session discovery, unread state, automation, scheduler, messaging, and
+desktop notifications do not scan this root. On Unix and macOS, CLI directories
+use mode `0700` and files use `0600`.
+
+The CLI runtime watches its owner process. If the CLI is killed, the runtime
+cancels work and exits instead of leaving an orphan listener. Ephemeral cleanup
+first moves the complete Thread into the CLI root's `trash/` directory, then
+deletes it.
+
+## Exit codes
+
+| Result | Code |
+|---|---:|
+| Success | `0` |
+| Startup, execution, or cleanup failure | `1` |
+| Usage or unsupported option/subcommand | `2` |
+| `SIGINT` | `130` |
+| `SIGTERM` | `143` |
+| Other signal | `128 + signal number` |
+
+## Connected-server commands
+
+The existing connected-server commands remain available through the same
+binary. For local desktop use they discover and verify Electron's private
+runtime endpoint. Explicit `--url`/`POLO_AI_SERVER_URL` and
+`--token`/`POLO_AI_SERVER_TOKEN` values take precedence.
 
 ```bash
-polo-ai session create [--name <n>] [--mode <m>]  # Create session
-polo-ai session messages <id>                       # Print message history
-polo-ai session delete <id>                         # Delete session
-polo-ai cancel <id>                                 # Cancel processing
+polo app
+polo ping
+polo health
+polo versions
+polo workspaces
+polo sessions
+polo connections
+polo sources
+polo session create
+polo session messages <session-id>
+polo session delete <session-id>
+polo send <session-id> "message"
+polo cancel <session-id>
+polo invoke <channel> [json-args...]
+polo listen <channel>
 ```
 
-### Send Message (Streaming)
-
-```bash
-# Send a message and stream the AI response in real time
-polo-ai send <session-id> <message>
-
-# Pipe text from stdin
-echo "Summarize this file" | polo-ai send <session-id>
-
-# Read from stdin explicitly
-cat document.txt | polo-ai send <session-id> --stdin
-```
-
-The `send` command subscribes to session events and streams them to stdout:
-- `text_delta` — text streamed inline
-- `tool_start` — `[tool: name]` marker
-- `tool_result` — tool output (truncated to 200 chars)
-- `error` — printed to stderr, exit code 1
-- `complete` — exit code 0
-- `interrupted` — exit code 130
-
-### Power User
-
-```bash
-# Raw RPC call — send any channel with JSON args
-polo-ai invoke <channel> [json-args...]
-
-# Subscribe to push events (Ctrl+C to stop)
-polo-ai listen <channel>
-```
-
-Examples:
-```bash
-polo-ai invoke system:homeDir
-polo-ai invoke sessions:get '"workspace-123"'
-polo-ai listen session:event
-```
-
-### Run (Self-Contained)
-
-```bash
-polo-ai run <prompt>
-polo-ai run --workspace-dir ./project --source github "List open PRs"
-```
-
-The `run` command is fully self-contained — it spawns a headless server, creates a session, sends the prompt, streams the response, and exits. No separate server setup needed. An API key is resolved from `--api-key`, `$LLM_API_KEY`, or a provider-specific env var (e.g., `$ANTHROPIC_API_KEY`, `$OPENAI_API_KEY`).
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--workspace-dir <path>` | — | Register a workspace directory before running |
-| `--source <slug>` | — | Enable a source (repeatable) |
-| `--output-format <fmt>` | `text` | Output format: `text` or `stream-json` |
-| `--mode <mode>` | `allow-all` | Permission mode for the session |
-| `--no-cleanup` | `false` | Skip session deletion on exit |
-| `--server-entry <path>` | — | Custom server entry point |
-
-**LLM Configuration:**
-
-| Flag | Env Fallback | Default | Description |
-|------|-------------|---------|-------------|
-| `--provider <name>` | `LLM_PROVIDER` | `anthropic` | Provider: `anthropic`, `openai`, `google`, `openrouter`, `groq`, `mistral`, `xai`, etc. |
-| `--model <id>` | `LLM_MODEL` | (provider default) | Model ID (e.g., `claude-sonnet-4-5-20250929`, `gpt-4o`, `gemini-2.0-flash`) |
-| `--api-key <key>` | `LLM_API_KEY` | (provider env) | API key — also checks provider-specific vars like `$OPENAI_API_KEY` |
-| `--base-url <url>` | `LLM_BASE_URL` | — | Custom endpoint for proxies, OpenRouter, or self-hosted models |
-
-```bash
-# Multi-provider examples
-polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-polo-ai run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
-```
-
-Prompt can also be piped via stdin:
-```bash
-echo "Summarize this file" | polo-ai run
-cat error.log | polo-ai run "What's causing these errors?"
-```
-
-### Validate Server
-
-```bash
-# Against a running server
-polo-ai --validate-server --url ws://127.0.0.1:9100 --token <token>
-
-# Self-contained (auto-spawns a server)
-polo-ai --validate-server
-```
-
-When no `--url` is provided, `--validate-server` automatically spawns a local headless server (same as the `run` command), runs the validation, and shuts it down.
-
-Runs a 21-step integration test covering the full server lifecycle including source and skill creation:
-
-1. Connect + handshake
-2. `credentials:healthCheck`
-3. `system:versions`
-4. `system:homeDir`
-5. `workspaces:get`
-6. `sessions:get`
-7. `LLM_Connection:list`
-8. `sources:get`
-9. `sessions:create` (temporary `__cli-validate-*` session)
-10. `sessions:getMessages`
-11. Send message + stream (text response)
-12. Send message + tool use (Bash tool)
-13. `sources:create` (temporary Cat Facts API source)
-14. Send + source mention (uses the created source)
-15. Send + skill create (writes SKILL.md via Bash)
-16. `skills:get` (verify skill appears)
-17. Send + skill mention (invokes the created skill)
-18. `skills:delete` (cleanup)
-19. `sources:delete` (cleanup)
-20. `sessions:delete` (cleanup)
-21. Disconnect
-
-**Note:** This test mutates workspace state — it creates and deletes a temporary session, source, and skill. All resources are cleaned up on completion. Continues on failure and reports a summary. Use `--json` for machine-readable output.
-
-## Scripting Patterns
-
-```bash
-# Get workspace IDs
-WORKSPACES=$(polo-ai --json workspaces | jq -r '.[].id')
-
-# Count sessions per workspace
-for ws in $WORKSPACES; do
-  COUNT=$(polo-ai --json --workspace "$ws" sessions | jq length)
-  echo "$ws: $COUNT sessions"
-done
-
-# Create a session and capture its ID
-SESSION_ID=$(polo-ai --json session create --name "CI Run" | jq -r '.id')
-
-# Send a message and wait for completion
-polo-ai send "$SESSION_ID" "Run the test suite and report results"
-
-# Clean up
-polo-ai session delete "$SESSION_ID"
-```
-
-## TLS / wss://
-
-For remote servers with TLS:
-
-```bash
-# Trusted certificate (Let's Encrypt, etc.)
-polo-ai --url wss://server.example.com:9100 ping
-
-# Self-signed certificate
-polo-ai --url wss://server.example.com:9100 --tls-ca /path/to/ca.pem ping
-```
-
-The `--tls-ca` flag sets `NODE_EXTRA_CA_CERTS` before connecting. You can also set `POLO_AI_TLS_CA` in your environment.
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `Connection timeout` | Server not running or unreachable | Check server is started, verify URL |
-| `AUTH_FAILED` | Wrong token | Check `POLO_AI_SERVER_TOKEN` matches server |
-| `PROTOCOL_VERSION_UNSUPPORTED` | Version mismatch | Update CLI and server to same version |
-| `WebSocket connection error` | Network issue or TLS problem | For self-signed certs, use `--tls-ca` |
-| `No workspace available` | Workspace not yet created | Create one via desktop app or API |
+For a TLS server, use a `wss://` URL and optionally `--tls-ca <path>`.

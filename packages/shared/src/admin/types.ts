@@ -15,6 +15,11 @@ export type {
   SkillValidationIssue,
   SkillVersionMetadata,
 } from '../creator-skills/types.ts';
+import type {
+  LocalAppArchitecture,
+  LocalAppPlatform,
+  LocalAppRuntimeKind,
+} from '../protocol/local-apps.ts';
 
 export interface AdminUser {
   id: string;
@@ -162,6 +167,136 @@ export interface ListOrganizationsResponse {
   organizations: OrganizationSummary[];
 }
 
+export type CatalogAppDeliveryMode = 'remote_url' | 'local_bundle';
+
+export interface AppReleaseSummary {
+  id?: string;
+  version: string;
+  runtime: LocalAppRuntimeKind;
+  /** Legacy Catalogs may include a URL; current POL-52 issues one on demand. */
+  downloadUrl?: string;
+  checksum: string;
+  sizeBytes: number;
+  platform?: LocalAppPlatform;
+  arch?: LocalAppArchitecture;
+}
+
+export interface AppReleaseDownload {
+  releaseId: string;
+  downloadUrl: string;
+  expiresAt: string;
+  checksum: string;
+  sizeBytes: number;
+  runtime: LocalAppRuntimeKind;
+  platform?: LocalAppPlatform;
+  arch?: LocalAppArchitecture;
+}
+
+export interface CatalogApp {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  iconUrl?: string;
+  creatorName?: string;
+  deliveryMode: CatalogAppDeliveryMode;
+  remoteUrl?: string;
+  currentRelease?: AppReleaseSummary;
+  permissions?: string[];
+  sortOrder: number;
+  /**
+   * Added locally when an app disappears from a refreshed catalog. Retaining
+   * the lightweight metadata lets the client explain why an installed app can
+   * no longer be launched without silently deleting it.
+   */
+  availability?: 'available' | 'withdrawn' | 'unavailable';
+}
+
+export interface AppCatalogResponse {
+  appConfigVersion: string;
+  apps: CatalogApp[];
+}
+
+export type AppCatalogFetchResult =
+  | { notModified: true }
+  | ({ notModified: false } & AppCatalogResponse);
+
+export interface AppCatalogCacheEntry extends AppCatalogResponse {
+  accountId: string;
+  organizationId: string;
+  authorizationStatus: 'authorized' | 'denied';
+  syncedAt: number;
+  /**
+   * Withdrawn apps are bounded independently from the 10,000 currently visible
+   * Catalog entries so a full directory cannot erase local/recent references.
+   */
+  withdrawnApps?: CatalogApp[];
+  /**
+   * Last releases whose version strings passed the client SemVer contract.
+   * This is deliberately separate from the latest catalog payload so a bad
+   * server version cannot erase a previously actionable update.
+   */
+  trustedReleases?: Record<string, AppReleaseSummary>;
+  warnings?: Array<{
+    code: 'invalid_semver';
+    catalogAppId: string;
+  }>;
+}
+
+export interface DeniedCatalogApp extends Pick<
+  CatalogApp,
+  | 'id'
+  | 'organizationId'
+  | 'name'
+  | 'description'
+  | 'iconUrl'
+  | 'creatorName'
+  | 'deliveryMode'
+  | 'sortOrder'
+> {
+  availability: 'unavailable';
+}
+
+/**
+ * Renderer-safe representation of a denied Catalog.
+ *
+ * Delivery URLs, release checksums, permissions, and trusted release metadata
+ * are deliberately absent while the scope remains available for status,
+ * logs, stop, and uninstall operations.
+ */
+export interface DeniedAppCatalogSnapshot {
+  accountId: string;
+  organizationId: string;
+  appConfigVersion: string;
+  authorizationStatus: 'denied';
+  syncedAt: number;
+  apps: DeniedCatalogApp[];
+  withdrawnApps?: DeniedCatalogApp[];
+}
+
+export type AppCatalogSyncResult =
+  | {
+      success: true;
+      catalog: AppCatalogCacheEntry;
+      source: 'network' | 'cache';
+      refreshed: boolean;
+      accessMode: 'online' | 'offline' | 'denied';
+      warningCode?: string;
+      warning?: string;
+    }
+  | {
+      success: false;
+      errorCode: string;
+      message: string;
+      status?: number;
+      /**
+       * Explicit Catalog scope denial may return the sanitized last trusted
+       * cache so a fresh renderer can expose local data-management actions.
+       */
+      catalog?: DeniedAppCatalogSnapshot;
+      accessMode?: 'denied';
+    };
+
 export interface OrganizationJoinPreview {
   organization: Organization;
   join: {
@@ -266,9 +401,13 @@ export type AdminErrorCode =
   | 'INVALID_TOKEN'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
+  | 'MEMBERSHIP_REMOVED'
+  | 'MEMBERSHIP_SUSPENDED'
+  | 'ORGANIZATION_UNAVAILABLE'
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
   | 'SERVER_ERROR'
+  | 'TIMEOUT'
   | 'NETWORK_ERROR'
   | 'UNKNOWN_ERROR'
   | 'idempotency_conflict'

@@ -226,29 +226,19 @@ try {
 Write-Info "Cleaning up..."
 Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
 
-# Add command line shortcut
-Write-Info "Adding 'polo-ai' command to PATH..."
+# Install the unified terminal launcher using the same managed script as NSIS.
+Write-Info "Adding 'polo' command to PATH..."
 
-$binDir = "$env:LOCALAPPDATA\Polo AI\bin"
-$cmdFile = "$binDir\polo-ai.cmd"
-$exePath = "$env:LOCALAPPDATA\Programs\Polo AI\Polo AI.exe"
-
-# Create bin directory
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-
-# Create batch file launcher
-$cmdContent = "@echo off`r`nstart `"`" `"$exePath`" %*"
-Set-Content -Path $cmdFile -Value $cmdContent -Encoding ASCII
-
-# Add to user PATH if not already there
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$binDir*") {
-    $newPath = "$userPath;$binDir"
-    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    Write-Success "Added to PATH (restart terminal to use 'polo-ai' command)"
-} else {
-    Write-Success "Command 'polo-ai' is ready"
+$installDir = "$env:LOCALAPPDATA\Programs\Polo AI"
+$terminalScript = "$installDir\resources\app\resources\scripts\windows-terminal-integration.ps1"
+if (-not (Test-Path $terminalScript)) {
+    Write-Err "Polo terminal setup script is missing: $terminalScript"
 }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $terminalScript -Mode Install -InstallDir $installDir
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "Polo terminal setup failed"
+}
+Write-Success "Command 'polo' is ready (restart Terminal if this is the first install)"
 
 Write-Host ""
 Write-Host "---------------------------------------------------------------------"
@@ -259,6 +249,7 @@ Write-Host "  Polo AI has been installed."
 Write-Host ""
 Write-Host "  Launch from:"
 Write-Host "    - Start Menu or desktop shortcut"
-Write-Host "    - Command line: polo-ai (restart terminal first)"
+Write-Host "    - App: polo app (restart terminal first)"
+Write-Host "    - Terminal: polo --help"
 Write-Host ""
 }

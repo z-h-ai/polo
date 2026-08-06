@@ -83,6 +83,8 @@ import {
 } from '@/context/OrganizationContext'
 import { useOrganizationContextState } from '@/hooks/useOrganizationContext'
 import {
+  emitAdminAuthFailure,
+  emitAdminCatalogSessionAuthFailure,
   getAdminErrorCode,
   isAdminAuthFailureResult,
   subscribeToAdminAuthFailures,
@@ -127,6 +129,12 @@ function workspaceDistribution(sessions: Iterable<{ workspaceId?: string }>): Re
 
 function isAdminKickedResult(result: { loggedIn: false; errorCode?: string; status?: number }): boolean {
   return result.errorCode === 'TOKEN_REVOKED'
+}
+
+function isAdminSessionChangedResult(
+  result: { loggedIn?: boolean; errorCode?: string },
+): boolean {
+  return result.loggedIn === false && result.errorCode === 'SESSION_CHANGED'
 }
 
 function isAdminAccountDisabledResult(result: { loggedIn?: boolean; errorCode?: string; status?: number; message?: string }): boolean {
@@ -359,7 +367,17 @@ export default function App() {
   const [runtimeChatAccessIssue, setRuntimeChatAccessIssue] = useState<Exclude<ChatAccessIssue, 'no-ai-service'> | null>(null)
   const [currentAdminUser, setCurrentAdminUser] = useState<Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null>(null)
   const currentAdminUserIdRef = useRef<string | null>(null)
-  currentAdminUserIdRef.current = currentAdminUser?.userId ?? null
+  const currentAdminUserGenerationRef = useRef(0)
+  const commitCurrentAdminUser = useCallback((
+    user: Pick<AdminStatusResult, 'userId' | 'username' | 'displayName'> | null,
+  ) => {
+    const nextAccountId = user?.userId ?? null
+    if (currentAdminUserIdRef.current !== nextAccountId) {
+      currentAdminUserGenerationRef.current += 1
+    }
+    currentAdminUserIdRef.current = nextAccountId
+    setCurrentAdminUser(user)
+  }, [])
   const organizationDeepLinkCoordinatorRef = useRef<OrganizationDeepLinkNavigationCoordinator | null>(null)
   const invalidateOrganizationDeepLinkNavigation = useCallback(() => {
     organizationDeepLinkCoordinatorRef.current?.invalidate()
@@ -709,18 +727,16 @@ export default function App() {
       if (currentAdminUserIdRef.current !== (user?.userId ?? null)) {
         invalidateOrganizationDeepLinkNavigation()
       }
-      currentAdminUserIdRef.current = user?.userId ?? null
-      setCurrentAdminUser(user)
+      commitCurrentAdminUser(user)
       return user
     } catch {
       if (currentAdminUserIdRef.current !== null) {
         invalidateOrganizationDeepLinkNavigation()
       }
-      currentAdminUserIdRef.current = null
-      setCurrentAdminUser(null)
+      commitCurrentAdminUser(null)
       return null
     }
-  }, [invalidateOrganizationDeepLinkNavigation])
+  }, [commitCurrentAdminUser, invalidateOrganizationDeepLinkNavigation])
 
   const continueAfterOrganization = useCallback((workspaceId: string | null) => {
     setAppState(workspaceId ? 'ready' : 'workspace-picker')
@@ -747,8 +763,7 @@ export default function App() {
       if (currentAdminUserIdRef.current !== accountId) return
       if (isAdminAuthFailureResult(error as AdminErrorLike)) {
         invalidateOrganizationDeepLinkNavigation()
-        currentAdminUserIdRef.current = null
-        setCurrentAdminUser(null)
+        commitCurrentAdminUser(null)
         setAppState('onboarding')
       } else {
         setAppState('organization')
@@ -756,6 +771,7 @@ export default function App() {
     }
   }, [
     bootstrapOrganization,
+    commitCurrentAdminUser,
     continueAfterOrganization,
     invalidateOrganizationDeepLinkNavigation,
   ])
@@ -838,8 +854,7 @@ export default function App() {
     clearOrganizationAccount(currentAdminUserIdRef.current, {
       preservePendingJoinToken: true,
     })
-    currentAdminUserIdRef.current = null
-    setCurrentAdminUser(null)
+    commitCurrentAdminUser(null)
     if (getAdminErrorCode(failure) === 'TOKEN_REVOKED') {
       enterAdminKicked()
     } else {
@@ -847,6 +862,7 @@ export default function App() {
     }
   }, [
     clearOrganizationAccount,
+    commitCurrentAdminUser,
     enterAdminKicked,
     enterAdminLogin,
     invalidateOrganizationDeepLinkNavigation,
@@ -855,7 +871,10 @@ export default function App() {
   // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
     invalidateOrganizationDeepLinkNavigation()
-    const validation = await window.electronAPI.adminValidate()
+    let validation = await window.electronAPI.adminValidate()
+    if (isAdminSessionChangedResult(validation)) {
+      validation = await window.electronAPI.adminValidate()
+    }
     if (!validation.loggedIn && isAdminKickedResult(validation)) {
       enterAdminKicked()
       return
@@ -920,7 +939,10 @@ export default function App() {
         let signedInAccountId: string | null = null
 
         if (adminStatus.adminUrl) {
-          const validation = await window.electronAPI.adminValidate()
+          let validation = await window.electronAPI.adminValidate()
+          if (isAdminSessionChangedResult(validation)) {
+            validation = await window.electronAPI.adminValidate()
+          }
           if (!isCurrentInitialization()) return
           if (!validation.loggedIn) {
             startupInitializationHandlersRef.current.handleAdminAuthFailure(validation)
@@ -942,8 +964,7 @@ export default function App() {
           if (currentAdminUserIdRef.current !== signedInUser.userId) {
             invalidateOrganizationDeepLinkNavigation()
           }
-          currentAdminUserIdRef.current = signedInUser.userId
-          setCurrentAdminUser(signedInUser)
+          commitCurrentAdminUser(signedInUser)
           signedInAccountId = signedInUser.userId
           needs = await window.electronAPI.getSetupNeeds()
           if (!isCurrentInitialization()) return
@@ -978,7 +999,7 @@ export default function App() {
         startupInitializationGenerationRef.current += 1
       }
     }
-  }, [invalidateOrganizationDeepLinkNavigation])
+  }, [commitCurrentAdminUser, invalidateOrganizationDeepLinkNavigation])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAdminReauthRequired((validation) => {
@@ -1545,8 +1566,7 @@ export default function App() {
       if (!validation.loggedIn && isAdminAccountDisabledResult(validation)) {
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
-        currentAdminUserIdRef.current = null
-        setCurrentAdminUser(null)
+        commitCurrentAdminUser(null)
         return true
       }
     } catch (error) {
@@ -1558,8 +1578,7 @@ export default function App() {
       })) {
         setRuntimeChatAccessIssue('account-disabled')
         invalidateOrganizationDeepLinkNavigation()
-        currentAdminUserIdRef.current = null
-        setCurrentAdminUser(null)
+        commitCurrentAdminUser(null)
         return true
       }
     }
@@ -1567,6 +1586,7 @@ export default function App() {
     return false
   }, [
     currentAdminUser,
+    commitCurrentAdminUser,
     invalidateOrganizationDeepLinkNavigation,
     runtimeChatAccessIssue,
   ])
@@ -2066,9 +2086,18 @@ export default function App() {
 
   // Execute reset after user confirms in dialog
   const executeReset = useCallback(async () => {
+    const logoutSnapshot = {
+      accountId: currentAdminUserIdRef.current,
+      generation: currentAdminUserGenerationRef.current,
+    }
+    const isCurrentLogout = () => (
+      currentAdminUserIdRef.current === logoutSnapshot.accountId
+      && currentAdminUserGenerationRef.current === logoutSnapshot.generation
+    )
     invalidateOrganizationDeepLinkNavigation()
     try {
-      await window.electronAPI.logout()
+      const result = await window.electronAPI.logout()
+      if (!result.success || !isCurrentLogout()) return
       invalidateOrganizationDeepLinkNavigation()
       // Reset all state
       // Clear session atoms - initialize with empty array clears all per-session atoms
@@ -2077,7 +2106,8 @@ export default function App() {
       setWindowWorkspaceId(null)
       setRuntimeChatAccessIssue(null)
       setLlmConnectionsLoaded(false)
-      clearOrganizationAccount(currentAdminUser?.userId)
+      clearOrganizationAccount(logoutSnapshot.accountId)
+      commitCurrentAdminUser(null)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
         needsBillingConfig: true,
@@ -2094,7 +2124,7 @@ export default function App() {
       setShowResetDialog(false)
     }
   }, [
-    currentAdminUser?.userId,
+    commitCurrentAdminUser,
     onboarding,
     initializeSessions,
     clearOrganizationAccount,
@@ -2103,12 +2133,20 @@ export default function App() {
   ])
 
   const handleAdminLogout = useCallback(async () => {
+    const logoutSnapshot = {
+      accountId: currentAdminUserIdRef.current,
+      generation: currentAdminUserGenerationRef.current,
+    }
+    const isCurrentLogout = () => (
+      currentAdminUserIdRef.current === logoutSnapshot.accountId
+      && currentAdminUserGenerationRef.current === logoutSnapshot.generation
+    )
     invalidateOrganizationDeepLinkNavigation()
     try {
-      await window.electronAPI.adminLogout()
-    } finally {
+      const result = await window.electronAPI.adminLogout()
+      if (!result.success || !isCurrentLogout()) return
       invalidateOrganizationDeepLinkNavigation()
-      clearOrganizationAccount(currentAdminUser?.userId)
+      clearOrganizationAccount(logoutSnapshot.accountId)
       initializeSessions([])
       setWorkspaces([])
       setWindowWorkspaceId(null)
@@ -2117,8 +2155,7 @@ export default function App() {
       setDefaultLlmConnectionSlug(undefined)
       setWorkspaceDefaultLlmConnection(undefined)
       setRuntimeChatAccessIssue(null)
-      currentAdminUserIdRef.current = null
-      setCurrentAdminUser(null)
+      commitCurrentAdminUser(null)
       setSetupNeeds({
         needsBillingConfig: false,
         needsCredentials: false,
@@ -2127,9 +2164,11 @@ export default function App() {
       })
       handleAdminRelogin()
       setAppState('onboarding')
+    } catch (error) {
+      console.error('Admin logout failed:', error)
     }
   }, [
-    currentAdminUser?.userId,
+    commitCurrentAdminUser,
     handleAdminRelogin,
     initializeSessions,
     clearOrganizationAccount,
@@ -2353,6 +2392,30 @@ export default function App() {
     organization.organizationMembershipRole,
     organization.organizationSummaries,
   ])
+  const startupCatalogOrganizationId = organizationContextValue?.activeOrganizationId
+  const startupCatalogContextKey = organizationContextValue?.organizationContextKey
+  const activeOrganizationAvailable = Boolean(
+    organization.activeOrganization
+    && organization.activeOrganization.status !== 'suspended'
+    && organization.activeOrganization.membership.status === 'active',
+  )
+
+  useEffect(() => {
+    if (!startupCatalogOrganizationId) return
+    let cancelled = false
+    void window.electronAPI.adminSyncAppCatalog(
+      startupCatalogOrganizationId,
+    ).then((result) => {
+      if (!cancelled && !result.success) {
+        emitAdminCatalogSessionAuthFailure(result)
+      }
+    }).catch(() => {
+      // Home surfaces refresh failures and the server retains the last confirmed cache.
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [startupCatalogContextKey, startupCatalogOrganizationId])
 
   // Platform actions for @polo-ai/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
@@ -2581,7 +2644,7 @@ export default function App() {
               )}
               />
             </TabShellProvider>
-            {organizationContextValue ? (
+            {organizationContextValue && activeOrganizationAvailable ? (
               <OrganizationManagementDialog
                 open={organizationManagementOpen}
                 onOpenChange={setOrganizationManagementOpen}

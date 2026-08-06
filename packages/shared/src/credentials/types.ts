@@ -115,6 +115,10 @@ export interface StoredCredential {
   username?: string;
   /** Admin display name associated with the token */
   displayName?: string;
+  /** Last server-verified Admin role, retained for restricted offline startup */
+  adminRole?: string;
+  /** Last server-verified Admin groups, retained for restricted offline startup */
+  adminGroupIds?: string[];
 
   // --- AWS IAM credentials (for llm_iam type) ---
 

@@ -1,7 +1,27 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
-import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel } from '@polo-ai/shared/config'
+import {
+  getAllSessionDrafts,
+  getDefaultThinkingLevel,
+  getHomeRecentApps,
+  getOrganizationContextStorage,
+  getPreferencesPath,
+  getSessionDraft,
+  loadPreferences,
+  setDefaultThinkingLevel,
+  setHomeRecentApps,
+  updateOrganizationContextStorage,
+  setSessionDraft,
+  deleteSessionDraft,
+  getWorkspaceByNameOrId,
+} from '@polo-ai/shared/config'
+import type {
+  HomeRecentAppPreference,
+} from '@polo-ai/shared/config/home-recent'
+import type {
+  OrganizationContextStoragePatch,
+} from '@polo-ai/shared/config/organization-context'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@polo-ai/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
@@ -16,6 +36,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.workspace.SETTINGS_UPDATE,
   RPC_CHANNELS.preferences.READ,
   RPC_CHANNELS.preferences.WRITE,
+  RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+  RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.drafts.GET,
   RPC_CHANNELS.drafts.SET,
   RPC_CHANNELS.drafts.DELETE,
@@ -189,15 +213,62 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Write user preferences file (validates JSON before saving)
   server.handle(RPC_CHANNELS.preferences.WRITE, async (_, content: string) => {
     try {
-      JSON.parse(content) // Validate JSON
+      const next = JSON.parse(content) as Record<string, unknown>
+      if (!next || typeof next !== 'object' || Array.isArray(next)) {
+        throw new Error('Preferences must be a JSON object')
+      }
+      // Existing broad writers predate device-local launcher and Admin
+      // organization state. Preserve those hidden fields so editing user
+      // preferences cannot erase them.
+      const current = loadPreferences()
+      if (
+        next.homeRecentApps === undefined
+        && current.homeRecentApps !== undefined
+      ) {
+        next.homeRecentApps = current.homeRecentApps
+      }
+      if (
+        next.organizationContextStorage === undefined
+        && current.organizationContextStorage !== undefined
+      ) {
+        next.organizationContextStorage = current.organizationContextStorage
+      }
       const path = getPreferencesPath()
       mkdirSync(dirname(path), { recursive: true })
-      writeFileSync(path, content, 'utf-8')
+      writeFileSync(path, JSON.stringify(next, null, 2), 'utf-8')
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   })
+
+  server.handle(
+    RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,
+    async (_ctx, contextKey: string) => getHomeRecentApps(contextKey),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
+    async (
+      _ctx,
+      contextKey: string,
+      apps: HomeRecentAppPreference[],
+    ) => setHomeRecentApps(contextKey, apps),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
+    async (_ctx, accountId: string) => getOrganizationContextStorage(accountId),
+  )
+
+  server.handle(
+    RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+    async (
+      _ctx,
+      accountId: string,
+      patch: OrganizationContextStoragePatch,
+    ) => updateOrganizationContextStorage(accountId, patch),
+  )
 
   // ============================================================
   // Session Drafts (persisted input text)

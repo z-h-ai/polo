@@ -1,8 +1,8 @@
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs'
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs'
 import { uptime as osUptime } from 'node:os'
 import { join } from 'node:path'
 import { OAuthFlowStore } from '@polo-ai/shared/auth'
-import { ensureConfigDir, loadStoredConfig, saveConfig } from '@polo-ai/shared/config'
+import { ensureConfigDir, initializeStoredConfigIfMissing } from '@polo-ai/shared/config'
 import { CONFIG_DIR } from '@polo-ai/shared/config/paths'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
 import { WsRpcServer, type WsRpcTlsOptions } from '../transport/server'
@@ -53,6 +53,14 @@ export interface ServerBootstrapOptions<TSessionManager, THandlerDeps> {
    * When provided, the WsRpcServer serves HTTP (e.g. WebUI) on the same port.
    */
   httpHandler?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void
+  /** CLI one-shot runtimes do not own or mutate shared bootstrap artifacts. */
+  bootstrapSharedConfig?: boolean
+  /** CLI one-shot runtimes use Thread leases instead of the desktop server lock. */
+  useServerLock?: boolean
+  /** Disable background model refresh for bounded one-shot runtimes. */
+  startModelRefresh?: boolean
+  /** Drain delay before transport close. Desktop defaults to 2 seconds. */
+  shutdownDrainMs?: number
 }
 
 export interface ServerHandlerContext {
@@ -119,7 +127,16 @@ export function generateServerToken(): string {
 // Startup lock file
 // ---------------------------------------------------------------------------
 
-const LOCK_FILE = join(CONFIG_DIR, '.server.lock')
+/**
+ * Server-process coordination is intentionally separate from user config.
+ *
+ * Normal long-lived servers keep the historical CONFIG_DIR lock. A temporary
+ * `polo run` server supplies a private POLO_AI_SERVER_RUNTIME_DIR so multiple
+ * invocations can share the user's config and credentials without contending
+ * on the long-lived Electron/server lock.
+ */
+const SERVER_RUNTIME_DIR = process.env.POLO_AI_SERVER_RUNTIME_DIR || CONFIG_DIR
+const LOCK_FILE = join(SERVER_RUNTIME_DIR, '.server.lock')
 
 interface LockPayload {
   pid: number
@@ -169,6 +186,10 @@ function isLockFromPreviousBoot(startedAt: number): boolean {
 }
 
 function acquireServerLock(logger: PlatformServices['logger']): void {
+  if (!existsSync(SERVER_RUNTIME_DIR)) {
+    mkdirSync(SERVER_RUNTIME_DIR, { recursive: true, mode: 0o700 })
+  }
+
   if (existsSync(LOCK_FILE)) {
     try {
       const content = readFileSync(LOCK_FILE, 'utf-8')
@@ -241,17 +262,15 @@ function bootstrapConfigArtifacts(platform: PlatformServices): void {
 }
 
 function ensureGlobalConfigExists(platform: PlatformServices): void {
-  const config = loadStoredConfig()
-  if (config) {
-    platform.logger.info('[bootstrap] Global config found')
-    return
-  }
-
-  saveConfig({
+  const created = initializeStoredConfigIfMissing({
     workspaces: [],
     activeWorkspaceId: null,
     activeSessionId: null,
   })
+  if (!created) {
+    platform.logger.info('[bootstrap] Global config found')
+    return
+  }
   platform.logger.info('[bootstrap] Initialized missing global config')
 }
 
@@ -281,9 +300,13 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
 
   options.applyPlatformToSubsystems?.(platform)
 
-  bootstrapConfigArtifacts(platform)
-  ensureGlobalConfigExists(platform)
-  acquireServerLock(platform.logger)
+  if (options.bootstrapSharedConfig !== false) {
+    bootstrapConfigArtifacts(platform)
+    ensureGlobalConfigExists(platform)
+  }
+  if (options.useServerLock !== false) {
+    acquireServerLock(platform.logger)
+  }
 
   const modelRefreshService = options.initModelRefreshService()
   const sessionManager = options.createSessionManager()
@@ -346,7 +369,9 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
 
   await options.initializeSessionManager(sessionManager)
 
-  modelRefreshService.startAll()
+  if (options.startModelRefresh !== false) {
+    modelRefreshService.startAll()
+  }
 
   platform.logger.info(`Polo AI server listening on ${wsServer.protocol}://${rpcHost}:${wsServer.port}`)
 
@@ -354,6 +379,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
   const stop = async (): Promise<void> => {
     if (stopped) return
     stopped = true
+    let cleanupError: Error | null = null
 
     platform.logger.info('Shutting down...')
 
@@ -364,8 +390,10 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
         graceMs: 2000,
         timestamp: Date.now(),
       })
-      // Brief drain period so clients receive the notification
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      const shutdownDrainMs = options.shutdownDrainMs ?? 2000
+      if (shutdownDrainMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, shutdownDrainMs))
+      }
     } catch (error) {
       platform.logger.error('[bootstrap] Failed to send shutdown notification:', error)
     }
@@ -380,6 +408,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
       await options.cleanupSessionManager?.(sessionManager)
     } catch (error) {
       platform.logger.error('[bootstrap] Failed to clean up session manager:', error)
+      cleanupError = error instanceof Error ? error : new Error(String(error))
     }
 
     try {
@@ -394,7 +423,10 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
       platform.logger.error('[bootstrap] Failed to dispose OAuth flow store:', error)
     }
 
-    releaseServerLock()
+    if (options.useServerLock !== false) {
+      releaseServerLock()
+    }
+    if (cleanupError) throw cleanupError
   }
 
   return {

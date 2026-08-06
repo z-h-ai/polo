@@ -117,6 +117,7 @@
       "name": "@polo-ai/cli",
       "version": "0.10.0",
       "bin": {
+        "polo": "src/index.ts",
         "polo-ai": "src/index.ts",
       },
       "dependencies": {
@@ -368,6 +369,7 @@
         "glob": "^13.0.0",
         "i18next": "^26.0.3",
         "incr-regex-package": "^1.0.4",
+        "koffi": "^2.15.1",
         "shell-quote": "^1.8.3",
         "yauzl": "^2.10.0",
       },

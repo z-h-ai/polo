@@ -1,19 +1,38 @@
-import { readFile, writeFile, unlink, mkdir, readdir, stat } from 'fs/promises'
-import { isAbsolute, join, resolve, dirname, parse as parsePath } from 'path'
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  readdir,
+  stat,
+  unlink,
+} from 'fs/promises'
+import { constants as fsConstants } from 'fs'
+import {
+  isAbsolute,
+  join,
+  resolve,
+  dirname,
+  parse as parsePath,
+  relative,
+  sep,
+} from 'path'
 import { homedir } from 'os'
 import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
 import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult } from '@polo-ai/shared/protocol'
 import type { StoredAttachment } from '@polo-ai/core/types'
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@polo-ai/shared/utils'
-import { getSessionAttachmentsPath, validateSessionId } from '@polo-ai/shared/sessions'
-import { getWorkspaceByNameOrId } from '@polo-ai/shared/config'
+import { validateSessionId } from '@polo-ai/shared/sessions'
 import { resizeImageForAPI, inspectImageBuffer } from '@polo-ai/server-core/services'
 import { sanitizeFilename, validateFilePath, getWorkspaceAllowedDirs } from '@polo-ai/server-core/handlers'
 import { MarkItDown } from 'markitdown-js'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@polo-ai/server-core/transport'
+import type { SessionStorage } from '@polo-ai/shared/sessions'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.file.READ,
@@ -28,6 +47,86 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.fs.SEARCH,
   RPC_CHANNELS.fs.LIST_DIRECTORY,
 ] as const
+
+const PRIVATE_DIRECTORY_MODE = 0o700
+const PRIVATE_FILE_MODE = 0o600
+
+async function assertSafeSessionArtifactPath(
+  storage: SessionStorage,
+  sessionsRoot: string,
+  path: string,
+  allowMissing: boolean,
+): Promise<void> {
+  storage.assertSafeFilePath?.(path, allowMissing)
+  const normalizedRoot = resolve(sessionsRoot)
+  const normalizedPath = resolve(path)
+  const fromRoot = relative(normalizedRoot, normalizedPath)
+  if (
+    fromRoot === '..'
+    || fromRoot.startsWith(`..${sep}`)
+    || isAbsolute(fromRoot)
+  ) {
+    throw new Error(`Refusing attachment path outside session storage: ${path}`)
+  }
+
+  const rootInfo = await lstat(normalizedRoot)
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+    throw new Error(`Refusing unsafe sessions root: ${normalizedRoot}`)
+  }
+  const canonicalRoot = await realpath(normalizedRoot)
+  let current = normalizedRoot
+  for (const segment of fromRoot ? fromRoot.split(sep) : []) {
+    current = join(current, segment)
+    let info
+    try {
+      info = await lstat(current)
+    } catch (error) {
+      if (allowMissing && (error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (info.isSymbolicLink()) {
+      throw new Error(`Refusing symlink in attachment storage: ${current}`)
+    }
+    const canonical = await realpath(current)
+    const canonicalRelative = relative(canonicalRoot, canonical)
+    if (
+      canonicalRelative === '..'
+      || canonicalRelative.startsWith(`..${sep}`)
+      || isAbsolute(canonicalRelative)
+    ) {
+      throw new Error(`Refusing attachment path outside canonical storage: ${current}`)
+    }
+  }
+}
+
+async function writePrivateSessionArtifact(
+  storage: SessionStorage,
+  sessionsRoot: string,
+  path: string,
+  content: string | Uint8Array,
+): Promise<void> {
+  await assertSafeSessionArtifactPath(storage, sessionsRoot, path, true)
+  const flags = fsConstants.O_WRONLY
+    | fsConstants.O_CREAT
+    | fsConstants.O_EXCL
+    | (fsConstants.O_NOFOLLOW ?? 0)
+  const handle = await open(path, flags, PRIVATE_FILE_MODE)
+  try {
+    await assertSafeSessionArtifactPath(storage, sessionsRoot, path, false)
+    const info = await handle.stat()
+    if (!info.isFile()) throw new Error(`Refusing non-file attachment target: ${path}`)
+    await handle.writeFile(content)
+    await handle.sync()
+    if (process.platform !== 'win32') await chmod(path, PRIVATE_FILE_MODE)
+  } catch (error) {
+    await handle.close().catch(() => {})
+    await assertSafeSessionArtifactPath(storage, sessionsRoot, path, false)
+      .then(() => unlink(path))
+      .catch(() => {})
+    throw error
+  }
+  await handle.close()
+}
 
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
   // Read a file (with path validation to prevent traversal attacks)
@@ -227,19 +326,37 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       if (!workspaceId) {
         throw new Error('Cannot determine workspace for attachment storage')
       }
-      const workspace = getWorkspaceByNameOrId(workspaceId)
-      if (!workspace) {
-        throw new Error(`Workspace not found: ${workspaceId}`)
-      }
-      const workspaceRootPath = workspace.rootPath
-
       // SECURITY: Validate sessionId to prevent path traversal attacks
       // This must happen before using sessionId in any file path operations
       validateSessionId(sessionId)
 
-      // Create attachments directory if it doesn't exist
-      const attachmentsDir = getSessionAttachmentsPath(workspaceRootPath, sessionId)
-      await mkdir(attachmentsDir, { recursive: true })
+      const storage = deps.sessionStorage
+      if (!storage) throw new Error('Session storage resolver is unavailable')
+      const workspace = deps.sessionManager.getWorkspaces()
+        .find(candidate => candidate.id === workspaceId)
+      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+      const managedSessionPath = deps.sessionManager.getSessionPath(sessionId)
+      if (!managedSessionPath) throw new Error(`Session not found: ${sessionId}`)
+      const sessionPath = storage.getSessionPath(workspace.rootPath, sessionId)
+      if (resolve(managedSessionPath) !== resolve(sessionPath)) {
+        throw new Error(`Session storage identity mismatch: ${sessionId}`)
+      }
+      const sessionsRoot = storage.getSessionsRoot(workspace.rootPath)
+      await assertSafeSessionArtifactPath(storage, sessionsRoot, sessionPath, false)
+      const attachmentsDir = storage.getAttachmentsPath(workspace.rootPath, sessionId)
+      await assertSafeSessionArtifactPath(storage, sessionsRoot, attachmentsDir, true)
+      try {
+        await mkdir(attachmentsDir, {
+          recursive: false,
+          mode: PRIVATE_DIRECTORY_MODE,
+        })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      await assertSafeSessionArtifactPath(storage, sessionsRoot, attachmentsDir, false)
+      if (process.platform !== 'win32') {
+        await chmod(attachmentsDir, PRIVATE_DIRECTORY_MODE)
+      }
 
       // Generate unique ID for this attachment
       const id = randomUUID()
@@ -353,11 +470,11 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
           }
         }
 
-        await writeFile(storedPath, decoded)
+        await writePrivateSessionArtifact(storage, sessionsRoot, storedPath, decoded)
         filesToCleanup.push(storedPath)
       } else if (attachment.text) {
         // Text files - save as UTF-8
-        await writeFile(storedPath, attachment.text, 'utf-8')
+        await writePrivateSessionArtifact(storage, sessionsRoot, storedPath, attachment.text)
         filesToCleanup.push(storedPath)
       } else {
         throw new Error('Attachment has no content (neither base64 nor text)')
@@ -373,7 +490,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
           resize: { width: 200, height: 200 },
           format: 'png',
         })
-        await writeFile(thumbPath, pngBuffer)
+        await writePrivateSessionArtifact(storage, sessionsRoot, thumbPath, pngBuffer)
         thumbnailPath = thumbPath
         thumbnailBase64 = pngBuffer.toString('base64')
         filesToCleanup.push(thumbPath)
@@ -394,7 +511,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
           if (!result || !result.textContent) {
             throw new Error('Conversion returned empty result')
           }
-          await writeFile(mdPath, result.textContent, 'utf-8')
+          await writePrivateSessionArtifact(storage, sessionsRoot, mdPath, result.textContent)
           markdownPath = mdPath
           filesToCleanup.push(mdPath)
           deps.platform.logger.info(`Converted Office file to markdown: ${mdPath}`)

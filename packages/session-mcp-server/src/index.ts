@@ -31,7 +31,7 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { isDeveloperFeedbackEnabled } from '@polo-ai/shared/feature-flags';
 // Import from session-tools-core
 import {
@@ -160,7 +160,7 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     exists: (path: string) => existsSync(path),
     readFile: (path: string) => readFileSync(path, 'utf-8'),
     readFileBuffer: (path: string) => readFileSync(path),
-    writeFile: (path: string, content: string) => writeFileSync(path, content, 'utf-8'),
+    writeFile: (path: string, content: string) => writeFileSync(path, content, { encoding: 'utf-8', mode: 0o600 }),
     isDirectory: (path: string) => existsSync(path) && statSync(path).isDirectory(),
     readdir: (path: string) => readdirSync(path),
     stat: (path: string) => {
@@ -193,8 +193,8 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
   const credentialManager = createCredentialManager(workspaceRootPath);
 
   // Session paths for transform_data / render_template
-  const sessionsDir = join(workspaceRootPath, 'sessions', sessionId);
-  const sessionDataDir = join(sessionsDir, 'data');
+  const sessionPath = dirname(plansFolderPath);
+  const sessionDataDir = join(sessionPath, 'data');
 
   // Build context
   return {
@@ -203,7 +203,8 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     get sourcesPath() { return join(workspaceRootPath, 'sources'); },
     get skillsPath() { return join(workspaceRootPath, 'skills'); },
     plansFolderPath,
-    sessionPath: sessionsDir,
+    credentialIsolation: process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot',
+    sessionPath,
     dataPath: sessionDataDir,
     callbacks,
     fs,
@@ -219,7 +220,8 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
       // Resolve preferences path from config dir (parent of workspaces dir)
       // workspaceRootPath = ~/.polo-ai/workspaces/{id}
       // preferencesPath = ~/.polo-ai/preferences.json
-      const configDir = join(workspaceRootPath, '..', '..');
+      const cliOneShot = process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot';
+      const configDir = cliOneShot ? workspaceRootPath : join(workspaceRootPath, '..', '..');
       const prefsPath = join(configDir, 'preferences.json');
       try {
         let current: Record<string, unknown> = {};
@@ -234,7 +236,7 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
             : current.location,
           updatedAt: Date.now(),
         };
-        writeFileSync(prefsPath, JSON.stringify(merged, null, 2), 'utf-8');
+        writeFileSync(prefsPath, JSON.stringify(merged, null, 2), { encoding: 'utf-8', mode: 0o600 });
       } catch (err) {
         console.error('Failed to update preferences:', err);
       }
@@ -242,11 +244,12 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
 
     // Developer feedback: write one JSON file per entry to {configDir}/feedback/
     submitFeedback: (feedback) => {
-      const configDir = process.env.POLO_AI_CONFIG_DIR || join(workspaceRootPath, '..', '..');
-      const feedbackDir = join(configDir, 'feedback');
-      mkdirSync(feedbackDir, { recursive: true });
+      const feedbackDir = process.env.POLO_AI_RUNTIME_PROFILE === 'cli-one-shot'
+        ? join(sessionPath, 'meta', 'feedback')
+        : join(process.env.POLO_AI_CONFIG_DIR || join(workspaceRootPath, '..', '..'), 'feedback');
+      mkdirSync(feedbackDir, { recursive: true, mode: 0o700 });
       const filePath = join(feedbackDir, `${feedback.id}.json`);
-      writeFileSync(filePath, JSON.stringify(feedback, null, 2), 'utf-8');
+      writeFileSync(filePath, JSON.stringify(feedback, null, 2), { encoding: 'utf-8', mode: 0o600 });
     },
 
     // Note: saveSourceConfig, validators, renderMermaid
@@ -501,7 +504,6 @@ async function main() {
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.POLO_AI_LLM_CALLBACK_PORT,
   };
-
   // Create the Codex context
   const ctx = createCodexContext(config);
 

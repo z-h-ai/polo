@@ -12,6 +12,10 @@ import type { SessionHeader, StoredMessage, SessionConfig } from './types.ts'
 import type { StoredSession } from './types.ts'
 import { readSessionJsonl } from './jsonl.ts'
 import { getSessionPath, getSessionFilePath } from './storage.ts'
+import {
+  defaultWorkspaceSessionStorage,
+  type SessionStorage,
+} from './session-storage.ts'
 import { debug } from '../utils/debug.ts'
 import {
   type BundleFile,
@@ -86,9 +90,10 @@ export interface SessionBundle {
 export function serializeSession(
   workspaceRootPath: string,
   sessionId: string,
+  storage: SessionStorage = defaultWorkspaceSessionStorage,
 ): SessionBundle | null {
-  const sessionDir = getSessionPath(workspaceRootPath, sessionId)
-  const sessionFile = getSessionFilePath(workspaceRootPath, sessionId)
+  const sessionDir = getSessionPath(workspaceRootPath, sessionId, storage)
+  const sessionFile = getSessionFilePath(workspaceRootPath, sessionId, storage)
 
   if (!existsSync(sessionFile)) {
     debug('[bundle] Session file not found:', sessionFile)

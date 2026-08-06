@@ -4,7 +4,7 @@ import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import TurndownService from 'turndown';
 import { parse as parseHtml } from 'node-html-parser';
 import { join } from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
 
@@ -323,14 +323,16 @@ export function createWebFetchTool(
     const sessionPath = getSessionPath();
     if (!sessionPath) throw new Error('No active session — cannot save file to disk');
     const dir = join(sessionPath, 'long_responses');
-    await mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await chmod(dir, 0o700);
     let urlName = '';
     try { urlName = new URL(url).pathname.split('/').pop() || ''; } catch { /* malformed URL */ }
     const safe =
       urlName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40) || 'download';
     const file = `${randomUUID()}_${safe}${ext}`;
     const abs = join(dir, file);
-    await writeFile(abs, buffer);
+    await writeFile(abs, buffer, { mode: 0o600 });
+    if (process.platform !== 'win32') await chmod(abs, 0o600);
     return abs;
   }
 

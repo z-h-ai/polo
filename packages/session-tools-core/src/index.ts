@@ -136,6 +136,17 @@ export type {
 
 export { createNodeFileSystem } from './context.ts';
 
+// Runtime-scoped subprocess environment policy
+export {
+  BLOCKED_ENV_VARS,
+  TOOL_ENV_ALLOWLIST,
+  TOOL_ENV_ALLOWLIST_NAMES,
+  TOOL_ENV_ALLOWLIST_SHELL_PATTERN,
+  createSanitizedEnv,
+  createScriptRuntimeEnv,
+  isToolEnvironmentVariableAllowed,
+} from './runtime/sandbox-env.ts';
+
 // Handlers
 export {
   // SubmitPlan

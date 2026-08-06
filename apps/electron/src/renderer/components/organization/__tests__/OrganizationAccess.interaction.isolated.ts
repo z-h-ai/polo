@@ -268,6 +268,52 @@ describe('OrganizationSwitcher management gate', () => {
     expect(listMembers).not.toHaveBeenCalled()
     expect(listInvitations).not.toHaveBeenCalled()
   })
+
+  it('shows a lost current organization only as a non-selectable tombstone', async () => {
+    const selectOrganization = mock(() => {})
+    const tombstone = {
+      ...organizationSummary(organizationAId, 'Unavailable Organization', 'owner'),
+      status: 'suspended' as const,
+      membership: {
+        ...organizationSummary(
+          organizationAId,
+          'Unavailable Organization',
+          'owner',
+        ).membership,
+        status: 'removed' as const,
+      },
+    }
+    renderWithI18n(createElement(
+      OrganizationProvider,
+      {
+        value: {
+          ...contextValue('owner'),
+          activeOrganizationId: organizationAId,
+          organizationSummaries: [
+            tombstone,
+            organizationSummary(organizationBId, 'Organization B', 'owner'),
+          ],
+          organizationContextKey: `account-1:${organizationAId}`,
+          onSelectOrganization: selectOrganization,
+        },
+        children: null,
+      },
+      createElement(OrganizationSwitcher),
+    ))
+
+    expect(screen.getByTestId('organization-switcher').textContent)
+      .toContain('Unavailable Organization')
+    expect(screen.queryByRole('button', { name: 'Manage organization' }))
+      .toBeNull()
+    const rows = screen.getAllByTestId('organization-switcher-row')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.textContent).toContain('Organization B')
+    expect(rows[0]?.textContent).not.toContain('Unavailable Organization')
+
+    const user = userEvent.setup({ document: window.document })
+    await user.click(rows[0]!)
+    expect(selectOrganization).toHaveBeenCalledWith(organizationBId)
+  })
 })
 
 describe('organization management request isolation', () => {

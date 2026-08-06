@@ -18,6 +18,7 @@ type AdminPreloadApi = Pick<
   | 'adminLogout'
   | 'adminGetStatus'
   | 'adminSyncConnections'
+  | 'adminSyncAppCatalog'
   | 'onAdminReauthRequired'
   | 'organizationList'
   | 'organizationCreate'
@@ -64,6 +65,8 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.admin.GET_STATUS),
     adminSyncConnections: () =>
       client.invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
+    adminSyncAppCatalog: (organizationId, options) =>
+      client.invoke(RPC_CHANNELS.admin.SYNC_APP_CATALOG, organizationId, options),
     onAdminReauthRequired: callback =>
       client.on('admin:reauthRequired', callback),
     organizationList: () =>

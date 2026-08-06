@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { type ChildProcess, type spawn as spawnProcess } from 'child_process'
 import { createHash } from 'crypto'
 import { EventEmitter } from 'events'
+import { watch } from 'fs'
 import { createServer, type Server } from 'http'
 import {
   chmod,
@@ -28,6 +29,7 @@ import type {
   LocalAppArchitecture,
   LocalAppInstallRequest,
   LocalAppPlatform,
+  LocalAppRuntimeStatus,
   PoloAppManifest,
 } from '@polo-ai/shared/protocol'
 import {
@@ -49,6 +51,14 @@ const stableFetch = undiciFetch as unknown as typeof globalThis.fetch
 let testRoot = ''
 let manager: LocalAppRuntimeManager | null = null
 let downloadServer: Server | null = null
+
+async function waitForProcessExit(pid: number, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await Bun.sleep(25)
+  }
+  return !isProcessAlive(pid)
+}
 
 beforeEach(async () => {
   testRoot = await mkdtemp(join(tmpdir(), 'polo-local-app-test-'))
@@ -151,7 +161,12 @@ function requestFor(
 
 function makeManager(options: Pick<
   LocalAppRuntimeManagerOptions,
-  'uvPath' | 'bunPath' | 'baseEnvironment' | 'portAllocator'
+  | 'uvPath'
+  | 'bunPath'
+  | 'baseEnvironment'
+  | 'portAllocator'
+  | 'onInstallProgress'
+  | 'onManagedProcessStarted'
 > = {}): LocalAppRuntimeManager {
   manager = new LocalAppRuntimeManager({
     rootDir: join(testRoot, 'runtime'),
@@ -322,6 +337,48 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function waitForJsonFile<T>(path: string): Promise<T> {
+  return new Promise<T>((resolveFile, rejectFile) => {
+    const directory = join(path, '..')
+    const filename = path.slice(directory.length + 1)
+    let settled = false
+    let reading = false
+    let readRequested = false
+    const watcher = watch(directory)
+    const settle = (error?: unknown, value?: T) => {
+      if (settled) return
+      settled = true
+      watcher.close()
+      if (error) rejectFile(error)
+      else resolveFile(value!)
+    }
+    const read = async () => {
+      if (settled) return
+      if (reading) {
+        readRequested = true
+        return
+      }
+      reading = true
+      try {
+        settle(undefined, JSON.parse(await readFile(path, 'utf8')) as T)
+      } catch {
+        // The initial probe may run before the producer writes the file.
+      } finally {
+        reading = false
+        if (readRequested) {
+          readRequested = false
+          void read()
+        }
+      }
+    }
+    watcher.on('change', (_event, changed) => {
+      if (changed === null || changed.toString() === filename) void read()
+    })
+    watcher.once('error', settle)
+    void read()
+  })
+}
+
 async function getFreeLocalPort(): Promise<number> {
   const server = createServer()
   await new Promise<void>((resolveListen, rejectListen) => {
@@ -392,19 +449,25 @@ async function launchHangingDependencyInstall(appId: string): Promise<{
   )
   const archive = await archiveBundle(bundle, appId)
   const url = await serveArchive(archive)
-  const runtime = makeManager({ bunPath: fakeBunPath })
+  const dataDir = join(testRoot, `runtime/apps/${appId}/data`)
+  await mkdir(dataDir, { recursive: true })
+  const pidFile = join(dataDir, 'installer-pids.json')
+  const pidsWritten = waitForJsonFile<{ root: number; child: number }>(pidFile)
+  let dependencyStarted!: () => void
+  const dependencyStart = new Promise<void>(resolve => {
+    dependencyStarted = resolve
+  })
+  const runtime = makeManager({
+    bunPath: fakeBunPath,
+    onManagedProcessStarted: (startedAppId, kind) => {
+      if (startedAppId === appId && kind === 'dependency-preparation') {
+        dependencyStarted()
+      }
+    },
+  })
   const install = runtime.install(requestFor(appId, '1.0.0', url, archive))
-  const pidFile = join(testRoot, `runtime/apps/${appId}/data/installer-pids.json`)
-  let pids: { root: number; child: number } | undefined
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    try {
-      pids = JSON.parse(await readFile(pidFile, 'utf8')) as { root: number; child: number }
-      break
-    } catch {
-      await Bun.sleep(10)
-    }
-  }
-  if (!pids) throw new Error(`dependency installer for ${appId} did not start`)
+  await dependencyStart
+  const pids = await pidsWritten
   return { runtime, install, pids }
 }
 
@@ -413,6 +476,48 @@ describe('LocalAppRuntimeManager', () => {
     expect(LOCAL_APP_INSTALL_RPC_TIMEOUT_MS).toBeGreaterThan(
       LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
     )
+  })
+
+  it('accepts the full business app id contract independently of the runtime path id', async () => {
+    for (const businessAppId of [
+      'App.ID',
+      '应用-甲',
+      'business\0app',
+      '\0'.repeat(512),
+      'x'.repeat(512),
+    ]) {
+      expect(validatePoloAppManifest({
+        schemaVersion: 1,
+        appId: businessAppId,
+        version: '1.0.0',
+        runtime: 'static',
+        entry: ['dist'],
+        healthcheck: '/health',
+        webPath: '/',
+        permissions: [],
+      }, { platform, arch: architecture }).appId).toBe(businessAppId)
+    }
+
+    const businessAppId = '\0'.repeat(512)
+    const runtimeAppId = `catalog-${'a'.repeat(64)}`
+    const bundleDir = await writeBundle(
+      'bundle-source',
+      '1.0.0',
+      { appId: businessAppId },
+      { 'dist/index.html': 'business-id-ready' },
+    )
+    const archive = await archiveBundle(bundleDir, 'business-id')
+    const url = await serveArchive(archive)
+    const runtime = makeManager()
+    const request = {
+      ...requestFor(runtimeAppId, '1.0.0', url, archive),
+      expectedManifestAppId: businessAppId,
+    }
+
+    await expect(runtime.install(request)).resolves.toMatchObject({
+      appId: runtimeAppId,
+      currentVersion: '1.0.0',
+    })
   })
 
   it('installs, starts, stops, and idempotently restarts a static bundle', async () => {
@@ -467,6 +572,128 @@ describe('LocalAppRuntimeManager', () => {
     const logs = await runtime.getLogs('demo.static')
     expect(logs).toContain('Installed 1.0.0')
     expect(logs).toContain('Healthy at')
+  })
+
+  it('does not return a deferred failure log snapshot after restart recovers', async () => {
+    const appId = 'demo.failure-recovery-logs'
+    const bundleDir = await writeBundle(
+      appId,
+      '1.0.0',
+      {},
+      { 'dist/index.html': 'recovered' },
+    )
+    const archive = await archiveBundle(bundleDir, 'failure-recovery-logs')
+    const url = await serveArchive(archive)
+    let logsEntered!: () => void
+    const entered = new Promise<void>(resolve => {
+      logsEntered = resolve
+    })
+    let releaseLogs!: () => void
+    const release = new Promise<void>(resolve => {
+      releaseLogs = resolve
+    })
+    class DeferredLogManager extends LocalAppRuntimeManager {
+      override async getLogs(): Promise<string> {
+        logsEntered()
+        await release
+        return 'sensitive output written after recovery'
+      }
+    }
+    const runtime = new DeferredLogManager({
+      rootDir: join(testRoot, 'runtime'),
+      platform,
+      arch: architecture,
+      fetch: stableFetch,
+    })
+    manager = runtime
+    await runtime.install(requestFor(appId, '1.0.0', url, archive))
+    const internals = runtime as unknown as {
+      statuses: Map<string, LocalAppRuntimeStatus>
+    }
+    internals.statuses.set(appId, {
+      appId,
+      status: 'broken',
+      currentVersion: '1.0.0',
+      error: {
+        code: 'START_FAILED',
+        message: 'health check failed',
+      },
+    })
+
+    const pendingLogs = runtime.getFailureRecoveryLogs(appId, { tail: 20 })
+    await entered
+    await expect(runtime.restart(appId)).resolves.toMatchObject({
+      appId,
+      version: '1.0.0',
+    })
+    expect((await runtime.getRuntimeStatus(appId)).status).toBe('running')
+
+    releaseLogs()
+    await expect(pendingLogs).rejects.toMatchObject({
+      code: 'NOT_AUTHORIZED',
+    })
+  })
+
+  it('limits retained-management logs to stable installed-like states', async () => {
+    let runtimeStatus: LocalAppRuntimeStatus = {
+      appId: 'retained-app',
+      status: 'installed',
+      currentVersion: '1.0.0',
+    }
+    const logRequests: Array<{ appId: string; tail?: number }> = []
+    class RetainedLogManager extends LocalAppRuntimeManager {
+      override async getRuntimeStatus(): Promise<LocalAppRuntimeStatus> {
+        return runtimeStatus
+      }
+
+      override async getLogs(
+        appId: string,
+        options: { tail?: number } = {},
+      ): Promise<string> {
+        logRequests.push({ appId, ...options })
+        return 'bounded retained log output'
+      }
+    }
+    const runtime = new RetainedLogManager({
+      rootDir: join(testRoot, 'retained-logs'),
+      platform,
+      arch: architecture,
+      fetch: stableFetch,
+    })
+    manager = runtime
+
+    for (
+      const status of [
+        'installed',
+        'running',
+        'stopped',
+        'broken',
+        'update_available',
+      ] as const
+    ) {
+      runtimeStatus = {
+        appId: 'retained-app',
+        status,
+        currentVersion: '1.0.0',
+      }
+      await expect(runtime.getRetainedManagementLogs(
+        'retained-app',
+        { tail: 25 },
+      )).resolves.toBe('bounded retained log output')
+    }
+
+    for (const status of ['not_installed', 'starting', 'installing'] as const) {
+      runtimeStatus = {
+        appId: 'retained-app',
+        status,
+      }
+      await expect(runtime.getRetainedManagementLogs('retained-app'))
+        .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    }
+    expect(logRequests).toEqual(Array.from({ length: 5 }, () => ({
+      appId: 'retained-app',
+      tail: 25,
+    })))
   })
 
   it('serializes stop against an in-flight start and leaves no running process', async () => {
@@ -1215,6 +1442,48 @@ package = false
     expect((await runtime.getInstalledApps())[0]?.currentVersion).toBe('1.0.0')
   })
 
+  it('makes checksum verification observable before archive extraction', async () => {
+    const bundle = await writeBundle(
+      'demo.observable-verification',
+      '1.0.0',
+      {},
+      { 'dist/index.html': 'verified' },
+    )
+    const archive = await archiveBundle(bundle, 'observable-verification')
+    const url = await serveArchive(archive)
+    const phases: string[] = []
+    let resolveVerifying!: () => void
+    const verifying = new Promise<void>(resolve => {
+      resolveVerifying = resolve
+    })
+    const runtime = makeManager({
+      onInstallProgress: (_appId, progress) => {
+        if (phases.at(-1) !== progress.phase) phases.push(progress.phase)
+        if (progress.phase === 'verifying') resolveVerifying()
+      },
+    })
+
+    const installation = runtime.install(requestFor(
+      'demo.observable-verification',
+      '1.0.0',
+      url,
+      archive,
+    ))
+    await verifying
+    expect(await runtime.getRuntimeStatus('demo.observable-verification'))
+      .toMatchObject({
+        status: 'installing',
+        progress: { phase: 'verifying' },
+      })
+    await installation
+    expect(phases).toEqual([
+      'downloading',
+      'verifying',
+      'extracting',
+      'preparing',
+    ])
+  })
+
   it('reports download progress and cancels an in-flight install', async () => {
     const padding = 'x'.repeat(32_000)
     const bundle = await writeBundle(
@@ -1317,28 +1586,35 @@ package = false
     )
     const archive = await archiveBundle(bundle, 'install-tree')
     const url = await serveArchive(archive)
-    const runtime = makeManager({ bunPath: fakeBunPath })
-    const install = runtime.install(requestFor('demo.install-tree', '1.0.0', url, archive))
-    const pidFile = join(
+    const dataDir = join(
       testRoot,
-      'runtime/apps/demo.install-tree/data/installer-pids.json',
+      'runtime/apps/demo.install-tree/data',
     )
-    let pids: { root: number; child: number } | undefined
-    for (let attempt = 0; attempt < 500; attempt += 1) {
-      try {
-        pids = JSON.parse(await readFile(pidFile, 'utf8')) as { root: number; child: number }
-        break
-      } catch {
-        await Bun.sleep(10)
-      }
-    }
-    expect(pids?.root).toBeGreaterThan(0)
-    expect(pids?.child).toBeGreaterThan(0)
+    await mkdir(dataDir, { recursive: true })
+    const pidFile = join(dataDir, 'installer-pids.json')
+    const pidsWritten = waitForJsonFile<{ root: number; child: number }>(pidFile)
+    let dependencyStarted!: () => void
+    const dependencyStart = new Promise<void>(resolve => {
+      dependencyStarted = resolve
+    })
+    const runtime = makeManager({
+      bunPath: fakeBunPath,
+      onManagedProcessStarted: (appId, kind) => {
+        if (appId === 'demo.install-tree' && kind === 'dependency-preparation') {
+          dependencyStarted()
+        }
+      },
+    })
+    const install = runtime.install(requestFor('demo.install-tree', '1.0.0', url, archive))
+    await dependencyStart
+    const pids = await pidsWritten
+    expect(pids.root).toBeGreaterThan(0)
+    expect(pids.child).toBeGreaterThan(0)
 
     expect(runtime.cancelInstall('demo.install-tree')).toBe(true)
     await expect(install).rejects.toMatchObject({ code: 'INSTALL_CANCELLED' })
-    expect(isProcessAlive(pids!.root)).toBe(false)
-    expect(isProcessAlive(pids!.child)).toBe(false)
+    expect(await waitForProcessExit(pids!.root)).toBe(true)
+    expect(await waitForProcessExit(pids!.child)).toBe(true)
   })
 
   it('blocks shutdown on retained dependency cleanup handles and succeeds after retry recovery', async () => {
@@ -1369,8 +1645,8 @@ package = false
     internals.forceKillProcessTree = originalForceKill
     await expect(runtime.shutdown()).resolves.toBeUndefined()
     expect(internals.managedProcesses.size).toBe(0)
-    expect(isProcessAlive(pids.root)).toBe(false)
-    expect(isProcessAlive(pids.child)).toBe(false)
+    expect(await waitForProcessExit(pids.root)).toBe(true)
+    expect(await waitForProcessExit(pids.child)).toBe(true)
   })
 
   it('blocks uninstall on retained dependency cleanup handles and removes files only after retry recovery', async () => {
@@ -1401,8 +1677,8 @@ package = false
     internals.forceKillProcessTree = originalForceKill
     await expect(runtime.uninstall(appId, { preserveData: false })).resolves.toBeUndefined()
     expect(internals.managedProcesses.size).toBe(0)
-    expect(isProcessAlive(pids.root)).toBe(false)
-    expect(isProcessAlive(pids.child)).toBe(false)
+    expect(await waitForProcessExit(pids.root)).toBe(true)
+    expect(await waitForProcessExit(pids.child)).toBe(true)
     await expect(stat(join(testRoot, `runtime/apps/${appId}`))).rejects.toThrow()
   })
 

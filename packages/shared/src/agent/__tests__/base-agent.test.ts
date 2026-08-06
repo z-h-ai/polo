@@ -6,7 +6,10 @@
  * and lifecycle management.
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AbortReason } from '../backend/types.ts';
+import { RootedSessionStorage } from '../../sessions/session-storage.ts';
 import {
   TestAgent,
   createMockBackendConfig,
@@ -167,6 +170,18 @@ describe('BaseAgent', () => {
     it('should provide access to PromptBuilder', () => {
       const builder = agent.getPromptBuilder();
       expect(builder).toBeTruthy();
+    });
+
+    it('should inject the runtime session storage into prompt paths', () => {
+      const sessionsRoot = join(tmpdir(), 'polo-cli-prompt-storage', 'sessions');
+      const config = createMockBackendConfig();
+      config.sessionStorage = new RootedSessionStorage(sessionsRoot);
+      const rootedAgent = new TestAgent(config);
+
+      const context = rootedAgent.getPromptBuilder().buildContextParts({}).join('\n');
+      expect(context).toContain(join(sessionsRoot, config.session!.id, 'plans'));
+      expect(context).toContain(join(sessionsRoot, config.session!.id, 'data'));
+      expect(context).toContain(join(sessionsRoot, config.session!.id));
     });
   });
 

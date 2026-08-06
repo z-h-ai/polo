@@ -65,7 +65,7 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
   constructor(
     private accessToken: string,
     private accountId: string,
-    private options?: { model?: string },
+    private options?: { model?: string; apiBase?: string },
   ) {}
 
   async search(query: string, count: number): Promise<WebSearchResult[]> {
@@ -97,7 +97,7 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
       const requestFingerprint = buildRequestFingerprint(requestBody);
       const hasMoreAttempts = attempt !== SEARCH_ATTEMPTS[SEARCH_ATTEMPTS.length - 1];
 
-      const response = await fetch(`${API_BASE}/responses`, {
+      const response = await fetch(`${(this.options?.apiBase || API_BASE).replace(/\/$/, '')}/responses`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

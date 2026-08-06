@@ -22,6 +22,13 @@ This follow-up branch starts from POO-21 commit `54d51093` and integrates the tw
 
 The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, authenticated server-core download boundaries, install/update/uninstall Ledger and journal behavior, and `skills:changed` refresh. That proof used the older Admin contract and must now be rerun against the POL-59 strict asynchronous service and isolated COS staging resources.
 
+## Latest dev integration
+
+- Merged current `origin/dev` while preserving the strict upload v2 flow, authoritative Safety endpoint, Member response redaction, renderer-only archive hashing/upload, and authenticated download boundary.
+- Resolved overlapping Creator Skill/AdminClient changes together with the newer Catalog, authentication-timeout, Electron packaging, and CLI work from `dev`.
+- Focused Creator Skill suites passed: 88 standard tests, 10 isolated server-core boundary tests, and 15 isolated panel interaction tests.
+- `bun run typecheck:all`, Creator Skill E2E TypeScript validation, and `bun run electron:build` passed on the merged tree.
+
 ## Remaining acceptance gate
 
 Do not mark POO-21 complete until the integrated branch passes its targeted shared/server-core/Electron suites and the cross-repository lifecycle is rerun against POL-59 staging with the strict v0.12.0 protocol. Final completion still requires a fresh independent reviewer `pass`.

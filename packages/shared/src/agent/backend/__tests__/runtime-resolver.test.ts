@@ -37,6 +37,23 @@ describe('resolveServerPath fallback', () => {
     expect(paths.piServerPath).toBe(join(serverDir, 'index.js'));
   });
 
+  it('finds server in Electron process.resourcesPath/app/resources', () => {
+    const resourcesPath = join(tmpBase, 'electron-resources');
+    const appRoot = join(resourcesPath, 'app');
+    const serverDir = join(resourcesPath, 'app', 'resources', 'pi-agent-server');
+    mkdirSync(serverDir, { recursive: true });
+    writeFileSync(join(serverDir, 'index.js'), '// packaged resource');
+
+    const hostRuntime: BackendHostRuntimeContext = {
+      appRootPath: appRoot,
+      resourcesPath,
+      isPackaged: true,
+    };
+
+    const paths = resolveBackendRuntimePaths(hostRuntime);
+    expect(paths.piServerPath).toBe(join(serverDir, 'index.js'));
+  });
+
   it('prefers resources/ over dist/resources/ when both exist', () => {
     const appRoot = join(tmpBase, 'app2');
 

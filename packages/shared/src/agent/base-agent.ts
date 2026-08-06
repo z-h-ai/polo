@@ -59,7 +59,7 @@ import { PrerequisiteManager } from './core/prerequisite-manager.ts';
 // Automation system for agent events
 import type { AutomationSystem } from '../automations/automation-system.ts';
 import type { AgentEvent as AutomationAgentEvent, SdkAutomationInput } from '../automations/types.ts';
-import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../sessions/storage.ts';
+import { defaultWorkspaceSessionStorage } from '../sessions/session-storage.ts';
 import { getMiniAgentSystemPrompt } from '../prompts/system.ts';
 import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../utils/title-generator.ts';
 
@@ -280,8 +280,8 @@ export abstract class BaseAgent implements AgentBackend {
       workspaceId: config.workspace.id,
       sessionId: this._sessionId,
       workingDirectory: this.workingDirectory,
-      plansFolderPath: getSessionPlansPath(config.workspace.rootPath, this._sessionId),
-      dataFolderPath: getSessionDataPath(config.workspace.rootPath, this._sessionId),
+      plansFolderPath: this.sessionStorage.getPlansPath(config.workspace.rootPath, this._sessionId),
+      dataFolderPath: this.sessionStorage.getDataPath(config.workspace.rootPath, this._sessionId),
     });
 
     // SourceManager: tracks active/inactive sources and formats state for context injection
@@ -293,6 +293,7 @@ export abstract class BaseAgent implements AgentBackend {
     this.promptBuilder = new PromptBuilder({
       workspace: config.workspace,
       session: config.session,
+      sessionStorage: this.sessionStorage,
       debugMode: config.debugMode,
       systemPromptPreset: config.systemPromptPreset,
       isHeadless: config.isHeadless,
@@ -838,6 +839,10 @@ ${formattedMessages}
   // Path Helpers
   // ============================================================
 
+  protected get sessionStorage() {
+    return this.config.sessionStorage ?? defaultWorkspaceSessionStorage;
+  }
+
   /**
    * Get the session storage path for this agent's session.
    * Convenience wrapper around getSessionPath() with null-checking.
@@ -846,7 +851,7 @@ ${formattedMessages}
    */
   protected getSessionStoragePath(): string | undefined {
     if (!this.config.session?.id || !this.config.workspace.rootPath) return undefined;
-    return getSessionPath(this.config.workspace.rootPath, this.config.session.id);
+    return this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this.config.session.id);
   }
 
   // ============================================================
@@ -1140,7 +1145,7 @@ ${formattedMessages}
    * Shared across all backends. Codex overrides validateCallLlmModel() for provider filtering.
    */
   protected async preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQueryResult> {
-    const sessionPath = getSessionPath(this.config.workspace.rootPath, this._sessionId);
+    const sessionPath = this.sessionStorage.getSessionPath(this.config.workspace.rootPath, this._sessionId);
     const request = await buildCallLlmRequest(input, {
       backendName: this.backendName,
       sessionPath,

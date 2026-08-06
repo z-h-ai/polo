@@ -7,8 +7,31 @@
  * messages with real-time streaming, and validating server health.
  */
 
-import { resolve } from 'path'
+import { basename, join, resolve } from 'path'
+import {
+  readElectronRuntimeDiscovery,
+  removeElectronRuntimeDiscovery,
+  type ElectronRuntimeDiscovery,
+  type RuntimeDiscoveryErrorCode,
+  type RuntimeDiscoveryErrorParams,
+} from '@polo-ai/shared/runtime-discovery'
+import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import { CliRpcClient } from './client.ts'
+import {
+  UsageError,
+  findExecutionCommandIndex,
+  parseExecutionArgs,
+} from './execution-parser.ts'
+import { runExecutionCommand } from './one-shot.ts'
+import { PROVIDER_ENV_KEYS } from './provider-env.ts'
+import { colorModeFromArgv, stderrErrorLine } from './terminal-output.ts'
+import { version as cliVersion } from '../package.json'
+
+setupI18n()
+const cliLocale = process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG
+if (cliLocale) {
+  void i18n.changeLanguage(cliLocale.split('.')[0]?.replace('_', '-'))
+}
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -17,6 +40,8 @@ import { CliRpcClient } from './client.ts'
 export interface CliArgs {
   url: string
   token: string
+  explicitUrl: boolean
+  explicitToken: boolean
   workspace?: string
   timeout: number
   json: boolean
@@ -44,6 +69,8 @@ export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2) // skip bun + script path
   let url = ''
   let token = ''
+  let explicitUrl = false
+  let explicitToken = false
   let workspace: string | undefined
   let timeout = 10_000
   let json = false
@@ -68,9 +95,11 @@ export function parseArgs(argv: string[]): CliArgs {
     const arg = args[i]
     switch (arg) {
       case '--url':
+        explicitUrl = true
         url = args[++i] ?? ''
         break
       case '--token':
+        explicitToken = true
         token = args[++i] ?? ''
         break
       case '--workspace':
@@ -154,7 +183,7 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!apiKey) apiKey = process.env.LLM_API_KEY ?? ''
   if (!baseUrl) baseUrl = process.env.LLM_BASE_URL ?? ''
 
-  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
+  return { url, token, explicitUrl, explicitToken, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +212,49 @@ async function resolveWorkspace(
   return undefined
 }
 
+export async function resolveRunWorkspace(
+  client: CliRpcClient,
+  args: Pick<CliArgs, 'workspace' | 'workspaceDir'>,
+  currentDirectory = process.cwd(),
+): Promise<{ id: string; registeredPath?: string } | undefined> {
+  if (args.workspace) {
+    const id = await resolveWorkspace(client, args.workspace)
+    return id ? { id } : undefined
+  }
+
+  const registeredPath = resolve(args.workspaceDir ?? currentDirectory)
+  try {
+    const workspaces = await client.invoke('workspaces:get') as Array<{
+      id?: string
+      rootPath?: string
+    }>
+    const existing = workspaces.find((workspace) => {
+      if (!workspace.id || !workspace.rootPath) return false
+      const existingPath = resolve(workspace.rootPath)
+      return process.platform === 'win32'
+        ? existingPath.toLowerCase() === registeredPath.toLowerCase()
+        : existingPath === registeredPath
+    })
+    if (existing?.id) {
+      await client.invoke('window:switchWorkspace', existing.id).catch(() => {})
+      return { id: existing.id, registeredPath }
+    }
+  } catch {
+    // A fresh local server can still create the workspace directly.
+  }
+
+  const name = basename(registeredPath) || 'workspace'
+  const workspace = await client.invoke(
+    'workspaces:create',
+    registeredPath,
+    name,
+  ) as { id?: string }
+  if (!workspace?.id) return undefined
+
+  await client.invoke('window:switchWorkspace', workspace.id).catch(() => {})
+  return { id: workspace.id, registeredPath }
+}
+
 // ---------------------------------------------------------------------------
 // Output helpers
 // ---------------------------------------------------------------------------
@@ -199,6 +271,80 @@ function out(data: unknown, jsonMode: boolean): void {
 
 function err(msg: string): void {
   process.stderr.write(`Error: ${msg}\n`)
+}
+
+async function cmdApp(): Promise<void> {
+  const desktopExecutable = process.env.POLO_AI_DESKTOP_EXECUTABLE
+  const desktopApp = process.env.POLO_AI_DESKTOP_APP
+  const appImage = process.env.APPIMAGE || process.env.POLO_AI_APPIMAGE
+
+  let command: string[]
+  if (process.platform === 'darwin') {
+    command = desktopApp
+      ? ['open', desktopApp]
+      : ['open', '-a', 'Polo AI']
+  } else if (process.platform === 'win32' && desktopExecutable) {
+    command = [desktopExecutable]
+  } else if (process.platform === 'linux' && appImage) {
+    command = [appImage]
+  } else {
+    throw new Error(
+      'Polo App location is unavailable. Reinstall Polo terminal support from Settings → Polo terminal features.',
+    )
+  }
+
+  if (process.platform === 'darwin' && command[0] === 'open') {
+    const result = Bun.spawnSync(command, {
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'pipe',
+    })
+    if (result.exitCode !== 0) {
+      throw new Error(`Unable to launch Polo App: ${result.stderr.toString().trim()}`)
+    }
+    return
+  }
+
+  const child = Bun.spawn(command, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  child.unref()
+}
+
+interface AppliedRuntimeDiscovery {
+  path: string
+  record: ElectronRuntimeDiscovery
+}
+
+function runtimeDiscoveryError(
+  code: RuntimeDiscoveryErrorCode,
+  params?: RuntimeDiscoveryErrorParams,
+): string {
+  return params
+    ? i18n.t(`cli.runtimeDiscovery.error.${code}`, params as Record<string, unknown>)
+    : i18n.t(`cli.runtimeDiscovery.error.${code}`)
+}
+
+function applyRuntimeDiscovery(args: CliArgs): AppliedRuntimeDiscovery | undefined {
+  if (args.explicitUrl && !args.url) {
+    throw new Error('--url requires a non-empty server URL')
+  }
+  if (args.explicitToken && !args.url) {
+    throw new Error('--token requires --url; Polo did not fall back to another server')
+  }
+  if (args.url) return undefined
+
+  const result = readElectronRuntimeDiscovery({
+    expectedVersion: cliVersion,
+    cleanupStale: true,
+  })
+  if (result.status === 'available') {
+    args.url = result.record.url
+    args.token = result.record.token
+    return { path: result.path, record: result.record }
+  }
+  if (result.status === 'incompatible' || result.status === 'invalid') {
+    throw new Error(runtimeDiscoveryError(result.errorCode, result.errorParams))
+  }
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -505,26 +651,74 @@ async function spawnLocalServer(args: CliArgs, opts?: { quiet?: boolean }): Prom
   const client = new CliRpcClient(server.url, {
     token: server.token,
     requestTimeout: args.timeout,
+    expectedServerVersion: cliVersion,
   })
   return { client, stop: server.stop }
+}
+
+function createConfiguredClient(
+  args: CliArgs,
+  expectedServerVersion?: string,
+): CliRpcClient {
+  return new CliRpcClient(args.url, {
+    token: args.token || undefined,
+    workspaceId: args.workspace,
+    requestTimeout: args.timeout,
+    connectTimeout: args.timeout,
+    expectedServerVersion,
+  })
+}
+
+function isVersionIncompatibility(error: unknown): boolean {
+  return (error as { code?: string } | undefined)?.code === 'VERSION_INCOMPATIBLE'
+}
+
+function handshakeFailureMessage(
+  error: unknown,
+  discovery?: AppliedRuntimeDiscovery,
+): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!discovery || isVersionIncompatibility(error)) return message
+
+  removeElectronRuntimeDiscovery({
+    path: discovery.path,
+    expectedRecord: discovery.record,
+  })
+  return `Polo App runtime is unavailable (${message}). `
+    + 'Restart it with `polo app`, or use --url/--token to connect to another server.'
+}
+
+/**
+ * Resolve and complete the handshake for commands that require a long-lived
+ * server. Discovery cleanup is deliberately confined to this handshake phase:
+ * once this function returns, RPC/argument/permission/business failures must
+ * not invalidate a healthy Electron discovery record.
+ */
+export async function connectForCommand(args: CliArgs): Promise<CliRpcClient> {
+  const discovery = applyRuntimeDiscovery(args)
+  if (!args.url) {
+    throw new Error(
+      'Polo App is not running. Start it with `polo app`, '
+      + 'or use --url/--token to connect to a remote server.',
+    )
+  }
+
+  // Discovery identifies the matching installed App, so enforce the release
+  // compatibility contract there. Explicit --url/env connections retain the
+  // existing remote-server behavior and may target older/custom servers.
+  const client = createConfiguredClient(args, discovery ? cliVersion : undefined)
+  try {
+    await client.connect()
+    return client
+  } catch (error) {
+    client.destroy()
+    throw new Error(handshakeFailureMessage(error, discovery))
+  }
 }
 
 // ---------------------------------------------------------------------------
 // LLM connection helpers
 // ---------------------------------------------------------------------------
-
-const PROVIDER_ENV_KEYS: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  google: 'GOOGLE_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
-  groq: 'GROQ_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
-  xai: 'XAI_API_KEY',
-  cerebras: 'CEREBRAS_API_KEY',
-  huggingface: 'HUGGINGFACE_API_KEY',
-}
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -623,94 +817,6 @@ async function setupLlmConnection(
   process.stderr.write(`LLM connection configured: ${provider}${baseUrl ? ` (${baseUrl})` : ''}\n`)
 
   return { connectionSlug }
-}
-
-async function cmdRun(args: CliArgs): Promise<void> {
-  // Prompt = all positional args (no session ID needed, unlike send)
-  const message = await readPrompt(args.rest, args.rest)
-  if (!message.trim()) {
-    err('No prompt provided. Usage: run <message>')
-    process.exit(1)
-  }
-
-  const server = await spawnLocalServer(args)
-
-  let client: CliRpcClient | undefined = server.client
-  let sessionId: string | undefined
-
-  const cleanup = async () => {
-    if (sessionId && client?.isConnected && !args.noCleanup) {
-      await client.invoke('sessions:delete', sessionId).catch(() => {})
-    }
-    client?.destroy()
-    await server.stop()
-  }
-
-  // Signal handling — cancel + clean up on SIGINT/SIGTERM
-  const onSignal = async () => {
-    if (sessionId && client?.isConnected) {
-      await client.invoke('sessions:cancel', sessionId).catch(() => {})
-    }
-    await cleanup()
-    process.exit(130)
-  }
-  process.on('SIGINT', onSignal)
-  process.on('SIGTERM', onSignal)
-
-  try {
-    await client.connect()
-
-    // Bootstrap workspace from directory if specified
-    let bootstrappedWorkspaceId: string | undefined
-    if (args.workspaceDir) {
-      const absPath = resolve(args.workspaceDir)
-      const ws = (await client.invoke('workspaces:create', absPath, 'ci-workspace')) as { id: string }
-      bootstrappedWorkspaceId = ws.id
-      process.stderr.write(`Workspace registered: ${absPath}\n`)
-    }
-
-    // Auto-setup LLM connection from flags / env vars.
-    // When --base-url is provided, always create the custom endpoint connection
-    // (even if other connections exist) so the session routes through it.
-    const connections = (await client.invoke('LLM_Connection:list')) as any[]
-    let connectionSlug: string | undefined
-    if (shouldSetupLlmConnection(connections?.length ?? 0, args)) {
-      const result = await setupLlmConnection(client, args)
-      connectionSlug = result.connectionSlug
-    }
-
-    const workspaceId = bootstrappedWorkspaceId
-      ?? await resolveWorkspace(client, args.workspace)
-    if (bootstrappedWorkspaceId) {
-      await client.invoke('window:switchWorkspace', bootstrappedWorkspaceId).catch(() => {})
-    }
-    if (!workspaceId) {
-      err('No workspace found on server')
-      process.exit(1)
-    }
-
-    const session = (await client.invoke('sessions:create', workspaceId, {
-      permissionMode: args.mode || 'allow-all',
-      enabledSourceSlugs: args.sources.length > 0 ? args.sources : undefined,
-    })) as { id: string }
-    sessionId = session.id
-
-    if (args.model) {
-      await client.invoke('session:setModel', sessionId, workspaceId, args.model, connectionSlug)
-    }
-
-    const exitCode = await sendAndStream(client, sessionId, message, args)
-    await cleanup()
-    process.exit(exitCode)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    err(msg)
-    await cleanup()
-    process.exit(1)
-  } finally {
-    process.off('SIGINT', onSignal)
-    process.off('SIGTERM', onSignal)
-  }
 }
 
 async function cmdValidate(args: CliArgs): Promise<void> {
@@ -1890,34 +1996,42 @@ export async function runValidation(
 // Help
 // ---------------------------------------------------------------------------
 
-function printHelp(): void {
-  process.stdout.write(`polo-ai — Terminal client for Polo AI server
+export function printHelp(): void {
+  process.stdout.write(`polo — Terminal client for Polo AI
 
-Usage: polo-ai [options] <command> [args...]
+Usage: polo [options] <command> [args...]
 
-Connection:
+Compatibility: polo-ai is retained as an alias for polo.
+
+One-shot execution:
+  run <message...>       Run with streaming Polo text or stream-json output
+  exec [PROMPT]          Run non-interactively (safe permissions by default)
+  exec resume <id>       Continue a persistent CLI Thread
+  exec resume --last     Continue the most recently used matching Thread
+  exec sessions          List persistent CLI exec Threads
+  exec delete <id>       Delete an inactive CLI exec Thread
+
+  Each run or exec invocation starts an independent CLI runtime, even while
+  Electron is running. CLI Threads are stored outside Electron sessions.
+
+Execution options:
+  -C, --cd <path>        Agent working directory only; does not register a workspace
+  --workspace <id>       Configuration workspace (sources, skills, permissions)
+  --provider <name>      LLM provider
+  -m, --model <id>       Model to use
+  --api-key <key>        Invocation-only API key
+  --base-url <url>       Invocation-only custom API endpoint
+  --json                 JSONL events for exec
+  --yolo                 Use Polo allow-all application permissions
+  --ephemeral            Delete the CLI Thread after completion
+
+Remote server connection (legacy RPC commands):
   --url <ws[s]://...>    Server URL (default: $POLO_AI_SERVER_URL)
   --token <secret>       Auth token (default: $POLO_AI_SERVER_TOKEN)
-  --workspace <id>       Workspace ID (auto-detected if omitted)
   --timeout <ms>         Request timeout (default: 10000)
   --tls-ca <path>        Custom CA cert for self-signed TLS
-  --json                 Raw JSON output for scripting
 
-LLM Configuration (for 'run' command):
-  --provider <name>      LLM provider (default: anthropic, or $LLM_PROVIDER)
-                         Supported: anthropic, openai, google, openrouter, groq, mistral, deepseek, xai, ...
-  --model <id>           Model to use (or $LLM_MODEL)
-  --api-key <key>        API key (or $LLM_API_KEY, or provider-specific e.g. $OPENAI_API_KEY)
-  --base-url <url>       Custom API endpoint (or $LLM_BASE_URL)
-
-Commands:
-  run <message>          Spawn server, send message, stream response, exit
-                         --workspace-dir <path>  Use directory as workspace (creates if needed)
-                         --source <slug>     Enable source (repeatable)
-                         --mode <mode>       Permission mode (default: allow-all)
-                         --output-format     text or stream-json (default: text)
-                         --no-cleanup        Keep session after completion
-                         --server-entry      Path to server/index.ts
+Remote RPC commands:
   ping                   Verify connectivity (clientId + latency)
   health                 Check credential store health
   versions               Show server runtime versions
@@ -1932,25 +2046,24 @@ Commands:
   cancel <id>            Cancel in-progress processing
   invoke <channel> [...] Raw RPC call with JSON args
   listen <channel>       Subscribe to push events (Ctrl+C to stop)
-  --validate-server      Multi-step server integration test
+  --validate-server      Multi-step test of the App or an explicit --url server
                          --verbose, -v       Show server stderr output
 
 Examples:
-  polo-ai run "What files are in the current directory?"
-  polo-ai run --source craft-kb "Summarize today's daily note"
-  polo-ai run --workspace-dir .github/agents --source craft-public "Read the doc"
-  polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-  OPENAI_API_KEY=sk-... polo-ai run --provider openai "Hello"
-  GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... polo-ai run --provider deepseek --model deepseek-v4-flash "Hello"
-  echo "Analyze this code" | polo-ai run
-  polo-ai ping
-  polo-ai sessions
-  polo-ai send abc-123 "What files are in the current directory?"
-  echo "Summarize this" | polo-ai send abc-123
-  polo-ai --validate-server
-  polo-ai invoke system:homeDir
-  polo-ai --json workspaces | jq '.[].name'
+  polo exec --yolo --json "hello"
+  polo exec -C ./my-project "Summarize this repo"
+  polo exec resume --last "Continue"
+  polo exec sessions
+  polo exec delete 550e8400-e29b-41d4-a716-446655440000
+  polo run "What files are in the current directory?"
+  polo run --source craft-kb "Summarize today's daily note"
+  polo run --provider openai --model gpt-4o "Summarize this repo"
+  echo "Analyze this code" | polo run
+  polo ping
+  polo send abc-123 "What files are in the current directory?"
+  polo --validate-server
+  polo invoke system:homeDir
+  polo --json workspaces | jq '.[].name'
 `)
 }
 
@@ -1959,6 +2072,17 @@ Examples:
 // ---------------------------------------------------------------------------
 
 export async function main(argv: string[] = process.argv): Promise<void> {
+  if (findExecutionCommandIndex(argv) >= 0) {
+    try {
+      const exitCode = await runExecutionCommand(parseExecutionArgs(argv))
+      process.exit(exitCode)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      process.stderr.write(stderrErrorLine(message, colorModeFromArgv(argv)))
+      process.exit(error instanceof UsageError ? 2 : 1)
+    }
+  }
+
   const args = parseArgs(argv)
 
   // Set custom CA before any WS connections
@@ -1972,35 +2096,42 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   }
 
   if (args.command === 'version') {
-    const pkg = await import('../package.json')
-    out(pkg.version ?? pkg.default?.version ?? 'unknown', false)
+    out(cliVersion, false)
     return
   }
 
-  // run is self-contained — spawns its own server
+  if (args.command === 'app') {
+    await cmdApp()
+    return
+  }
+
+  // The legacy full-server run implementation is intentionally sealed. The
+  // complete routing arity table above must have sent every run to one-shot;
+  // retaining this guard prevents future parser drift from reintroducing it.
   if (args.command === 'run') {
-    await cmdRun(args)
-    return
+    process.stderr.write(stderrErrorLine(
+      'run must use the isolated one-shot runner',
+      colorModeFromArgv(argv),
+    ))
+    process.exit(2)
   }
 
-  // validate can spawn its own server or use --url
+  // Validation keeps the current CLI-runtime boundary: without an explicit
+  // URL it starts a private headless server and never reuses Electron.
   if (args.command === 'validate') {
     await cmdValidate(args)
     return
   }
 
-  // All other commands need a server URL
-  if (!args.url) {
-    err('No server URL. Use --url <ws://...> or set $POLO_AI_SERVER_URL')
+  // Explicit --url/--token wins. Otherwise discover and handshake with the
+  // private local Electron endpoint. Only this phase may clean stale discovery.
+  let client: CliRpcClient
+  try {
+    client = await connectForCommand(args)
+  } catch (error) {
+    err(error instanceof Error ? error.message : String(error))
     process.exit(1)
   }
-
-  const client = new CliRpcClient(args.url, {
-    token: args.token || undefined,
-    workspaceId: args.workspace,
-    requestTimeout: args.timeout,
-    connectTimeout: args.timeout,
-  })
 
   try {
     switch (args.command) {
@@ -2061,8 +2192,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         process.exit(1)
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    err(msg)
+    err(e instanceof Error ? e.message : String(e))
     process.exit(1)
   } finally {
     client.destroy()

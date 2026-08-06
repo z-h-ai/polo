@@ -210,6 +210,22 @@ async function fill(selector: string, value: string): Promise<void> {
   `)
 }
 
+async function fillTextarea(selector: string, value: string): Promise<void> {
+  await evaluate(`
+    (() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      if (!(element instanceof HTMLTextAreaElement)) throw new Error('Textarea not found');
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value'
+      ).set;
+      setter.call(element, ${JSON.stringify(value)});
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    })()
+  `)
+}
+
 async function click(selector: string): Promise<void> {
   await evaluate(`
     (() => {
@@ -277,6 +293,24 @@ async function runPhoneLogin(): Promise<void> {
 
 async function finishOnboarding(): Promise<void> {
   await click('[data-testid="onboarding-complete-finish"]')
+  await waitFor('organization onboarding or application shell', () => evaluate<boolean>(
+    `Boolean(
+      document.querySelector('[data-testid="organization-onboarding-page"]')
+      || document.querySelector('[data-testid="sidebar-user-menu-trigger"]')
+    )`,
+  ))
+  const needsOrganization = await evaluate<boolean>(
+    `Boolean(document.querySelector('[data-testid="organization-onboarding-page"]'))`,
+  )
+  if (needsOrganization) {
+    await waitForSelector('[data-testid="organization-name-input"]')
+    await fill('[data-testid="organization-name-input"]', `Phone E2E ${phone}`)
+    await fillTextarea(
+      '[data-testid="organization-purpose-input"]',
+      'Validate the POO-8 to POO-13 release handoff',
+    )
+    await click('[data-testid="organization-create-submit"]')
+  }
   await waitForSelector('[data-testid="sidebar-user-menu-trigger"]')
 }
 
@@ -486,6 +520,8 @@ async function run(): Promise<void> {
     scenarios: [
       'send-code',
       'auto-register',
+      'first-login-organization-create',
+      'returning-login-organization-restore',
       'account-security-navigation',
       'set-password',
       'real-logout',

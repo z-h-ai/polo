@@ -26,6 +26,11 @@ export interface SearchProviderAuthConfig {
   credential?: SearchProviderCredential;
 }
 
+export interface SearchCredentialProxyConfig {
+  baseUrl: string;
+  capability: string;
+}
+
 function getApiKey(piAuth?: SearchProviderAuthConfig): string | undefined {
   if (piAuth?.credential?.type !== 'api_key') return undefined;
   return typeof piAuth.credential.key === 'string' && piAuth.credential.key.length > 0
@@ -49,7 +54,10 @@ function getOpenAiCodexAccessToken(piAuth?: SearchProviderAuthConfig): string | 
   return getOAuthAccess(piAuth) ?? getApiKey(piAuth);
 }
 
-export function resolveSearchProvider(piAuth?: SearchProviderAuthConfig): WebSearchProvider {
+export function resolveSearchProvider(
+  piAuth?: SearchProviderAuthConfig,
+  credentialProxy?: SearchCredentialProxyConfig,
+): WebSearchProvider {
   const provider = piAuth?.provider;
   const apiKey = getApiKey(piAuth);
   const openAiCodexAccess = getOpenAiCodexAccessToken(piAuth);
@@ -57,8 +65,8 @@ export function resolveSearchProvider(piAuth?: SearchProviderAuthConfig): WebSea
   // OpenAI with API key → standard Responses API
   if (provider === 'openai' && apiKey) {
     return new ResponsesApiSearchProvider({
-      apiBase: 'https://api.openai.com/v1',
-      apiKey,
+      apiBase: credentialProxy?.baseUrl ?? 'https://api.openai.com/v1',
+      apiKey: credentialProxy?.capability ?? apiKey,
     });
   }
 
@@ -67,7 +75,9 @@ export function resolveSearchProvider(piAuth?: SearchProviderAuthConfig): WebSea
   if (provider === 'openai-codex' && openAiCodexAccess) {
     const accountId = extractChatGptAccountId(openAiCodexAccess);
     if (accountId) {
-      return new ChatGPTBackendSearchProvider(openAiCodexAccess, accountId);
+      return new ChatGPTBackendSearchProvider(openAiCodexAccess, accountId, {
+        apiBase: credentialProxy ? `${credentialProxy.baseUrl.replace(/\/$/, '')}/codex` : undefined,
+      });
     }
     // Can't extract accountId (malformed/non-JWT token) → fall through to DDG
   }
@@ -75,15 +85,18 @@ export function resolveSearchProvider(piAuth?: SearchProviderAuthConfig): WebSea
   // OpenRouter → same Responses API format, different base URL
   if (provider === 'openrouter' && apiKey) {
     return new ResponsesApiSearchProvider({
-      apiBase: 'https://openrouter.ai/api/v1',
-      apiKey,
+      apiBase: credentialProxy?.baseUrl ?? 'https://openrouter.ai/api/v1',
+      apiKey: credentialProxy?.capability ?? apiKey,
       model: 'openai/gpt-4o-mini',
     });
   }
 
   // Google → Gemini API with native Google Search grounding
   if (provider === 'google' && apiKey) {
-    return new GoogleSearchProvider(apiKey);
+    return new GoogleSearchProvider(
+      credentialProxy?.capability ?? apiKey,
+      credentialProxy?.baseUrl,
+    );
   }
 
   // Vercel AI Gateway is currently not wired to provider-native search routing.

@@ -63,6 +63,7 @@ describe('admin preload RPC chain', () => {
     const token = 'join-token-12345678901234567890'
 
     await api.organizationList()
+    await api.adminSyncAppCatalog(organizationId, { force: true })
     await api.organizationCreate({
       type: 'creator_space',
       name: 'Studio',
@@ -82,6 +83,7 @@ describe('admin preload RPC chain', () => {
 
     expect(calls).toEqual([
       [RPC_CHANNELS.admin.LIST_ORGANIZATIONS],
+      [RPC_CHANNELS.admin.SYNC_APP_CATALOG, organizationId, { force: true }],
       [
         RPC_CHANNELS.admin.CREATE_ORGANIZATION,
         {

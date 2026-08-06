@@ -521,6 +521,109 @@ describe('AdminClient', () => {
     });
   });
 
+  it('times out both a hanging fetch and a hanging response body', async () => {
+    for (const phase of ['fetch', 'body'] as const) {
+      let capturedSignal: AbortSignal | undefined;
+      let abortCount = 0;
+      const hangUntilAbort = (signal: AbortSignal) =>
+        new Promise<never>((_resolve, reject) => {
+          const onAbort = () => {
+            abortCount += 1;
+            signal.removeEventListener('abort', onAbort);
+            reject(signal.reason);
+          };
+          signal.addEventListener('abort', onAbort);
+        });
+      globalThis.fetch = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        capturedSignal = init?.signal as AbortSignal;
+        if (phase === 'fetch') return hangUntilAbort(capturedSignal);
+        return {
+          ok: true,
+          status: 200,
+          text: () => hangUntilAbort(capturedSignal!),
+        } as unknown as Response;
+      }) as typeof globalThis.fetch;
+
+      const client = new AdminClient('https://admin.example.com', {
+        requestTimeoutMs: 10,
+      });
+      await expect(client.getAuthConfig()).rejects.toMatchObject({
+        errorCode: 'TIMEOUT',
+        message: 'Admin request timed out',
+      });
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(abortCount).toBe(1);
+    }
+  });
+
+  it('preserves 401 and 403 response authorization when their bodies never finish', async () => {
+    for (const [status, errorCode] of [
+      [401, 'UNAUTHORIZED'],
+      [403, 'FORBIDDEN'],
+    ] as const) {
+      let capturedSignal: AbortSignal | undefined;
+      let abortCount = 0;
+      globalThis.fetch = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        capturedSignal = init?.signal as AbortSignal;
+        return {
+          ok: false,
+          status,
+          text: () => new Promise<never>((_resolve, reject) => {
+            const onAbort = () => {
+              abortCount += 1;
+              capturedSignal!.removeEventListener('abort', onAbort);
+              reject(capturedSignal!.reason);
+            };
+            capturedSignal!.addEventListener('abort', onAbort);
+          }),
+        } as unknown as Response;
+      }) as typeof globalThis.fetch;
+
+      const client = new AdminClient('https://admin.example.com', {
+        requestTimeoutMs: 10,
+      });
+      await expect(client.getAppCatalog(
+        'access-token',
+        '11111111-1111-4111-8111-111111111111',
+      )).rejects.toMatchObject({
+        errorCode,
+        status,
+      });
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(abortCount).toBe(1);
+      await Bun.sleep(20);
+      expect(abortCount).toBe(1);
+    }
+  });
+
+  it('clears the request deadline after the response body is consumed', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      capturedSignal = init?.signal as AbortSignal;
+      return new Response(JSON.stringify({ phoneAuthEnabled: true }), {
+        status: 200,
+      });
+    }) as typeof globalThis.fetch;
+    const client = new AdminClient('https://admin.example.com', {
+      requestTimeoutMs: 10,
+    });
+
+    await expect(client.getAuthConfig()).resolves.toEqual({
+      phoneAuthEnabled: true,
+    });
+    await Bun.sleep(20);
+    expect(capturedSignal?.aborted).toBe(false);
+  });
+
   it('drops retryAfter values outside the stable numeric range', async () => {
     for (const retryAfter of [-1, 0, 86_401, '60', { seconds: 60 }]) {
       mockJsonFetch({
@@ -558,6 +661,38 @@ describe('AdminClient', () => {
       errorCode: 'ACCOUNT_DISABLED',
       status: 403,
     });
+  });
+
+  it('preserves explicit membership loss codes on non-auth HTTP statuses', async () => {
+    for (const [errorCode, status, safeMessage] of [
+      [
+        'MEMBERSHIP_REMOVED',
+        409,
+        'Organization membership is no longer available',
+      ],
+      [
+        'MEMBERSHIP_SUSPENDED',
+        423,
+        'Organization membership is suspended',
+      ],
+      [
+        'ORGANIZATION_UNAVAILABLE',
+        409,
+        'Organization is no longer available',
+      ],
+    ] as const) {
+      mockJsonFetch({
+        errorCode,
+        message: 'private server authorization detail',
+      }, status);
+      const client = new AdminClient('https://admin.example.com');
+
+      await expect(client.listOrganizations('access-token')).rejects.toMatchObject({
+        errorCode,
+        status,
+        message: safeMessage,
+      });
+    }
   });
 
   it('refreshes tokens and retries once on authenticated 401 responses', async () => {
@@ -626,6 +761,74 @@ describe('AdminClient', () => {
     expect((fetchCalls[2]!.init.headers as Record<string, string>).Authorization).toBe('Bearer fresh-access-token');
   });
 
+  it('preserves protected 401 when VALIDATE refresh is unreachable or Catalog refresh returns 5xx', async () => {
+    for (const testCase of [
+      {
+        name: 'validate-network',
+        protectedPath: '/api/auth/validate',
+        invoke: (client: AdminClient) => client.validate('locally-unexpired-token'),
+        refreshResponse: null,
+      },
+      {
+        name: 'catalog-5xx',
+        protectedPath: '/api/organizations/organization-1/apps',
+        invoke: (client: AdminClient) => client.getAppCatalog(
+          'locally-unexpired-token',
+          'organization-1',
+        ),
+        refreshResponse: new Response(JSON.stringify({
+          errorCode: 'SERVER_ERROR',
+          message: 'temporarily unavailable',
+        }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      },
+    ]) {
+      fetchCalls = [];
+      globalThis.fetch = (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const url = typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        fetchCalls.push({ url, init: init ?? {} });
+        if (url.endsWith('/api/auth/refresh')) {
+          if (!testCase.refreshResponse) {
+            throw new TypeError('network disconnected');
+          }
+          return testCase.refreshResponse.clone();
+        }
+        expect(url).toContain(testCase.protectedPath);
+        return new Response(JSON.stringify({
+          errorCode: 'TOKEN_REVOKED',
+          message: 'definitive protected endpoint rejection',
+        }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+      const client = new AdminClient('https://admin.example.com', {
+        tokenStore: {
+          getRefreshToken: () => 'refresh-token',
+        },
+      });
+
+      await expect(testCase.invoke(client)).rejects.toMatchObject({
+        errorCode: 'TOKEN_REVOKED',
+        status: 401,
+        message: 'Admin session is no longer valid',
+      });
+      expect(fetchCalls.map(call => call.url)).toHaveLength(2);
+      expect(fetchCalls[1]!.url).toBe(
+        'https://admin.example.com/api/auth/refresh',
+      );
+    }
+  });
+
   it('lists organizations and strips fields outside the client contract', async () => {
     mockJsonFetch({
       organizations: [{
@@ -676,6 +879,142 @@ describe('AdminClient', () => {
     expect(fetchCalls[0]!.url).toBe('https://admin.example.com/api/me/organizations');
     expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
       .toBe('Bearer organization-access-token');
+  });
+
+  it('fetches a validated organization app catalog with version comparison', async () => {
+    mockJsonFetch({
+      appConfigVersion: 2,
+      apps: [{
+        id: 'app-1',
+        organizationId: 'organization-1',
+        name: 'Knowledge base',
+        description: 'Internal documentation',
+        iconUrl: 'https://cdn.example.com/icon.png',
+        creatorName: 'Acme',
+        deliveryMode: 'local_bundle',
+        permissions: ['Read files selected by you'],
+        currentRelease: {
+          id: 'release-2',
+          version: '2.0.0',
+          runtime: 'static',
+          checksum: `sha256:${'A'.repeat(64)}`,
+          sizeBytes: 1024,
+          platform: 'any',
+          arch: 'any',
+          internalBuildId: 'must-not-leak',
+        },
+        sortOrder: 1,
+        groupIds: ['must-not-leak'],
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    const result = await client.getAppCatalog(
+      'organization-access-token',
+      'organization-1',
+      '1',
+    );
+
+    expect(result).toEqual({
+      notModified: false,
+      appConfigVersion: '2',
+      apps: [{
+        id: 'app-1',
+        organizationId: 'organization-1',
+        name: 'Knowledge base',
+        description: 'Internal documentation',
+        iconUrl: 'https://cdn.example.com/icon.png',
+        creatorName: 'Acme',
+        deliveryMode: 'local_bundle',
+        permissions: ['Read files selected by you'],
+        currentRelease: {
+          id: 'release-2',
+          version: '2.0.0',
+          runtime: 'static',
+          checksum: 'a'.repeat(64),
+          sizeBytes: 1024,
+        },
+        sortOrder: 1,
+      }],
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/apps?version=1',
+    );
+    expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe('Bearer organization-access-token');
+  });
+
+  it('requests a short-lived POL-52 download grant and normalizes its metadata', async () => {
+    mockJsonFetch({
+      releaseId: 'release-2',
+      downloadUrl: 'https://admin.example.com/api/download/file?token=signed',
+      expiresAt: '2026-08-01T12:10:00.000Z',
+      checksum: `sha256:${'B'.repeat(64)}`,
+      sizeBytes: 2048,
+      runtime: 'static',
+      platform: 'any',
+      arch: 'any',
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppReleaseDownload(
+      'organization-access-token',
+      'organization-1',
+      'app-1',
+      'release-2',
+    )).resolves.toEqual({
+      releaseId: 'release-2',
+      downloadUrl: 'https://admin.example.com/api/download/file?token=signed',
+      expiresAt: '2026-08-01T12:10:00.000Z',
+      checksum: 'b'.repeat(64),
+      sizeBytes: 2048,
+      runtime: 'static',
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/apps/app-1/releases/release-2/download',
+    );
+    expect(fetchCalls[0]!.init).toMatchObject({ method: 'POST' });
+    expect(fetchCalls[0]!.init.body).toBeUndefined();
+  });
+
+  it('rejects an app catalog containing another organization identity', async () => {
+    mockJsonFetch({
+      appConfigVersion: 'apps-v2',
+      apps: [{
+        id: 'remote-app',
+        organizationId: 'organization-b',
+        name: 'Remote App',
+        description: '',
+        deliveryMode: 'remote_url',
+        remoteUrl: 'https://catalog.example.com/remote',
+        sortOrder: 0,
+      }],
+    });
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppCatalog(
+      'organization-access-token',
+      'organization-a',
+    )).rejects.toMatchObject({
+      errorCode: 'SERVER_ERROR',
+      message: 'Admin app catalog contains an app from another organization',
+    });
+  });
+
+  it('returns notModified for a 304 app catalog response', async () => {
+    fetchCalls = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      fetchCalls.push({ url, init: init ?? {} });
+      return new Response(null, { status: 304 });
+    }) as typeof globalThis.fetch;
+
+    const client = new AdminClient('https://admin.example.com');
+    await expect(client.getAppCatalog(
+      'organization-access-token',
+      'organization-1',
+      'apps-v2',
+    )).resolves.toEqual({ notModified: true });
   });
 
   it('accepts the POL-56 member response shape when user.phone is omitted', async () => {

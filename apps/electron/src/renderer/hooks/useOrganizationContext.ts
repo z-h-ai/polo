@@ -8,11 +8,20 @@ import type {
 import {
   clearPendingOrganizationJoinToken,
   clearStoredActiveOrganizationId,
+  clearVerifiedOrganizationContext,
+  createUnavailableOrganizationTombstone,
   createOrganizationContextKey,
+  getOrganizationContextStorage,
   getPendingOrganizationJoinToken,
   getStoredActiveOrganizationId,
   setPendingOrganizationJoinToken,
   setStoredActiveOrganizationId,
+  setUnavailableOrganizationContext,
+  setVerifiedOrganizationContext,
+} from '@/lib/organization-storage'
+import type {
+  UnavailableOrganizationTombstone,
+  VerifiedOrganizationContext,
 } from '@/lib/organization-storage'
 import {
   emitAdminAuthFailure,
@@ -40,6 +49,26 @@ export interface AcceptJoinOutcome {
 interface OrganizationAccountScope {
   accountId: string
   generation: number
+}
+
+const TEMPORARY_ORGANIZATION_ERROR_CODES = new Set([
+  'FETCH_FAILED',
+  'NETWORK_ERROR',
+  'SERVER_ERROR',
+  'TIMEOUT',
+  'request_failed',
+])
+
+function isTemporaryOrganizationError(error: OrganizationFlowError): boolean {
+  return (
+    TEMPORARY_ORGANIZATION_ERROR_CODES.has(error.code)
+    || (typeof error.status === 'number' && error.status >= 500)
+  )
+}
+
+function isActiveOrganization(organization: OrganizationSummary): boolean {
+  return organization.status !== 'suspended'
+    && organization.membership.status === 'active'
 }
 
 function resultError(result: {
@@ -72,6 +101,13 @@ function caughtError(caught: unknown): OrganizationFlowError {
   return { code: 'request_failed' }
 }
 
+function persistOrganizationContext(persistence: Promise<void>): void {
+  void persistence.catch(() => {
+    // The live authorization state remains authoritative. A later verified
+    // response or bootstrap will retry the device-local preference write.
+  })
+}
+
 export function useOrganizationContextState() {
   const [flowState, setFlowState] = useState<OrganizationFlowState>('idle')
   const [organizationSummaries, setOrganizationSummaries] = useState<OrganizationSummary[]>([])
@@ -93,7 +129,12 @@ export function useOrganizationContextState() {
   // started for an earlier login, even when its IPC response arrives after account swap.
   const accountIdRef = useRef<string | null>(null)
   const accountScopeGenerationRef = useRef(0)
+  const organizationSummariesRef = useRef(organizationSummaries)
+  organizationSummariesRef.current = organizationSummaries
   const activeOrganizationIdRef = useRef<string | null>(null)
+  const unavailableOrganizationRef = useRef<
+    UnavailableOrganizationTombstone | null
+  >(null)
   const organizationScopeGenerationRef = useRef(0)
   const refreshGenerationRef = useRef(0)
 
@@ -108,12 +149,17 @@ export function useOrganizationContextState() {
     organizationId: string,
   ) => {
     const organization = summaries.find(item => item.id === organizationId)
-    if (!organization || organization.membership.status !== 'active') {
+    if (!organization || !isActiveOrganization(organization)) {
       throw { code: 'membership_not_active' } satisfies OrganizationFlowError
     }
 
     setStoredActiveOrganizationId(accountId, organizationId)
+    persistOrganizationContext(
+      setVerifiedOrganizationContext(accountId, summaries, organizationId),
+    )
+    unavailableOrganizationRef.current = null
     accountIdRef.current = accountId
+    organizationSummariesRef.current = summaries
     activeOrganizationIdRef.current = organizationId
     organizationScopeGenerationRef.current += 1
     setActiveOrganizationId(organizationId)
@@ -132,13 +178,68 @@ export function useOrganizationContextState() {
     }))
   }, [])
 
+  const retainUnavailableOrganization = useCallback((
+    accountId: string,
+    summaries: OrganizationSummary[],
+    unavailableOrganization: OrganizationSummary,
+  ) => {
+    const tombstone = createUnavailableOrganizationTombstone(
+      unavailableOrganization,
+    )
+    const nextSummaries = [
+      ...summaries.filter(item => item.id !== tombstone.id),
+      tombstone,
+    ]
+    clearStoredActiveOrganizationId(accountId)
+    persistOrganizationContext(
+      setUnavailableOrganizationContext(
+        accountId,
+        summaries,
+        tombstone,
+      ),
+    )
+    unavailableOrganizationRef.current = {
+      organization: tombstone,
+      recordedAt: Date.now(),
+    }
+    accountIdRef.current = accountId
+    organizationSummariesRef.current = nextSummaries
+    activeOrganizationIdRef.current = tombstone.id
+    organizationScopeGenerationRef.current += 1
+    setOrganizationSummaries(nextSummaries)
+    setActiveOrganizationId(tombstone.id)
+    setOrganizationMembershipRole(tombstone.membership.role)
+    setContextVersion(version => version + 1)
+    setFlowState('ready')
+    setError(null)
+
+    window.dispatchEvent(new CustomEvent('polo:organization-changed', {
+      detail: {
+        accountId,
+        organizationId: tombstone.id,
+        role: tombstone.membership.role,
+        contextKey: createOrganizationContextKey(accountId, tombstone.id),
+        available: false,
+      },
+    }))
+  }, [])
+
   const loadOrganizations = useCallback(async (
     scope: OrganizationAccountScope,
   ): Promise<OrganizationSummary[] | null> => {
     const result = await window.electronAPI.organizationList()
     if (!isCurrentAccountScope(scope)) return null
     if (!result.success) throw resultError(result)
+    organizationSummariesRef.current = result.organizations
     setOrganizationSummaries(result.organizations)
+    persistOrganizationContext(
+      setVerifiedOrganizationContext(
+        scope.accountId,
+        result.organizations,
+        activeOrganizationIdRef.current
+          ?? getStoredActiveOrganizationId(scope.accountId),
+      ),
+    )
     return result.organizations
   }, [isCurrentAccountScope])
 
@@ -191,6 +292,7 @@ export function useOrganizationContextState() {
     joinPreviewTokenRef.current = null
     activeOrganizationIdRef.current = null
     organizationScopeGenerationRef.current += 1
+    organizationSummariesRef.current = []
     setOrganizationSummaries([])
     setJoinPreview(null)
     setActiveOrganizationId(null)
@@ -198,7 +300,15 @@ export function useOrganizationContextState() {
     setFlowState('loading')
     setError(null)
 
+    let previouslyVerified: VerifiedOrganizationContext | null = null
+    let persistedTombstone: UnavailableOrganizationTombstone | null = null
     try {
+      const persisted = await getOrganizationContextStorage(accountId)
+      if (!isCurrentAccountScope(scope)) return null
+      previouslyVerified = persisted.verifiedContext ?? null
+      persistedTombstone = persisted.unavailableTombstone ?? null
+      unavailableOrganizationRef.current = persistedTombstone
+
       const summaries = await loadOrganizations(scope)
       if (!summaries || !isCurrentAccountScope(scope)) return null
       const token = getPendingOrganizationJoinToken() ?? pendingJoinTokenRef.current
@@ -212,7 +322,32 @@ export function useOrganizationContextState() {
       }
 
       if (!isCurrentAccountScope(scope)) return null
-      if (summaries.length === 0) {
+      const activeSummaries = summaries.filter(
+        isActiveOrganization,
+      )
+      const priorOrganizationId = persistedTombstone?.organization.id
+        ?? previouslyVerified?.activeOrganizationId
+      if (priorOrganizationId) {
+        const reauthorized = activeSummaries.find(
+          organization => organization.id === priorOrganizationId,
+        )
+        if (reauthorized) {
+          activateOrganization(accountId, summaries, reauthorized.id)
+          return 'ready'
+        }
+        const unavailable = summaries.find(
+          organization => organization.id === priorOrganizationId,
+        )
+          ?? persistedTombstone?.organization
+          ?? previouslyVerified?.organizationSummaries.find(
+            organization => organization.id === priorOrganizationId,
+          )
+        if (unavailable) {
+          retainUnavailableOrganization(accountId, summaries, unavailable)
+          return 'ready'
+        }
+      }
+      if (activeSummaries.length === 0) {
         activeOrganizationIdRef.current = null
         setActiveOrganizationId(null)
         setOrganizationMembershipRole(null)
@@ -222,8 +357,8 @@ export function useOrganizationContextState() {
 
       const storedId = getStoredActiveOrganizationId(accountId)
       const preferred = (
-        storedId ? summaries.find(item => item.id === storedId) : undefined
-      ) ?? (summaries.length === 1 ? summaries[0] : undefined)
+        storedId ? activeSummaries.find(item => item.id === storedId) : undefined
+      ) ?? (activeSummaries.length === 1 ? activeSummaries[0] : undefined)
 
       if (preferred) {
         activateOrganization(accountId, summaries, preferred.id)
@@ -237,7 +372,31 @@ export function useOrganizationContextState() {
       return 'select'
     } catch (caught) {
       if (!isCurrentAccountScope(scope)) return null
-      setError(caughtError(caught))
+      const nextError = caughtError(caught)
+      if (nextError.authFailureHandled) {
+        clearStoredActiveOrganizationId(accountId)
+        persistOrganizationContext(clearVerifiedOrganizationContext(accountId))
+        unavailableOrganizationRef.current = null
+      } else if (isTemporaryOrganizationError(nextError)) {
+        const cached = previouslyVerified
+        const active = cached?.activeOrganizationId
+          ? cached.organizationSummaries.find(organization => (
+              organization.id === cached.activeOrganizationId
+              && isActiveOrganization(organization)
+            ))
+          : undefined
+        if (cached && active && isCurrentAccountScope(scope)) {
+          setOrganizationSummaries(cached.organizationSummaries)
+          activateOrganization(accountId, cached.organizationSummaries, active.id)
+          return 'ready'
+        }
+        const unavailable = persistedTombstone?.organization
+        if (unavailable && isCurrentAccountScope(scope)) {
+          retainUnavailableOrganization(accountId, [], unavailable)
+          return 'ready'
+        }
+      }
+      setError(nextError)
       setFlowState('loading')
       throw caught
     }
@@ -246,6 +405,7 @@ export function useOrganizationContextState() {
     isCurrentAccountScope,
     loadOrganizations,
     previewJoin,
+    retainUnavailableOrganization,
   ])
 
   const receiveJoinToken = useCallback(async (token: string) => {
@@ -265,18 +425,30 @@ export function useOrganizationContextState() {
     setJoinPreview(null)
     setError(null)
 
-    if (organizationSummaries.length === 0) {
+    const activeSummaries = organizationSummaries.filter(isActiveOrganization)
+    if (activeSummaries.length === 0) {
       setFlowState('create')
       return 'create'
     }
 
     const accountId = accountIdRef.current
+    const unavailable = accountId
+      ? unavailableOrganizationRef.current?.organization
+      : null
+    if (accountId && unavailable) {
+      retainUnavailableOrganization(
+        accountId,
+        organizationSummaries.filter(isActiveOrganization),
+        unavailable,
+      )
+      return 'ready'
+    }
     const storedId = accountId ? getStoredActiveOrganizationId(accountId) : null
     const preferred = (
       storedId
-        ? organizationSummaries.find(item => item.id === storedId)
+        ? activeSummaries.find(item => item.id === storedId)
         : undefined
-    ) ?? (organizationSummaries.length === 1 ? organizationSummaries[0] : undefined)
+    ) ?? (activeSummaries.length === 1 ? activeSummaries[0] : undefined)
 
     if (accountId && preferred) {
       activateOrganization(accountId, organizationSummaries, preferred.id)
@@ -285,7 +457,11 @@ export function useOrganizationContextState() {
 
     setFlowState('select')
     return 'select'
-  }, [activateOrganization, organizationSummaries])
+  }, [
+    activateOrganization,
+    organizationSummaries,
+    retainUnavailableOrganization,
+  ])
 
   const createOrganization = useCallback(async (input: CreateOrganizationInput) => {
     const accountId = accountIdRef.current
@@ -418,14 +594,52 @@ export function useOrganizationContextState() {
 
     const result = await window.electronAPI.organizationList()
     if (!isCurrentScope()) return result.success ? result.organizations : []
-    if (!result.success) throw resultError(result)
+    if (!result.success) {
+      const nextError = resultError(result)
+      if (nextError.authFailureHandled) {
+        clearStoredActiveOrganizationId(requestAccountId)
+        persistOrganizationContext(
+          clearVerifiedOrganizationContext(requestAccountId),
+        )
+        unavailableOrganizationRef.current = null
+      }
+      throw nextError
+    }
     const summaries = result.organizations
 
-    setOrganizationSummaries(summaries)
-    if (!requestOrganizationId) return summaries
-    const active = summaries.find(item => item.id === requestOrganizationId)
+    if (!requestOrganizationId) {
+      organizationSummariesRef.current = summaries
+      setOrganizationSummaries(summaries)
+      persistOrganizationContext(
+        setVerifiedOrganizationContext(requestAccountId, summaries, null),
+      )
+      return summaries
+    }
+    const active = summaries.find(item => (
+      item.id === requestOrganizationId
+      && isActiveOrganization(item)
+    ))
     if (!active) {
+      const unavailable = summaries.find(
+        item => item.id === requestOrganizationId,
+      ) ?? organizationSummariesRef.current.find(
+        item => item.id === requestOrganizationId,
+      ) ?? unavailableOrganizationRef.current?.organization
+      if (unavailable) {
+        retainUnavailableOrganization(
+          requestAccountId,
+          summaries,
+          unavailable,
+        )
+        return summaries
+      }
+      organizationSummariesRef.current = summaries
+      setOrganizationSummaries(summaries)
       clearStoredActiveOrganizationId(requestAccountId)
+      persistOrganizationContext(
+        setVerifiedOrganizationContext(requestAccountId, summaries, null),
+      )
+      unavailableOrganizationRef.current = null
       activeOrganizationIdRef.current = null
       organizationScopeGenerationRef.current += 1
       setActiveOrganizationId(null)
@@ -433,16 +647,27 @@ export function useOrganizationContextState() {
       setFlowState(summaries.length === 0 ? 'create' : 'select')
       return summaries
     }
+    organizationSummariesRef.current = summaries
+    setOrganizationSummaries(summaries)
+    unavailableOrganizationRef.current = null
+    persistOrganizationContext(
+      setVerifiedOrganizationContext(requestAccountId, summaries, active.id),
+    )
     setOrganizationMembershipRole(active.membership.role)
     return summaries
-  }, [])
+  }, [retainUnavailableOrganization])
 
   const clearAccount = useCallback((
     accountId?: string | null,
     options?: { preservePendingJoinToken?: boolean },
   ) => {
     const targetAccountId = accountId ?? accountIdRef.current
-    if (targetAccountId) clearStoredActiveOrganizationId(targetAccountId)
+    if (targetAccountId) {
+      clearStoredActiveOrganizationId(targetAccountId)
+      persistOrganizationContext(
+        clearVerifiedOrganizationContext(targetAccountId),
+      )
+    }
     const preservedJoinToken = options?.preservePendingJoinToken
       ? pendingJoinTokenRef.current ?? getPendingOrganizationJoinToken()
       : null
@@ -453,8 +678,10 @@ export function useOrganizationContextState() {
     accountIdRef.current = null
     accountScopeGenerationRef.current += 1
     activeOrganizationIdRef.current = null
+    unavailableOrganizationRef.current = null
     organizationScopeGenerationRef.current += 1
     refreshGenerationRef.current += 1
+    organizationSummariesRef.current = []
     setOrganizationSummaries([])
     setActiveOrganizationId(null)
     setOrganizationMembershipRole(null)

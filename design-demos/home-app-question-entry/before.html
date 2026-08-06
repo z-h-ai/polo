@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-Hans" data-prototype-role="before">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polo 首页 App · Before</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f8f8fa;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    .renderer-frame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #f8f8fa;
+    }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script id="prototype-config" type="application/json">
+{
+  "scenes": ["catalog", "offline"],
+  "themes": ["light", "dark"],
+  "langs": ["zh-Hans", "en"]
+}
+  </script>
+  <script type="text/babel" data-presets="env,react">
+    const prototypeConfig = JSON.parse(
+      document.getElementById("prototype-config").textContent
+    );
+
+    function readPrototypeParameters() {
+      const query = new URLSearchParams(window.location.search);
+      const select = (name, values) => {
+        const requested = query.get(name);
+        return values.includes(requested) ? requested : values[0];
+      };
+      return {
+        scene: select("scene", prototypeConfig.scenes),
+        theme: select("theme", prototypeConfig.themes),
+        lang: select("lang", prototypeConfig.langs),
+      };
+    }
+
+    function rendererUrl(parameters) {
+      const url = new URL("assets/renderer/index.html", window.location.href);
+      url.search = new URLSearchParams({
+        page: "before",
+        scene: parameters.scene,
+        theme: parameters.theme,
+        lang: parameters.lang,
+      }).toString();
+      return url.href;
+    }
+
+    function PrototypeApp() {
+      const [parameters, setParameters] = React.useState(
+        readPrototypeParameters
+      );
+      React.useEffect(() => {
+        const refresh = () => setParameters(readPrototypeParameters());
+        window.addEventListener("popstate", refresh);
+        return () => window.removeEventListener("popstate", refresh);
+      }, []);
+      return (
+        <iframe
+          className="renderer-frame"
+          title="Current Polo Home renderer"
+          src={rendererUrl(parameters)}
+        />
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<PrototypeApp />);
+  </script>
+</body>
+</html>

@@ -5,7 +5,9 @@ copyright: Copyright © 2026 Polo AI
 electronVersion: "39.2.7"
 
 # Hook to compile macOS 26+ Liquid Glass icon after packaging
+beforePack: scripts/beforePack.cjs
 afterPack: scripts/afterPack.cjs
+afterAllArtifactBuild: scripts/afterAllArtifactBuild.cjs
 
 directories:
   output: release
@@ -33,8 +35,12 @@ files:
   # Include CLI tool shell wrappers (platform-independent, both Unix and Windows)
   - resources/bin/markitdown
   - resources/bin/markitdown.cmd
+  - resources/bin/polo
+  - resources/bin/polo.cmd
   - resources/bin/polo-ai
   - resources/bin/polo-ai.cmd
+  - resources/bin/polo-messages.sh
+  - resources/bin/polo-messages.cmd
   - resources/bin/pdf-tool
   - resources/bin/pdf-tool.cmd
   - resources/bin/xlsx-tool
@@ -53,9 +59,14 @@ files:
   - resources/bin/darwin-arm64/**/*
   - resources/bin/darwin-x64/**/*
   - resources/bin/win32-x64/**/*
+  - resources/bin/win32-arm64/**/*
   - resources/bin/linux-x64/**/*
+  - resources/bin/linux-arm64/**/*
   # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
+  # Bun is copied to Resources/vendor below so terminal launchers can resolve
+  # it without entering the packaged app directory.
+  - "!vendor/bun/**/*"
   # Exclude everything from node_modules (will use extraResources for SDK)
   - "!node_modules/**/*"
 
@@ -92,13 +103,7 @@ mac:
     CFBundleIconName: AppIcon
   target:
     - target: dmg
-      arch:
-        - arm64
-        - x64
     - target: zip
-      arch:
-        - arm64
-        - x64
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -108,14 +113,19 @@ mac:
     - from: node_modules/@anthropic-ai/claude-agent-sdk
       to: app/node_modules/@anthropic-ai/claude-agent-sdk
     # Stable alias pointing at the target-arch native binary package.
-    # Populated by build-dmg.sh / build-linux.sh / build-win.ps1 before
-    # electron-builder runs (`apps/electron/node_modules/@anthropic-ai/claude-agent-sdk-binary/`).
+    # Populated by scripts/electron-dist.ts before electron-builder runs
+    # (`apps/electron/node_modules/@anthropic-ai/claude-agent-sdk-binary/`).
     # The runtime resolver (runtime-resolver.ts) looks here first.
     - from: node_modules/@anthropic-ai/claude-agent-sdk-binary
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     # ripgrep (used by packages/server-core/src/services/search.ts).
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    # Native FFI used by the shared credential writer lock.
+    - from: ../../node_modules/koffi
+      to: app/node_modules/koffi
+    - from: vendor/bun/bun
+      to: vendor/bun/bun
     # WhatsApp worker subprocess (self-contained; Baileys bundled in).
     - from: ../../packages/messaging-whatsapp-worker/dist/worker.cjs
       to: messaging-whatsapp-worker/worker.cjs
@@ -125,10 +135,9 @@ mac:
     - "!**/resources/bin/linux-*/**"
   # Use predictable naming for macOS packages (applies to zip; dmg uses its own config below)
   artifactName: "Polo-AI-${arch}.${ext}"
-  # Code signing & notarization (disabled by default for local builds)
-  # To enable: set CSC_LINK, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
-  # notarize:
-  #   teamId: ${APPLE_TEAM_ID}
+  # Production builds use the Apple credentials supplied by release CI.
+  # scripts/electron-dist.ts explicitly disables notarization for --dev smoke.
+  notarize: true
 
 dmg:
   # Use predictable naming: Polo-AI-arm64.dmg, Polo-AI-x64.dmg
@@ -177,7 +186,8 @@ win:
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
-    # Native FFI used by LocalAppRuntimeManager for Windows Job Objects.
+    # Native FFI used by the shared credential writer lock and by
+    # LocalAppRuntimeManager for Windows Job Objects.
     - from: ../../node_modules/koffi
       to: app/node_modules/koffi
     - from: vendor/bun/bun.exe
@@ -194,6 +204,7 @@ nsis:
   # Bun subprocess cannot read/write files in Program Files due to Windows permissions.
   perMachine: false
   deleteAppDataOnUninstall: true
+  include: build/installer.nsh
 
 linux:
   icon: resources/icon.png
@@ -211,6 +222,11 @@ linux:
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
+    # Native FFI used by the shared credential writer lock.
+    - from: ../../node_modules/koffi
+      to: app/node_modules/koffi
+    - from: vendor/bun/bun
+      to: vendor/bun/bun
     # WhatsApp worker subprocess (self-contained; Baileys bundled in).
     - from: ../../packages/messaging-whatsapp-worker/dist/worker.cjs
       to: messaging-whatsapp-worker/worker.cjs

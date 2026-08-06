@@ -2,7 +2,12 @@ import { describe, it, expect } from "bun:test";
 import { readdirSync } from "fs";
 import { join } from "path";
 import { LOCALE_REGISTRY, type LanguageCode } from "../registry";
-import { SUPPORTED_LANGUAGE_CODES, LANGUAGES } from "../languages";
+import {
+  SUPPORTED_LANGUAGE_CODES,
+  LANGUAGES,
+  resolveSupportedLanguage,
+  translateRegistryMessage,
+} from "../languages";
 import { getDateLocale } from "../date-locale";
 
 // ---------------------------------------------------------------------------
@@ -76,6 +81,33 @@ describe("derived exports", () => {
       expect(LANGUAGES[code].nativeName).toBe(
         LOCALE_REGISTRY[code as LanguageCode].nativeName,
       );
+    }
+  });
+
+  it("resolves OS locale variants from the registry without a duplicated list", () => {
+    expect(resolveSupportedLanguage("de-DE")).toBe("de");
+    expect(resolveSupportedLanguage("zh_CN")).toBe("zh-Hans");
+    expect(resolveSupportedLanguage("unknown")).toBe("en");
+  });
+
+  it("translates early-process errors without the mutable i18next singleton", () => {
+    expect(
+      translateRegistryMessage("zh-CN", "cli.terminalFilesMissing"),
+    ).toBe("Polo 终端文件缺失，请重新安装 Polo。");
+    expect(
+      translateRegistryMessage("de-DE", "cli.terminalFilesMissing"),
+    ).toBe(LOCALE_REGISTRY.de.messages["cli.terminalFilesMissing"]);
+  });
+
+  it("localizes the terminal command validation error with stable parameters", () => {
+    const key = "settings.terminalFeatures.error.invalidCommand";
+    const english = LOCALE_REGISTRY.en.messages[key];
+    expect(english).toContain("{{operations}}");
+    for (const code of SUPPORTED_LANGUAGE_CODES) {
+      const message = LOCALE_REGISTRY[code].messages[key];
+      expect(message).toBeDefined();
+      expect(message).toContain("{{operations}}");
+      if (code !== "en") expect(message).not.toBe(english);
     }
   });
 });

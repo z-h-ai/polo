@@ -1,0 +1,21 @@
+ObjC.import('AppKit')
+
+function run(argv) {
+  const pid = Number(argv[0])
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`Invalid process identifier: ${argv[0]}`)
+  }
+  const running = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid)
+  if (!running) {
+    throw new Error(`No NSRunningApplication for PID ${pid}`)
+  }
+  const frontmost = $.NSWorkspace.sharedWorkspace.frontmostApplication
+  return JSON.stringify({
+    active: Boolean(running.active),
+    frontmost: Number(frontmost.processIdentifier) === pid,
+    frontmostPid: Number(frontmost.processIdentifier),
+    hidden: Boolean(running.hidden),
+    terminated: Boolean(running.terminated),
+    bundleIdentifier: ObjC.unwrap(running.bundleIdentifier),
+  })
+}

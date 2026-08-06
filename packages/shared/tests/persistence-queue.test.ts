@@ -39,7 +39,22 @@ describe('SessionPersistenceQueue', () => {
     // Create sessions subdirectory structure
     mkdirSync(join(testDir, 'sessions', 'test-session'), { recursive: true });
     // Use 0ms debounce for immediate writes in tests
-    queue = new SessionPersistenceQueue(0);
+    queue = new SessionPersistenceQueue({
+      owner: 'electron',
+      ensureSessionsRoot(workspaceRootPath) {
+        const sessionsRoot = join(workspaceRootPath, 'sessions');
+        mkdirSync(sessionsRoot, { recursive: true });
+        return sessionsRoot;
+      },
+      ensureSession(workspaceRootPath, sessionId) {
+        const sessionRoot = join(workspaceRootPath, 'sessions', sessionId);
+        mkdirSync(sessionRoot, { recursive: true });
+        return sessionRoot;
+      },
+      getSessionFilePath(workspaceRootPath, sessionId) {
+        return join(workspaceRootPath, 'sessions', sessionId, 'session.jsonl');
+      },
+    }, 0);
   });
 
   afterEach(() => {

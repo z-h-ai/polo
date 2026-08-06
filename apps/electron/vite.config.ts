@@ -70,6 +70,14 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    open: false
+    open: false,
+    headers: {
+      // Cross-origin isolation is required so SharedArrayBuffer is available
+      // in the renderer (used by some preload dependencies). The packaged app
+      // gets this via its custom protocol, but the Vite dev server on
+      // http://localhost:5173 must set these headers explicitly.
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+    },
   }
 })

@@ -247,37 +247,71 @@ docker run -d \
 
 ## CLI Client
 
-A terminal client that connects to a running Polo AI server over WebSocket (`ws://` or `wss://`). Use it for scripting, CI/CD pipelines, server validation, or when you prefer the command line.
+`polo` is the primary command-line entry point. `polo-ai` remains available as
+a compatibility alias and invokes the same implementation.
+
+`polo run` and `polo exec` each start an independent, invocation-scoped runtime.
+They do not connect to or reuse the Electron server, even when Electron is
+already running. CLI Threads are stored separately from Electron sessions.
 
 ### Installation
 
+- macOS: launch Polo once and choose **Complete Now** when asked to complete
+  setup. The same actions are available later under **Settings → Polo terminal
+  features**.
+- Linux and Windows: the app installer creates `polo` and adds its managed
+  directory to the user PATH.
+- `polo-ai` remains a compatibility shim until Polo 1.0.
+
+For source development:
+
 ```bash
-# From the monorepo (requires Bun)
 bun run apps/cli/src/index.ts --help
-
-# Or add to your PATH
-alias polo-ai="bun run $(pwd)/apps/cli/src/index.ts"
 ```
 
-### Connection
-
-The CLI reads connection details from flags or environment variables:
-
-```bash
-# Via environment (set once)
-export POLO_AI_SERVER_URL=ws://127.0.0.1:9100
-export POLO_AI_SERVER_TOKEN=<your-token>
-
-# Or via flags
-polo-ai --url ws://127.0.0.1:9100 --token <token> ping
-```
-
-For TLS connections (`wss://`), use `--tls-ca <path>` for self-signed certificates.
-
-### Commands
+### One-shot commands
 
 | Command | Description |
 |---------|-------------|
+| `polo run <prompt...>` | Stream a one-shot response using Polo text or `stream-json` output |
+| `polo exec [PROMPT]` | Run non-interactively with safe permissions by default |
+| `polo exec resume <thread_id> [PROMPT]` | Continue a persistent CLI Thread in place |
+| `polo exec resume --last [PROMPT]` | Resume the last Thread matching the configuration scope and working directory |
+| `polo exec sessions` | List persistent `cli-exec` Threads |
+| `polo exec delete <thread_id>` | Delete an inactive CLI Thread |
+
+Use `-C/--cd` to select the agent's execution directory. It does not register a
+Polo workspace and does not create Polo configuration or Electron sessions in
+that directory. Use `--workspace` separately to select the configuration
+workspace that supplies sources, skills, permissions, and LLM configuration.
+
+```bash
+polo exec --yolo --json "hello"
+polo exec -C ./my-project "Summarize this repository"
+polo exec sessions
+polo exec resume --last "Continue"
+polo exec delete 550e8400-e29b-41d4-a716-446655440000
+
+polo run "Summarize the README"
+polo run --source github -C ./my-project "List open PRs"
+```
+
+Provider, model, base URL, and API-key flags apply only to the current
+invocation. `polo exec --help` and `polo run --help` show their complete option
+sets.
+
+### Remote server commands
+
+The legacy RPC commands connect to a running Polo AI server over WebSocket. They
+are separate from the isolated `run` and `exec` paths. For local desktop use,
+they discover and verify the private Electron endpoint automatically. Explicit
+`POLO_AI_SERVER_URL`/`POLO_AI_SERVER_TOKEN` or `--url`/`--token` values take
+precedence.
+For self-signed TLS connections (`wss://`), use `--tls-ca <path>`.
+
+| Command | Description |
+|---------|-------------|
+| `app` | Start or focus the desktop App |
 | `ping` | Verify connectivity (clientId + latency) |
 | `health` | Check credential store health |
 | `versions` | Show server runtime versions |
@@ -292,56 +326,24 @@ For TLS connections (`wss://`), use `--tls-ca <path>` for self-signed certificat
 | `cancel <id>` | Cancel in-progress processing |
 | `invoke <channel> [args]` | Raw RPC call with JSON args |
 | `listen <channel>` | Subscribe to push events (Ctrl+C to stop) |
-| `run <prompt>` | Self-contained: spawn server, run prompt, stream response, exit |
 | `--validate-server` | 21-step integration test (auto-spawns server if no `--url`) |
 
-#### Run Command Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--workspace-dir <path>` | — | Register a workspace directory before running |
-| `--source <slug>` | — | Enable a source (repeatable) |
-| `--output-format <fmt>` | `text` | Output format: `text` or `stream-json` |
-| `--mode <mode>` | `allow-all` | Permission mode for the session |
-| `--no-cleanup` | `false` | Skip session deletion on exit |
-| `--server-entry <path>` | — | Custom server entry point |
-| `--provider <name>` | `anthropic` | LLM provider (`anthropic`, `openai`, `google`, `openrouter`, `groq`, `mistral`, `xai`, etc.) |
-| `--model <id>` | (provider default) | Model ID (e.g., `claude-sonnet-4-5-20250929`, `gpt-4o`, `gemini-2.0-flash`) |
-| `--api-key <key>` | — | API key (or `$LLM_API_KEY`, or provider-specific env var) |
-| `--base-url <url>` | — | Custom API endpoint for proxies or self-hosted models |
-
-The `run` command is fully self-contained — it spawns a headless server, creates a session, sends the prompt, streams the response, and exits. No separate server setup needed. An API key is resolved from `--api-key`, `$LLM_API_KEY`, or a provider-specific env var (e.g., `$ANTHROPIC_API_KEY`, `$OPENAI_API_KEY`).
-
-### Examples
-
 ```bash
+# Start or focus the desktop app
+polo app
+
 # Quick connectivity check
-polo-ai ping
+polo ping
 
 # List sessions (human-readable)
-polo-ai sessions
+polo sessions
 
 # Send a message and stream the AI response
-polo-ai send abc-123 "What files are in the current directory?"
-
-# Pipe input
-echo "Summarize this" | polo-ai send abc-123
-
-# JSON output for scripting
-polo-ai --json workspaces | jq '.[].name'
-
-# Self-contained run (spawns its own server)
-polo-ai run "Summarize the README"
-polo-ai run --workspace-dir ./my-project --source github "List open PRs"
-
-# Multi-provider support
-polo-ai run --provider openai --model gpt-4o "Summarize this repo"
-GOOGLE_API_KEY=... polo-ai run --provider google --model gemini-2.0-flash "Hello"
-polo-ai run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
+polo send abc-123 "What files are in the current directory?"
 
 # Validate the server (auto-spawns if no --url)
-polo-ai --validate-server
-polo-ai --validate-server --url ws://127.0.0.1:9100 --token <token>
+polo --validate-server
+polo --validate-server --url ws://127.0.0.1:9100 --token <token>
 ```
 
 ## Architecture
