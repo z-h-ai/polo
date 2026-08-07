@@ -595,7 +595,7 @@ wait_for_discovery() {
 stop_discovered_app() {
   local runtime_file="$1"
   local app_pid
-  app_pid=$(sed -n 's/.*"pid":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$runtime_file" | head -1)
+  app_pid=$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$runtime_file" | head -1)
   if [ -n "$app_pid" ]; then
     kill "$app_pid" 2>/dev/null || true
     local deadline=$((SECONDS + 15))
@@ -694,7 +694,7 @@ run_packaged_headless_lifecycle() {
   fi
   local temporary_port
   temporary_port=$(sed -n \
-    's/.*Server ready: ws:\\/\\/127\\.0\\.0\\.1:\\([0-9][0-9]*\\).*/\\1/p' \
+    's/.*Server ready: ws:\/\/127\.0\.0\.1:\([0-9][0-9]*\).*/\1/p' \
     "$run_output" | head -1)
   if [ -z "$temporary_port" ]; then
     echo "polo run did not report its temporary loopback port" >&2
@@ -857,14 +857,14 @@ run_macos_full_e2e() {
   run_fresh_shell /bin/zsh "$test_home" "polo app"
   wait_for_discovery "$runtime_file"
   local initial_app_pid
-  initial_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$runtime_file" | head -1)
+  initial_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$runtime_file" | head -1)
   test -n "$initial_app_pid"
   wait_for_macos_frontmost_state "$initial_app_pid" "cold-launch" true
   /usr/bin/osascript -e 'tell application "Finder" to activate'
   wait_for_macos_frontmost_state "$initial_app_pid" "background-before-focus" false
   run_fresh_shell /bin/zsh "$test_home" "polo app"
   local focused_app_pid
-  focused_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$runtime_file" | head -1)
+  focused_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$runtime_file" | head -1)
   test "$focused_app_pid" = "$initial_app_pid"
   kill -0 "$focused_app_pid"
   wait_for_macos_frontmost_state "$focused_app_pid" "second-polo-app-focus" true
