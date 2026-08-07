@@ -96,6 +96,15 @@ const adminClientBehavior = {
     _accessToken: string,
     _input: unknown,
   ): Promise<any> => ({ artifacts: [] }),
+  getCreatorArtifact: async (
+    _accessToken: string,
+    _organizationId: string,
+    _artifactId: string,
+    _version?: string,
+    _referencePath?: string,
+  ): Promise<any> => {
+    throw new Error('getCreatorArtifact behavior not configured')
+  },
   createCreatorSkillUploadGrant: async (_accessToken: string, _input: unknown): Promise<any> => ({
     method: 'PUT',
     url: 'https://uploads.example.test/object',
@@ -133,6 +142,18 @@ const adminClientBehavior = {
   acceptOrganizationJoin: async (_accessToken: string, _token: string): Promise<any> => {
     throw new Error('acceptOrganizationJoin behavior not configured')
   },
+  updateOrganizationMember: async (
+    _accessToken: string,
+    _organizationId: string,
+    _memberId: string,
+    _input: unknown,
+  ): Promise<any> => ({ membership: { role: 'manager', status: 'active' } }),
+  removeOrganizationMember: async (
+    _accessToken: string,
+    _organizationId: string,
+    _memberId: string,
+    _reason?: string,
+  ): Promise<any> => ({ membership: { role: 'member', status: 'removed' } }),
 }
 
 class MockAdminClient {
@@ -206,6 +227,27 @@ class MockAdminClient {
     return adminClientBehavior.listCreatorArtifacts(accessToken, input)
   }
 
+  async getCreatorArtifact(
+    accessToken: string,
+    organizationId: string,
+    artifactId: string,
+    version?: string,
+    referencePath?: string,
+  ) {
+    adminClientCalls.push({
+      method: 'getCreatorArtifact',
+      args: [organizationId, artifactId, version, referencePath],
+      accessToken,
+    })
+    return adminClientBehavior.getCreatorArtifact(
+      accessToken,
+      organizationId,
+      artifactId,
+      version,
+      referencePath,
+    )
+  }
+
   async createCreatorSkillUploadGrant(accessToken: string, input: unknown) {
     adminClientCalls.push({ method: 'createCreatorSkillUploadGrant', args: [input], accessToken })
     return adminClientBehavior.createCreatorSkillUploadGrant(accessToken, input)
@@ -234,6 +276,34 @@ class MockAdminClient {
   async acceptOrganizationJoin(accessToken: string, token: string) {
     adminClientCalls.push({ method: 'acceptOrganizationJoin', args: [token], accessToken })
     return adminClientBehavior.acceptOrganizationJoin(accessToken, token)
+  }
+
+  async updateOrganizationMember(
+    accessToken: string,
+    organizationId: string,
+    memberId: string,
+    input: unknown,
+  ) {
+    adminClientCalls.push({
+      method: 'updateOrganizationMember',
+      args: [organizationId, memberId, input],
+      accessToken,
+    })
+    return adminClientBehavior.updateOrganizationMember(accessToken, organizationId, memberId, input)
+  }
+
+  async removeOrganizationMember(
+    accessToken: string,
+    organizationId: string,
+    memberId: string,
+    reason?: string,
+  ) {
+    adminClientCalls.push({
+      method: 'removeOrganizationMember',
+      args: [organizationId, memberId, reason],
+      accessToken,
+    })
+    return adminClientBehavior.removeOrganizationMember(accessToken, organizationId, memberId, reason)
   }
 }
 
@@ -432,6 +502,10 @@ function createHarness() {
       handlers,
       RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS,
     ),
+    getCreatorArtifact: requiredHandler(
+      handlers,
+      RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT,
+    ),
     createCreatorSkillUploadGrant: requiredHandler(
       handlers,
       RPC_CHANNELS.admin.CREATE_CREATOR_SKILL_UPLOAD_GRANT,
@@ -567,11 +641,17 @@ beforeEach(() => {
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
   adminClientBehavior.listCreatorArtifacts = async () => ({ artifacts: [] })
+  adminClientBehavior.getCreatorArtifact = async () => {
+    throw new Error('getCreatorArtifact behavior not configured')
+  }
   adminClientBehavior.createCreatorSkillUploadGrant = async () => ({
     method: 'PUT',
     url: 'https://uploads.example.test/object',
+    headers: { 'content-type': 'application/zip' },
     expiresAt: '2030-01-01T00:00:00.000Z',
     uploadGeneration: 1,
+    expectedSizeBytes: 42,
+    expectedArchiveChecksum: 'a'.repeat(64),
   })
   adminClientBehavior.completeCreatorSkillUpload = async () => ({
     id: 'version-id',
@@ -579,6 +659,7 @@ beforeEach(() => {
     version: '1.0.0',
     status: 'uploaded',
     archiveChecksum: 'a'.repeat(64),
+    sizeBytes: 42,
     uploadGeneration: 1,
     createdAt: '2026-07-31T00:00:00.000Z',
   })
@@ -590,6 +671,12 @@ beforeEach(() => {
     archiveChecksum: 'a'.repeat(64),
     uploadGeneration: 1,
     createdAt: '2026-07-31T00:00:00.000Z',
+  })
+  adminClientBehavior.updateOrganizationMember = async () => ({
+    membership: { role: 'manager', status: 'active' },
+  })
+  adminClientBehavior.removeOrganizationMember = async () => ({
+    membership: { role: 'member', status: 'removed' },
   })
 })
 
@@ -606,6 +693,7 @@ describe('registerAdminHandlers', () => {
       'createOrganizationInvitation',
       'createOrganizationJoinLink',
       'getAuthConfig',
+      'getCreatorArtifact',
       'getPhoneAuthChallengeConfig',
       'listCreatorArtifacts',
       'listOrganizationInvitations',
@@ -639,6 +727,8 @@ describe('registerAdminHandlers', () => {
       organizationId: 'organization-id',
       artifactId: 'artifact-id',
       version: '1.0.0',
+      sizeBytes: 42,
+      archiveChecksum: 'a'.repeat(64),
       idempotencyKey: 'upload-request-1',
     }
 
@@ -653,7 +743,6 @@ describe('registerAdminHandlers', () => {
     await expect(completeCreatorSkillUpload(context, {
       ...base,
       uploadGeneration: 1,
-      sizeBytes: 42,
     })).resolves.toMatchObject({
       success: true,
       version: { status: 'validating' },
@@ -666,7 +755,7 @@ describe('registerAdminHandlers', () => {
       },
       {
         method: 'completeCreatorSkillUpload',
-        args: [{ ...base, uploadGeneration: 1, sizeBytes: 42 }],
+        args: [{ ...base, uploadGeneration: 1 }],
         accessToken: 'creator-access-token',
       },
       {
@@ -678,6 +767,90 @@ describe('registerAdminHandlers', () => {
         accessToken: 'creator-access-token',
       },
     ])
+  })
+
+  it('fails closed before validation when completion returns another upload generation', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'user-1',
+      username: 'creator',
+    }
+    adminClientBehavior.completeCreatorSkillUpload = async () => ({
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'uploaded',
+      archiveChecksum: 'a'.repeat(64),
+      sizeBytes: 42,
+      uploadGeneration: 2,
+      createdAt: '2026-07-31T00:00:00.000Z',
+    })
+    const { completeCreatorSkillUpload } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+
+    await expect(completeCreatorSkillUpload(context, {
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      uploadGeneration: 1,
+      sizeBytes: 42,
+      archiveChecksum: 'a'.repeat(64),
+      idempotencyKey: 'upload-complete-1',
+    })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'version_conflict',
+    })
+    expect(adminClientCalls.map(call => call.method)).toEqual([
+      'completeCreatorSkillUpload',
+    ])
+  })
+
+  it('strips upload generation from Member detail at the RPC boundary', async () => {
+    managerState.tokens = {
+      accessToken: 'member-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'member-1',
+      username: 'member',
+    }
+    adminClientBehavior.getCreatorArtifact = async () => ({
+      artifact: {
+        id: 'artifact-id',
+        organizationId: 'organization-id',
+        type: 'skill',
+        slug: 'review-helper',
+        status: 'published',
+        latestPublishedVersion: '1.0.0',
+        createdByUserId: 'user-1',
+        createdAt: '2026-07-30T00:00:00.000Z',
+        updatedAt: '2026-07-30T00:00:00.000Z',
+      },
+      versions: [{
+        id: 'version-id',
+        artifactId: 'artifact-id',
+        version: '1.0.0',
+        status: 'published',
+        archiveChecksum: 'a'.repeat(64),
+        sizeBytes: 42,
+        uploadGeneration: 8,
+        createdAt: '2026-07-30T00:00:00.000Z',
+        publishedAt: '2026-07-30T00:01:00.000Z',
+      }],
+      selectedVersion: '1.0.0',
+    })
+    const { getCreatorArtifact } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+
+    const response = await getCreatorArtifact(context, {
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+    }) as { success: boolean; versions?: Array<Record<string, unknown>> }
+
+    expect(response.success).toBe(true)
+    expect(response.versions?.[0]).not.toHaveProperty('uploadGeneration')
   })
 
   it('forwards organization onboarding through the authenticated admin session', async () => {
@@ -828,6 +1001,57 @@ describe('registerAdminHandlers', () => {
     expect(await listCreatorArtifacts(context, input)).toMatchObject({
       success: true,
       artifacts: [],
+    })
+    expect(catalogRequests).toBe(2)
+  })
+
+  it('invalidates another member Catalog cache after an owner changes their role', async () => {
+    const organizationId = '11111111-1111-4111-8111-111111111111'
+    const memberId = '22222222-2222-4222-8222-222222222222'
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    const input = { organizationId, type: 'skill', includeDrafts: true }
+    let catalogRequests = 0
+    adminClientBehavior.listCreatorArtifacts = async () => {
+      catalogRequests += 1
+      return catalogRequests === 1
+        ? { artifacts: [] }
+        : { artifacts: [{ id: 'newly-visible-draft' }] }
+    }
+    const { listCreatorArtifacts, updateOrganizationMember } = createHarness()
+
+    managerState.tokens = {
+      accessToken: 'member-access-token',
+      refreshToken: 'member-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'member-user',
+      username: 'member',
+    }
+    expect(await listCreatorArtifacts(context, input)).toMatchObject({
+      success: true,
+      artifacts: [],
+    })
+
+    managerState.tokens = {
+      accessToken: 'owner-access-token',
+      refreshToken: 'owner-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'owner-user',
+      username: 'owner',
+    }
+    expect(await updateOrganizationMember(context, organizationId, memberId, {
+      role: 'manager',
+    })).toMatchObject({ success: true })
+
+    managerState.tokens = {
+      accessToken: 'member-access-token',
+      refreshToken: 'member-refresh-token',
+      expiresAt: Date.now() + 10 * 60_000,
+      userId: 'member-user',
+      username: 'member',
+    }
+    expect(await listCreatorArtifacts(context, input)).toMatchObject({
+      success: true,
+      artifacts: [{ id: 'newly-visible-draft' }],
     })
     expect(catalogRequests).toBe(2)
   })

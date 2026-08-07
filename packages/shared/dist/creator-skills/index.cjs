@@ -4779,6 +4779,7 @@ __export(creator_skills_exports, {
   CreatorArtifactCapabilitySchema: () => CreatorArtifactCapabilitySchema,
   CreatorArtifactCatalogPageSchema: () => CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema: () => CreatorArtifactDetailSchema,
+  CreatorArtifactDetailVersionSchema: () => CreatorArtifactDetailVersionSchema,
   CreatorArtifactIdRpcInputSchema: () => CreatorArtifactIdRpcInputSchema,
   CreatorArtifactListRpcInputSchema: () => CreatorArtifactListRpcInputSchema,
   CreatorArtifactMutationResponseSchema: () => CreatorArtifactMutationResponseSchema,
@@ -18701,7 +18702,7 @@ var CreatorArtifactSchema = external_exports.discriminatedUnion("type", [
     slug: skillSlug
   })
 ]);
-var CreatorArtifactVersionSchema = external_exports.object({
+var creatorArtifactDetailVersionSchema = external_exports.object({
   id: entityId,
   artifactId: entityId,
   version: stableSemver,
@@ -18726,12 +18727,15 @@ var CreatorArtifactVersionSchema = external_exports.object({
   revokedByUserId: nullableOptional(entityId),
   revocationReason: nullableOptional(external_exports.string().max(2e3)),
   validationPolicy: nullableOptional(SkillArchivePolicySchema),
-  uploadGeneration: external_exports.number().int().nonnegative(),
   validatorVersion: nullableOptional(external_exports.string().max(128)),
   validatedArchiveChecksum: nullableOptional(checksum),
   validatedAt: nullableOptional(isoDate),
   metadata: nullableOptional(SkillVersionMetadataSchema),
   validationIssues: nullableOptional(external_exports.array(SkillValidationIssueSchema).max(1e4))
+});
+var CreatorArtifactDetailVersionSchema = creatorArtifactDetailVersionSchema;
+var CreatorArtifactVersionSchema = creatorArtifactDetailVersionSchema.extend({
+  uploadGeneration: external_exports.number().int().nonnegative()
 });
 var CreatorArtifactCapabilitySchema = external_exports.object({
   creatorSkillArtifacts: external_exports.boolean()
@@ -18742,7 +18746,7 @@ var CreatorArtifactCatalogPageSchema = external_exports.object({
 });
 var CreatorArtifactDetailSchema = external_exports.object({
   artifact: CreatorArtifactSchema,
-  versions: external_exports.array(CreatorArtifactVersionSchema),
+  versions: external_exports.array(CreatorArtifactDetailVersionSchema),
   selectedVersion: nullableOptional(stableSemver),
   // Zod's string max is measured in UTF-16 code units, while the archive
   // policy is expressed in bytes.  Keep the transport boundary aligned with
@@ -18783,13 +18787,11 @@ var CreatorSkillUploadGrantSchema = external_exports.object({
   url: external_exports.string().url().max(8192),
   headers: external_exports.record(external_exports.string(), external_exports.string().max(8192)).optional(),
   expiresAt: isoDate,
-  uploadGeneration: external_exports.number().int().positive()
+  uploadGeneration: external_exports.number().int().positive(),
+  expectedSizeBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  expectedArchiveChecksum: checksum
 });
-var CreatorArtifactVersionCreatedResponseSchema = external_exports.object({
-  version: CreatorArtifactVersionSchema,
-  upload: CreatorSkillUploadGrantSchema,
-  replayed: external_exports.boolean().optional()
-});
+var CreatorArtifactVersionCreatedResponseSchema = CreatorArtifactVersionMutationResponseSchema;
 var CreatorSkillManifestEntrySchema = external_exports.object({
   path: external_exports.string().min(1).max(4096),
   size: external_exports.number().int().nonnegative().max(HARD_SKILL_ARCHIVE_POLICY.maxFileBytes),
@@ -18879,11 +18881,14 @@ var CreatorArtifactUploadGrantRpcInputSchema = external_exports.object({
   organizationId: entityId,
   artifactId: entityId,
   version: stableSemver,
+  sizeBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  archiveChecksum: checksum,
   idempotencyKey
 }).strict();
 var CreatorArtifactUploadCompleteRpcInputSchema = CreatorArtifactUploadGrantRpcInputSchema.extend({
   uploadGeneration: external_exports.number().int().positive(),
-  sizeBytes: external_exports.number().int().nonnegative().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes)
+  sizeBytes: external_exports.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  archiveChecksum: checksum
 }).strict();
 var CreatorArtifactRevokeRpcInputSchema = CreatorArtifactVersionRpcInputSchema.extend({
   reason: external_exports.string().trim().min(1).max(2e3)
@@ -21946,6 +21951,7 @@ var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "f9999556728593a5f0f5f3e22f89b1e86793
   CreatorArtifactCapabilitySchema,
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
+  CreatorArtifactDetailVersionSchema,
   CreatorArtifactIdRpcInputSchema,
   CreatorArtifactListRpcInputSchema,
   CreatorArtifactMutationResponseSchema,

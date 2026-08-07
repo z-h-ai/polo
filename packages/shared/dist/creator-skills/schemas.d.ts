@@ -101,7 +101,7 @@ export declare const CreatorArtifactSchema: z.ZodDiscriminatedUnion<[z.ZodObject
     type: z.ZodLiteral<"skill">;
     slug: z.ZodString;
 }, z.core.$strip>], "type">;
-export declare const CreatorArtifactVersionSchema: z.ZodObject<{
+export declare const CreatorArtifactDetailVersionSchema: z.ZodObject<{
     id: z.ZodString;
     artifactId: z.ZodString;
     version: z.ZodString;
@@ -144,7 +144,6 @@ export declare const CreatorArtifactVersionSchema: z.ZodObject<{
         maxFileBytes: number;
         maxExpandedBytes: number;
     } | null | undefined>>>;
-    uploadGeneration: z.ZodNumber;
     validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
     validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
     validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
@@ -195,6 +194,101 @@ export declare const CreatorArtifactVersionSchema: z.ZodObject<{
         field?: string | undefined;
         suggestion?: string | undefined;
     }[] | null | undefined>>>;
+}, z.core.$strip>;
+export declare const CreatorArtifactVersionSchema: z.ZodObject<{
+    id: z.ZodString;
+    artifactId: z.ZodString;
+    version: z.ZodString;
+    changelog: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    status: z.ZodEnum<{
+        published: "published";
+        upload_pending: "upload_pending";
+        uploaded: "uploaded";
+        validating: "validating";
+        validation_failed: "validation_failed";
+        validated: "validated";
+        revoked: "revoked";
+        expired: "expired";
+    }>;
+    archiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    contentDigest: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    sizeBytes: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodPipe<z.ZodString, z.ZodTransform<number, string>>]>>>, z.ZodTransform<number | undefined, number | null | undefined>>>;
+    createdAt: z.ZodString;
+    publishedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    publishedByUserId: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    revokedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    revokedByUserId: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    revocationReason: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    validationPolicy: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        version: z.ZodString;
+        maxArchiveBytes: z.ZodNumber;
+        maxFileCount: z.ZodNumber;
+        maxFileBytes: z.ZodNumber;
+        maxExpandedBytes: z.ZodNumber;
+    }, z.core.$strip>>>, z.ZodTransform<{
+        version: string;
+        maxArchiveBytes: number;
+        maxFileCount: number;
+        maxFileBytes: number;
+        maxExpandedBytes: number;
+    } | undefined, {
+        version: string;
+        maxArchiveBytes: number;
+        maxFileCount: number;
+        maxFileBytes: number;
+        maxExpandedBytes: number;
+    } | null | undefined>>>;
+    validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
+    metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        name: z.ZodString;
+        description: z.ZodString;
+        globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        icon: z.ZodOptional<z.ZodString>;
+        requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>>, z.ZodTransform<{
+        name: string;
+        description: string;
+        globs?: string[] | undefined;
+        alwaysAllow?: string[] | undefined;
+        icon?: string | undefined;
+        requiredSources?: string[] | undefined;
+    } | undefined, {
+        name: string;
+        description: string;
+        globs?: string[] | undefined;
+        alwaysAllow?: string[] | undefined;
+        icon?: string | undefined;
+        requiredSources?: string[] | undefined;
+    } | null | undefined>>>;
+    validationIssues: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+        code: z.ZodString;
+        severity: z.ZodEnum<{
+            error: "error";
+            warning: "warning";
+        }>;
+        path: z.ZodString;
+        field: z.ZodOptional<z.ZodString>;
+        message: z.ZodString;
+        suggestion: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>>, z.ZodTransform<{
+        code: string;
+        severity: "error" | "warning";
+        path: string;
+        message: string;
+        field?: string | undefined;
+        suggestion?: string | undefined;
+    }[] | undefined, {
+        code: string;
+        severity: "error" | "warning";
+        path: string;
+        message: string;
+        field?: string | undefined;
+        suggestion?: string | undefined;
+    }[] | null | undefined>>>;
+    uploadGeneration: z.ZodNumber;
 }, z.core.$strip>;
 export declare const CreatorArtifactCapabilitySchema: z.ZodObject<{
     creatorSkillArtifacts: z.ZodBoolean;
@@ -396,7 +490,6 @@ export declare const CreatorArtifactDetailSchema: z.ZodObject<{
             maxFileBytes: number;
             maxExpandedBytes: number;
         } | null | undefined>>>;
-        uploadGeneration: z.ZodNumber;
         validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
@@ -583,7 +676,6 @@ export declare const CreatorArtifactVersionMutationResponseSchema: z.ZodObject<{
             maxFileBytes: number;
             maxExpandedBytes: number;
         } | null | undefined>>>;
-        uploadGeneration: z.ZodNumber;
         validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
@@ -634,6 +726,7 @@ export declare const CreatorArtifactVersionMutationResponseSchema: z.ZodObject<{
             field?: string | undefined;
             suggestion?: string | undefined;
         }[] | null | undefined>>>;
+        uploadGeneration: z.ZodNumber;
     }, z.core.$strip>;
     replayed: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
@@ -643,6 +736,8 @@ export declare const CreatorSkillUploadGrantSchema: z.ZodObject<{
     headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     expiresAt: z.ZodString;
     uploadGeneration: z.ZodNumber;
+    expectedSizeBytes: z.ZodNumber;
+    expectedArchiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
 }, z.core.$strip>;
 export declare const CreatorArtifactVersionCreatedResponseSchema: z.ZodObject<{
     version: z.ZodObject<{
@@ -688,7 +783,6 @@ export declare const CreatorArtifactVersionCreatedResponseSchema: z.ZodObject<{
             maxFileBytes: number;
             maxExpandedBytes: number;
         } | null | undefined>>>;
-        uploadGeneration: z.ZodNumber;
         validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
@@ -739,12 +833,6 @@ export declare const CreatorArtifactVersionCreatedResponseSchema: z.ZodObject<{
             field?: string | undefined;
             suggestion?: string | undefined;
         }[] | null | undefined>>>;
-    }, z.core.$strip>;
-    upload: z.ZodObject<{
-        method: z.ZodLiteral<"PUT">;
-        url: z.ZodString;
-        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
-        expiresAt: z.ZodString;
         uploadGeneration: z.ZodNumber;
     }, z.core.$strip>;
     replayed: z.ZodOptional<z.ZodBoolean>;
@@ -879,6 +967,8 @@ export declare const CreatorArtifactUploadGrantRpcInputSchema: z.ZodObject<{
     organizationId: z.ZodString;
     artifactId: z.ZodString;
     version: z.ZodString;
+    sizeBytes: z.ZodNumber;
+    archiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
     idempotencyKey: z.ZodString;
 }, z.core.$strict>;
 export declare const CreatorArtifactUploadCompleteRpcInputSchema: z.ZodObject<{
@@ -888,6 +978,7 @@ export declare const CreatorArtifactUploadCompleteRpcInputSchema: z.ZodObject<{
     idempotencyKey: z.ZodString;
     uploadGeneration: z.ZodNumber;
     sizeBytes: z.ZodNumber;
+    archiveChecksum: z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>;
 }, z.core.$strict>;
 export declare const CreatorArtifactRevokeRpcInputSchema: z.ZodObject<{
     organizationId: z.ZodString;

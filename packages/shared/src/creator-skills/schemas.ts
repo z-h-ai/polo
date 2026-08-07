@@ -91,7 +91,7 @@ export const CreatorArtifactSchema = z.discriminatedUnion('type', [
   }),
 ])
 
-export const CreatorArtifactVersionSchema = z.object({
+const creatorArtifactDetailVersionSchema = z.object({
   id: entityId,
   artifactId: entityId,
   version: stableSemver,
@@ -116,12 +116,21 @@ export const CreatorArtifactVersionSchema = z.object({
   revokedByUserId: nullableOptional(entityId),
   revocationReason: nullableOptional(z.string().max(2_000)),
   validationPolicy: nullableOptional(SkillArchivePolicySchema),
-  uploadGeneration: z.number().int().nonnegative(),
   validatorVersion: nullableOptional(z.string().max(128)),
   validatedArchiveChecksum: nullableOptional(checksum),
   validatedAt: nullableOptional(isoDate),
   metadata: nullableOptional(SkillVersionMetadataSchema),
   validationIssues: nullableOptional(z.array(SkillValidationIssueSchema).max(10_000)),
+})
+
+// Detail responses are consumed by both managers and Members. Keep the
+// internal upload concurrency token out of this DTO; Zod strips it if a server
+// accidentally includes it. Manager-only mutation responses use the stricter
+// schema below and still require the generation.
+export const CreatorArtifactDetailVersionSchema = creatorArtifactDetailVersionSchema
+
+export const CreatorArtifactVersionSchema = creatorArtifactDetailVersionSchema.extend({
+  uploadGeneration: z.number().int().nonnegative(),
 })
 
 export const CreatorArtifactCapabilitySchema = z.object({
@@ -135,7 +144,7 @@ export const CreatorArtifactCatalogPageSchema = z.object({
 
 export const CreatorArtifactDetailSchema = z.object({
   artifact: CreatorArtifactSchema,
-  versions: z.array(CreatorArtifactVersionSchema),
+  versions: z.array(CreatorArtifactDetailVersionSchema),
   selectedVersion: nullableOptional(stableSemver),
   // Zod's string max is measured in UTF-16 code units, while the archive
   // policy is expressed in bytes.  Keep the transport boundary aligned with
@@ -180,13 +189,12 @@ export const CreatorSkillUploadGrantSchema = z.object({
   headers: z.record(z.string(), z.string().max(8_192)).optional(),
   expiresAt: isoDate,
   uploadGeneration: z.number().int().positive(),
+  expectedSizeBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  expectedArchiveChecksum: checksum,
 })
 
-export const CreatorArtifactVersionCreatedResponseSchema = z.object({
-  version: CreatorArtifactVersionSchema,
-  upload: CreatorSkillUploadGrantSchema,
-  replayed: z.boolean().optional(),
-})
+export const CreatorArtifactVersionCreatedResponseSchema =
+  CreatorArtifactVersionMutationResponseSchema
 
 export const CreatorSkillManifestEntrySchema = z.object({
   path: z.string().min(1).max(4_096),
@@ -294,13 +302,16 @@ export const CreatorArtifactUploadGrantRpcInputSchema = z.object({
   organizationId: entityId,
   artifactId: entityId,
   version: stableSemver,
+  sizeBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+  archiveChecksum: checksum,
   idempotencyKey,
 }).strict()
 
 export const CreatorArtifactUploadCompleteRpcInputSchema = CreatorArtifactUploadGrantRpcInputSchema
   .extend({
     uploadGeneration: z.number().int().positive(),
-    sizeBytes: z.number().int().nonnegative().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+    sizeBytes: z.number().int().positive().max(HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes),
+    archiveChecksum: checksum,
   })
   .strict()
 

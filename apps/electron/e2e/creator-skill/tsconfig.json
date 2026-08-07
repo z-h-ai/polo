@@ -10,6 +10,7 @@
   },
   "include": [
     "main.ts",
+    "renderer.ts",
     "../../src/**/*.d.ts",
     "../../../../packages/ui/src/**/*.d.ts"
   ]
