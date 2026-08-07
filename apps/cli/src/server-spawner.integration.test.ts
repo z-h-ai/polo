@@ -104,14 +104,18 @@ async function runLifecycleFailure(mode: 'disconnect' | 'heartbeat') {
 describe('server spawner process integration', () => {
   it('drains noisy stderr, bounds diagnostics, and removes invocation secrets from child env', async () => {
     const secret = 'server-spawner-secret-value-123456'
+    const privateConfig = join(tmpdir(), `polo-private-config-${crypto.randomUUID()}`)
+    const previousConfigDir = process.env.POLO_AI_CONFIG_DIR
     process.env.POLO_FAKE_API_KEY = secret
     process.env.COMPANY_SSO_REFRESH_MATERIAL = 'unknown-oauth-refresh-secret'
+    delete process.env.POLO_AI_CONFIG_DIR
     try {
       const server = await spawnServer({
         serverEntry: join(import.meta.dir, '__fixtures__', 'noisy-server.ts'),
         quiet: true,
         secrets: [secret],
         startupTimeout: 10_000,
+        env: { POLO_AI_CONFIG_DIR: privateConfig },
       })
       servers.push(server)
       await Bun.sleep(100)
@@ -122,9 +126,12 @@ describe('server spawner process integration', () => {
       expect(diagnostics).not.toContain('unknown-oauth-refresh-secret')
       expect(diagnostics).toContain('credential=missing')
       expect(diagnostics).toContain('custom-oauth=missing')
+      expect(diagnostics).toContain(`config-dir=${privateConfig}`)
     } finally {
       delete process.env.POLO_FAKE_API_KEY
       delete process.env.COMPANY_SSO_REFRESH_MATERIAL
+      if (previousConfigDir === undefined) delete process.env.POLO_AI_CONFIG_DIR
+      else process.env.POLO_AI_CONFIG_DIR = previousConfigDir
     }
   }, 20_000)
 
