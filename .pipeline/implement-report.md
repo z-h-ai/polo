@@ -1,57 +1,64 @@
-# POO-16 实现报告
+# POO-21 / POO-26 v0.12.0 Integration Report
 
-## 变更摘要
+## Integration scope
 
-本轮从当前 HEAD `a1059257` 继续，没有重新实施、回退或丢弃已有变更。逐项复核需求快照中的六个 reviewer 问题及 2026-08-04 人工裁决后确认，当前分支已经具备对应实现和回归测试：
+This follow-up branch starts from POO-21 commit `54d51093` and integrates the two independently reviewed POO-26 strict-contract commits. The original POO-21 worktree and its untracked session/design files remain untouched.
 
-1. 配置快照递归复制使用 `dereference: false`，复制后拒绝任何 symlink；外部目标不会进入持久 Thread。
-2. workspace exec 会把应用级 `permissions/default.json` 固化进调用开始时的 `config-snapshot/`；全新安装才回退 bundled default。
-3. intermediate assistant 文本在 `text_complete.isIntermediate` 时清空，不会拼入最终 stdout、`-o` 或 JSON agent message。
-4. `ExecEventAdapter` 从真实 session event 的 `tokenUsage` 映射 JSONL usage。
-5. `exec sessions/delete` 对 `--last`、`--yolo`、model/provider/credential 等 execution-only 参数报 usage error，真实 CLI 退出 2；管理子命令使用专属 help。
-6. `exec sessions` 会把 owner 和 lease 均失效的非终态持久 `cli-exec` Thread 修复为 `interrupted`。
+- Upload grant and completion require the same `sizeBytes`, `archiveChecksum`, and current `uploadGeneration`.
+- Electron renderer performs chunked, cancellable SHA-256 and direct object-storage PUT without exposing an account token or sending ZIP bytes through main/server-core.
+- AdminClient uses the authoritative `/api/installed-artifacts/status` endpoint for exact artifact/version/checksum Safety lookup.
+- Member detail responses remain stripped of storage, validation-policy, manifest, and internal validation metadata.
+- The published package identity is `@z-h-ai/shared@0.12.0`; release tag, registry tarball, attestation, and polo-admin clean-consumer proof are recorded by POO-26.
 
-人工裁决边界保持不变：共享配置工作区中 source/skill 原有配置值允许保留在权限受控的快照中；命令行显式传入的 API key、token 和 Authorization header 仍不得进入持久化产物。credential writer lock 继续使用跨平台 OS 级 native lock。
+## POO-26 release evidence
 
-在重跑定向门禁时，既有 delete/acquire 并发回归稳定复现出一个额外生命周期竞态：`acquireCliThreadLease` 在第一次 containment 检查后调用 `ensurePrivateDir`，若 delete 恰好已把 Thread 原子移动到 trash，该调用会重新创建空 Thread 目录，导致 delete 与 acquire 同时成功。本轮移除 acquire 路径的目录创建；后续 state-lock 获取会重新验证现存 Thread，delete 先完成时 acquire 现在 fail closed。
+- Release commit: `7bbde0b78bcaafdc0e785ad404373820f5c4b7b5`
+- Tag: `shared-v0.12.0`
+- Candidate/registry SHA-256: `385609a812223c7dc3c947689bd915e68c69c7ff970247e0ea303059c3c98711`
+- Publish workflow: `https://github.com/z-h-ai/polo/actions/runs/31083340263`
+- polo-admin downstream proof: `https://github.com/z-h-ai/polo-admin/actions/runs/31083974149`
 
-## 关键文件列表
+## POO-21 baseline evidence retained
 
-- `apps/cli/src/cli-thread-store.ts`
-  - 修复 delete/acquire 竞态，禁止 lease acquire 重建已被删除的 Thread 目录。
-- `apps/cli/src/cli-thread-store.test.ts`
-  - 既有跨进程 30 轮 delete/acquire 互斥回归覆盖本轮修复；本轮未改测试文件。
-- `apps/cli/src/one-shot.ts`、`apps/cli/src/one-shot.test.ts`
-  - 配置 symlink、应用级权限快照、intermediate/final message 边界及回归。
-- `apps/cli/src/exec-event-adapter.ts`、`apps/cli/src/exec-event-adapter.test.ts`
-  - `tokenUsage` 到稳定 JSONL usage 的映射及回归。
-- `apps/cli/src/execution-parser.ts`、`apps/cli/src/execution-parser.test.ts`、`apps/cli/src/index.test.ts`
-  - 管理子命令参数白名单、退出码、专属 help 和 SIGKILL 后 sessions 修复回归。
-- `packages/shared/src/credentials/backends/native-write-lock.ts`
-  - POSIX `flock` / Windows named mutex 的 OS 级 credential writer lock。
+The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, authenticated server-core download boundaries, install/update/uninstall Ledger and journal behavior, and `skills:changed` refresh. That proof used the older Admin contract and must now be rerun against the POL-59 strict asynchronous service and isolated COS staging resources.
 
-## 自测结果
+## Latest dev integration
 
-- 六项 reviewer 问题、credential lock 与 Thread store 定向回归：
-  - `NO_COLOR=1 bun test apps/cli/src/one-shot.test.ts apps/cli/src/exec-event-adapter.test.ts apps/cli/src/execution-parser.test.ts apps/cli/src/index.test.ts apps/cli/src/cli-thread-store.test.ts packages/shared/src/credentials/__tests__/secure-storage-write-lock.test.ts`
-  - 通过：64 pass，0 fail，530 expect。
-- delete/acquire 竞态压力复验：
-  - `for i in {1..5}; do NO_COLOR=1 bun test apps/cli/src/cli-thread-store.test.ts --test-name-pattern 'serializes delete and acquire' || exit 1; done`
-  - 通过：连续 5 轮，每轮 30 个跨进程竞争场景均只有一个操作成功。
-- 全量测试：
-  - `NO_COLOR=1 bun run test`
-  - 通过：普通全量 4906 pass、19 skip、0 fail，381 files；随后仓库全部 `*.isolated.ts` 测试通过，命令退出 0。
-- 全量类型检查：
-  - `NO_COLOR=1 bun run typecheck:all`
-  - 通过：core、shared、server-core、server、session-tools-core、pi-agent-server、electron、ui 全部退出 0。
-- server subprocess 构建：
-  - `NO_COLOR=1 bun run server:build:subprocess`
-  - 通过：Session MCP 390 modules / 4.58 MB；Pi Agent 3999 modules / 20.41 MB。
-- `git diff --check`
-  - 通过。
+- Merged current `origin/dev` while preserving the strict upload v2 flow, authoritative Safety endpoint, Member response redaction, renderer-only archive hashing/upload, and authenticated download boundary.
+- Resolved overlapping Creator Skill/AdminClient changes together with the newer Catalog, authentication-timeout, Electron packaging, and CLI work from `dev`.
+- Focused Creator Skill suites passed: 88 standard tests, 10 isolated server-core boundary tests, and 15 isolated panel interaction tests.
+- `bun run typecheck:all`, Creator Skill E2E TypeScript validation, and `bun run electron:build` passed on the merged tree.
+- The first full regression exposed a `dev`-side release preflight bug: redirected `electron:dist` prepared the complete runtime before reaching the CLI artifact fail-closed guard, so its 5-second regression timed out after about 103 seconds. `scripts/electron-dist.ts` now rejects the test-only output override before any runtime preparation. The focused regression passed in 67 ms, and the full rerun passed with `5282 passed / 19 skipped` plus every isolated suite.
 
-## 遗留问题
+## 2026-08-06 real staging E2E fixes
 
-- 本轮 coder 范围内无已知遗留实现问题；仍需由独立 reviewer 按任务约定重新验收，不能以 coder 自测替代 review 终态。
-- 当前环境未执行 Windows/Linux 实机安装、签名、notarization、DMG、NSIS 或 AppImage/FUSE 安装。
-- 用户已有 `.task/session-analysis/` 未改动、未删除、未提交；`.pipeline/fix-report-round1.md`、`.pipeline/fix-report-round2.md` 的既有删除状态保持不纳入本轮提交。
+- The real staging E2E initially failed before launch because the main-process harness bundled `koffi` and esbuild attempted to inline all platform-specific `.node` binaries.
+- Marked `koffi` external and made the temporary harness resolve the repository native dependency; the authenticated download wrapper now treats Fetch `preconnect` as optional because Electron/Node Fetch does not guarantee that extension.
+- Fixed a stale cross-account Catalog result after Owner changes a Member role by invalidating the organization-wide cache on member update/remove. Added a regression proving a cached Member view observes a newly visible draft after promotion.
+- Aligned the authoritative Safety request with POL-59: `{ identities: [...] }` and algorithm-labelled `sha256:<digest>` on the wire, while retaining the canonical 64-character checksum inside the desktop contract.
+- Removed the contradictory E2E assertion that required Member detail to expose `validationPolicy`; the same response is still recursively checked to reject validation policy, manifest, upload generation, and internal validation metadata.
+
+## Real POL-59 staging acceptance
+
+`POO21_ADMIN_BASE_URL=http://127.0.0.1:3000 bun run electron:e2e:creator-skill` passed against the deployed staging Admin, validation/cleanup workers, PostgreSQL, and real Tencent COS through a loopback safety proxy. The proxy only kept the harness loopback-only invariant and rewrote the public download URL back to that local gateway; upstream API, direct PUT, workers, and COS remained real.
+
+- Owner created the Creator Space, draft, and versions; Member management and draft download were rejected.
+- Bob was promoted to Manager and published `1.0.0` and `1.1.0`, then demoted to Member for download and install.
+- Negative checks passed: invalid credentials/body, stale upload generation, Member management, and cross-user download token binding.
+- Electron install/update/uninstall passed with progress stages `download`, `validate`, `prepare`, `commit`, `refresh`; `skills:changed` fired three times and two cleanup-safe backups remained.
+- Accepted versions used distinct archive checksums/content digests; staging cleanup then removed 2 users, 8 retry organizations, 8 artifacts, 9 versions, and all 9 referenced COS objects. Post-cleanup database counts are zero for the fixture users, organizations, and artifacts.
+
+## Remaining acceptance gate
+
+The real cross-repository lifecycle gate is now satisfied. Final regression passed with `5283 passed / 19 skipped` in the 429-file standard suite, every isolated suite passing, `bun run typecheck:all` passing, and `bun run electron:build` passing. Do not mark POO-21 complete until a fresh independent reviewer returns `pass`.
+
+## 2026-08-06 reviewer round 1 remediation
+
+- Restored `CreatorSkillUploadGrant.headers` as an optional field in the source type, Zod response schema, and public package declaration. The new archive identity fields remain required, preserving the strict v2 contract without breaking older Admin responses.
+- Moved the renderer incremental SHA-256 implementation into a focused module and documented its FIPS 180-4 provenance, endian/padding rules, unsigned 32-bit arithmetic, bounded-memory purpose, and safe counter invariant.
+- Fixed the staging stale-generation check to send the full required archive identity. It now asserts the HTTP 409 conflict produced after schema validation instead of accepting any generic rejection.
+- Extended the real staging Electron E2E to read the committed Ledger after install, assert an empty Ledger and no journals after uninstall, and exercise startup recovery in a separate Electron-as-Node process against a deliberately persisted `preparing` crash journal.
+- The extended real Tencent COS staging lifecycle passed with `ledgerCommitted`, `journalsCleaned`, and `restartRecoveryPassed` all true. The rerun fixture was removed together with 2 users, 2 organizations, 2 artifacts, 3 versions, and all 3 COS objects.
+- Final standard suite evidence: one isolated full run passed `5303 / 5303` with 19 skips and 0 failures. Two prior full runs exposed the repository's existing RPC registration ordering flake (the same four tests passed immediately in isolation); the final full run and all isolated suites were green. `bun run typecheck:all` and `bun run electron:build` passed.
+
+The remaining release gate is an independent reviewer `pass` plus manual GitHub token revocation/replacement described in the POL-59 report.

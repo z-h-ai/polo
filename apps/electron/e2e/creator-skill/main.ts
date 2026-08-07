@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
+import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { zipSync, strToU8 } from 'fflate'
 import type { Workspace } from '@polo-ai/core/types'
@@ -8,6 +9,7 @@ import {
   CREATOR_SKILL_FIXTURE_CONTENT,
   calculateContentDigest,
   type CreatorSkillOperationProgress,
+  type CreatorSkillsLedger,
 } from '@polo-ai/shared/creator-skills'
 import { AdminClient } from '@polo-ai/shared/admin'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
@@ -41,6 +43,7 @@ const workspace: Workspace = {
 }
 const sessionId = 'creator-skill-e2e-session'
 const adminHttpClient = new AdminClient(adminBaseUrl)
+const adminSessions = new Map<string, Awaited<ReturnType<AdminClient['login']>>>()
 let adminAccessToken = ''
 const rpcServer = new WsRpcServer({
   host: '127.0.0.1',
@@ -51,6 +54,59 @@ const rpcServer = new WsRpcServer({
     }
   },
 })
+
+function readLedger(): CreatorSkillsLedger {
+  return JSON.parse(readFileSync(
+    join(workspace.rootPath, 'creator-skills.json'),
+    'utf8',
+  )) as CreatorSkillsLedger
+}
+
+/**
+ * Persist the same pre-commit journal a killed install leaves behind, then run
+ * startup recovery in a separate Electron-as-Node process. This crosses the
+ * process boundary instead of calling the recovery function in the live E2E
+ * process, so the proof covers durable on-disk restart behavior.
+ */
+function assertRestartRecovery(): void {
+  const ledgerPath = join(workspace.rootPath, 'creator-skills.json')
+  const ledgerBefore = readFileSync(ledgerPath, 'utf8')
+  const operationId = randomUUID()
+  const operationPath = join(workspace.rootPath, '.creator-skill-ops', operationId)
+  mkdirSync(join(operationPath, 'stage'), { recursive: true })
+  writeFileSync(join(operationPath, 'stage', 'partial-download'), 'crash debris')
+  writeFileSync(join(operationPath, 'journal.json'), `${JSON.stringify({
+    schemaVersion: 1,
+    operationId,
+    action: 'install',
+    slug: workspace.slug,
+    targetPath: join(workspace.rootPath, 'skills', workspace.slug),
+    transactionBackupPath: join(operationPath, 'backup'),
+    ledgerPath,
+    oldLedger: null,
+    state: 'preparing',
+  }, null, 2)}\n`)
+
+  const script = [
+    "const { recoverCreatorSkillOperations } = require('@polo-ai/shared/creator-skills')",
+    'recoverCreatorSkillOperations(process.argv[1]).catch(error => { console.error(error); process.exitCode = 1 })',
+  ].join(';')
+  execFileSync(process.execPath, ['-e', script, workspace.rootPath], {
+    cwd: process.cwd(),
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'pipe',
+  })
+
+  if (existsSync(operationPath)) {
+    throw new Error('Restart recovery left the crashed operation journal behind')
+  }
+  if (readFileSync(ledgerPath, 'utf8') !== ledgerBefore) {
+    throw new Error('Restart recovery changed the committed Creator Skill Ledger')
+  }
+  if (!existsSync(join(workspace.rootPath, 'skills', workspace.slug, 'SKILL.md'))) {
+    throw new Error('Restart recovery removed the committed Creator Skill directory')
+  }
+}
 
 let window: BrowserWindow | null = null
 let completed = false
@@ -175,8 +231,43 @@ async function rendererAdminCall<T>(method: string, ...args: unknown[]): Promise
   return rendererCall<T>(`return await window.electronAPI.${method}(${serializedArgs})`)
 }
 
+async function rendererFetchStatus(
+  pathOrUrl: string,
+  init: Record<string, unknown>,
+): Promise<number> {
+  const url = new URL(pathOrUrl, adminBaseUrl).toString()
+  return rendererCall<number>(`
+    const response = await fetch(${JSON.stringify(url)}, ${JSON.stringify(init)})
+    return response.status
+  `)
+}
+
 function logStep(step: string): void {
   console.log(JSON.stringify({ event: 'creator_skill_step', step }))
+}
+
+function assertNoMemberMetadataLeak(value: unknown, path = '$'): void {
+  if (!value || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoMemberMetadataLeak(item, `${path}[${index}]`))
+    return
+  }
+  const forbiddenFields = new Set([
+    'validationPolicy',
+    'uploadGeneration',
+    'storageKey',
+    'manifest',
+    'validatorVersion',
+    'validatedArchiveChecksum',
+    'validatedAt',
+    'validationIssues',
+  ])
+  for (const [key, nested] of Object.entries(value)) {
+    if (forbiddenFields.has(key)) {
+      throw new Error(`Member artifact detail leaked ${key} at ${path}`)
+    }
+    assertNoMemberMetadataLeak(nested, `${path}.${key}`)
+  }
 }
 
 function createSkillArchive(content: string): Uint8Array {
@@ -193,7 +284,9 @@ function makeChangelog(version: string): string {
 
 async function login(identifier: string, password: string): Promise<void> {
   logStep(`login-start:${identifier}`)
-  const result = await adminHttpClient.login(identifier, password)
+  const cached = adminSessions.get(identifier)
+  const result = cached ?? await adminHttpClient.login(identifier, password)
+  if (!cached) adminSessions.set(identifier, result)
   adminAccessToken = result.accessToken
   await getCredentialManager().setAdminTokens({
     accessToken: result.accessToken,
@@ -204,6 +297,20 @@ async function login(identifier: string, password: string): Promise<void> {
     displayName: result.user.displayName ?? undefined,
   })
   logStep(`login-done:${identifier}`)
+}
+
+async function assertInvalidCredentialsRejected(): Promise<void> {
+  const status = await rendererFetchStatus('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      identifier: 'alice',
+      password: 'definitely-not-alice-password',
+    }),
+  })
+  if (status !== 401) {
+    throw new Error(`Invalid credentials returned unexpected status ${status}`)
+  }
 }
 
 async function logout(): Promise<void> {
@@ -289,6 +396,39 @@ async function createArtifact(organizationId: string, slug: string): Promise<{ i
   return { id: result.artifact.id }
 }
 
+async function assertInvalidArtifactBodyRejected(organizationId: string): Promise<void> {
+  const status = await rendererFetchStatus(
+    `/api/organizations/${organizationId}/artifacts`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminAccessToken}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `creator-skill-invalid-${randomUUID()}`,
+      },
+      body: JSON.stringify({
+        slug: '../invalid-skill',
+        unexpected: true,
+      }),
+    },
+  )
+  if (status !== 400) {
+    throw new Error(`Invalid Creator Artifact body returned unexpected status ${status}`)
+  }
+}
+
+async function assertMemberManagementDenied(organizationId: string): Promise<void> {
+  const result = await rendererAdminCall<{ success: boolean }>('creatorArtifactCreate', {
+    organizationId,
+    type: 'skill',
+    slug: `member-denied-${randomUUID().slice(0, 8)}`,
+    idempotencyKey: `creator-skill-member-denied-${randomUUID()}`,
+  })
+  if (result.success) {
+    throw new Error('Member unexpectedly created a Creator Skill draft')
+  }
+}
+
 async function createVersion(
   organizationId: string,
   artifactId: string,
@@ -297,24 +437,10 @@ async function createVersion(
 ): Promise<{
   versionId: string
   version: string
-  upload: {
-    method: 'PUT'
-    url: string
-    headers?: Record<string, string>
-    expiresAt: string
-    uploadGeneration: number
-  }
 }> {
   const versionResult = await rendererAdminCall<{
     success: boolean
     version?: { id: string }
-    upload?: {
-      method: 'PUT'
-      url: string
-      headers?: Record<string, string>
-      expiresAt: string
-      uploadGeneration: number
-    }
   }>('creatorArtifactCreateVersion', {
     organizationId,
     artifactId,
@@ -322,10 +448,10 @@ async function createVersion(
     changelog,
     idempotencyKey: `creator-skill-version-${randomUUID()}`,
   })
-  if (!versionResult.success || !versionResult.version?.id || !versionResult.upload) {
+  if (!versionResult.success || !versionResult.version?.id) {
     throw new Error(`Failed to create version ${version}`)
   }
-  return { versionId: versionResult.version.id, version, upload: versionResult.upload }
+  return { versionId: versionResult.version.id, version }
 }
 
 async function uploadVersion(
@@ -333,39 +459,89 @@ async function uploadVersion(
   artifactId: string,
   version: string,
   archiveContent: string,
-  upload: {
-    method: 'PUT'
-    url: string
-    headers?: Record<string, string>
-    expiresAt: string
-    uploadGeneration: number
-  },
 ): Promise<{ archiveChecksum: string; contentDigest: string }> {
   const archive = createSkillArchive(archiveContent)
-  const archiveChecksum = createHash('sha256').update(archive).digest('hex')
   const contentDigest = calculateContentDigest([{
     path: 'SKILL.md',
     size: new TextEncoder().encode(archiveContent).byteLength,
     sha256: createHash('sha256').update(archiveContent).digest('hex'),
   }])
-  const uploadResult = await rendererCall<{ ok: boolean }>(`
-    const base64 = ${JSON.stringify(Buffer.from(archive).toString('base64'))}
-    const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
-    const file = new File([bytes], 'creator-skill.zip', { type: 'application/zip' })
-    const headers = ${JSON.stringify({
-      Authorization: `Bearer ${adminAccessToken}`,
-      ...(upload.headers ?? {}),
-    })}
-    const response = await fetch(${JSON.stringify(upload.url)}, {
-      method: ${JSON.stringify(upload.method)},
-      headers,
-      body: file,
-      redirect: 'error',
-    })
-    return { ok: response.ok }
+  const base64Archive = Buffer.from(archive).toString('base64')
+  const prepared = await rendererCall<{
+    handle: string
+    sizeBytes: number
+    archiveChecksum: string
+  }>(`
+    return await window.__creatorSkillUploadHarness.prepare(
+      ${JSON.stringify(base64Archive)},
+      'creator-skill.zip',
+      ${JSON.stringify(workspace.slug)},
+    )
   `)
-  if (!uploadResult.ok) {
-    throw new Error('Creator skill upload PUT failed in renderer')
+  const archiveChecksum = prepared.archiveChecksum
+  const grantResult = await rendererAdminCall<{
+    success: boolean
+    grant?: {
+      method: 'PUT'
+      url: string
+      headers: Record<string, string>
+      expiresAt: string
+      uploadGeneration: number
+      expectedSizeBytes: number
+      expectedArchiveChecksum: string
+    }
+  }>('creatorArtifactCreateUploadGrant', {
+    organizationId,
+    artifactId,
+    version,
+    sizeBytes: prepared.sizeBytes,
+    archiveChecksum,
+    idempotencyKey: `creator-skill-upload-grant-${randomUUID()}`,
+  })
+  const upload = grantResult.grant
+  if (
+    !grantResult.success
+    || !upload
+    || upload.expectedSizeBytes !== prepared.sizeBytes
+    || upload.expectedArchiveChecksum !== archiveChecksum
+  ) throw new Error('Creator skill upload grant was not bound to the archive identity')
+  const uploadResult = await rendererCall<{
+    sizeBytes: number
+    archiveChecksum: string
+  }>(`
+    return await window.__creatorSkillUploadHarness.upload(
+      ${JSON.stringify(prepared.handle)},
+      ${JSON.stringify(upload)},
+    )
+  `)
+  if (
+    uploadResult.sizeBytes !== prepared.sizeBytes
+    || uploadResult.archiveChecksum !== archiveChecksum
+  ) {
+    throw new Error('Creator skill upload helper returned a mismatched archive identity')
+  }
+
+  const staleCompleteResult = await rendererAdminCall<{
+    success: boolean
+    errorCode?: string
+    status?: number
+  }>(
+    'creatorArtifactCompleteUpload',
+    {
+      organizationId,
+      artifactId,
+      version,
+      uploadGeneration: upload.uploadGeneration + 1,
+      sizeBytes: archive.length,
+      archiveChecksum,
+      idempotencyKey: `creator-skill-stale-complete-${randomUUID()}`,
+    },
+  )
+  // The desktop AdminClient intentionally maps unknown server codes to its
+  // stable VALIDATION_ERROR boundary; HTTP 409 proves the complete request
+  // passed schema validation and reached the stale-generation conflict gate.
+  if (staleCompleteResult.success || staleCompleteResult.status !== 409) {
+    throw new Error(`Stale upload generation was not rejected by the generation gate: ${JSON.stringify(staleCompleteResult)}`)
   }
 
   const completeResult = await rendererAdminCall<{
@@ -375,7 +551,8 @@ async function uploadVersion(
     artifactId,
     version,
     uploadGeneration: upload.uploadGeneration,
-    sizeBytes: archive.length,
+    sizeBytes: prepared.sizeBytes,
+    archiveChecksum,
     idempotencyKey: `creator-skill-complete-${randomUUID()}`,
   })
   if (!completeResult.success) {
@@ -402,6 +579,51 @@ async function waitForValidatedVersion(
     return detail.success
       && detail.versions?.some(item => item.version === version && item.status === 'validated') === true
   })
+}
+
+async function assertValidationPolicySnapshot(
+  organizationId: string,
+  artifactId: string,
+  version: string,
+): Promise<void> {
+  const detail = await rendererAdminCall<{
+    success: boolean
+    versions?: Array<{
+      version: string
+      status: string
+      archiveChecksum?: string
+      validatedArchiveChecksum?: string
+      validatorVersion?: string
+      validationPolicy?: {
+        version: string
+        maxArchiveBytes: number
+        maxFileCount: number
+        maxFileBytes: number
+        maxExpandedBytes: number
+      }
+    }>
+  }>('creatorArtifactGet', {
+    organizationId,
+    artifactId,
+    version,
+  })
+  const validated = detail.versions?.find(item => item.version === version)
+  const policy = validated?.validationPolicy
+  if (
+    !detail.success
+    || validated?.status !== 'validated'
+    || !validated.archiveChecksum
+    || validated.validatedArchiveChecksum !== validated.archiveChecksum
+    || !validated.validatorVersion
+    || !policy
+    || !policy.version
+    || policy.maxArchiveBytes <= 0
+    || policy.maxFileCount <= 0
+    || policy.maxFileBytes <= 0
+    || policy.maxExpandedBytes <= 0
+  ) {
+    throw new Error(`Validated version ${version} is missing its policy or checksum snapshot`)
+  }
 }
 
 async function attemptMemberAccessBeforePublish(
@@ -559,15 +781,20 @@ async function run(): Promise<void> {
     return true
   `)
 
+  logStep('invalid-credentials')
+  await assertInvalidCredentialsRejected()
+
   logStep('alice-login-org')
   await login('alice', 'alice-password-123')
   const organization = await createOrganization()
+  await assertInvalidArtifactBodyRejected(organization.id)
   const joinToken = await createJoinLink(organization.id)
 
   logStep('bob-join')
   await logout()
   await login('bob', 'bob-password-123')
   await acceptJoin(joinToken)
+  await assertMemberManagementDenied(organization.id)
 
   logStep('draft-upload')
   await logout()
@@ -584,9 +811,9 @@ async function run(): Promise<void> {
     artifact.id,
     versionOne.version,
     CREATOR_SKILL_FIXTURE_CONTENT,
-    versionOne.upload,
   )
   await waitForValidatedVersion(organization.id, artifact.id, '1.0.0')
+  await assertValidationPolicySnapshot(organization.id, artifact.id, '1.0.0')
 
   logStep('member-prepublish')
   await logout()
@@ -663,15 +890,21 @@ async function run(): Promise<void> {
     const response = await rendererAdminCall<{
       success: boolean
       artifact?: { id: string; slug: string; latestPublishedVersion?: string }
-      versions?: Array<{ version: string; status: string }>
+      versions?: Array<{ version: string; status: string; validationPolicy?: unknown }>
     }>('creatorArtifactGet', {
       organizationId: organization.id,
       artifactId: artifact.id,
       version: '1.0.0',
     })
-    if (!response.success || response.artifact?.latestPublishedVersion !== '1.0.0') {
+    if (
+      !response.success
+      || response.artifact?.latestPublishedVersion !== '1.0.0'
+      || response.versions?.length !== 1
+      || response.versions.some(version => version.status !== 'published')
+    ) {
       throw new Error('Published artifact detail is incorrect')
     }
+    assertNoMemberMetadataLeak(response)
   }
   {
     const response = await rendererAdminCall<{
@@ -717,6 +950,20 @@ async function run(): Promise<void> {
     throw new Error('Published version download grant was not issued')
   }
 
+  logStep('download-token-binding')
+  await logout()
+  await login('alice', 'alice-password-123')
+  const crossUserDownloadStatus = await rendererFetchStatus(downloadGrantOne.url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${adminAccessToken}` },
+    redirect: 'error',
+  })
+  if (crossUserDownloadStatus >= 200 && crossUserDownloadStatus < 300) {
+    throw new Error('Download token unexpectedly authorized a different user')
+  }
+  await logout()
+  await login('bob', 'bob-password-123')
+
   await rendererCall(`
     if (!window.__creatorSkillHarnessState) throw new Error('Harness state missing')
     return true
@@ -733,6 +980,16 @@ async function run(): Promise<void> {
     manifest: downloadGrantOne.manifest ?? [],
     validationPolicy: downloadGrantOne.validationPolicy,
   })
+  const firstLedger = readLedger()
+  if (
+    firstLedger.schemaVersion !== 1
+    || firstLedger.installed.length !== 1
+    || firstLedger.installed[0]?.artifactId !== artifact.id
+    || firstLedger.installed[0]?.version !== '1.0.0'
+  ) {
+    throw new Error(`First install was not committed to the Creator Skill Ledger: ${JSON.stringify(firstLedger)}`)
+  }
+  assertRestartRecovery()
 
   // Publishing remains a manager operation; the member that installed the
   // first release must not be able to create the update.
@@ -753,9 +1010,9 @@ async function run(): Promise<void> {
     artifact.id,
     versionTwo.version,
     updatedContent,
-    versionTwo.upload,
   )
   await waitForValidatedVersion(organization.id, artifact.id, '1.1.0')
+  await assertValidationPolicySnapshot(organization.id, artifact.id, '1.1.0')
   await publishVersion(organization.id, artifact.id, versionTwo.version)
 
   await logout()
@@ -816,6 +1073,17 @@ async function run(): Promise<void> {
   if (existsSync(join(workspace.rootPath, 'skills', workspace.slug))) {
     throw new Error('Uninstall left the formal skill path behind')
   }
+  const finalLedger = readLedger()
+  if (finalLedger.schemaVersion !== 1 || finalLedger.installed.length !== 0) {
+    throw new Error(`Uninstall was not committed to the Creator Skill Ledger: ${JSON.stringify(finalLedger)}`)
+  }
+  const operationRoot = join(workspace.rootPath, '.creator-skill-ops')
+  const remainingOperations = existsSync(operationRoot)
+    ? readdirSync(operationRoot).filter(name => name !== 'locks')
+    : []
+  if (remainingOperations.length > 0) {
+    throw new Error(`Completed lifecycle left Creator Skill journals behind: ${remainingOperations.join(', ')}`)
+  }
 
   const finalBackups = await rendererCall<{ success: boolean; backups?: Array<{ slug: string }> }>(`
     return await window.electronAPI.creatorSkillListBackups({
@@ -853,9 +1121,16 @@ async function run(): Promise<void> {
     },
     roles: [
       'alice owner created artifact and approved membership changes',
-      'bob member could not download draft content',
+      'bob member could not manage or download draft content',
       'bob manager published both released versions',
-      'admin member installed the published skill',
+      'bob member installed the published skill',
+    ],
+    negativeChecks: [
+      'invalid credentials rejected',
+      'invalid artifact body rejected',
+      'member management rejected',
+      'stale upload generation rejected',
+      'cross-user download token rejected',
     ],
     versions: [
       { version: '1.0.0', archiveChecksum: downloadGrantOne.archiveChecksum, contentDigest: downloadGrantOne.contentDigest },
@@ -865,6 +1140,9 @@ async function run(): Promise<void> {
       progressStages: [...stages],
       skillsChangedCount: harnessState.skillsChanged.length,
       backupsCount: finalBackups.backups.length,
+      ledgerCommitted: true,
+      journalsCleaned: true,
+      restartRecoveryPassed: true,
     },
   }))
   app.quit()

@@ -43,6 +43,7 @@ import {
   CreateCreatorArtifactRpcInputSchema,
   CreatorArtifactArchiveRpcInputSchema,
   CreatorArtifactIdRpcInputSchema,
+  CreatorArtifactDetailSchema,
   CreatorArtifactListRpcInputSchema,
   CreatorArtifactRevokeRpcInputSchema,
   CreatorArtifactUploadCompleteRpcInputSchema,
@@ -1617,13 +1618,16 @@ export function registerAdminHandlers(
       if (!organizationId.success || !memberId.success || !input.success) {
         return adminInputError('VALIDATION_ERROR')
       }
-      return callOrganization('updateOrganizationMember', (client, accessToken) =>
-        client.updateOrganizationMember(
+      return callOrganization('updateOrganizationMember', async (client, accessToken, userId) => {
+        const result = await client.updateOrganizationMember(
           accessToken,
           organizationId.data,
           memberId.data,
           input.data,
-        ))
+        )
+        invalidateCreatorArtifactCache(userId, organizationId.data)
+        return result
+      })
     },
   )
 
@@ -1643,13 +1647,16 @@ export function registerAdminHandlers(
       if (!organizationId.success || !memberId.success || !input.success) {
         return adminInputError('VALIDATION_ERROR')
       }
-      return callOrganization('removeOrganizationMember', (client, accessToken) =>
-        client.removeOrganizationMember(
+      return callOrganization('removeOrganizationMember', async (client, accessToken, userId) => {
+        const result = await client.removeOrganizationMember(
           accessToken,
           organizationId.data,
           memberId.data,
           input.data.reason,
-        ))
+        )
+        invalidateCreatorArtifactCache(userId, organizationId.data)
+        return result
+      })
     },
   )
 
@@ -1695,14 +1702,16 @@ export function registerAdminHandlers(
   server.handle(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT, async (_ctx, rawInput: unknown) => {
     const input = CreatorArtifactIdRpcInputSchema.safeParse(rawInput)
     if (!input.success) return adminInputError('VALIDATION_ERROR')
-    return callOrganization('getCreatorArtifact', (client, accessToken) =>
-      client.getCreatorArtifact(
+    return callOrganization('getCreatorArtifact', async (client, accessToken) => {
+      const detail = await client.getCreatorArtifact(
         accessToken,
         input.data.organizationId,
         input.data.artifactId,
         input.data.version,
         input.data.referencePath,
-      ))
+      )
+      return CreatorArtifactDetailSchema.parse(detail)
+    })
   })
 
   server.handle(RPC_CHANNELS.admin.CREATE_CREATOR_ARTIFACT, async (_ctx, rawInput: unknown) => {
@@ -1756,10 +1765,22 @@ export function registerAdminHandlers(
     if (!input.success) return adminInputError('VALIDATION_ERROR')
     return callOrganization('completeCreatorSkillUpload', async (client, accessToken, userId) => {
       const completed = await client.completeCreatorSkillUpload(accessToken, input.data)
-      const archiveChecksum = completed.archiveChecksum
-      if (!archiveChecksum) {
+      if (completed.uploadGeneration !== input.data.uploadGeneration) {
         throw new AdminError(
-          'Admin service did not calculate the uploaded archive checksum',
+          'Admin service did not bind the upload generation',
+          'version_conflict',
+        )
+      }
+      const archiveChecksum = completed.archiveChecksum
+      if (!archiveChecksum || archiveChecksum !== input.data.archiveChecksum) {
+        throw new AdminError(
+          'Admin service did not bind the uploaded archive checksum',
+          'checksum_mismatch',
+        )
+      }
+      if (completed.sizeBytes !== input.data.sizeBytes) {
+        throw new AdminError(
+          'Admin service did not bind the uploaded archive size',
           'checksum_mismatch',
         )
       }

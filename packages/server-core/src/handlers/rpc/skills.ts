@@ -86,7 +86,7 @@ function isLoopbackHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
 }
 
-function shouldAttachAdminAuth(requestUrl: string, adminOrigin: string): boolean {
+export function shouldAttachAdminAuth(requestUrl: string, adminOrigin: string): boolean {
   const request = new URL(requestUrl)
   const admin = new URL(adminOrigin)
   if (request.origin === adminOrigin) return true
@@ -103,7 +103,7 @@ function createCreatorSkillDownloadFetch(
   const adminUrl = getAdminUrl()
   const adminOrigin = adminUrl ? new URL(adminUrl).origin : null
 
-  const downloadFetch = async (
+  const authenticatedFetch = async (
     input: Parameters<typeof fetch>[0],
     init?: Parameters<typeof fetch>[1],
   ) => {
@@ -131,9 +131,13 @@ function createCreatorSkillDownloadFetch(
     })
   }
 
-  return Object.assign(downloadFetch, {
-    preconnect: fetchImpl.preconnect.bind(fetchImpl),
-  }) as typeof fetch
+  const preconnect = fetchImpl.preconnect
+  return Object.assign(
+    authenticatedFetch,
+    typeof preconnect === 'function'
+      ? { preconnect: preconnect.bind(fetchImpl) }
+      : {},
+  ) as typeof fetch
 }
 
 async function canonicalizePotentialPath(path: string): Promise<string> {

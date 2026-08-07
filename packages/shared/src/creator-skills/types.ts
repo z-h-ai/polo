@@ -71,12 +71,21 @@ export interface CreatorArtifactVersion {
   revokedByUserId?: string
   revocationReason?: string
   validationPolicy?: SkillArchivePolicy
-  uploadGeneration: number
   validatorVersion?: string
   validatedArchiveChecksum?: string
   validatedAt?: string
   metadata?: SkillVersionMetadata
   validationIssues?: SkillValidationIssue[]
+}
+
+/**
+ * Upload mutations are manager-only and must bind the response to the exact
+ * grant generation. Artifact detail is deliberately typed without this
+ * internal concurrency token so a fully redacted Member response remains a
+ * valid public DTO.
+ */
+export interface CreatorArtifactManagerVersion extends CreatorArtifactVersion {
+  uploadGeneration: number
 }
 
 export type SkillVersionMetadata = ValidatedSkillMetadata
@@ -139,6 +148,8 @@ export interface CreatorSkillUploadGrant {
   headers?: Record<string, string>
   expiresAt: string
   uploadGeneration: number
+  expectedSizeBytes: number
+  expectedArchiveChecksum: string
 }
 
 export interface CreatorSkillManifestEntry {

@@ -86,6 +86,12 @@ export async function runElectronDist(
   options: ElectronDistOptions,
   dependencies: ElectronDistDependencies = defaultDependencies,
 ): Promise<void> {
+  if (process.env.POLO_AI_CLI_ARTIFACT_OUTPUT_DIR) {
+    throw new Error(
+      'POLO_AI_CLI_ARTIFACT_OUTPUT_DIR is test-only and requires the direct artifact builder '
+      + 'flag --allow-test-output-override; production electron:build/electron:dist fail closed.',
+    )
+  }
   if (options.platform !== process.platform) {
     throw new Error(
       `Electron release packaging must run on its native platform: `

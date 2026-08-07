@@ -455,7 +455,8 @@ async function main(): Promise<void> {
     ),
     runEsbuild(
       "apps/electron/src/preload/bootstrap.ts",
-      "apps/electron/dist/bootstrap-preload.cjs"
+      "apps/electron/dist/bootstrap-preload.cjs",
+      { __POLO_AI_TRUSTED_PHONE_AUTH_E2E__: "true" }
     ),
     runEsbuild(
       "apps/electron/src/preload/browser-toolbar.ts",
@@ -559,6 +560,7 @@ async function main(): Promise<void> {
     format: "cjs",
     outfile: join(ROOT_DIR, "apps/electron/dist/bootstrap-preload.cjs"),
     external: ["electron"],
+    define: { __POLO_AI_TRUSTED_PHONE_AUTH_E2E__: "true" },
     logLevel: "info",
   });
   await preloadContext.watch();

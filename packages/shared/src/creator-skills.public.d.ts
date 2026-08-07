@@ -56,12 +56,15 @@ export interface CreatorArtifactVersion {
   revokedByUserId?: string
   revocationReason?: string
   validationPolicy?: SkillArchivePolicy
-  uploadGeneration: number
   validatorVersion?: string
   validatedArchiveChecksum?: string
   validatedAt?: string
   metadata?: SkillVersionMetadata
   validationIssues?: SkillValidationIssue[]
+}
+
+export interface CreatorArtifactManagerVersion extends CreatorArtifactVersion {
+  uploadGeneration: number
 }
 
 export interface ValidatedSkillMetadata {
@@ -133,6 +136,8 @@ export interface CreatorSkillUploadGrant {
   headers?: Record<string, string>
   expiresAt: string
   uploadGeneration: number
+  expectedSizeBytes: number
+  expectedArchiveChecksum: string
 }
 
 export interface CreatorSkillManifestEntry {
@@ -268,6 +273,7 @@ export declare const SkillArchivePolicySchema: ZodTypeAny
 export declare const SkillValidationIssueSchema: ZodTypeAny
 export declare const SkillVersionMetadataSchema: ZodTypeAny
 export declare const CreatorArtifactSchema: ZodTypeAny
+export declare const CreatorArtifactDetailVersionSchema: ZodTypeAny
 export declare const CreatorArtifactVersionSchema: ZodTypeAny
 export declare const CreatorArtifactCapabilitySchema: ZodTypeAny
 export declare const CreatorArtifactCatalogPageSchema: ZodTypeAny

@@ -1226,7 +1226,7 @@ describe('AdminClient', () => {
     });
   });
 
-  it('derives Creator Skill safety from the published artifact detail contract', async () => {
+  it('parses redacted Member detail and strips an accidental upload generation', async () => {
     mockJsonFetch({
       artifact: {
         id: 'artifact-1',
@@ -1245,8 +1245,85 @@ describe('AdminClient', () => {
         version: '1.0.0',
         status: 'published',
         archiveChecksum: 'a'.repeat(64),
+        sizeBytes: 123,
         createdAt: '2026-07-30T00:00:00.000Z',
-        uploadGeneration: 1,
+        publishedAt: '2026-07-30T00:01:00.000Z',
+        uploadGeneration: 9,
+      }],
+      selectedVersion: '1.0.0',
+    });
+    const client = new AdminClient('https://admin.example.com');
+
+    const detail = await client.getCreatorArtifact(
+      'member-access-token',
+      'organization-1',
+      'artifact-1',
+      '1.0.0',
+    );
+
+    expect(detail.versions[0]).not.toHaveProperty('uploadGeneration');
+    expect(detail.versions[0]).toMatchObject({
+      id: 'version-1',
+      status: 'published',
+      archiveChecksum: 'a'.repeat(64),
+    });
+  });
+
+  it('binds upload grant and completion requests to size and checksum', async () => {
+    const archiveChecksum = 'a'.repeat(64);
+    const baseVersion = {
+      id: 'version-1',
+      artifactId: 'artifact-1',
+      version: '1.0.0',
+      status: 'uploaded',
+      archiveChecksum,
+      sizeBytes: 123,
+      createdAt: '2026-07-30T00:00:00.000Z',
+      uploadGeneration: 2,
+    };
+    mockJsonFetch({
+      method: 'PUT',
+      url: 'https://uploads.example.test/object',
+      headers: { 'content-type': 'application/zip', 'x-cos-meta-sha256': archiveChecksum },
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      uploadGeneration: 2,
+      expectedSizeBytes: 123,
+      expectedArchiveChecksum: archiveChecksum,
+    });
+    const client = new AdminClient('https://admin.example.com');
+    const binding = {
+      organizationId: 'organization-1',
+      artifactId: 'artifact-1',
+      version: '1.0.0',
+      sizeBytes: 123,
+      archiveChecksum,
+      idempotencyKey: 'upload-grant-1',
+    };
+
+    await client.createCreatorSkillUploadGrant('creator-access-token', binding);
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({ sizeBytes: 123, archiveChecksum }));
+
+    mockJsonFetch(baseVersion);
+    await client.completeCreatorSkillUpload('creator-access-token', {
+      ...binding,
+      uploadGeneration: 2,
+      idempotencyKey: 'upload-complete-1',
+    });
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      uploadGeneration: 2,
+      sizeBytes: 123,
+      archiveChecksum,
+    }));
+  });
+
+  it('queries authoritative Creator Skill safety by exact installed identity', async () => {
+    mockJsonFetch({
+      statuses: [{
+        artifactId: 'artifact-1',
+        version: '1.0.0',
+        archiveChecksum: 'a'.repeat(64),
+        status: 'active',
+        internalTombstoneId: 'must-not-leak',
       }],
     });
     const client = new AdminClient('https://admin.example.com');
@@ -1264,9 +1341,15 @@ describe('AdminClient', () => {
       status: 'active',
     });
     expect(fetchCalls[0]!.url).toBe(
-      'https://admin.example.com/api/artifacts/artifact-1?version=1.0.0',
+      'https://admin.example.com/api/installed-artifacts/status',
     );
-    expect(fetchCalls[0]!.init.method).toBe('GET');
+    expect(fetchCalls[0]!.init.method).toBe('POST');
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify({
+      identities: [{
+        ...input,
+        archiveChecksum: `sha256:${input.archiveChecksum}`,
+      }],
+    }));
     expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
       .toBe('Bearer creator-access-token');
   });

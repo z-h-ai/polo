@@ -2,9 +2,13 @@ import { describe, expect, it } from 'bun:test'
 import {
   CreateCreatorArtifactRpcInputSchema,
   CreatorArtifactIdRpcInputSchema,
+  CreatorArtifactUploadCompleteRpcInputSchema,
+  CreatorArtifactUploadGrantRpcInputSchema,
+  CreatorSkillUploadGrantSchema,
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorArtifactCatalogPageSchema,
   CreatorArtifactDetailSchema,
+  CreatorArtifactVersionMutationResponseSchema,
   CreatorSkillInstallRpcInputSchema,
   CreatorSkillUninstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
@@ -14,6 +18,17 @@ import {
 import { HARD_SKILL_ARCHIVE_POLICY } from '../types'
 
 describe('Creator Skill boundary schemas', () => {
+  it('keeps upload response headers optional for older Admin implementations', () => {
+    expect(CreatorSkillUploadGrantSchema.parse({
+      method: 'PUT',
+      url: 'https://uploads.example.test/archive.zip',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      uploadGeneration: 1,
+      expectedSizeBytes: 123,
+      expectedArchiveChecksum: 'a'.repeat(64),
+    })).not.toHaveProperty('headers')
+  })
+
   it('strips unknown Admin response fields recursively', () => {
     const parsed = CreatorArtifactCatalogPageSchema.parse({
       artifacts: [{
@@ -43,6 +58,45 @@ describe('Creator Skill boundary schemas', () => {
       }],
       nextCursor: 'cursor',
     })
+  })
+
+  it('keeps Member detail independent from manager upload generations', () => {
+    const artifact = {
+      id: 'artifact-id',
+      organizationId: 'organization-id',
+      type: 'skill',
+      slug: 'review-helper',
+      status: 'published' as const,
+      createdByUserId: 'user-id',
+      createdAt: '2026-07-30T00:00:00.000Z',
+      updatedAt: '2026-07-30T00:00:00.000Z',
+    }
+    const memberVersion = {
+      id: 'version-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      status: 'published' as const,
+      archiveChecksum: 'a'.repeat(64),
+      sizeBytes: 123,
+      createdAt: '2026-07-30T00:00:00.000Z',
+      publishedAt: '2026-07-30T00:01:00.000Z',
+    }
+
+    expect(CreatorArtifactDetailSchema.parse({
+      artifact,
+      versions: [memberVersion],
+    }).versions[0]).toEqual(memberVersion)
+
+    const stripped = CreatorArtifactDetailSchema.parse({
+      artifact,
+      versions: [{ ...memberVersion, uploadGeneration: 7 }],
+    })
+    expect(stripped.versions[0]).toEqual(memberVersion)
+    expect(stripped.versions[0]).not.toHaveProperty('uploadGeneration')
+
+    expect(CreatorArtifactVersionMutationResponseSchema.safeParse({
+      version: memberVersion,
+    }).success).toBe(false)
   })
 
   it('keeps legacy Web App identifiers opaque while enforcing Skill slugs', () => {
@@ -82,6 +136,39 @@ describe('Creator Skill boundary schemas', () => {
       workspaceId: 'workspace-id',
       skillSlug: 'review-helper',
       injected: true,
+    }).success).toBe(false)
+  })
+
+  it('requires exact archive identity for upload grant and completion RPCs', () => {
+    const binding = {
+      organizationId: 'organization-id',
+      artifactId: 'artifact-id',
+      version: '1.0.0',
+      sizeBytes: 1024,
+      archiveChecksum: 'A'.repeat(64),
+      idempotencyKey: 'upload-request-1',
+    }
+    expect(CreatorArtifactUploadGrantRpcInputSchema.parse(binding)).toEqual({
+      ...binding,
+      archiveChecksum: 'a'.repeat(64),
+    })
+    expect(CreatorArtifactUploadGrantRpcInputSchema.safeParse({
+      ...binding,
+      sizeBytes: undefined,
+    }).success).toBe(false)
+    expect(CreatorArtifactUploadGrantRpcInputSchema.safeParse({
+      ...binding,
+      archiveChecksum: undefined,
+    }).success).toBe(false)
+
+    expect(CreatorArtifactUploadCompleteRpcInputSchema.safeParse({
+      ...binding,
+      uploadGeneration: 2,
+    }).success).toBe(true)
+    expect(CreatorArtifactUploadCompleteRpcInputSchema.safeParse({
+      ...binding,
+      uploadGeneration: 2,
+      archiveChecksum: undefined,
     }).success).toBe(false)
   })
 

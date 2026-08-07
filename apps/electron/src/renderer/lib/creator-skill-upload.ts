@@ -1,4 +1,5 @@
 import type { CreatorSkillUploadGrant } from '../../shared/types'
+import { IncrementalSha256 } from './creator-skill-sha256'
 
 export class CreatorSkillUploadError extends Error {
   readonly errorCode:
@@ -6,6 +7,7 @@ export class CreatorSkillUploadError extends Error {
     | 'archive_policy_exceeded'
     | 'upload_expired'
     | 'creator_skill_upload_cancelled'
+    | 'checksum_mismatch'
     | 'NETWORK_ERROR'
 
   constructor(errorCode: CreatorSkillUploadError['errorCode']) {
@@ -20,6 +22,18 @@ const HARD_MAX_ARCHIVE_ENTRIES = 1_000
 const MAX_EOCD_SCAN_BYTES = 65_557
 const MAX_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 const decoder = new TextDecoder('utf-8', { fatal: true })
+const SHA256_CHUNK_BYTES = 1024 * 1024
+
+export interface PreparedCreatorSkillArchive {
+  sizeBytes: number
+  archiveChecksum: string
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new CreatorSkillUploadError('creator_skill_upload_cancelled')
+  }
+}
 
 function isIgnoredNoisePath(path: string): boolean {
   return path === '.DS_Store'
@@ -38,13 +52,19 @@ function invalidArchive(): never {
  * not extract data or replace server validation; it only catches the obvious
  * malformed root, traversal, link, and entry-count cases before a large PUT.
  */
-export async function preflightCreatorSkillUploadFile(file: File, slug: string): Promise<void> {
+export async function preflightCreatorSkillUploadFile(
+  file: File,
+  slug: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  throwIfCancelled(options.signal)
   if (file.size <= 0) invalidArchive()
   if (file.size > HARD_MAX_ARCHIVE_BYTES) {
     throw new CreatorSkillUploadError('archive_policy_exceeded')
   }
   const tailOffset = Math.max(0, file.size - MAX_EOCD_SCAN_BYTES)
   const tail = new DataView(await file.slice(tailOffset).arrayBuffer())
+  throwIfCancelled(options.signal)
   let eocd = -1
   for (let offset = tail.byteLength - 22; offset >= 0; offset -= 1) {
     if (tail.getUint32(offset, true) === 0x06054b50) {
@@ -70,10 +90,12 @@ export async function preflightCreatorSkillUploadFile(file: File, slug: string):
     centralDirectoryOffset,
     centralDirectoryOffset + centralDirectorySize,
   ).arrayBuffer())
+  throwIfCancelled(options.signal)
   let offset = 0
   let skillFileCount = 0
   const seen = new Set<string>()
   for (let index = 0; index < entryCount; index += 1) {
+    throwIfCancelled(options.signal)
     if (offset + 46 > directory.byteLength || directory.getUint32(offset, true) !== 0x02014b50) invalidArchive()
     const nameLength = directory.getUint16(offset + 28, true)
     const extraLength = directory.getUint16(offset + 30, true)
@@ -103,22 +125,63 @@ export async function preflightCreatorSkillUploadFile(file: File, slug: string):
   if (offset !== directory.byteLength || skillFileCount !== 1) invalidArchive()
 }
 
+export async function calculateCreatorSkillArchiveChecksum(
+  file: File,
+  options: { signal: AbortSignal; chunkBytes?: number },
+): Promise<string> {
+  const chunkBytes = options.chunkBytes ?? SHA256_CHUNK_BYTES
+  if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
+    throw new TypeError('chunkBytes must be a positive safe integer')
+  }
+  const hash = new IncrementalSha256()
+  for (let offset = 0; offset < file.size; offset += chunkBytes) {
+    throwIfCancelled(options.signal)
+    const bytes = await file.slice(offset, Math.min(file.size, offset + chunkBytes)).arrayBuffer()
+    throwIfCancelled(options.signal)
+    hash.update(new Uint8Array(bytes))
+  }
+  throwIfCancelled(options.signal)
+  return hash.digestHex()
+}
+
+export async function prepareCreatorSkillUploadFile(
+  file: File,
+  slug: string,
+  options: { signal: AbortSignal; chunkBytes?: number },
+): Promise<PreparedCreatorSkillArchive> {
+  await preflightCreatorSkillUploadFile(file, slug, { signal: options.signal })
+  return {
+    sizeBytes: file.size,
+    archiveChecksum: await calculateCreatorSkillArchiveChecksum(file, options),
+  }
+}
+
 /**
  * The selected File remains in Chromium's file-backed Blob implementation.
  * It is deliberately PUT from the renderer to the signed object URL: archive
  * bytes must not be marshalled over Electron RPC or buffered by server-core.
- * The Admin service calculates the authoritative archive checksum from the
- * stored object, so this path never materializes a 100 MiB File in JS memory.
+ * The caller supplies the incrementally computed checksum that was bound into
+ * the signed grant; this path never materializes a 100 MiB File in JS memory.
  */
 export async function uploadCreatorSkillArchive(
   file: File,
   grant: CreatorSkillUploadGrant,
+  prepared: PreparedCreatorSkillArchive,
   options: {
     signal: AbortSignal
     fetchImpl?: typeof fetch
   },
-): Promise<{ sizeBytes: number }> {
+): Promise<PreparedCreatorSkillArchive> {
   const fetchImpl = options.fetchImpl ?? fetch
+  throwIfCancelled(options.signal)
+  if (
+    file.size !== prepared.sizeBytes
+    || grant.expectedSizeBytes !== prepared.sizeBytes
+    || grant.expectedArchiveChecksum !== prepared.archiveChecksum
+  ) throw new CreatorSkillUploadError('checksum_mismatch')
+  if (Date.parse(grant.expiresAt) <= Date.now()) {
+    throw new CreatorSkillUploadError('upload_expired')
+  }
 
   let response: Response
   try {
@@ -139,6 +202,6 @@ export async function uploadCreatorSkillArchive(
   if (options.signal.aborted) throw new CreatorSkillUploadError('creator_skill_upload_cancelled')
 
   return {
-    sizeBytes: file.size,
+    ...prepared,
   }
 }

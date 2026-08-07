@@ -33,7 +33,7 @@ import {
   type CreatorArtifactCapability,
   type CreatorArtifactCatalogPage,
   type CreatorArtifactDetail,
-  type CreatorArtifactVersion,
+  type CreatorArtifactManagerVersion,
   type CreatorSkillDownloadGrant,
   type CreatorSkillSafetyStatus,
   type CreatorSkillUploadGrant,
@@ -69,6 +69,7 @@ import {
   CreatorArtifactVersionMutationResponseSchema,
   CreatorSkillDownloadGrantSchema,
   CreatorSkillSafetyStatusSchema,
+  CreatorSkillSafetyStatusBatchSchema,
   CreatorSkillUploadGrantSchema,
   SkillArchivePolicySchema,
   AppCatalogResponseSchema,
@@ -619,8 +620,7 @@ export class AdminClient {
     accessToken: string,
     input: CreateCreatorArtifactVersionInput,
   ): Promise<{
-    version: CreatorArtifactVersion;
-    upload: CreatorSkillUploadGrant;
+    version: CreatorArtifactManagerVersion;
     replayed?: boolean;
   }> {
     const response = await this.request<unknown>(
@@ -654,6 +654,8 @@ export class AdminClient {
       organizationId: string;
       artifactId: string;
       version: string;
+      sizeBytes: number;
+      archiveChecksum: string;
       idempotencyKey: string;
     },
   ): Promise<CreatorSkillUploadGrant> {
@@ -663,6 +665,10 @@ export class AdminClient {
         method: 'POST',
         accessToken,
         headers: { 'Idempotency-Key': input.idempotencyKey },
+        body: {
+          sizeBytes: input.sizeBytes,
+          archiveChecksum: input.archiveChecksum,
+        },
       },
     );
     return this.readSuccessResponse(response, CreatorSkillUploadGrantSchema);
@@ -676,9 +682,10 @@ export class AdminClient {
       version: string;
       uploadGeneration: number;
       sizeBytes: number;
+      archiveChecksum: string;
       idempotencyKey: string;
     },
-  ): Promise<CreatorArtifactVersion> {
+  ): Promise<CreatorArtifactManagerVersion> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/upload-complete`,
       {
@@ -688,6 +695,7 @@ export class AdminClient {
         body: {
           uploadGeneration: input.uploadGeneration,
           sizeBytes: input.sizeBytes,
+          archiveChecksum: input.archiveChecksum,
         },
       },
     );
@@ -700,7 +708,7 @@ export class AdminClient {
       artifactId: string;
       version: string;
     },
-  ): Promise<CreatorArtifactVersion> {
+  ): Promise<CreatorArtifactManagerVersion> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/validate`,
       {
@@ -725,7 +733,7 @@ export class AdminClient {
       version: string;
       idempotencyKey: string;
     },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<{ version: CreatorArtifactManagerVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/publish`,
       {
@@ -745,7 +753,7 @@ export class AdminClient {
       version: string;
       idempotencyKey: string;
     },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<{ version: CreatorArtifactManagerVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}`,
       {
@@ -787,7 +795,7 @@ export class AdminClient {
       reason: string;
       idempotencyKey: string;
     },
-  ): Promise<{ version: CreatorArtifactVersion; replayed?: boolean }> {
+  ): Promise<{ version: CreatorArtifactManagerVersion; replayed?: boolean }> {
     const response = await this.request<unknown>(
       `/api/artifacts/${encodeURIComponent(input.artifactId)}/versions/${encodeURIComponent(input.version)}/revoke`,
       {
@@ -823,38 +831,28 @@ export class AdminClient {
       archiveChecksum: string;
     },
   ): Promise<CreatorSkillSafetyStatus> {
-    const detail = await this.getCreatorArtifact(
+    const canonicalChecksum = input.archiveChecksum.toLowerCase().replace(/^sha256:/, '');
+    const response = await this.request<unknown>('/api/installed-artifacts/status', {
+      method: 'POST',
       accessToken,
-      '',
-      input.artifactId,
-      input.version,
-    );
-    const currentVersion = detail.versions.find(version => version.version === input.version);
-    if (
-      detail.artifact.id !== input.artifactId
-      || !currentVersion
-      || currentVersion.archiveChecksum !== input.archiveChecksum
-    ) {
+      body: {
+        identities: [{
+          ...input,
+          archiveChecksum: `sha256:${canonicalChecksum}`,
+        }],
+      },
+    });
+    const batch = this.readSuccessResponse(response, CreatorSkillSafetyStatusBatchSchema);
+    if (batch.statuses.length !== 1) {
       throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
     }
-
-    const status =
-      detail.artifact.status === 'archived' || currentVersion.status === 'expired'
-        ? 'archived'
-        : currentVersion.status === 'revoked' || currentVersion.revokedAt
-          ? 'revoked'
-          : 'active';
-    const safeVersion = detail.artifact.latestPublishedVersion !== input.version
-      ? detail.artifact.latestPublishedVersion
-      : undefined;
-
-    return CreatorSkillSafetyStatusSchema.parse({
-      artifactId: input.artifactId,
-      version: input.version,
-      archiveChecksum: input.archiveChecksum,
-      status,
-      ...(safeVersion ? { safeVersion } : {}),
-    });
+    const status = CreatorSkillSafetyStatusSchema.parse(batch.statuses[0]);
+    if (
+      status.artifactId !== input.artifactId
+      || status.version !== input.version
+      || status.archiveChecksum !== canonicalChecksum
+    ) throw new AdminError('Admin response is invalid', 'SERVER_ERROR');
+    return status;
   }
 
   private async request<T>(path: string, options: {

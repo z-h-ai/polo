@@ -285,6 +285,7 @@ mock.module('@polo-ai/shared/admin', () => ({
   getAppCatalogAccessMode: (accountId: string, organizationId: string) =>
     appCatalogAccess.get(`${accountId}:${organizationId}`) ?? 'offline',
   getAppCatalogApps: (catalog: { apps?: unknown[] }) => catalog.apps ?? [],
+  isAppCatalogAccessDeniedForAccount: () => false,
   denyAppCatalogAccessForAccount: (accountId: string) => {
     for (const key of appCatalogAccess.keys()) {
       if (key.startsWith(`${accountId}:`)) appCatalogAccess.set(key, 'denied')
@@ -419,6 +420,15 @@ mock.module('@polo-ai/shared/config', () => ({
 
 mock.module('@polo-ai/shared/credentials', () => ({
   getCredentialManager: () => mockCredentialManager,
+  SOURCE_CREDENTIAL_TYPES: [
+    'source_oauth',
+    'source_bearer',
+    'source_apikey',
+    'source_basic',
+  ],
+  startInvocationCredentialProxy: async () => {
+    throw new Error('Invocation credential proxy is not configured for admin handler tests')
+  },
 }))
 
 const { readApiKey, registerAdminHandlers } = await import('./admin')

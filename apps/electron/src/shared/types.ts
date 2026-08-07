@@ -696,13 +696,14 @@ export interface ElectronAPI {
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{
     version: CreatorArtifactVersion
-    upload: CreatorSkillUploadGrant
     replayed?: boolean
   }>>
   creatorArtifactCreateUploadGrant(input: {
     organizationId: string
     artifactId: string
     version: string
+    sizeBytes: number
+    archiveChecksum: string
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{
     grant: CreatorSkillUploadGrant
@@ -713,6 +714,7 @@ export interface ElectronAPI {
     version: string
     uploadGeneration: number
     sizeBytes: number
+    archiveChecksum: string
     idempotencyKey: string
   }): Promise<OrganizationRpcResult<{
     version: CreatorArtifactVersion
