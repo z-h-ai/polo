@@ -38,7 +38,9 @@ export function TabBar() {
         <Icons.House className="h-4 w-4" strokeWidth={1.5} />
       </Button>
 
-      <div className="flex min-w-0 flex-1 items-end gap-1 overflow-hidden">
+      {/* Fill the titlebar so tabs align to its bottom edge instead of being
+          vertically centered with a visible gap above the TopBar. */}
+      <div className="flex h-full min-w-0 flex-1 items-end gap-1 overflow-hidden">
         {openTabs.map((tab) => {
           const active = tab.id === activeTabId
           return (
@@ -46,7 +48,9 @@ export function TabBar() {
               key={tab.id}
               className={cn(
                 'titlebar-no-drag flex h-8 min-w-[120px] max-w-[220px] flex-1 items-center gap-1.5 rounded-t-md border border-transparent px-2 text-xs transition-colors',
-                active ? 'border-foreground/10 bg-foreground/8 text-foreground' : 'text-foreground/65 hover:bg-foreground/5',
+                active
+                  ? 'relative z-[1] -mb-px border-foreground/10 border-b-transparent bg-foreground/8 text-foreground'
+                  : 'text-foreground/65 hover:bg-foreground/5',
               )}
               draggable={tab.id !== POLO_TAB_ID}
               onClick={() => activateTab(tab.id)}
