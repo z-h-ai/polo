@@ -85,6 +85,15 @@ describe('Creator App publishing contract', () => {
     })
   })
 
+  it('rejects legacy Manifest permission objects and non-empty arrays instead of rewriting them', () => {
+    for (const permissions of [{ shell: true }, ['shell']]) {
+      expect(analyzeCreatorAppPayload([
+        { path: 'index.html', content: '<!doctype html>' },
+        { path: 'polo-app.json', content: JSON.stringify({ runtime: 'static', entry: ['index.html'], permissions }) },
+      ])).toMatchObject({ status: 'invalid', code: 'invalid_legacy_permissions' })
+    }
+  })
+
   it('does not accept an empty dependency lock or a service without a health endpoint', () => {
     expect(analyzeCreatorAppPayload([
       { path: 'main.py', content: "@app.get('/health')" },
@@ -115,7 +124,7 @@ describe('Creator App publishing contract', () => {
             version: '99.0.0',
             runtime: 'static',
             entry: ['index.html'],
-            permissions: ['shell'],
+            permissions: [],
           }),
         },
       ],

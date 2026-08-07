@@ -22,7 +22,7 @@ export interface CreatorAppEntryCandidate {
 export type CreatorAppPayloadAnalysis =
   | { status: 'ready'; candidate: CreatorAppEntryCandidate; legacyHint?: CreatorAppEntryCandidate }
   | { status: 'needs_entry_selection'; candidates: CreatorAppEntryCandidate[]; legacyHint?: CreatorAppEntryCandidate }
-  | { status: 'invalid'; code: 'missing_runnable_payload' | 'unsafe_archive'; message: string }
+  | { status: 'invalid'; code: 'missing_runnable_payload' | 'unsafe_archive' | 'invalid_legacy_permissions'; message: string }
 
 export interface CanonicalCreatorAppBundle {
   entries: Array<NormalizedCreatorAppPayloadEntry>
@@ -86,6 +86,15 @@ function legacyCandidate(entries: readonly NormalizedCreatorAppPayloadEntry[]): 
   return undefined
 }
 
+function hasInvalidLegacyPermissions(entries: readonly NormalizedCreatorAppPayloadEntry[]): boolean {
+  const manifest = entries.find(entry => entry.path === 'polo-app.json')
+  if (!manifest?.content) return false
+  try {
+    const raw = JSON.parse(manifest.content) as Record<string, unknown>
+    return raw.permissions !== undefined && (!Array.isArray(raw.permissions) || raw.permissions.length !== 0)
+  } catch { return false }
+}
+
 /**
  * Server-side ingress contract. It is intentionally pure: callers inspect
  * uploaded bytes but never execute a build command or application code.
@@ -115,6 +124,9 @@ export function analyzeCreatorAppPayload(
   }
 
   const files = entries.filter(entry => entry.type === 'file')
+  if (hasInvalidLegacyPermissions(entries)) {
+    return { status: 'invalid', code: 'invalid_legacy_permissions', message: 'This legacy Bundle requests unsupported permissions.' }
+  }
   const paths = new Set(files.map(entry => entry.path))
   const legacyHint = legacyCandidate(entries)
   const candidates: CreatorAppEntryCandidate[] = []

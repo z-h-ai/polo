@@ -403,8 +403,11 @@ export class AdminClient {
   async createPlatformApp(accessToken: string, organizationId: string, input: {
     name: string; visibility: 'all_members'; deliveryMode: 'remote_url' | 'local_bundle'; remoteUrl?: string
   }): Promise<AdminPlatformApp> {
-    const response = await this.request<any>(`/api/organizations/${encodeURIComponent(organizationId)}/apps`, {
-      method: 'POST', accessToken, body: input,
+    const response = await this.request<any>(`/api/admin/organizations/${encodeURIComponent(organizationId)}/apps`, {
+      method: 'POST', accessToken, body: {
+        name: input.name, deliveryMode: input.deliveryMode, remoteUrl: input.remoteUrl,
+        visibilityPolicy: input.visibility, status: 'published',
+      },
     });
     const app = response?.app ?? response;
     if (!app || typeof app.id !== 'string' || app.organizationId !== organizationId) throw new AdminError('Invalid App create response', 'SERVER_ERROR');
@@ -412,34 +415,34 @@ export class AdminClient {
   }
 
   async listPlatformAppReleases(accessToken: string, organizationId: string, appId: string): Promise<AdminPlatformRelease[]> {
-    const response = await this.request<any>(`/api/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases`, { method: 'GET', accessToken });
+    const response = await this.request<any>(`/api/admin/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases`, { method: 'GET', accessToken });
     if (!Array.isArray(response?.releases)) throw new AdminError('Invalid Release list response', 'SERVER_ERROR');
     return response.releases;
   }
 
   async createPlatformRelease(accessToken: string, organizationId: string, appId: string, version: string): Promise<AdminPlatformRelease> {
-    const response = await this.request<any>(`/api/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases`, { method: 'POST', accessToken, body: { version } });
+    const response = await this.request<any>(`/api/admin/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases`, { method: 'POST', accessToken, body: { version, status: 'draft', metadata: {} } });
     const release = response?.release ?? response;
     if (!release || typeof release.id !== 'string' || release.appId !== appId || release.version !== version) throw new AdminError('Invalid Release create response', 'SERVER_ERROR');
     return release;
   }
 
   async createPlatformReleaseUpload(accessToken: string, organizationId: string, appId: string, releaseId: string): Promise<AdminSignedUpload> {
-    const response = await this.request<any>(`/api/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(releaseId)}/upload`, { method: 'POST', accessToken });
+    const response = await this.request<any>(`/api/admin/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(releaseId)}/upload`, { method: 'POST', accessToken });
     const upload = response?.upload ?? response;
     if (!upload || typeof upload.url !== 'string' || upload.method !== 'PUT') throw new AdminError('Invalid signed upload response', 'SERVER_ERROR');
     return upload;
   }
 
   async completeAndPublishPlatformRelease(accessToken: string, organizationId: string, appId: string, releaseId: string, input: { checksum: string; sizeBytes: number }): Promise<void> {
-    const base = `/api/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(releaseId)}`;
-    await this.request(`${base}/upload-complete`, { method: 'POST', accessToken, body: input });
+    const base = `/api/admin/organizations/${encodeURIComponent(organizationId)}/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(releaseId)}`;
+    await this.request(`${base}/upload-complete`, { method: 'POST', accessToken });
     await this.request(`${base}/publish`, { method: 'POST', accessToken });
   }
 
   async uploadPlatformReleaseBundle(upload: AdminSignedUpload, bundle: Uint8Array): Promise<void> {
     const body = bundle.buffer.slice(bundle.byteOffset, bundle.byteOffset + bundle.byteLength) as ArrayBuffer
-    const response = await fetch(upload.url, { method: 'PUT', headers: upload.headers, body });
+    const response = await fetch(upload.url, { method: 'PUT', headers: { ...upload.headers, 'Content-Type': 'application/zip' }, body });
     if (!response.ok) throw new AdminError('Signed Bundle upload failed', 'NETWORK_ERROR');
   }
 
