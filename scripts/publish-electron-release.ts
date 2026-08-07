@@ -29,6 +29,7 @@ import {
 import { isStrictSemver } from './strict-semver'
 
 export const MANIFEST_NAMES = ['latest-mac.yml', 'latest-linux.yml'] as const
+export const MACOS_DMG_NAME = 'Polo-AI-x64.dmg'
 export const MAX_DISK_USAGE = 0.70
 export const KEEP_RELEASES = 3
 
@@ -86,8 +87,8 @@ function asManifest(value: unknown, name: string): UpdateManifest {
     throw new Error(`${name} is not a YAML object`)
   }
   const manifest = value as Partial<UpdateManifest>
-  if (typeof manifest.version !== 'string' || !Array.isArray(manifest.files) || manifest.files.length !== 1) {
-    throw new Error(`${name} must contain a version and exactly one file`)
+  if (typeof manifest.version !== 'string' || !Array.isArray(manifest.files) || manifest.files.length < 1) {
+    throw new Error(`${name} must contain a version and at least one file`)
   }
   for (const entry of manifest.files) {
     if (
@@ -101,8 +102,36 @@ function asManifest(value: unknown, name: string): UpdateManifest {
     }
     validateBasename(entry.url, name)
   }
+  if (new Set(manifest.files.map(entry => entry.url)).size !== manifest.files.length) {
+    throw new Error(`${name} contains duplicate file entries`)
+  }
   if (manifest.path !== undefined) validateBasename(manifest.path, `${name}.path`)
   return manifest as UpdateManifest
+}
+
+function manifestEntryForArtifact(
+  manifest: UpdateManifest,
+  name: (typeof MANIFEST_NAMES)[number],
+  expectedArtifact: ReleaseArtifactContract,
+): YamlFile {
+  const allowed = name === 'latest-mac.yml'
+    ? new Set([expectedArtifact.fileName, MACOS_DMG_NAME])
+    : new Set([expectedArtifact.fileName])
+  const unsupported = manifest.files.find(entry => !allowed.has(entry.url))
+  if (unsupported) {
+    throw new Error(`${name} references an unsupported artifact: ${unsupported.url}`)
+  }
+  const entry = manifest.files.find(item => item.url === expectedArtifact.fileName)
+  if (!entry) {
+    throw new Error(`${name} does not reference ${expectedArtifact.fileName}`)
+  }
+  if (manifest.path !== undefined && manifest.path !== entry.url) {
+    throw new Error(`${name}.path references ${manifest.path}, expected ${entry.url}`)
+  }
+  if (manifest.sha512 !== undefined && manifest.sha512 !== entry.sha512) {
+    throw new Error(`${name} top-level SHA-512 does not match ${entry.url}`)
+  }
+  return entry
 }
 
 function expectedManifestArtifacts(contract: ReleaseContract): Record<(typeof MANIFEST_NAMES)[number], ReleaseArtifactContract> {
@@ -178,19 +207,13 @@ export async function validateSource(
       throw new Error(`${name} has version ${manifest.version}, expected ${expected.version}`)
     }
     const expectedArtifact = manifestArtifacts[name]
-    const entry = manifest.files[0]!
-    if (entry.url !== expectedArtifact.fileName || (manifest.path && manifest.path !== entry.url)) {
-      throw new Error(`${name} references ${entry.url}, expected ${expectedArtifact.fileName}`)
-    }
+    const entry = manifestEntryForArtifact(manifest, name, expectedArtifact)
     const artifactPath = join(source, entry.url)
     const artifactStat = await stat(artifactPath)
     if (!artifactStat.isFile()) throw new Error(`${name} references a non-file artifact: ${entry.url}`)
     if (artifactStat.size !== entry.size) throw new Error(`${name} has an incorrect size for ${entry.url}`)
     if ((await checksum(artifactPath, 'sha512')) !== entry.sha512) {
       throw new Error(`${name} has an incorrect SHA-512 for ${entry.url}`)
-    }
-    if (manifest.sha512 && manifest.sha512 !== entry.sha512) {
-      throw new Error(`${name} top-level SHA-512 does not match its file entry`)
     }
     manifests[name] = manifest
   }

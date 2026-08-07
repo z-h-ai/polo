@@ -11,7 +11,11 @@ import {
   type ReleaseArtifactContract,
   type ReleaseContract,
 } from './electron-release-contract'
-import { MANIFEST_NAMES, validateSource } from './publish-electron-release'
+import {
+  MACOS_DMG_NAME,
+  MANIFEST_NAMES,
+  validateSource,
+} from './publish-electron-release'
 
 const BUNDLE_FILES = [
   'Polo-AI-x64.zip',
@@ -148,15 +152,25 @@ export async function verifyPublishedRelease(
     const manifest = load(await manifestResponse.text()) as {
       version?: string
       files?: Array<{ url?: string, size?: number, sha512?: string }>
+      path?: string
+      sha512?: string
     }
-    const entry = manifest.files?.[0]
     const artifact = manifestContracts[manifestName]!
+    const entry = manifest.files?.find(item => item.url === artifact.fileName)
+    const allowed = manifestName === 'latest-mac.yml'
+      ? new Set([artifact.fileName, MACOS_DMG_NAME])
+      : new Set([artifact.fileName])
     if (
       manifest.version !== expected.version
-      || manifest.files?.length !== 1
-      || entry?.url !== artifact.fileName
+      || !Array.isArray(manifest.files)
+      || manifest.files.length < 1
+      || manifest.files.some(item => typeof item.url !== 'string' || !allowed.has(item.url))
+      || new Set(manifest.files.map(item => item.url)).size !== manifest.files.length
+      || !entry
       || !Number.isSafeInteger(entry.size)
       || typeof entry.sha512 !== 'string'
+      || (manifest.path !== undefined && manifest.path !== artifact.fileName)
+      || (manifest.sha512 !== undefined && manifest.sha512 !== entry.sha512)
     ) {
       throw new Error(`${manifestName} does not match the published contract`)
     }
