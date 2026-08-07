@@ -1092,6 +1092,7 @@ export async function executeTurn(
         },
       },
     })
+    if (args.verbose) process.stderr.write(`Server ready: ${server.url}\n`)
     await completeStage('spawnServer')
     await lease.heartbeat({
       pid: server.pid,

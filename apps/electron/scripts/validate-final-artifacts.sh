@@ -680,9 +680,18 @@ run_packaged_headless_lifecycle() {
   fi
   cat "$run_output"
 
-  grep -F '"sawHello":true' "$request_log" >/dev/null
-  grep -F 'artifact run completed' "$run_output" >/dev/null
-  grep -F 'Server ready: ws://127.0.0.1:' "$run_output" >/dev/null
+  if ! grep -F '"sawHello":true' "$request_log" >/dev/null; then
+    echo "polo run did not reach the mock provider" >&2
+    return 1
+  fi
+  if ! grep -F 'artifact run completed' "$run_output" >/dev/null; then
+    echo "polo run did not return the expected provider response" >&2
+    return 1
+  fi
+  if ! grep -F 'Server ready: ws://127.0.0.1:' "$run_output" >/dev/null; then
+    echo "verbose polo run did not report its temporary loopback server" >&2
+    return 1
+  fi
   local temporary_port
   temporary_port=$(sed -n \
     's/.*Server ready: ws:\\/\\/127\\.0\\.0\\.1:\\([0-9][0-9]*\\).*/\\1/p' \
