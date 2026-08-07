@@ -1891,8 +1891,8 @@ export function registerAdminHandlers(
       const releases = await client.listPlatformAppReleases(accessToken, resolved.organizationId, app.id)
       const patches = releases.map(release => /^1\.0\.(\d+)$/.exec(release.version)?.[1]).filter(Boolean).map(Number)
       const version = `1.0.${patches.length ? Math.max(...patches) + 1 : 0}`
-      const release = await client.createPlatformRelease(accessToken, resolved.organizationId, app.id, version)
       const bundle = createCanonicalCreatorAppBundle({ entries, appId: app.id, version, name: input.data.name, entry })
+      const release = await client.createPlatformRelease(accessToken, resolved.organizationId, app.id, version)
       const upload = await client.createPlatformReleaseUpload(accessToken, resolved.organizationId, app.id, release.id)
       await client.uploadPlatformReleaseBundle(upload, bundle.archive)
       await client.completeAndPublishPlatformRelease(accessToken, resolved.organizationId, app.id, release.id, bundle)
