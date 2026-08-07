@@ -25,6 +25,7 @@ import {
   LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
   LOCAL_APP_INSTALL_RPC_TIMEOUT_MS,
 } from '@polo-ai/shared/protocol'
+import { createPlatformOwnedManifest } from '@polo-ai/shared/admin'
 import type {
   LocalAppArchitecture,
   LocalAppInstallRequest,
@@ -476,6 +477,22 @@ describe('LocalAppRuntimeManager', () => {
     expect(LOCAL_APP_INSTALL_RPC_TIMEOUT_MS).toBeGreaterThan(
       LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
     )
+  })
+
+  it('accepts a platform-generated Creator App manifest with empty permissions', () => {
+    const manifest = createPlatformOwnedManifest({
+      appId: 'server-owned-app',
+      version: '1.0.0',
+      name: 'Creator Static App',
+      entry: { runtime: 'static', path: 'index.html' },
+    })
+    expect(validatePoloAppManifest(manifest, { platform, arch: architecture })).toMatchObject({
+      appId: 'server-owned-app',
+      version: '1.0.0',
+      runtime: 'static',
+      entry: ['index.html'],
+      permissions: [],
+    })
   })
 
   it('accepts the full business app id contract independently of the runtime path id', async () => {
