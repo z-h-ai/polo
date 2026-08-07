@@ -21,12 +21,6 @@ on:
       previous_macos_sha256:
         type: string
         default: ""
-      previous_windows_name:
-        type: string
-        default: ""
-      previous_windows_sha256:
-        type: string
-        default: ""
       previous_linux_name:
         type: string
         default: ""
@@ -47,31 +41,24 @@ on:
         required: true
       apple_team_id:
         required: true
-      windows_csc_link:
-        required: true
-      windows_csc_key_password:
-        required: true
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: ${{ matrix.platform }} signed lifecycle
+    name: ${{ matrix.platform }} release lifecycle
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
+        # Windows is intentionally excluded until its Authenticode credentials are configured.
         include:
           - platform: macos
             runner: macos-14
             manifest: latest-mac.yml
             artifact: Polo-AI-x64.zip
-          - platform: windows
-            runner: windows-latest
-            manifest: latest.yml
-            artifact: Polo-AI-x64.exe
           - platform: linux
             runner: ubuntu-latest
             manifest: latest-linux.yml
@@ -81,19 +68,17 @@ jobs:
       PREVIOUS_RELEASE_TAG: ${{ inputs.previous_release_tag }}
       PREVIOUS_RELEASE_VERSION: ${{ inputs.previous_release_version }}
       PREVIOUS_RELEASE_COMMIT_SHA: ${{ inputs.previous_release_commit_sha }}
-      EXPECTED_PREVIOUS_ARTIFACT_SHA256: ${{ (matrix.platform == 'macos' && inputs.previous_macos_sha256) || (matrix.platform == 'windows' && inputs.previous_windows_sha256) || inputs.previous_linux_sha256 }}
+      EXPECTED_PREVIOUS_ARTIFACT_SHA256: ${{ (matrix.platform == 'macos' && inputs.previous_macos_sha256) || inputs.previous_linux_sha256 }}
       EXPECTED_PREVIOUS_INSTALLER_SHA256: ${{ inputs.previous_installer_sha256 }}
-      PREVIOUS_ARTIFACT_NAME: ${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || (matrix.platform == 'windows' && inputs.previous_windows_name) || inputs.previous_linux_name }}
+      PREVIOUS_ARTIFACT_NAME: ${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || inputs.previous_linux_name }}
       POLO_AI_ARTIFACT_VALIDATION_MODE: ${{ inputs.bootstrap && 'bootstrap' || 'full' }}
-      POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || (matrix.platform == 'windows' && inputs.previous_windows_name) || inputs.previous_linux_name }}
+      POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || inputs.previous_linux_name }}
       POLO_AI_PREVIOUS_INSTALL_SCRIPT: ${{ github.workspace }}/previous/install-app.sh
       POLO_AI_RELEASE_MACOS_TEAM_ID: ${{ vars.POLO_AI_RELEASE_MACOS_TEAM_ID }}
       POLO_AI_RELEASE_MACOS_APP_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_APP_REQUIREMENT }}
       POLO_AI_RELEASE_MACOS_UV_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_UV_REQUIREMENT }}
-      POLO_AI_RELEASE_WINDOWS_PUBLISHER: ${{ vars.POLO_AI_RELEASE_WINDOWS_PUBLISHER }}
-      POLO_AI_RELEASE_WINDOWS_THUMBPRINT: ${{ vars.POLO_AI_RELEASE_WINDOWS_THUMBPRINT }}
-      CSC_LINK: ${{ (matrix.platform == 'macos' && secrets.macos_csc_link) || (matrix.platform == 'windows' && secrets.windows_csc_link) || '' }}
-      CSC_KEY_PASSWORD: ${{ (matrix.platform == 'macos' && secrets.macos_csc_key_password) || (matrix.platform == 'windows' && secrets.windows_csc_key_password) || '' }}
+      CSC_LINK: ${{ matrix.platform == 'macos' && secrets.macos_csc_link || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'macos' && secrets.macos_csc_key_password || '' }}
       APPLE_ID: ${{ matrix.platform == 'macos' && secrets.apple_id || '' }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'macos' && secrets.apple_app_specific_password || '' }}
       APPLE_TEAM_ID: ${{ matrix.platform == 'macos' && secrets.apple_team_id || '' }}
@@ -109,10 +94,10 @@ jobs:
           current_version="$(node -p 'require("./apps/electron/package.json").version')"
           echo "CURRENT_ELECTRON_VERSION=$current_version" >> "$GITHUB_ENV"
           missing=""
-          for name in CSC_LINK CSC_KEY_PASSWORD; do
-            if [ "${{ matrix.platform }}" != "linux" ] && [ -z "${!name:-}" ]; then missing="$missing $name"; fi
-          done
           if [ "${{ matrix.platform }}" = "macos" ]; then
+            for name in CSC_LINK CSC_KEY_PASSWORD; do
+              if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
+            done
             for name in POLO_AI_RELEASE_MACOS_TEAM_ID POLO_AI_RELEASE_MACOS_APP_REQUIREMENT POLO_AI_RELEASE_MACOS_UV_REQUIREMENT APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
               if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
             done
@@ -120,16 +105,12 @@ jobs:
               echo "::error::macOS signing and notarization Team IDs differ"
               exit 1
             fi
-          elif [ "${{ matrix.platform }}" = "windows" ]; then
-            for name in POLO_AI_RELEASE_WINDOWS_PUBLISHER POLO_AI_RELEASE_WINDOWS_THUMBPRINT; do
-              if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
-            done
           fi
           if [ "${{ inputs.bootstrap }}" != "true" ]; then
             for name in PREVIOUS_RELEASE_TAG PREVIOUS_RELEASE_VERSION PREVIOUS_RELEASE_COMMIT_SHA EXPECTED_PREVIOUS_ARTIFACT_SHA256 PREVIOUS_ARTIFACT_NAME; do
               if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
             done
-            if [ "${{ matrix.platform }}" != "windows" ] && [ -z "$EXPECTED_PREVIOUS_INSTALLER_SHA256" ]; then
+            if [ -z "$EXPECTED_PREVIOUS_INSTALLER_SHA256" ]; then
               missing="$missing EXPECTED_PREVIOUS_INSTALLER_SHA256"
             fi
           fi
@@ -138,8 +119,8 @@ jobs:
             exit 1
           fi
 
-      - name: Verify and download previous Unix release
-        if: ${{ inputs.bootstrap == false && matrix.platform != 'windows' }}
+      - name: Verify and download previous release
+        if: ${{ inputs.bootstrap == false }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,17 +129,6 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --artifact-name "$PREVIOUS_ARTIFACT_NAME" \
             --output "previous/verified-contract-${{ matrix.platform }}.json"
-
-      - name: Verify and download previous Windows release
-        if: ${{ inputs.bootstrap == false && matrix.platform == 'windows' }}
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          & scripts/preflight-previous-release.ps1 `
-            -ArtifactName $env:PREVIOUS_ARTIFACT_NAME `
-            -Output "previous/verified-contract-windows.json"
-          if ($LASTEXITCODE -ne 0) { throw "Previous Windows release preflight failed" }
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -214,24 +184,8 @@ jobs:
             --artifact-sha256 "$EXPECTED_PREVIOUS_ARTIFACT_SHA256"
             --output "previous/verified-contract-${{ matrix.platform }}.json"
           )
-          if [ "${{ matrix.platform }}" != "windows" ]; then
-            args+=(--installer "$POLO_AI_PREVIOUS_INSTALL_SCRIPT" --installer-sha256 "$EXPECTED_PREVIOUS_INSTALLER_SHA256")
-          fi
+          args+=(--installer "$POLO_AI_PREVIOUS_INSTALL_SCRIPT" --installer-sha256 "$EXPECTED_PREVIOUS_INSTALLER_SHA256")
           bun run scripts/validate-previous-release-contract.ts "${args[@]}"
-
-      - name: Run Windows terminal ownership tests
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          foreach ($test in @(
-            "windows-terminal-integration.test.ps1",
-            "windows-terminal-integration-race.test.ps1",
-            "windows-wrapper-smoke.test.ps1"
-          )) {
-            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
-              -File "apps/electron/resources/scripts/tests/$test"
-            if ($LASTEXITCODE -ne 0) { throw "$test failed" }
-          }
 
       - name: Build and validate macOS release
         if: matrix.platform == 'macos'
@@ -239,13 +193,6 @@ jobs:
         run: |
           set -o pipefail
           bun run electron:dist:mac --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-macos.log"
-
-      - name: Build and validate Windows release
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          bun run electron:dist:win --arch=x64 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/full-validation-windows.log"
-          if ($LASTEXITCODE -ne 0) { throw "Windows release validation failed" }
 
       - name: Build and validate Linux release
         if: matrix.platform == 'linux'
@@ -270,6 +217,15 @@ jobs:
           path: |
             apps/electron/release/${{ matrix.artifact }}
             apps/electron/release/${{ matrix.manifest }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload macOS manual installer
+        if: matrix.platform == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-release-macos-dmg-${{ github.sha }}
+          path: apps/electron/release/Polo-AI-x64.dmg
           if-no-files-found: error
           retention-days: 14
 

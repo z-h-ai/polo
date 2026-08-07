@@ -1,10 +1,10 @@
-name: Roll Back Electron Update Pointer
+name: Verify Manual Electron Update Rollback
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Retained version to make current, without a leading v
+        description: Version already selected manually in Zeabur, without a leading v
         required: true
         type: string
 
@@ -21,11 +21,10 @@ jobs:
     environment: production
     permissions:
       contents: read
-    env:
-      ZEABUR_ENVIRONMENT_ID: ${{ vars.ZEABUR_ENVIRONMENT_ID }}
-      ZEABUR_PUBLISHER_SERVICE_ID: ${{ vars.ZEABUR_PUBLISHER_SERVICE_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
@@ -35,22 +34,14 @@ jobs:
             import { isStrictSemver } from "./scripts/strict-semver.ts";
             if (!isStrictSemver(process.argv[1])) throw new Error("Rollback version must be strict SemVer");
           ' "${{ inputs.version }}"
-      - name: Authenticate Zeabur CLI
-        env:
-          ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
+      - name: Verify manually selected rollback release
         run: |
-          test -n "$ZEABUR_TOKEN"
-          test -n "$ZEABUR_ENVIRONMENT_ID"
-          test -n "$ZEABUR_PUBLISHER_SERVICE_ID"
-          curl -fsSL https://zeabur.com/install.sh | bash
-          export PATH="$HOME/.zeabur/bin:$PATH"
-          echo "$HOME/.zeabur/bin" >> "$GITHUB_PATH"
-          zeabur auth login --token "$ZEABUR_TOKEN"
-      - name: Atomically point latest at retained version
-        run: |
-          zeabur service exec \
-            --id "$ZEABUR_PUBLISHER_SERVICE_ID" \
-            --env-id "$ZEABUR_ENVIRONMENT_ID" -- \
-            /app/publisher rollback \
-              --releases-dir /data/releases \
-              --version "${{ inputs.version }}"
+          rollback_version="${{ inputs.version }}"
+          rollback_tag="v${rollback_version}"
+          rollback_commit="$(git rev-list -n 1 "${rollback_tag}^{commit}")"
+          bun scripts/electron-release-bundle.ts verify \
+            --url https://updates.polo.z-h-ai.com/electron/latest \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$rollback_tag" \
+            --version "$rollback_version" \
+            --commit "$rollback_commit"

@@ -6,14 +6,13 @@ import { describe, expect, it } from 'bun:test'
 import { prepareReleaseBundle, verifyPublishedRelease } from './electron-release-bundle'
 
 describe('release bundle assembly and public verification', () => {
-  it('builds the fixed eight-file bundle and verifies it over HEAD/GET', async () => {
+  it('builds the macOS/Linux bundle and verifies it over HEAD/GET', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-release-bundle-'))
     const input = join(root, 'input')
     const output = join(root, 'output')
     await mkdir(input)
     const artifacts = [
       ['Polo-AI-x64.zip', 'macOS bytes', 'latest-mac.yml'],
-      ['Polo-AI-x64.exe', 'Windows bytes', 'latest.yml'],
       ['Polo-AI-x64.AppImage', 'Linux bytes', 'latest-linux.yml'],
     ] as const
     try {
@@ -40,7 +39,7 @@ describe('release bundle assembly and public verification', () => {
         installScript,
         publishedAt: '2026-08-07T12:00:00.000Z',
       })
-      expect((await readdir(output)).sort()).toHaveLength(8)
+      expect((await readdir(output)).sort()).toHaveLength(6)
 
       const server = Bun.serve({
         port: 0,

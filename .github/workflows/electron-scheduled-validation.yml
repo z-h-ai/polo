@@ -25,5 +25,3 @@ jobs:
       apple_id: ${{ secrets.POLO_AI_APPLE_ID }}
       apple_app_specific_password: ${{ secrets.POLO_AI_APPLE_APP_SPECIFIC_PASSWORD }}
       apple_team_id: ${{ secrets.POLO_AI_APPLE_TEAM_ID }}
-      windows_csc_link: ${{ secrets.POLO_AI_WINDOWS_CSC_LINK }}
-      windows_csc_key_password: ${{ secrets.POLO_AI_WINDOWS_CSC_KEY_PASSWORD }}

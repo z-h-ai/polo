@@ -18,7 +18,6 @@ function contract(version = '0.15.2'): ReleaseContract {
     publishedAt: '2026-08-07T12:00:00.000Z',
     artifacts: {
       macosZip: { fileName: 'Polo-AI-x64.zip', sha256: '1'.repeat(64) },
-      windowsExe: { fileName: 'Polo-AI-x64.exe', sha256: '2'.repeat(64) },
       linuxAppImage: { fileName: 'Polo-AI-x64.AppImage', sha256: '3'.repeat(64) },
     },
     installApp: { fileName: 'install-app.sh', sha256: '4'.repeat(64) },
@@ -38,7 +37,7 @@ function input(overrides: Record<string, unknown> = {}) {
 }
 
 describe('release contract', () => {
-  it('accepts the fixed schema', () => {
+  it('accepts the macOS/Linux release schema', () => {
     expect(parseReleaseContract(contract())).toEqual(contract())
   })
 

@@ -18,7 +18,6 @@ const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 export const RELEASE_ARTIFACT_KEYS = [
   'macosZip',
-  'windowsExe',
   'linuxAppImage',
 ] as const
 
@@ -142,7 +141,6 @@ export function parseReleaseContract(value: unknown): ReleaseContract {
     publishedAt: record.publishedAt,
     artifacts: {
       macosZip: parseArtifact(artifactRecord.macosZip, 'artifacts.macosZip'),
-      windowsExe: parseArtifact(artifactRecord.windowsExe, 'artifacts.windowsExe'),
       linuxAppImage: parseArtifact(artifactRecord.linuxAppImage, 'artifacts.linuxAppImage'),
     },
     installApp: parseArtifact(record.installApp, 'installApp'),
@@ -156,7 +154,6 @@ export function parseReleaseContract(value: unknown): ReleaseContract {
   }
   if (
     !contract.artifacts.macosZip.fileName.endsWith('.zip')
-    || !contract.artifacts.windowsExe.fileName.endsWith('.exe')
     || !contract.artifacts.linuxAppImage.fileName.endsWith('.AppImage')
     || contract.installApp.fileName !== 'install-app.sh'
   ) {
@@ -212,7 +209,6 @@ export async function createReleaseContract(input: {
   commitSha: string
   publishedAt: string
   macosZip: string
-  windowsExe: string
   linuxAppImage: string
   installApp: string
 }): Promise<ReleaseContract> {
@@ -225,7 +221,6 @@ export async function createReleaseContract(input: {
     publishedAt: input.publishedAt,
     artifacts: {
       macosZip: { fileName: basename(input.macosZip), sha256: await sha256(input.macosZip) },
-      windowsExe: { fileName: basename(input.windowsExe), sha256: await sha256(input.windowsExe) },
       linuxAppImage: { fileName: basename(input.linuxAppImage), sha256: await sha256(input.linuxAppImage) },
     },
     installApp: { fileName: basename(input.installApp), sha256: await sha256(input.installApp) },
@@ -288,8 +283,6 @@ async function runPreflight(argv: string[]): Promise<void> {
     appendOutput(output, 'previous_commit_sha', result.previous.commitSha)
     appendOutput(output, 'previous_macos_name', result.previous.artifacts.macosZip.fileName)
     appendOutput(output, 'previous_macos_sha256', result.previous.artifacts.macosZip.sha256)
-    appendOutput(output, 'previous_windows_name', result.previous.artifacts.windowsExe.fileName)
-    appendOutput(output, 'previous_windows_sha256', result.previous.artifacts.windowsExe.sha256)
     appendOutput(output, 'previous_linux_name', result.previous.artifacts.linuxAppImage.fileName)
     appendOutput(output, 'previous_linux_sha256', result.previous.artifacts.linuxAppImage.sha256)
     appendOutput(output, 'previous_installer_sha256', result.previous.installApp.sha256)

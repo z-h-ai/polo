@@ -25,7 +25,7 @@ import {
 
 const repository = 'polo/polo'
 const commitSha = 'a'.repeat(40)
-const manifestNames = ['latest-mac.yml', 'latest.yml', 'latest-linux.yml'] as const
+const manifestNames = ['latest-mac.yml', 'latest-linux.yml'] as const
 const testPublisherOptions = { capacityCheck: async () => {} }
 
 interface Fixture {
@@ -42,17 +42,15 @@ async function createFixture(version = '1.0.0'): Promise<Fixture> {
   await Promise.all([mkdir(source), mkdir(volume)])
   const files = {
     macosZip: join(source, 'Polo-AI-x64.zip'),
-    windowsExe: join(source, 'Polo-AI-x64.exe'),
     linuxAppImage: join(source, 'Polo-AI-x64.AppImage'),
     installApp: join(source, 'install-app.sh'),
   }
   await Promise.all([
     writeFile(files.macosZip, 'macOS release'),
-    writeFile(files.windowsExe, 'Windows release'),
     writeFile(files.linuxAppImage, 'Linux release'),
     writeFile(files.installApp, '#!/bin/sh\n'),
   ])
-  const artifacts = [files.macosZip, files.windowsExe, files.linuxAppImage]
+  const artifacts = [files.macosZip, files.linuxAppImage]
   for (let index = 0; index < manifestNames.length; index += 1) {
     const artifact = artifacts[index]!
     const contents = await readFile(artifact)
@@ -88,18 +86,18 @@ describe('release publisher validation', () => {
   it('accepts the complete curated release directory', async () => {
     const fixture = await createFixture()
     try {
-      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(8)
+      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(6)
     } finally { await destroy(fixture) }
   })
 
   it('rejects incorrect manifest version, size, and hashes', async () => {
     const fixture = await createFixture()
     try {
-      const manifest = join(fixture.source, 'latest.yml')
+      const manifest = join(fixture.source, 'latest-mac.yml')
       const original = await readFile(manifest, 'utf8')
       await writeFile(manifest, original.replace('version: 1.0.0', 'version: 2.0.0'))
       await expect(validateSource(fixture.source, fixture.args)).rejects.toThrow('has version')
-      await writeFile(manifest, original.replace('size: 15', 'size: 999'))
+      await writeFile(manifest, original.replace(/size: \d+/, 'size: 999'))
       await expect(validateSource(fixture.source, fixture.args)).rejects.toThrow('incorrect size')
       await writeFile(manifest, original.replace(/sha512: .+/g, 'sha512: invalid'))
       await expect(validateSource(fixture.source, fixture.args)).rejects.toThrow('incorrect SHA-512')

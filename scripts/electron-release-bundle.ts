@@ -15,7 +15,6 @@ import { MANIFEST_NAMES, validateSource } from './publish-electron-release'
 
 const BUNDLE_FILES = [
   'Polo-AI-x64.zip',
-  'Polo-AI-x64.exe',
   'Polo-AI-x64.AppImage',
   ...MANIFEST_NAMES,
 ] as const
@@ -64,7 +63,6 @@ export async function prepareReleaseBundle(input: BundleMetadata & {
     commitSha: input.commitSha,
     publishedAt: input.publishedAt,
     macosZip: join(outputDir, 'Polo-AI-x64.zip'),
-    windowsExe: join(outputDir, 'Polo-AI-x64.exe'),
     linuxAppImage: join(outputDir, 'Polo-AI-x64.AppImage'),
     installApp: join(outputDir, 'install-app.sh'),
   })
@@ -142,7 +140,6 @@ export async function verifyPublishedRelease(
 
   const manifestContracts: Record<string, ReleaseArtifactContract> = {
     'latest-mac.yml': contract.artifacts.macosZip,
-    'latest.yml': contract.artifacts.windowsExe,
     'latest-linux.yml': contract.artifacts.linuxAppImage,
   }
   for (const manifestName of MANIFEST_NAMES) {

@@ -28,10 +28,20 @@ describe('Electron release workflow boundaries', () => {
     expect(scheduled).not.toContain('environment: production')
   })
 
-  it('requires production approval for manual rollback', () => {
+  it('requires production approval to verify a manual rollback', () => {
     expect(rollback).toContain('workflow_dispatch:')
     expect(rollback).toContain('environment: production')
-    expect(rollback).toContain('/app/publisher rollback')
+    expect(rollback).toContain('electron-release-bundle.ts verify')
+    expect(rollback).not.toContain('ZEABUR_TOKEN')
+    expect(rollback).not.toContain('/app/publisher rollback')
+  })
+
+  it('keeps the manual production gate free of Zeabur write credentials', () => {
+    expect(release).toContain('Verify manually uploaded updater bundle')
+    expect(release).toContain('Verify manually uploaded DMG')
+    expect(release).not.toContain('ZEABUR_TOKEN')
+    expect(release).not.toContain('zeabur deploy')
+    expect(release).not.toContain('/app/publisher')
   })
 
   it('grants contents write only to GitHub Release jobs', () => {

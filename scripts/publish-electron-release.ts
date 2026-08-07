@@ -28,7 +28,7 @@ import {
 } from './electron-release-contract'
 import { isStrictSemver } from './strict-semver'
 
-export const MANIFEST_NAMES = ['latest-mac.yml', 'latest.yml', 'latest-linux.yml'] as const
+export const MANIFEST_NAMES = ['latest-mac.yml', 'latest-linux.yml'] as const
 export const MAX_DISK_USAGE = 0.70
 export const KEEP_RELEASES = 3
 
@@ -108,7 +108,6 @@ function asManifest(value: unknown, name: string): UpdateManifest {
 function expectedManifestArtifacts(contract: ReleaseContract): Record<(typeof MANIFEST_NAMES)[number], ReleaseArtifactContract> {
   return {
     'latest-mac.yml': contract.artifacts.macosZip,
-    'latest.yml': contract.artifacts.windowsExe,
     'latest-linux.yml': contract.artifacts.linuxAppImage,
   }
 }
