@@ -1270,4 +1270,104 @@ describe('AdminClient', () => {
     expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization)
       .toBe('Bearer creator-access-token');
   });
+
+  it('matches the production Creator App and Release HTTP contract', async () => {
+    const client = new AdminClient('https://admin.example.com');
+    mockJsonFetch({
+      app: {
+        id: 'app-1',
+        organizationId: 'organization-1',
+        name: 'Published site',
+        deliveryMode: 'remote_url',
+        internalField: 'must-not-leak',
+      },
+    }, 201);
+
+    expect(await client.createPlatformApp('creator-access-token', 'organization-1', {
+      name: 'Published site',
+      visibility: 'all_members',
+      deliveryMode: 'remote_url',
+      remoteUrl: 'https://app.example.test',
+    })).toEqual({
+      id: 'app-1',
+      organizationId: 'organization-1',
+      name: 'Published site',
+      deliveryMode: 'remote_url',
+    });
+    expect(fetchCalls[0]).toMatchObject({
+      url: 'https://admin.example.com/api/organizations/organization-1/admin/apps',
+      init: {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Published site',
+          deliveryMode: 'remote_url',
+          remoteUrl: 'https://app.example.test',
+          visibilityPolicy: 'all_members',
+          status: 'active',
+        }),
+      },
+    });
+
+    mockJsonFetch({
+      release: { id: 'release-1', appId: 'app-1', version: '1.0.0' },
+      upload: { method: 'PUT', url: 'https://admin.example.com/signed-upload' },
+    }, 201);
+    const input = {
+      version: '1.0.0',
+      runtime: 'static' as const,
+      checksum: `sha256:${'a'.repeat(64)}`,
+      sizeBytes: 123,
+      platform: 'any' as const,
+      arch: 'any' as const,
+    };
+    const created = await client.createPlatformRelease(
+      'creator-access-token', 'organization-1', 'app-1', input,
+    );
+    expect(created).toEqual({
+      release: { id: 'release-1', appId: 'app-1', version: '1.0.0' },
+      upload: { method: 'PUT', url: 'https://admin.example.com/signed-upload' },
+    });
+    expect(fetchCalls[0]!.url).toBe(
+      'https://admin.example.com/api/organizations/organization-1/admin/apps/app-1/releases',
+    );
+    expect(fetchCalls[0]!.init.body).toBe(JSON.stringify(input));
+  });
+
+  it('uploads a Creator App Bundle with authentication then completes and publishes it', async () => {
+    const client = new AdminClient('https://admin.example.com');
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (request: string | URL | Request, init?: RequestInit) => {
+      const url = typeof request === 'string' ? request : request instanceof URL ? request.toString() : request.url;
+      calls.push({ url, init: init ?? {} });
+      return url.endsWith('/signed-upload')
+        ? new Response(null, { status: 204 })
+        : new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof globalThis.fetch;
+
+    await client.uploadPlatformReleaseBundle(
+      'creator-access-token',
+      { method: 'PUT', url: 'https://admin.example.com/signed-upload' },
+      new Uint8Array([1, 2, 3]),
+    );
+    await client.completeAndPublishPlatformRelease(
+      'creator-access-token', 'organization-1', 'app-1', 'release-1',
+    );
+
+    expect(calls.map(call => call.url)).toEqual([
+      'https://admin.example.com/signed-upload',
+      'https://admin.example.com/api/organizations/organization-1/admin/apps/app-1/releases/release-1/upload-complete',
+      'https://admin.example.com/api/organizations/organization-1/admin/apps/app-1/releases/release-1/publish',
+    ]);
+    expect(calls[0]!.init.headers).toMatchObject({
+      Authorization: 'Bearer creator-access-token',
+      'Content-Type': 'application/zip',
+    });
+    for (const call of calls.slice(1)) {
+      expect(call.init.body).toBe('{}');
+      expect(call.init.headers).toMatchObject({
+        Authorization: 'Bearer creator-access-token',
+        'Content-Type': 'application/json',
+      });
+    }
+  });
 });

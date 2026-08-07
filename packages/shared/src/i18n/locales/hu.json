@@ -363,6 +363,7 @@
   "creatorSkills.artifact.webAppGuide.bundleDescription": "Húzz be egy futtatható ZIP-et vagy mappát. A Polo elemzi, elkészíti a platformcsomagot, és csak akkor kérdez rá, ha nem tudja meghatározni az alkalmazás belépési pontját.",
   "creatorSkills.artifact.webAppGuide.bundleTitle": "Alkalmazás feltöltése",
   "creatorSkills.artifact.webAppGuide.description": "Adj meg egy alkalmazásnevet, majd válassz már közzétett webhelyet vagy futtatható alkalmazásfájlt. A Polo kezeli a platform részleteit.",
+  "creatorSkills.artifact.webAppGuide.entryPrompt": "Melyik fájl indítja el az alkalmazást?",
   "creatorSkills.artifact.webAppGuide.file": "Futtatható ZIP vagy mappa",
   "creatorSkills.artifact.webAppGuide.name": "Alkalmazás neve",
   "creatorSkills.artifact.webAppGuide.recommended": "Ajánlott",

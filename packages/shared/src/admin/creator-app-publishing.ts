@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import type { LocalAppRuntimeKind, PoloAppManifest } from '../protocol/local-apps.ts'
+import { validatePoloAppManifestContract } from '../protocol/local-app-manifest.ts'
 
 export type CreatorAppPublishMode = 'website' | 'upload'
 export type CreatorAppVisibility = 'all_members'
@@ -353,24 +354,20 @@ export function validateProductionCreatorAppBundle(
   const entries = decodeCreatorAppPayloadZip(archive)
   const manifestEntry = entries.find(entry => entry.path === 'polo-app.json')
   if (!manifestEntry?.content) throw new Error('The final Bundle is missing polo-app.json.')
-  let manifest: PoloAppManifest
+  let rawManifest: unknown
   try {
-    manifest = JSON.parse(manifestEntry.content) as PoloAppManifest
+    rawManifest = JSON.parse(manifestEntry.content)
   } catch {
     throw new Error('The final Bundle has an invalid polo-app.json.')
   }
-  const entry = Array.isArray(manifest.entry) && typeof manifest.entry[0] === 'string'
-    ? safePath(manifest.entry[0])
-    : null
-  const validHttpPath = (value: unknown) => typeof value === 'string'
-    && value.startsWith('/') && !value.startsWith('//') && !value.includes('\0')
-    && (() => { try { return new URL(value, 'http://127.0.0.1').origin === 'http://127.0.0.1' } catch { return false } })()
-  if (
-    typeof manifest.appId !== 'string' || !manifest.appId.trim() || manifest.appId.length > 512
-    || typeof manifest.version !== 'string' || !/^[0-9A-Za-z](?:[0-9A-Za-z._+-]{0,126}[0-9A-Za-z])?$/.test(manifest.version)
-    || !entry || !entries.some(item => item.path === entry) || !Array.isArray(manifest.permissions) || manifest.permissions.length !== 0
-    || !validHttpPath(manifest.healthcheck) || !validHttpPath(manifest.webPath)
-  ) {
+  let manifest: PoloAppManifest
+  try {
+    manifest = validatePoloAppManifestContract(rawManifest)
+  } catch {
+    throw new Error('The final Bundle does not satisfy the production Manifest contract.')
+  }
+  const entry = safePath(manifest.entry[0]!)
+  if (!entry || !entries.some(item => item.path === entry && item.type === 'file')) {
     throw new Error('The final Bundle does not satisfy the production Manifest contract.')
   }
   if (expected && (manifest.appId !== expected.appId || manifest.version !== expected.version || manifest.runtime !== expected.runtime)) {

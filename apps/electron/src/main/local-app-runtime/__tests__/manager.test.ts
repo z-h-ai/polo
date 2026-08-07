@@ -25,7 +25,10 @@ import {
   LOCAL_APP_INSTALL_OPERATION_TIMEOUT_MS,
   LOCAL_APP_INSTALL_RPC_TIMEOUT_MS,
 } from '@polo-ai/shared/protocol'
-import { createPlatformOwnedManifest } from '@polo-ai/shared/admin'
+import {
+  createCanonicalCreatorAppBundle,
+  createPlatformOwnedManifest,
+} from '@polo-ai/shared/admin'
 import type {
   LocalAppArchitecture,
   LocalAppInstallRequest,
@@ -492,6 +495,57 @@ describe('LocalAppRuntimeManager', () => {
       runtime: 'static',
       entry: ['index.html'],
       permissions: [],
+    })
+  })
+
+  it.each([
+    {
+      runtime: 'static' as const,
+      entry: 'index.html',
+      entries: [
+        { path: 'index.html', content: '<!doctype html><title>Static Creator App</title>' },
+      ],
+    },
+    {
+      runtime: 'python' as const,
+      entry: 'main.py',
+      entries: [
+        { path: 'main.py', content: "@app.get('/health')\ndef health(): return 'ok'" },
+        { path: 'pyproject.toml', content: '[project]\nname = "creator-app"' },
+        { path: 'uv.lock', content: 'version = "1"' },
+      ],
+    },
+    {
+      runtime: 'js' as const,
+      entry: 'server.js',
+      entries: [
+        { path: 'server.js', content: "server.get('/health', () => 'ok')" },
+        { path: 'bun.lock', content: 'lockfileVersion: 1' },
+      ],
+    },
+  ])('installs a canonical Creator $runtime ZIP through the production installer', async fixture => {
+    const appId = `00000000-0000-4000-8000-00000000000${fixture.runtime === 'static' ? 1 : fixture.runtime === 'python' ? 2 : 3}`
+    const bundle = createCanonicalCreatorAppBundle({
+      entries: fixture.entries,
+      appId,
+      version: '1.0.0',
+      name: `${fixture.runtime} Creator App`,
+      entry: { runtime: fixture.runtime, path: fixture.entry },
+    })
+    const archive = Buffer.from(bundle.archive)
+    const url = await serveArchive(archive)
+    let uvPath: string | undefined
+    if (fixture.runtime === 'python') {
+      uvPath = join(testRoot, 'fake-uv')
+      await writeFile(uvPath, '#!/bin/sh\nexit 0\n', 'utf8')
+      await chmod(uvPath, 0o755)
+    }
+    const runtime = makeManager({ ...(uvPath ? { uvPath } : {}) })
+
+    await expect(runtime.install(requestFor(appId, '1.0.0', url, archive))).resolves.toMatchObject({
+      appId,
+      currentVersion: '1.0.0',
+      versions: ['1.0.0'],
     })
   })
 

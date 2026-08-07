@@ -363,6 +363,7 @@
   "creatorSkills.artifact.webAppGuide.bundleDescription": "Ziehen Sie eine ausführbare ZIP-Datei oder einen Ordner hinein. Polo analysiert den Inhalt, erstellt das Plattform-Bundle und fragt nur nach, wenn der Einstieg nicht eindeutig ist.",
   "creatorSkills.artifact.webAppGuide.bundleTitle": "App hochladen",
   "creatorSkills.artifact.webAppGuide.description": "Geben Sie einen App-Namen an und wählen Sie dann eine veröffentlichte Website oder eine ausführbare App-Datei. Polo übernimmt die Plattformdetails.",
+  "creatorSkills.artifact.webAppGuide.entryPrompt": "Welche Datei startet die App?",
   "creatorSkills.artifact.webAppGuide.file": "Ausführbare ZIP-Datei oder Ordner",
   "creatorSkills.artifact.webAppGuide.name": "App-Name",
   "creatorSkills.artifact.webAppGuide.recommended": "Empfohlen",

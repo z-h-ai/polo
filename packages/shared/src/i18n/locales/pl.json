@@ -363,6 +363,7 @@
   "creatorSkills.artifact.webAppGuide.bundleDescription": "Przeciągnij wykonywalny plik ZIP lub folder. Polo go przeanalizuje, przygotuje pakiet platformy i zapyta tylko wtedy, gdy nie może określić punktu wejścia aplikacji.",
   "creatorSkills.artifact.webAppGuide.bundleTitle": "Prześlij aplikację",
   "creatorSkills.artifact.webAppGuide.description": "Podaj nazwę aplikacji, a następnie wybierz opublikowaną witrynę lub wykonywalny plik aplikacji. Polo obsługuje szczegóły platformy.",
+  "creatorSkills.artifact.webAppGuide.entryPrompt": "Który plik uruchamia aplikację?",
   "creatorSkills.artifact.webAppGuide.file": "Wykonywalny ZIP lub folder",
   "creatorSkills.artifact.webAppGuide.name": "Nazwa aplikacji",
   "creatorSkills.artifact.webAppGuide.recommended": "Zalecane",

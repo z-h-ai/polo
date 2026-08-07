@@ -363,6 +363,7 @@
   "creatorSkills.artifact.webAppGuide.bundleDescription": "実行可能な ZIP またはフォルダーをドラッグしてください。Polo が内容を分析してプラットフォーム用バンドルを準備し、アプリのエントリを特定できない場合にのみ質問します。",
   "creatorSkills.artifact.webAppGuide.bundleTitle": "アプリをアップロード",
   "creatorSkills.artifact.webAppGuide.description": "アプリ名を入力し、公開済みの Web サイトまたは実行可能なアプリファイルを選びます。プラットフォームの詳細は Polo が処理します。",
+  "creatorSkills.artifact.webAppGuide.entryPrompt": "アプリを起動するファイルはどれですか？",
   "creatorSkills.artifact.webAppGuide.file": "実行可能な ZIP またはフォルダー",
   "creatorSkills.artifact.webAppGuide.name": "アプリ名",
   "creatorSkills.artifact.webAppGuide.recommended": "推奨",

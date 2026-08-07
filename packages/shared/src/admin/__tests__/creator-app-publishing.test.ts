@@ -147,6 +147,33 @@ describe('Creator App publishing contract', () => {
     })
   })
 
+  it('uses the installer Manifest contract for the final production ZIP', () => {
+    const base = {
+      schemaVersion: 1,
+      appId: 'server-app-id',
+      version: '1.0.0',
+      runtime: 'static',
+      entry: ['index.html'],
+      healthcheck: '/',
+      webPath: '/',
+      permissions: [],
+    }
+    for (const manifest of [
+      { ...base, appId: '' },
+      { ...base, entry: ['../index.html'] },
+      { ...base, healthcheck: 'relative' },
+      { ...base, permissions: ['host.read'] },
+    ]) {
+      const archive = zipSync({
+        'index.html': new TextEncoder().encode('<!doctype html>'),
+        'polo-app.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      })
+      expect(() => validateProductionCreatorAppBundle(archive)).toThrow(
+        'production Manifest contract',
+      )
+    }
+  })
+
   it('decodes actual ZIP bytes and rejects traversal before analysis', () => {
     const payload = zipSync({
       'index.html': new TextEncoder().encode('<!doctype html>'),

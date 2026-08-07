@@ -363,6 +363,7 @@
   "creatorSkills.artifact.webAppGuide.bundleDescription": "Arrastra un ZIP o carpeta ejecutable. Polo lo analizará, preparará el paquete de la plataforma y solo preguntará si no puede determinar la entrada de la aplicación.",
   "creatorSkills.artifact.webAppGuide.bundleTitle": "Subir una aplicación",
   "creatorSkills.artifact.webAppGuide.description": "Indica un nombre para la aplicación y elige un sitio web ya publicado o un archivo de aplicación ejecutable. Polo se encarga de los detalles de la plataforma.",
+  "creatorSkills.artifact.webAppGuide.entryPrompt": "¿Qué archivo inicia la aplicación?",
   "creatorSkills.artifact.webAppGuide.file": "ZIP o carpeta ejecutable",
   "creatorSkills.artifact.webAppGuide.name": "Nombre de la aplicación",
   "creatorSkills.artifact.webAppGuide.recommended": "Recomendado",

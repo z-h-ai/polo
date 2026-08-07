@@ -232,6 +232,30 @@ export const AppCatalogResponseSchema = z.object({
   })
 })
 
+export const AdminPlatformAppSchema = z.object({
+  id: entityId,
+  organizationId: entityId,
+  name: nonBlankString(128),
+  deliveryMode: z.enum(['remote_url', 'local_bundle']),
+})
+
+export const AdminPlatformReleaseSchema = z.object({
+  id: entityId,
+  appId: entityId,
+  version: nonBlankString(64),
+})
+
+export const AdminSignedUploadSchema = z.object({
+  url: httpUrl,
+  method: z.literal('PUT'),
+  headers: z.record(z.string(), z.string()).optional(),
+})
+
+export const AdminPlatformReleaseCreatedResponseSchema = z.object({
+  release: AdminPlatformReleaseSchema,
+  upload: AdminSignedUploadSchema,
+})
+
 /**
  * Fail-closed Catalog projection exposed outside the trusted main process.
  *

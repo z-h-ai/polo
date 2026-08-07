@@ -1037,6 +1037,7 @@ export function CreatorArtifactsPanel({
                     <Input
                       id="creator-web-app-name"
                       data-testid="creator-web-app-name"
+                      maxLength={128}
                       value={webAppName}
                       onChange={event => setWebAppName(event.target.value)}
                     />
@@ -1089,7 +1090,9 @@ export function CreatorArtifactsPanel({
                     )}
                     {webAppEntryCandidates.length > 0 ? (
                       <div data-testid="creator-web-app-entry-selection" className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Which file starts the App?</p>
+                        <p className="text-xs text-muted-foreground">
+                          {t('creatorSkills.artifact.webAppGuide.entryPrompt')}
+                        </p>
                         {webAppEntryCandidates.map(candidate => (
                           <Button key={`${candidate.runtime}:${candidate.path}`} type="button" size="sm" variant="outline"
                             onClick={() => { setWebAppSelectedEntry(candidate); void publishWebApp(candidate) }}>

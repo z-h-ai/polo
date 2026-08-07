@@ -363,6 +363,7 @@
   "creatorSkills.artifact.webAppGuide.bundleDescription": "拖入可运行的 ZIP 或文件夹。Polo 会自动分析、准备平台发布包；只有无法判断应用入口时才会追问。",
   "creatorSkills.artifact.webAppGuide.bundleTitle": "上传应用",
   "creatorSkills.artifact.webAppGuide.description": "填写应用名称后，选择已上线的网站或可运行的应用文件；平台细节由 Polo 自动处理。",
+  "creatorSkills.artifact.webAppGuide.entryPrompt": "哪个文件用于启动应用？",
   "creatorSkills.artifact.webAppGuide.file": "可运行的 ZIP 或文件夹",
   "creatorSkills.artifact.webAppGuide.name": "应用名称",
   "creatorSkills.artifact.webAppGuide.recommended": "推荐",
