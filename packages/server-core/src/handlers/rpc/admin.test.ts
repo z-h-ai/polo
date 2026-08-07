@@ -92,6 +92,12 @@ const adminClientBehavior = {
     defaultConnection: null,
   }),
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
+  createCreatorAppPublicationDraft: async (_accessToken: string, _input: unknown): Promise<any> => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
+  }),
+  publishCreatorApp: async (_accessToken: string, _input: unknown): Promise<any> => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'published',
+  }),
   listCreatorArtifacts: async (
     _accessToken: string,
     _input: unknown,
@@ -206,6 +212,16 @@ class MockAdminClient {
     return adminClientBehavior.listCreatorArtifacts(accessToken, input)
   }
 
+  async createCreatorAppPublicationDraft(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'createCreatorAppPublicationDraft', args: [input], accessToken })
+    return adminClientBehavior.createCreatorAppPublicationDraft(accessToken, input)
+  }
+
+  async publishCreatorApp(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'publishCreatorApp', args: [input], accessToken })
+    return adminClientBehavior.publishCreatorApp(accessToken, input)
+  }
+
   async createCreatorSkillUploadGrant(accessToken: string, input: unknown) {
     adminClientCalls.push({ method: 'createCreatorSkillUploadGrant', args: [input], accessToken })
     return adminClientBehavior.createCreatorSkillUploadGrant(accessToken, input)
@@ -288,6 +304,13 @@ const mockCredentialManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
+  analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
+  createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
+  decodeCreatorAppPayloadZip: () => { throw new Error('not configured') },
+  resolveCreatorAppPublishingOrganization: (input: any) => input.requestedOrganizationId
+    && input.availableOrganizationIds.includes(input.requestedOrganizationId)
+    ? { organizationId: input.requestedOrganizationId, source: 'requested' }
+    : { organizationId: null, source: 'none' },
   denyAppCatalogAccessForAccount: () => {},
   denyCachedAppCatalogAuthorization: () => null,
   denyCachedAppCatalogAuthorizationForAccount: () => [],
@@ -440,6 +463,7 @@ function createHarness() {
       handlers,
       RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD,
     ),
+    publishCreatorApp: requiredHandler(handlers, RPC_CHANNELS.admin.PUBLISH_CREATOR_APP),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
     previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
     acceptOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN),
@@ -566,6 +590,12 @@ beforeEach(() => {
     defaultConnection: 'admin-anthropic',
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
+  adminClientBehavior.createCreatorAppPublicationDraft = async () => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
+  })
+  adminClientBehavior.publishCreatorApp = async () => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'published',
+  })
   adminClientBehavior.listCreatorArtifacts = async () => ({ artifacts: [] })
   adminClientBehavior.createCreatorSkillUploadGrant = async () => ({
     method: 'PUT',
@@ -614,6 +644,7 @@ describe('registerAdminHandlers', () => {
       'login',
       'logout',
       'previewOrganizationJoin',
+      'publishCreatorApp',
       'removeOrganizationMember',
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',
@@ -678,6 +709,47 @@ describe('registerAdminHandlers', () => {
         accessToken: 'creator-access-token',
       },
     ])
+  })
+
+  it('receives a source organization over authenticated RPC and creates then publishes a website App', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token', refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000, userId: 'user-1', username: 'creator',
+    }
+    adminClientBehavior.listOrganizations = async () => ({ organizations: [{ id: 'creator-space' }] })
+    const { publishCreatorApp } = createHarness()
+    const result = await publishCreatorApp(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      {
+        organizationId: 'creator-space', name: 'Website', visibility: 'all_members',
+        mode: 'website', websiteUrl: 'https://app.example.test',
+      },
+    )
+    expect(result).toMatchObject({ success: true, publication: { appId: 'app-id', status: 'published' } })
+    expect(adminClientCalls.filter(call => call.method.includes('CreatorAppPublication'))).toEqual([
+      expect.objectContaining({ method: 'createCreatorAppPublicationDraft', args: [expect.objectContaining({ organizationId: 'creator-space', mode: 'website' })] }),
+    ])
+    expect(adminClientCalls.find(call => call.method === 'publishCreatorApp')).toMatchObject({
+      args: [expect.objectContaining({ appId: 'app-id', releaseId: 'release-id', websiteUrl: 'https://app.example.test' })],
+    })
+  })
+
+  it('rejects unavailable, removed, and absent source organizations without a fallback publication', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token', refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000, userId: 'user-1', username: 'creator',
+    }
+    adminClientBehavior.listOrganizations = async () => ({ organizations: [{ id: 'allowed-space' }] })
+    const { publishCreatorApp } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    for (const organizationId of ['deleted-space', 'removed-space', '']) {
+      const result = await publishCreatorApp(context, {
+        organizationId, name: 'Website', visibility: 'all_members', mode: 'website',
+        websiteUrl: 'https://app.example.test',
+      })
+      expect(result.success).toBe(false)
+    }
+    expect(adminClientCalls.some(call => call.method === 'createCreatorAppPublicationDraft')).toBe(false)
   })
 
   it('forwards organization onboarding through the authenticated admin session', async () => {

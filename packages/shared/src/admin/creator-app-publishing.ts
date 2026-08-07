@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { strToU8, unzipSync, zipSync } from 'fflate'
 import type { LocalAppRuntimeKind, PoloAppManifest } from '../protocol/local-apps.ts'
 
 export type CreatorAppPublishMode = 'website' | 'upload'
@@ -7,8 +8,10 @@ export type CreatorAppVisibility = 'all_members'
 export interface CreatorAppPayloadEntry {
   path: string
   type?: 'file' | 'directory' | 'symlink'
-  /** Text is sufficient for the deterministic ingress contract and tests. */
+  /** Decoded text is used for deterministic runtime detection. */
   content?: string
+  /** Raw payload bytes are preserved when creating the final ZIP. */
+  bytes?: Uint8Array
 }
 
 export interface CreatorAppEntryCandidate {
@@ -22,10 +25,18 @@ export type CreatorAppPayloadAnalysis =
   | { status: 'invalid'; code: 'missing_runnable_payload' | 'unsafe_archive'; message: string }
 
 export interface CanonicalCreatorAppBundle {
-  entries: Array<Required<CreatorAppPayloadEntry>>
+  entries: Array<NormalizedCreatorAppPayloadEntry>
   manifest: PoloAppManifest
   checksum: string
   sizeBytes: number
+  archive: Uint8Array
+}
+
+export interface NormalizedCreatorAppPayloadEntry {
+  path: string
+  type: 'file' | 'directory' | 'symlink'
+  content: string
+  bytes: Uint8Array
 }
 
 const PYTHON_LOCK_FILES = new Set(['requirements.txt', 'poetry.lock', 'pipfile.lock', 'uv.lock'])
@@ -48,7 +59,7 @@ function isRootFile(path: string, names: readonly string[]): boolean {
   return !path.includes('/') && names.includes(path.toLowerCase())
 }
 
-function legacyCandidate(entries: readonly Required<CreatorAppPayloadEntry>[]): CreatorAppEntryCandidate | undefined {
+function legacyCandidate(entries: readonly NormalizedCreatorAppPayloadEntry[]): CreatorAppEntryCandidate | undefined {
   const manifest = entries.find(entry => entry.path === 'polo-app.json')
   if (!manifest?.content) return undefined
   try {
@@ -79,7 +90,7 @@ export function analyzeCreatorAppPayload(
   input: readonly CreatorAppPayloadEntry[],
 ): CreatorAppPayloadAnalysis {
   const seen = new Set<string>()
-  const entries: Array<Required<CreatorAppPayloadEntry>> = []
+  const entries: NormalizedCreatorAppPayloadEntry[] = []
   for (const entry of input) {
     const path = safePath(entry.path)
     if (!path || entry.type === 'symlink' || NESTED_ARCHIVE.test(path)) {
@@ -90,26 +101,49 @@ export function analyzeCreatorAppPayload(
       return { status: 'invalid', code: 'unsafe_archive', message: 'The upload contains duplicate file paths.' }
     }
     seen.add(key)
-    entries.push({ path, type: entry.type ?? 'file', content: entry.content ?? '' })
+    const bytes = entry.bytes ?? strToU8(entry.content ?? '')
+    entries.push({
+      path,
+      type: entry.type ?? 'file',
+      content: entry.content ?? new TextDecoder().decode(bytes),
+      bytes,
+    })
   }
 
   const files = entries.filter(entry => entry.type === 'file')
   const paths = new Set(files.map(entry => entry.path))
-  const rootNames = new Set(files.filter(entry => !entry.path.includes('/')).map(entry => entry.path.toLowerCase()))
   const legacyHint = legacyCandidate(entries)
   const candidates: CreatorAppEntryCandidate[] = []
 
   if (paths.has('index.html')) candidates.push({ runtime: 'static', path: 'index.html' })
 
-  const hasPythonLock = [...rootNames].some(name => PYTHON_LOCK_FILES.has(name))
-  const hasJsLock = [...rootNames].some(name => JS_LOCK_FILES.has(name))
+  const hasLock = (names: ReadonlySet<string>) => files.some(entry => {
+    if (entry.path.includes('/') || !names.has(entry.path.toLowerCase())) return false
+    const lock = entry.content.trim()
+    if (!lock) return false
+    if (entry.path === 'requirements.txt') return /^[A-Za-z0-9_.-]+(?:\[[^\]]+\])?\s*(?:===|==|>=|<=|~=|>|<)\s*[^\s#]+/m.test(lock)
+    if (entry.path === 'poetry.lock') return /^\[\[package\]\]/m.test(lock)
+    if (entry.path === 'pipfile.lock') return /"(?:default|develop)"\s*:/m.test(lock)
+    if (entry.path === 'uv.lock') return /^version\s*=\s*"/m.test(lock)
+    if (entry.path === 'package-lock.json') return /"lockfileVersion"\s*:/m.test(lock)
+    if (entry.path === 'pnpm-lock.yaml') return /^lockfileVersion\s*:/m.test(lock)
+    if (entry.path === 'yarn.lock') return /^(?:"?[\w@][^:\n]*"?):\s*$/m.test(lock)
+    if (entry.path === 'bun.lock') return /^lockfileVersion\s*:/m.test(lock)
+    // bun.lockb is binary; the non-empty magic header is the only safe claim
+    // this ingress needs to make without executing a package manager.
+    return entry.bytes.byteLength > 8 && entry.bytes[0] === 0x62
+  })
+  const hasPythonLock = hasLock(PYTHON_LOCK_FILES)
+  const hasJsLock = hasLock(JS_LOCK_FILES)
   for (const entry of files) {
-    if (isRootFile(entry.path, ['main.py', 'app.py', 'server.py', 'wsgi.py']) && hasPythonLock) {
+    const hasHealthcheck = entry.content.includes('/health')
+    if (isRootFile(entry.path, ['main.py', 'app.py', 'server.py', 'wsgi.py']) && hasPythonLock && hasHealthcheck) {
       candidates.push({ runtime: 'python', path: entry.path })
     }
     if (
-      (isRootFile(entry.path, ['server.js', 'server.mjs', 'index.js', 'index.mjs']) && hasJsLock)
-      || entry.path === '.next/standalone/server.js'
+      ((isRootFile(entry.path, ['server.js', 'server.mjs', 'index.js', 'index.mjs'])
+        || entry.path === '.next/standalone/server.js') && hasJsLock)
+      && hasHealthcheck
     ) {
       candidates.push({ runtime: 'js', path: entry.path })
     }
@@ -165,23 +199,125 @@ export function createCanonicalCreatorAppBundle(input: {
 }): CanonicalCreatorAppBundle {
   const analysis = analyzeCreatorAppPayload(input.entries)
   if (analysis.status === 'invalid') throw new Error(analysis.message)
+  const candidates = analysis.status === 'ready'
+    ? [analysis.candidate]
+    : analysis.candidates
+  if (!candidates.some(candidate => (
+    candidate.runtime === input.entry.runtime && candidate.path === input.entry.path
+  ))) {
+    throw new Error('The selected App entry is not a safe analyzed candidate.')
+  }
   const manifest = createPlatformOwnedManifest(input)
-  const entries = input.entries
+  const entries: NormalizedCreatorAppPayloadEntry[] = input.entries
     .filter(entry => safePath(entry.path) !== 'polo-app.json')
     .map(entry => ({
       path: safePath(entry.path)!,
       type: entry.type ?? 'file' as const,
-      content: entry.content ?? '',
+      content: entry.content ?? new TextDecoder().decode(entry.bytes ?? new Uint8Array()),
+      bytes: entry.bytes ?? strToU8(entry.content ?? ''),
     }))
-    .concat({ path: 'polo-app.json', type: 'file' as const, content: `${JSON.stringify(manifest)}\n` })
+    .concat({
+      path: 'polo-app.json',
+      type: 'file' as const,
+      content: `${JSON.stringify(manifest)}\n`,
+      bytes: strToU8(`${JSON.stringify(manifest)}\n`),
+    })
     .sort((left, right) => left.path.localeCompare(right.path))
-  const encoded = entries.map(entry => `${entry.path}\0${entry.type}\0${entry.content}\0`).join('')
+  const archiveEntries: Record<string, Uint8Array> = {}
+  for (const entry of entries) {
+    if (entry.type !== 'file') continue
+    const source = input.entries.find(sourceEntry => safePath(sourceEntry.path) === entry.path)
+    archiveEntries[entry.path] = entry.path === 'polo-app.json'
+      ? entry.bytes
+      : source?.bytes ?? strToU8(source?.content ?? '')
+  }
+  const archive = zipSync(archiveEntries, { level: 9 })
+  validateProductionCreatorAppBundle(archive, manifest)
   return {
     entries,
     manifest,
-    checksum: createHash('sha256').update(encoded).digest('hex'),
-    sizeBytes: Buffer.byteLength(encoded),
+    checksum: createHash('sha256').update(archive).digest('hex'),
+    sizeBytes: archive.byteLength,
+    archive,
   }
+}
+
+/** Decode a real ZIP at the authenticated ingress boundary.  It never runs it. */
+export function decodeCreatorAppPayloadZip(archive: Uint8Array): CreatorAppPayloadEntry[] {
+  if (archive.byteLength === 0 || archive.byteLength > 50 * 1024 * 1024) {
+    throw new Error('The upload ZIP is empty or exceeds the archive size limit.')
+  }
+  inspectZipCentralDirectory(archive)
+  let files: Record<string, Uint8Array>
+  try {
+    files = unzipSync(archive)
+  } catch {
+    throw new Error('The upload is not a valid ZIP archive.')
+  }
+  let total = 0
+  return Object.entries(files).map(([path, bytes]) => {
+    if (!safePath(path)) throw new Error('The upload contains an unsafe archive entry.')
+    total += bytes.byteLength
+    if (total > 100 * 1024 * 1024) throw new Error('The upload exceeds the extracted size limit.')
+    return { path, type: 'file' as const, bytes, content: new TextDecoder().decode(bytes) }
+  })
+}
+
+/**
+ * fflate returns an object keyed by name, which would hide duplicate central
+ * directory entries and Unix symlink metadata. Inspect those bytes first.
+ */
+function inspectZipCentralDirectory(archive: Uint8Array): void {
+  const names = new Set<string>()
+  const decoder = new TextDecoder()
+  for (let offset = 0; offset + 46 <= archive.length; offset += 1) {
+    if (
+      archive[offset] !== 0x50 || archive[offset + 1] !== 0x4b
+      || archive[offset + 2] !== 0x01 || archive[offset + 3] !== 0x02
+    ) continue
+    const view = new DataView(archive.buffer, archive.byteOffset + offset, 46)
+    const nameLength = view.getUint16(28, true)
+    const extraLength = view.getUint16(30, true)
+    const commentLength = view.getUint16(32, true)
+    const end = offset + 46 + nameLength + extraLength + commentLength
+    if (end > archive.length) throw new Error('The upload is not a valid ZIP archive.')
+    const path = decoder.decode(archive.subarray(offset + 46, offset + 46 + nameLength))
+    const normalized = safePath(path)
+    const key = normalized?.toLocaleLowerCase('en-US')
+    const externalAttributes = view.getUint32(38, true)
+    const unixMode = externalAttributes >>> 16
+    if (!normalized || !key || names.has(key) || (unixMode & 0o170000) === 0o120000) {
+      throw new Error('The upload contains an unsafe archive entry.')
+    }
+    names.add(key)
+    offset = end - 1
+  }
+}
+
+/** The same manifest/ZIP contract consumed by the desktop installer. */
+export function validateProductionCreatorAppBundle(
+  archive: Uint8Array,
+  expected?: Pick<PoloAppManifest, 'appId' | 'version' | 'runtime'>,
+): PoloAppManifest {
+  const entries = decodeCreatorAppPayloadZip(archive)
+  const manifestEntry = entries.find(entry => entry.path === 'polo-app.json')
+  if (!manifestEntry?.content) throw new Error('The final Bundle is missing polo-app.json.')
+  let manifest: PoloAppManifest
+  try {
+    manifest = JSON.parse(manifestEntry.content) as PoloAppManifest
+  } catch {
+    throw new Error('The final Bundle has an invalid polo-app.json.')
+  }
+  const entry = Array.isArray(manifest.entry) && typeof manifest.entry[0] === 'string'
+    ? safePath(manifest.entry[0])
+    : null
+  if (!entry || !entries.some(item => item.path === entry) || !Array.isArray(manifest.permissions) || manifest.permissions.length !== 0) {
+    throw new Error('The final Bundle does not satisfy the production Manifest contract.')
+  }
+  if (expected && (manifest.appId !== expected.appId || manifest.version !== expected.version || manifest.runtime !== expected.runtime)) {
+    throw new Error('The final Bundle does not satisfy the production Manifest contract.')
+  }
+  return manifest
 }
 
 export function buildCreatorAppPublishingUrl(

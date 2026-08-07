@@ -15,6 +15,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { zipSync } from 'fflate'
 import { Spinner } from '@polo-ai/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -113,6 +114,7 @@ export function CreatorArtifactsPanel({
   const [webAppName, setWebAppName] = useState('')
   const [webAppUrl, setWebAppUrl] = useState('')
   const [webAppFile, setWebAppFile] = useState<File | null>(null)
+  const [webAppFiles, setWebAppFiles] = useState<File[]>([])
   const [slug, setSlug] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [changelog, setChangelog] = useState('')
@@ -497,6 +499,65 @@ export function CreatorArtifactsPanel({
         managementUrl.searchParams.set('payloadName', webAppFile.name)
       }
       await window.electronAPI.openUrl(managementUrl.toString())
+    } catch {
+      setError(t('creatorSkills.errors.webAppManagementUnavailable'))
+    } finally {
+      setAction(null)
+    }
+  }
+
+  const publishWebApp = async () => {
+    if (!webAppPublishMode || !webAppName.trim()) return
+    setAction('open-web-app')
+    setError(null)
+    try {
+      if (webAppPublishMode === 'website') {
+        const websiteUrl = new URL(webAppUrl.trim())
+        if (websiteUrl.protocol !== 'https:') {
+          setError(t('creatorSkills.errors.webAppHttpsRequired'))
+          return
+        }
+        const result = await window.electronAPI.creatorAppPublish({
+          organizationId,
+          name: webAppName.trim(),
+          visibility: 'all_members',
+          mode: 'website',
+          websiteUrl: websiteUrl.toString(),
+        })
+        if (!result.success) {
+          setError(resultMessage(t, result))
+          return
+        }
+      } else {
+        const files = webAppFiles.length > 0 ? webAppFiles : webAppFile ? [webAppFile] : []
+        if (files.length === 0) return
+        const payload = files.length === 1 && files[0]!.name.toLowerCase().endsWith('.zip')
+          ? new Uint8Array(await files[0]!.arrayBuffer())
+          : zipSync(Object.fromEntries(await Promise.all(files.map(async file => [
+              file.webkitRelativePath || file.name,
+              new Uint8Array(await file.arrayBuffer()),
+            ]))), { level: 9 })
+        let binary = ''
+        for (let offset = 0; offset < payload.length; offset += 0x8000) {
+          binary += String.fromCharCode(...payload.subarray(offset, offset + 0x8000))
+        }
+        const result = await window.electronAPI.creatorAppPublish({
+          organizationId,
+          name: webAppName.trim(),
+          visibility: 'all_members',
+          mode: 'upload',
+          payloadBase64: btoa(binary),
+        })
+        if (!result.success) {
+          setError(resultMessage(t, result))
+          return
+        }
+      }
+      setWebAppPublishMode(null)
+      setWebAppName('')
+      setWebAppUrl('')
+      setWebAppFile(null)
+      setWebAppFiles([])
     } catch {
       setError(t('creatorSkills.errors.webAppManagementUnavailable'))
     } finally {
@@ -993,7 +1054,13 @@ export function CreatorArtifactsPanel({
                           data-testid="creator-web-app-file"
                           type="file"
                           accept=".zip,application/zip"
-                          onChange={event => setWebAppFile(event.target.files?.[0] ?? null)}
+                          multiple
+                          ref={node => node?.setAttribute('webkitdirectory', '')}
+                          onChange={event => {
+                            const files = Array.from(event.target.files ?? [])
+                            setWebAppFiles(files)
+                            setWebAppFile(files[0] ?? null)
+                          }}
                         />
                       </>
                     )}
@@ -1006,7 +1073,7 @@ export function CreatorArtifactsPanel({
                         || !webAppName.trim()
                         || (webAppPublishMode === 'website' ? !webAppUrl.trim() : !webAppFile)
                       }
-                      onClick={() => { void openWebAppManagement(webAppPublishMode) }}
+                      onClick={() => { void publishWebApp() }}
                     >
                       {action === 'open-web-app'
                         ? <Spinner className="mr-1.5" />

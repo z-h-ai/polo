@@ -231,6 +231,7 @@ export const RPC_CHANNELS = {
     REVOKE_CREATOR_ARTIFACT_VERSION: 'admin:revokeCreatorArtifactVersion',
     GET_CREATOR_SKILL_DOWNLOAD_GRANT: 'admin:getCreatorSkillDownloadGrant',
     GET_CREATOR_SKILL_SAFETY_STATUS: 'admin:getCreatorSkillSafetyStatus',
+    PUBLISH_CREATOR_APP: 'admin:publishCreatorApp',
   },
   llmConnections: {
     LIST: 'LLM_Connection:list',

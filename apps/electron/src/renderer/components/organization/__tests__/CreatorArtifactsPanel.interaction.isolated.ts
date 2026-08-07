@@ -69,6 +69,7 @@ let installResponse: (
   input: { operationId: string },
 ) => Promise<Record<string, unknown>> | Record<string, unknown>
 let openedUrls: string[]
+let creatorAppPublishInputs: Array<Record<string, unknown>>
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
@@ -82,6 +83,7 @@ beforeEach(async () => {
   detailArtifact = skill
   detailInputs = []
   openedUrls = []
+  creatorAppPublishInputs = []
   detailResponse = () => ({
     success: true as const,
     artifact: detailArtifact,
@@ -146,6 +148,13 @@ beforeEach(async () => {
       onCreatorSkillProgress: () => () => {},
       creatorSkillCancel: async () => ({ success: true as const }),
       adminGetStatus: async () => ({ adminUrl: 'https://admin.example.test' }),
+      creatorAppPublish: async (input: Record<string, unknown>) => {
+        creatorAppPublishInputs.push(input)
+        return {
+          success: true as const,
+          publication: { appId: 'server-app-id', releaseId: 'release-id', version: '1.0.0', status: 'published' as const },
+        }
+      },
       openUrl: async (url: string) => { openedUrls.push(url) },
     },
   })
@@ -385,11 +394,14 @@ describe('CreatorArtifactsPanel', () => {
     fireEvent.click(within(guide).getByRole('button', {
       name: 'Continue to Web App publishing',
     }))
-    await waitFor(() => {
-      expect(openedUrls).toEqual([
-        `https://admin.example.test/organization-apps/publish?organizationId=${organizationId}&mode=website&name=Published+Dashboard&visibility=all_members&websiteUrl=https%3A%2F%2Fdashboard.example.test%2F`,
-      ])
-    })
+    await waitFor(() => expect(creatorAppPublishInputs).toEqual([{
+      organizationId,
+      name: 'Published Dashboard',
+      visibility: 'all_members',
+      mode: 'website',
+      websiteUrl: 'https://dashboard.example.test/',
+    }]))
+    expect(openedUrls).toEqual([])
   })
 
   it('starts the runnable payload flow with the selected mode and file metadata', async () => {
@@ -415,11 +427,15 @@ describe('CreatorArtifactsPanel', () => {
     fireEvent.click(within(guide).getByRole('button', {
       name: 'Continue to Web App publishing',
     }))
-    await waitFor(() => {
-      expect(openedUrls).toEqual([
-        `https://admin.example.test/organization-apps/publish?organizationId=${organizationId}&mode=upload&name=Local+Dashboard&visibility=all_members&payloadName=dashboard.zip`,
-      ])
+    await waitFor(() => expect(creatorAppPublishInputs).toHaveLength(1))
+    expect(creatorAppPublishInputs[0]).toMatchObject({
+      organizationId,
+      name: 'Local Dashboard',
+      visibility: 'all_members',
+      mode: 'upload',
     })
+    expect(atob(creatorAppPublishInputs[0]!.payloadBase64 as string)).toBe('payload')
+    expect(openedUrls).toEqual([])
   })
 
   it('localizes workspace mutation errors without a server message', async () => {

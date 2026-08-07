@@ -4,8 +4,11 @@ import {
   buildCreatorAppPublishingUrl,
   createCanonicalCreatorAppBundle,
   createPlatformOwnedManifest,
+  decodeCreatorAppPayloadZip,
   resolveCreatorAppPublishingOrganization,
+  validateProductionCreatorAppBundle,
 } from '../creator-app-publishing.ts'
+import { unzipSync, zipSync } from 'fflate'
 
 describe('Creator App publishing contract', () => {
   it('recognizes a static production payload and produces a platform-owned manifest', () => {
@@ -35,15 +38,15 @@ describe('Creator App publishing contract', () => {
 
   it('recognizes locked Python and JS service payloads without executing them', () => {
     expect(analyzeCreatorAppPayload([
-      { path: 'main.py', content: 'raise RuntimeError()' },
+      { path: 'main.py', content: "@app.get('/health')\ndef health(): pass" },
       { path: 'requirements.txt', content: 'fastapi==1.0' },
     ])).toEqual({
       status: 'ready',
       candidate: { runtime: 'python', path: 'main.py' },
     })
     expect(analyzeCreatorAppPayload([
-      { path: '.next/standalone/server.js', content: 'process.exit(1)' },
-      { path: 'package-lock.json', content: '{}' },
+      { path: '.next/standalone/server.js', content: "server.get('/health', () => {})" },
+      { path: 'package-lock.json', content: '{"lockfileVersion": 3}' },
     ])).toEqual({
       status: 'ready',
       candidate: { runtime: 'js', path: '.next/standalone/server.js' },
@@ -52,9 +55,9 @@ describe('Creator App publishing contract', () => {
 
   it('asks only for an entry when more than one runnable service is found', () => {
     expect(analyzeCreatorAppPayload([
-      { path: 'app.py' },
-      { path: 'server.py' },
-      { path: 'requirements.txt' },
+      { path: 'app.py', content: "@app.get('/health')" },
+      { path: 'server.py', content: "@app.get('/health')" },
+      { path: 'requirements.txt', content: 'fastapi==1.0' },
     ])).toEqual({
       status: 'needs_entry_selection',
       candidates: [
@@ -69,6 +72,10 @@ describe('Creator App publishing contract', () => {
       status: 'invalid',
       code: 'unsafe_archive',
     })
+    expect(analyzeCreatorAppPayload([{ path: 'linked-app', type: 'symlink' }])).toMatchObject({
+      status: 'invalid',
+      code: 'unsafe_archive',
+    })
     expect(analyzeCreatorAppPayload([{ path: 'src/index.ts' }])).toMatchObject({
       status: 'invalid',
       code: 'missing_runnable_payload',
@@ -76,10 +83,27 @@ describe('Creator App publishing contract', () => {
     })
   })
 
+  it('does not accept an empty dependency lock or a service without a health endpoint', () => {
+    expect(analyzeCreatorAppPayload([
+      { path: 'main.py', content: "@app.get('/health')" },
+      { path: 'requirements.txt', content: '' },
+    ])).toMatchObject({ status: 'invalid', code: 'missing_runnable_payload' })
+    expect(analyzeCreatorAppPayload([
+      { path: 'server.js', content: "server.get('/health', () => {})" },
+      { path: 'package-lock.json', content: '{}' },
+    ])).toMatchObject({ status: 'invalid', code: 'missing_runnable_payload' })
+    expect(analyzeCreatorAppPayload([
+      { path: 'server.js', content: 'server.listen(3000)' },
+      { path: 'package-lock.json', content: '{}' },
+    ])).toMatchObject({ status: 'invalid', code: 'missing_runnable_payload' })
+  })
+
   it('rewrites a legacy bundle identity and permissions before calculating final metadata', () => {
+    const binaryAsset = new Uint8Array([0, 255, 1, 2])
     const result = createCanonicalCreatorAppBundle({
       entries: [
         { path: 'index.html', content: '<!doctype html>' },
+        { path: 'assets/logo.bin', bytes: binaryAsset },
         {
           path: 'polo-app.json',
           content: JSON.stringify({
@@ -105,6 +129,42 @@ describe('Creator App publishing contract', () => {
     })
     expect(result.checksum).toMatch(/^[a-f0-9]{64}$/)
     expect(result.sizeBytes).toBeGreaterThan(0)
+    expect(unzipSync(result.archive)['assets/logo.bin']).toEqual(binaryAsset)
+    expect(validateProductionCreatorAppBundle(result.archive, result.manifest)).toMatchObject({
+      appId: 'server-app-id', permissions: [],
+    })
+  })
+
+  it('decodes actual ZIP bytes and rejects traversal before analysis', () => {
+    const payload = zipSync({
+      'index.html': new TextEncoder().encode('<!doctype html>'),
+      'assets/raw.bin': new Uint8Array([0, 255, 1]),
+    })
+    expect(decodeCreatorAppPayloadZip(payload)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'assets/raw.bin', bytes: new Uint8Array([0, 255, 1]) }),
+    ]))
+    expect(() => decodeCreatorAppPayloadZip(zipSync({ '../escape': new Uint8Array([1]) }))).toThrow('unsafe archive')
+  })
+
+  it('refuses a caller-selected traversal, missing, or runtime-mismatched entry', () => {
+    const input = {
+      entries: [
+        { path: 'main.py', content: "@app.get('/health')" },
+        { path: 'requirements.txt', content: 'fastapi==1.0' },
+      ],
+      appId: 'server-app-id',
+      version: '1.0.0',
+      name: 'Safe App',
+    }
+    for (const entry of [
+      { runtime: 'python' as const, path: '../main.py' },
+      { runtime: 'python' as const, path: 'missing.py' },
+      { runtime: 'js' as const, path: 'main.py' },
+    ]) {
+      expect(() => createCanonicalCreatorAppBundle({ ...input, entry })).toThrow(
+        'not a safe analyzed candidate',
+      )
+    }
   })
 
   it('makes the Console mode and source organization an explicit, authorization-safe query contract', () => {

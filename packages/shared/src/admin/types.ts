@@ -112,6 +112,28 @@ export interface AdminLlmConnectionsResponse {
 }
 
 export type OrganizationType = 'enterprise_workspace' | 'creator_space';
+export interface CreatorAppPublicationInput {
+  organizationId: string;
+  appId?: string;
+  releaseId?: string;
+  name: string;
+  visibility: 'all_members';
+  mode: 'website' | 'upload';
+  websiteUrl?: string;
+  /** Base64-encoded final, platform-owned ZIP; never a creator manifest. */
+  bundleBase64?: string;
+  checksum?: string;
+  sizeBytes?: number;
+}
+
+export interface CreatorAppPublicationResponse {
+  appId: string;
+  releaseId: string;
+  version: string;
+  status: 'draft' | 'published';
+  checksum?: string;
+  sizeBytes?: number;
+}
 export type OrganizationRole = 'owner' | 'manager' | 'member';
 export type OrganizationStatus = 'active' | 'suspended';
 export type OrganizationMembershipStatus = 'active' | 'suspended' | 'removed';

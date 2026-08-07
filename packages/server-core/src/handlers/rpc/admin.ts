@@ -19,7 +19,12 @@ import {
   type AdminRefreshResponse,
   type AdminUser,
   type DeniedAppCatalogSnapshot,
+  analyzeCreatorAppPayload,
+  createCanonicalCreatorAppBundle,
+  decodeCreatorAppPayloadZip,
+  resolveCreatorAppPublishingOrganization,
 } from '@polo-ai/shared/admin'
+import { z } from 'zod'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -108,7 +113,26 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.REVOKE_CREATOR_ARTIFACT_VERSION,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
+  RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
 ] as const
+
+const CreatorAppPublishRpcInputSchema = z.object({
+  organizationId: z.string().min(1).max(512),
+  name: z.string().trim().min(1).max(256),
+  visibility: z.literal('all_members'),
+  mode: z.enum(['website', 'upload']),
+  websiteUrl: z.string().url().max(16_384).optional(),
+  /** ZIP bytes cross the authenticated local RPC only as base64. */
+  payloadBase64: z.string().min(1).max(70 * 1024 * 1024).optional(),
+}).strict().superRefine((input, context) => {
+  if (input.mode === 'website') {
+    if (!input.websiteUrl || new URL(input.websiteUrl).protocol !== 'https:') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['websiteUrl'], message: 'HTTPS URL required' })
+    }
+  } else if (!input.payloadBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.payloadBase64)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['payloadBase64'], message: 'ZIP payload required' })
+  }
+})
 
 type StoredAdminTokens = NonNullable<Awaited<ReturnType<CredentialManager['getAdminTokens']>>>
 interface AdminSessionSnapshot {
@@ -1824,6 +1848,79 @@ export function registerAdminHandlers(
     if (!input.success) return adminInputError('VALIDATION_ERROR')
     return callOrganization('getCreatorSkillSafetyStatus', (client, accessToken) =>
       client.getCreatorSkillSafetyStatus(accessToken, input.data))
+  })
+
+  // This is the authenticated receiving boundary for Creator Space's publish
+  // intent.  It resolves the requested source organization from the current
+  // Admin session before creating the draft, so query parameters can never
+  // select an organization the session cannot access.
+  server.handle(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP, async (_ctx, rawInput: unknown) => {
+    const input = CreatorAppPublishRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('publishCreatorApp', async (client, accessToken, userId) => {
+      const organizations = await client.listOrganizations(accessToken)
+      const resolved = resolveCreatorAppPublishingOrganization({
+        requestedOrganizationId: input.data.organizationId,
+        availableOrganizationIds: organizations.organizations.map(item => item.id),
+        fallbackOrganizationId: null,
+      })
+      if (!resolved.organizationId) {
+        throw new AdminError('The source organization is unavailable', 'ORGANIZATION_UNAVAILABLE')
+      }
+      if (input.data.mode === 'website') {
+        const draft = await client.createCreatorAppPublicationDraft(accessToken, {
+          organizationId: resolved.organizationId,
+          name: input.data.name,
+          visibility: input.data.visibility,
+          mode: input.data.mode,
+          websiteUrl: input.data.websiteUrl,
+        })
+        const publication = await client.publishCreatorApp(accessToken, {
+          organizationId: resolved.organizationId,
+          appId: draft.appId,
+          releaseId: draft.releaseId,
+          name: input.data.name,
+          visibility: input.data.visibility,
+          mode: 'website',
+          websiteUrl: input.data.websiteUrl,
+        })
+        invalidateCreatorArtifactCache(userId, resolved.organizationId)
+        return { publication }
+      }
+      const archive = Uint8Array.from(Buffer.from(input.data.payloadBase64!, 'base64'))
+      const entries = decodeCreatorAppPayloadZip(archive)
+      const analysis = analyzeCreatorAppPayload(entries)
+      if (analysis.status === 'invalid') throw new AdminError(analysis.message, 'VALIDATION_ERROR')
+      if (analysis.status === 'needs_entry_selection') {
+        throw new AdminError('Choose which detected file starts the application.', 'VALIDATION_ERROR')
+      }
+      const draft = await client.createCreatorAppPublicationDraft(accessToken, {
+        organizationId: resolved.organizationId,
+        name: input.data.name,
+        visibility: input.data.visibility,
+        mode: input.data.mode,
+      })
+      const bundle = createCanonicalCreatorAppBundle({
+        entries,
+        appId: draft.appId,
+        version: draft.version,
+        name: input.data.name,
+        entry: analysis.candidate,
+      })
+      const publication = await client.publishCreatorApp(accessToken, {
+        organizationId: resolved.organizationId,
+        appId: draft.appId,
+        releaseId: draft.releaseId,
+        name: input.data.name,
+        visibility: input.data.visibility,
+        mode: 'upload',
+        bundleBase64: Buffer.from(bundle.archive).toString('base64'),
+        checksum: bundle.checksum,
+        sizeBytes: bundle.sizeBytes,
+      })
+      invalidateCreatorArtifactCache(userId, resolved.organizationId)
+      return { publication }
+    })
   })
   return {
     async endCurrentSession(beforeDelete): Promise<AdminSessionEndResult> {
