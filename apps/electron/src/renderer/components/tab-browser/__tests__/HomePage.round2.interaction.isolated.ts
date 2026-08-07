@@ -147,15 +147,15 @@ describe('HomePage round-two regressions', () => {
 
     expect(screen.getByTestId('builtin-app-launcher')).toBeTruthy()
     expect(screen.getByText('Built-in apps')).toBeTruthy()
-    expect(screen.getByText('Pro Buddy')).toBeTruthy()
-    expect(screen.getByText('Kanban')).toBeTruthy()
-    expect(screen.getByText('AirDrop')).toBeTruthy()
+    expect(screen.getByText('Polo 助手')).toBeTruthy()
+    expect(screen.queryByText('Kanban')).toBeNull()
+    expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(screen.getByText('Pro Buddy'))
+    fireEvent.click(screen.getByText('Polo 助手'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
-  it('migrates recents to preferences while keeping other built-ins discoverable', async () => {
+  it('migrates recents to preferences while keeping Polo 助手 discoverable', async () => {
     installedApps = [
       ...BUILTIN_APP_DEFINITIONS,
       {
@@ -168,11 +168,6 @@ describe('HomePage round-two regressions', () => {
       },
     ]
     setLocalStorage(KEYS.homeRecentApps, [
-      {
-        id: BUILTIN_APP_DEFINITIONS[0]!.id,
-        kind: 'builtin',
-        openedAt: 2,
-      },
       {
         id: 'external-recent',
         kind: 'external',
@@ -191,15 +186,32 @@ describe('HomePage round-two regressions', () => {
     })
     expect(localStorage.getItem('craft-home-recent-apps')).toBeNull()
     const launcher = screen.getByTestId('builtin-app-launcher')
-    expect(within(launcher).queryByText('Pro Buddy')).toBeNull()
-    expect(within(launcher).getByText('Kanban')).toBeTruthy()
-    expect(within(launcher).getByText('AirDrop')).toBeTruthy()
+    expect(within(launcher).getByText('Polo 助手')).toBeTruthy()
+    expect(screen.queryByText('Kanban')).toBeNull()
+    expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(within(launcher).getByText('Kanban'))
-    expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[1])
+    fireEvent.click(within(launcher).getByText('Polo 助手'))
+    expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
   it('does not let delayed hydration overwrite newer same-context recents', async () => {
+    const externalA = {
+      id: 'external-a',
+      name: 'External A',
+      url: 'https://external-a.example.com',
+      type: 'webapp' as const,
+      createdAt: 1,
+      order: 1,
+    }
+    const externalB = {
+      id: 'external-b',
+      name: 'External B',
+      url: 'https://external-b.example.com',
+      type: 'webapp' as const,
+      createdAt: 2,
+      order: 2,
+    }
+    installedApps = [...BUILTIN_APP_DEFINITIONS, externalA, externalB]
     const hydration = createDeferred<any[]>()
     getHomeRecentApps.mockImplementationOnce(() => hydration.promise)
 
@@ -212,33 +224,34 @@ describe('HomePage round-two regressions', () => {
       expect(getHomeRecentApps).toHaveBeenCalledTimes(1)
     })
 
-    fireEvent.click(screen.getByText('Pro Buddy'))
-    fireEvent.click(screen.getByText('Kanban'))
+    fireEvent.click(screen.getByText('Polo 助手'))
+    fireEvent.click(screen.getByText('External A'))
     await waitFor(() => {
       expect(setHomeRecentApps).toHaveBeenCalledTimes(2)
     })
 
     await act(async () => {
       hydration.resolve([{
-        id: BUILTIN_APP_DEFINITIONS[2]!.id,
-        kind: 'builtin',
+        id: externalB.id,
+        kind: 'external',
         openedAt: 1,
       }])
       await hydration.promise
     })
 
-    const launcher = screen.getByTestId('builtin-app-launcher')
-    expect(within(launcher).queryByText('Pro Buddy')).toBeNull()
-    expect(within(launcher).queryByText('Kanban')).toBeNull()
-    fireEvent.click(screen.getByText('AirDrop'))
+    expect(screen.queryByTestId('builtin-app-launcher')).toBeNull()
+    expect(screen.getByText('Polo 助手')).toBeTruthy()
+    expect(screen.queryByText('Kanban')).toBeNull()
+    expect(screen.queryByText('AirDrop')).toBeNull()
+    fireEvent.click(screen.getByText('External B'))
 
     await waitFor(() => {
       expect(setHomeRecentApps).toHaveBeenCalledTimes(3)
     })
     const persisted = [...homeRecentAppsByContext.values()][0]!
     expect(persisted.map(app => app.id)).toEqual([
-      BUILTIN_APP_DEFINITIONS[2]!.id,
-      BUILTIN_APP_DEFINITIONS[1]!.id,
+      externalB.id,
+      externalA.id,
       BUILTIN_APP_DEFINITIONS[0]!.id,
     ])
   })

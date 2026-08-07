@@ -1,4 +1,5 @@
 import * as Icons from 'lucide-react'
+import poloAppIcon from '../../../../resources/icon.png'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { isMac, isWebUI } from '@/lib/platform'
@@ -13,7 +14,7 @@ function TabIcon({ tab }: { tab: TabInstance }) {
     return <img src={tab.favicon} alt="" className="h-3.5 w-3.5 shrink-0" />
   }
   if (tab.type === 'polo') {
-    return <Icons.Sparkles className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
+    return <img src={poloAppIcon} alt="" className="h-3.5 w-3.5 shrink-0 object-contain" />
   }
   return <Icons.Globe2 className="h-3.5 w-3.5 text-foreground/65" strokeWidth={1.5} />
 }
