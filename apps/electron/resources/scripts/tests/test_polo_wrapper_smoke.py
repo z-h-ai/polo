@@ -44,6 +44,7 @@ with open(os.environ["POLO_WRAPPER_RECORD"], "w", encoding="utf-8") as handle:
         "server": os.environ.get("POLO_AI_SERVER_ENTRY"),
         "appRoot": os.environ.get("POLO_AI_APP_ROOT"),
         "resources": os.environ.get("POLO_AI_RESOURCES_PATH"),
+        "assetsRoot": os.environ.get("POLO_AI_BUNDLED_ASSETS_ROOT"),
         "packaged": os.environ.get("POLO_AI_IS_PACKAGED"),
     }, handle, ensure_ascii=False)
 PY
@@ -76,7 +77,8 @@ exit "${POLO_WRAPPER_EXIT:-37}"
         self.assertEqual(record["bun"], str(self.runtime))
         self.assertEqual(record["server"], str(self.server))
         self.assertEqual(record["appRoot"], str(self.app))
-        self.assertEqual(record["resources"], str(self.app / "resources"))
+        self.assertEqual(record["resources"], str(self.app / "dist" / "resources"))
+        self.assertEqual(record["assetsRoot"], str(self.app / "dist"))
         self.assertEqual(record["packaged"], "true")
 
         compat = subprocess.run(

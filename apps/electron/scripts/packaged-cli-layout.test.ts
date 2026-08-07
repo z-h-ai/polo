@@ -45,6 +45,7 @@ function assemble(platform: 'darwin' | 'linux' | 'win32') {
   const binDir = join(appDir, 'resources', 'bin')
   const cliDir = join(appDir, 'dist', 'cli')
   const serverDir = join(appDir, 'dist', 'server')
+  const bundledResourcesDir = join(appDir, 'dist', 'resources')
   const bunDir = join(resourcesDir, 'vendor', 'bun')
   const koffiDir = join(appDir, 'node_modules', 'koffi')
   const koffiPlatform = platform === 'darwin'
@@ -53,7 +54,9 @@ function assemble(platform: 'darwin' | 'linux' | 'win32') {
       ? (process.arch === 'arm64' ? 'linux_arm64' : 'linux_x64')
       : (process.arch === 'arm64' ? 'win32_arm64' : 'win32_x64')
   const koffiBuildDir = join(koffiDir, 'build', 'koffi', koffiPlatform)
-  for (const dir of [binDir, cliDir, serverDir, bunDir, koffiBuildDir]) mkdirSync(dir, { recursive: true })
+  for (const dir of [binDir, cliDir, serverDir, bundledResourcesDir, bunDir, koffiBuildDir]) {
+    mkdirSync(dir, { recursive: true })
+  }
   writeFileSync(join(koffiDir, 'package.json'), '{}\n')
   writeFileSync(join(koffiDir, 'index.js'), '// native loader\n')
   writeFileSync(join(koffiBuildDir, 'koffi.node'), 'fixture')
@@ -155,8 +158,8 @@ describe('assembled Electron CLI layout', () => {
       expect(outputs[0]).toBe([
         join(realAppDir, 'dist', 'server', 'polo-server.js'),
         realAppDir,
-        join(realAppDir, 'resources'),
-        realAppDir,
+        join(realAppDir, 'dist', 'resources'),
+        join(realAppDir, 'dist'),
         'true',
         '1',
         'run',
