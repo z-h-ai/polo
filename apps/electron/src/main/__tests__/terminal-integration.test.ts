@@ -644,6 +644,21 @@ describe('macOS terminal integration', () => {
     })
   })
 
+  it('accepts a managed launcher path with redundant separators', () => {
+    const options = setup()
+    const installed = installTerminalIntegration(options)
+    options.commandLookup = () => installed.launcherPath.replace(
+      '/.local/bin/polo',
+      '//.local/bin/polo',
+    )
+
+    const status = getTerminalIntegrationStatus(options)
+
+    expect(status.conflict).toBeUndefined()
+    expect(status.pathReady).toBe(true)
+    expect(status.statusCode).toBe('ready')
+  })
+
   it('does not treat the packaged wrapper symlink target as a user command conflict', () => {
     const options = setup()
     const packagedWrapper = join(

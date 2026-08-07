@@ -759,21 +759,28 @@ export function getTerminalIntegrationStatus(
   }
   const command = lookupAndValidateCommand(options)
   const found = command.found
+  const normalizedFound = found ? resolve(found) : null
+  const normalizedLauncherPath = resolve(launcherPath)
+  const normalizedLauncherTarget = resolve(launcherTarget)
   // The packaged app prepends its internal resources/bin directory to PATH for
   // agent sessions. That bundled wrapper is the symlink target we are about to
-  // install, not a user-owned system command conflict.
-  const externalFound = found === launcherTarget ? null : found
+  // install, not a user-owned system command conflict. Login shells can also
+  // preserve redundant path separators (for example, /tmp//home/.local/bin),
+  // so compare lexical absolute paths before classifying the command.
+  const externalFound = normalizedFound === normalizedLauncherTarget
+    ? null
+    : found
   const launcherExists = pathExists(launcherPath)
   const conflict = malformedProfile
     ? { code: 'profile_conflict' as const, path: malformedProfile }
     : launcherExists && !installed
       ? { code: 'launcher_conflict' as const, path: launcherPath }
-      : externalFound && externalFound !== launcherPath
+      : externalFound && normalizedFound !== normalizedLauncherPath
         ? { code: 'command_conflict' as const, path: externalFound }
         : undefined
   const pathReady = blockReady
     && !staleManagedProfile
-    && found === launcherPath
+    && normalizedFound === normalizedLauncherPath
     && launcherExecutable
     && command.valid
 
