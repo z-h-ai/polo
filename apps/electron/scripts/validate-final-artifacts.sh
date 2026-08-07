@@ -672,8 +672,13 @@ run_packaged_headless_lifecycle() {
   base_url=$("$HOST_BUN" -e \
     'process.stdout.write(JSON.parse(await Bun.file(process.argv[1]).text()).baseUrl)' \
     "$state_file")
-  run_fresh_shell "$shell_path" "$test_home" \
-    "polo run --provider openai --model gpt-4o --api-key '$mock_token' --base-url '$base_url' --workspace-dir '$workspace' --timeout 60000 --send-timeout 60000 'hello' >'$run_output' 2>&1 && cat '$run_output'"
+  if ! run_fresh_shell "$shell_path" "$test_home" \
+    "polo run --provider openai --model gpt-4o --api-key '$mock_token' --base-url '$base_url' --workspace-dir '$workspace' --timeout 60000 --send-timeout 60000 'hello' >'$run_output' 2>&1"; then
+    echo "Packaged polo run failed:" >&2
+    cat "$run_output" >&2
+    return 1
+  fi
+  cat "$run_output"
 
   grep -F '"sawHello":true' "$request_log" >/dev/null
   grep -F 'artifact run completed' "$run_output" >/dev/null
@@ -800,8 +805,16 @@ run_macos_full_e2e() {
   fi
   test "$current_version" = "$CURRENT_VERSION"
 
-  HOME="$test_home" SHELL=/bin/zsh POLO_AI_TERMINAL_HOME="$test_home" \
-    "$executable" --polo-terminal-integration install >/dev/null
+  local integration_output
+  integration_output=$(HOME="$test_home" SHELL=/bin/zsh \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    POLO_AI_TERMINAL_HOME="$test_home" \
+    "$executable" --polo-terminal-integration install)
+  if ! printf '%s' "$integration_output" \
+    | grep -F '"statusCode":"ready"' >/dev/null; then
+    echo "macOS terminal integration install did not become ready: $integration_output" >&2
+    return 1
+  fi
   test "$(readlink "$launcher")" = \
     "$resources_root/app/resources/bin/polo"
   run_fresh_shell /bin/zsh "$test_home" \
@@ -831,8 +844,15 @@ run_macos_full_e2e() {
   launchctl unsetenv POLO_AI_RUNTIME_DISCOVERY_FILE
   MAC_LAUNCH_ENV_CONFIGURED=false
 
-  HOME="$test_home" SHELL=/bin/zsh POLO_AI_TERMINAL_HOME="$test_home" \
-    "$executable" --polo-terminal-integration uninstall >/dev/null
+  integration_output=$(HOME="$test_home" SHELL=/bin/zsh \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    POLO_AI_TERMINAL_HOME="$test_home" \
+    "$executable" --polo-terminal-integration uninstall)
+  if ! printf '%s' "$integration_output" \
+    | grep -F '"statusCode":"not_installed"' >/dev/null; then
+    echo "macOS terminal integration uninstall left managed state: $integration_output" >&2
+    return 1
+  fi
   rm -rf "$installed_app"
   MAC_INSTALLED_APP=""
   if [ -e "$launcher" ] \
