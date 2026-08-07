@@ -114,8 +114,10 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
     proc = Bun.spawn([bunExecutable, 'run', serverEntry], {
       env: createSafeRuntimeEnvironment(process.env, {
         ...inferPackagedEnvironment(serverEntry),
-        ...opts?.env,
         POLO_AI_CONFIG_DIR: process.env.POLO_AI_CONFIG_DIR,
+        // A one-shot invocation supplies its private configuration snapshot
+        // here. It must win over an unset or unrelated parent config root.
+        ...opts?.env,
         POLO_AI_BUN: bunExecutable,
         POLO_AI_SERVER_RUNTIME_DIR: runtimeDir,
         POLO_AI_SERVER_TOKEN: token,
