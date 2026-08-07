@@ -68,6 +68,7 @@ let detailResponse: (
 let installResponse: (
   input: { operationId: string },
 ) => Promise<Record<string, unknown>> | Record<string, unknown>
+let openedUrls: string[]
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
@@ -80,6 +81,7 @@ beforeEach(async () => {
   detailVersions = []
   detailArtifact = skill
   detailInputs = []
+  openedUrls = []
   detailResponse = () => ({
     success: true as const,
     artifact: detailArtifact,
@@ -143,7 +145,8 @@ beforeEach(async () => {
       ),
       onCreatorSkillProgress: () => () => {},
       creatorSkillCancel: async () => ({ success: true as const }),
-      openUrl: async () => {},
+      adminGetStatus: async () => ({ adminUrl: 'https://admin.example.test' }),
+      openUrl: async (url: string) => { openedUrls.push(url) },
     },
   })
 })
@@ -350,6 +353,36 @@ describe('CreatorArtifactsPanel', () => {
 
     expect((document.querySelector('#creator-skill-slug') as HTMLInputElement).placeholder)
       .toBe('mi-skill')
+  })
+
+  it('keeps platform bundle details out of the Creator Web App entry point', async () => {
+    renderPanel(true)
+    const typeSelect = await screen.findByTestId('creator-artifact-type-select')
+    fireEvent.pointerDown(typeSelect, {
+      button: 0,
+      buttons: 1,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    })
+    fireEvent.click(await screen.findByRole('option', { name: 'Web App' }))
+
+    const guide = screen.getByTestId('web-app-publishing-guide')
+    expect(guide.textContent).toContain('Published website address')
+    expect(guide.textContent).toContain('HTTPS address')
+    expect(guide.textContent).toContain('Upload an App')
+    expect(guide.textContent).toContain('runnable ZIP or folder')
+    expect(guide.textContent).not.toContain('polo-app.json')
+    expect(guide.textContent).not.toContain('appId')
+    expect(guide.textContent).not.toContain('checksum')
+
+    fireEvent.click(within(guide).getByRole('button', {
+      name: 'Continue to Web App publishing',
+    }))
+    await waitFor(() => {
+      expect(openedUrls).toEqual([
+        `https://admin.example.test/organization-apps?organizationId=${organizationId}`,
+      ])
+    })
   })
 
   it('localizes workspace mutation errors without a server message', async () => {

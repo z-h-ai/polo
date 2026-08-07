@@ -884,18 +884,58 @@ export function CreatorArtifactsPanel({
                 </Button>
               </>
             ) : newArtifactType === 'web_app' ? (
-              <Button
-                type="button"
-                size="sm"
-                className="w-full"
-                disabled={action !== null}
-                onClick={() => { void openWebAppManagement() }}
+              <div
+                data-testid="web-app-publishing-guide"
+                className="space-y-3 rounded-lg bg-foreground/[0.035] p-3"
               >
-                {action === 'open-web-app'
-                  ? <Spinner className="mr-1.5" />
-                  : <Globe2 className="mr-1.5 size-3.5" />}
-                {t('creatorSkills.artifact.continueWebApp')}
-              </Button>
+                <div>
+                  <p className="text-sm font-medium">
+                    {t('creatorSkills.artifact.webAppGuide.title')}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t('creatorSkills.artifact.webAppGuide.description')}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <div className="rounded-lg border border-border/60 bg-background/60 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <Globe2 className="size-3.5 text-accent" />
+                      <span className="text-xs font-medium">
+                        {t('creatorSkills.artifact.webAppGuide.remoteTitle')}
+                      </span>
+                      <span className="ml-auto rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
+                        {t('creatorSkills.artifact.webAppGuide.recommended')}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                      {t('creatorSkills.artifact.webAppGuide.remoteDescription')}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <Upload className="size-3.5 text-muted-foreground" />
+                      <span className="text-xs font-medium">
+                        {t('creatorSkills.artifact.webAppGuide.bundleTitle')}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                      {t('creatorSkills.artifact.webAppGuide.bundleDescription')}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  disabled={action !== null}
+                  onClick={() => { void openWebAppManagement() }}
+                >
+                  {action === 'open-web-app'
+                    ? <Spinner className="mr-1.5" />
+                    : <Globe2 className="mr-1.5 size-3.5" />}
+                  {t('creatorSkills.artifact.continueWebApp')}
+                </Button>
+              </div>
             ) : null}
             {enabled === false ? (
               <p className="text-xs text-muted-foreground">
