@@ -860,7 +860,10 @@ run_macos_full_e2e() {
   initial_app_pid=$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$runtime_file" | head -1)
   test -n "$initial_app_pid"
   wait_for_macos_frontmost_state "$initial_app_pid" "cold-launch" true
-  /usr/bin/osascript -e 'tell application "Finder" to activate'
+  # A bare AppleScript activation can be a no-op on hosted macOS runners when
+  # Finder has no window. Opening the isolated test home guarantees a concrete
+  # Finder window that can take focus before the second `polo app` invocation.
+  /usr/bin/open -a Finder "$test_home"
   wait_for_macos_frontmost_state "$initial_app_pid" "background-before-focus" false
   run_fresh_shell /bin/zsh "$test_home" "polo app"
   local focused_app_pid
