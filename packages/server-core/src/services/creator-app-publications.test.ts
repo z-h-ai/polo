@@ -29,7 +29,8 @@ describe('CreatorAppPublicationService', () => {
     const entries = [
       { path: 'app.py', content: "@app.get('/health')" },
       { path: 'server.py', content: "@app.get('/health')" },
-      { path: 'requirements.txt', content: 'fastapi==1.0' },
+      { path: 'pyproject.toml', content: '[project]\nname = "app"' },
+      { path: 'uv.lock', content: 'version = "1"' },
     ]
     await expect(service.publishUpload({ organizationId: 'org-one', name: 'Python', entries })).resolves.toMatchObject({
       status: 'needs_entry_selection', candidates: [{ path: 'app.py' }, { path: 'server.py' }],

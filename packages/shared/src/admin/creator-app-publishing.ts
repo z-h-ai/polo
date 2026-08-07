@@ -39,7 +39,7 @@ export interface NormalizedCreatorAppPayloadEntry {
   bytes: Uint8Array
 }
 
-const PYTHON_LOCK_FILES = new Set(['requirements.txt', 'poetry.lock', 'pipfile.lock', 'uv.lock'])
+const PYTHON_LOCK_FILES = new Set(['uv.lock'])
 const JS_LOCK_FILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'])
 const NESTED_ARCHIVE = /\.(?:zip|tar|tgz|gz)$/i
 const MAX_ZIP_ENTRIES = 2_000
@@ -138,10 +138,11 @@ export function analyzeCreatorAppPayload(
     return entry.bytes.byteLength > 8 && entry.bytes[0] === 0x62
   })
   const hasPythonLock = hasLock(PYTHON_LOCK_FILES)
+  const hasPyproject = files.some(entry => entry.path === 'pyproject.toml' && entry.content.trim().length > 0)
   const hasJsLock = hasLock(JS_LOCK_FILES)
   for (const entry of files) {
     const hasHealthcheck = entry.content.includes('/health')
-    if (isRootFile(entry.path, ['main.py', 'app.py', 'server.py', 'wsgi.py']) && hasPythonLock && hasHealthcheck) {
+    if (isRootFile(entry.path, ['main.py', 'app.py', 'server.py', 'wsgi.py']) && hasPythonLock && hasPyproject && hasHealthcheck) {
       candidates.push({ runtime: 'python', path: entry.path })
     }
     if (
@@ -251,7 +252,7 @@ export function decodeCreatorAppPayloadZip(archive: Uint8Array): CreatorAppPaylo
   if (archive.byteLength === 0 || archive.byteLength > 50 * 1024 * 1024) {
     throw new Error('The upload ZIP is empty or exceeds the archive size limit.')
   }
-  inspectZipCentralDirectory(archive)
+  const directories = inspectZipCentralDirectory(archive)
   let files: Record<string, Uint8Array>
   try {
     files = unzipSync(archive)
@@ -260,7 +261,7 @@ export function decodeCreatorAppPayloadZip(archive: Uint8Array): CreatorAppPaylo
   }
   const entries = Object.entries(files).map(([path, bytes]) => {
     if (!safePath(path)) throw new Error('The upload contains an unsafe archive entry.')
-    return { path, type: 'file' as const, bytes, content: new TextDecoder().decode(bytes) }
+    return { path: path.replace(/\/$/, ''), type: directories.has(path) ? 'directory' as const : 'file' as const, bytes, content: new TextDecoder().decode(bytes) }
   })
   return normalizeCreatorAppPayloadRoot(entries)
 }
@@ -270,13 +271,15 @@ export function normalizeCreatorAppPayloadRoot(
   input: readonly CreatorAppPayloadEntry[],
 ): CreatorAppPayloadEntry[] {
   const safeEntries = input.map(entry => ({ ...entry, path: safePath(entry.path) ?? entry.path }))
-  const roots = new Set(safeEntries.map(entry => entry.path.split('/')[0]!))
-  const shouldStrip = roots.size === 1 && safeEntries.every(entry => entry.path.includes('/'))
+  const files = safeEntries.filter(entry => entry.type !== 'directory')
+  const roots = new Set(files.map(entry => entry.path.split('/')[0]!))
+  const shouldStrip = files.length > 0 && roots.size === 1 && files.every(entry => entry.path.includes('/'))
   const entries = shouldStrip
     ? safeEntries.map(entry => ({ ...entry, path: entry.path.slice(entry.path.indexOf('/') + 1) }))
     : safeEntries
   const seen = new Set<string>()
   for (const entry of entries) {
+    if (entry.type === 'directory') continue
     const path = safePath(entry.path)
     const key = path?.toLocaleLowerCase('en-US')
     if (!path || !key || seen.has(key)) throw new Error('The upload contains conflicting file paths.')
@@ -289,11 +292,12 @@ export function normalizeCreatorAppPayloadRoot(
  * fflate returns an object keyed by name, which would hide duplicate central
  * directory entries and Unix symlink metadata. Inspect those bytes first.
  */
-function inspectZipCentralDirectory(archive: Uint8Array): void {
+function inspectZipCentralDirectory(archive: Uint8Array): Set<string> {
   const names = new Set<string>()
   const decoder = new TextDecoder()
   let count = 0
   let expandedBytes = 0
+  const directories = new Set<string>()
   for (let offset = 0; offset + 46 <= archive.length; offset += 1) {
     if (
       archive[offset] !== 0x50 || archive[offset + 1] !== 0x4b
@@ -323,8 +327,10 @@ function inspectZipCentralDirectory(archive: Uint8Array): void {
       throw new Error('The upload contains an unsafe archive entry.')
     }
     names.add(key)
+    if (path.endsWith('/')) directories.add(path)
     offset = end - 1
   }
+  return directories
 }
 
 /** The same manifest/ZIP contract consumed by the desktop installer. */

@@ -508,7 +508,7 @@ export function CreatorArtifactsPanel({
     }
   }
 
-  const publishWebApp = async () => {
+  const publishWebApp = async (entryOverride?: { runtime: 'static' | 'python' | 'js'; path: string }) => {
     if (!webAppPublishMode || !webAppName.trim()) return
     setAction('open-web-app')
     setError(null)
@@ -543,13 +543,14 @@ export function CreatorArtifactsPanel({
         for (let offset = 0; offset < payload.length; offset += 0x8000) {
           binary += String.fromCharCode(...payload.subarray(offset, offset + 0x8000))
         }
+        const selectedEntry = entryOverride ?? webAppSelectedEntry
         const result = await window.electronAPI.creatorAppPublish({
           organizationId,
           name: webAppName.trim(),
           visibility: 'all_members',
           mode: 'upload',
           payloadBase64: btoa(binary),
-          ...(webAppSelectedEntry ? { selectedEntry: webAppSelectedEntry } : {}),
+          ...(selectedEntry ? { selectedEntry } : {}),
         })
         if (!result.success) {
           setError(resultMessage(t, result))
@@ -1091,7 +1092,7 @@ export function CreatorArtifactsPanel({
                         <p className="text-xs text-muted-foreground">Which file starts the App?</p>
                         {webAppEntryCandidates.map(candidate => (
                           <Button key={`${candidate.runtime}:${candidate.path}`} type="button" size="sm" variant="outline"
-                            onClick={() => { setWebAppSelectedEntry(candidate); void publishWebApp() }}>
+                            onClick={() => { setWebAppSelectedEntry(candidate); void publishWebApp(candidate) }}>
                             {candidate.path}
                           </Button>
                         ))}

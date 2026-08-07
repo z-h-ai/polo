@@ -39,7 +39,8 @@ describe('Creator App publishing contract', () => {
   it('recognizes locked Python and JS service payloads without executing them', () => {
     expect(analyzeCreatorAppPayload([
       { path: 'main.py', content: "@app.get('/health')\ndef health(): pass" },
-      { path: 'requirements.txt', content: 'fastapi==1.0' },
+      { path: 'pyproject.toml', content: '[project]\nname = "app"' },
+      { path: 'uv.lock', content: 'version = "1"' },
     ])).toEqual({
       status: 'ready',
       candidate: { runtime: 'python', path: 'main.py' },
@@ -57,7 +58,8 @@ describe('Creator App publishing contract', () => {
     expect(analyzeCreatorAppPayload([
       { path: 'app.py', content: "@app.get('/health')" },
       { path: 'server.py', content: "@app.get('/health')" },
-      { path: 'requirements.txt', content: 'fastapi==1.0' },
+      { path: 'pyproject.toml', content: '[project]\nname = "app"' },
+      { path: 'uv.lock', content: 'version = "1"' },
     ])).toEqual({
       status: 'needs_entry_selection',
       candidates: [
@@ -86,7 +88,8 @@ describe('Creator App publishing contract', () => {
   it('does not accept an empty dependency lock or a service without a health endpoint', () => {
     expect(analyzeCreatorAppPayload([
       { path: 'main.py', content: "@app.get('/health')" },
-      { path: 'requirements.txt', content: '' },
+      { path: 'pyproject.toml', content: '[project]\nname = "app"' },
+      { path: 'uv.lock', content: '' },
     ])).toMatchObject({ status: 'invalid', code: 'missing_runnable_payload' })
     expect(analyzeCreatorAppPayload([
       { path: 'server.js', content: "server.get('/health', () => {})" },
@@ -147,11 +150,25 @@ describe('Creator App publishing contract', () => {
     expect(() => decodeCreatorAppPayloadZip(zipSync({ 'bomb.txt': new TextEncoder().encode('x'.repeat(1024 * 1024)) }, { level: 9 }))).toThrow('unsafe archive')
   })
 
+  it('safely strips an explicit enclosing directory and preserves empty directories', () => {
+    const archive = zipSync({
+      'myapp/': new Uint8Array(),
+      'myapp/empty/': new Uint8Array(),
+      'myapp/index.html': new TextEncoder().encode('<!doctype html>'),
+    })
+    const entries = decodeCreatorAppPayloadZip(archive)
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'index.html', type: 'file' }),
+    ]))
+    expect(analyzeCreatorAppPayload(entries)).toMatchObject({ status: 'ready', candidate: { path: 'index.html' } })
+  })
+
   it('refuses a caller-selected traversal, missing, or runtime-mismatched entry', () => {
     const input = {
       entries: [
         { path: 'main.py', content: "@app.get('/health')" },
-        { path: 'requirements.txt', content: 'fastapi==1.0' },
+        { path: 'pyproject.toml', content: '[project]\nname = "app"' },
+        { path: 'uv.lock', content: 'version = "1"' },
       ],
       appId: 'server-app-id',
       version: '1.0.0',
