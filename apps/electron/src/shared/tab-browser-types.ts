@@ -34,31 +34,8 @@ export const POLO_APP_DEFINITION: AppDefinition = {
   order: 0,
 }
 
-export const KANBAN_APP_ID = 'kanban'
-export const AIRDROP_APP_ID = 'airdrop'
-
-export const KANBAN_APP_DEFINITION: AppDefinition = {
-  id: KANBAN_APP_ID,
-  name: 'Kanban',
-  url: 'https://kb.z-h-ai.com/',
-  type: 'builtin',
-  createdAt: 0,
-  order: 1,
-}
-
-export const AIRDROP_APP_DEFINITION: AppDefinition = {
-  id: AIRDROP_APP_ID,
-  name: 'AirDrop',
-  url: 'https://airdrop.z-h-ai.com/',
-  type: 'builtin',
-  createdAt: 0,
-  order: 2,
-}
-
 export const BUILTIN_APP_DEFINITIONS: AppDefinition[] = [
   POLO_APP_DEFINITION,
-  KANBAN_APP_DEFINITION,
-  AIRDROP_APP_DEFINITION,
 ]
 
 export const BUILTIN_APP_IDS = new Set(BUILTIN_APP_DEFINITIONS.map((a) => a.id))
