@@ -33,6 +33,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('bash "$UNINSTALL_SCRIPT"')
     expect(validator).toContain('--polo-terminal-integration install')
     expect(validator).toContain('--polo-terminal-integration uninstall')
+    expect(validator).toContain('test_macos_settings_integration "$installed_app"')
     expect(validator).toContain('validate_legacy_app_bundle')
     expect(validator).toContain('validate-legacy-electron-layout.ts')
     expect(validator).toContain('legacy container contract passed')
@@ -78,7 +79,7 @@ describe('Electron final artifact validation pipeline', () => {
       'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_INSTALL_ARTIFACT="$current_install"',
     )
     expect(validator).toContain(
-      'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_TERMINAL_HOME="$test_home"',
+      'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_TERMINAL_HOME="$integration_home"',
     )
     expect(validator).toContain('Packaged polo run failed:')
     expect(validator).toContain('cat "$run_output" >&2')

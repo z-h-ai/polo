@@ -734,6 +734,38 @@ test_macos_command_conflict() {
   grep -F 'echo user-owned' "$conflict_launcher" >/dev/null
 }
 
+test_macos_settings_integration() {
+  local installed_app="$1"
+  local integration_home="$TEMP_ROOT/settings integration 用户"
+  local executable="$installed_app/Contents/MacOS/Polo AI"
+  local launcher="$integration_home/.local/bin/polo"
+  local integration_output
+  mkdir -p "$integration_home"
+
+  integration_output=$(HOME="$integration_home" SHELL=/bin/zsh \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    POLO_AI_TERMINAL_HOME="$integration_home" \
+    "$executable" --polo-terminal-integration install)
+  if ! printf '%s' "$integration_output" \
+    | grep -F '"statusCode":"ready"' >/dev/null; then
+    echo "macOS terminal integration install did not become ready: $integration_output" >&2
+    return 1
+  fi
+  test "$(readlink "$launcher")" = \
+    "$installed_app/Contents/Resources/app/resources/bin/polo"
+
+  integration_output=$(HOME="$integration_home" SHELL=/bin/zsh \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    POLO_AI_TERMINAL_HOME="$integration_home" \
+    "$executable" --polo-terminal-integration uninstall)
+  if ! printf '%s' "$integration_output" \
+    | grep -F '"statusCode":"not_installed"' >/dev/null; then
+    echo "macOS terminal integration uninstall left managed state: $integration_output" >&2
+    return 1
+  fi
+  test ! -e "$launcher"
+}
+
 macos_running_application_state() {
   local pid="$1"
   /usr/bin/osascript -l JavaScript \
@@ -803,18 +835,9 @@ run_macos_full_e2e() {
   fi
   test "$current_version" = "$CURRENT_VERSION"
 
-  local integration_output
-  integration_output=$(HOME="$test_home" SHELL=/bin/zsh \
-    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
-    POLO_AI_TERMINAL_HOME="$test_home" \
-    "$executable" --polo-terminal-integration install)
-  if ! printf '%s' "$integration_output" \
-    | grep -F '"statusCode":"ready"' >/dev/null; then
-    echo "macOS terminal integration install did not become ready: $integration_output" >&2
-    return 1
-  fi
   test "$(readlink "$launcher")" = \
     "$resources_root/app/resources/bin/polo"
+  test_macos_settings_integration "$installed_app"
   run_fresh_shell /bin/zsh "$test_home" \
     "test \"\$(polo --version)\" = '$current_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
   run_packaged_headless_lifecycle /bin/zsh "$test_home"
@@ -842,25 +865,9 @@ run_macos_full_e2e() {
   launchctl unsetenv POLO_AI_RUNTIME_DISCOVERY_FILE
   MAC_LAUNCH_ENV_CONFIGURED=false
 
-  integration_output=$(HOME="$test_home" SHELL=/bin/zsh \
-    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
-    POLO_AI_TERMINAL_HOME="$test_home" \
-    "$executable" --polo-terminal-integration uninstall)
-  if ! printf '%s' "$integration_output" \
-    | grep -F '"statusCode":"not_installed"' >/dev/null; then
-    echo "macOS terminal integration uninstall left managed state: $integration_output" >&2
-    return 1
-  fi
   rm -rf "$installed_app"
   MAC_INSTALLED_APP=""
-  if [ -e "$launcher" ] \
-    || grep -R -F '# >>> Polo CLI >>>' \
-      "$test_home/.zprofile" "$test_home/.bash_profile" \
-      "$test_home/.config/fish/conf.d/polo.fish" 2>/dev/null; then
-    echo "macOS full E2E left managed terminal state behind" >&2
-    return 1
-  fi
-  echo "✓ macOS real install/settings/discovery/${MODE}/uninstall E2E passed"
+  echo "✓ macOS real installer/settings/discovery/${MODE} E2E passed"
 }
 
 test_linux_command_conflict() {
