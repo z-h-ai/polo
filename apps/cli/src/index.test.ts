@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { printHelp } from './index.ts'
+import { printHelp, resolveAppLaunchCommand } from './index.ts'
 
 const tempDirs: string[] = []
 
@@ -13,6 +13,15 @@ afterEach(async () => {
 })
 
 describe('top-level CLI help', () => {
+  it('launches an installed Linux AppImage with the installer sandbox contract', () => {
+    expect(resolveAppLaunchCommand('linux', {
+      POLO_AI_APPIMAGE: '/home/user/.polo-ai/app/Polo-AI-x64.AppImage',
+    })).toEqual([
+      '/home/user/.polo-ai/app/Polo-AI-x64.AppImage',
+      '--no-sandbox',
+    ])
+  })
+
   it('uses polo as the primary command and mentions polo-ai only as an alias', () => {
     let output = ''
     const originalWrite = process.stdout.write

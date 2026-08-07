@@ -273,25 +273,30 @@ function err(msg: string): void {
   process.stderr.write(`Error: ${msg}\n`)
 }
 
-async function cmdApp(): Promise<void> {
-  const desktopExecutable = process.env.POLO_AI_DESKTOP_EXECUTABLE
-  const desktopApp = process.env.POLO_AI_DESKTOP_APP
-  const appImage = process.env.APPIMAGE || process.env.POLO_AI_APPIMAGE
+export function resolveAppLaunchCommand(
+  platform: NodeJS.Platform = process.platform,
+  environment: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const desktopExecutable = environment.POLO_AI_DESKTOP_EXECUTABLE
+  const desktopApp = environment.POLO_AI_DESKTOP_APP
+  const appImage = environment.APPIMAGE || environment.POLO_AI_APPIMAGE
 
-  let command: string[]
-  if (process.platform === 'darwin') {
-    command = desktopApp
+  if (platform === 'darwin') {
+    return desktopApp
       ? ['open', desktopApp]
       : ['open', '-a', 'Polo AI']
-  } else if (process.platform === 'win32' && desktopExecutable) {
-    command = [desktopExecutable]
-  } else if (process.platform === 'linux' && appImage) {
-    command = [appImage]
-  } else {
-    throw new Error(
-      'Polo App location is unavailable. Reinstall Polo terminal support from Settings → Polo terminal features.',
-    )
   }
+  if (platform === 'win32' && desktopExecutable) return [desktopExecutable]
+  // AppImage mounts do not preserve the chrome-sandbox SUID bit. Keep the
+  // canonical `polo app` path aligned with the installer launcher contract.
+  if (platform === 'linux' && appImage) return [appImage, '--no-sandbox']
+  throw new Error(
+    'Polo App location is unavailable. Reinstall Polo terminal support from Settings → Polo terminal features.',
+  )
+}
+
+async function cmdApp(): Promise<void> {
+  const command = resolveAppLaunchCommand()
 
   if (process.platform === 'darwin' && command[0] === 'open') {
     const result = Bun.spawnSync(command, {
