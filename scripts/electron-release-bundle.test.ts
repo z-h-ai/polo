@@ -19,9 +19,12 @@ describe('release bundle assembly and public verification', () => {
       for (const [name, contents, manifest] of artifacts) {
         await writeFile(join(input, name), contents)
         const hash = createHash('sha512').update(contents).digest('base64')
+        const auxiliaryDmg = manifest === 'latest-mac.yml'
+          ? `  - url: Polo-AI-x64.dmg\n    sha512: ${'a'.repeat(88)}\n    size: 123\n`
+          : ''
         await writeFile(
           join(input, manifest),
-          `version: 0.15.2\nfiles:\n  - url: ${name}\n    sha512: ${hash}\n    size: ${Buffer.byteLength(contents)}\npath: ${name}\nsha512: ${hash}\n`,
+          `version: 0.15.2\nfiles:\n${auxiliaryDmg}  - url: ${name}\n    sha512: ${hash}\n    size: ${Buffer.byteLength(contents)}\npath: ${name}\nsha512: ${hash}\n`,
         )
       }
       const installScript = join(root, 'install-app.sh')

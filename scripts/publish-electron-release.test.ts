@@ -90,6 +90,44 @@ describe('release publisher validation', () => {
     } finally { await destroy(fixture) }
   })
 
+  it('accepts the Electron Builder macOS ZIP and DMG manifest', async () => {
+    const fixture = await createFixture()
+    try {
+      const manifestPath = join(fixture.source, 'latest-mac.yml')
+      const manifest = await readFile(manifestPath, 'utf8')
+      await writeFile(
+        manifestPath,
+        manifest.replace(
+          'files:\n',
+          `files:\n  - url: Polo-AI-x64.dmg\n    sha512: ${'a'.repeat(88)}\n    size: 123\n`,
+        ),
+      )
+
+      const validated = await validateSource(fixture.source, fixture.args)
+
+      expect(validated.manifests['latest-mac.yml'].files).toHaveLength(2)
+      expect(validated.manifests['latest-mac.yml'].files[1]?.url).toBe('Polo-AI-x64.zip')
+    } finally { await destroy(fixture) }
+  })
+
+  it('rejects unsupported updater artifacts', async () => {
+    const fixture = await createFixture()
+    try {
+      const manifestPath = join(fixture.source, 'latest-mac.yml')
+      const manifest = await readFile(manifestPath, 'utf8')
+      await writeFile(
+        manifestPath,
+        manifest.replace(
+          'files:\n',
+          `files:\n  - url: unexpected.pkg\n    sha512: ${'a'.repeat(88)}\n    size: 123\n`,
+        ),
+      )
+
+      await expect(validateSource(fixture.source, fixture.args))
+        .rejects.toThrow('references an unsupported artifact')
+    } finally { await destroy(fixture) }
+  })
+
   it('rejects incorrect manifest version, size, and hashes', async () => {
     const fixture = await createFixture()
     try {
