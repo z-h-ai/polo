@@ -40,8 +40,6 @@ import {
   type CreateCreatorArtifactInput,
   type CreateCreatorArtifactVersionInput,
   type SkillArchivePolicy,
-  type CreatorAppPublicationInput,
-  type CreatorAppPublicationResponse,
 } from './types.ts';
 import type { ZodType } from 'zod';
 import {
@@ -598,56 +596,6 @@ export class AdminClient {
       },
     );
     return this.readSuccessResponse(response, CreatorArtifactMutationResponseSchema);
-  }
-
-  /**
-   * Creator Web App ingress. The local RPC has already validated and rebuilt
-   * upload bundles; Admin remains the authority that creates the App/Release
-   * and persists the immutable publication.
-   */
-  async publishCreatorApp(
-    accessToken: string,
-    input: CreatorAppPublicationInput,
-  ): Promise<CreatorAppPublicationResponse> {
-    const response = await this.request<unknown>(
-      `/api/organizations/${encodeURIComponent(input.organizationId)}/creator-app-publications/${encodeURIComponent(input.appId ?? '')}`,
-      { method: 'POST', accessToken, body: input },
-    );
-    if (!response || typeof response !== 'object') {
-      throw new AdminError('Creator app publication response is invalid', 'SERVER_ERROR');
-    }
-    const value = response as Record<string, unknown>;
-    if (
-      typeof value.appId !== 'string' || typeof value.releaseId !== 'string'
-      || typeof value.version !== 'string' || value.status !== 'published'
-    ) throw new AdminError('Creator app publication response is invalid', 'SERVER_ERROR');
-    return {
-      appId: value.appId,
-      releaseId: value.releaseId,
-      version: value.version,
-      status: 'published',
-      ...(typeof value.checksum === 'string' ? { checksum: value.checksum } : {}),
-      ...(typeof value.sizeBytes === 'number' ? { sizeBytes: value.sizeBytes } : {}),
-    };
-  }
-
-  async createCreatorAppPublicationDraft(
-    accessToken: string,
-    input: Pick<CreatorAppPublicationInput, 'organizationId' | 'name' | 'visibility' | 'mode' | 'websiteUrl'>,
-  ): Promise<CreatorAppPublicationResponse> {
-    const response = await this.request<unknown>(
-      `/api/organizations/${encodeURIComponent(input.organizationId)}/creator-app-publications`,
-      { method: 'POST', accessToken, body: input },
-    );
-    if (!response || typeof response !== 'object') {
-      throw new AdminError('Creator app draft response is invalid', 'SERVER_ERROR');
-    }
-    const value = response as Record<string, unknown>;
-    if (
-      typeof value.appId !== 'string' || typeof value.releaseId !== 'string'
-      || typeof value.version !== 'string' || value.status !== 'draft'
-    ) throw new AdminError('Creator app draft response is invalid', 'SERVER_ERROR');
-    return { appId: value.appId, releaseId: value.releaseId, version: value.version, status: 'draft' };
   }
 
   async deleteCreatorArtifactDraft(

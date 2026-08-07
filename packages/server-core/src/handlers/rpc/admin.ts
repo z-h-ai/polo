@@ -19,8 +19,6 @@ import {
   type AdminRefreshResponse,
   type AdminUser,
   type DeniedAppCatalogSnapshot,
-  analyzeCreatorAppPayload,
-  createCanonicalCreatorAppBundle,
   decodeCreatorAppPayloadZip,
   resolveCreatorAppPublishingOrganization,
 } from '@polo-ai/shared/admin'
@@ -74,6 +72,7 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
+import { CreatorAppPublicationService } from '../../services/creator-app-publications'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
@@ -124,6 +123,7 @@ const CreatorAppPublishRpcInputSchema = z.object({
   websiteUrl: z.string().url().max(16_384).optional(),
   /** ZIP bytes cross the authenticated local RPC only as base64. */
   payloadBase64: z.string().min(1).max(70 * 1024 * 1024).optional(),
+  selectedEntry: z.object({ runtime: z.enum(['static', 'python', 'js']), path: z.string().min(1).max(4_096) }).strict().optional(),
 }).strict().superRefine((input, context) => {
   if (input.mode === 'website') {
     if (!input.websiteUrl || new URL(input.websiteUrl).protocol !== 'https:') {
@@ -439,6 +439,7 @@ export function registerAdminHandlers(
   deps: HandlerDeps,
 ): AdminSessionControl {
   const log = deps.platform.logger
+  const creatorAppPublications = new CreatorAppPublicationService(deps.creatorAppPublicationRoot)
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
@@ -1859,65 +1860,35 @@ export function registerAdminHandlers(
     if (!input.success) return adminInputError('VALIDATION_ERROR')
     return callOrganization('publishCreatorApp', async (client, accessToken, userId) => {
       const organizations = await client.listOrganizations(accessToken)
+      const activeOrganizations = organizations.organizations.filter(item => (
+        item.status !== 'suspended' && item.membership?.status === 'active'
+      ))
       const resolved = resolveCreatorAppPublishingOrganization({
         requestedOrganizationId: input.data.organizationId,
-        availableOrganizationIds: organizations.organizations.map(item => item.id),
+        availableOrganizationIds: activeOrganizations.map(item => item.id),
         fallbackOrganizationId: null,
       })
       if (!resolved.organizationId) {
         throw new AdminError('The source organization is unavailable', 'ORGANIZATION_UNAVAILABLE')
       }
       if (input.data.mode === 'website') {
-        const draft = await client.createCreatorAppPublicationDraft(accessToken, {
+        const publication = await creatorAppPublications.publishWebsite({
           organizationId: resolved.organizationId,
           name: input.data.name,
-          visibility: input.data.visibility,
-          mode: input.data.mode,
-          websiteUrl: input.data.websiteUrl,
-        })
-        const publication = await client.publishCreatorApp(accessToken, {
-          organizationId: resolved.organizationId,
-          appId: draft.appId,
-          releaseId: draft.releaseId,
-          name: input.data.name,
-          visibility: input.data.visibility,
-          mode: 'website',
-          websiteUrl: input.data.websiteUrl,
+          websiteUrl: input.data.websiteUrl!,
         })
         invalidateCreatorArtifactCache(userId, resolved.organizationId)
         return { publication }
       }
       const archive = Uint8Array.from(Buffer.from(input.data.payloadBase64!, 'base64'))
       const entries = decodeCreatorAppPayloadZip(archive)
-      const analysis = analyzeCreatorAppPayload(entries)
-      if (analysis.status === 'invalid') throw new AdminError(analysis.message, 'VALIDATION_ERROR')
-      if (analysis.status === 'needs_entry_selection') {
-        throw new AdminError('Choose which detected file starts the application.', 'VALIDATION_ERROR')
-      }
-      const draft = await client.createCreatorAppPublicationDraft(accessToken, {
+      const publication = await creatorAppPublications.publishUpload({
         organizationId: resolved.organizationId,
         name: input.data.name,
-        visibility: input.data.visibility,
-        mode: input.data.mode,
-      })
-      const bundle = createCanonicalCreatorAppBundle({
         entries,
-        appId: draft.appId,
-        version: draft.version,
-        name: input.data.name,
-        entry: analysis.candidate,
+        ...(input.data.selectedEntry ? { entry: input.data.selectedEntry } : {}),
       })
-      const publication = await client.publishCreatorApp(accessToken, {
-        organizationId: resolved.organizationId,
-        appId: draft.appId,
-        releaseId: draft.releaseId,
-        name: input.data.name,
-        visibility: input.data.visibility,
-        mode: 'upload',
-        bundleBase64: Buffer.from(bundle.archive).toString('base64'),
-        checksum: bundle.checksum,
-        sizeBytes: bundle.sizeBytes,
-      })
+      if (publication.status === 'needs_entry_selection') return publication
       invalidateCreatorArtifactCache(userId, resolved.organizationId)
       return { publication }
     })

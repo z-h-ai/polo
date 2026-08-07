@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
@@ -307,6 +309,7 @@ mock.module('@polo-ai/shared/admin', () => ({
   analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
   createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
   decodeCreatorAppPayloadZip: () => { throw new Error('not configured') },
+  normalizeCreatorAppPayloadRoot: (entries: unknown) => entries,
   resolveCreatorAppPublishingOrganization: (input: any) => input.requestedOrganizationId
     && input.availableOrganizationIds.includes(input.requestedOrganizationId)
     ? { organizationId: input.requestedOrganizationId, source: 'requested' }
@@ -433,6 +436,7 @@ function createHarness() {
         process: async () => Buffer.from(''),
       },
     },
+    creatorAppPublicationRoot: join(tmpdir(), 'polo-admin-handler-publications'),
   } satisfies HandlerDeps
 
   registerAdminHandlers(server, deps)
@@ -716,7 +720,7 @@ describe('registerAdminHandlers', () => {
       accessToken: 'creator-access-token', refreshToken: 'refresh-token',
       expiresAt: Date.now() + 10 * 60_000, userId: 'user-1', username: 'creator',
     }
-    adminClientBehavior.listOrganizations = async () => ({ organizations: [{ id: 'creator-space' }] })
+    adminClientBehavior.listOrganizations = async () => ({ organizations: [{ id: 'creator-space', status: 'active', membership: { status: 'active' } }] })
     const { publishCreatorApp } = createHarness()
     const result = await publishCreatorApp(
       { clientId: 'client-1', workspaceId: null, webContentsId: null },
@@ -725,13 +729,8 @@ describe('registerAdminHandlers', () => {
         mode: 'website', websiteUrl: 'https://app.example.test',
       },
     )
-    expect(result).toMatchObject({ success: true, publication: { appId: 'app-id', status: 'published' } })
-    expect(adminClientCalls.filter(call => call.method.includes('CreatorAppPublication'))).toEqual([
-      expect.objectContaining({ method: 'createCreatorAppPublicationDraft', args: [expect.objectContaining({ organizationId: 'creator-space', mode: 'website' })] }),
-    ])
-    expect(adminClientCalls.find(call => call.method === 'publishCreatorApp')).toMatchObject({
-      args: [expect.objectContaining({ appId: 'app-id', releaseId: 'release-id', websiteUrl: 'https://app.example.test' })],
-    })
+    expect(result).toMatchObject({ success: true, publication: { status: 'published' } })
+    expect(adminClientCalls.some(call => call.method.includes('CreatorAppPublication'))).toBe(false)
   })
 
   it('rejects unavailable, removed, and absent source organizations without a fallback publication', async () => {

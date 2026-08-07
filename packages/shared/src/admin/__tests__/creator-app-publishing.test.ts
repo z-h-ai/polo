@@ -144,6 +144,7 @@ describe('Creator App publishing contract', () => {
       expect.objectContaining({ path: 'assets/raw.bin', bytes: new Uint8Array([0, 255, 1]) }),
     ]))
     expect(() => decodeCreatorAppPayloadZip(zipSync({ '../escape': new Uint8Array([1]) }))).toThrow('unsafe archive')
+    expect(() => decodeCreatorAppPayloadZip(zipSync({ 'bomb.txt': new TextEncoder().encode('x'.repeat(1024 * 1024)) }, { level: 9 }))).toThrow('unsafe archive')
   })
 
   it('refuses a caller-selected traversal, missing, or runtime-mismatched entry', () => {

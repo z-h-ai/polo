@@ -240,7 +240,6 @@ import type {
   OrganizationMembership,
   OrganizationSummary,
   AppCatalogSyncResult,
-  CreatorAppPublicationResponse,
   UpdateOrganizationMemberInput,
 } from '@polo-ai/shared/admin/types'
 import type {
@@ -640,7 +639,11 @@ export interface ElectronAPI {
     websiteUrl?: string
     /** Authenticated local RPC payload, never sent in a URL. */
     payloadBase64?: string
-  }): Promise<OrganizationRpcResult<{ publication: CreatorAppPublicationResponse }>>
+    selectedEntry?: { runtime: 'static' | 'python' | 'js'; path: string }
+  }): Promise<OrganizationRpcResult<
+    | { publication: { appId: string; releaseId: string; version: string; status: 'published'; checksum?: string; sizeBytes?: number } }
+    | { status: 'needs_entry_selection'; candidates: Array<{ runtime: 'static' | 'python' | 'js'; path: string }> }
+  >>
   onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
   organizationList(): Promise<OrganizationRpcResult<{ organizations: OrganizationSummary[] }>>
   organizationCreate(input: CreateOrganizationInput): Promise<OrganizationRpcResult<CreateOrganizationResponse>>

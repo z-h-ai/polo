@@ -42,6 +42,10 @@ export interface NormalizedCreatorAppPayloadEntry {
 const PYTHON_LOCK_FILES = new Set(['requirements.txt', 'poetry.lock', 'pipfile.lock', 'uv.lock'])
 const JS_LOCK_FILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'])
 const NESTED_ARCHIVE = /\.(?:zip|tar|tgz|gz)$/i
+const MAX_ZIP_ENTRIES = 2_000
+const MAX_ZIP_ENTRY_BYTES = 25 * 1024 * 1024
+const MAX_ZIP_EXPANDED_BYTES = 100 * 1024 * 1024
+const MAX_ZIP_COMPRESSION_RATIO = 100
 
 function safePath(value: string): string | null {
   const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '')
@@ -254,13 +258,31 @@ export function decodeCreatorAppPayloadZip(archive: Uint8Array): CreatorAppPaylo
   } catch {
     throw new Error('The upload is not a valid ZIP archive.')
   }
-  let total = 0
-  return Object.entries(files).map(([path, bytes]) => {
+  const entries = Object.entries(files).map(([path, bytes]) => {
     if (!safePath(path)) throw new Error('The upload contains an unsafe archive entry.')
-    total += bytes.byteLength
-    if (total > 100 * 1024 * 1024) throw new Error('The upload exceeds the extracted size limit.')
     return { path, type: 'file' as const, bytes, content: new TextDecoder().decode(bytes) }
   })
+  return normalizeCreatorAppPayloadRoot(entries)
+}
+
+/** Remove one accidental enclosing project directory, but never merge conflicts. */
+export function normalizeCreatorAppPayloadRoot(
+  input: readonly CreatorAppPayloadEntry[],
+): CreatorAppPayloadEntry[] {
+  const safeEntries = input.map(entry => ({ ...entry, path: safePath(entry.path) ?? entry.path }))
+  const roots = new Set(safeEntries.map(entry => entry.path.split('/')[0]!))
+  const shouldStrip = roots.size === 1 && safeEntries.every(entry => entry.path.includes('/'))
+  const entries = shouldStrip
+    ? safeEntries.map(entry => ({ ...entry, path: entry.path.slice(entry.path.indexOf('/') + 1) }))
+    : safeEntries
+  const seen = new Set<string>()
+  for (const entry of entries) {
+    const path = safePath(entry.path)
+    const key = path?.toLocaleLowerCase('en-US')
+    if (!path || !key || seen.has(key)) throw new Error('The upload contains conflicting file paths.')
+    seen.add(key)
+  }
+  return entries
 }
 
 /**
@@ -270,6 +292,8 @@ export function decodeCreatorAppPayloadZip(archive: Uint8Array): CreatorAppPaylo
 function inspectZipCentralDirectory(archive: Uint8Array): void {
   const names = new Set<string>()
   const decoder = new TextDecoder()
+  let count = 0
+  let expandedBytes = 0
   for (let offset = 0; offset + 46 <= archive.length; offset += 1) {
     if (
       archive[offset] !== 0x50 || archive[offset + 1] !== 0x4b
@@ -286,7 +310,16 @@ function inspectZipCentralDirectory(archive: Uint8Array): void {
     const key = normalized?.toLocaleLowerCase('en-US')
     const externalAttributes = view.getUint32(38, true)
     const unixMode = externalAttributes >>> 16
-    if (!normalized || !key || names.has(key) || (unixMode & 0o170000) === 0o120000) {
+    const compressedBytes = view.getUint32(20, true)
+    const uncompressedBytes = view.getUint32(24, true)
+    count += 1
+    expandedBytes += uncompressedBytes
+    if (
+      !normalized || !key || names.has(key) || (unixMode & 0o170000) === 0o120000
+      || count > MAX_ZIP_ENTRIES || uncompressedBytes > MAX_ZIP_ENTRY_BYTES
+      || expandedBytes > MAX_ZIP_EXPANDED_BYTES || compressedBytes === 0 && uncompressedBytes > 0
+      || uncompressedBytes / Math.max(1, compressedBytes) > MAX_ZIP_COMPRESSION_RATIO
+    ) {
       throw new Error('The upload contains an unsafe archive entry.')
     }
     names.add(key)
@@ -311,7 +344,15 @@ export function validateProductionCreatorAppBundle(
   const entry = Array.isArray(manifest.entry) && typeof manifest.entry[0] === 'string'
     ? safePath(manifest.entry[0])
     : null
-  if (!entry || !entries.some(item => item.path === entry) || !Array.isArray(manifest.permissions) || manifest.permissions.length !== 0) {
+  const validHttpPath = (value: unknown) => typeof value === 'string'
+    && value.startsWith('/') && !value.startsWith('//') && !value.includes('\0')
+    && (() => { try { return new URL(value, 'http://127.0.0.1').origin === 'http://127.0.0.1' } catch { return false } })()
+  if (
+    typeof manifest.appId !== 'string' || !manifest.appId.trim() || manifest.appId.length > 512
+    || typeof manifest.version !== 'string' || !/^[0-9A-Za-z](?:[0-9A-Za-z._+-]{0,126}[0-9A-Za-z])?$/.test(manifest.version)
+    || !entry || !entries.some(item => item.path === entry) || !Array.isArray(manifest.permissions) || manifest.permissions.length !== 0
+    || !validHttpPath(manifest.healthcheck) || !validHttpPath(manifest.webPath)
+  ) {
     throw new Error('The final Bundle does not satisfy the production Manifest contract.')
   }
   if (expected && (manifest.appId !== expected.appId || manifest.version !== expected.version || manifest.runtime !== expected.runtime)) {

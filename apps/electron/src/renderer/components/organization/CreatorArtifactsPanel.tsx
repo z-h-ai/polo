@@ -115,6 +115,8 @@ export function CreatorArtifactsPanel({
   const [webAppUrl, setWebAppUrl] = useState('')
   const [webAppFile, setWebAppFile] = useState<File | null>(null)
   const [webAppFiles, setWebAppFiles] = useState<File[]>([])
+  const [webAppEntryCandidates, setWebAppEntryCandidates] = useState<Array<{ runtime: 'static' | 'python' | 'js'; path: string }>>([])
+  const [webAppSelectedEntry, setWebAppSelectedEntry] = useState<{ runtime: 'static' | 'python' | 'js'; path: string } | null>(null)
   const [slug, setSlug] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [changelog, setChangelog] = useState('')
@@ -547,9 +549,14 @@ export function CreatorArtifactsPanel({
           visibility: 'all_members',
           mode: 'upload',
           payloadBase64: btoa(binary),
+          ...(webAppSelectedEntry ? { selectedEntry: webAppSelectedEntry } : {}),
         })
         if (!result.success) {
           setError(resultMessage(t, result))
+          return
+        }
+        if ('status' in result && result.status === 'needs_entry_selection') {
+          setWebAppEntryCandidates(result.candidates)
           return
         }
       }
@@ -558,6 +565,8 @@ export function CreatorArtifactsPanel({
       setWebAppUrl('')
       setWebAppFile(null)
       setWebAppFiles([])
+      setWebAppEntryCandidates([])
+      setWebAppSelectedEntry(null)
     } catch {
       setError(t('creatorSkills.errors.webAppManagementUnavailable'))
     } finally {
@@ -1054,6 +1063,19 @@ export function CreatorArtifactsPanel({
                           data-testid="creator-web-app-file"
                           type="file"
                           accept=".zip,application/zip"
+                          onChange={event => {
+                            const files = Array.from(event.target.files ?? [])
+                            setWebAppFiles(files)
+                            setWebAppFile(files[0] ?? null)
+                          }}
+                        />
+                        <Label htmlFor="creator-web-app-folder">
+                          {t('creatorSkills.artifact.webAppGuide.file')}
+                        </Label>
+                        <Input
+                          id="creator-web-app-folder"
+                          data-testid="creator-web-app-folder"
+                          type="file"
                           multiple
                           ref={node => node?.setAttribute('webkitdirectory', '')}
                           onChange={event => {
@@ -1064,6 +1086,17 @@ export function CreatorArtifactsPanel({
                         />
                       </>
                     )}
+                    {webAppEntryCandidates.length > 0 ? (
+                      <div data-testid="creator-web-app-entry-selection" className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Which file starts the App?</p>
+                        {webAppEntryCandidates.map(candidate => (
+                          <Button key={`${candidate.runtime}:${candidate.path}`} type="button" size="sm" variant="outline"
+                            onClick={() => { setWebAppSelectedEntry(candidate); void publishWebApp() }}>
+                            {candidate.path}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
                     <Button
                       type="button"
                       size="sm"
