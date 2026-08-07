@@ -39,6 +39,7 @@ public static class FixtureBun {
       "\"server\":\"" + Escape(Environment.GetEnvironmentVariable("POLO_AI_SERVER_ENTRY") ?? "") + "\"," +
       "\"appRoot\":\"" + Escape(Environment.GetEnvironmentVariable("POLO_AI_APP_ROOT") ?? "") + "\"," +
       "\"resources\":\"" + Escape(Environment.GetEnvironmentVariable("POLO_AI_RESOURCES_PATH") ?? "") + "\"," +
+      "\"assetsRoot\":\"" + Escape(Environment.GetEnvironmentVariable("POLO_AI_BUNDLED_ASSETS_ROOT") ?? "") + "\"," +
       "\"packaged\":\"" + Escape(Environment.GetEnvironmentVariable("POLO_AI_IS_PACKAGED") ?? "") + "\"}";
     File.WriteAllText(record, json, new UTF8Encoding(false));
     return 37;
@@ -57,7 +58,8 @@ public static class FixtureBun {
     Assert-True ($data.bun -ceq (Join-Path $runtimeDir "bun.exe")) "polo.cmd resolved the wrong Bun"
     Assert-True ($data.server -ceq $serverPath) "polo.cmd resolved the wrong server"
     Assert-True ($data.appRoot -ceq $appRoot) "polo.cmd resolved the wrong app root"
-    Assert-True ($data.resources -ceq (Join-Path $appRoot "resources")) "polo.cmd set wrong resources"
+    Assert-True ($data.resources -ceq (Join-Path $appRoot "dist\resources")) "polo.cmd set wrong resources"
+    Assert-True ($data.assetsRoot -ceq (Join-Path $appRoot "dist")) "polo.cmd set wrong assets root"
     Assert-True ($data.packaged -ceq "true") "polo.cmd omitted packaged mode"
 
     & (Join-Path $binDir "polo-ai.cmd") "兼容" "space arg"

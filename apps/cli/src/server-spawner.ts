@@ -79,10 +79,11 @@ export function resolveBunExecutable(): string {
 function inferPackagedEnvironment(serverEntry: string): Record<string, string> {
   if (!serverEntry.endsWith(join('dist', 'server', 'polo-server.js'))) return {}
   const appRoot = resolve(serverEntry, '..', '..', '..')
+  const bundledAssetsRoot = join(appRoot, 'dist')
   return {
     POLO_AI_APP_ROOT: process.env.POLO_AI_APP_ROOT || appRoot,
-    POLO_AI_RESOURCES_PATH: process.env.POLO_AI_RESOURCES_PATH || join(appRoot, 'resources'),
-    POLO_AI_BUNDLED_ASSETS_ROOT: process.env.POLO_AI_BUNDLED_ASSETS_ROOT || appRoot,
+    POLO_AI_RESOURCES_PATH: process.env.POLO_AI_RESOURCES_PATH || join(bundledAssetsRoot, 'resources'),
+    POLO_AI_BUNDLED_ASSETS_ROOT: process.env.POLO_AI_BUNDLED_ASSETS_ROOT || bundledAssetsRoot,
     POLO_AI_IS_PACKAGED: 'true',
     POLO_AI_VERSION: process.env.POLO_AI_VERSION || cliVersion,
   }
