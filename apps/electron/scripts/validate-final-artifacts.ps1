@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Smoke", "Full")]
+    [ValidateSet("Smoke", "Bootstrap", "Full")]
     [string]$Mode = "Smoke",
     [string]$ReleaseDir = "",
     [string]$Arch = "x64",
@@ -33,7 +33,7 @@ if ($Mode -eq "Full" -and (
 )) {
     throw "Full validation requires -PreviousArtifact or POLO_AI_PREVIOUS_ARTIFACT"
 }
-if ($Mode -eq "Full") {
+if ($Mode -ne "Smoke") {
     if (
         [string]::IsNullOrWhiteSpace($expectedPublisher) -or
         [string]::IsNullOrWhiteSpace($expectedThumbprint)
@@ -83,7 +83,7 @@ function Invoke-Uninstaller {
 }
 
 function Assert-ReleaseAuthenticodeIdentity([string]$Path, [string]$Label) {
-    if ($Mode -ne "Full") {
+    if ($Mode -eq "Smoke") {
         return
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $Path
@@ -168,7 +168,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
             throw "Installed NSIS uv differs from the pinned bytes without a valid Authenticode signature"
         }
     }
-    if ($Mode -eq "Full") {
+    if ($Mode -ne "Smoke") {
         Assert-ReleaseAuthenticodeIdentity $installedExe "installed-current-app"
         Assert-ReleaseAuthenticodeIdentity $uvPath "installed-current-uv"
     } else {
@@ -482,7 +482,7 @@ function Get-CurrentNsisArtifactVersion([string]$Artifact, [string]$Label) {
             throw "$Label NSIS uv differs from the pinned bytes without a valid Authenticode signature"
         }
     }
-    if ($Mode -eq "Full") {
+    if ($Mode -ne "Smoke") {
         $payloadExe = Get-ChildItem -LiteralPath $extractRoot -Recurse -File `
             -Filter "Polo AI.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $payloadExe) {
@@ -728,11 +728,16 @@ function Test-FullLifecycle {
 }
 
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
+if ($Mode -ne "Smoke") {
+    $currentVersion = Get-CurrentNsisArtifactVersion $installer "current"
+    if (-not $currentVersion) {
+        throw "Unable to read current strict version"
+    }
+}
 if ($Mode -eq "Full") {
     $previousVersion = Get-LegacyNsisArtifactVersion $PreviousArtifact "previous"
-    $currentVersion = Get-CurrentNsisArtifactVersion $installer "current"
-    if (-not $previousVersion -or -not $currentVersion) {
-        throw "Unable to read legacy previous/current strict versions"
+    if (-not $previousVersion) {
+        throw "Unable to read legacy previous strict version"
     }
     if ($previousVersion -ceq $currentVersion) {
         throw "Previous artifact version must differ from current artifact ($currentVersion)"

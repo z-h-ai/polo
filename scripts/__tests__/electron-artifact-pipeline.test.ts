@@ -114,50 +114,43 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).not.toContain('$env:Path = "$binDir;')
   })
 
-  it('defines a blocking release/nightly three-platform full workflow', () => {
+  it('defines a reusable blocking macOS/Linux release build while Windows signing is deferred', () => {
     const workflow = read('.github/workflows/electron-artifact-full.yml')
+    const releaseWorkflow = read('.github/workflows/electron-release.yml')
+    const scheduledWorkflow = read('.github/workflows/electron-scheduled-validation.yml')
 
-    expect(workflow).toContain('release:')
-    expect(workflow).toContain('schedule:')
-    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).toContain('workflow_call:')
+    expect(workflow).not.toContain('release:\n    types:')
+    expect(releaseWorkflow).toContain('tags:')
+    expect(scheduledWorkflow).toContain('schedule:')
+    expect(scheduledWorkflow).toContain('workflow_dispatch:')
     expect(workflow).toContain('previous_release_tag:')
     expect(workflow).toContain('previous_release_version:')
     expect(workflow).toContain('previous_release_commit_sha:')
     expect(workflow).toContain('previous_macos_sha256:')
-    expect(workflow).toContain('previous_windows_sha256:')
+    expect(workflow).not.toContain('previous_windows_sha256:')
     expect(workflow).toContain('previous_linux_sha256:')
     expect(workflow).toContain('previous_installer_sha256:')
-    expect(workflow).toContain('POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG')
-    expect(workflow).toContain('POLO_AI_FULL_E2E_PREVIOUS_RELEASE_COMMIT_SHA')
     expect(workflow).toContain('EXPECTED_PREVIOUS_ARTIFACT_SHA256')
-    expect(workflow).toContain('POLO_AI_ARTIFACT_VALIDATION_MODE: full')
+    expect(workflow).toContain("inputs.bootstrap && 'bootstrap' || 'full'")
     expect(workflow).toContain('POLO_AI_PREVIOUS_ARTIFACT:')
     expect(workflow).toContain('POLO_AI_PREVIOUS_INSTALL_SCRIPT:')
     expect(workflow).toContain('runner: macos-14')
-    expect(workflow).toContain('runner: windows-latest')
+    expect(workflow).not.toContain('runner: windows-latest')
     expect(workflow).toContain('runner: ubuntu-latest')
     const unixPreviousPreflight = read('scripts/preflight-previous-release.sh')
-    const windowsPreviousPreflight = read('scripts/preflight-previous-release.ps1')
     expect(workflow).toContain('preflight-previous-release.sh')
-    expect(workflow).toContain('preflight-previous-release.ps1')
     expect(unixPreviousPreflight).toContain('gh release download')
-    expect(windowsPreviousPreflight).toContain('gh release download')
     expect(unixPreviousPreflight).toContain('--repo "$GITHUB_REPOSITORY"')
     expect(unixPreviousPreflight).toContain('application/vnd.github.raw+json')
-    expect(windowsPreviousPreflight).toContain('Get-FileHash')
     expect(workflow).toContain('validate-previous-release-contract.ts')
     expect(workflow).toContain('verified-contract-${{ matrix.platform }}.json')
     expect(unixPreviousPreflight).toContain('Previous release version must differ from current')
-    expect(windowsPreviousPreflight).toContain('Previous release version must differ from current')
     expect(unixPreviousPreflight).toContain('is_semver')
     const semverPattern = read('scripts/strict-semver-pattern.txt').trim()
     expect(semverPattern.startsWith('^')).toBe(true)
     expect(semverPattern.endsWith('$')).toBe(true)
-    for (const consumer of [
-      workflow,
-      unixPreviousPreflight,
-      windowsPreviousPreflight,
-    ]) {
+    for (const consumer of [unixPreviousPreflight]) {
       expect(consumer).toContain('strict-semver-pattern.txt')
     }
     expect(read('scripts/strict-semver.ts')).toContain(
@@ -167,34 +160,30 @@ describe('Electron final artifact validation pipeline', () => {
       "from './strict-semver'",
     )
     expect(workflow).not.toContain("semver_pattern='^")
-    expect(windowsPreviousPreflight).not.toContain("$semverPattern = '(?:")
     expect(workflow).not.toContain('v[0-9]*.[0-9]*.[0-9]*)')
-    expect(workflow).toContain('windows-terminal-integration.test.ps1')
-    expect(workflow).toContain('windows-terminal-integration-race.test.ps1')
+    expect(workflow).not.toContain('windows-terminal-integration.test.ps1')
+    expect(workflow).not.toContain('windows-terminal-integration-race.test.ps1')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_TEAM_ID')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_APP_REQUIREMENT')
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_UV_REQUIREMENT')
-    expect(workflow).toContain('POLO_AI_RELEASE_WINDOWS_PUBLISHER')
-    expect(workflow).toContain('POLO_AI_RELEASE_WINDOWS_THUMBPRINT')
-    expect(workflow).toContain('POLO_AI_MACOS_CSC_LINK')
-    expect(workflow).toContain('POLO_AI_WINDOWS_CSC_LINK')
+    expect(workflow).not.toContain('POLO_AI_RELEASE_WINDOWS_PUBLISHER')
+    expect(workflow).not.toContain('POLO_AI_RELEASE_WINDOWS_THUMBPRINT')
+    expect(workflow).toContain('secrets.macos_csc_link')
+    expect(workflow).not.toContain('secrets.windows_csc_link')
     expect(workflow).toContain('electron:dist:mac --arch=x64')
-    expect(workflow).toContain('electron:dist:win --arch=x64')
+    expect(workflow).not.toContain('electron:dist:win --arch=x64')
     expect(workflow).toContain('electron:dist:linux --arch=x64')
     expect(workflow).not.toContain('electron:dist:dev:mac --arch=x64')
-    expect(workflow).not.toContain('electron:dist:dev:win --arch=x64')
     expect(workflow).not.toContain('electron:dist:dev:linux --arch=x64')
     expect(workflow).toContain('prepare-platform-runtime.test.ts')
     expect(workflow).toContain('test ! -e apps/electron/vendor/bun')
     expect(workflow).toContain("find apps/electron/resources/bin -maxdepth 2 -type f -name 'uv*'")
-    expect(workflow).toContain('windows-wrapper-smoke.test.ps1')
+    expect(workflow).not.toContain('windows-wrapper-smoke.test.ps1')
     expect(workflow).toContain('xvfb-run -a')
     expect(workflow).toContain('full-validation-macos.log')
-    expect(workflow).toContain('full-validation-windows.log')
+    expect(workflow).not.toContain('full-validation-windows.log')
     expect(workflow).toContain('full-validation-linux.log')
-    expect(workflow).toContain('release-signing-audit-Darwin.jsonl')
-    expect(workflow).toContain('release-signing-audit-Windows.jsonl')
-    expect(workflow).toContain('previous_artifact_sha256=')
+    expect(workflow).toContain('release-signing-audit-*.jsonl')
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('bun run validate:ci')
     expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildMcpServers(config)')
@@ -203,17 +192,14 @@ describe('Electron final artifact validation pipeline', () => {
   it('verifies immutable previous assets before every setup or install write', () => {
     const workflow = read('.github/workflows/electron-artifact-full.yml')
     const unixPreflight = workflow.indexOf(
-      'Verify and download previous Unix release before setup',
-    )
-    const windowsPreflight = workflow.indexOf(
-      'Verify and download previous Windows release before setup',
+      'Verify and download previous release',
     )
     const setupBun = workflow.indexOf('- name: Setup Bun')
     const setupUv = workflow.indexOf('- name: Install uv')
-    const apt = workflow.indexOf('- name: Install Linux GUI and AppImage dependencies')
+    const apt = workflow.indexOf('- name: Install Linux GUI dependencies')
     const installDependencies = workflow.indexOf('- name: Install dependencies')
 
-    for (const preflight of [unixPreflight, windowsPreflight]) {
+    for (const preflight of [unixPreflight]) {
       expect(preflight).toBeGreaterThan(0)
       expect(preflight).toBeLessThan(setupBun)
       expect(preflight).toBeLessThan(setupUv)
@@ -221,11 +207,9 @@ describe('Electron final artifact validation pipeline', () => {
       expect(preflight).toBeLessThan(installDependencies)
     }
     expect(workflow.indexOf('preflight-previous-release.sh')).toBeLessThan(setupBun)
-    expect(workflow.indexOf('preflight-previous-release.ps1')).toBeLessThan(setupBun)
 
     const unix = read('scripts/preflight-previous-release.sh')
-    const windows = read('scripts/preflight-previous-release.ps1')
-    for (const contract of [unix, windows]) {
+    for (const contract of [unix]) {
       expect(contract).toContain('PREVIOUS_RELEASE_COMMIT_SHA')
       expect(contract).toContain('EXPECTED_PREVIOUS_ARTIFACT_SHA256')
       expect(contract).toContain('gh release download')

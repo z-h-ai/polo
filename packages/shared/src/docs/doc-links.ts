@@ -3,7 +3,7 @@
  * Summaries provide quick context; "Learn more" opens the full docs.
  */
 
-const DOC_BASE_URL = 'https://polo.ai/docs'
+const DOC_BASE_URL = 'https://app.polo.z-h-ai.com/docs'
 
 export type DocFeature =
   | 'sources'

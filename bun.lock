@@ -132,7 +132,7 @@
     },
     "apps/electron": {
       "name": "@polo-ai/electron",
-      "version": "0.10.0",
+      "version": "0.15.2",
       "dependencies": {
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -185,6 +185,10 @@
         "@types/yauzl": "^2.10.3",
         "happy-dom": "^20.11.1",
       },
+    },
+    "apps/public-api": {
+      "name": "@polo-ai/public-api",
+      "version": "0.10.0",
     },
     "apps/viewer": {
       "name": "@polo-ai/viewer",
@@ -359,8 +363,6 @@
         "@mariozechner/pi-agent-core": "0.73.1",
         "@mariozechner/pi-ai": "0.73.1",
         "@mariozechner/pi-coding-agent": "0.73.1",
-        "@polo-ai/core": "workspace:*",
-        "@polo-ai/session-tools-core": "workspace:*",
         "bash-parser": "^0.5.0",
         "croner": "^10.0.1",
         "date-fns": "^4.1.0",
@@ -1047,6 +1049,8 @@
     "@polo-ai/messaging-whatsapp-worker": ["@polo-ai/messaging-whatsapp-worker@workspace:packages/messaging-whatsapp-worker"],
 
     "@polo-ai/pi-agent-server": ["@polo-ai/pi-agent-server@workspace:packages/pi-agent-server"],
+
+    "@polo-ai/public-api": ["@polo-ai/public-api@workspace:apps/public-api"],
 
     "@polo-ai/server": ["@polo-ai/server@workspace:packages/server"],
 

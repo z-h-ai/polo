@@ -128,6 +128,9 @@ export function useSessionMenuActions({
   }, [onLabelsChange])
 
   const share = React.useCallback(async () => {
+    if (!window.confirm('Share this session publicly? It may contain file paths, prompts, tool output, or credentials. Anyone with the link can read it.')) {
+      return
+    }
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
     if (result?.success && result.url) {
       await navigator.clipboard.writeText(result.url)

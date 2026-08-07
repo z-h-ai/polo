@@ -33,7 +33,7 @@ We built Polo AI because we wanted a better, more opinionated (and preferably no
 **How do I connect to Linear, Gmail, Slack...?**
 Tell the agent "add Linear as a source." It finds public APIs and MCP servers, reads their docs, sets up credentials, and configures everything. No config files, no setup wizards.
 
-[Check out how I just connected to Slack →](https://polo.ai/s/DRNQEiy8w2e1v5LPgKl8b)
+[Check out how I just connected to Slack →](https://app.polo.z-h-ai.com/s/DRNQEiy8w2e1v5LPgKl8b)
 
 **I already have my MCP config JSON.**
 Paste it. The agent handles the rest.
@@ -50,7 +50,7 @@ Polo AI connects to anything. We have it hooked up to a direct Postgres DB behin
 **How do I import my Claude Code skills and MCPs?**
 Tell the agent you want to import your skills from Claude Code. It handles the migration.
 
-[Here I imported all my skills in one go →](https://polo.ai/s/gWCFqwhObFWaNJIEJmd6j)
+[Here I imported all my skills in one go →](https://app.polo.z-h-ai.com/s/gWCFqwhObFWaNJIEJmd6j)
 
 **How do I create a new skill?**
 Describe what the skill should do, give it context. The agent takes care of the rest.
@@ -68,12 +68,12 @@ Yes. That's the core idea behind agent-native software. You describe what you wa
 
 **macOS / Linux:**
 ```bash
-curl -fsSL https://polo.ai/install-app.sh | bash
+curl -fsSL https://app.polo.z-h-ai.com/install-app.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://polo.ai/install-app.ps1 | iex
+irm https://app.polo.z-h-ai.com/install-app.ps1 | iex
 ```
 
 ### Build from Source
@@ -552,7 +552,7 @@ Or configure manually in `~/.polo-ai/workspaces/{id}/automations.json`:
 
 **Supported events:** `LabelAdd`, `LabelRemove`, `PermissionModeChange`, `FlagChange`, `SessionStatusChange`, `SchedulerTick`, `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, and more.
 
-See the [Automations documentation](https://polo.ai/docs/automations/overview) for the full reference.
+See the [Automations documentation](https://app.polo.z-h-ai.com/docs/automations/overview) for the full reference.
 
 ## Advanced Features
 

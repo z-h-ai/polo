@@ -486,6 +486,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   // Share action handlers
   const handleShare = React.useCallback(async () => {
+    if (!window.confirm('Share this session publicly? It may contain file paths, prompts, tool output, or credentials. Anyone with the link can read it.')) {
+      return
+    }
     const result = await window.electronAPI.sessionCommand(sessionId, { type: 'shareToViewer' }) as { success: boolean; url?: string; error?: string } | undefined
     if (result?.success && result.url) {
       await navigator.clipboard.writeText(result.url)
@@ -565,7 +568,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               <span className="flex-1">{t('sessionMenu.stopSharing')}</span>
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://polo.ai/docs/go-further/sharing')}>
+            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://app.polo.z-h-ai.com/docs/go-further/sharing')}>
               <Info className="h-3.5 w-3.5" />
               <span className="flex-1">{t('chat.learnMore')}</span>
             </StyledDropdownMenuItem>
@@ -579,7 +582,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
               <span className="flex-1">{t('chat.shareOnline')}</span>
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://polo.ai/docs/go-further/sharing')}>
+            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://app.polo.z-h-ai.com/docs/go-further/sharing')}>
               <Info className="h-3.5 w-3.5" />
               <span className="flex-1">{t('chat.learnMore')}</span>
             </StyledDropdownMenuItem>

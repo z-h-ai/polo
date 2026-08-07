@@ -1,6 +1,6 @@
 {
   "name": "@polo-ai/server",
-  "version": "0.10.0",
+  "version": "0.15.2",
   "description": "Standalone headless Polo AI server (Bun runtime)",
   "type": "module",
   "main": "src/index.ts",
@@ -18,7 +18,7 @@
     "email": "support@polo.ai"
   },
   "license": "Apache-2.0",
-  "homepage": "https://polo.ai",
+  "homepage": "https://app.polo.z-h-ai.com",
   "scripts": {
     "start": "bun run src/index.ts",
     "generate-token": "bun run src/index.ts --generate-token",

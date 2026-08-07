@@ -17,7 +17,6 @@ import {
 } from '../prepare-platform-runtime'
 import {
   getUvRuntimeManifestPath,
-  installPinnedUvBinary,
   isPinnedUvRuntime,
   isPinnedUvVersionOutput,
   sha256File,
@@ -190,25 +189,16 @@ describe('preparePlatformRuntime', () => {
     expect(isPinnedUvRuntime(cached, 'darwin', 'arm64')).toBe(false)
   })
 
-  it('atomically replaces a polluted cache with the pinned release binary', () => {
+  it('atomically replaces a polluted cache with the verified staged binary', async () => {
     const root = mkdtempSync(join(tmpdir(), 'polo uv atomic replacement '))
     roots.push(root)
     const electronDir = join(root, 'electron')
     const targetDir = join(electronDir, 'resources', 'bin', 'darwin-arm64')
     const cached = join(targetDir, 'uv')
-    const pinned = join(
-      import.meta.dir,
-      '..',
-      '..',
-      'apps',
-      'electron',
-      'resources',
-      'bin',
-      'darwin-arm64',
-      'uv',
-    )
+    const verifiedSource = join(root, 'verified-uv')
     mkdirSync(targetDir, { recursive: true })
     writeUvFixture(cached, 'darwin', 'arm64')
+    writeUvFixture(verifiedSource, 'darwin', 'arm64')
     const config: BuildConfig = {
       platform: 'darwin',
       arch: 'arm64',
@@ -219,11 +209,11 @@ describe('preparePlatformRuntime', () => {
       electronDir,
     }
 
-    installPinnedUvBinary(config, pinned)
+    await stageUvRuntime(config, verifiedSource)
 
-    expect(sha256File(cached)).toBe(sha256File(pinned))
-    expect(validateUvRuntimeManifest(config, { requireTrusted: true })).toMatchObject({
-      source: 'astral-sh-release',
+    expect(sha256File(cached)).toBe(sha256File(verifiedSource))
+    expect(validateUvRuntimeManifest(config)).toMatchObject({
+      source: 'fixture',
       version: '0.10.6',
       platform: 'darwin',
       arch: 'arm64',

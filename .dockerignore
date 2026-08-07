@@ -11,6 +11,8 @@ node_modules/
 # Build artifacts
 dist/
 *.tgz
+!apps/viewer/dist/
+!apps/viewer/dist/**
 
 # Electron app output (not needed for server)
 apps/electron/release/
@@ -49,7 +51,6 @@ CHANGELOG*.md
 LICENSE*
 
 # Docker files (avoid recursive context)
-Dockerfile*
 docker-compose*.yml
 .dockerignore
 

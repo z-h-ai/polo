@@ -35,7 +35,7 @@ describe('WebUI /api/oauth/callback', () => {
       flowId: 'flow-1',
       state: 'inner-state-123',
       codeVerifier: 'verifier',
-      redirectUri: 'https://polo.ai/auth/callback',
+      redirectUri: 'https://app.polo.z-h-ai.com/auth/callback',
       source: {} as any,
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',

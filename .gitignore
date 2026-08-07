@@ -6,6 +6,15 @@ out
 dist
 *.tgz
 .build
+
+# Zeabur's source uploader respects this file. These two generated artifacts
+# are required by the runtime-only public API Docker image after its build step.
+!apps/viewer/
+!apps/viewer/dist/
+!apps/viewer/dist/**
+!apps/public-api/
+!apps/public-api/.build/
+!apps/public-api/.build/polo-public-api
 apps/electron/release
 apps/electron/resources/session-mcp-server/
 apps/electron/resources/pi-agent-server/
