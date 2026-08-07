@@ -57,6 +57,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('polo --help')
     expect(validator).toContain('run_packaged_headless_lifecycle')
     expect(validator).toContain('--base-url')
+    expect(validator).toContain("-C '$workspace' --verbose")
+    expect(validator).not.toContain("--workspace-dir '$workspace'")
     expect(validator).toContain("'hello'")
     expect(validator).toContain('polo-run-server-*')
     expect(validator).not.toContain('POLO_AI_E2E_RUN_PROBE')

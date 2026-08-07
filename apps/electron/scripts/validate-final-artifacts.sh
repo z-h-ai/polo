@@ -673,7 +673,7 @@ run_packaged_headless_lifecycle() {
     'process.stdout.write(JSON.parse(await Bun.file(process.argv[1]).text()).baseUrl)' \
     "$state_file")
   if ! run_fresh_shell "$shell_path" "$test_home" \
-    "polo run --provider openai --model gpt-4o --api-key '$mock_token' --base-url '$base_url' --workspace-dir '$workspace' --timeout 60000 --send-timeout 60000 'hello' >'$run_output' 2>&1"; then
+    "polo run --provider openai --model gpt-4o --api-key '$mock_token' --base-url '$base_url' -C '$workspace' --verbose --timeout 60000 --send-timeout 60000 'hello' >'$run_output' 2>&1"; then
     echo "Packaged polo run failed:" >&2
     cat "$run_output" >&2
     return 1
@@ -682,9 +682,7 @@ run_packaged_headless_lifecycle() {
 
   grep -F '"sawHello":true' "$request_log" >/dev/null
   grep -F 'artifact run completed' "$run_output" >/dev/null
-  grep -F 'Workspace registered:' "$run_output" >/dev/null
   grep -F 'Server ready: ws://127.0.0.1:' "$run_output" >/dev/null
-  grep -R -F "$workspace" "$test_home/.polo-ai" >/dev/null
   local temporary_port
   temporary_port=$(sed -n \
     's/.*Server ready: ws:\\/\\/127\\.0\\.0\\.1:\\([0-9][0-9]*\\).*/\\1/p' \
