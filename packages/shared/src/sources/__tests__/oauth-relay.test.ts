@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-import { OAUTH_RELAY_CALLBACK_URL, decodeOAuthRelayState, isOAuthRelayState } from '../../auth/oauth-relay.ts';
+import { OAUTH_RELAY_CALLBACK_URL, OAUTH_RELAY_STATE_URL, isOAuthRelayState } from '../../auth/oauth-relay.ts';
 import { SourceCredentialManager } from '../credential-manager.ts';
 import type { LoadedSource, FolderSourceConfig } from '../types.ts';
 
@@ -52,9 +52,11 @@ function createMcpSource(overrides: Partial<FolderSourceConfig> = {}): LoadedSou
 
 describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
   const credManager = new SourceCredentialManager();
+  const relayStates: Array<{ returnTo: string; innerState: string }> = [];
 
   beforeEach(() => {
-    globalThis.fetch = mock((input: string | URL | Request) => {
+    relayStates.length = 0;
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string'
         ? input
         : input instanceof URL
@@ -65,6 +67,11 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
           authorization_endpoint: 'https://example.com/oauth/authorize',
           token_endpoint: 'https://example.com/oauth/token',
         }));
+      }
+      if (url === OAUTH_RELAY_STATE_URL) {
+        const body = init?.body;
+        relayStates.push(JSON.parse(typeof body === 'string' ? body : '{}'));
+        return Promise.resolve(Response.json({ state: 'ca2.abcdefghijklmnopqrstuvwx.abcdefghijklmnopqrstuvwxyz123456' }, { status: 201 }));
       }
       return Promise.resolve(new Response('Not Found', { status: 404 }));
     }) as unknown as typeof fetch;
@@ -84,7 +91,7 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
     const outerState = authUrl.searchParams.get('state');
     expect(outerState).toBeTruthy();
     expect(isOAuthRelayState(outerState!)).toBe(true);
-    expect(decodeOAuthRelayState(outerState!)).toEqual({
+    expect(relayStates.pop()).toEqual({
       returnTo: 'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
       innerState: result.state,
     });
@@ -104,7 +111,7 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
     const outerState = authUrl.searchParams.get('state');
     expect(outerState).toBeTruthy();
     expect(isOAuthRelayState(outerState!)).toBe(true);
-    expect(decodeOAuthRelayState(outerState!)).toEqual({
+    expect(relayStates.pop()).toEqual({
       returnTo: 'http://localhost:6477/callback',
       innerState: result.state,
     });
@@ -124,7 +131,7 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
     const outerState = authUrl.searchParams.get('state');
     expect(outerState).toBeTruthy();
     expect(isOAuthRelayState(outerState!)).toBe(true);
-    expect(decodeOAuthRelayState(outerState!)).toEqual({
+    expect(relayStates.pop()).toEqual({
       returnTo: 'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
       innerState: result.state,
     });

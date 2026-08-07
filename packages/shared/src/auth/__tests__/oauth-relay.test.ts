@@ -1,35 +1,27 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 
 import {
   OAUTH_RELAY_CALLBACK_URL,
-  decodeOAuthRelayState,
-  encodeOAuthRelayState,
+  OAUTH_RELAY_STATE_URL,
   isOAuthRelayState,
   wrapPreparedOAuthFlowForRelay,
 } from '../oauth-relay.ts';
 import type { PreparedOAuthFlow } from '../oauth-flow-types.ts';
 
-describe('oauth relay state', () => {
-  it('round-trips the relay callback target and inner state', () => {
-    const encoded = encodeOAuthRelayState(
-      'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
-      'inner-state-123',
-    );
-
-    expect(isOAuthRelayState(encoded)).toBe(true);
-    expect(decodeOAuthRelayState(encoded)).toEqual({
-      returnTo: 'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
-      innerState: 'inner-state-123',
-    });
-  });
-
-  it('rejects malformed relay state', () => {
-    expect(() => decodeOAuthRelayState('ca1.not-valid-base64')).toThrow('Invalid OAuth relay state');
-  });
-});
+const RELAY_STATE = 'ca2.abcdefghijklmnopqrstuvwx.abcdefghijklmnopqrstuvwxyz123456';
 
 describe('wrapPreparedOAuthFlowForRelay', () => {
-  it('keeps the inner flow state but rewrites auth URL state and redirect_uri', () => {
+  it('uses a server-minted opaque state and the stable redirect URI', async () => {
+    let stateRequest: Record<string, string> | null = null;
+    globalThis.fetch = mock(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === OAUTH_RELAY_STATE_URL) {
+        stateRequest = JSON.parse(String(init?.body));
+        return Response.json({ state: RELAY_STATE }, { status: 201 });
+      }
+      return new Response('Not found', { status: 404 });
+    }) as unknown as typeof fetch;
+
     const prepared: PreparedOAuthFlow = {
       authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=test-client&redirect_uri=https%3A%2F%2Fold.example%2Fcallback&response_type=code&state=inner-state-123',
       state: 'inner-state-123',
@@ -41,24 +33,22 @@ describe('wrapPreparedOAuthFlowForRelay', () => {
       provider: 'google',
     };
 
-    const wrapped = wrapPreparedOAuthFlowForRelay(
+    const wrapped = await wrapPreparedOAuthFlowForRelay(
       prepared,
       'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
     );
 
+    expect(stateRequest!).toEqual({
+      returnTo: 'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
+      innerState: 'inner-state-123',
+    });
     expect(wrapped.state).toBe('inner-state-123');
     expect(wrapped.redirectUri).toBe(OAUTH_RELAY_CALLBACK_URL);
 
     const authUrl = new URL(wrapped.authUrl);
     expect(authUrl.searchParams.get('redirect_uri')).toBe(OAUTH_RELAY_CALLBACK_URL);
-
-    const outerState = authUrl.searchParams.get('state');
-    expect(outerState).toBeTruthy();
-    expect(outerState).not.toBe('inner-state-123');
-    expect(isOAuthRelayState(outerState!)).toBe(true);
-    expect(decodeOAuthRelayState(outerState!)).toEqual({
-      returnTo: 'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
-      innerState: 'inner-state-123',
-    });
+    expect(authUrl.searchParams.get('state')).toBe(RELAY_STATE);
+    expect(isOAuthRelayState(RELAY_STATE)).toBe(true);
+    expect(isOAuthRelayState('ca1.untrusted')).toBe(false);
   });
 });

@@ -1,0 +1,29 @@
+name: Scheduled Electron Release Validation
+
+on:
+  schedule:
+    - cron: "27 8 * * 2,5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: electron-scheduled-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    uses: ./.github/workflows/electron-artifact-full.yml
+    with:
+      # Scheduled validation proves current signing and clean-install behavior. Only
+      # immutable tag releases are allowed to resolve and exercise a predecessor.
+      bootstrap: true
+    secrets:
+      macos_csc_link: ${{ secrets.POLO_AI_MACOS_CSC_LINK }}
+      macos_csc_key_password: ${{ secrets.POLO_AI_MACOS_CSC_KEY_PASSWORD }}
+      apple_id: ${{ secrets.POLO_AI_APPLE_ID }}
+      apple_app_specific_password: ${{ secrets.POLO_AI_APPLE_APP_SPECIFIC_PASSWORD }}
+      apple_team_id: ${{ secrets.POLO_AI_APPLE_TEAM_ID }}
+      windows_csc_link: ${{ secrets.POLO_AI_WINDOWS_CSC_LINK }}
+      windows_csc_key_password: ${{ secrets.POLO_AI_WINDOWS_CSC_KEY_PASSWORD }}

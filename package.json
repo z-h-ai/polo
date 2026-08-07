@@ -1,6 +1,6 @@
 {
   "name": "polo-ai",
-  "version": "0.10.0",
+  "version": "0.15.2",
   "license": "Apache-2.0",
   "description": "Claude Code-like agent for Polo AI documents",
   "type": "module",
@@ -92,6 +92,7 @@
     "viewer:dev": "lsof -ti:5174 | xargs kill -9 2>/dev/null; vite dev --config apps/viewer/vite.config.ts --open /s/tz5-13I84pwK_he",
     "viewer:typecheck": "cd apps/viewer && bun run typecheck",
     "viewer:build": "vite build --config apps/viewer/vite.config.ts",
+    "public-api:build": "bun build apps/public-api/src/index.ts --compile --target=bun-linux-x64-musl --outfile apps/public-api/.build/polo-public-api",
     "viewer:preview": "vite preview --config apps/viewer/vite.config.ts",
     "webui:dev": "lsof -ti:5175 | xargs kill -9 2>/dev/null; vite dev --config apps/webui/vite.config.ts",
     "webui:clean": "rm -rf apps/webui/dist",
@@ -106,6 +107,8 @@
     "docs:dev": "cd apps/online-docs && npm install && npx mintlify dev",
     "build": "bun run scripts/build.ts",
     "release": "bun run scripts/release.ts",
+    "release:publish": "bun run scripts/publish-electron-release.ts publish",
+    "release:rollback": "bun run scripts/publish-electron-release.ts rollback",
     "check-version": "bun run scripts/check-version.ts",
     "oss:sync": "bun run scripts/oss-sync.ts",
     "prepare": "husky"

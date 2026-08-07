@@ -1,0 +1,33 @@
+{
+  admin off
+  auto_https off
+}
+
+:8080 {
+  root * /data/releases
+
+  @latestManifests {
+    method GET HEAD
+    path /electron/latest/latest-mac.yml /electron/latest/latest.yml /electron/latest/latest-linux.yml /electron/latest/release-contract.json
+  }
+  handle @latestManifests {
+    header Cache-Control "no-cache"
+    file_server
+  }
+
+  @immutableArtifacts {
+    method GET HEAD
+    path /electron/latest/* /electron/releases/*
+  }
+  handle @immutableArtifacts {
+    header Cache-Control "public, max-age=31536000, immutable"
+    file_server
+  }
+
+  @readonly method GET HEAD
+  handle @readonly {
+    file_server
+  }
+
+  respond "Method not allowed" 405
+}

@@ -1,0 +1,235 @@
+#!/usr/bin/env bun
+
+import { createHash } from 'node:crypto'
+import { cp, lstat, mkdir, readdir, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { parseArgs } from 'node:util'
+import { load } from 'js-yaml'
+import {
+  createReleaseContract,
+  parseReleaseContract,
+  type ReleaseArtifactContract,
+  type ReleaseContract,
+} from './electron-release-contract'
+import { MANIFEST_NAMES, validateSource } from './publish-electron-release'
+
+const BUNDLE_FILES = [
+  'Polo-AI-x64.zip',
+  'Polo-AI-x64.exe',
+  'Polo-AI-x64.AppImage',
+  ...MANIFEST_NAMES,
+] as const
+
+interface BundleMetadata {
+  repository: string
+  tag: string
+  version: string
+  commitSha: string
+}
+
+async function assertRegularFile(path: string): Promise<void> {
+  const value = await lstat(path)
+  if (!value.isFile()) throw new Error(`Expected a regular file: ${path}`)
+}
+
+export async function prepareReleaseBundle(input: BundleMetadata & {
+  inputDir: string
+  outputDir: string
+  installScript: string
+  publishedAt: string
+}): Promise<ReleaseContract> {
+  const inputDir = resolve(input.inputDir)
+  const outputDir = resolve(input.outputDir)
+  const existing = await readdir(outputDir).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []
+    throw error
+  })
+  if (existing.length > 0) throw new Error(`Release output directory is not empty: ${outputDir}`)
+  await mkdir(outputDir, { recursive: true })
+
+  for (const name of BUNDLE_FILES) {
+    const source = join(inputDir, name)
+    await assertRegularFile(source)
+    await cp(source, join(outputDir, name), { errorOnExist: true, force: false })
+  }
+  await assertRegularFile(input.installScript)
+  await cp(input.installScript, join(outputDir, 'install-app.sh'), {
+    errorOnExist: true,
+    force: false,
+  })
+  const contract = await createReleaseContract({
+    repository: input.repository,
+    tag: input.tag,
+    version: input.version,
+    commitSha: input.commitSha,
+    publishedAt: input.publishedAt,
+    macosZip: join(outputDir, 'Polo-AI-x64.zip'),
+    windowsExe: join(outputDir, 'Polo-AI-x64.exe'),
+    linuxAppImage: join(outputDir, 'Polo-AI-x64.AppImage'),
+    installApp: join(outputDir, 'install-app.sh'),
+  })
+  await writeFile(
+    join(outputDir, 'release-contract.json'),
+    `${JSON.stringify(contract, null, 2)}\n`,
+  )
+  await validateSource(outputDir, input)
+  return contract
+}
+
+function sha512(contents: Uint8Array): string {
+  return createHash('sha512').update(contents).digest('base64')
+}
+
+function sha256(contents: Uint8Array): string {
+  return createHash('sha256').update(contents).digest('hex')
+}
+
+async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(url, init)
+  if (!response.ok) throw new Error(`${init?.method ?? 'GET'} ${url} returned HTTP ${response.status}`)
+  return response
+}
+
+function requireCacheControl(response: Response, directive: string, label: string): void {
+  const value = response.headers.get('cache-control') ?? ''
+  if (!value.toLowerCase().includes(directive)) {
+    throw new Error(`${label} Cache-Control must include ${directive}`)
+  }
+}
+
+async function verifyArtifact(
+  baseUrl: string,
+  contractArtifact: ReleaseArtifactContract,
+  manifestEntry?: { size: number, sha512: string },
+): Promise<void> {
+  const url = `${baseUrl}/${encodeURIComponent(contractArtifact.fileName)}`
+  const head = await fetchOk(url, { method: 'HEAD', cache: 'no-store' })
+  requireCacheControl(head, 'immutable', contractArtifact.fileName)
+  const contents = new Uint8Array(await (await fetchOk(url, { cache: 'no-store' })).arrayBuffer())
+  const headerSize = head.headers.get('content-length')
+  if (headerSize !== null && Number(headerSize) !== contents.byteLength) {
+    throw new Error(`${contractArtifact.fileName} HEAD content-length is incorrect`)
+  }
+  if (manifestEntry && manifestEntry.size !== contents.byteLength) {
+    throw new Error(`${contractArtifact.fileName} manifest size is incorrect`)
+  }
+  if (manifestEntry && manifestEntry.sha512 !== sha512(contents)) {
+    throw new Error(`${contractArtifact.fileName} manifest SHA-512 is incorrect`)
+  }
+  if (contractArtifact.sha256 !== sha256(contents)) {
+    throw new Error(`${contractArtifact.fileName} contract SHA-256 is incorrect`)
+  }
+}
+
+export async function verifyPublishedRelease(
+  baseUrl: string,
+  expected: BundleMetadata,
+): Promise<ReleaseContract> {
+  const normalizedBase = baseUrl.replace(/\/$/, '')
+  const contractResponse = await fetchOk(`${normalizedBase}/release-contract.json`, {
+    cache: 'no-store',
+  })
+  requireCacheControl(contractResponse, 'no-cache', 'release-contract.json')
+  const contract = parseReleaseContract(await contractResponse.json())
+  if (
+    contract.repository !== expected.repository
+    || contract.tag !== expected.tag
+    || contract.version !== expected.version
+    || contract.commitSha !== expected.commitSha
+  ) {
+    throw new Error('Published contract does not match the release being verified')
+  }
+
+  const manifestContracts: Record<string, ReleaseArtifactContract> = {
+    'latest-mac.yml': contract.artifacts.macosZip,
+    'latest.yml': contract.artifacts.windowsExe,
+    'latest-linux.yml': contract.artifacts.linuxAppImage,
+  }
+  for (const manifestName of MANIFEST_NAMES) {
+    const manifestResponse = await fetchOk(`${normalizedBase}/${manifestName}`, { cache: 'no-store' })
+    requireCacheControl(manifestResponse, 'no-cache', manifestName)
+    const manifest = load(await manifestResponse.text()) as {
+      version?: string
+      files?: Array<{ url?: string, size?: number, sha512?: string }>
+    }
+    const entry = manifest.files?.[0]
+    const artifact = manifestContracts[manifestName]!
+    if (
+      manifest.version !== expected.version
+      || manifest.files?.length !== 1
+      || entry?.url !== artifact.fileName
+      || !Number.isSafeInteger(entry.size)
+      || typeof entry.sha512 !== 'string'
+    ) {
+      throw new Error(`${manifestName} does not match the published contract`)
+    }
+    await verifyArtifact(normalizedBase, artifact, {
+      size: entry.size!,
+      sha512: entry.sha512,
+    })
+  }
+  await verifyArtifact(normalizedBase, contract.installApp)
+
+  const methodCheck = await fetch(`${normalizedBase}/release-contract.json`, { method: 'POST' })
+  if (methodCheck.status !== 405) {
+    throw new Error(`Static update service accepted POST with HTTP ${methodCheck.status}`)
+  }
+  return contract
+}
+
+function required(values: Record<string, string | undefined>, key: string): string {
+  const value = values[key]
+  if (!value) throw new Error(`Missing --${key}`)
+  return value
+}
+
+async function main(): Promise<void> {
+  const [command, ...args] = process.argv.slice(2)
+  const common = {
+    repository: { type: 'string' as const },
+    tag: { type: 'string' as const },
+    version: { type: 'string' as const },
+    commit: { type: 'string' as const },
+  }
+  if (command === 'prepare') {
+    const { values } = parseArgs({
+      args,
+      options: {
+        ...common,
+        input: { type: 'string' },
+        output: { type: 'string' },
+        'install-script': { type: 'string' },
+        'published-at': { type: 'string' },
+      },
+      strict: true,
+    })
+    await prepareReleaseBundle({
+      inputDir: required(values, 'input'),
+      outputDir: required(values, 'output'),
+      installScript: required(values, 'install-script'),
+      repository: required(values, 'repository'),
+      tag: required(values, 'tag'),
+      version: required(values, 'version'),
+      commitSha: required(values, 'commit').toLowerCase(),
+      publishedAt: values['published-at'] ?? new Date().toISOString(),
+    })
+    return
+  }
+  if (command === 'verify') {
+    const { values } = parseArgs({
+      args,
+      options: { ...common, url: { type: 'string' } },
+      strict: true,
+    })
+    await verifyPublishedRelease(required(values, 'url'), {
+      repository: required(values, 'repository'),
+      tag: required(values, 'tag'),
+      version: required(values, 'version'),
+      commitSha: required(values, 'commit').toLowerCase(),
+    })
+    return
+  }
+  throw new Error('Usage: electron-release-bundle.ts <prepare|verify> [options]')
+}
+
+if (import.meta.main) await main()

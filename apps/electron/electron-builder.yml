@@ -89,7 +89,7 @@ extraMetadata:
 # Auto-update: electron-updater fetches from this URL for update manifests (.yml files)
 publish:
   provider: generic
-  url: https://polo.ai/electron/latest
+  url: https://updates.polo.z-h-ai.com/electron/latest
 
 # Disable ASAR to avoid decompression overhead and click delays
 asar: false
@@ -214,7 +214,7 @@ linux:
     - target: AppImage
       arch:
         - x64
-  artifactName: "Polo-AI-${arch}.${ext}"
+  artifactName: "Polo-AI-x64.${ext}"
   extraResources:
     - from: node_modules/@anthropic-ai/claude-agent-sdk
       to: app/node_modules/@anthropic-ai/claude-agent-sdk

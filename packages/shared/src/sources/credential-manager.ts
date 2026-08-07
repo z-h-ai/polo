@@ -527,7 +527,7 @@ export class SourceCredentialManager {
     }
 
     return relayReturnTo
-      ? wrapPreparedOAuthFlowForRelay(prepared, relayReturnTo)
+      ? await wrapPreparedOAuthFlowForRelay(prepared, relayReturnTo)
       : prepared;
   }
 

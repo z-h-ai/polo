@@ -28,7 +28,7 @@ module.exports = async function afterAllArtifactBuild(context) {
       '-File',
       path.join(__dirname, 'validate-final-artifacts.ps1'),
       '-Mode',
-      mode === 'full' ? 'Full' : 'Smoke',
+      mode === 'full' ? 'Full' : mode === 'bootstrap' ? 'Bootstrap' : 'Smoke',
       '-ReleaseDir',
       releaseDir,
       '-Arch',
@@ -52,7 +52,7 @@ module.exports = async function afterAllArtifactBuild(context) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     stdio: 'inherit',
-    timeout: mode === 'full' ? 15 * 60_000 : 5 * 60_000,
+    timeout: mode === 'full' || mode === 'bootstrap' ? 15 * 60_000 : 5 * 60_000,
     env: process.env,
   });
   if (result.error || result.status !== 0) {

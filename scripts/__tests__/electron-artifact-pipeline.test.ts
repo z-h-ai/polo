@@ -114,12 +114,16 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).not.toContain('$env:Path = "$binDir;')
   })
 
-  it('defines a blocking release/nightly three-platform full workflow', () => {
+  it('defines a reusable blocking three-platform release build', () => {
     const workflow = read('.github/workflows/electron-artifact-full.yml')
+    const releaseWorkflow = read('.github/workflows/electron-release.yml')
+    const scheduledWorkflow = read('.github/workflows/electron-scheduled-validation.yml')
 
-    expect(workflow).toContain('release:')
-    expect(workflow).toContain('schedule:')
-    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).toContain('workflow_call:')
+    expect(workflow).not.toContain('release:\n    types:')
+    expect(releaseWorkflow).toContain('tags:')
+    expect(scheduledWorkflow).toContain('schedule:')
+    expect(scheduledWorkflow).toContain('workflow_dispatch:')
     expect(workflow).toContain('previous_release_tag:')
     expect(workflow).toContain('previous_release_version:')
     expect(workflow).toContain('previous_release_commit_sha:')
@@ -127,10 +131,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('previous_windows_sha256:')
     expect(workflow).toContain('previous_linux_sha256:')
     expect(workflow).toContain('previous_installer_sha256:')
-    expect(workflow).toContain('POLO_AI_FULL_E2E_PREVIOUS_RELEASE_TAG')
-    expect(workflow).toContain('POLO_AI_FULL_E2E_PREVIOUS_RELEASE_COMMIT_SHA')
     expect(workflow).toContain('EXPECTED_PREVIOUS_ARTIFACT_SHA256')
-    expect(workflow).toContain('POLO_AI_ARTIFACT_VALIDATION_MODE: full')
+    expect(workflow).toContain("inputs.bootstrap && 'bootstrap' || 'full'")
     expect(workflow).toContain('POLO_AI_PREVIOUS_ARTIFACT:')
     expect(workflow).toContain('POLO_AI_PREVIOUS_INSTALL_SCRIPT:')
     expect(workflow).toContain('runner: macos-14')
@@ -153,11 +155,7 @@ describe('Electron final artifact validation pipeline', () => {
     const semverPattern = read('scripts/strict-semver-pattern.txt').trim()
     expect(semverPattern.startsWith('^')).toBe(true)
     expect(semverPattern.endsWith('$')).toBe(true)
-    for (const consumer of [
-      workflow,
-      unixPreviousPreflight,
-      windowsPreviousPreflight,
-    ]) {
+    for (const consumer of [unixPreviousPreflight, windowsPreviousPreflight]) {
       expect(consumer).toContain('strict-semver-pattern.txt')
     }
     expect(read('scripts/strict-semver.ts')).toContain(
@@ -176,8 +174,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('POLO_AI_RELEASE_MACOS_UV_REQUIREMENT')
     expect(workflow).toContain('POLO_AI_RELEASE_WINDOWS_PUBLISHER')
     expect(workflow).toContain('POLO_AI_RELEASE_WINDOWS_THUMBPRINT')
-    expect(workflow).toContain('POLO_AI_MACOS_CSC_LINK')
-    expect(workflow).toContain('POLO_AI_WINDOWS_CSC_LINK')
+    expect(workflow).toContain('secrets.macos_csc_link')
+    expect(workflow).toContain('secrets.windows_csc_link')
     expect(workflow).toContain('electron:dist:mac --arch=x64')
     expect(workflow).toContain('electron:dist:win --arch=x64')
     expect(workflow).toContain('electron:dist:linux --arch=x64')
@@ -192,9 +190,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('full-validation-macos.log')
     expect(workflow).toContain('full-validation-windows.log')
     expect(workflow).toContain('full-validation-linux.log')
-    expect(workflow).toContain('release-signing-audit-Darwin.jsonl')
-    expect(workflow).toContain('release-signing-audit-Windows.jsonl')
-    expect(workflow).toContain('previous_artifact_sha256=')
+    expect(workflow).toContain('release-signing-audit-*.jsonl')
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('bun run validate:ci')
     expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildMcpServers(config)')
@@ -203,14 +199,14 @@ describe('Electron final artifact validation pipeline', () => {
   it('verifies immutable previous assets before every setup or install write', () => {
     const workflow = read('.github/workflows/electron-artifact-full.yml')
     const unixPreflight = workflow.indexOf(
-      'Verify and download previous Unix release before setup',
+      'Verify and download previous Unix release',
     )
     const windowsPreflight = workflow.indexOf(
-      'Verify and download previous Windows release before setup',
+      'Verify and download previous Windows release',
     )
     const setupBun = workflow.indexOf('- name: Setup Bun')
     const setupUv = workflow.indexOf('- name: Install uv')
-    const apt = workflow.indexOf('- name: Install Linux GUI and AppImage dependencies')
+    const apt = workflow.indexOf('- name: Install Linux GUI dependencies')
     const installDependencies = workflow.indexOf('- name: Install dependencies')
 
     for (const preflight of [unixPreflight, windowsPreflight]) {

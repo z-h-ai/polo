@@ -228,7 +228,7 @@ ELECTRON_CACHE_ALT="$HOME/.cache/@polo-ai"
 # Verify AppImage exists
 if [ ! -f "$APPIMAGE_PATH" ]; then
     echo "Error: Polo AI not found at $APPIMAGE_PATH"
-    echo "Reinstall: curl -fsSL https://polo.ai/install-app.sh | bash"
+    echo "Reinstall: curl -fsSL https://app.polo.z-h-ai.com/install-app.sh | bash"
     exit 1
 fi
 
@@ -279,7 +279,7 @@ ELECTRON_CACHE_ALT="$HOME/.cache/@polo-ai"
 # Verify AppImage exists
 if [ ! -f "$APPIMAGE_PATH" ]; then
     echo "Error: Polo AI not found at $APPIMAGE_PATH"
-    echo "Reinstall: curl -fsSL https://polo.ai/install-app.sh | bash"
+    echo "Reinstall: curl -fsSL https://app.polo.z-h-ai.com/install-app.sh | bash"
     exit 1
 fi
 
