@@ -15,4 +15,4 @@ export const POLO_AI_LOGO = [
 export const POLO_AI_LOGO_HTML = POLO_AI_LOGO.map((line) => line.trimEnd()).join('\n');
 
 /** Session viewer base URL */
-export const VIEWER_URL = 'https://polo.ai';
+export const VIEWER_URL = 'https://app.polo.z-h-ai.com';

@@ -1,10 +1,10 @@
 # Polo AI Windows Installer
-# Usage: irm https://polo.ai/install-app.ps1 | iex
+# Usage: irm https://app.polo.z-h-ai.com/install-app.ps1 | iex
 
 & {
 $ErrorActionPreference = "Stop"
 
-$VERSIONS_URL = "https://polo.ai/electron"
+$VERSIONS_URL = "https://updates.polo.z-h-ai.com/electron"
 $DOWNLOAD_DIR = "$env:TEMP\polo-ai-install"
 $APP_NAME = "Polo AI"
 

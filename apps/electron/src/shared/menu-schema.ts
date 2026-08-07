@@ -299,7 +299,7 @@ export const HELP_LINKS: MenuItemUrl[] = [
     type: 'url',
     id: 'helpAndDocs',
     labelKey: 'menu.helpAndDocs',
-    url: 'https://polo.ai/docs',
+    url: 'https://app.polo.z-h-ai.com/docs',
     icon: 'HelpCircle',
   },
 ]

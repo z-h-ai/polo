@@ -30,9 +30,9 @@ export default defineConfig({
     port: 5174, // Different from Electron dev server
     open: true,
     proxy: {
-      // Proxy API requests to production R2 during local dev
+      // Proxy API requests to the public service during local development.
       '/s/api': {
-        target: 'https://polo.ai',
+        target: 'https://app.polo.z-h-ai.com',
         changeOrigin: true,
         secure: true,
       },

@@ -234,7 +234,7 @@ export async function rebuildMenu(): Promise<void> {
       submenu: [
         {
           label: i18n.t("menu.helpAndDocs"),
-          click: () => shell.openExternal('https://polo.ai/docs')
+          click: () => shell.openExternal('https://app.polo.z-h-ai.com/docs')
         },
         {
           label: i18n.t("menu.keyboardShortcuts"),

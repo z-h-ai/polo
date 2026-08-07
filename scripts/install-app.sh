@@ -2,7 +2,7 @@
 
 set -Ee
 
-VERSIONS_URL="https://polo.ai/electron"
+VERSIONS_URL="https://updates.polo.z-h-ai.com/electron"
 DOWNLOAD_DIR="$HOME/.polo-ai/downloads"
 LOCAL_ARTIFACT="${POLO_AI_INSTALL_ARTIFACT:-}"
 

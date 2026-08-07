@@ -7,7 +7,3 @@ export const APP_VERSION: string = pkg.version;
 export function getAppVersion(): string {
   return APP_VERSION;
 }
-
-export * from './install.ts';
-export * from './manifest.ts';
-export * from './version.ts';

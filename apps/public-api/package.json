@@ -1,0 +1,11 @@
+{
+  "name": "@polo-ai/public-api",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  }
+}

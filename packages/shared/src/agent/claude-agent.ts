@@ -966,7 +966,7 @@ export class ClaudeAgent extends BaseAgent {
         // This is a public Mintlify MCP server, no auth needed
         'polo-ai-docs': {
           type: 'http',
-          url: 'https://polo.ai/docs/mcp',
+          url: 'https://app.polo.z-h-ai.com/docs/mcp',
         },
         // Per-source proxy servers from centralized MCP pool (MCP + API sources)
         // Each source gets its own SDK server keyed by slug (e.g., 'linear', 'github', 'gmail')

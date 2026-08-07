@@ -842,6 +842,8 @@ interface ManagedSession {
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
   sharedId?: string
+  // Local-only capability token for updating or revoking a shared session.
+  sharedWriteToken?: string
   // Model to use for this session (overrides global config if set)
   model?: string
   // LLM connection slug for this session (locked after first message)
@@ -1090,8 +1092,11 @@ function managedToSession(
   storage: SessionStorage,
   overrides?: Partial<Session>,
 ): Session {
+  // The write capability persists locally for main-process share mutations,
+  // but should never cross the renderer IPC boundary.
+  const { sharedWriteToken: _sharedWriteToken, ...persistedFields } = pickSessionFields(m)
   return {
-    ...pickSessionFields(m),
+    ...persistedFields,
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,
@@ -1994,6 +1999,7 @@ export class SessionManager implements ISessionManager {
       if (managed.hasUnread === undefined) managed.hasUnread = stored.hasUnread
       if (managed.sharedUrl === undefined) managed.sharedUrl = stored.sharedUrl
       if (managed.sharedId === undefined) managed.sharedId = stored.sharedId
+      if (managed.sharedWriteToken === undefined) managed.sharedWriteToken = stored.sharedWriteToken
       if (managed.transferredSessionSummary === undefined) managed.transferredSessionSummary = stored.transferredSessionSummary
       if (managed.transferredSessionSummaryApplied === undefined) managed.transferredSessionSummaryApplied = stored.transferredSessionSummaryApplied
 
@@ -2463,6 +2469,7 @@ export class SessionManager implements ISessionManager {
       managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
+      managed.sharedWriteToken = storedSession.sharedWriteToken
       // Sync name from disk - ensures title persistence across lazy loading
       managed.name = storedSession.name
       // Restore LLM connection state - ensures correct provider on resume
@@ -4632,10 +4639,11 @@ export class SessionManager implements ISessionManager {
       }
 
       const { VIEWER_URL } = await import('@polo-ai/shared/branding')
+      const { sharedWriteToken: _sharedWriteToken, ...sharePayload } = storedSession
       const response = await fetch(`${VIEWER_URL}/s/api`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(storedSession)
+        body: JSON.stringify(sharePayload)
       })
 
       if (!response.ok) {
@@ -4646,15 +4654,21 @@ export class SessionManager implements ISessionManager {
         return { success: false, error: 'Failed to upload session' }
       }
 
-      const data = await response.json() as { id: string; url: string }
+      const data = await response.json() as { id: string; url: string; writeToken?: string }
+      if (!data.writeToken) {
+        sessionLog.error('Share API did not return a write token')
+        return { success: false, error: 'Failed to create share capability' }
+      }
 
       // Store shared info in session
       managed.sharedUrl = data.url
       managed.sharedId = data.id
+      managed.sharedWriteToken = data.writeToken
       const workspaceRootPath = managed.workspace.rootPath
       await updateSessionMetadata(workspaceRootPath, sessionId, {
         sharedUrl: data.url,
         sharedId: data.id,
+        sharedWriteToken: data.writeToken,
       }, this.sessionStorage)
 
       sessionLog.info(`Session ${sessionId} shared at ${data.url}`)
@@ -4680,7 +4694,7 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       return { success: false, error: 'Session not found' }
     }
-    if (!managed.sharedId) {
+    if (!managed.sharedId || !managed.sharedWriteToken) {
       return { success: false, error: 'Session not shared' }
     }
 
@@ -4696,10 +4710,14 @@ export class SessionManager implements ISessionManager {
       }
 
       const { VIEWER_URL } = await import('@polo-ai/shared/branding')
+      const { sharedWriteToken: _sharedWriteToken, ...sharePayload } = storedSession
       const response = await fetch(`${VIEWER_URL}/s/api/${managed.sharedId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(storedSession)
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Polo-Share-Token': managed.sharedWriteToken,
+        },
+        body: JSON.stringify(sharePayload)
       })
 
       if (!response.ok) {
@@ -4731,7 +4749,7 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       return { success: false, error: 'Session not found' }
     }
-    if (!managed.sharedId) {
+    if (!managed.sharedId || !managed.sharedWriteToken) {
       return { success: false, error: 'Session not shared' }
     }
 
@@ -4743,7 +4761,7 @@ export class SessionManager implements ISessionManager {
       const { VIEWER_URL } = await import('@polo-ai/shared/branding')
       const response = await fetch(
         `${VIEWER_URL}/s/api/${managed.sharedId}`,
-        { method: 'DELETE' }
+        { method: 'DELETE', headers: { 'X-Polo-Share-Token': managed.sharedWriteToken } }
       )
 
       if (!response.ok) {
@@ -4754,10 +4772,12 @@ export class SessionManager implements ISessionManager {
       // Clear shared info
       delete managed.sharedUrl
       delete managed.sharedId
+      delete managed.sharedWriteToken
       const workspaceRootPath = managed.workspace.rootPath
       await updateSessionMetadata(workspaceRootPath, sessionId, {
         sharedUrl: undefined,
         sharedId: undefined,
+        sharedWriteToken: undefined,
       }, this.sessionStorage)
 
       sessionLog.info(`Session ${sessionId} share revoked`)
@@ -5439,7 +5459,13 @@ export class SessionManager implements ISessionManager {
         const { VIEWER_URL } = await import('@polo-ai/shared/branding')
         const response = await fetch(
           `${VIEWER_URL}/s/api/${managed.sharedId}`,
-          { method: 'DELETE', signal: AbortSignal.timeout(5000) }
+          {
+            method: 'DELETE',
+            headers: managed.sharedWriteToken
+              ? { 'X-Polo-Share-Token': managed.sharedWriteToken }
+              : undefined,
+            signal: AbortSignal.timeout(5000),
+          }
         )
         if (!response.ok) {
           sessionLog.warn(`Failed to revoke share for ${sessionId}: HTTP ${response.status}`)
@@ -7998,6 +8024,7 @@ export class SessionManager implements ISessionManager {
       if (mode === 'fork') {
         storedSession.sharedUrl = undefined
         storedSession.sharedId = undefined
+        storedSession.sharedWriteToken = undefined
 
         // Resume-first: try to find a compatible LLM connection on the target workspace.
         // If found and the session has an sdkSessionId, preserve it for API-level resume.

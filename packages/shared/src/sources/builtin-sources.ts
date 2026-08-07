@@ -44,7 +44,7 @@ export function getDocsSource(workspaceId: string, workspaceRootPath: string): L
     type: 'mcp',
     mcp: {
       transport: 'http',
-      url: 'https://polo.ai/docs/mcp',
+      url: 'https://app.polo.z-h-ai.com/docs/mcp',
       authType: 'none',
     },
     tagline: 'Search Polo AI documentation and source setup guides',

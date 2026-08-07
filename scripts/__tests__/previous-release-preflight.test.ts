@@ -142,7 +142,7 @@ describe('previous release runner-only preflight', () => {
       installer: { sha256: digest(installerBody) },
     })
     expect(readFileSync(value.githubEnv, 'utf8')).toContain(
-      'CURRENT_ELECTRON_VERSION=0.10.0',
+      'CURRENT_ELECTRON_VERSION=0.15.2',
     )
   })
 

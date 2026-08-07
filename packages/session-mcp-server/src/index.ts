@@ -275,7 +275,7 @@ function createSessionTools(includeDeveloperFeedback: boolean): Tool[] {
 // Polo AI Docs Upstream Proxy
 // ============================================================
 
-const DOCS_MCP_URL = 'https://polo.ai/docs/mcp';
+const DOCS_MCP_URL = 'https://app.polo.z-h-ai.com/docs/mcp';
 
 /** Cached upstream client + tool list */
 let docsClient: Client | null = null;

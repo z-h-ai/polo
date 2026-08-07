@@ -278,7 +278,7 @@ export function TopBar({
               <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://polo.ai/docs')}>
+            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://app.polo.z-h-ai.com/docs')}>
               <Icons.ExternalLink className="h-3.5 w-3.5" />
               <span className="flex-1">{t("menu.allDocumentation")}</span>
             </StyledDropdownMenuItem>

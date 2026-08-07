@@ -39,25 +39,29 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "$MODE" != "smoke" ] && [ "$MODE" != "full" ]; then
-  echo "Mode must be smoke or full" >&2
+if [ "$MODE" != "smoke" ] && [ "$MODE" != "full" ] && [ "$MODE" != "bootstrap" ]; then
+  echo "Mode must be smoke, bootstrap, or full" >&2
   exit 2
+fi
+if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
+  for lifecycle_script in "$INSTALL_SCRIPT" "$UNINSTALL_SCRIPT"; do
+    if [ ! -f "$lifecycle_script" ]; then
+      echo "Release validation requires lifecycle script: $lifecycle_script" >&2
+      exit 1
+    fi
+  done
 fi
 if [ "$MODE" = "full" ]; then
   if [ -z "$PREVIOUS_ARTIFACT" ] || [ ! -f "$PREVIOUS_ARTIFACT" ]; then
     echo "Full validation requires --previous-artifact or POLO_AI_PREVIOUS_ARTIFACT" >&2
     exit 1
   fi
-  for lifecycle_script in "$INSTALL_SCRIPT" "$UNINSTALL_SCRIPT"; do
-    if [ ! -f "$lifecycle_script" ]; then
-      echo "Full validation requires lifecycle script: $lifecycle_script" >&2
-      exit 1
-    fi
-  done
   if [ -z "$PREVIOUS_INSTALL_SCRIPT" ] || [ ! -f "$PREVIOUS_INSTALL_SCRIPT" ]; then
     echo "Full Unix validation requires POLO_AI_PREVIOUS_INSTALL_SCRIPT from the fixed previous release tag" >&2
     exit 1
   fi
+fi
+if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
   if [ "$SYSTEM_NAME" = "Darwin" ]; then
     for release_identity in \
       "$MACOS_TEAM_ID" \
@@ -76,10 +80,10 @@ if [ "$MODE" = "full" ]; then
 fi
 
 SIGNING_AUDIT_FILE="${POLO_AI_RELEASE_SIGNING_AUDIT_FILE:-$RELEASE_DIR/release-signing-audit-${SYSTEM_NAME}.jsonl}"
-if [ "$MODE" = "full" ] && [ "$SYSTEM_NAME" = "Darwin" ]; then
+if { [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; } && [ "$SYSTEM_NAME" = "Darwin" ]; then
   : > "$SIGNING_AUDIT_FILE"
   echo "release-signing-contract platform=macos mode=full team_id=$MACOS_TEAM_ID audit=$SIGNING_AUDIT_FILE"
-elif [ "$MODE" = "full" ]; then
+elif [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
   echo "release-signing-contract platform=$SYSTEM_NAME mode=full signing=not-applicable"
 else
   echo "release-signing-contract platform=$SYSTEM_NAME mode=smoke acceptance=development-only"
@@ -299,7 +303,7 @@ validate_app_bundle() {
   if [ "$SYSTEM_NAME" = "Darwin" ]; then
     local app_bundle
     app_bundle="$(dirname "$(dirname "$resources_root")")"
-    if [ "$MODE" = "full" ]; then
+    if [ "$MODE" != "smoke" ]; then
       validate_macos_release_identity "$label" "$app_bundle" "$uv"
     else
       # Development smoke explicitly permits electron-builder's ad-hoc signing.
@@ -777,19 +781,23 @@ run_macos_full_e2e() {
   fi
   MAC_INSTALLED_APP="$installed_app"
 
-  run_previous_release_installer "$test_home" "$PREVIOUS_ARTIFACT"
-  local previous_version
-  previous_version=$(read_installed_legacy_version "$resources_root")
-  test "$previous_version" = "$PREVIOUS_VERSION"
-  test -x "$resources_root/app/resources/bin/polo-ai"
-  test ! -e "$launcher"
+  local previous_version=""
+  if [ "$MODE" = "full" ]; then
+    run_previous_release_installer "$test_home" "$PREVIOUS_ARTIFACT"
+    previous_version=$(read_installed_legacy_version "$resources_root")
+    test "$previous_version" = "$PREVIOUS_VERSION"
+    test -x "$resources_root/app/resources/bin/polo-ai"
+    test ! -e "$launcher"
+  fi
   HOME="$test_home" SHELL=/bin/zsh \
     POLO_AI_INSTALL_ARTIFACT="$current_install" \
     POLO_AI_INSTALL_DIR="$install_root" \
     bash "$INSTALL_SCRIPT"
   local current_version
   current_version=$(read_installed_version "$resources_root")
-  assert_versions_differ "$previous_version" "$current_version"
+  if [ "$MODE" = "full" ]; then
+    assert_versions_differ "$previous_version" "$current_version"
+  fi
   test "$current_version" = "$CURRENT_VERSION"
 
   HOME="$test_home" SHELL=/bin/zsh POLO_AI_TERMINAL_HOME="$test_home" \
@@ -834,7 +842,7 @@ run_macos_full_e2e() {
     echo "macOS full E2E left managed terminal state behind" >&2
     return 1
   fi
-  echo "✓ macOS real install/settings/discovery/cross-version upgrade/uninstall E2E passed"
+  echo "✓ macOS real install/settings/discovery/${MODE}/uninstall E2E passed"
 }
 
 test_linux_command_conflict() {
@@ -878,18 +886,22 @@ run_linux_full_e2e() {
   run_fresh_shell /bin/bash "$test_home" \
     "test \"\$DISPLAY\" = '$expected_display'"
 
-  run_previous_release_installer "$test_home" "$PREVIOUS_ARTIFACT"
-  local previous_version
-  previous_version=$(read_installed_legacy_version_from_appimage "$test_home/.polo-ai/app/Polo-AI-x64.AppImage")
-  test "$previous_version" = "$PREVIOUS_VERSION"
-  test ! -e "$launcher"
-  test -x "$test_home/.local/bin/polo-ai"
+  local previous_version=""
+  if [ "$MODE" = "full" ]; then
+    run_previous_release_installer "$test_home" "$PREVIOUS_ARTIFACT"
+    previous_version=$(read_installed_legacy_version_from_appimage "$test_home/.polo-ai/app/Polo-AI-x64.AppImage")
+    test "$previous_version" = "$PREVIOUS_VERSION"
+    test ! -e "$launcher"
+    test -x "$test_home/.local/bin/polo-ai"
+  fi
   HOME="$test_home" SHELL=/bin/bash \
     POLO_AI_INSTALL_ARTIFACT="$current_install" \
     bash "$INSTALL_SCRIPT"
   local current_version
   current_version=$(HOME="$test_home" "$launcher" --version)
-  assert_versions_differ "$previous_version" "$current_version"
+  if [ "$MODE" = "full" ]; then
+    assert_versions_differ "$previous_version" "$current_version"
+  fi
   test "$current_version" = "$CURRENT_VERSION"
   run_fresh_shell /bin/bash "$test_home" \
     "test \"\$(polo --version)\" = '$current_version' && test \"\$(polo-ai --version 2>/dev/null)\" = '$current_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
@@ -912,7 +924,7 @@ run_linux_full_e2e() {
     echo "Linux full E2E left managed install or terminal state behind" >&2
     return 1
   fi
-  echo "✓ Linux real install/AppImage/discovery/cross-version upgrade/uninstall E2E passed"
+  echo "✓ Linux real install/AppImage/discovery/${MODE}/uninstall E2E passed"
 }
 
 case "$SYSTEM_NAME" in
@@ -921,8 +933,10 @@ case "$SYSTEM_NAME" in
   *) echo "Use validate-final-artifacts.ps1 on Windows" >&2; exit 2 ;;
 esac
 
-if [ "$MODE" = "full" ]; then
-  preflight_previous_artifact "$SYSTEM_NAME"
+if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
+  if [ "$MODE" = "full" ]; then
+    preflight_previous_artifact "$SYSTEM_NAME"
+  fi
   run_current_container_smoke
   case "$SYSTEM_NAME" in
     Darwin) run_macos_full_e2e ;;
