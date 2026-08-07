@@ -14,6 +14,11 @@ import { installWebviewSecurityHandlers } from './webview-security'
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
+// Center the 14px macOS window controls in the 36px tab bar.
+// Keep this shared between window creation and visibility restoration because
+// setWindowButtonVisibility() may reset Electron's custom position.
+const MAC_TRAFFIC_LIGHT_POSITION = { x: 18, y: 11 }
+
 /**
  * Get the appropriate background material for Windows transparency effects
  * - Windows 11 (build 22000+): Mica effect
@@ -261,7 +266,7 @@ export class WindowManager {
       // macOS-specific: hidden title bar with inset traffic lights
       ...(isMac && {
         titleBarStyle: 'hiddenInset',
-        trafficLightPosition: { x: 18, y: 16 },
+        trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION,
         vibrancy: 'under-window',
         visualEffectState: 'active',
       }),
@@ -783,7 +788,7 @@ export class WindowManager {
       // setWindowButtonVisibility can reset position to default, so we need
       // to restore the custom position using the modern setWindowButtonPosition API
       if (visible) {
-        managed.window.setWindowButtonPosition({ x: 18, y: 19 })
+        managed.window.setWindowButtonPosition(MAC_TRAFFIC_LIGHT_POSITION)
       }
     }
   }
