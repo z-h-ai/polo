@@ -56,7 +56,7 @@ jobs:
         # Windows is intentionally excluded until its Authenticode credentials are configured.
         include:
           - platform: macos
-            runner: macos-14
+            runner: macos-15-intel
             manifest: latest-mac.yml
             artifact: Polo-AI-x64.zip
           - platform: linux
