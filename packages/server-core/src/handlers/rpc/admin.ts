@@ -19,7 +19,12 @@ import {
   type AdminRefreshResponse,
   type AdminUser,
   type DeniedAppCatalogSnapshot,
+  analyzeCreatorAppPayload,
+  createCanonicalCreatorAppBundle,
+  decodeCreatorAppPayloadZip,
+  resolveCreatorAppPublishingOrganization,
 } from '@polo-ai/shared/admin'
+import { z } from 'zod'
 import {
   classifyAdminAuthorizationFailure,
   markAppCatalogAccessDenied,
@@ -109,7 +114,38 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.REVOKE_CREATOR_ARTIFACT_VERSION,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
+  RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
 ] as const
+
+const CreatorAppPublishRpcInputSchema = z.object({
+  organizationId: z.string().min(1).max(512),
+  name: z.string().trim().min(1).max(128),
+  visibility: z.literal('all_members'),
+  mode: z.enum(['website', 'upload']),
+  websiteUrl: z.string().url().max(16_384).optional(),
+  /** ZIP bytes cross the authenticated local RPC only as base64. */
+  payloadBase64: z.string().min(1).max(70 * 1024 * 1024).optional(),
+  selectedEntry: z.object({ runtime: z.enum(['static', 'python', 'js']), path: z.string().min(1).max(4_096) }).strict().optional(),
+  appId: z.string().min(1).max(512).optional(),
+}).strict().superRefine((input, context) => {
+  if (input.mode === 'website') {
+    if (!input.websiteUrl || new URL(input.websiteUrl).protocol !== 'https:') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['websiteUrl'], message: 'HTTPS URL required' })
+    }
+  } else if (!input.payloadBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.payloadBase64)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['payloadBase64'], message: 'ZIP payload required' })
+  }
+})
+
+const CREATOR_APP_RELEASE_CONFLICT_RETRIES = 3
+
+function nextCreatorAppPatchVersion(releases: readonly { version: string }[]): string {
+  const patches = releases
+    .map(release => /^1\.0\.(\d+)$/.exec(release.version)?.[1])
+    .filter((patch): patch is string => patch !== undefined)
+    .map(Number)
+  return `1.0.${patches.length ? Math.max(...patches) + 1 : 0}`
+}
 
 type StoredAdminTokens = NonNullable<Awaited<ReturnType<CredentialManager['getAdminTokens']>>>
 interface AdminSessionSnapshot {
@@ -1845,6 +1881,90 @@ export function registerAdminHandlers(
     if (!input.success) return adminInputError('VALIDATION_ERROR')
     return callOrganization('getCreatorSkillSafetyStatus', (client, accessToken) =>
       client.getCreatorSkillSafetyStatus(accessToken, input.data))
+  })
+
+  // This is the authenticated receiving boundary for Creator Space's publish
+  // intent.  It resolves the requested source organization from the current
+  // Admin session before creating the draft, so query parameters can never
+  // select an organization the session cannot access.
+  server.handle(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP, async (_ctx, rawInput: unknown) => {
+    const input = CreatorAppPublishRpcInputSchema.safeParse(rawInput)
+    if (!input.success) return adminInputError('VALIDATION_ERROR')
+    return callOrganization('publishCreatorApp', async (client, accessToken, userId) => {
+      const organizations = await client.listOrganizations(accessToken)
+      const activeOrganizations = organizations.organizations.filter(item => (
+        item.status !== 'suspended' && item.membership?.status === 'active'
+      ))
+      const resolved = resolveCreatorAppPublishingOrganization({
+        requestedOrganizationId: input.data.organizationId,
+        availableOrganizationIds: activeOrganizations.map(item => item.id),
+        fallbackOrganizationId: null,
+      })
+      if (!resolved.organizationId) {
+        throw new AdminError('The source organization is unavailable', 'ORGANIZATION_UNAVAILABLE')
+      }
+      if (input.data.mode === 'website') {
+        const app = await client.createPlatformApp(accessToken, resolved.organizationId, { name: input.data.name, visibility: input.data.visibility, deliveryMode: 'remote_url', remoteUrl: input.data.websiteUrl! })
+        const publication = { appId: app.id, releaseId: '', version: '1.0.0', status: 'published' as const }
+        invalidateCreatorArtifactCache(userId, resolved.organizationId)
+        return { publication }
+      }
+      const archive = Uint8Array.from(Buffer.from(input.data.payloadBase64!, 'base64'))
+      const entries = decodeCreatorAppPayloadZip(archive)
+      const analysis = analyzeCreatorAppPayload(entries)
+      if (analysis.status === 'invalid') throw new AdminError(analysis.message, 'VALIDATION_ERROR')
+      if (analysis.status === 'needs_entry_selection' && !input.data.selectedEntry) return { status: 'needs_entry_selection' as const, candidates: analysis.candidates }
+      const entry = input.data.selectedEntry ?? (analysis.status === 'ready' ? analysis.candidate : undefined)
+      if (!entry) throw new AdminError('Choose which detected file starts the application.', 'VALIDATION_ERROR')
+      const app = input.data.appId
+        ? { id: input.data.appId }
+        : await client.createPlatformApp(accessToken, resolved.organizationId, { name: input.data.name, visibility: input.data.visibility, deliveryMode: 'local_bundle' })
+      let created: {
+        release: { id: string; appId: string; version: string }
+        upload: { url: string; method: 'PUT'; headers?: Record<string, string> }
+        bundle: ReturnType<typeof createCanonicalCreatorAppBundle>
+      } | undefined
+      for (let attempt = 0; attempt < CREATOR_APP_RELEASE_CONFLICT_RETRIES; attempt += 1) {
+        const releases = await client.listPlatformAppReleases(accessToken, resolved.organizationId, app.id)
+        const version = nextCreatorAppPatchVersion(releases)
+        const bundle = createCanonicalCreatorAppBundle({
+          entries, appId: app.id, version, name: input.data.name, entry,
+        })
+        try {
+          const result = await client.createPlatformRelease(
+            accessToken,
+            resolved.organizationId,
+            app.id,
+            {
+              version,
+              runtime: bundle.manifest.runtime,
+              checksum: `sha256:${bundle.checksum}`,
+              sizeBytes: bundle.sizeBytes,
+              platform: 'any',
+              arch: 'any',
+            },
+          )
+          created = { ...result, bundle }
+          break
+        } catch (error) {
+          if (!(error instanceof AdminError) || error.status !== 409) throw error
+        }
+      }
+      if (!created) {
+        throw new AdminError(
+          'Release version allocation conflicted repeatedly',
+          'version_conflict',
+          { status: 409 },
+        )
+      }
+      const { release, upload, bundle } = created
+      await client.uploadPlatformReleaseBundle(accessToken, upload, bundle.archive)
+      await client.completeAndPublishPlatformRelease(accessToken, resolved.organizationId, app.id, release.id)
+      const version = release.version
+      const publication = { appId: app.id, releaseId: release.id, version, status: 'published' as const, checksum: bundle.checksum, sizeBytes: bundle.sizeBytes }
+      invalidateCreatorArtifactCache(userId, resolved.organizationId)
+      return { publication }
+    })
   })
   return {
     async endCurrentSession(beforeDelete): Promise<AdminSessionEndResult> {

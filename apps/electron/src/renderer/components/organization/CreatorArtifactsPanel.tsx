@@ -15,6 +15,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { zipSync } from 'fflate'
 import { Spinner } from '@polo-ai/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +35,7 @@ import {
 } from '@/lib/creator-skill-errors'
 import { translateCreatorSkillValidationIssue } from '@/lib/creator-skill-validation-issues'
 import { compareStableCreatorSkillVersion } from '@/lib/creator-skill-version'
+import type { CreatorAppPublishMode } from '@polo-ai/shared/admin'
 import {
   CreatorSkillUploadError,
   prepareCreatorSkillUploadFile,
@@ -107,6 +109,13 @@ export function CreatorArtifactsPanel({
   const [error, setError] = useState<string | null>(null)
   const [issues, setIssues] = useState<SkillValidationIssue[]>([])
   const [newArtifactType, setNewArtifactType] = useState<'web_app' | 'skill' | null>(null)
+  const [webAppPublishMode, setWebAppPublishMode] = useState<CreatorAppPublishMode | null>(null)
+  const [webAppName, setWebAppName] = useState('')
+  const [webAppUrl, setWebAppUrl] = useState('')
+  const [webAppFile, setWebAppFile] = useState<File | null>(null)
+  const [webAppFiles, setWebAppFiles] = useState<File[]>([])
+  const [webAppEntryCandidates, setWebAppEntryCandidates] = useState<Array<{ runtime: 'static' | 'python' | 'js'; path: string }>>([])
+  const [webAppSelectedEntry, setWebAppSelectedEntry] = useState<{ runtime: 'static' | 'python' | 'js'; path: string } | null>(null)
   const [slug, setSlug] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [changelog, setChangelog] = useState('')
@@ -460,7 +469,7 @@ export function CreatorArtifactsPanel({
     [artifacts, selectedId],
   )
 
-  const openWebAppManagement = async () => {
+  const openWebAppManagement = async (publishMode?: CreatorAppPublishMode) => {
     setAction('open-web-app')
     setError(null)
     try {
@@ -469,9 +478,94 @@ export function CreatorArtifactsPanel({
         setError(t('creatorSkills.errors.webAppManagementUnavailable'))
         return
       }
-      const managementUrl = new URL('/organization-apps', status.adminUrl)
+      const managementUrl = publishMode
+        ? new URL('/organization-apps/publish', status.adminUrl)
+        : new URL('/organization-apps', status.adminUrl)
       managementUrl.searchParams.set('organizationId', organizationId)
+      if (publishMode) managementUrl.searchParams.set('mode', publishMode)
+      if (publishMode) {
+        managementUrl.searchParams.set('name', webAppName.trim())
+        managementUrl.searchParams.set('visibility', 'all_members')
+      }
+      if (publishMode === 'website') {
+        const websiteUrl = new URL(webAppUrl.trim())
+        if (websiteUrl.protocol !== 'https:') {
+          setError(t('creatorSkills.errors.webAppHttpsRequired'))
+          return
+        }
+        managementUrl.searchParams.set('websiteUrl', websiteUrl.toString())
+      }
+      if (publishMode === 'upload' && webAppFile) {
+        managementUrl.searchParams.set('payloadName', webAppFile.name)
+      }
       await window.electronAPI.openUrl(managementUrl.toString())
+    } catch {
+      setError(t('creatorSkills.errors.webAppManagementUnavailable'))
+    } finally {
+      setAction(null)
+    }
+  }
+
+  const publishWebApp = async (entryOverride?: { runtime: 'static' | 'python' | 'js'; path: string }) => {
+    if (!webAppPublishMode || !webAppName.trim()) return
+    setAction('open-web-app')
+    setError(null)
+    try {
+      if (webAppPublishMode === 'website') {
+        const websiteUrl = new URL(webAppUrl.trim())
+        if (websiteUrl.protocol !== 'https:') {
+          setError(t('creatorSkills.errors.webAppHttpsRequired'))
+          return
+        }
+        const result = await window.electronAPI.creatorAppPublish({
+          organizationId,
+          name: webAppName.trim(),
+          visibility: 'all_members',
+          mode: 'website',
+          websiteUrl: websiteUrl.toString(),
+        })
+        if (!result.success) {
+          setError(resultMessage(t, result))
+          return
+        }
+      } else {
+        const files = webAppFiles.length > 0 ? webAppFiles : webAppFile ? [webAppFile] : []
+        if (files.length === 0) return
+        const payload = files.length === 1 && files[0]!.name.toLowerCase().endsWith('.zip')
+          ? new Uint8Array(await files[0]!.arrayBuffer())
+          : zipSync(Object.fromEntries(await Promise.all(files.map(async file => [
+              file.webkitRelativePath || file.name,
+              new Uint8Array(await file.arrayBuffer()),
+            ]))), { level: 9 })
+        let binary = ''
+        for (let offset = 0; offset < payload.length; offset += 0x8000) {
+          binary += String.fromCharCode(...payload.subarray(offset, offset + 0x8000))
+        }
+        const selectedEntry = entryOverride ?? webAppSelectedEntry
+        const result = await window.electronAPI.creatorAppPublish({
+          organizationId,
+          name: webAppName.trim(),
+          visibility: 'all_members',
+          mode: 'upload',
+          payloadBase64: btoa(binary),
+          ...(selectedEntry ? { selectedEntry } : {}),
+        })
+        if (!result.success) {
+          setError(resultMessage(t, result))
+          return
+        }
+        if ('status' in result && result.status === 'needs_entry_selection') {
+          setWebAppEntryCandidates(result.candidates)
+          return
+        }
+      }
+      setWebAppPublishMode(null)
+      setWebAppName('')
+      setWebAppUrl('')
+      setWebAppFile(null)
+      setWebAppFiles([])
+      setWebAppEntryCandidates([])
+      setWebAppSelectedEntry(null)
     } catch {
       setError(t('creatorSkills.errors.webAppManagementUnavailable'))
     } finally {
@@ -879,18 +973,148 @@ export function CreatorArtifactsPanel({
                 </Button>
               </>
             ) : newArtifactType === 'web_app' ? (
-              <Button
-                type="button"
-                size="sm"
-                className="w-full"
-                disabled={action !== null}
-                onClick={() => { void openWebAppManagement() }}
+              <div
+                data-testid="web-app-publishing-guide"
+                className="space-y-3 rounded-lg bg-foreground/[0.035] p-3"
               >
-                {action === 'open-web-app'
-                  ? <Spinner className="mr-1.5" />
-                  : <Globe2 className="mr-1.5 size-3.5" />}
-                {t('creatorSkills.artifact.continueWebApp')}
-              </Button>
+                <div>
+                  <p className="text-sm font-medium">
+                    {t('creatorSkills.artifact.webAppGuide.title')}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t('creatorSkills.artifact.webAppGuide.description')}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    data-testid="web-app-publish-mode-website"
+                    aria-pressed={webAppPublishMode === 'website'}
+                    className="w-full rounded-lg border border-border/60 bg-background/60 p-2.5 text-left transition-colors hover:border-accent/60 aria-[pressed=true]:border-accent aria-[pressed=true]:bg-accent/5"
+                    onClick={() => setWebAppPublishMode('website')}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Globe2 className="size-3.5 text-accent" />
+                      <span className="text-xs font-medium">
+                        {t('creatorSkills.artifact.webAppGuide.remoteTitle')}
+                      </span>
+                      <span className="ml-auto rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
+                        {t('creatorSkills.artifact.webAppGuide.recommended')}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                      {t('creatorSkills.artifact.webAppGuide.remoteDescription')}
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="web-app-publish-mode-upload"
+                    aria-pressed={webAppPublishMode === 'upload'}
+                    className="w-full rounded-lg border border-border/60 bg-background/60 p-2.5 text-left transition-colors hover:border-accent/60 aria-[pressed=true]:border-accent aria-[pressed=true]:bg-accent/5"
+                    onClick={() => setWebAppPublishMode('upload')}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Upload className="size-3.5 text-muted-foreground" />
+                      <span className="text-xs font-medium">
+                        {t('creatorSkills.artifact.webAppGuide.bundleTitle')}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                      {t('creatorSkills.artifact.webAppGuide.bundleDescription')}
+                    </p>
+                  </button>
+                </div>
+                {webAppPublishMode ? (
+                  <div className="space-y-2 rounded-lg border border-border/60 p-3">
+                    <Label htmlFor="creator-web-app-name">
+                      {t('creatorSkills.artifact.webAppGuide.name')}
+                    </Label>
+                    <Input
+                      id="creator-web-app-name"
+                      data-testid="creator-web-app-name"
+                      maxLength={128}
+                      value={webAppName}
+                      onChange={event => setWebAppName(event.target.value)}
+                    />
+                    {webAppPublishMode === 'website' ? (
+                      <>
+                        <Label htmlFor="creator-web-app-url">
+                          {t('creatorSkills.artifact.webAppGuide.url')}
+                        </Label>
+                        <Input
+                          id="creator-web-app-url"
+                          data-testid="creator-web-app-url"
+                          type="url"
+                          value={webAppUrl}
+                          placeholder="https://app.example.com"
+                          onChange={event => setWebAppUrl(event.target.value)}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Label htmlFor="creator-web-app-file">
+                          {t('creatorSkills.artifact.webAppGuide.file')}
+                        </Label>
+                        <Input
+                          id="creator-web-app-file"
+                          data-testid="creator-web-app-file"
+                          type="file"
+                          accept=".zip,application/zip"
+                          onChange={event => {
+                            const files = Array.from(event.target.files ?? [])
+                            setWebAppFiles(files)
+                            setWebAppFile(files[0] ?? null)
+                          }}
+                        />
+                        <Label htmlFor="creator-web-app-folder">
+                          {t('creatorSkills.artifact.webAppGuide.file')}
+                        </Label>
+                        <Input
+                          id="creator-web-app-folder"
+                          data-testid="creator-web-app-folder"
+                          type="file"
+                          multiple
+                          ref={node => node?.setAttribute('webkitdirectory', '')}
+                          onChange={event => {
+                            const files = Array.from(event.target.files ?? [])
+                            setWebAppFiles(files)
+                            setWebAppFile(files[0] ?? null)
+                          }}
+                        />
+                      </>
+                    )}
+                    {webAppEntryCandidates.length > 0 ? (
+                      <div data-testid="creator-web-app-entry-selection" className="space-y-1">
+                        <p className="text-xs text-muted-foreground">
+                          {t('creatorSkills.artifact.webAppGuide.entryPrompt')}
+                        </p>
+                        {webAppEntryCandidates.map(candidate => (
+                          <Button key={`${candidate.runtime}:${candidate.path}`} type="button" size="sm" variant="outline"
+                            onClick={() => { setWebAppSelectedEntry(candidate); void publishWebApp(candidate) }}>
+                            {candidate.path}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="w-full"
+                      disabled={
+                        action !== null
+                        || !webAppName.trim()
+                        || (webAppPublishMode === 'website' ? !webAppUrl.trim() : !webAppFile)
+                      }
+                      onClick={() => { void publishWebApp() }}
+                    >
+                      {action === 'open-web-app'
+                        ? <Spinner className="mr-1.5" />
+                        : <Globe2 className="mr-1.5 size-3.5" />}
+                      {t('creatorSkills.artifact.continueWebApp')}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             {enabled === false ? (
               <p className="text-xs text-muted-foreground">

@@ -267,6 +267,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.REVOKE_CREATOR_ARTIFACT_VERSION,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_DOWNLOAD_GRANT,
   RPC_CHANNELS.admin.GET_CREATOR_SKILL_SAFETY_STATUS,
+  // Creator publication consumes local File bytes and local authenticated
+  // credentials; it must never be proxied to a workspace server.
+  RPC_CHANNELS.admin.PUBLISH_CREATOR_APP,
 
   // preferences — device-local launcher and verified Admin organization state
   RPC_CHANNELS.preferences.GET_HOME_RECENT_APPS,

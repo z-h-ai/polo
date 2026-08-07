@@ -40,8 +40,12 @@ import {
   type CreateCreatorArtifactInput,
   type CreateCreatorArtifactVersionInput,
   type SkillArchivePolicy,
+  type AdminPlatformApp,
+  type AdminPlatformRelease,
+  type AdminSignedUpload,
+  type AdminPlatformReleaseInput,
 } from './types.ts';
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 import {
   AdminLoginResponseSchema,
   AdminPhoneAuthResponseSchema,
@@ -74,6 +78,9 @@ import {
   SkillArchivePolicySchema,
   AppCatalogResponseSchema,
   AppReleaseDownloadSchema,
+  AdminPlatformAppSchema,
+  AdminPlatformReleaseSchema,
+  AdminPlatformReleaseCreatedResponseSchema,
 } from './schemas.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
@@ -396,6 +403,62 @@ export class AdminClient {
       { method: 'POST', accessToken },
     );
     return this.readSuccessResponse(response, AppReleaseDownloadSchema);
+  }
+
+  async createPlatformApp(accessToken: string, organizationId: string, input: {
+    name: string; visibility: 'all_members'; deliveryMode: 'remote_url' | 'local_bundle'; remoteUrl?: string
+  }): Promise<AdminPlatformApp> {
+    const response = await this.request<unknown>(`/api/organizations/${encodeURIComponent(organizationId)}/admin/apps`, {
+      method: 'POST', accessToken, body: {
+        name: input.name, deliveryMode: input.deliveryMode, remoteUrl: input.remoteUrl,
+        visibilityPolicy: input.visibility, status: input.deliveryMode === 'remote_url' ? 'active' : 'draft',
+      },
+    });
+    const parsed = z.object({ app: AdminPlatformAppSchema }).safeParse(response);
+    if (!parsed.success || parsed.data.app.organizationId !== organizationId) throw new AdminError('Invalid App create response', 'SERVER_ERROR');
+    const app = parsed.data.app;
+    return app;
+  }
+
+  async listPlatformAppReleases(accessToken: string, organizationId: string, appId: string): Promise<AdminPlatformRelease[]> {
+    const response = await this.request<unknown>(`/api/organizations/${encodeURIComponent(organizationId)}/admin/apps/${encodeURIComponent(appId)}/releases`, { method: 'GET', accessToken });
+    const parsed = z.object({ releases: z.array(AdminPlatformReleaseSchema) }).safeParse(response);
+    if (!parsed.success || parsed.data.releases.some(release => release.appId !== appId)) throw new AdminError('Invalid Release list response', 'SERVER_ERROR');
+    return parsed.data.releases;
+  }
+
+  async createPlatformRelease(
+    accessToken: string,
+    organizationId: string,
+    appId: string,
+    input: AdminPlatformReleaseInput,
+  ): Promise<{ release: AdminPlatformRelease; upload: AdminSignedUpload }> {
+    const response = await this.request<unknown>(`/api/organizations/${encodeURIComponent(organizationId)}/admin/apps/${encodeURIComponent(appId)}/releases`, {
+      method: 'POST', accessToken, body: input,
+    });
+    const parsed = AdminPlatformReleaseCreatedResponseSchema.safeParse(response);
+    if (
+      !parsed.success
+      || parsed.data.release.appId !== appId
+      || parsed.data.release.version !== input.version
+    ) throw new AdminError('Invalid Release create response', 'SERVER_ERROR');
+    return parsed.data;
+  }
+
+  async completeAndPublishPlatformRelease(accessToken: string, organizationId: string, appId: string, releaseId: string): Promise<void> {
+    const base = `/api/organizations/${encodeURIComponent(organizationId)}/admin/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(releaseId)}`;
+    await this.request(`${base}/upload-complete`, { method: 'POST', accessToken, body: {} });
+    await this.request(`${base}/publish`, { method: 'POST', accessToken, body: {} });
+  }
+
+  async uploadPlatformReleaseBundle(accessToken: string, upload: AdminSignedUpload, bundle: Uint8Array): Promise<void> {
+    const body = bundle.buffer.slice(bundle.byteOffset, bundle.byteOffset + bundle.byteLength) as ArrayBuffer
+    const response = await fetch(upload.url, {
+      method: 'PUT',
+      headers: { ...upload.headers, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/zip' },
+      body,
+    });
+    if (!response.ok) throw new AdminError('Signed Bundle upload failed', 'NETWORK_ERROR');
   }
 
   async createOrganization(

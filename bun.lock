@@ -115,7 +115,7 @@
     },
     "apps/cli": {
       "name": "@polo-ai/cli",
-      "version": "0.10.0",
+      "version": "0.15.2",
       "bin": {
         "polo": "src/index.ts",
         "polo-ai": "src/index.ts",
@@ -293,7 +293,7 @@
     },
     "packages/server": {
       "name": "@polo-ai/server",
-      "version": "0.10.0",
+      "version": "0.15.2",
       "bin": {
         "polo-ai-server": "src/index.ts",
       },
@@ -322,6 +322,7 @@
       },
       "devDependencies": {
         "@types/node": "^22.0.0",
+        "fflate": "^0.8.2",
         "typescript": "^5.8.2",
       },
     },

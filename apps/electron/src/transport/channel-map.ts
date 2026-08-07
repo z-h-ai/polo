@@ -153,6 +153,7 @@ export const CHANNEL_MAP = {
   adminGetStatus: invoke(RPC_CHANNELS.admin.GET_STATUS),
   adminSyncConnections: invoke(RPC_CHANNELS.admin.SYNC_CONNECTIONS),
   adminSyncAppCatalog: invoke(RPC_CHANNELS.admin.SYNC_APP_CATALOG),
+  creatorAppPublish: invoke(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP),
   onAdminReauthRequired: listener('admin:reauthRequired'),
   organizationList: invoke(RPC_CHANNELS.admin.LIST_ORGANIZATIONS),
   organizationCreate: invoke(RPC_CHANNELS.admin.CREATE_ORGANIZATION),
