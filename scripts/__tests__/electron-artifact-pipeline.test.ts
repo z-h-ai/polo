@@ -75,6 +75,13 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain(
       'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_INSTALL_ARTIFACT="$current_install"',
     )
+    expect(validator).toContain(
+      'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_TERMINAL_HOME="$test_home"',
+    )
+    expect(validator).toContain('Packaged polo run failed:')
+    expect(validator).toContain('cat "$run_output" >&2')
+    expect(validator).toContain('macOS terminal integration install did not become ready:')
+    expect(validator).toContain('macOS terminal integration uninstall left managed state:')
   })
 
   it('validates the installed NSIS container and real previous-to-current lifecycle', () => {
