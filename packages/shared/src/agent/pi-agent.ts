@@ -36,6 +36,10 @@ export function buildPiSubprocessEnvironment(input: {
   awsEnv?: Record<string, string>;
   sessionDir?: string;
   debug?: boolean;
+  /** When true, strip ANTHROPIC_* / OPENAI_* credential env vars inherited
+   *  from the host shell so the Pi subprocess routes exclusively through the
+   *  invocation credential proxy instead of falling back to a stale key. */
+  stripCredentialEnv?: boolean;
 }): NodeJS.ProcessEnv {
   if (input.invocationScoped) {
     if (!input.privateHome) {
@@ -51,14 +55,34 @@ export function buildPiSubprocessEnvironment(input: {
     });
   }
 
+  const baseEnv = input.stripCredentialEnv
+    ? stripCredentialEnvVars(process.env)
+    : process.env;
   return {
-    ...process.env,
+    ...baseEnv,
     ...getProxyEnvVars(),
     ...input.envOverrides,
     ...input.awsEnv,
     ...(input.sessionDir ? { POLO_AI_SESSION_DIR: input.sessionDir } : {}),
     POLO_AI_DEBUG: input.debug ? '1' : '0',
   };
+}
+
+/** Env var prefixes whose inherited values must not leak into a custom-endpoint
+ *  Pi subprocess — they cause the Anthropic/OpenAI SDK inside pi-coding-agent to
+ *  bypass the credential proxy and call the default upstream with a stale key. */
+const CREDENTIAL_ENV_PREFIXES = [
+  'ANTHROPIC_',
+  'OPENAI_',
+] as const;
+
+function stripCredentialEnvVars(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const stripped: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (CREDENTIAL_ENV_PREFIXES.some(prefix => key.startsWith(prefix))) continue;
+    stripped[key] = value;
+  }
+  return stripped;
 }
 import { AbortReason } from './backend/types.ts';
 import { getBackendRuntime } from './backend/internal/driver-types.ts';
@@ -501,6 +525,7 @@ export class PiAgent extends BaseAgent {
       awsEnv,
       sessionDir,
       debug: debugEnv === '1',
+      stripCredentialEnv: isCustomEndpointMode,
     });
 
     // Spawn the subprocess
