@@ -72,6 +72,9 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('polo sessions')
     expect(validator).toContain('user-owned')
     expect(validator).toContain('"$shell_path" -lic "cd \\"\\$HOME\\"')
+    expect(validator).toContain(
+      'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_INSTALL_ARTIFACT="$current_install"',
+    )
   })
 
   it('validates the installed NSIS container and real previous-to-current lifecycle', () => {
@@ -135,7 +138,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain("inputs.bootstrap && 'bootstrap' || 'full'")
     expect(workflow).toContain('POLO_AI_PREVIOUS_ARTIFACT:')
     expect(workflow).toContain('POLO_AI_PREVIOUS_INSTALL_SCRIPT:')
-    expect(workflow).toContain('runner: macos-14')
+    expect(workflow).toContain('runner: macos-15-intel')
+    expect(workflow).not.toContain('runner: macos-14')
     expect(workflow).not.toContain('runner: windows-latest')
     expect(workflow).toContain('runner: ubuntu-latest')
     const unixPreviousPreflight = read('scripts/preflight-previous-release.sh')

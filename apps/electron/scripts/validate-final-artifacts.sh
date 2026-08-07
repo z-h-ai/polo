@@ -895,6 +895,7 @@ run_linux_full_e2e() {
     test -x "$test_home/.local/bin/polo-ai"
   fi
   HOME="$test_home" SHELL=/bin/bash \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
     POLO_AI_INSTALL_ARTIFACT="$current_install" \
     bash "$INSTALL_SCRIPT"
   local current_version
