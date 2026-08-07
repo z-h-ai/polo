@@ -134,6 +134,9 @@ export interface CreatorAppPublicationResponse {
   checksum?: string;
   sizeBytes?: number;
 }
+export interface AdminPlatformApp { id: string; organizationId: string; name: string; deliveryMode: 'remote_url' | 'local_bundle'; }
+export interface AdminPlatformRelease { id: string; appId: string; version: string; }
+export interface AdminSignedUpload { url: string; method: 'PUT'; headers?: Record<string, string>; }
 export type OrganizationRole = 'owner' | 'manager' | 'member';
 export type OrganizationStatus = 'active' | 'suspended';
 export type OrganizationMembershipStatus = 'active' | 'suspended' | 'removed';

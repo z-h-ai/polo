@@ -19,6 +19,8 @@ import {
   type AdminRefreshResponse,
   type AdminUser,
   type DeniedAppCatalogSnapshot,
+  analyzeCreatorAppPayload,
+  createCanonicalCreatorAppBundle,
   decodeCreatorAppPayloadZip,
   resolveCreatorAppPublishingOrganization,
 } from '@polo-ai/shared/admin'
@@ -72,7 +74,6 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { decryptTransitApiKey, deriveTransitKey } from '../../lib/admin-transit-decrypt'
-import { CreatorAppPublicationService } from '../../services/creator-app-publications'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.LOGIN,
@@ -124,6 +125,7 @@ const CreatorAppPublishRpcInputSchema = z.object({
   /** ZIP bytes cross the authenticated local RPC only as base64. */
   payloadBase64: z.string().min(1).max(70 * 1024 * 1024).optional(),
   selectedEntry: z.object({ runtime: z.enum(['static', 'python', 'js']), path: z.string().min(1).max(4_096) }).strict().optional(),
+  appId: z.string().min(1).max(512).optional(),
 }).strict().superRefine((input, context) => {
   if (input.mode === 'website') {
     if (!input.websiteUrl || new URL(input.websiteUrl).protocol !== 'https:') {
@@ -439,7 +441,6 @@ export function registerAdminHandlers(
   deps: HandlerDeps,
 ): AdminSessionControl {
   const log = deps.platform.logger
-  const creatorAppPublications = new CreatorAppPublicationService(deps.creatorAppPublicationRoot)
   let appCatalogSyncInvocation = 0
   const latestAppCatalogSyncByScope = new Map<string, number>()
   const appCatalogAuthorizationEpochByScope = new Map<string, number>()
@@ -1872,23 +1873,30 @@ export function registerAdminHandlers(
         throw new AdminError('The source organization is unavailable', 'ORGANIZATION_UNAVAILABLE')
       }
       if (input.data.mode === 'website') {
-        const publication = await creatorAppPublications.publishWebsite({
-          organizationId: resolved.organizationId,
-          name: input.data.name,
-          websiteUrl: input.data.websiteUrl!,
-        })
+        const app = await client.createPlatformApp(accessToken, resolved.organizationId, { name: input.data.name, visibility: input.data.visibility, deliveryMode: 'remote_url', remoteUrl: input.data.websiteUrl! })
+        const publication = { appId: app.id, releaseId: '', version: '1.0.0', status: 'published' as const }
         invalidateCreatorArtifactCache(userId, resolved.organizationId)
         return { publication }
       }
       const archive = Uint8Array.from(Buffer.from(input.data.payloadBase64!, 'base64'))
       const entries = decodeCreatorAppPayloadZip(archive)
-      const publication = await creatorAppPublications.publishUpload({
-        organizationId: resolved.organizationId,
-        name: input.data.name,
-        entries,
-        ...(input.data.selectedEntry ? { entry: input.data.selectedEntry } : {}),
-      })
-      if (publication.status === 'needs_entry_selection') return publication
+      const analysis = analyzeCreatorAppPayload(entries)
+      if (analysis.status === 'invalid') throw new AdminError(analysis.message, 'VALIDATION_ERROR')
+      if (analysis.status === 'needs_entry_selection' && !input.data.selectedEntry) return { status: 'needs_entry_selection' as const, candidates: analysis.candidates }
+      const entry = input.data.selectedEntry ?? (analysis.status === 'ready' ? analysis.candidate : undefined)
+      if (!entry) throw new AdminError('Choose which detected file starts the application.', 'VALIDATION_ERROR')
+      const app = input.data.appId
+        ? { id: input.data.appId }
+        : await client.createPlatformApp(accessToken, resolved.organizationId, { name: input.data.name, visibility: input.data.visibility, deliveryMode: 'local_bundle' })
+      const releases = await client.listPlatformAppReleases(accessToken, resolved.organizationId, app.id)
+      const patches = releases.map(release => /^1\.0\.(\d+)$/.exec(release.version)?.[1]).filter(Boolean).map(Number)
+      const version = `1.0.${patches.length ? Math.max(...patches) + 1 : 0}`
+      const release = await client.createPlatformRelease(accessToken, resolved.organizationId, app.id, version)
+      const bundle = createCanonicalCreatorAppBundle({ entries, appId: app.id, version, name: input.data.name, entry })
+      const upload = await client.createPlatformReleaseUpload(accessToken, resolved.organizationId, app.id, release.id)
+      await client.uploadPlatformReleaseBundle(upload, bundle.archive)
+      await client.completeAndPublishPlatformRelease(accessToken, resolved.organizationId, app.id, release.id, bundle)
+      const publication = { appId: app.id, releaseId: release.id, version, status: 'published' as const, checksum: bundle.checksum, sizeBytes: bundle.sizeBytes }
       invalidateCreatorArtifactCache(userId, resolved.organizationId)
       return { publication }
     })

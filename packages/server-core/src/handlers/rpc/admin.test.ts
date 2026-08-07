@@ -224,6 +224,11 @@ class MockAdminClient {
     return adminClientBehavior.publishCreatorApp(accessToken, input)
   }
 
+  async createPlatformApp(accessToken: string, organizationId: string, input: any) {
+    adminClientCalls.push({ method: 'createPlatformApp', args: [organizationId, input], accessToken })
+    return { id: 'app-id', organizationId, name: input.name, deliveryMode: input.deliveryMode }
+  }
+
   async createCreatorSkillUploadGrant(accessToken: string, input: unknown) {
     adminClientCalls.push({ method: 'createCreatorSkillUploadGrant', args: [input], accessToken })
     return adminClientBehavior.createCreatorSkillUploadGrant(accessToken, input)
