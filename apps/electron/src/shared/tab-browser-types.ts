@@ -27,7 +27,7 @@ export const POLO_TAB_ID = 'polo-ai-tab'
 
 export const POLO_APP_DEFINITION: AppDefinition = {
   id: POLO_APP_ID,
-  name: 'Pro Buddy',
+  name: 'Polo 助手',
   url: 'poloai://app',
   type: 'builtin',
   createdAt: 0,
@@ -51,7 +51,7 @@ export const POLO_TAB: TabInstance = {
   id: POLO_TAB_ID,
   appId: POLO_APP_ID,
   type: 'polo',
-  title: 'Pro Buddy',
+  title: 'Polo 助手',
 }
 
 export function createTabId(prefix = 'tab'): string {

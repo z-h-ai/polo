@@ -147,15 +147,15 @@ describe('HomePage round-two regressions', () => {
 
     expect(screen.getByTestId('builtin-app-launcher')).toBeTruthy()
     expect(screen.getByText('Built-in apps')).toBeTruthy()
-    expect(screen.getByText('Pro Buddy')).toBeTruthy()
+    expect(screen.getByText('Polo 助手')).toBeTruthy()
     expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(screen.getByText('Pro Buddy'))
+    fireEvent.click(screen.getByText('Polo 助手'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
-  it('migrates recents to preferences while keeping Pro Buddy discoverable', async () => {
+  it('migrates recents to preferences while keeping Polo 助手 discoverable', async () => {
     installedApps = [
       ...BUILTIN_APP_DEFINITIONS,
       {
@@ -186,11 +186,11 @@ describe('HomePage round-two regressions', () => {
     })
     expect(localStorage.getItem('craft-home-recent-apps')).toBeNull()
     const launcher = screen.getByTestId('builtin-app-launcher')
-    expect(within(launcher).getByText('Pro Buddy')).toBeTruthy()
+    expect(within(launcher).getByText('Polo 助手')).toBeTruthy()
     expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByText('AirDrop')).toBeNull()
 
-    fireEvent.click(within(launcher).getByText('Pro Buddy'))
+    fireEvent.click(within(launcher).getByText('Polo 助手'))
     expect(openApp).toHaveBeenCalledWith(BUILTIN_APP_DEFINITIONS[0])
   })
 
@@ -224,7 +224,7 @@ describe('HomePage round-two regressions', () => {
       expect(getHomeRecentApps).toHaveBeenCalledTimes(1)
     })
 
-    fireEvent.click(screen.getByText('Pro Buddy'))
+    fireEvent.click(screen.getByText('Polo 助手'))
     fireEvent.click(screen.getByText('External A'))
     await waitFor(() => {
       expect(setHomeRecentApps).toHaveBeenCalledTimes(2)
@@ -240,7 +240,7 @@ describe('HomePage round-two regressions', () => {
     })
 
     expect(screen.queryByTestId('builtin-app-launcher')).toBeNull()
-    expect(screen.getByText('Pro Buddy')).toBeTruthy()
+    expect(screen.getByText('Polo 助手')).toBeTruthy()
     expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByText('AirDrop')).toBeNull()
     fireEvent.click(screen.getByText('External B'))
