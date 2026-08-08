@@ -44,9 +44,10 @@ describe('Electron release workflow boundaries', () => {
     expect(release).not.toContain('/app/publisher')
   })
 
-  it('grants contents write only to GitHub Release jobs', () => {
-    expect(release.match(/contents: write/g)).toHaveLength(2)
+  it('grants contents write only to Draft Release, production verification, and publishing', () => {
+    expect(release.match(/contents: write/g)).toHaveLength(3)
     expect(release).toContain('Create immutable Draft GitHub Release')
+    expect(release).toContain('Production needs this permission only to download the expected DMG')
     expect(release).toContain('Publish approved GitHub Release')
   })
 })

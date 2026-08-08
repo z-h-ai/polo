@@ -128,7 +128,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     permissions:
-      contents: read
+      # Draft Releases are not readable by a contents:read workflow token.
+      # Production needs this permission only to download the expected DMG before
+      # comparing it with the manually uploaded immutable public artifact.
+      contents: write
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
     steps:
