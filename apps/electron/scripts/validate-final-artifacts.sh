@@ -456,9 +456,19 @@ preflight_previous_artifact() {
       *) echo "macOS full validation requires a previous ZIP artifact" >&2; return 1 ;;
     esac
     ditto -x -k "$PREVIOUS_ARTIFACT" "$previous_root"
-    validate_legacy_app_bundle \
-      "previous ZIP preflight" \
-      "$previous_root/Polo AI.app/Contents/Resources"
+    local previous_resources="$previous_root/Polo AI.app/Contents/Resources"
+    if [ -f "$previous_resources/app/dist/cli/artifact-manifest.json" ]; then
+      # v0.15.2 and later carry the POO-14 packaged CLI contract. Earlier
+      # releases retain the legacy layout below, so the upgrade gate must
+      # recognize both immutable predecessor formats.
+      validate_app_bundle \
+        "previous ZIP preflight (POO-14)" \
+        "$previous_resources" false false
+    else
+      validate_legacy_app_bundle \
+        "previous ZIP preflight" \
+        "$previous_resources"
+    fi
   else
     case "$PREVIOUS_ARTIFACT" in
       *.AppImage) ;;
@@ -471,9 +481,16 @@ preflight_previous_artifact() {
       cd "$previous_root"
       "$previous_copy" --appimage-extract >/dev/null
     )
-    validate_legacy_app_bundle \
-      "previous AppImage preflight" \
-      "$previous_root/squashfs-root/resources"
+    local previous_resources="$previous_root/squashfs-root/resources"
+    if [ -f "$previous_resources/app/dist/cli/artifact-manifest.json" ]; then
+      validate_app_bundle \
+        "previous AppImage preflight (POO-14)" \
+        "$previous_resources" false false
+    else
+      validate_legacy_app_bundle \
+        "previous AppImage preflight" \
+        "$previous_resources"
+    fi
   fi
 
   PREVIOUS_VERSION="$VALIDATED_VERSION"
