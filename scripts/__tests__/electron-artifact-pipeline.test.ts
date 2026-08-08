@@ -191,6 +191,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('electron:dist:mac --arch=${{ matrix.arch }}')
     expect(workflow).toContain('manual_installer: Polo-AI-x64.dmg')
     expect(workflow).toContain('manual_installer: Polo-AI-arm64.dmg')
+    expect(workflow).toContain("matrix.updater && (inputs.bootstrap && 'bootstrap' || 'full') || 'smoke'")
     expect(workflow).not.toContain('electron:dist:win --arch=x64')
     expect(workflow).toContain('electron:dist:linux --arch=x64')
     expect(workflow).not.toContain('electron:dist:dev:mac --arch=x64')
