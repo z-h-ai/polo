@@ -873,6 +873,33 @@ exec /bin/mv "$@"
 })
 
 describe('updater manifest parsing', () => {
+  it('can mask an optional yq from a historical installer shell', () => {
+    const root = createHome()
+    const fakeBin = join(root, 'bin')
+    const bashEnv = join(root, 'bash-env')
+    mkdirSync(fakeBin)
+    writeFileSync(join(fakeBin, 'yq'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(fakeBin, 'yq'), 0o755)
+    writeFileSync(
+      bashEnv,
+      `command() {
+  if [ "$#" -eq 2 ] && [ "$1" = "-v" ] && [ "$2" = "yq" ]; then
+    return 1
+  fi
+  builtin command "$@"
+}
+`,
+    )
+
+    const result = Bun.spawnSync(['bash', '-c', 'command -v yq >/dev/null'], {
+      env: { ...process.env, BASH_ENV: bashEnv, PATH: `${fakeBin}:/usr/bin:/bin` },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    expect(result.exitCode).toBe(1)
+  })
+
   it('extracts a Linux artifact without requiring yq', () => {
     const manifest = [
       'version: 0.15.3',

@@ -541,6 +541,7 @@ run_previous_release_installer() {
   local shim_dir="$TEMP_ROOT/legacy installer shim"
   local manifest="$shim_dir/manifest.yml"
   local curl_shim="$shim_dir/curl"
+  local bash_env="$shim_dir/bash-env"
   local host_arch
   local checksum
   local filename
@@ -590,7 +591,22 @@ fi
 EOF
   chmod +x "$curl_shim"
 
+  # The v0.15.2 installer treats yq as optional, but GitHub's runner ships a
+  # yq dialect that rejects its jq-only `empty` expression. The lifecycle
+  # fixture intentionally verifies the immutable predecessor through its
+  # supported no-yq branch, rather than letting a runner-provided optional
+  # binary make an otherwise valid upgrade fail.
+  cat > "$bash_env" <<'EOF'
+command() {
+  if [ "$#" -eq 2 ] && [ "$1" = "-v" ] && [ "$2" = "yq" ]; then
+    return 1
+  fi
+  builtin command "$@"
+}
+EOF
+
   HOME="$test_home" \
+    BASH_ENV="$bash_env" \
     PATH="$shim_dir:/usr/bin:/bin:/usr/sbin:/sbin" \
     POLO_AI_LEGACY_MANIFEST="$manifest" \
     POLO_AI_LEGACY_ARTIFACT="$artifact" \
