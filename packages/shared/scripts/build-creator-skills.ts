@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { access, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
@@ -16,6 +16,7 @@ async function main(): Promise<void> {
     entryPoints: [
       join(srcRoot, 'creator-skills', 'index.ts'),
       join(srcRoot, 'creator-skills', 'fixtures.ts'),
+      join(srcRoot, 'admin', 'creator-app-publishing.ts'),
     ],
     outdir: distRoot,
     outbase: srcRoot,
@@ -29,9 +30,23 @@ async function main(): Promise<void> {
     legalComments: 'none',
   })
 
+  await build({
+    entryPoints: [join(srcRoot, 'admin', 'creator-app-publishing.constants.ts')],
+    outfile: join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
+    bundle: true,
+    format: 'cjs',
+    platform: 'browser',
+    target: 'es2022',
+    logLevel: 'silent',
+    sourcemap: false,
+    legalComments: 'none',
+  })
+
   for (const output of [
     join(distRoot, 'creator-skills', 'index.cjs'),
     join(distRoot, 'creator-skills', 'fixtures.cjs'),
+    join(distRoot, 'admin', 'creator-app-publishing.cjs'),
+    join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
   ]) {
     const normalized = (await readFile(output, 'utf8')).replace(/[ \t]+$/gm, '').trimEnd()
     await writeFile(output, `${normalized}\n`)
@@ -46,11 +61,20 @@ async function main(): Promise<void> {
     },
   )
 
+  await mkdir(join(distRoot, 'admin'), { recursive: true })
+  await copyFile(
+    join(srcRoot, 'creator-app-publishing.public.d.ts'),
+    join(distRoot, 'admin', 'creator-app-publishing.d.ts'),
+  )
+
   for (const output of [
     join(distRoot, 'creator-skills', 'index.cjs'),
     join(distRoot, 'creator-skills', 'fixtures.cjs'),
     join(distRoot, 'creator-skills', 'index.d.ts'),
     join(distRoot, 'creator-skills', 'fixtures.d.ts'),
+    join(distRoot, 'admin', 'creator-app-publishing.cjs'),
+    join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
+    join(distRoot, 'admin', 'creator-app-publishing.d.ts'),
   ]) {
     await access(output)
   }
