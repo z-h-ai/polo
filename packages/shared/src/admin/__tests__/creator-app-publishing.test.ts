@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import {
   analyzeCreatorAppPayload,
   buildCreatorAppPublishingUrl,
+  CREATOR_APP_CANONICAL_ENTRIES,
+  CREATOR_APP_PAYLOAD_LIMITS,
   createCanonicalCreatorAppBundle,
   createPlatformOwnedManifest,
   decodeCreatorAppPayloadZip,
@@ -9,6 +11,15 @@ import {
   validateProductionCreatorAppBundle,
 } from '../creator-app-publishing.ts'
 import { unzipSync, zipSync } from 'fflate'
+import { CREATOR_APP_PAYLOAD_FIXTURES } from './creator-app-publishing.fixtures.ts'
+
+const dynamicRuntimeEvidence = `
+const host = process.env.HOST;
+const port = process.env.PORT;
+const health = "/health";
+const token = process.env.POLO_APP_HEALTH_TOKEN;
+const header = "X-Polo-App-Health-Token";
+`
 
 describe('Creator App publishing contract', () => {
   it('recognizes a static production payload and produces a platform-owned manifest', () => {
@@ -36,36 +47,58 @@ describe('Creator App publishing contract', () => {
     })
   })
 
-  it('recognizes locked Python and JS service payloads without executing them', () => {
+  it('recognizes the canonical locked Python and JS service payloads without executing them', () => {
     expect(analyzeCreatorAppPayload([
-      { path: 'main.py', content: "@app.get('/health')\ndef health(): pass" },
+      { path: 'server/main.py', content: dynamicRuntimeEvidence },
       { path: 'pyproject.toml', content: '[project]\nname = "app"' },
-      { path: 'uv.lock', content: 'version = "1"' },
+      { path: 'uv.lock', content: '# lock marker' },
     ])).toEqual({
       status: 'ready',
-      candidate: { runtime: 'python', path: 'main.py' },
+      candidate: { runtime: 'python', path: 'server/main.py' },
     })
     expect(analyzeCreatorAppPayload([
-      { path: '.next/standalone/server.js', content: "server.get('/health', () => {})" },
-      { path: 'package-lock.json', content: '{"lockfileVersion": 3}' },
+      { path: 'server/index.js', content: dynamicRuntimeEvidence },
+      { path: 'package.json', content: '{"name":"app"}' },
+      { path: 'bun.lock', content: '{"workspaces":{}}' },
     ])).toEqual({
       status: 'ready',
-      candidate: { runtime: 'js', path: '.next/standalone/server.js' },
+      candidate: { runtime: 'js', path: 'server/index.js' },
     })
   })
 
   it('asks only for an entry when more than one runnable service is found', () => {
     expect(analyzeCreatorAppPayload([
-      { path: 'app.py', content: "@app.get('/health')" },
-      { path: 'server.py', content: "@app.get('/health')" },
+      { path: 'app.py', content: dynamicRuntimeEvidence },
+      { path: 'server.py', content: dynamicRuntimeEvidence },
       { path: 'pyproject.toml', content: '[project]\nname = "app"' },
-      { path: 'uv.lock', content: 'version = "1"' },
+      { path: 'uv.lock', content: '# lock marker' },
     ])).toEqual({
       status: 'needs_entry_selection',
       candidates: [
         { runtime: 'python', path: 'app.py' },
         { runtime: 'python', path: 'server.py' },
       ],
+    })
+  })
+
+  it('blocks contradictory runtimes instead of asking the Creator to choose a runtime', () => {
+    expect(analyzeCreatorAppPayload([
+      { path: 'index.html', content: '<!doctype html>' },
+      { path: 'server/main.py', content: dynamicRuntimeEvidence },
+      { path: 'pyproject.toml', content: '[project]\nname = "app"' },
+      { path: 'uv.lock', content: '# lock marker' },
+    ])).toMatchObject({ status: 'invalid', code: 'ambiguous_runtime' })
+  })
+
+  it('prefers a canonical entry over compatible root-level legacy entries', () => {
+    expect(analyzeCreatorAppPayload([
+      { path: 'server/main.py', content: dynamicRuntimeEvidence },
+      { path: 'app.py', content: dynamicRuntimeEvidence },
+      { path: 'pyproject.toml', content: '[project]\nname = "app"' },
+      { path: 'uv.lock', content: '# lock marker' },
+    ])).toEqual({
+      status: 'ready',
+      candidate: { runtime: 'python', path: 'server/main.py' },
     })
   })
 
@@ -96,18 +129,61 @@ describe('Creator App publishing contract', () => {
 
   it('does not accept an empty dependency lock or a service without a health endpoint', () => {
     expect(analyzeCreatorAppPayload([
-      { path: 'main.py', content: "@app.get('/health')" },
+      { path: 'server/main.py', content: dynamicRuntimeEvidence },
       { path: 'pyproject.toml', content: '[project]\nname = "app"' },
       { path: 'uv.lock', content: '' },
     ])).toMatchObject({ status: 'invalid', code: 'missing_runnable_payload' })
     expect(analyzeCreatorAppPayload([
-      { path: 'server.js', content: "server.get('/health', () => {})" },
-      { path: 'package-lock.json', content: '{}' },
+      { path: 'server/index.js', content: dynamicRuntimeEvidence },
+      { path: 'package.json', content: '{"name":"app"}' },
+      { path: 'bun.lock', content: '' },
     ])).toMatchObject({ status: 'invalid', code: 'missing_runnable_payload' })
     expect(analyzeCreatorAppPayload([
-      { path: 'server.js', content: 'server.listen(3000)' },
-      { path: 'package-lock.json', content: '{}' },
+      { path: 'server/index.js', content: 'server.listen(3000)' },
+      { path: 'package.json', content: '{"name":"app"}' },
+      { path: 'bun.lock', content: '{"workspaces":{}}' },
     ])).toMatchObject({ status: 'invalid', code: 'missing_runnable_payload' })
+  })
+
+  it('accepts all four compliance fixtures through ZIP analysis and final Bundle validation', () => {
+    for (const fixture of CREATOR_APP_PAYLOAD_FIXTURES) {
+      const payloadArchive = zipSync(Object.fromEntries(fixture.entries.map(entry => [
+        entry.path,
+        entry.bytes ?? new TextEncoder().encode(entry.content ?? ''),
+      ])))
+      const entries = decodeCreatorAppPayloadZip(payloadArchive)
+      const analysis = analyzeCreatorAppPayload(entries)
+      expect(analysis).toEqual({ status: 'ready', candidate: fixture.expected })
+      if (analysis.status !== 'ready') throw new Error(`Fixture ${fixture.id} was not ready`)
+      const bundle = createCanonicalCreatorAppBundle({
+        entries,
+        appId: `fixture-${fixture.id}`,
+        version: '1.0.0',
+        name: fixture.id,
+        entry: analysis.candidate,
+      })
+      expect(validateProductionCreatorAppBundle(bundle.archive, bundle.manifest)).toMatchObject({
+        appId: `fixture-${fixture.id}`,
+        runtime: fixture.expected.runtime,
+        entry: [fixture.expected.path],
+        permissions: [],
+      })
+      if (fixture.id === 'next-standalone') {
+        const paths = new Set(bundle.entries.map(entry => entry.path))
+        expect(paths.has('server/node_modules/next/package.json')).toBeTrue()
+        expect(paths.has('server/public/favicon.ico')).toBeTrue()
+        expect(paths.has('server/.next/static/chunks/app.js')).toBeTrue()
+      }
+    }
+  })
+
+  it('exports one canonical entry and 200 MiB archive boundary for every consumer', () => {
+    expect(CREATOR_APP_CANONICAL_ENTRIES).toEqual({
+      static: 'index.html',
+      python: 'server/main.py',
+      js: 'server/index.js',
+    })
+    expect(CREATOR_APP_PAYLOAD_LIMITS.archiveBytes).toBe(200 * 1024 * 1024)
   })
 
   it('rewrites a legacy bundle identity and permissions before calculating final metadata', () => {
@@ -202,18 +278,18 @@ describe('Creator App publishing contract', () => {
   it('refuses a caller-selected traversal, missing, or runtime-mismatched entry', () => {
     const input = {
       entries: [
-        { path: 'main.py', content: "@app.get('/health')" },
+        { path: 'server/main.py', content: dynamicRuntimeEvidence },
         { path: 'pyproject.toml', content: '[project]\nname = "app"' },
-        { path: 'uv.lock', content: 'version = "1"' },
+        { path: 'uv.lock', content: '# lock marker' },
       ],
       appId: 'server-app-id',
       version: '1.0.0',
       name: 'Safe App',
     }
     for (const entry of [
-      { runtime: 'python' as const, path: '../main.py' },
+      { runtime: 'python' as const, path: '../server/main.py' },
       { runtime: 'python' as const, path: 'missing.py' },
-      { runtime: 'js' as const, path: 'main.py' },
+      { runtime: 'js' as const, path: 'server/main.py' },
     ]) {
       expect(() => createCanonicalCreatorAppBundle({ ...input, entry })).toThrow(
         'not a safe analyzed candidate',

@@ -28,6 +28,9 @@ const packageName = publishManifest.name
 const packageVersion = publishManifest.version
 const registry = 'https://npm.pkg.github.com'
 const requiredEntries = [
+  'dist/admin/creator-app-publishing.cjs',
+  'dist/admin/creator-app-publishing.browser.cjs',
+  'dist/admin/creator-app-publishing.d.ts',
   'dist/creator-skills/archive.d.ts',
   'dist/creator-skills/fixtures.cjs',
   'dist/creator-skills/fixtures.d.ts',
@@ -263,9 +266,10 @@ async function inspectPackageDirectory(
   const exports = packageJson.exports ?? {}
   assert(exports['./creator-skills'], 'creator-skills export is missing')
   assert(exports['./creator-skills/fixtures'], 'creator-skills fixtures export is missing')
+  assert(exports['./creator-app-publishing'], 'creator-app-publishing export is missing')
   assert(
-    Object.keys(exports).sort().join('\n') === './creator-skills\n./creator-skills/fixtures',
-    'published package must expose only the two supported Creator Skill subpaths',
+    Object.keys(exports).sort().join('\n') === './creator-app-publishing\n./creator-skills\n./creator-skills/fixtures',
+    'published package must expose only the three supported public subpaths',
   )
   const exportTargets = Object.values(exports).flatMap(value => (
     typeof value === 'string'
@@ -402,6 +406,12 @@ import {
   CREATOR_SKILL_FIXTURE_METADATA,
   CREATOR_SKILL_FIXTURE_SLUG,
 } from '${packageName}/creator-skills/fixtures'
+import {
+  CREATOR_APP_CANONICAL_ENTRIES,
+  CREATOR_APP_PAYLOAD_MAX_BYTES,
+  analyzeCreatorAppPayload,
+  type CreatorAppPayloadEntry,
+} from '${packageName}/creator-app-publishing'
 
 const metadata: SkillVersionMetadata = CREATOR_SKILL_FIXTURE_METADATA
 const uploadGrant: CreatorSkillUploadGrant = {
@@ -439,6 +449,15 @@ if (!validation.valid || !metadata.name) throw new Error('fixture validation fai
 if (calculateContentDigest(CREATOR_SKILL_FIXTURE_MANIFEST) !== CREATOR_SKILL_FIXTURE_CONTENT_DIGEST) {
   throw new Error('fixture content digest drifted')
 }
+const payloadEntries: CreatorAppPayloadEntry[] = [
+  { path: 'index.html', content: '<!doctype html>' },
+]
+const payloadAnalysis = analyzeCreatorAppPayload(payloadEntries)
+if (
+  payloadAnalysis.status !== 'ready'
+  || payloadAnalysis.candidate.path !== CREATOR_APP_CANONICAL_ENTRIES.static
+  || CREATOR_APP_PAYLOAD_MAX_BYTES !== 200 * 1024 * 1024
+) throw new Error('Creator App publishing type contract failed')
 `)
   await writeFile(join(routeRoot, 'route.ts'), `import {
   calculateContentDigest,
@@ -454,6 +473,11 @@ import {
   CREATOR_SKILL_FIXTURE_METADATA,
   CREATOR_SKILL_FIXTURE_SLUG,
 } from '${packageName}/creator-skills/fixtures'
+import {
+  CREATOR_APP_CANONICAL_ENTRIES,
+  CREATOR_APP_PAYLOAD_MAX_BYTES,
+  analyzeCreatorAppPayload,
+} from '${packageName}/creator-app-publishing'
 
 export const runtime = 'nodejs'
 
@@ -491,6 +515,14 @@ export async function GET() {
       expectedArchiveChecksum: 'a'.repeat(64),
     }).success
   )
+  const payloadAnalysis = analyzeCreatorAppPayload([
+    { path: 'index.html', content: '<!doctype html>' },
+  ])
+  const creatorAppPayloadContract = (
+    payloadAnalysis.status === 'ready'
+    && payloadAnalysis.candidate.path === CREATOR_APP_CANONICAL_ENTRIES.static
+    && CREATOR_APP_PAYLOAD_MAX_BYTES === 200 * 1024 * 1024
+  )
   return Response.json({
     valid: validation.valid,
     slug: CREATOR_SKILL_FIXTURE_SLUG,
@@ -498,7 +530,23 @@ export async function GET() {
     digest,
     digestMatches: digest === CREATOR_SKILL_FIXTURE_CONTENT_DIGEST,
     strictUploadV2,
+    creatorAppPayloadContract,
   })
+}
+`)
+  const clientProofRoot = join(consumerRoot, 'src', 'app')
+  await writeFile(join(clientProofRoot, 'client-proof.tsx'), `'use client'
+
+import { CREATOR_APP_PAYLOAD_MAX_BYTES } from '${packageName}/creator-app-publishing'
+
+export function ClientProof() {
+  return <output data-testid="browser-safe-payload-limit">{CREATOR_APP_PAYLOAD_MAX_BYTES}</output>
+}
+`)
+  await writeFile(join(clientProofRoot, 'page.tsx'), `import { ClientProof } from './client-proof'
+
+export default function Page() {
+  return <ClientProof />
 }
 `)
   return consumerRoot
@@ -509,14 +557,22 @@ async function proveNodeEntrypoints(consumerRoot: string): Promise<void> {
     const assert = require('node:assert/strict');
     const shared = require('${packageName}/creator-skills');
     const fixtures = require('${packageName}/creator-skills/fixtures');
+    const publishing = require('${packageName}/creator-app-publishing');
     const mainPath = require.resolve('${packageName}/creator-skills');
     const fixturePath = require.resolve('${packageName}/creator-skills/fixtures');
+    const publishingPath = require.resolve('${packageName}/creator-app-publishing');
     assert.match(mainPath, /\/dist\/creator-skills\/index\.cjs$/);
     assert.match(fixturePath, /\/dist\/creator-skills\/fixtures\.cjs$/);
+    assert.match(publishingPath, /\/dist\/admin\/creator-app-publishing\.cjs$/);
     assert.equal(shared.validateCreatorSkillContent(fixtures.CREATOR_SKILL_FIXTURE_CONTENT, fixtures.CREATOR_SKILL_FIXTURE_SLUG).valid, true);
     assert.deepEqual(fixtures.CREATOR_SKILL_FIXTURE_METADATA, shared.CREATOR_SKILL_FIXTURE_METADATA);
     assert.equal(shared.calculateContentDigest(fixtures.CREATOR_SKILL_FIXTURE_MANIFEST), fixtures.CREATOR_SKILL_FIXTURE_CONTENT_DIGEST);
-    console.log(JSON.stringify({ mainPath, fixturePath, digest: fixtures.CREATOR_SKILL_FIXTURE_CONTENT_DIGEST }));
+    assert.deepEqual(publishing.CREATOR_APP_CANONICAL_ENTRIES, { static: 'index.html', python: 'server/main.py', js: 'server/index.js' });
+    assert.equal(publishing.CREATOR_APP_PAYLOAD_MAX_BYTES, 200 * 1024 * 1024);
+    assert.deepEqual(publishing.analyzeCreatorAppPayload([{ path: 'index.html', content: '<!doctype html>' }]), {
+      status: 'ready', candidate: { runtime: 'static', path: 'index.html' },
+    });
+    console.log(JSON.stringify({ mainPath, fixturePath, publishingPath, digest: fixtures.CREATOR_SKILL_FIXTURE_CONTENT_DIGEST }));
   `
   await runCommand('node', ['-e', commonJsProof], { cwd: consumerRoot })
 
@@ -524,7 +580,10 @@ async function proveNodeEntrypoints(consumerRoot: string): Promise<void> {
     import assert from 'node:assert/strict';
     import { validateCreatorSkillContent } from '${packageName}/creator-skills';
     import { CREATOR_SKILL_FIXTURE_CONTENT, CREATOR_SKILL_FIXTURE_SLUG } from '${packageName}/creator-skills/fixtures';
+    import { CREATOR_APP_PAYLOAD_MAX_BYTES, analyzeCreatorAppPayload } from '${packageName}/creator-app-publishing';
     assert.equal(validateCreatorSkillContent(CREATOR_SKILL_FIXTURE_CONTENT, CREATOR_SKILL_FIXTURE_SLUG).valid, true);
+    assert.equal(CREATOR_APP_PAYLOAD_MAX_BYTES, 200 * 1024 * 1024);
+    assert.equal(analyzeCreatorAppPayload([{ path: 'index.html', content: '<!doctype html>' }]).status, 'ready');
   `
   await runCommand('node', ['--input-type=module', '-e', esmProof], { cwd: consumerRoot })
 }
@@ -596,6 +655,7 @@ async function proveNextProductionRoute(
   assert(response.name === 'Review Helper', 'Next route fixture metadata drifted')
   assert(response.digestMatches === true, 'Next route fixture contentDigest drifted')
   assert(response.strictUploadV2 === true, 'Next route strict upload v2 contract drifted')
+  assert(response.creatorAppPayloadContract === true, 'Next route Creator App payload contract drifted')
   return {
     command: 'node node_modules/next/dist/bin/next start',
     terminationSignal: 'SIGTERM',
@@ -635,6 +695,7 @@ async function writeEvidence(
     gitTag,
     gitSnapshotClean: status.length === 0,
     publicExports: [
+      `${packageName}/creator-app-publishing`,
       `${packageName}/creator-skills`,
       `${packageName}/creator-skills/fixtures`,
     ],
@@ -653,9 +714,11 @@ async function writeEvidence(
       typescriptNoEmit: 'passed',
       nextProductionBuild: 'passed',
       nextProductionRoute: 'passed',
+      nextClientComponentBuild: 'passed',
       nextProductionProcessLifecycle: 'passed',
       fixtureCanonicalDigest: 'passed',
       strictUploadV2Contract: 'passed',
+      creatorAppPayloadContract: 'passed',
       negativeTarballBoundary: 'passed',
     },
   }
@@ -732,6 +795,7 @@ async function writeRegistryEvidence(
     releaseCommit: gitOutput(['rev-parse', `${releaseTag}^{}`]) ?? 'unknown',
     proofToolCommit: gitOutput(['rev-parse', 'HEAD']) ?? 'unknown',
     publicExports: [
+      `${packageName}/creator-app-publishing`,
       `${packageName}/creator-skills`,
       `${packageName}/creator-skills/fixtures`,
     ],
@@ -752,9 +816,11 @@ async function writeRegistryEvidence(
       typescriptNoEmit: 'passed',
       nextProductionBuild: 'passed',
       nextProductionRoute: 'passed',
+      nextClientComponentBuild: 'passed',
       nextProductionProcessLifecycle: 'passed',
       fixtureCanonicalDigest: 'passed',
       strictUploadV2Contract: 'passed',
+      creatorAppPayloadContract: 'passed',
       negativeInstalledPackageBoundary: 'passed',
     },
   }
