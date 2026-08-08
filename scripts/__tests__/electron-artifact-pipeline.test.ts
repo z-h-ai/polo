@@ -322,6 +322,14 @@ describe('Electron final artifact validation pipeline', () => {
     expect(installer).not.toContain('exec "$APPIMAGE_PATH" --no-sandbox --polo-cli')
   })
 
+  it('keeps the immutable predecessor installer independent from runner-provided yq', () => {
+    const validator = read('apps/electron/scripts/validate-final-artifacts.sh')
+
+    expect(validator).toContain('local bash_env="$shim_dir/bash-env"')
+    expect(validator).toContain('if [ "$#" -eq 2 ] && [ "$1" = "-v" ] && [ "$2" = "yq" ]; then')
+    expect(validator).toContain('BASH_ENV="$bash_env"')
+  })
+
   it('builds and validates dependency-free sanitized CLI metadata', () => {
     const build = read('scripts/build-cli-artifacts.ts')
     const validate = read('scripts/validate-cli-artifacts.ts')
