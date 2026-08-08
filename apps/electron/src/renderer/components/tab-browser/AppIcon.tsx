@@ -1,4 +1,5 @@
 import * as Icons from 'lucide-react'
+import poloAppIcon from '../../../../resources/icon.png'
 import { cn } from '@/lib/utils'
 import { POLO_APP_ID, type AppDefinition } from '../../../shared/tab-browser-types'
 
@@ -51,7 +52,7 @@ export function AppIcon({ app, onOpen, onRemove, className }: AppIconProps) {
         {app.iconUrl ? (
           <img src={app.iconUrl} alt="" className="h-full w-full object-cover" />
         ) : app.id === POLO_APP_ID ? (
-          <Icons.Sparkles className="h-9 w-9 text-foreground/75" strokeWidth={1.5} />
+          <img src={poloAppIcon} alt="" className="h-full w-full object-contain" />
         ) : (
           <span className={cn('flex h-full w-full items-center justify-center text-2xl font-semibold text-white', colorForName(app.name))}>
             {app.name.trim().slice(0, 1).toUpperCase() || '?'}

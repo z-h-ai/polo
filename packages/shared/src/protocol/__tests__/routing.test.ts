@@ -81,4 +81,9 @@ describe('channel routing behavior', () => {
       expect(REMOTE_ELIGIBLE_CHANNELS.has(channel)).toBe(false)
     }
   })
+
+  test('keeps authenticated Creator App publication explicitly local', () => {
+    expect(LOCAL_ONLY_CHANNELS.has(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP)).toBe(true)
+    expect(REMOTE_ELIGIBLE_CHANNELS.has(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP)).toBe(false)
+  })
 })

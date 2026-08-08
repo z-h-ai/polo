@@ -68,6 +68,8 @@ let detailResponse: (
 let installResponse: (
   input: { operationId: string },
 ) => Promise<Record<string, unknown>> | Record<string, unknown>
+let openedUrls: string[]
+let creatorAppPublishInputs: Array<Record<string, unknown>>
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
@@ -80,6 +82,8 @@ beforeEach(async () => {
   detailVersions = []
   detailArtifact = skill
   detailInputs = []
+  openedUrls = []
+  creatorAppPublishInputs = []
   detailResponse = () => ({
     success: true as const,
     artifact: detailArtifact,
@@ -143,7 +147,15 @@ beforeEach(async () => {
       ),
       onCreatorSkillProgress: () => () => {},
       creatorSkillCancel: async () => ({ success: true as const }),
-      openUrl: async () => {},
+      adminGetStatus: async () => ({ adminUrl: 'https://admin.example.test' }),
+      creatorAppPublish: async (input: Record<string, unknown>) => {
+        creatorAppPublishInputs.push(input)
+        return {
+          success: true as const,
+          publication: { appId: 'server-app-id', releaseId: 'release-id', version: '1.0.0', status: 'published' as const },
+        }
+      },
+      openUrl: async (url: string) => { openedUrls.push(url) },
     },
   })
 })
@@ -350,6 +362,80 @@ describe('CreatorArtifactsPanel', () => {
 
     expect((document.querySelector('#creator-skill-slug') as HTMLInputElement).placeholder)
       .toBe('mi-skill')
+  })
+
+  it('starts the published website flow with only Creator-provided fields', async () => {
+    renderPanel(true)
+    const typeSelect = await screen.findByTestId('creator-artifact-type-select')
+    fireEvent.pointerDown(typeSelect, {
+      button: 0,
+      buttons: 1,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    })
+    fireEvent.click(await screen.findByRole('option', { name: 'Web App' }))
+
+    const guide = screen.getByTestId('web-app-publishing-guide')
+    expect(guide.textContent).toContain('Published website address')
+    expect(guide.textContent).toContain('HTTPS address')
+    expect(guide.textContent).toContain('Upload an App')
+    expect(guide.textContent).toContain('runnable ZIP or folder')
+    expect(guide.textContent).not.toContain('polo-app.json')
+    expect(guide.textContent).not.toContain('appId')
+    expect(guide.textContent).not.toContain('checksum')
+
+    fireEvent.click(within(guide).getByTestId('web-app-publish-mode-website'))
+    fireEvent.change(within(guide).getByTestId('creator-web-app-name'), {
+      target: { value: 'Published Dashboard' },
+    })
+    fireEvent.change(within(guide).getByTestId('creator-web-app-url'), {
+      target: { value: 'https://dashboard.example.test' },
+    })
+    fireEvent.click(within(guide).getByRole('button', {
+      name: 'Continue to Web App publishing',
+    }))
+    await waitFor(() => expect(creatorAppPublishInputs).toEqual([{
+      organizationId,
+      name: 'Published Dashboard',
+      visibility: 'all_members',
+      mode: 'website',
+      websiteUrl: 'https://dashboard.example.test/',
+    }]))
+    expect(openedUrls).toEqual([])
+  })
+
+  it('starts the runnable payload flow with the selected mode and file metadata', async () => {
+    renderPanel(true)
+    const typeSelect = await screen.findByTestId('creator-artifact-type-select')
+    fireEvent.pointerDown(typeSelect, {
+      button: 0,
+      buttons: 1,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    })
+    fireEvent.click(await screen.findByRole('option', { name: 'Web App' }))
+
+    const guide = screen.getByTestId('web-app-publishing-guide')
+    fireEvent.click(within(guide).getByTestId('web-app-publish-mode-upload'))
+    fireEvent.change(within(guide).getByTestId('creator-web-app-name'), {
+      target: { value: 'Local Dashboard' },
+    })
+    const file = new File(['payload'], 'dashboard.zip', { type: 'application/zip' })
+    fireEvent.change(within(guide).getByTestId('creator-web-app-file'), {
+      target: { files: [file] },
+    })
+    fireEvent.click(within(guide).getByRole('button', {
+      name: 'Continue to Web App publishing',
+    }))
+    await waitFor(() => expect(creatorAppPublishInputs).toHaveLength(1))
+    expect(creatorAppPublishInputs[0]).toMatchObject({
+      organizationId,
+      name: 'Local Dashboard',
+      visibility: 'all_members',
+      mode: 'upload',
+    })
+    expect(atob(creatorAppPublishInputs[0]!.payloadBase64 as string)).toBe('payload')
+    expect(openedUrls).toEqual([])
   })
 
   it('localizes workspace mutation errors without a server message', async () => {

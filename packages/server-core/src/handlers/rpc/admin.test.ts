@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test'
 import { createCipheriv, hkdfSync } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { zipSync } from 'fflate'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import {
+  analyzeCreatorAppPayload as realAnalyzeCreatorAppPayload,
+  createCanonicalCreatorAppBundle as realCreateCanonicalCreatorAppBundle,
+  createPlatformOwnedManifest as realCreatePlatformOwnedManifest,
+  decodeCreatorAppPayloadZip as realDecodeCreatorAppPayloadZip,
+} from '../../../../shared/src/admin/creator-app-publishing'
 
 type StoredTokens = {
   accessToken: string
@@ -92,6 +101,19 @@ const adminClientBehavior = {
     defaultConnection: null,
   }),
   listOrganizations: async (_accessToken: string): Promise<any> => ({ organizations: [] }),
+  createCreatorAppPublicationDraft: async (_accessToken: string, _input: unknown): Promise<any> => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
+  }),
+  publishCreatorApp: async (_accessToken: string, _input: unknown): Promise<any> => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'published',
+  }),
+  listPlatformAppReleases: async (): Promise<any[]> => [],
+  createPlatformRelease: async (_input: unknown): Promise<any> => ({
+    release: { id: 'release-id', appId: 'app-id', version: '1.0.0' },
+    upload: { method: 'PUT', url: 'https://admin.example.com/upload' },
+  }),
+  uploadPlatformReleaseBundle: async (): Promise<void> => {},
+  completeAndPublishPlatformRelease: async (): Promise<void> => {},
   listCreatorArtifacts: async (
     _accessToken: string,
     _input: unknown,
@@ -248,6 +270,41 @@ class MockAdminClient {
     )
   }
 
+  async createCreatorAppPublicationDraft(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'createCreatorAppPublicationDraft', args: [input], accessToken })
+    return adminClientBehavior.createCreatorAppPublicationDraft(accessToken, input)
+  }
+
+  async publishCreatorApp(accessToken: string, input: unknown) {
+    adminClientCalls.push({ method: 'publishCreatorApp', args: [input], accessToken })
+    return adminClientBehavior.publishCreatorApp(accessToken, input)
+  }
+
+  async createPlatformApp(accessToken: string, organizationId: string, input: any) {
+    adminClientCalls.push({ method: 'createPlatformApp', args: [organizationId, input], accessToken })
+    return { id: 'app-id', organizationId, name: input.name, deliveryMode: input.deliveryMode }
+  }
+
+  async listPlatformAppReleases(accessToken: string, organizationId: string, appId: string) {
+    adminClientCalls.push({ method: 'listPlatformAppReleases', args: [organizationId, appId], accessToken })
+    return adminClientBehavior.listPlatformAppReleases()
+  }
+
+  async createPlatformRelease(accessToken: string, organizationId: string, appId: string, input: any) {
+    adminClientCalls.push({ method: 'createPlatformRelease', args: [organizationId, appId, input], accessToken })
+    return adminClientBehavior.createPlatformRelease(input)
+  }
+
+  async uploadPlatformReleaseBundle(accessToken: string, upload: unknown, bundle: Uint8Array) {
+    adminClientCalls.push({ method: 'uploadPlatformReleaseBundle', args: [upload, bundle], accessToken })
+    return adminClientBehavior.uploadPlatformReleaseBundle()
+  }
+
+  async completeAndPublishPlatformRelease(accessToken: string, organizationId: string, appId: string, releaseId: string) {
+    adminClientCalls.push({ method: 'completeAndPublishPlatformRelease', args: [organizationId, appId, releaseId], accessToken })
+    return adminClientBehavior.completeAndPublishPlatformRelease()
+  }
+
   async createCreatorSkillUploadGrant(accessToken: string, input: unknown) {
     adminClientCalls.push({ method: 'createCreatorSkillUploadGrant', args: [input], accessToken })
     return adminClientBehavior.createCreatorSkillUploadGrant(accessToken, input)
@@ -358,6 +415,15 @@ const mockCredentialManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
+  analyzeCreatorAppPayload: realAnalyzeCreatorAppPayload,
+  createCanonicalCreatorAppBundle: realCreateCanonicalCreatorAppBundle,
+  createPlatformOwnedManifest: realCreatePlatformOwnedManifest,
+  decodeCreatorAppPayloadZip: realDecodeCreatorAppPayloadZip,
+  normalizeCreatorAppPayloadRoot: (entries: unknown) => entries,
+  resolveCreatorAppPublishingOrganization: (input: any) => input.requestedOrganizationId
+    && input.availableOrganizationIds.includes(input.requestedOrganizationId)
+    ? { organizationId: input.requestedOrganizationId, source: 'requested' }
+    : { organizationId: null, source: 'none' },
   denyAppCatalogAccessForAccount: () => {},
   denyCachedAppCatalogAuthorization: () => null,
   denyCachedAppCatalogAuthorizationForAccount: () => [],
@@ -490,6 +556,7 @@ function createHarness() {
         process: async () => Buffer.from(''),
       },
     },
+    creatorAppPublicationRoot: join(tmpdir(), 'polo-admin-handler-publications'),
   } satisfies HandlerDeps
 
   registerAdminHandlers(server, deps)
@@ -524,6 +591,7 @@ function createHarness() {
       handlers,
       RPC_CHANNELS.admin.COMPLETE_CREATOR_SKILL_UPLOAD,
     ),
+    publishCreatorApp: requiredHandler(handlers, RPC_CHANNELS.admin.PUBLISH_CREATOR_APP),
     createOrganization: requiredHandler(handlers, RPC_CHANNELS.admin.CREATE_ORGANIZATION),
     previewOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN),
     acceptOrganizationJoin: requiredHandler(handlers, RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN),
@@ -650,6 +718,19 @@ beforeEach(() => {
     defaultConnection: 'admin-anthropic',
   })
   adminClientBehavior.listOrganizations = async () => ({ organizations: [] })
+  adminClientBehavior.createCreatorAppPublicationDraft = async () => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'draft',
+  })
+  adminClientBehavior.publishCreatorApp = async () => ({
+    appId: 'app-id', releaseId: 'release-id', version: '1.0.0', status: 'published',
+  })
+  adminClientBehavior.listPlatformAppReleases = async () => []
+  adminClientBehavior.createPlatformRelease = async input => ({
+    release: { id: 'release-id', appId: 'app-id', version: (input as { version: string }).version },
+    upload: { method: 'PUT', url: 'https://admin.example.com/upload' },
+  })
+  adminClientBehavior.uploadPlatformReleaseBundle = async () => {}
+  adminClientBehavior.completeAndPublishPlatformRelease = async () => {}
   adminClientBehavior.listCreatorArtifacts = async () => ({ artifacts: [] })
   adminClientBehavior.getCreatorArtifact = async () => {
     throw new Error('getCreatorArtifact behavior not configured')
@@ -712,6 +793,7 @@ describe('registerAdminHandlers', () => {
       'login',
       'logout',
       'previewOrganizationJoin',
+      'publishCreatorApp',
       'removeOrganizationMember',
       'revokeOrganizationJoinLink',
       'sendPhoneAuthCode',
@@ -861,6 +943,103 @@ describe('registerAdminHandlers', () => {
 
     expect(response.success).toBe(true)
     expect(response.versions?.[0]).not.toHaveProperty('uploadGeneration')
+  })
+
+  it('receives a source organization over authenticated RPC and creates then publishes a website App', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token', refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000, userId: 'user-1', username: 'creator',
+    }
+    adminClientBehavior.listOrganizations = async () => ({ organizations: [{ id: 'creator-space', status: 'active', membership: { status: 'active' } }] })
+    const { publishCreatorApp } = createHarness()
+    const result = await publishCreatorApp(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      {
+        organizationId: 'creator-space', name: 'Website', visibility: 'all_members',
+        mode: 'website', websiteUrl: 'https://app.example.test',
+      },
+    )
+    expect(result).toMatchObject({ success: true, publication: { status: 'published' } })
+    expect(adminClientCalls.some(call => call.method.includes('CreatorAppPublication'))).toBe(false)
+  })
+
+  it('publishes canonical Bundle bytes with complete Release metadata and retries a version conflict', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token', refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000, userId: 'user-1', username: 'creator',
+    }
+    adminClientBehavior.listOrganizations = async () => ({
+      organizations: [{ id: 'creator-space', status: 'active', membership: { status: 'active' } }],
+    })
+    let listAttempt = 0
+    adminClientBehavior.listPlatformAppReleases = async () => {
+      listAttempt += 1
+      return listAttempt === 1
+        ? [{ id: 'release-0', appId: 'app-id', version: '1.0.0' }]
+        : [
+            { id: 'release-0', appId: 'app-id', version: '1.0.0' },
+            { id: 'release-1', appId: 'app-id', version: '1.0.1' },
+          ]
+    }
+    let createAttempt = 0
+    adminClientBehavior.createPlatformRelease = async input => {
+      createAttempt += 1
+      if (createAttempt === 1) {
+        throw new TestAdminError('Release version already exists', 'VALIDATION_ERROR', { status: 409 })
+      }
+      return {
+        release: { id: 'release-2', appId: 'app-id', version: (input as { version: string }).version },
+        upload: { method: 'PUT', url: 'https://admin.example.com/upload' },
+      }
+    }
+    const payload = zipSync({
+      'index.html': new TextEncoder().encode('<!doctype html><title>Creator App</title>'),
+    })
+    const { publishCreatorApp } = createHarness()
+    const result = await publishCreatorApp(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      {
+        organizationId: 'creator-space', appId: 'app-id', name: 'Static App',
+        visibility: 'all_members', mode: 'upload',
+        payloadBase64: Buffer.from(payload).toString('base64'),
+      },
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      publication: { appId: 'app-id', releaseId: 'release-2', version: '1.0.2', status: 'published' },
+    })
+    const releaseCalls = adminClientCalls.filter(call => call.method === 'createPlatformRelease')
+    expect(releaseCalls).toHaveLength(2)
+    expect(releaseCalls[1]!.args[2]).toMatchObject({
+      version: '1.0.2', runtime: 'static', sizeBytes: expect.any(Number),
+      checksum: expect.stringMatching(/^sha256:[a-f0-9]{64}$/), platform: 'any', arch: 'any',
+    })
+    const uploadCall = adminClientCalls.find(call => call.method === 'uploadPlatformReleaseBundle')
+    expect(uploadCall?.accessToken).toBe('creator-access-token')
+    expect(uploadCall?.args[1]).toBeInstanceOf(Uint8Array)
+    expect(adminClientCalls.at(-1)).toMatchObject({
+      method: 'completeAndPublishPlatformRelease',
+      args: ['creator-space', 'app-id', 'release-2'],
+    })
+  })
+
+  it('rejects unavailable, removed, and absent source organizations without a fallback publication', async () => {
+    managerState.tokens = {
+      accessToken: 'creator-access-token', refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 10 * 60_000, userId: 'user-1', username: 'creator',
+    }
+    adminClientBehavior.listOrganizations = async () => ({ organizations: [{ id: 'allowed-space' }] })
+    const { publishCreatorApp } = createHarness()
+    const context = { clientId: 'client-1', workspaceId: null, webContentsId: null }
+    for (const organizationId of ['deleted-space', 'removed-space', '']) {
+      const result = await publishCreatorApp(context, {
+        organizationId, name: 'Website', visibility: 'all_members', mode: 'website',
+        websiteUrl: 'https://app.example.test',
+      })
+      expect(result.success).toBe(false)
+    }
+    expect(adminClientCalls.some(call => call.method === 'createCreatorAppPublicationDraft')).toBe(false)
   })
 
   it('forwards organization onboarding through the authenticated admin session', async () => {

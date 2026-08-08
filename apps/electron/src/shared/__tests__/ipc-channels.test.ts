@@ -47,6 +47,7 @@ const EXPECTED_CHANNELS: string[] = [
   'admin:login',
   'admin:logout',
   'admin:previewOrganizationJoin',
+  'admin:publishCreatorApp',
   'admin:publishCreatorArtifactVersion',
   'admin:removeOrganizationMember',
   'admin:revokeCreatorArtifactVersion',

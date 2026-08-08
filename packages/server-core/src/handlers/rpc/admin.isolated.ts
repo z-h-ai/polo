@@ -275,6 +275,11 @@ const mockCredentialManager = {
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: MockAdminClient,
   AdminError: TestAdminError,
+  analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
+  createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
+  decodeCreatorAppPayloadZip: () => { throw new Error('not configured') },
+  normalizeCreatorAppPayloadRoot: (entries: unknown) => entries,
+  resolveCreatorAppPublishingOrganization: () => ({ organizationId: null, source: 'none' }),
   setAppCatalogAccessMode: (
     accountId: string,
     organizationId: string,

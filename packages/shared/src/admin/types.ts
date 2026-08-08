@@ -113,6 +113,39 @@ export interface AdminLlmConnectionsResponse {
 }
 
 export type OrganizationType = 'enterprise_workspace' | 'creator_space';
+export interface CreatorAppPublicationInput {
+  organizationId: string;
+  appId?: string;
+  releaseId?: string;
+  name: string;
+  visibility: 'all_members';
+  mode: 'website' | 'upload';
+  websiteUrl?: string;
+  /** Base64-encoded final, platform-owned ZIP; never a creator manifest. */
+  bundleBase64?: string;
+  checksum?: string;
+  sizeBytes?: number;
+}
+
+export interface CreatorAppPublicationResponse {
+  appId: string;
+  releaseId: string;
+  version: string;
+  status: 'draft' | 'published';
+  checksum?: string;
+  sizeBytes?: number;
+}
+export interface AdminPlatformApp { id: string; organizationId: string; name: string; deliveryMode: 'remote_url' | 'local_bundle'; }
+export interface AdminPlatformRelease { id: string; appId: string; version: string; }
+export interface AdminSignedUpload { url: string; method: 'PUT'; headers?: Record<string, string>; }
+export interface AdminPlatformReleaseInput {
+  version: string;
+  runtime: 'static' | 'python' | 'js';
+  checksum: string;
+  sizeBytes: number;
+  platform: 'any';
+  arch: 'any';
+}
 export type OrganizationRole = 'owner' | 'manager' | 'member';
 export type OrganizationStatus = 'active' | 'suspended';
 export type OrganizationMembershipStatus = 'active' | 'suspended' | 'removed';

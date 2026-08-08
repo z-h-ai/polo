@@ -631,6 +631,19 @@ export interface ElectronAPI {
     organizationId: string,
     options?: { force?: boolean },
   ): Promise<AppCatalogSyncResult>
+  creatorAppPublish(input: {
+    organizationId: string
+    name: string
+    visibility: 'all_members'
+    mode: 'website' | 'upload'
+    websiteUrl?: string
+    /** Authenticated local RPC payload, never sent in a URL. */
+    payloadBase64?: string
+    selectedEntry?: { runtime: 'static' | 'python' | 'js'; path: string }
+  }): Promise<OrganizationRpcResult<
+    | { publication: { appId: string; releaseId: string; version: string; status: 'published'; checksum?: string; sizeBytes?: number } }
+    | { status: 'needs_entry_selection'; candidates: Array<{ runtime: 'static' | 'python' | 'js'; path: string }> }
+  >>
   onAdminReauthRequired(callback: (result: AdminValidateResult) => void): () => void
   organizationList(): Promise<OrganizationRpcResult<{ organizations: OrganizationSummary[] }>>
   organizationCreate(input: CreateOrganizationInput): Promise<OrganizationRpcResult<CreateOrganizationResponse>>

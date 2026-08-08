@@ -208,6 +208,11 @@ mock.module('@polo-ai/shared/config', () => ({
 mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: TestAdminClient,
   AdminError: TestAdminError,
+  analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
+  createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
+  decodeCreatorAppPayloadZip: () => { throw new Error('not configured') },
+  normalizeCreatorAppPayloadRoot: (entries: unknown) => entries,
+  resolveCreatorAppPublishingOrganization: () => ({ organizationId: null, source: 'none' }),
   getSafeAdminErrorMessage: () => 'Admin request failed',
   getAppCatalogApps: (entry: AppCatalogCacheEntry) => [
     ...entry.apps,

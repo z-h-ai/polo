@@ -324,4 +324,13 @@ describe('isLocalOnly consistency', () => {
       RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
     )).toBe(true)
   })
+
+  it('routes Creator App publication locally while a remote workspace is active', async () => {
+    const local = stubClient()
+    const remote = stubClient()
+    const routed = new RoutedClient(local, remote)
+    await routed.invoke(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP, { organizationId: 'org' })
+    expect(local.invoke).toHaveBeenCalledWith(RPC_CHANNELS.admin.PUBLISH_CREATOR_APP, { organizationId: 'org' })
+    expect(remote.invoke).not.toHaveBeenCalled()
+  })
 })

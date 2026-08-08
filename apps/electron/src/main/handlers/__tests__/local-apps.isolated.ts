@@ -157,6 +157,11 @@ mock.module('@polo-ai/shared/admin', () => ({
   AdminClient: class {
     getAppReleaseDownload = getAppReleaseDownload
   },
+  analyzeCreatorAppPayload: () => ({ status: 'invalid', message: 'not configured' }),
+  createCanonicalCreatorAppBundle: () => { throw new Error('not configured') },
+  decodeCreatorAppPayloadZip: () => { throw new Error('not configured') },
+  normalizeCreatorAppPayloadRoot: (entries: unknown) => entries,
+  resolveCreatorAppPublishingOrganization: () => ({ organizationId: null, source: 'none' }),
   getCachedAppCatalog,
   getAppCatalogAccessMode,
   isAppCatalogAccessDeniedForAccount: () => accountAccessDenied,

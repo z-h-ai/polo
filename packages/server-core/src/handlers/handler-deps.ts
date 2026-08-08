@@ -49,6 +49,8 @@ export interface HandlerDeps<
    * synchronize on phases instead of wall-clock filesystem delivery.
    */
   sessionFileWatchFactory?: SessionFileWatchFactory
+  /** Durable local Creator App publication store; tests may inject an isolated root. */
+  creatorAppPublicationRoot?: string
   /**
    * Host-owned session-ending hook invoked inside the trusted transition lock.
    * It must synchronously fence new and in-flight lifecycle result commits,

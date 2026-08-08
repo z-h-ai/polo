@@ -1,4 +1,7 @@
 # POO-21 / POO-26 v0.12.0 Integration Report
+---
+
+# POO-29 实现报告
 
 ## Integration scope
 
@@ -17,10 +20,26 @@ This follow-up branch starts from POO-21 commit `54d51093` and integrates the tw
 - Candidate/registry SHA-256: `385609a812223c7dc3c947689bd915e68c69c7ff970247e0ea303059c3c98711`
 - Publish workflow: `https://github.com/z-h-ai/polo/actions/runs/31083340263`
 - polo-admin downstream proof: `https://github.com/z-h-ai/polo-admin/actions/runs/31083974149`
+---
+
+- Creator Space 中选择 **Web App** 后，入口先展示两种面向结果的发布方式：
+  - **已上线网站（推荐）**：填写 HTTPS 地址，Polo 直接创建并发布。
+  - **上传应用**：拖入可运行 ZIP 或文件夹，Polo 自动分析入口并准备平台发布包；仅在无法唯一确定入口时追加询问。
+- 发布入口不再要求或展示 `polo-app.json`、`appId`、checksum、平台或架构等平台内部交付物。
+- 进入 Organization Console 时保持传入 `organizationId`：`/organization-apps?organizationId=<来源组织>`，使已登录发布页可默认选中来源组织。
+- 所有支持语言补齐相同的 Creator 文案，避免不同语言重新暴露旧的 Manifest/ZIP 根目录约束。
 
 ## POO-21 baseline evidence retained
 
 The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, authenticated server-core download boundaries, install/update/uninstall Ledger and journal behavior, and `skills:changed` refresh. That proof used the older Admin contract and must now be rerun against the POL-59 strict asynchronous service and isolated COS staging resources.
+---
+
+- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
+  - Web App 发布入口改为双路径说明，并保留携带来源组织 ID 的跳转。
+- `apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
+  - 回归验证 Creator 不见平台 Bundle 字段，且跳转 URL 携带 `organizationId`。
+- `packages/shared/src/i18n/locales/{de,en,es,hu,ja,pl,zh-Hans}.json`
+  - 新增并对齐 Web App 发布入口文案。
 
 ## Latest dev integration
 
@@ -29,6 +48,26 @@ The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, 
 - Focused Creator Skill suites passed: 88 standard tests, 10 isolated server-core boundary tests, and 15 isolated panel interaction tests.
 - `bun run typecheck:all`, Creator Skill E2E TypeScript validation, and `bun run electron:build` passed on the merged tree.
 - The first full regression exposed a `dev`-side release preflight bug: redirected `electron:dist` prepared the complete runtime before reaching the CLI artifact fail-closed guard, so its 5-second regression timed out after about 103 seconds. `scripts/electron-dist.ts` now rejects the test-only output override before any runtime preparation. The focused regression passed in 67 ms, and the full rerun passed with `5282 passed / 19 skipped` plus every isolated suite.
+---
+
+- `NO_COLOR=1 bun test --isolate ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
+  - 通过：16 pass，0 fail，75 expect；测试运行时输出了一条既有异步轮询的 React `act(...)` 警告，不影响结果。
+- `NO_COLOR=1 bun run lint:i18n:parity`
+  - 通过：6 个非英语 locale、每个 1933 keys。
+- `NO_COLOR=1 bun run lint:i18n:coverage`
+  - 通过：所有静态翻译键均可解析。
+- `NO_COLOR=1 bun scripts/sort-locales.ts --check`
+  - 通过。
+- `NO_COLOR=1 bun run typecheck:shared`
+  - 通过。
+- `NO_COLOR=1 bun run typecheck:electron`
+  - 通过。
+- `NO_COLOR=1 bun x eslint src/renderer/components/organization/CreatorArtifactsPanel.tsx src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
+  - 通过。
+- `NO_COLOR=1 bun run test`
+  - 通过（普通测试及隔离测试脚本均以退出码 0 结束）。
+- `git diff --check`
+  - 通过。
 
 ## 2026-08-06 real staging E2E fixes
 
@@ -62,3 +101,7 @@ The real cross-repository lifecycle gate is now satisfied. Final regression pass
 - Final standard suite evidence: one isolated full run passed `5303 / 5303` with 19 skips and 0 failures. Two prior full runs exposed the repository's existing RPC registration ordering flake (the same four tests passed immediately in isolation); the final full run and all isolated suites were green. `bun run typecheck:all` and `bun run electron:build` passed.
 
 The remaining release gate is an independent reviewer `pass` plus manual GitHub token revocation/replacement described in the POL-59 report.
+---
+
+- 本 worktree 只包含 Polo Creator/Electron 入口；Polo Admin 内的自动草稿、Bundle 重打包和最终发布服务由既有 Organization Console 路径承接，本轮未越过仓库边界修改该服务。
+- 本轮没有已知的 Creator 入口实现遗留问题；仍需独立 reviewer 按完整跨仓库发布流程验收。
