@@ -73,6 +73,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('wait_for_macos_frontmost_state "$initial_app_pid" "cold-launch" true')
     expect(validator).toContain('/usr/bin/open -a Finder "$test_home"')
     expect(validator).toContain('wait_for_macos_frontmost_state "$focused_app_pid" "second-polo-app-focus" true')
+    expect(validator).toContain('transition=unavailable continuing=true')
+    expect(validator).toContain('transition=restored')
     expect(validator).toContain('macos-focus-state phase=')
     expect(validator).toContain('macos-running-app-state.jxa')
     expect(validator).not.toContain('POLO_AI_E2E_DIRECT_APP')
