@@ -65,6 +65,7 @@
     },
     "./creator-app-publishing": {
       "types": "./dist/admin/creator-app-publishing.d.ts",
+      "browser": "./dist/admin/creator-app-publishing.browser.cjs",
       "node": "./dist/admin/creator-app-publishing.cjs",
       "import": "./dist/admin/creator-app-publishing.cjs",
       "default": "./dist/admin/creator-app-publishing.cjs"

@@ -30,10 +30,23 @@ async function main(): Promise<void> {
     legalComments: 'none',
   })
 
+  await build({
+    entryPoints: [join(srcRoot, 'admin', 'creator-app-publishing.constants.ts')],
+    outfile: join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
+    bundle: true,
+    format: 'cjs',
+    platform: 'browser',
+    target: 'es2022',
+    logLevel: 'silent',
+    sourcemap: false,
+    legalComments: 'none',
+  })
+
   for (const output of [
     join(distRoot, 'creator-skills', 'index.cjs'),
     join(distRoot, 'creator-skills', 'fixtures.cjs'),
     join(distRoot, 'admin', 'creator-app-publishing.cjs'),
+    join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
   ]) {
     const normalized = (await readFile(output, 'utf8')).replace(/[ \t]+$/gm, '').trimEnd()
     await writeFile(output, `${normalized}\n`)
@@ -60,6 +73,7 @@ async function main(): Promise<void> {
     join(distRoot, 'creator-skills', 'index.d.ts'),
     join(distRoot, 'creator-skills', 'fixtures.d.ts'),
     join(distRoot, 'admin', 'creator-app-publishing.cjs'),
+    join(distRoot, 'admin', 'creator-app-publishing.browser.cjs'),
     join(distRoot, 'admin', 'creator-app-publishing.d.ts'),
   ]) {
     await access(output)

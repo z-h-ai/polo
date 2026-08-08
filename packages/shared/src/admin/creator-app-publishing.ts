@@ -2,6 +2,16 @@ import { createHash } from 'node:crypto'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import type { LocalAppRuntimeKind, PoloAppManifest } from '../protocol/local-apps.ts'
 import { validatePoloAppManifestContract } from '../protocol/local-app-manifest.ts'
+import {
+  CREATOR_APP_CANONICAL_ENTRIES,
+  CREATOR_APP_PAYLOAD_LIMITS,
+} from './creator-app-publishing.constants.ts'
+
+export {
+  CREATOR_APP_CANONICAL_ENTRIES,
+  CREATOR_APP_PAYLOAD_LIMITS,
+  CREATOR_APP_PAYLOAD_MAX_BYTES,
+} from './creator-app-publishing.constants.ts'
 
 export type CreatorAppPublishMode = 'website' | 'upload'
 export type CreatorAppVisibility = 'all_members'
@@ -39,23 +49,6 @@ export interface NormalizedCreatorAppPayloadEntry {
   content: string
   bytes: Uint8Array
 }
-
-export const CREATOR_APP_CANONICAL_ENTRIES = Object.freeze({
-  static: 'index.html',
-  python: 'server/main.py',
-  js: 'server/index.js',
-} as const satisfies Record<LocalAppRuntimeKind, string>)
-
-export const CREATOR_APP_PAYLOAD_LIMITS = Object.freeze({
-  archiveBytes: 200 * 1024 * 1024,
-  entryCount: 10_000,
-  compressedEntryBytes: 200 * 1024 * 1024,
-  expandedEntryBytes: 512 * 1024 * 1024,
-  expandedTotalBytes: 1024 * 1024 * 1024,
-  compressionRatio: 100,
-})
-
-export const CREATOR_APP_PAYLOAD_MAX_BYTES = CREATOR_APP_PAYLOAD_LIMITS.archiveBytes
 
 const PYTHON_LOCK_FILES = new Set(['uv.lock'])
 const JS_LOCK_FILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'])

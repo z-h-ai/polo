@@ -1,6 +1,6 @@
 {
   "name": "@z-h-ai/shared",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "license": "Apache-2.0",
   "description": "Published Creator Skill contracts for Polo AI",
   "repository": {
@@ -38,6 +38,7 @@
     },
     "./creator-app-publishing": {
       "types": "./dist/admin/creator-app-publishing.d.ts",
+      "browser": "./dist/admin/creator-app-publishing.browser.cjs",
       "import": "./dist/admin/creator-app-publishing.cjs",
       "require": "./dist/admin/creator-app-publishing.cjs",
       "default": "./dist/admin/creator-app-publishing.cjs"

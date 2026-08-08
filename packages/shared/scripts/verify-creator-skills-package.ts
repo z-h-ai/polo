@@ -29,6 +29,7 @@ const packageVersion = publishManifest.version
 const registry = 'https://npm.pkg.github.com'
 const requiredEntries = [
   'dist/admin/creator-app-publishing.cjs',
+  'dist/admin/creator-app-publishing.browser.cjs',
   'dist/admin/creator-app-publishing.d.ts',
   'dist/creator-skills/archive.d.ts',
   'dist/creator-skills/fixtures.cjs',
@@ -533,6 +534,21 @@ export async function GET() {
   })
 }
 `)
+  const clientProofRoot = join(consumerRoot, 'src', 'app')
+  await writeFile(join(clientProofRoot, 'client-proof.tsx'), `'use client'
+
+import { CREATOR_APP_PAYLOAD_MAX_BYTES } from '${packageName}/creator-app-publishing'
+
+export function ClientProof() {
+  return <output data-testid="browser-safe-payload-limit">{CREATOR_APP_PAYLOAD_MAX_BYTES}</output>
+}
+`)
+  await writeFile(join(clientProofRoot, 'page.tsx'), `import { ClientProof } from './client-proof'
+
+export default function Page() {
+  return <ClientProof />
+}
+`)
   return consumerRoot
 }
 
@@ -698,6 +714,7 @@ async function writeEvidence(
       typescriptNoEmit: 'passed',
       nextProductionBuild: 'passed',
       nextProductionRoute: 'passed',
+      nextClientComponentBuild: 'passed',
       nextProductionProcessLifecycle: 'passed',
       fixtureCanonicalDigest: 'passed',
       strictUploadV2Contract: 'passed',
@@ -799,6 +816,7 @@ async function writeRegistryEvidence(
       typescriptNoEmit: 'passed',
       nextProductionBuild: 'passed',
       nextProductionRoute: 'passed',
+      nextClientComponentBuild: 'passed',
       nextProductionProcessLifecycle: 'passed',
       fixtureCanonicalDigest: 'passed',
       strictUploadV2Contract: 'passed',

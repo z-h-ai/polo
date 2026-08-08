@@ -25,8 +25,8 @@ async function main(): Promise<void> {
   const developmentManifest = await readJson(join(packageRoot, 'package.json')) as PackageManifest
   const publishManifest = await readJson(join(packageRoot, 'package.publish.json')) as PackageManifest
 
-  if (publishManifest.name !== '@z-h-ai/shared' || publishManifest.version !== '0.13.0') {
-    throw new Error('publish manifest must target @z-h-ai/shared@0.13.0')
+  if (publishManifest.name !== '@z-h-ai/shared' || publishManifest.version !== '0.13.1') {
+    throw new Error('publish manifest must target @z-h-ai/shared@0.13.1')
   }
   if (publishManifest.private !== undefined) {
     throw new Error('publish manifest must be publishable')
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-app-publishing']) {
     const developmentExport = developmentExports?.[subpath] as Record<string, unknown> | undefined
     const publishExport = publishExports?.[subpath] as Record<string, unknown> | undefined
-    for (const condition of ['types', 'import', 'default']) {
+    for (const condition of ['types', 'browser', 'import', 'default']) {
       if (developmentExport?.[condition] !== publishExport?.[condition]) {
         throw new Error(`package.json and package.publish.json export ${subpath} ${condition} must match`)
       }
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     )
   }
 
-  for (const filename of ['creator-app-publishing.cjs', 'creator-app-publishing.d.ts']) {
+  for (const filename of ['creator-app-publishing.cjs', 'creator-app-publishing.browser.cjs', 'creator-app-publishing.d.ts']) {
     await copyFile(
       join(distRoot, 'admin', filename),
       join(stagedAdminDistRoot, filename),
