@@ -80,7 +80,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('user-owned')
     expect(validator).toContain('"$shell_path" -lic "cd \\"\\$HOME\\"')
     expect(validator).toContain(
-      'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_INSTALL_ARTIFACT="$current_install"',
+      'PATH="$installer_shim:/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_INSTALL_ARTIFACT="$current_install"',
     )
     expect(validator).toContain(
       'PATH="/usr/bin:/bin:/usr/sbin:/sbin" \\\n    POLO_AI_TERMINAL_HOME="$integration_home"',
@@ -328,8 +328,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('local bash_env="$shim_dir/bash-env"')
     expect(validator).toContain('if [ "$#" -eq 2 ] && [ "$1" = "-v" ] && [ "$2" = "yq" ]; then')
     expect(validator).toContain('BASH_ENV="$bash_env"')
-    expect(validator).toContain('cat > "$shim_dir/pgrep"')
-    expect(validator).toContain('exit 1')
+    expect(validator).toContain('write_installer_process_shim')
+    expect(validator).toContain('[ "$2" = "Polo-AI.*AppImage" ]')
   })
 
   it('exercises the POO-14 predecessor terminal links before upgrading them', () => {
@@ -338,6 +338,7 @@ describe('Electron final artifact validation pipeline', () => {
 
     expect(linuxLifecycle).toContain('test -L "$launcher"')
     expect(linuxLifecycle).not.toContain('test ! -e "$launcher"')
+    expect(linuxLifecycle).toContain('PATH="$installer_shim:/usr/bin:/bin:/usr/sbin:/sbin"')
   })
 
   it('builds and validates dependency-free sanitized CLI metadata', () => {

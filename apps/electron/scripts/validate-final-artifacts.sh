@@ -535,6 +535,22 @@ read_installed_legacy_version_from_appimage() {
   read_installed_legacy_version "$extract_root/squashfs-root/resources"
 }
 
+write_installer_process_shim() {
+  local shim_dir="$1"
+
+  # Keep the production installer unchanged: this shim exists only because
+  # full validation has no installed GUI AppImage, while its broad stop probe
+  # can match the validation builder process itself.
+  cat > "$shim_dir/pgrep" <<'EOF'
+#!/bin/sh
+if [ "$#" -eq 2 ] && [ "$1" = "-f" ] && [ "$2" = "Polo-AI.*AppImage" ]; then
+  exit 1
+fi
+exec /usr/bin/pgrep "$@"
+EOF
+  chmod +x "$shim_dir/pgrep"
+}
+
 run_previous_release_installer() {
   local test_home="$1"
   local artifact="$2"
@@ -590,16 +606,9 @@ else
 fi
 EOF
   chmod +x "$curl_shim"
-  # A historical installer stops a process matching Polo-AI.*AppImage before
-  # updating. In this nested validation, that broad pattern can match the
-  # builder process rather than an installed application, tearing down the
-  # fixture while its transaction is still running. The fixture has no app to
-  # stop, so make that probe deterministically report no match.
-  cat > "$shim_dir/pgrep" <<'EOF'
-#!/bin/sh
-exit 1
-EOF
-  chmod +x "$shim_dir/pgrep"
+  # The nested fixture has no GUI AppImage to stop. Its broad historical
+  # process probe can otherwise match the builder itself.
+  write_installer_process_shim "$shim_dir"
 
   # The v0.15.2 installer treats yq as optional, but GitHub's runner ships a
   # yq dialect that rejects its jq-only `empty` expression. The lifecycle
@@ -927,6 +936,7 @@ run_macos_full_e2e() {
 
 test_linux_command_conflict() {
   local current_artifact="$1"
+  local installer_shim="$2"
   local conflict_home="$TEMP_ROOT/conflict 用户"
   local conflict_launcher="$conflict_home/.local/bin/polo"
   local conflict_artifact="$TEMP_ROOT/conflict-current.AppImage"
@@ -936,7 +946,7 @@ test_linux_command_conflict() {
   chmod +x "$conflict_launcher"
 
   if HOME="$conflict_home" SHELL=/bin/bash \
-    PATH="$conflict_home/.local/bin:/usr/bin:/bin" \
+    PATH="$installer_shim:$conflict_home/.local/bin:/usr/bin:/bin" \
     POLO_AI_INSTALL_ARTIFACT="$conflict_artifact" \
     bash "$INSTALL_SCRIPT" >/dev/null 2>&1; then
     echo "Linux installer overwrote or accepted a user-owned polo command" >&2
@@ -952,7 +962,9 @@ run_linux_full_e2e() {
   local installed_app="$test_home/.polo-ai/app/Polo-AI-x64.AppImage"
   local runtime_file="$test_home/.polo-ai/runtime/electron.json"
   local current_install="$TEMP_ROOT/install-current.AppImage"
-  mkdir -p "$test_home" "$TEMP_ROOT/tmp"
+  local installer_shim="$TEMP_ROOT/current installer shim"
+  mkdir -p "$test_home" "$TEMP_ROOT/tmp" "$installer_shim"
+  write_installer_process_shim "$installer_shim"
   cp "$current_artifact" "$current_install"
   if [ -z "${DISPLAY:-}" ]; then
     echo "Linux full E2E requires a runner-provided DISPLAY (use xvfb-run -a)" >&2
@@ -978,7 +990,7 @@ run_linux_full_e2e() {
     test -x "$test_home/.local/bin/polo-ai"
   fi
   HOME="$test_home" SHELL=/bin/bash \
-    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    PATH="$installer_shim:/usr/bin:/bin:/usr/sbin:/sbin" \
     POLO_AI_INSTALL_ARTIFACT="$current_install" \
     bash "$INSTALL_SCRIPT"
   local current_version
@@ -990,7 +1002,7 @@ run_linux_full_e2e() {
   run_fresh_shell /bin/bash "$test_home" \
     "test \"\$(polo --version)\" = '$current_version' && test \"\$(polo-ai --version 2>/dev/null)\" = '$current_version' && polo --help | grep -F 'Usage: polo ' >/dev/null"
   run_packaged_headless_lifecycle /bin/bash "$test_home"
-  test_linux_command_conflict "$current_artifact"
+  test_linux_command_conflict "$current_artifact" "$installer_shim"
 
   run_fresh_shell /bin/bash "$test_home" \
     "POLO_AI_RUNTIME_DISCOVERY_FILE='$runtime_file' nohup polo app >/dev/null 2>&1 &"
