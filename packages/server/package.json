@@ -1,6 +1,6 @@
 {
   "name": "@polo-ai/server",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "description": "Standalone headless Polo AI server (Bun runtime)",
   "type": "module",
   "main": "src/index.ts",
