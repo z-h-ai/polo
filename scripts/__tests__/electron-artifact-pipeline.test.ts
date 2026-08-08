@@ -328,6 +328,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('local bash_env="$shim_dir/bash-env"')
     expect(validator).toContain('if [ "$#" -eq 2 ] && [ "$1" = "-v" ] && [ "$2" = "yq" ]; then')
     expect(validator).toContain('BASH_ENV="$bash_env"')
+    expect(validator).toContain('ln -s "$HOST_BUN" "$shim_dir/bun"')
   })
 
   it('builds and validates dependency-free sanitized CLI metadata', () => {
