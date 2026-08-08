@@ -971,7 +971,10 @@ run_linux_full_e2e() {
     run_previous_release_installer "$test_home" "$PREVIOUS_ARTIFACT"
     previous_version=$(read_installed_legacy_version_from_appimage "$test_home/.polo-ai/app/Polo-AI-x64.AppImage")
     test "$previous_version" = "$PREVIOUS_VERSION"
-    test ! -e "$launcher"
+    # v0.15.2 already uses the POO-14 terminal transaction helper, which
+    # owns both links. The current installer must prove it can replace that
+    # real predecessor state instead of assuming only polo-ai existed.
+    test -L "$launcher"
     test -x "$test_home/.local/bin/polo-ai"
   fi
   HOME="$test_home" SHELL=/bin/bash \

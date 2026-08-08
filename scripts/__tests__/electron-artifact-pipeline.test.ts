@@ -332,6 +332,14 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('exit 1')
   })
 
+  it('exercises the POO-14 predecessor terminal links before upgrading them', () => {
+    const validator = read('apps/electron/scripts/validate-final-artifacts.sh')
+    const linuxLifecycle = validator.slice(validator.indexOf('run_linux_full_e2e()'))
+
+    expect(linuxLifecycle).toContain('test -L "$launcher"')
+    expect(linuxLifecycle).not.toContain('test ! -e "$launcher"')
+  })
+
   it('builds and validates dependency-free sanitized CLI metadata', () => {
     const build = read('scripts/build-cli-artifacts.ts')
     const validate = read('scripts/validate-cli-artifacts.ts')
