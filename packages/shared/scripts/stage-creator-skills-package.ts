@@ -7,6 +7,7 @@ const packageRoot = resolve(scriptDir, '..')
 const distRoot = join(packageRoot, 'dist')
 const stageRoot = join(distRoot, 'publish')
 const stagedDistRoot = join(stageRoot, 'dist', 'creator-skills')
+const stagedAdminDistRoot = join(stageRoot, 'dist', 'admin')
 
 type PackageIdentity = {
   name?: string
@@ -24,8 +25,8 @@ async function main(): Promise<void> {
   const developmentManifest = await readJson(join(packageRoot, 'package.json')) as PackageManifest
   const publishManifest = await readJson(join(packageRoot, 'package.publish.json')) as PackageManifest
 
-  if (publishManifest.name !== '@z-h-ai/shared' || publishManifest.version !== '0.12.0') {
-    throw new Error('publish manifest must target @z-h-ai/shared@0.12.0')
+  if (publishManifest.name !== '@z-h-ai/shared' || publishManifest.version !== '0.13.0') {
+    throw new Error('publish manifest must target @z-h-ai/shared@0.13.0')
   }
   if (publishManifest.private !== undefined) {
     throw new Error('publish manifest must be publishable')
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
   }
   const developmentExports = developmentManifest.exports as Record<string, unknown> | undefined
   const publishExports = publishManifest.exports as Record<string, unknown> | undefined
-  for (const subpath of ['./creator-skills', './creator-skills/fixtures']) {
+  for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-app-publishing']) {
     const developmentExport = developmentExports?.[subpath] as Record<string, unknown> | undefined
     const publishExport = publishExports?.[subpath] as Record<string, unknown> | undefined
     for (const condition of ['types', 'import', 'default']) {
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
 
   await rm(stageRoot, { recursive: true, force: true })
   await mkdir(stagedDistRoot, { recursive: true })
+  await mkdir(stagedAdminDistRoot, { recursive: true })
 
   for (const filename of [
     'archive.d.ts',
@@ -64,6 +66,13 @@ async function main(): Promise<void> {
     await copyFile(
       join(distRoot, 'creator-skills', filename),
       join(stagedDistRoot, filename),
+    )
+  }
+
+  for (const filename of ['creator-app-publishing.cjs', 'creator-app-publishing.d.ts']) {
+    await copyFile(
+      join(distRoot, 'admin', filename),
+      join(stagedAdminDistRoot, filename),
     )
   }
 

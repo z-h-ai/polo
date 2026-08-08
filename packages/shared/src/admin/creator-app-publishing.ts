@@ -23,7 +23,7 @@ export interface CreatorAppEntryCandidate {
 export type CreatorAppPayloadAnalysis =
   | { status: 'ready'; candidate: CreatorAppEntryCandidate; legacyHint?: CreatorAppEntryCandidate }
   | { status: 'needs_entry_selection'; candidates: CreatorAppEntryCandidate[]; legacyHint?: CreatorAppEntryCandidate }
-  | { status: 'invalid'; code: 'missing_runnable_payload' | 'unsafe_archive' | 'invalid_legacy_permissions'; message: string }
+  | { status: 'invalid'; code: 'missing_runnable_payload' | 'ambiguous_runtime' | 'unsafe_archive' | 'invalid_legacy_permissions'; message: string }
 
 export interface CanonicalCreatorAppBundle {
   entries: Array<NormalizedCreatorAppPayloadEntry>
@@ -40,13 +40,26 @@ export interface NormalizedCreatorAppPayloadEntry {
   bytes: Uint8Array
 }
 
+export const CREATOR_APP_CANONICAL_ENTRIES = Object.freeze({
+  static: 'index.html',
+  python: 'server/main.py',
+  js: 'server/index.js',
+} as const satisfies Record<LocalAppRuntimeKind, string>)
+
+export const CREATOR_APP_PAYLOAD_LIMITS = Object.freeze({
+  archiveBytes: 200 * 1024 * 1024,
+  entryCount: 10_000,
+  compressedEntryBytes: 200 * 1024 * 1024,
+  expandedEntryBytes: 512 * 1024 * 1024,
+  expandedTotalBytes: 1024 * 1024 * 1024,
+  compressionRatio: 100,
+})
+
+export const CREATOR_APP_PAYLOAD_MAX_BYTES = CREATOR_APP_PAYLOAD_LIMITS.archiveBytes
+
 const PYTHON_LOCK_FILES = new Set(['uv.lock'])
 const JS_LOCK_FILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'])
 const NESTED_ARCHIVE = /\.(?:zip|tar|tgz|gz)$/i
-const MAX_ZIP_ENTRIES = 2_000
-const MAX_ZIP_ENTRY_BYTES = 25 * 1024 * 1024
-const MAX_ZIP_EXPANDED_BYTES = 100 * 1024 * 1024
-const MAX_ZIP_COMPRESSION_RATIO = 100
 
 function safePath(value: string): string | null {
   const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '')
@@ -62,6 +75,16 @@ function safePath(value: string): string | null {
 
 function isRootFile(path: string, names: readonly string[]): boolean {
   return !path.includes('/') && names.includes(path.toLowerCase())
+}
+
+function hasDynamicRuntimeEvidence(entry: NormalizedCreatorAppPayloadEntry): boolean {
+  return [
+    'HOST',
+    'PORT',
+    '/health',
+    'POLO_APP_HEALTH_TOKEN',
+    'X-Polo-App-Health-Token',
+  ].every(marker => entry.content.includes(marker))
 }
 
 function legacyCandidate(entries: readonly NormalizedCreatorAppPayloadEntry[]): CreatorAppEntryCandidate | undefined {
@@ -130,44 +153,46 @@ export function analyzeCreatorAppPayload(
   }
   const paths = new Set(files.map(entry => entry.path))
   const legacyHint = legacyCandidate(entries)
-  const candidates: CreatorAppEntryCandidate[] = []
+  const canonicalCandidates: CreatorAppEntryCandidate[] = []
+  const legacyCandidates: CreatorAppEntryCandidate[] = []
 
-  if (paths.has('index.html')) candidates.push({ runtime: 'static', path: 'index.html' })
+  if (paths.has(CREATOR_APP_CANONICAL_ENTRIES.static)) {
+    canonicalCandidates.push({ runtime: 'static', path: CREATOR_APP_CANONICAL_ENTRIES.static })
+  }
 
   const hasLock = (names: ReadonlySet<string>) => files.some(entry => {
     if (entry.path.includes('/') || !names.has(entry.path.toLowerCase())) return false
-    const lock = entry.content.trim()
-    if (!lock) return false
-    if (entry.path === 'requirements.txt') return /^[A-Za-z0-9_.-]+(?:\[[^\]]+\])?\s*(?:===|==|>=|<=|~=|>|<)\s*[^\s#]+/m.test(lock)
-    if (entry.path === 'poetry.lock') return /^\[\[package\]\]/m.test(lock)
-    if (entry.path === 'pipfile.lock') return /"(?:default|develop)"\s*:/m.test(lock)
-    if (entry.path === 'uv.lock') return /^version\s*=\s*"/m.test(lock)
-    if (entry.path === 'package-lock.json') return /"lockfileVersion"\s*:/m.test(lock)
-    if (entry.path === 'pnpm-lock.yaml') return /^lockfileVersion\s*:/m.test(lock)
-    if (entry.path === 'yarn.lock') return /^(?:"?[\w@][^:\n]*"?):\s*$/m.test(lock)
-    if (entry.path === 'bun.lock') return /^lockfileVersion\s*:/m.test(lock)
-    // bun.lockb is binary; the non-empty magic header is the only safe claim
-    // this ingress needs to make without executing a package manager.
-    return entry.bytes.byteLength > 8 && entry.bytes[0] === 0x62
+    return entry.bytes.byteLength > 0 && entry.content.trim().length > 0
   })
   const hasPythonLock = hasLock(PYTHON_LOCK_FILES)
   const hasPyproject = files.some(entry => entry.path === 'pyproject.toml' && entry.content.trim().length > 0)
+  const hasPackageJson = files.some(entry => entry.path === 'package.json' && entry.content.trim().length > 0)
   const hasJsLock = hasLock(JS_LOCK_FILES)
+
+  const canonicalPython = files.find(entry => entry.path === CREATOR_APP_CANONICAL_ENTRIES.python)
+  if (canonicalPython && hasPythonLock && hasPyproject && hasDynamicRuntimeEvidence(canonicalPython)) {
+    canonicalCandidates.push({ runtime: 'python', path: CREATOR_APP_CANONICAL_ENTRIES.python })
+  }
+  const canonicalJavaScript = files.find(entry => entry.path === CREATOR_APP_CANONICAL_ENTRIES.js)
+  if (canonicalJavaScript && hasJsLock && hasPackageJson && hasDynamicRuntimeEvidence(canonicalJavaScript)) {
+    canonicalCandidates.push({ runtime: 'js', path: CREATOR_APP_CANONICAL_ENTRIES.js })
+  }
+
   for (const entry of files) {
-    const hasHealthcheck = entry.content.includes('/health')
-    if (isRootFile(entry.path, ['main.py', 'app.py', 'server.py', 'wsgi.py']) && hasPythonLock && hasPyproject && hasHealthcheck) {
-      candidates.push({ runtime: 'python', path: entry.path })
+    if (isRootFile(entry.path, ['main.py', 'app.py', 'server.py', 'wsgi.py']) && hasPythonLock && hasPyproject && hasDynamicRuntimeEvidence(entry)) {
+      legacyCandidates.push({ runtime: 'python', path: entry.path })
     }
     if (
       ((isRootFile(entry.path, ['server.js', 'server.mjs', 'index.js', 'index.mjs'])
-        || entry.path === '.next/standalone/server.js') && hasJsLock)
-      && hasHealthcheck
+        || entry.path === '.next/standalone/server.js') && hasJsLock && hasPackageJson)
+      && hasDynamicRuntimeEvidence(entry)
     ) {
-      candidates.push({ runtime: 'js', path: entry.path })
+      legacyCandidates.push({ runtime: 'js', path: entry.path })
     }
   }
 
-  const uniqueCandidates = [...new Map(candidates.map(candidate => [
+  const detectedCandidates = canonicalCandidates.length > 0 ? canonicalCandidates : legacyCandidates
+  const uniqueCandidates = [...new Map(detectedCandidates.map(candidate => [
     `${candidate.runtime}\0${candidate.path}`,
     candidate,
   ])).values()].sort((left, right) => left.path.localeCompare(right.path))
@@ -177,6 +202,13 @@ export function analyzeCreatorAppPayload(
       status: 'invalid',
       code: 'missing_runnable_payload',
       message: 'This upload does not contain a runnable App. Build it locally with POL-65, then upload the generated payload.',
+    }
+  }
+  if (new Set(uniqueCandidates.map(candidate => candidate.runtime)).size > 1) {
+    return {
+      status: 'invalid',
+      code: 'ambiguous_runtime',
+      message: 'This upload contains more than one runnable App runtime. Upload one canonical App payload.',
     }
   }
   if (uniqueCandidates.length > 1) {
@@ -262,7 +294,7 @@ export function createCanonicalCreatorAppBundle(input: {
 
 /** Decode a real ZIP at the authenticated ingress boundary.  It never runs it. */
 export function decodeCreatorAppPayloadZip(archive: Uint8Array): CreatorAppPayloadEntry[] {
-  if (archive.byteLength === 0 || archive.byteLength > 50 * 1024 * 1024) {
+  if (archive.byteLength === 0 || archive.byteLength > CREATOR_APP_PAYLOAD_LIMITS.archiveBytes) {
     throw new Error('The upload ZIP is empty or exceeds the archive size limit.')
   }
   const directories = inspectZipCentralDirectory(archive)
@@ -333,9 +365,12 @@ function inspectZipCentralDirectory(archive: Uint8Array): Set<string> {
     expandedBytes += uncompressedBytes
     if (
       !normalized || !key || names.has(key) || (unixMode & 0o170000) === 0o120000
-      || count > MAX_ZIP_ENTRIES || uncompressedBytes > MAX_ZIP_ENTRY_BYTES
-      || expandedBytes > MAX_ZIP_EXPANDED_BYTES || compressedBytes === 0 && uncompressedBytes > 0
-      || uncompressedBytes / Math.max(1, compressedBytes) > MAX_ZIP_COMPRESSION_RATIO
+      || count > CREATOR_APP_PAYLOAD_LIMITS.entryCount
+      || compressedBytes > CREATOR_APP_PAYLOAD_LIMITS.compressedEntryBytes
+      || uncompressedBytes > CREATOR_APP_PAYLOAD_LIMITS.expandedEntryBytes
+      || expandedBytes > CREATOR_APP_PAYLOAD_LIMITS.expandedTotalBytes
+      || compressedBytes === 0 && uncompressedBytes > 0
+      || uncompressedBytes / Math.max(1, compressedBytes) > CREATOR_APP_PAYLOAD_LIMITS.compressionRatio
     ) {
       throw new Error('The upload contains an unsafe archive entry.')
     }
