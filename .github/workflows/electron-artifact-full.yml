@@ -83,7 +83,10 @@ jobs:
       EXPECTED_PREVIOUS_ARTIFACT_SHA256: ${{ (matrix.platform == 'macos' && inputs.previous_macos_sha256) || inputs.previous_linux_sha256 }}
       EXPECTED_PREVIOUS_INSTALLER_SHA256: ${{ inputs.previous_installer_sha256 }}
       PREVIOUS_ARTIFACT_NAME: ${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || inputs.previous_linux_name }}
-      POLO_AI_ARTIFACT_VALIDATION_MODE: ${{ inputs.bootstrap && 'bootstrap' || 'full' }}
+      # The arm64 DMG is a separately validated manual installer. It has no
+      # architecture-safe predecessor update payload yet, so it must not run
+      # the x64 upgrade lifecycle.
+      POLO_AI_ARTIFACT_VALIDATION_MODE: ${{ matrix.updater && (inputs.bootstrap && 'bootstrap' || 'full') || 'smoke' }}
       POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || inputs.previous_linux_name }}
       POLO_AI_PREVIOUS_INSTALL_SCRIPT: ${{ github.workspace }}/previous/install-app.sh
       POLO_AI_RELEASE_MACOS_TEAM_ID: ${{ vars.POLO_AI_RELEASE_MACOS_TEAM_ID }}
