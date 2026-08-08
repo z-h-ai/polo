@@ -428,12 +428,6 @@ ensure_cli_bin_on_path() {
     fi
 }
 
-# Check if yq is available (optional, for YAML parsing)
-HAS_YQ=false
-if command -v yq >/dev/null 2>&1; then
-    HAS_YQ=true
-fi
-
 # Download function that works with both curl and wget
 # Usage: download_file <url> [output_file] [show_progress]
 download_file() {
@@ -570,12 +564,12 @@ else
         error "Failed to fetch release info from $yml_file"
     fi
 
-    # Extract version from YAML manifest
-    if [ "$HAS_YQ" = true ]; then
-        version=$(echo "$manifest_yaml" | yq -r '.version // empty')
-    else
-        version=$(echo "$manifest_yaml" | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//')
-    fi
+    # Keep this parser independent from whichever `yq` implementation happens
+    # to be installed. For example, the GitHub Linux runner's yq rejects the
+    # jq-only `empty` expression, which made a valid release manifest fail at
+    # install-time validation. Electron-builder's manifests use a scalar
+    # top-level version and the stable files-array structure parsed below.
+    version=$(echo "$manifest_yaml" | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//')
 
     if [ -z "$version" ]; then
         error "Failed to extract version from manifest"
@@ -583,14 +577,10 @@ else
 
     info "Latest version: $version"
 
-    # Extract sha512 and filename for our architecture
-    if [ "$HAS_YQ" = true ]; then
-        checksum=$(echo "$manifest_yaml" | yq -r ".files[] | select(.arch == \"$arch\") | .sha512")
-        filename=$(echo "$manifest_yaml" | yq -r ".files[] | select(.arch == \"$arch\") | .url")
-    else
-        checksum=$(get_sha512_from_yaml "$manifest_yaml" "$arch")
-        filename=$(get_filename_from_yaml "$manifest_yaml" "$arch")
-    fi
+    # Extract sha512 and filename for our architecture without an external
+    # YAML parser, so installer behavior is the same on CI and user machines.
+    checksum=$(get_sha512_from_yaml "$manifest_yaml" "$arch")
+    filename=$(get_filename_from_yaml "$manifest_yaml" "$arch")
 
     # Validate checksum format (SHA512 base64 = 88 characters)
     if [ -z "$checksum" ] || [ ${#checksum} -lt 80 ]; then

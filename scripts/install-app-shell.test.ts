@@ -18,6 +18,10 @@ import { join } from 'node:path'
 const roots: string[] = []
 const installer = readFileSync(join(import.meta.dir, 'install-app.sh'), 'utf8')
 const helpers = installer.slice(0, installer.indexOf('# Detect OS'))
+const manifestHelpers = installer.slice(
+  installer.indexOf('# Download function'),
+  installer.indexOf('# Detect architecture'),
+)
 
 function createHome(): string {
   const home = join(tmpdir(), `polo-installer-shell-${crypto.randomUUID()}`)
@@ -866,4 +870,41 @@ exec /bin/mv "$@"
     expect(existsSync(join(home, '.polo-ai', 'app'))).toBe(false)
     expect(readFileSync(userProfile, 'utf8')).toBe(userProfileContent)
   }, 20_000)
+})
+
+describe('updater manifest parsing', () => {
+  it('extracts a Linux artifact without requiring yq', () => {
+    const manifest = [
+      'version: 0.15.3',
+      'files:',
+      '  - url: Polo-AI-arm64.AppImage',
+      `    sha512: ${'a'.repeat(88)}`,
+      '    size: 123',
+      '    arch: arm64',
+      '  - url: Polo-AI-x64.AppImage',
+      `    sha512: ${'b'.repeat(88)}`,
+      '    size: 456',
+      '    arch: x64',
+      'path: Polo-AI-x64.AppImage',
+      `sha512: ${'b'.repeat(88)}`,
+      '',
+    ].join('\n')
+    const result = Bun.spawnSync(
+      ['bash', '-c', `${manifestHelpers}
+manifest_yaml="$MANIFEST_YAML"
+version=$(echo "$manifest_yaml" | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//')
+checksum=$(get_sha512_from_yaml "$manifest_yaml" x64)
+filename=$(get_filename_from_yaml "$manifest_yaml" x64)
+printf '%s|%s|%s\\n' "$version" "$checksum" "$filename"
+`],
+      {
+        env: { ...process.env, MANIFEST_YAML: manifest },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.toString()).toBe(`0.15.3|${'b'.repeat(88)}|Polo-AI-x64.AppImage\n`)
+  })
 })
