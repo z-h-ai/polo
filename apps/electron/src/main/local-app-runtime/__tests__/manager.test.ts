@@ -26,6 +26,7 @@ import {
   LOCAL_APP_INSTALL_RPC_TIMEOUT_MS,
 } from '@polo-ai/shared/protocol'
 import {
+  CREATOR_APP_CANONICAL_ENTRIES,
   createCanonicalCreatorAppBundle,
   createPlatformOwnedManifest,
 } from '@polo-ai/shared/admin'
@@ -508,19 +509,29 @@ describe('LocalAppRuntimeManager', () => {
     },
     {
       runtime: 'python' as const,
-      entry: 'main.py',
+      entry: CREATOR_APP_CANONICAL_ENTRIES.python,
       entries: [
-        { path: 'main.py', content: "@app.get('/health')\ndef health(): return 'ok'" },
+        {
+          path: CREATOR_APP_CANONICAL_ENTRIES.python,
+          content: 'HOST = "HOST"\nPORT = "PORT"\nHEALTH_PATH = "/health"\nHEALTH_TOKEN = "POLO_APP_HEALTH_TOKEN"\nHEALTH_HEADER = "X-Polo-App-Health-Token"',
+        },
         { path: 'pyproject.toml', content: '[project]\nname = "creator-app"' },
         { path: 'uv.lock', content: 'version = "1"' },
       ],
     },
     {
       runtime: 'js' as const,
-      entry: 'server.js',
+      entry: CREATOR_APP_CANONICAL_ENTRIES.js,
       entries: [
-        { path: 'server.js', content: "server.get('/health', () => 'ok')" },
-        { path: 'bun.lock', content: 'lockfileVersion: 1' },
+        {
+          path: CREATOR_APP_CANONICAL_ENTRIES.js,
+          content: 'const HOST = "HOST"; const PORT = "PORT"; const HEALTH_PATH = "/health"; const HEALTH_TOKEN = "POLO_APP_HEALTH_TOKEN"; const HEALTH_HEADER = "X-Polo-App-Health-Token";',
+        },
+        { path: 'package.json', content: '{"name":"creator-app","private":true,"type":"module"}' },
+        {
+          path: 'bun.lock',
+          content: '{"lockfileVersion":1,"configVersion":1,"workspaces":{"":{"name":"creator-app"}},"packages":{}}',
+        },
       ],
     },
   ])('installs a canonical Creator $runtime ZIP through the production installer', async fixture => {
@@ -535,12 +546,21 @@ describe('LocalAppRuntimeManager', () => {
     const archive = Buffer.from(bundle.archive)
     const url = await serveArchive(archive)
     let uvPath: string | undefined
+    let bunPath: string | undefined
     if (fixture.runtime === 'python') {
       uvPath = join(testRoot, 'fake-uv')
       await writeFile(uvPath, '#!/bin/sh\nexit 0\n', 'utf8')
       await chmod(uvPath, 0o755)
     }
-    const runtime = makeManager({ ...(uvPath ? { uvPath } : {}) })
+    if (fixture.runtime === 'js') {
+      bunPath = join(testRoot, 'fake-bun')
+      await writeFile(bunPath, '#!/bin/sh\nexit 0\n', 'utf8')
+      await chmod(bunPath, 0o755)
+    }
+    const runtime = makeManager({
+      ...(uvPath ? { uvPath } : {}),
+      ...(bunPath ? { bunPath } : {}),
+    })
 
     await expect(runtime.install(requestFor(appId, '1.0.0', url, archive))).resolves.toMatchObject({
       appId,
