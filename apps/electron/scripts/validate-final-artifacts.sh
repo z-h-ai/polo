@@ -546,6 +546,11 @@ run_previous_release_installer() {
   local checksum
   local filename
 
+  if [ -z "$HOST_BUN" ] || [ ! -x "$HOST_BUN" ]; then
+    echo "Previous installer lifecycle requires the host Bun executable" >&2
+    return 1
+  fi
+
   case "$(uname -m)" in
     arm64|aarch64) host_arch="arm64" ;;
     x86_64|amd64) host_arch="x64" ;;
@@ -590,6 +595,7 @@ else
 fi
 EOF
   chmod +x "$curl_shim"
+  ln -s "$HOST_BUN" "$shim_dir/bun"
 
   # The v0.15.2 installer treats yq as optional, but GitHub's runner ships a
   # yq dialect that rejects its jq-only `empty` expression. The lifecycle
