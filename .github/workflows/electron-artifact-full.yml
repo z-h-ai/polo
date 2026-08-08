@@ -56,11 +56,23 @@ jobs:
         # Windows is intentionally excluded until its Authenticode credentials are configured.
         include:
           - platform: macos
+            arch: x64
             runner: macos-15-intel
+            updater: true
             manifest: latest-mac.yml
             artifact: Polo-AI-x64.zip
+            manual_installer: Polo-AI-x64.dmg
+          # Keep the automatic-update contract on x64 for now. This native
+          # Apple Silicon build is a separately signed manual installer.
+          - platform: macos
+            arch: arm64
+            runner: macos-15
+            updater: false
+            manual_installer: Polo-AI-arm64.dmg
           - platform: linux
+            arch: x64
             runner: ubuntu-latest
+            updater: true
             manifest: latest-linux.yml
             artifact: Polo-AI-x64.AppImage
     runs-on: ${{ matrix.runner }}
@@ -120,7 +132,7 @@ jobs:
           fi
 
       - name: Verify and download previous release
-        if: ${{ inputs.bootstrap == false }}
+        if: ${{ inputs.bootstrap == false && matrix.updater }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,7 +180,7 @@ jobs:
           test -z "$(find apps/electron/resources/bin -maxdepth 2 -type f -name 'uv*' -print -quit)"
 
       - name: Revalidate previous release contract
-        if: ${{ inputs.bootstrap == false }}
+        if: ${{ inputs.bootstrap == false && matrix.updater }}
         shell: bash
         run: |
           args=(
@@ -192,7 +204,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          bun run electron:dist:mac --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-macos.log"
+          bun run electron:dist:mac --arch=${{ matrix.arch }} 2>&1 | tee "$RUNNER_TEMP/full-validation-macos-${{ matrix.arch }}.log"
 
       - name: Build and validate Linux release
         if: matrix.platform == 'linux'
@@ -205,15 +217,17 @@ jobs:
           ' _ "$RUNNER_TEMP/full-validation-linux.log"
 
       - name: Require updater outputs
+        if: matrix.updater
         shell: bash
         run: |
           test -f "apps/electron/release/${{ matrix.artifact }}"
           test -f "apps/electron/release/${{ matrix.manifest }}"
 
       - name: Upload curated release input
+        if: matrix.updater
         uses: actions/upload-artifact@v4
         with:
-          name: electron-release-${{ matrix.platform }}-${{ github.sha }}
+          name: electron-release-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
           path: |
             apps/electron/release/${{ matrix.artifact }}
             apps/electron/release/${{ matrix.manifest }}
@@ -224,8 +238,8 @@ jobs:
         if: matrix.platform == 'macos'
         uses: actions/upload-artifact@v4
         with:
-          name: electron-release-macos-dmg-${{ github.sha }}
-          path: apps/electron/release/Polo-AI-x64.dmg
+          name: electron-release-macos-dmg-${{ matrix.arch }}-${{ github.sha }}
+          path: apps/electron/release/${{ matrix.manual_installer }}
           if-no-files-found: error
           retention-days: 14
 
@@ -233,9 +247,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: electron-validation-${{ matrix.platform }}-${{ github.sha }}
+          name: electron-validation-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/full-validation-${{ matrix.platform }}.log
+            ${{ runner.temp }}/full-validation-${{ matrix.platform }}-${{ matrix.arch }}.log
             apps/electron/release/release-signing-audit-*.jsonl
             previous/verified-contract-${{ matrix.platform }}.json
           if-no-files-found: ignore

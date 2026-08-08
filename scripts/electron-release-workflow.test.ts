@@ -44,6 +44,19 @@ describe('Electron release workflow boundaries', () => {
     expect(release).not.toContain('/app/publisher')
   })
 
+  it('builds and verifies both native macOS manual installers', () => {
+    expect(reusable).toContain('runner: macos-15-intel')
+    expect(reusable).toContain('runner: macos-15')
+    expect(reusable).toContain('arch: x64')
+    expect(reusable).toContain('arch: arm64')
+    expect(reusable).toContain('manual_installer: Polo-AI-x64.dmg')
+    expect(reusable).toContain('manual_installer: Polo-AI-arm64.dmg')
+    expect(reusable).toContain('electron:dist:mac --arch=${{ matrix.arch }}')
+    expect(release).toContain('test -f collected/Polo-AI-x64.dmg')
+    expect(release).toContain('test -f collected/Polo-AI-arm64.dmg')
+    expect(release).toContain('for arch in x64 arm64; do')
+  })
+
   it('grants contents write only to Draft Release, production verification, and publishing', () => {
     expect(release.match(/contents: write/g)).toHaveLength(3)
     expect(release).toContain('Create immutable Draft GitHub Release')

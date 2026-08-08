@@ -105,7 +105,9 @@ jobs:
             --commit "$GITHUB_SHA" \
             --published-at "$(git show -s --format=%cI "$GITHUB_SHA")"
           test -f collected/Polo-AI-x64.dmg
+          test -f collected/Polo-AI-arm64.dmg
           cp collected/Polo-AI-x64.dmg release/Polo-AI-x64.dmg
+          cp collected/Polo-AI-arm64.dmg release/Polo-AI-arm64.dmg
       - name: Create immutable Draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -114,7 +116,7 @@ jobs:
             test "$(jq -r .isDraft /tmp/release.json)" = "true"
             mkdir existing-release
             gh release download "$GITHUB_REF_NAME" --dir existing-release
-            test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 7
+            test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 8
             for file in release/*; do
               cmp "$file" "existing-release/$(basename "$file")"
             done
@@ -160,13 +162,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir expected-dmg
-          gh release download "$GITHUB_REF_NAME" --pattern Polo-AI-x64.dmg --dir expected-dmg
-          curl -fsS --retry 5 --retry-delay 10 \
-            https://updates.polo.z-h-ai.com/electron/latest/Polo-AI-x64.dmg \
-            --output uploaded.dmg
-          cmp expected-dmg/Polo-AI-x64.dmg uploaded.dmg
-          curl -fsSI https://updates.polo.z-h-ai.com/electron/latest/Polo-AI-x64.dmg \
-            | tr -d '\r' | grep -i '^cache-control:.*immutable'
+          for arch in x64 arm64; do
+            dmg="Polo-AI-$arch.dmg"
+            gh release download "$GITHUB_REF_NAME" --pattern "$dmg" --dir expected-dmg
+            curl -fsS --retry 5 --retry-delay 10 \
+              "https://updates.polo.z-h-ai.com/electron/latest/$dmg" \
+              --output "uploaded-$arch.dmg"
+            cmp "expected-dmg/$dmg" "uploaded-$arch.dmg"
+            curl -fsSI "https://updates.polo.z-h-ai.com/electron/latest/$dmg" \
+              | tr -d '\r' | grep -i '^cache-control:.*immutable'
+          done
 
   publish-release:
     needs: production
