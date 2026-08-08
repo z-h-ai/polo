@@ -48,4 +48,10 @@ describe('installed CLI entrypoints', () => {
     expect(unixInstaller).toContain('ensure_cli_bin_on_path')
     expect(unixInstaller).toContain('export PATH="$HOME/.local/bin:$PATH" # Polo AI CLI')
   })
+
+  it('parses updater manifests without depending on the host yq implementation', () => {
+    expect(unixInstaller).toContain('get_sha512_from_yaml "$manifest_yaml" "$arch"')
+    expect(unixInstaller).toContain('get_filename_from_yaml "$manifest_yaml" "$arch"')
+    expect(unixInstaller).not.toContain("yq -r '.version // empty'")
+  })
 })
