@@ -337,9 +337,15 @@ describe('Electron final artifact validation pipeline', () => {
   it('exercises the POO-14 predecessor terminal links before upgrading them', () => {
     const validator = read('apps/electron/scripts/validate-final-artifacts.sh')
     const linuxLifecycle = validator.slice(validator.indexOf('run_linux_full_e2e()'))
+    const macosLifecycle = validator.slice(
+      validator.indexOf('run_macos_full_e2e()'),
+      validator.indexOf('test_linux_command_conflict()'),
+    )
 
     expect(linuxLifecycle).toContain('test -L "$launcher"')
     expect(linuxLifecycle).not.toContain('test ! -e "$launcher"')
+    expect(macosLifecycle).toContain('test -L "$launcher"')
+    expect(macosLifecycle).not.toContain('test ! -e "$launcher"')
     expect(linuxLifecycle).toContain('PATH="$installer_shim:/usr/bin:/bin:/usr/sbin:/sbin"')
   })
 

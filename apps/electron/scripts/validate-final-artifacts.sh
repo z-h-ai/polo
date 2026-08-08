@@ -883,7 +883,10 @@ run_macos_full_e2e() {
     previous_version=$(read_installed_legacy_version "$resources_root")
     test "$previous_version" = "$PREVIOUS_VERSION"
     test -x "$resources_root/app/resources/bin/polo-ai"
-    test ! -e "$launcher"
+    # POO-14's macOS installer already installs both terminal aliases. The
+    # upgrade fixture must preserve that owned link rather than treating it as
+    # unexpected user state.
+    test -L "$launcher"
   fi
   HOME="$test_home" SHELL=/bin/zsh \
     POLO_AI_INSTALL_ARTIFACT="$current_install" \
