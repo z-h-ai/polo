@@ -15,8 +15,13 @@ import { describe, expect, it } from 'bun:test'
 import { createReleaseContract } from './electron-release-contract'
 import {
   confirmRelease,
+  assertConfirmedRelease,
+  assertFinalizedRelease,
+  assertNotLatest,
+  assertRollbackTarget,
   projectedDiskUsage,
   publish,
+  finalizeRelease,
   rollback,
   rollbackFailedRelease,
   validateSource,
@@ -42,12 +47,18 @@ async function createFixture(version = '1.0.0'): Promise<Fixture> {
   await Promise.all([mkdir(source), mkdir(volume)])
   const files = {
     macosZip: join(source, 'Polo-AI-x64.zip'),
+    macosX64Dmg: join(source, 'Polo-AI-x64.dmg'),
+    macosArm64Dmg: join(source, 'Polo-AI-arm64.dmg'),
     linuxAppImage: join(source, 'Polo-AI-x64.AppImage'),
+    windowsExe: join(source, 'Polo-AI-x64.exe'),
     installApp: join(source, 'install-app.sh'),
   }
   await Promise.all([
     writeFile(files.macosZip, 'macOS release'),
+    writeFile(files.macosX64Dmg, 'macOS x64 DMG'),
+    writeFile(files.macosArm64Dmg, 'macOS arm64 DMG'),
     writeFile(files.linuxAppImage, 'Linux release'),
+    writeFile(files.windowsExe, 'Windows release'),
     writeFile(files.installApp, '#!/bin/sh\n'),
   ])
   const artifacts = [files.macosZip, files.linuxAppImage]
@@ -86,7 +97,7 @@ describe('release publisher validation', () => {
   it('accepts the complete curated release directory', async () => {
     const fixture = await createFixture()
     try {
-      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(6)
+      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(9)
     } finally { await destroy(fixture) }
   })
 
@@ -95,11 +106,13 @@ describe('release publisher validation', () => {
     try {
       const manifestPath = join(fixture.source, 'latest-mac.yml')
       const manifest = await readFile(manifestPath, 'utf8')
+      const dmgContents = await readFile(join(fixture.source, 'Polo-AI-x64.dmg'))
+      const dmgHash = createHash('sha512').update(dmgContents).digest('base64')
       await writeFile(
         manifestPath,
         manifest.replace(
           'files:\n',
-          `files:\n  - url: Polo-AI-x64.dmg\n    sha512: ${'a'.repeat(88)}\n    size: 123\n`,
+          `files:\n  - url: Polo-AI-x64.dmg\n    sha512: ${dmgHash}\n    size: ${dmgContents.byteLength}\n`,
         ),
       )
 
@@ -209,6 +222,7 @@ describe('release publisher filesystem behavior', () => {
         const fixture = version === '1.0.0' ? first : await createFixture(version)
         fixture.args.releasesDir = first.volume
         await publish(fixture.args, testPublisherOptions)
+        await confirmRelease(first.volume, version)
         if (fixture !== first) await destroy(fixture)
       }
       expect((await readdir(join(first.volume, 'electron', 'releases'))).sort()).toEqual([
@@ -232,6 +246,254 @@ describe('release publisher filesystem behavior', () => {
       await publish(second.args, testPublisherOptions)
       await rollbackFailedRelease(first.volume, '1.1.0')
       expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+      await assertNotLatest(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('keeps a manually selected oldest release until an unconfirmed next release can roll back to it', async () => {
+    const first = await createFixture('1.0.0')
+    try {
+      for (const version of ['1.0.0', '1.1.0', '1.2.0']) {
+        const fixture = version === '1.0.0' ? first : await createFixture(version)
+        fixture.args.releasesDir = first.volume
+        await publish(fixture.args, testPublisherOptions)
+        await confirmRelease(first.volume, version)
+        if (fixture !== first) await destroy(fixture)
+      }
+      await rollback(first.volume, '1.0.0')
+      const next = await createFixture('1.3.0')
+      try {
+        next.args.releasesDir = first.volume
+        await publish(next.args, testPublisherOptions)
+        await rollbackFailedRelease(first.volume, '1.3.0')
+        expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+        expect(await readdir(join(first.volume, 'electron', 'releases'))).toContain('1.0.0')
+      } finally { await destroy(next) }
+    } finally { await destroy(first) }
+  })
+
+  it('keeps a durable confirmation marker for retriable finalization compensation', async () => {
+    const first = await createFixture('1.0.0')
+    try {
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await confirmRelease(first.volume, '1.0.0')
+      await assertConfirmedRelease(first.volume, '1.0.0')
+      await rollbackFailedRelease(first.volume, '1.0.0')
+      await expect(readlink(join(first.volume, 'electron', 'latest'))).rejects.toThrow()
+    } finally { await destroy(first) }
+  })
+
+  it('archives an exactly asserted compensation without permanently pinning latest', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+      await rollback(first.volume, '1.1.0')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.1.0')
+      expect(await readFile(join(first.volume, 'electron', '.compensated-history-1.1.0.json'), 'utf8'))
+        .toContain('releases/1.0.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('prefers a live same-version retry marker over archived compensation and restores its exact predecessor', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+
+      await publish(second.args, testPublisherOptions)
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+
+      // The immutable directory is retried with a new live rollback marker.
+      // Its predecessor must win over the old compensation archive, before
+      // and after production confirmation changes it to .confirmed.
+      expect(await publish(second.args, testPublisherOptions)).toBe('idempotent')
+      await expect(assertRollbackTarget(first.volume, '1.1.0')).rejects.toThrow('not its exact predecessor')
+      await confirmRelease(first.volume, '1.1.0')
+      await expect(assertRollbackTarget(first.volume, '1.1.0')).rejects.toThrow('not its exact predecessor')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('resumes a confirmed identical retry without overwriting its original rollback predecessor', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.1.0')
+
+      expect(await publish(second.args, testPublisherOptions)).toBe('idempotent')
+      await assertConfirmedRelease(first.volume, '1.1.0')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('records the actual manual rollback pointer as a later publish predecessor while retaining archival compensation history', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    const failed = await createFixture('1.2.0')
+    const next = await createFixture('1.3.0')
+    try {
+      second.args.releasesDir = first.volume
+      failed.args.releasesDir = first.volume
+      next.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await finalizeRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.1.0')
+      await finalizeRelease(first.volume, '1.1.0')
+      await publish(failed.args, testPublisherOptions)
+      await rollbackFailedRelease(first.volume, '1.2.0')
+      await assertRollbackTarget(first.volume, '1.2.0')
+      await rollback(first.volume, '1.0.0')
+
+      await publish(next.args, testPublisherOptions)
+      expect(JSON.parse(await readFile(join(first.volume, 'electron', '.rollback-1.3.0.json'), 'utf8')))
+        .toMatchObject({ previousTarget: 'releases/1.0.0' })
+      expect(await readFile(join(first.volume, 'electron', '.compensated-history-1.2.0.json'), 'utf8'))
+        .toContain('releases/1.1.0')
+      await confirmRelease(first.volume, '1.3.0')
+      await finalizeRelease(first.volume, '1.3.0')
+      await assertFinalizedRelease(first.volume, '1.3.0')
+      expect((await readdir(join(first.volume, 'electron', 'releases'))).sort()).toEqual([
+        '1.1.0', '1.2.0', '1.3.0',
+      ])
+    } finally {
+      await destroy(next)
+      await destroy(failed)
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('finalizes a successful GitHub publication by returning retention to exactly three releases', async () => {
+    const first = await createFixture('1.0.0')
+    try {
+      for (const version of ['1.0.0', '1.1.0', '1.2.0']) {
+        const fixture = version === '1.0.0' ? first : await createFixture(version)
+        fixture.args.releasesDir = first.volume
+        await publish(fixture.args, testPublisherOptions)
+        await confirmRelease(first.volume, version)
+        if (fixture !== first) await destroy(fixture)
+      }
+      await rollback(first.volume, '1.0.0')
+      const next = await createFixture('1.3.0')
+      try {
+        next.args.releasesDir = first.volume
+        await publish(next.args, testPublisherOptions)
+        await confirmRelease(first.volume, '1.3.0')
+        await finalizeRelease(first.volume, '1.3.0')
+        await finalizeRelease(first.volume, '1.3.0')
+        await assertFinalizedRelease(first.volume, '1.3.0')
+        expect((await readdir(join(first.volume, 'electron', 'releases'))).sort()).toEqual([
+          '1.1.0', '1.2.0', '1.3.0',
+        ])
+      } finally { await destroy(next) }
+    } finally { await destroy(first) }
+  })
+
+  it('persists and compares the complete finalized SemVer inventory, including bootstrap histories below three', async () => {
+    const first = await createFixture('1.0.0')
+    try {
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await finalizeRelease(first.volume, '1.0.0')
+      const markerPath = join(first.volume, 'electron', '.finalized-1.0.0.json')
+      expect(JSON.parse(await readFile(markerPath, 'utf8'))).toMatchObject({
+        sourceReleaseCount: 1,
+        expectedVersions: ['1.0.0'],
+      })
+      await assertFinalizedRelease(first.volume, '1.0.0')
+    } finally { await destroy(first) }
+  })
+
+  it('rejects a finalized marker whose complete retained SemVer set differs from disk', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    const third = await createFixture('1.2.0')
+    try {
+      second.args.releasesDir = first.volume
+      third.args.releasesDir = first.volume
+      for (const fixture of [first, second, third]) {
+        await publish(fixture.args, testPublisherOptions)
+        await confirmRelease(first.volume, fixture.args.version)
+      }
+      await finalizeRelease(first.volume, '1.2.0')
+      const markerPath = join(first.volume, 'electron', '.finalized-1.2.0.json')
+      await writeFile(markerPath, JSON.stringify({
+        schemaVersion: 1,
+        version: '1.2.0',
+        latestTarget: 'releases/1.2.0',
+        sourceReleaseCount: 3,
+        expectedVersions: ['1.0.0', '1.2.0', '1.3.0'],
+      }))
+      await expect(assertFinalizedRelease(first.volume, '1.2.0')).rejects.toThrow('inventory differs')
+    } finally {
+      await destroy(third)
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('keeps rollback history when retention fails and reports stale-marker cleanup failures for retry', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.1.0')
+
+      await expect(finalizeRelease(first.volume, '1.1.0', {
+        retentionCleanup: async () => { throw new Error('injected retention failure') },
+      })).rejects.toThrow('injected retention failure')
+      await assertConfirmedRelease(first.volume, '1.1.0')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+
+      // Recreate the confirmed state to exercise an injected marker-delete
+      // failure; assert-finalized must surface it rather than report success.
+      await publish(second.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.1.0')
+      await expect(finalizeRelease(first.volume, '1.1.0', {
+        markerCleanup: async () => { throw new Error('injected marker cleanup failure') },
+      })).rejects.toThrow('injected marker cleanup failure')
+      await expect(assertFinalizedRelease(first.volume, '1.1.0')).rejects.toThrow('stale rollback markers remain')
+      await finalizeRelease(first.volume, '1.1.0')
+      await assertFinalizedRelease(first.volume, '1.1.0')
     } finally {
       await destroy(second)
       await destroy(first)
@@ -245,7 +507,26 @@ describe('release publisher filesystem behavior', () => {
       await rollbackFailedRelease(fixture.volume, '1.0.0')
       await expect(readlink(join(fixture.volume, 'electron', 'latest'))).rejects.toThrow()
       expect(await readdir(join(fixture.volume, 'electron', 'releases'))).toContain('1.0.0')
+      await assertRollbackTarget(fixture.volume, '1.0.0')
     } finally { await destroy(fixture) }
+  })
+
+  it('treats a retried compensation as a no-op after the old latest is already restored', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+      await assertNotLatest(first.volume, '1.1.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
   })
 
   it('calculates capacity from current usage plus incoming payload', () => {

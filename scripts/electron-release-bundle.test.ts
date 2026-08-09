@@ -6,27 +6,31 @@ import { describe, expect, it } from 'bun:test'
 import { prepareReleaseBundle, verifyPublishedRelease } from './electron-release-bundle'
 
 describe('release bundle assembly and public verification', () => {
-  it('builds the macOS/Linux bundle and verifies it over HEAD/GET', async () => {
+  it('builds the complete desktop bundle and verifies it over HEAD/GET', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-release-bundle-'))
     const input = join(root, 'input')
     const output = join(root, 'output')
     await mkdir(input)
-    const artifacts = [
-      ['Polo-AI-x64.zip', 'macOS bytes', 'latest-mac.yml'],
-      ['Polo-AI-x64.AppImage', 'Linux bytes', 'latest-linux.yml'],
-    ] as const
     try {
-      for (const [name, contents, manifest] of artifacts) {
-        await writeFile(join(input, name), contents)
-        const hash = createHash('sha512').update(contents).digest('base64')
-        const auxiliaryDmg = manifest === 'latest-mac.yml'
-          ? `  - url: Polo-AI-x64.dmg\n    sha512: ${'a'.repeat(88)}\n    size: 123\n`
-          : ''
-        await writeFile(
-          join(input, manifest),
-          `version: 0.15.2\nfiles:\n${auxiliaryDmg}  - url: ${name}\n    sha512: ${hash}\n    size: ${Buffer.byteLength(contents)}\npath: ${name}\nsha512: ${hash}\n`,
-        )
+      const contents = {
+        'Polo-AI-x64.zip': 'macOS update bytes',
+        'Polo-AI-x64.dmg': 'macOS Intel DMG bytes',
+        'Polo-AI-arm64.dmg': 'macOS Apple Silicon DMG bytes',
+        'Polo-AI-x64.AppImage': 'Linux bytes',
+        'Polo-AI-x64.exe': 'Windows bytes',
       }
+      for (const [name, value] of Object.entries(contents)) await writeFile(join(input, name), value)
+      const macZipHash = createHash('sha512').update(contents['Polo-AI-x64.zip']).digest('base64')
+      const macDmgHash = createHash('sha512').update(contents['Polo-AI-x64.dmg']).digest('base64')
+      const linuxHash = createHash('sha512').update(contents['Polo-AI-x64.AppImage']).digest('base64')
+      await writeFile(
+        join(input, 'latest-mac.yml'),
+        `version: 0.15.2\nfiles:\n  - url: Polo-AI-x64.dmg\n    sha512: ${macDmgHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.dmg'])}\n  - url: Polo-AI-x64.zip\n    sha512: ${macZipHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.zip'])}\npath: Polo-AI-x64.zip\nsha512: ${macZipHash}\n`,
+      )
+      await writeFile(
+        join(input, 'latest-linux.yml'),
+        `version: 0.15.2\nfiles:\n  - url: Polo-AI-x64.AppImage\n    sha512: ${linuxHash}\n    size: ${Buffer.byteLength(contents['Polo-AI-x64.AppImage'])}\npath: Polo-AI-x64.AppImage\nsha512: ${linuxHash}\n`,
+      )
       const installScript = join(root, 'install-app.sh')
       await writeFile(installScript, '#!/bin/sh\n')
       const expected = {
@@ -42,7 +46,7 @@ describe('release bundle assembly and public verification', () => {
         installScript,
         publishedAt: '2026-08-07T12:00:00.000Z',
       })
-      expect((await readdir(output)).sort()).toHaveLength(6)
+      expect((await readdir(output)).sort()).toHaveLength(9)
 
       const server = Bun.serve({
         port: 0,
@@ -53,7 +57,7 @@ describe('release bundle assembly and public verification', () => {
           const name = basename(new URL(request.url).pathname)
           const file = Bun.file(join(output, name))
           if (!(await file.exists())) return new Response('Not found', { status: 404 })
-          const noCache = name.endsWith('.yml') || name === 'release-contract.json'
+          const noCache = name.endsWith('.yml') || name === 'release-contract.json' || name === 'install-app.sh'
           const headers = {
             'content-length': String(file.size),
             'cache-control': noCache ? 'no-cache' : 'public, max-age=31536000, immutable',
