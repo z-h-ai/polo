@@ -196,6 +196,30 @@ Follow the repository conventions.
     }
   })
 
+  it('counts description limits by Unicode code point', () => {
+    const acceptedDescription = '😀'.repeat(1_024)
+    expect(parseCreatorSkillMetadata([{
+      path: 'polo-test/SKILL.md',
+      content: skill.replace(
+        'description: Verifies a Creator Skill package.',
+        `description: ${JSON.stringify(acceptedDescription)}`,
+      ),
+    }]).metadata.description).toBe(acceptedDescription)
+
+    expect(issueFor([{
+      path: 'polo-test/SKILL.md',
+      content: skill.replace(
+        'description: Verifies a Creator Skill package.',
+        `description: ${JSON.stringify('😀'.repeat(1_025))}`,
+      ),
+    }])).toEqual({
+      code: 'invalid_skill_content',
+      path: 'polo-test/SKILL.md',
+      field: 'description',
+      message: 'Creator Skill description must be at most 1024 characters',
+    })
+  })
+
   it('uses one canonical SKILL.md failure for every invalid candidate layout', () => {
     const expected = {
       code: 'skill_file_count',

@@ -26045,6 +26045,9 @@ function requiredDescription(data, path) {
   }
   return value.trim();
 }
+function unicodeCodePointLength(value) {
+  return Array.from(value).length;
+}
 function optionalString(data, field, path) {
   const value = data[field];
   if (value === void 0) return void 0;
@@ -26101,7 +26104,7 @@ function validateCreatorSkillMetadata(value, path, rootDirectory) {
   if (!validName) {
     issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill name must use strict kebab-case (for example, polo-test)", "name"));
   }
-  if (description.length > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
+  if (unicodeCodePointLength(description) > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
     issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill description must be at most 1024 characters", "description"));
   }
   if (rootDirectory !== void 0 && validName && name !== rootDirectory) {

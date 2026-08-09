@@ -1,20 +1,59 @@
-# POO-29 第 5 轮修复报告
+# POO-37 Round 5 修复报告
 
-## 处理结果
+## 修复结果
 
-- 修复 `admin:publishCreatorApp` 漏入 IPC 稳定性快照的问题：更新 `EXPECTED_CHANNELS`，当前 wire-format 总数为 379。
-- 重跑路由分类、IPC 快照、类型检查和全量门禁；未复现 reviewer 所述 `mode-manager.test.ts` 无期限占用。
+共享 browser-safe metadata core 的 `description` 上限已改为 Unicode code points 计数：保留既有非空（最少 1 个 code point）和 1024 上限，避免 JavaScript UTF-16 `.length` 将每个非 BMP 字符计为两个 code units。
+
+- `😀`.repeat(1024) 合法。
+- `😀`.repeat(1025) 以既有结构化 `invalid_skill_content` / `description` / `Creator Skill description must be at most 1024 characters` 拒绝。
+- browser metadata parser（含无 `Buffer` / `process` / `require` 的已构建 bundle）、server content validator、`SkillVersionMetadataSchema`、archive validator 全部复用同一 metadata core，并有各自的边界回归。
+- 未改变其他 YAML、UTF-8、ZIP root、noise、alias、icon 或 browser-safe 规则。
 
 ## 关键文件
 
-- `apps/electron/src/shared/__tests__/ipc-channels.test.ts`
+- `packages/shared/src/creator-skills/metadata.ts`
+- `packages/shared/src/creator-skills/__tests__/metadata.test.ts`
+- `packages/shared/src/creator-skills/__tests__/skill-content.test.ts`
+- `packages/shared/src/creator-skills/__tests__/schemas.test.ts`
+- `packages/shared/src/creator-skills/__tests__/archive.test.ts`
+- `packages/shared/src/creator-skills/__tests__/package-exports.test.ts`
+- `packages/shared/dist/creator-skills/index.cjs`
+- `packages/shared/dist/creator-skills/metadata.browser.cjs`
+- `packages/shared/dist/creator-skills/metadata.browser.mjs`
 
-## 实际测试
+## 验证命令与结果
 
-- `bun test apps/electron/src/shared/__tests__/ipc-channels.test.ts packages/shared/src/protocol/__tests__/routing.test.ts`：15 pass。
-- `bun run typecheck:all`：通过。
-- `NO_COLOR=1 bun run test`：通过。
+```text
+bun test packages/shared/src/creator-skills/__tests__/metadata.test.ts packages/shared/src/creator-skills/__tests__/archive.test.ts packages/shared/src/creator-skills/__tests__/skill-content.test.ts packages/shared/src/creator-skills/__tests__/schemas.test.ts
+# 49 pass, 0 fail
 
-## 遗留问题
+bun run typecheck:shared
+# passed
 
-第 5 轮第 1–3 项要求的平台 Admin 组织级事务、共享 Catalog 写入和唯一安装器 validator，依赖不在本 worktree 的 Polo Admin 服务实现。本仓库当前没有可复用的组织级发布 HTTP handler；继续把本机 `creator-app-publications` 当成平台发布会违反需求，因此未将其表述为完成。
+bun run --cwd packages/shared build:creator-skills
+# passed
+
+bun test packages/shared/src/creator-skills/__tests__/package-exports.test.ts
+# 1 pass; browser bundle runs with Buffer/process/require undefined and covers 1024/1025 non-BMP descriptions
+
+bun test packages/shared/src/creator-skills/__tests__ packages/shared/src/admin/__tests__/semver.test.ts
+# 104 pass, 0 fail, 634 assertions
+
+bun run --cwd packages/shared test:creator-skills-package-failures
+# passed（proof failure lifecycle regressions）
+
+bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --allow-dirty-snapshot --output-dir /tmp/poo-37-shared-fix-round5-final
+# passed；CI-style process lifecycle passed
+```
+
+## 本地打包与 lifecycle 客观证据
+
+`/tmp/poo-37-shared-fix-round5-final/proof.json`：本地候选包 `@z-h-ai/shared@0.13.2`、tarball `z-h-ai-shared-0.13.2.tgz`、SHA-256 `e8b0a8cd5e0017397420cc931dee394229176cd8629164c940ed11cb65ac0103`。
+
+frozen `npm ci`、CJS require、ESM import、TypeScript、Next production build/route/client build、browser metadata contract、negative tarball boundary 全为 `passed`。`lifecycle-proof.json` 记录 exit code `0`、`processGroupReaped: true`、无存活子进程。
+
+这是本地候选包的 clean-install/lifecycle 证据；`gitSnapshotClean` 为 `false`，不是 GitHub Packages registry 发布证据。
+
+## 未处理的外部事项
+
+未 push、未创建 tag、未处理 registry release。`shared-v0.13.2` tag、GitHub Packages release 与 registry clean-install 仍需外部授权。

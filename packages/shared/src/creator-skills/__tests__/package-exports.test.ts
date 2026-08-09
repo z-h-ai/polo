@@ -54,11 +54,27 @@ describe('@polo-ai/shared Creator Skill package exports', () => {
       globalThis.process = undefined
       globalThis.require = undefined
       const metadata = await import(${JSON.stringify(pathToFileURL(metadataPath).href)})
+      const descriptionAtLimit = '😀'.repeat(1024)
       const result = metadata.parseCreatorSkillMetadata([{
         path: 'polo-test/SKILL.md',
-        content: new TextEncoder().encode('---\\nname: polo-test\\ndescription: Browser proof.\\n---\\n\\nUse the skill.\\n'),
+        content: new TextEncoder().encode('---\\nname: polo-test\\ndescription: ' + JSON.stringify(descriptionAtLimit) + '\\n---\\n\\nUse the skill.\\n'),
       }])
-      if (result.slug !== 'polo-test') process.exitCode = 1
+      if (result.slug !== 'polo-test' || result.metadata.description !== descriptionAtLimit) {
+        throw new Error('browser metadata parser rejected the 1024-code-point description')
+      }
+      try {
+        metadata.parseCreatorSkillMetadata([{
+          path: 'polo-test/SKILL.md',
+          content: new TextEncoder().encode('---\\nname: polo-test\\ndescription: ' + JSON.stringify('😀'.repeat(1025)) + '\\n---\\n\\nUse the skill.\\n'),
+        }])
+        throw new Error('browser metadata parser accepted the 1025-code-point description')
+      } catch (error) {
+        if (error?.issues?.[0]?.code !== 'invalid_skill_content'
+          || error.issues[0]?.field !== 'description'
+          || error.issues[0]?.message !== 'Creator Skill description must be at most 1024 characters') {
+          throw error
+        }
+      }
     `
     const browserRuntime = Bun.spawnSync({
       cmd: [process.execPath, '--input-type=module', '--eval', browserRuntimeScript],

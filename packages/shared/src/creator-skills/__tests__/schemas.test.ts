@@ -278,6 +278,21 @@ describe('Creator Skill boundary schemas', () => {
         [field]: ['x'.repeat(maxLength + 1)],
       }).success).toBe(false)
     }
+    expect(SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: '😀'.repeat(1_024),
+    }).success).toBe(true)
+    const oversizedDescription = SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: '😀'.repeat(1_025),
+    })
+    expect(oversizedDescription.success).toBe(false)
+    if (!oversizedDescription.success) {
+      expect(oversizedDescription.error.issues).toContainEqual(expect.objectContaining({
+        path: ['description'],
+        message: 'Creator Skill description must be at most 1024 characters',
+      }))
+    }
   })
 
   it('accepts a SKILL.md up to the archive hard byte limit', () => {

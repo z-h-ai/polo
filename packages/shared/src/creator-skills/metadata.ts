@@ -159,6 +159,11 @@ function requiredDescription(data: Record<string, unknown>, path: string): strin
   return value.trim()
 }
 
+/** Counts Unicode code points without depending on Node or UTF-16 code units. */
+function unicodeCodePointLength(value: string): number {
+  return Array.from(value).length
+}
+
 function optionalString(data: Record<string, unknown>, field: 'icon', path: string): string | undefined {
   const value = data[field]
   if (value === undefined) return undefined
@@ -238,7 +243,7 @@ export function validateCreatorSkillMetadata(
   if (!validName) {
     issues.push(metadataIssue('invalid_skill_content', path, 'Creator Skill name must use strict kebab-case (for example, polo-test)', 'name'))
   }
-  if (description.length > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
+  if (unicodeCodePointLength(description) > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
     issues.push(metadataIssue('invalid_skill_content', path, 'Creator Skill description must be at most 1024 characters', 'description'))
   }
   if (rootDirectory !== undefined && validName && name !== rootDirectory) {

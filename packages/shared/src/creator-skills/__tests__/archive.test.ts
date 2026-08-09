@@ -412,6 +412,34 @@ Review the selected change carefully.
     })
   })
 
+  it('counts description length by Unicode code point through archive validation', async () => {
+    await withTemp(async root => {
+      const accepted = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL.replace(
+          'description: Reviews changes against a checklist.',
+          `description: ${JSON.stringify('😀'.repeat(1_024))}`,
+        ),
+      }, 'description-at-limit.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: accepted,
+        slug: 'review-helper',
+      })).resolves.toMatchObject({ metadata: { description: '😀'.repeat(1_024) } })
+
+      const rejected = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL.replace(
+          'description: Reviews changes against a checklist.',
+          `description: ${JSON.stringify('😀'.repeat(1_025))}`,
+        ),
+      }, 'description-over-limit.zip')
+      expect(await archiveIssue(rejected)).toEqual(expect.objectContaining({
+        code: 'invalid_skill_content',
+        path: 'review-helper/SKILL.md',
+        field: 'description',
+        message: 'Creator Skill description must be at most 1024 characters',
+      }))
+    })
+  })
+
   it("uses the browser parser's strict UTF-8 error and packaging-noise policy", async () => {
     await withTemp(async root => {
       const noisyArchive = await writeZip(root, {

@@ -168,5 +168,28 @@ Do the work.
         }],
       })
     }
+
+    const acceptedDescription = '😀'.repeat(1_024)
+    expect(validateCreatorSkillContent(`---
+name: foo-bar
+description: ${JSON.stringify(acceptedDescription)}
+---
+
+Do the work.
+`, 'foo-bar')).toMatchObject({ valid: true })
+    expect(validateCreatorSkillContent(`---
+name: foo-bar
+description: ${JSON.stringify('😀'.repeat(1_025))}
+---
+
+Do the work.
+`, 'foo-bar')).toMatchObject({
+      valid: false,
+      errors: [{
+        code: 'invalid_skill_content',
+        path: 'description',
+        message: 'Creator Skill description must be at most 1024 characters',
+      }],
+    })
   })
 })
