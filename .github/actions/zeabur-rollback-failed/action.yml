@@ -1,0 +1,39 @@
+name: Restore failed Zeabur release
+description: Retry the sole PVC writer rollback and independently prove the failed version is not latest.
+
+inputs:
+  token:
+    required: true
+  service-id:
+    required: true
+  environment-id:
+    required: true
+  version:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        for attempt in $(seq 1 3); do
+          if npx zeabur@latest auth login --token "${{ inputs.token }}" >/dev/null \
+            && npx zeabur@latest service exec \
+              --id "${{ inputs.service-id }}" \
+              --env-id "${{ inputs.environment-id }}" \
+              -- /usr/local/bin/bun /app/publish-electron-release.ts rollback-failed \
+                --releases-dir /data/releases \
+                --version "${{ inputs.version }}" \
+            && npx zeabur@latest service exec \
+              --id "${{ inputs.service-id }}" \
+              --env-id "${{ inputs.environment-id }}" \
+              -- /usr/local/bin/bun /app/publish-electron-release.ts assert-not-latest \
+                --releases-dir /data/releases \
+                --version "${{ inputs.version }}"; then
+            exit 0
+          fi
+          if [ "$attempt" -lt 3 ]; then sleep 5; fi
+        done
+        echo "::error::Could not prove the old latest pointer after release failure"
+        exit 1

@@ -16,9 +16,11 @@ import { createReleaseContract } from './electron-release-contract'
 import {
   confirmRelease,
   assertConfirmedRelease,
+  assertFinalizedRelease,
   assertNotLatest,
   projectedDiskUsage,
   publish,
+  finalizeRelease,
   rollback,
   rollbackFailedRelease,
   validateSource,
@@ -281,6 +283,52 @@ describe('release publisher filesystem behavior', () => {
       await assertConfirmedRelease(first.volume, '1.0.0')
       await rollbackFailedRelease(first.volume, '1.0.0')
       await expect(readlink(join(first.volume, 'electron', 'latest'))).rejects.toThrow()
+    } finally { await destroy(first) }
+  })
+
+  it('resumes a confirmed identical retry without overwriting its original rollback predecessor', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.1.0')
+
+      expect(await publish(second.args, testPublisherOptions)).toBe('idempotent')
+      await assertConfirmedRelease(first.volume, '1.1.0')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('finalizes a successful GitHub publication by returning retention to exactly three releases', async () => {
+    const first = await createFixture('1.0.0')
+    try {
+      for (const version of ['1.0.0', '1.1.0', '1.2.0']) {
+        const fixture = version === '1.0.0' ? first : await createFixture(version)
+        fixture.args.releasesDir = first.volume
+        await publish(fixture.args, testPublisherOptions)
+        await confirmRelease(first.volume, version)
+        if (fixture !== first) await destroy(fixture)
+      }
+      await rollback(first.volume, '1.0.0')
+      const next = await createFixture('1.3.0')
+      try {
+        next.args.releasesDir = first.volume
+        await publish(next.args, testPublisherOptions)
+        await confirmRelease(first.volume, '1.3.0')
+        await finalizeRelease(first.volume, '1.3.0')
+        await finalizeRelease(first.volume, '1.3.0')
+        await assertFinalizedRelease(first.volume, '1.3.0')
+        expect((await readdir(join(first.volume, 'electron', 'releases'))).sort()).toEqual([
+          '1.1.0', '1.2.0', '1.3.0',
+        ])
+      } finally { await destroy(next) }
     } finally { await destroy(first) }
   })
 

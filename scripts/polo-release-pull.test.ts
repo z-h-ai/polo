@@ -6,6 +6,8 @@ import { describe, expect, it } from 'bun:test'
 import { prepareReleaseBundle } from './electron-release-bundle'
 import { pullRelease, RELEASE_ASSET_NAMES } from './polo-release-pull'
 
+const releaseId = 42
+
 const repository = 'polo/polo'
 const version = '1.0.0'
 const tag = `v${version}`
@@ -43,9 +45,21 @@ async function createDraftAssets(root: string, variant = 'A'): Promise<string> {
   return output
 }
 
+async function approvedDraftIdentity(assetsDir: string): Promise<string> {
+  return JSON.stringify({
+    releaseId,
+    assets: await Promise.all(RELEASE_ASSET_NAMES.map(async (name, index) => ({
+      id: index + 1,
+      name,
+      size: (await Bun.file(join(assetsDir, name)).arrayBuffer()).byteLength,
+      sha256: createHash('sha256').update(Buffer.from(await Bun.file(join(assetsDir, name)).arrayBuffer())).digest('hex'),
+    }))),
+  })
+}
+
 function startDraftServer(
   assetsDir: string,
-  options: { signedFailure?: boolean, includeDigests?: boolean } = {},
+  options: { signedFailure?: boolean, includeDigests?: boolean, assetRequests?: { count: number } } = {},
 ): ReturnType<typeof Bun.serve> {
   let server: ReturnType<typeof Bun.serve>
   server = Bun.serve({
@@ -56,9 +70,10 @@ function startDraftServer(
         expect(request.headers.get('authorization')).toBe('Bearer test-token')
         return Response.json({ sha: commitSha })
       }
-      if (pathname === `/repos/${repository}/releases/tags/${tag}`) {
+      if (pathname === `/repos/${repository}/releases/${releaseId}`) {
         expect(request.headers.get('authorization')).toBe('Bearer test-token')
         return Response.json({
+          id: releaseId,
           draft: true,
           tag_name: tag,
           target_commitish: commitSha,
@@ -76,6 +91,7 @@ function startDraftServer(
       }
       const match = pathname.match(new RegExp(`^/repos/${repository}/releases/assets/(\\d+)$`))
       if (match) {
+        if (options.assetRequests) options.assetRequests.count += 1
         expect(request.headers.get('authorization')).toBe('Bearer test-token')
         if (options.signedFailure) {
           return new Response(null, {
@@ -108,6 +124,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
@@ -137,6 +155,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
@@ -166,6 +186,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
@@ -182,6 +204,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
@@ -209,6 +233,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
@@ -223,7 +249,7 @@ describe('Zeabur Draft Release puller', () => {
     }
   })
 
-  it('re-downloads every asset when Draft SHA-256 digests are unavailable and rejects same-size byte changes', async () => {
+  it('rejects a current Draft whose approved identity has the same sizes but different bytes before PVC writes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-byte-compare-'))
     const volume = join(root, 'volume')
     const oldAssets = await createDraftAssets(join(root, 'old'), 'A')
@@ -238,13 +264,73 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(currentAssets),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
         peakCapacityCheck: async () => {},
         publisherOptions: { capacityCheck: async () => {} },
-      })).rejects.toThrow('differs byte-for-byte')
+      })).rejects.toThrow('differs from the approved Draft SHA-256 digests')
       expect(await readdir(incoming)).toHaveLength(9)
+      await expect(readlink(join(volume, 'electron', 'latest'))).rejects.toThrow()
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('fetches the approved Draft by release ID and rejects changed asset IDs before downloading or writing the PVC', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-identity-mismatch-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    const assetRequests = { count: 0 }
+    await mkdir(volume)
+    const server = startDraftServer(assetsDir, { assetRequests })
+    try {
+      const identity = JSON.parse(await approvedDraftIdentity(assetsDir))
+      identity.assets[0].id = 999
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releaseId,
+        assetIdentity: JSON.stringify(identity),
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+      })).rejects.toThrow('Current Draft Release asset identity does not match the approved Draft')
+      expect(assetRequests.count).toBe(0)
+      await expect(readdir(join(volume, 'electron', '.incoming'))).rejects.toThrow()
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects changed bytes against the approved digest before moving the downloaded stage onto the PVC', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-digest-mismatch-'))
+    const volume = join(root, 'volume')
+    const approvedAssets = await createDraftAssets(join(root, 'approved'), 'A')
+    const changedAssets = await createDraftAssets(join(root, 'changed'), 'B')
+    await mkdir(volume)
+    const server = startDraftServer(changedAssets)
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(approvedAssets),
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+      })).rejects.toThrow('Downloaded release assets differ from the approved Draft SHA-256 digests')
+      await expect(readdir(join(volume, 'electron', '.incoming'))).resolves.toEqual([])
       await expect(readlink(join(volume, 'electron', 'latest'))).rejects.toThrow()
     } finally {
       server.stop(true)
@@ -264,6 +350,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
@@ -292,6 +380,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
@@ -310,6 +400,8 @@ describe('Zeabur Draft Release puller', () => {
         tag,
         version,
         commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',

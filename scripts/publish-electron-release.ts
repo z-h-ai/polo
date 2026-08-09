@@ -433,6 +433,17 @@ export async function publish(
       if (!(await sameContents(source, destination))) {
         throw new Error(`Release ${args.version} already exists with different contents`)
       }
+      // A runner may resume after confirm but before GitHub publication. In
+      // that state .confirmed records the only exact predecessor; recreating
+      // .rollback from the current latest would replace it with self-history.
+      const confirmedMarker = join(electronRoot, `.confirmed-${args.version}.json`)
+      const confirmed = await lstat(confirmedMarker).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (latestContract?.version === args.version && confirmed?.isFile()) {
+        return 'idempotent'
+      }
       await recordRollbackTarget(electronRoot, args.version)
       await switchLatest(electronRoot, destination)
       return 'idempotent'
@@ -558,6 +569,23 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
   })
 }
 
+export async function finalizeRelease(releasesDir: string, version: string): Promise<void> {
+  if (!isStrictSemver(version)) throw new Error('Finalized version must be strict SemVer')
+  const electronRoot = join(resolve(releasesDir), 'electron')
+  await withPublisherLock(electronRoot, async () => {
+    const latest = await readLatestContract(electronRoot)
+    if (!latest || latest.version !== version) {
+      throw new Error(`Cannot finalize ${version}: it is not electron/latest`)
+    }
+    // GitHub publication was positively verified before this transition. The
+    // predecessor marker is no longer a rollback promise, so remove it before
+    // retention to return the PVC to its exact three-release policy. Missing
+    // is intentional: repeated Service Exec finalization is idempotent.
+    await rm(join(electronRoot, `.confirmed-${version}.json`), { force: true })
+    await cleanOldReleases(electronRoot)
+  })
+}
+
 export async function assertConfirmedRelease(releasesDir: string, version: string): Promise<void> {
   if (!isStrictSemver(version)) throw new Error('Confirmed version must be strict SemVer')
   const electronRoot = join(resolve(releasesDir), 'electron')
@@ -567,6 +595,20 @@ export async function assertConfirmedRelease(releasesDir: string, version: strin
   }
   const marker = await lstat(join(electronRoot, `.confirmed-${version}.json`))
   if (!marker.isFile()) throw new Error(`Cannot verify ${version}: confirmation marker is missing`)
+}
+
+export async function assertFinalizedRelease(releasesDir: string, version: string): Promise<void> {
+  if (!isStrictSemver(version)) throw new Error('Finalized version must be strict SemVer')
+  const electronRoot = join(resolve(releasesDir), 'electron')
+  const latest = await readLatestContract(electronRoot)
+  if (!latest || latest.version !== version) {
+    throw new Error(`Cannot verify finalization of ${version}: it is not electron/latest`)
+  }
+  const confirmed = await lstat(join(electronRoot, `.confirmed-${version}.json`)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (confirmed) throw new Error(`Cannot verify finalization of ${version}: confirmation marker remains`)
 }
 
 export async function assertNotLatest(releasesDir: string, version: string): Promise<void> {
@@ -634,13 +676,25 @@ async function main(): Promise<void> {
     console.log(`Release ${version} is confirmed`)
     return
   }
+  if (command === 'finalize') {
+    const version = required(values, 'version')
+    await finalizeRelease(required(values, 'releases-dir'), version)
+    console.log(`Release ${version} finalized`)
+    return
+  }
+  if (command === 'assert-finalized') {
+    const version = required(values, 'version')
+    await assertFinalizedRelease(required(values, 'releases-dir'), version)
+    console.log(`Release ${version} is finalized`)
+    return
+  }
   if (command === 'assert-not-latest') {
     const version = required(values, 'version')
     await assertNotLatest(required(values, 'releases-dir'), version)
     console.log(`Release ${version} is no longer electron/latest`)
     return
   }
-  throw new Error('Usage: publisher <publish|rollback|confirm|rollback-failed|assert-confirmed|assert-not-latest> [options]')
+  throw new Error('Usage: publisher <publish|rollback|confirm|rollback-failed|finalize|assert-confirmed|assert-finalized|assert-not-latest> [options]')
 }
 
 if (import.meta.main) await main()

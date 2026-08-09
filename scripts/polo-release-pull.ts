@@ -9,6 +9,11 @@ import { parseArgs } from 'node:util'
 import { parseStrictSemverTag } from './strict-semver'
 import { sha256 } from './electron-release-contract'
 import {
+  parseDraftReleaseIdentity,
+  RELEASE_ASSET_NAMES,
+  type DraftReleaseIdentity,
+} from './electron-release-draft-identity'
+import {
   publish,
   projectedDiskUsage,
   validateSource,
@@ -17,17 +22,7 @@ import {
   type ReleaseArguments,
 } from './publish-electron-release'
 
-export const RELEASE_ASSET_NAMES = [
-  'Polo-AI-x64.dmg',
-  'Polo-AI-x64.zip',
-  'Polo-AI-arm64.dmg',
-  'Polo-AI-x64.AppImage',
-  'Polo-AI-x64.exe',
-  'latest-mac.yml',
-  'latest-linux.yml',
-  'install-app.sh',
-  'release-contract.json',
-] as const
+export { RELEASE_ASSET_NAMES }
 
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
@@ -38,10 +33,10 @@ interface GitHubAsset {
   size: number
   state: string
   url: string
-  digest?: string
 }
 
 interface GitHubRelease {
+  id: number
   draft: boolean
   tag_name: string
   target_commitish: string
@@ -57,6 +52,8 @@ export interface ReleasePullOptions {
   tag: string
   version: string
   commitSha: string
+  releaseId: number
+  assetIdentity: DraftReleaseIdentity | string
   releasesDir?: string
   apiBase?: string
   token?: string
@@ -73,13 +70,28 @@ function normalizeApiBase(value: string): string {
   return url.toString().replace(/\/$/, '')
 }
 
-function assertInput(options: ReleasePullOptions): void {
+function approvedDraftIdentity(options: ReleasePullOptions): DraftReleaseIdentity {
   if (!REPOSITORY_PATTERN.test(options.repository)) throw new Error('Repository is invalid')
   if (parseStrictSemverTag(options.tag) !== options.version) {
     throw new Error('Tag and strict SemVer version do not match')
   }
   if (!COMMIT_PATTERN.test(options.commitSha)) throw new Error('Commit SHA is invalid')
   if (!options.token) throw new Error('GH_TOKEN is required to read Draft Release assets')
+  if (!Number.isSafeInteger(options.releaseId) || options.releaseId <= 0) {
+    throw new Error('Approved Draft Release ID is invalid')
+  }
+  let identity: DraftReleaseIdentity
+  try {
+    identity = parseDraftReleaseIdentity(
+      typeof options.assetIdentity === 'string' ? JSON.parse(options.assetIdentity) : options.assetIdentity,
+    )
+  } catch {
+    throw new Error('Approved Draft Release asset identity is invalid')
+  }
+  if (identity.releaseId !== options.releaseId) {
+    throw new Error('Approved Draft Release ID does not match its asset identity')
+  }
+  return identity
 }
 
 function apiHeaders(token: string, binary = false): HeadersInit {
@@ -98,10 +110,13 @@ async function getJson<T>(url: string, token: string): Promise<T> {
 
 function assertDraftRelease(
   release: GitHubRelease,
-  options: Required<Pick<ReleasePullOptions, 'repository' | 'tag' | 'version' | 'commitSha'>>,
+  options: Required<Pick<ReleasePullOptions, 'repository' | 'tag' | 'version' | 'commitSha' | 'releaseId'>>,
   apiBase: string,
+  approvedIdentity: DraftReleaseIdentity,
 ): Map<string, GitHubAsset> {
-  if (!release.draft) throw new Error('Release pull accepts only a Draft GitHub Release')
+  if (!release.draft || release.id !== options.releaseId) {
+    throw new Error('Current Draft Release does not match the approved release ID')
+  }
   if (release.tag_name !== options.tag || release.target_commitish.toLowerCase() !== options.commitSha) {
     throw new Error('Draft Release tag or target commit does not match the requested release')
   }
@@ -118,7 +133,6 @@ function assertDraftRelease(
       || !Number.isSafeInteger(asset.size)
       || asset.size <= 0
       || asset.state !== 'uploaded'
-      || (asset.digest !== undefined && typeof asset.digest !== 'string')
     ) {
       throw new Error('Draft Release contains an invalid or non-whitelisted asset')
     }
@@ -126,8 +140,12 @@ function assertDraftRelease(
       `/repos/${options.repository}/releases/assets/${asset.id}`,
       `${apiBase}/`,
     ).toString()
-    if (asset.url !== expectedUrl || assets.has(asset.name)) {
-      throw new Error('Draft Release asset URL or names are invalid')
+    const approvedAsset = approvedIdentity.assets.find(candidate => candidate.name === asset.name)
+    if (
+      asset.url !== expectedUrl || assets.has(asset.name)
+      || !approvedAsset || asset.id !== approvedAsset.id || asset.size !== approvedAsset.size
+    ) {
+      throw new Error('Current Draft Release asset identity does not match the approved Draft')
     }
     assets.set(asset.name, asset)
   }
@@ -197,28 +215,13 @@ async function existingIncomingIsReusable(
   }
 }
 
-function trustedSha256Digests(assets: Map<string, GitHubAsset>): Map<string, string> | undefined {
-  const digests = new Map<string, string>()
-  for (const name of RELEASE_ASSET_NAMES) {
-    const digest = assets.get(name)!.digest
-    if (digest === undefined) return undefined
-    const match = digest.match(/^sha256:([a-f0-9]{64})$/)
-    if (!match) throw new Error(`Draft Release asset has an invalid SHA-256 digest: ${name}`)
-    digests.set(name, match[1]!)
-  }
-  return digests
+function trustedSha256Digests(identity: DraftReleaseIdentity): Map<string, string> {
+  return new Map(identity.assets.map(asset => [asset.name, asset.sha256]))
 }
 
 async function matchesTrustedDigests(directory: string, digests: Map<string, string>): Promise<boolean> {
   for (const name of RELEASE_ASSET_NAMES) {
     if (await sha256(join(directory, name)) !== digests.get(name)) return false
-  }
-  return true
-}
-
-async function sameAssetBytes(left: string, right: string): Promise<boolean> {
-  for (const name of RELEASE_ASSET_NAMES) {
-    if (await sha256(join(left, name)) !== await sha256(join(right, name))) return false
   }
   return true
 }
@@ -259,16 +262,16 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
     commitSha: options.commitSha.toLowerCase(),
     token,
   }
-  assertInput(normalized)
+  const approvedIdentity = approvedDraftIdentity(normalized)
   const apiBase = normalizeApiBase(options.apiBase ?? 'https://api.github.com')
   const [tagCommit, release] = await Promise.all([
     getJson<GitHubCommit>(`${apiBase}/repos/${normalized.repository}/commits/${normalized.tag}`, token!),
-    getJson<GitHubRelease>(`${apiBase}/repos/${normalized.repository}/releases/tags/${normalized.tag}`, token!),
+    getJson<GitHubRelease>(`${apiBase}/repos/${normalized.repository}/releases/${normalized.releaseId}`, token!),
   ])
   if (typeof tagCommit.sha !== 'string' || tagCommit.sha.toLowerCase() !== normalized.commitSha) {
     throw new Error('Git tag does not point at the requested commit')
   }
-  const assets = assertDraftRelease(release, normalized, apiBase)
+  const assets = assertDraftRelease(release, normalized, apiBase, approvedIdentity)
   const releasesDir = resolve(options.releasesDir ?? '/data/releases')
   const incomingRoot = join(releasesDir, 'electron', '.incoming')
   const incoming = join(incomingRoot, normalized.version)
@@ -285,24 +288,18 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
   let createdIncoming = false
   try {
     const assetBytes = RELEASE_ASSET_NAMES.reduce((total, name) => total + assets.get(name)!.size, 0)
+    const trustedDigests = trustedSha256Digests(approvedIdentity)
     if (reusableIncoming) {
-      const trustedDigests = trustedSha256Digests(assets)
       await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes)
-      if (trustedDigests) {
-        if (!(await matchesTrustedDigests(incoming, trustedDigests))) {
-          throw new Error(`Incoming release ${normalized.version} differs from the Draft Release SHA-256 digests`)
-        }
-      } else {
-        await downloadAssets(apiBase, normalized.repository, assets, stage, token!)
-        await validateSource(stage, publishArgs)
-        if (!(await sameAssetBytes(stage, incoming))) {
-          throw new Error(`Incoming release ${normalized.version} differs byte-for-byte from the Draft Release`)
-        }
-        await rm(stage, { recursive: true, force: true })
+      if (!(await matchesTrustedDigests(incoming, trustedDigests))) {
+        throw new Error(`Incoming release ${normalized.version} differs from the approved Draft SHA-256 digests`)
       }
     } else {
       await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes * 2)
       await downloadAssets(apiBase, normalized.repository, assets, stage, token!)
+      if (!(await matchesTrustedDigests(stage, trustedDigests))) {
+        throw new Error(`Downloaded release assets differ from the approved Draft SHA-256 digests`)
+      }
       await validateSource(stage, publishArgs)
       await rename(stage, incoming)
       createdIncoming = true
@@ -339,6 +336,8 @@ async function main(): Promise<void> {
       tag: { type: 'string' },
       version: { type: 'string' },
       commit: { type: 'string' },
+      'release-id': { type: 'string' },
+      'asset-identity': { type: 'string' },
     },
     strict: true,
   })
@@ -347,6 +346,8 @@ async function main(): Promise<void> {
     tag: required(values, 'tag'),
     version: required(values, 'version'),
     commitSha: required(values, 'commit'),
+    releaseId: Number(required(values, 'release-id')),
+    assetIdentity: required(values, 'asset-identity'),
   })
   console.log(`Release ${required(values, 'version')}: ${result}`)
 }
