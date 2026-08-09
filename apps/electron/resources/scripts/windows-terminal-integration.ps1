@@ -387,6 +387,7 @@ public static class PoloWindowsTerminalAtomic {
         string binDir,
         bool ensurePresent,
         string expectedValue,
+        bool hasExpectedValue,
         string replacementValue,
         string testRaceValue) {
         IntPtr transaction = CreateTransaction(
@@ -410,7 +411,7 @@ public static class PoloWindowsTerminalAtomic {
             }
             uint valueType;
             string before = ReadRegistryString(key, valueName, out valueType);
-            if (expectedValue != null &&
+            if (hasExpectedValue &&
                 !String.Equals(before, expectedValue, StringComparison.Ordinal)) {
                 throw new InvalidOperationException(
                     "User PATH changed before the guarded rollback.");
@@ -894,12 +895,14 @@ function Mutate-UserPath(
         return Mutate-UserPathFile -EnsurePresent $EnsurePresent -ExpectedValue $ExpectedValue `
             -Claims $Claims -Published $Published
     }
+    $hasExpectedValue = $null -ne $ExpectedValue
     return [PoloWindowsTerminalAtomic]::MutateUserPath(
         $UserPathRegistrySubKey,
         $UserPathRegistryValueName,
         $BinDir,
         $EnsurePresent,
         $ExpectedValue,
+        $hasExpectedValue,
         $ReplacementValue,
         $RaceValue
     )
