@@ -10,9 +10,11 @@
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Install -InstallDir "$INSTDIR" -BinDir "$R1"'
   Pop $0
   ${If} $0 == 0
-    ; Keep the exact target beside the installed app. The uninstaller runs in
-    ; a new process and must not rediscover a potentially different profile.
-    WriteINIStr "$INSTDIR\polo-terminal-integration.ini" "terminal" "binDir" "$R1"
+    ; Keep the exact target in the per-user install registry. NSIS INI
+    ; round-trips can corrupt a Unicode LOCALAPPDATA path (for example, a
+    ; non-ASCII Windows username), while registry strings preserve it for the
+    ; uninstaller's separate process.
+    WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "PoloTerminalBinDir" "$R1"
   ${EndIf}
   Pop $R1
   ${If} $0 != 0
@@ -34,10 +36,10 @@ polo_terminal_setup_finished:
   Push $R1
   Push $R2
   StrCpy $R2 ""
-  ReadINIStr $R1 "$INSTDIR\polo-terminal-integration.ini" "terminal" "binDir"
+  ReadRegStr $R1 HKCU "${INSTALL_REGISTRY_KEY}" "PoloTerminalBinDir"
   ${If} $R1 == ""
-    ; Legacy installs predate the persisted target. Their conventional
-    ; per-user location remains the safe fallback.
+    ; Legacy installs predate the Unicode-safe registry value. Their
+    ; conventional per-user location remains the safe fallback.
     ReadEnvStr $R1 "LOCALAPPDATA"
     StrCpy $R1 "$R1\Polo AI\bin"
   ${Else}
