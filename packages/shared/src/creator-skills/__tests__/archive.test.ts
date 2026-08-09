@@ -13,7 +13,7 @@ import {
 import { DEFAULT_SKILL_ARCHIVE_POLICY } from '../types'
 
 const VALID_SKILL = `---
-name: Review Helper
+name: review-helper
 description: Reviews changes against a checklist.
 icon: "🧭"
 requiredSources:
@@ -118,7 +118,7 @@ describe('Creator Skill archive validation', () => {
       })
 
       expect(validated.metadata).toEqual({
-        name: 'Review Helper',
+        name: 'review-helper',
         description: 'Reviews changes against a checklist.',
         icon: '🧭',
         requiredSources: ['github'],
@@ -233,6 +233,44 @@ describe('Creator Skill archive validation', () => {
     })
   })
 
+  it('allows arbitrary business directories while retaining every archive safety check', async () => {
+    await withTemp(async root => {
+      const archivePath = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL,
+        'review-helper/agents/reviewer.md': 'Review changes.',
+        'review-helper/scripts/check.sh': '#!/bin/sh\necho safe script text\n',
+        'review-helper/assets/prompt.txt': 'asset',
+        'review-helper/templates/report.md': '# Report',
+        'review-helper/custom-ai-data/example.json': '{"ok":true}',
+      }, 'business-directories.zip')
+      const validated = await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+      expect(validated.metadata.name).toBe('review-helper')
+      expect(validated.manifest.map(entry => entry.path)).toEqual([
+        'SKILL.md',
+        'agents/reviewer.md',
+        'assets/prompt.txt',
+        'custom-ai-data/example.json',
+        'scripts/check.sh',
+        'templates/report.md',
+      ])
+    })
+  })
+
+  it('rejects invalid Creator metadata names and root-name mismatches', async () => {
+    await withTemp(async root => {
+      for (const [name, content] of [
+        ['invalid-name', VALID_SKILL.replace('name: review-helper', 'name: Polo Test')],
+        ['root-mismatch', VALID_SKILL.replace('name: review-helper', 'name: another-skill')],
+      ] as const) {
+        const archivePath = await writeZip(root, { 'review-helper/SKILL.md': content }, `${name}.zip`)
+        await expect(validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })).rejects.toMatchObject({
+          code: 'skill_validation_failed',
+          issues: [{ code: 'invalid_skill_content', field: 'name' }],
+        })
+      }
+    })
+  })
+
   it('fully validates icon PNG structure, CRC, termination, and dimensions', async () => {
     await withTemp(async root => {
       const validIconArchive = await writeZip(root, {
@@ -295,17 +333,14 @@ describe('Creator Skill archive validation', () => {
         issues: [{ code: 'path_type_conflict', path: 'review-helper/references/nested.txt' }],
       })
 
-      const referencesFile = await writeZip(root, {
+      const ordinaryReferencesFile = await writeZip(root, {
         'review-helper/SKILL.md': VALID_SKILL,
-        'review-helper/references': 'must be a directory',
+        'review-helper/references': 'ordinary business content is allowed',
       }, 'references-file.zip')
       await expect(preflightCreatorSkillArchive({
-        archivePath: referencesFile,
+        archivePath: ordinaryReferencesFile,
         slug: 'review-helper',
-      })).rejects.toMatchObject({
-        code: 'invalid_skill_archive',
-        issues: [{ code: 'skill_structure_type_mismatch' }],
-      })
+      })).resolves.toBeDefined()
     })
   })
 

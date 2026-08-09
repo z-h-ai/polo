@@ -21,12 +21,17 @@ async function readJson(path: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
 }
 
+function isSemver(value: unknown): value is string {
+  return typeof value === 'string'
+    && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value)
+}
+
 async function main(): Promise<void> {
   const developmentManifest = await readJson(join(packageRoot, 'package.json')) as PackageManifest
   const publishManifest = await readJson(join(packageRoot, 'package.publish.json')) as PackageManifest
 
-  if (publishManifest.name !== '@z-h-ai/shared' || publishManifest.version !== '0.13.1') {
-    throw new Error('publish manifest must target @z-h-ai/shared@0.13.1')
+  if (publishManifest.name !== '@z-h-ai/shared' || !isSemver(publishManifest.version)) {
+    throw new Error('publish manifest must target @z-h-ai/shared with a valid SemVer version')
   }
   if (publishManifest.private !== undefined) {
     throw new Error('publish manifest must be publishable')
@@ -37,7 +42,7 @@ async function main(): Promise<void> {
   }
   const developmentExports = developmentManifest.exports as Record<string, unknown> | undefined
   const publishExports = publishManifest.exports as Record<string, unknown> | undefined
-  for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-app-publishing']) {
+  for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-skills/metadata', './creator-app-publishing']) {
     const developmentExport = developmentExports?.[subpath] as Record<string, unknown> | undefined
     const publishExport = publishExports?.[subpath] as Record<string, unknown> | undefined
     for (const condition of ['types', 'browser', 'import', 'default']) {
@@ -59,6 +64,9 @@ async function main(): Promise<void> {
     'index.d.ts',
     'installer.d.ts',
     'ledger.d.ts',
+    'metadata.browser.cjs',
+    'metadata.browser.mjs',
+    'metadata.d.ts',
     'schemas.d.ts',
     'skill-content.d.ts',
     'types.d.ts',

@@ -7,7 +7,7 @@ import type {
 export const CREATOR_SKILL_FIXTURE_SLUG = 'review-helper'
 
 export const CREATOR_SKILL_FIXTURE_CONTENT = `---
-name: Review Helper
+name: review-helper
 description: Reviews changes against a checklist.
 icon: "🧭"
 requiredSources:
@@ -20,7 +20,7 @@ Review the selected change carefully.
 `
 
 export const CREATOR_SKILL_FIXTURE_METADATA: SkillVersionMetadata = {
-  name: 'Review Helper',
+  name: 'review-helper',
   description: 'Reviews changes against a checklist.',
   icon: '🧭',
   requiredSources: ['github'],
@@ -38,8 +38,8 @@ export const CREATOR_SKILL_FIXTURE_POLICY: SkillArchivePolicy = {
 export const CREATOR_SKILL_FIXTURE_MANIFEST: CreatorSkillManifestEntry[] = [{
   path: 'SKILL.md',
   size: new TextEncoder().encode(CREATOR_SKILL_FIXTURE_CONTENT).byteLength,
-  sha256: '223c04758120adcd8cd619b9ec0b19ae3faaf3ddb57720f92a2be5101bae976f',
+  sha256: 'a063d3f9bd112e6e1d816cb2c771ccf9fb8602b942e8e82a173af9c5001c91b9',
 }]
 
 export const CREATOR_SKILL_FIXTURE_CONTENT_DIGEST =
-  'f9999556728593a5f0f5f3e22f89b1e86793ae5232f7e11e68324ef82927136c'
+  'b5326fb33894331f09a1b0e80650435c8c2cd70ba45b691cf513ba9de5f9da80'

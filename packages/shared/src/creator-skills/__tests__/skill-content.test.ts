@@ -30,15 +30,29 @@ describe('local and Creator Skill slug policies', () => {
   })
 
   it('layers strict kebab-case only onto Creator Skill publication', () => {
-    expect(validateCreatorSkillContent(CONTENT, 'foo-bar').valid).toBe(true)
+    const creatorContent = CONTENT.replace('name: Legacy Slug', 'name: foo-bar')
+    expect(validateCreatorSkillContent(creatorContent, 'foo-bar').valid).toBe(true)
     for (const slug of ['foo--bar', '-foo', 'foo-']) {
-      expect(validateCreatorSkillContent(CONTENT, slug)).toMatchObject({
-        valid: false,
-        errors: [{
-          path: 'slug',
-          message: 'Creator Skill slug must use strict kebab-case',
-        }],
-      })
+      const validation = validateCreatorSkillContent(creatorContent, slug)
+      expect(validation.valid).toBe(false)
+      expect(validation.errors).toContainEqual(expect.objectContaining({
+        path: 'slug',
+        message: 'Creator Skill slug must use strict kebab-case',
+      }))
     }
+  })
+
+  it('requires a strict metadata name matching the Creator Skill root', () => {
+    expect(validateCreatorSkillContent(CONTENT, 'foo-bar')).toMatchObject({
+      valid: false,
+      errors: [{ path: 'name', message: expect.stringContaining('strict kebab-case') }],
+    })
+    expect(validateCreatorSkillContent(
+      CONTENT.replace('name: Legacy Slug', 'name: another-skill'),
+      'foo-bar',
+    )).toMatchObject({
+      valid: false,
+      errors: [{ path: 'name', message: expect.stringContaining("must match root directory 'foo-bar'") }],
+    })
   })
 })

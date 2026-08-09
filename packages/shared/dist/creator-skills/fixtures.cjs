@@ -30,7 +30,7 @@ __export(fixtures_exports, {
 module.exports = __toCommonJS(fixtures_exports);
 var CREATOR_SKILL_FIXTURE_SLUG = "review-helper";
 var CREATOR_SKILL_FIXTURE_CONTENT = `---
-name: Review Helper
+name: review-helper
 description: Reviews changes against a checklist.
 icon: "\u{1F9ED}"
 requiredSources:
@@ -42,7 +42,7 @@ alwaysAllow:
 Review the selected change carefully.
 `;
 var CREATOR_SKILL_FIXTURE_METADATA = {
-  name: "Review Helper",
+  name: "review-helper",
   description: "Reviews changes against a checklist.",
   icon: "\u{1F9ED}",
   requiredSources: ["github"],
@@ -58,9 +58,9 @@ var CREATOR_SKILL_FIXTURE_POLICY = {
 var CREATOR_SKILL_FIXTURE_MANIFEST = [{
   path: "SKILL.md",
   size: new TextEncoder().encode(CREATOR_SKILL_FIXTURE_CONTENT).byteLength,
-  sha256: "223c04758120adcd8cd619b9ec0b19ae3faaf3ddb57720f92a2be5101bae976f"
+  sha256: "a063d3f9bd112e6e1d816cb2c771ccf9fb8602b942e8e82a173af9c5001c91b9"
 }];
-var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "f9999556728593a5f0f5f3e22f89b1e86793ae5232f7e11e68324ef82927136c";
+var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "b5326fb33894331f09a1b0e80650435c8c2cd70ba45b691cf513ba9de5f9da80";
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   CREATOR_SKILL_FIXTURE_CONTENT,

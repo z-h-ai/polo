@@ -44,6 +44,22 @@ export const PortableSkillMetadataSchema = z.object({
   requiredSources: z.array(z.string()).optional(),
 }).passthrough()
 
+/**
+ * The published Creator Skill contract deliberately treats `name` as the
+ * stable package identifier, rather than a display label. Local skills keep
+ * using PortableSkillMetadataSchema for backwards compatibility.
+ */
+export const CreatorSkillMetadataSchema = PortableSkillMetadataSchema.extend({
+  name: z.string().trim().min(1).max(64).regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    'Creator Skill name must use strict kebab-case (for example, polo-test)',
+  ),
+  description: z.string().trim().min(1).max(
+    1_024,
+    'Creator Skill description must be at most 1024 characters',
+  ),
+}).passthrough()
+
 export function isValidSkillSlug(slug: string): boolean {
   return /^[a-z0-9-]+$/.test(slug)
 }
@@ -134,19 +150,39 @@ export function validateCreatorSkillContent(
   slug: string,
 ): SkillContentValidationResult {
   const validation = validatePortableSkillContent(markdownContent, slug)
-  if (isValidCreatorSkillSlug(slug)) return validation
+  const errors = validation.errors.filter(error => error.path !== 'slug')
+  if (!isValidCreatorSkillSlug(slug)) {
+    errors.push({
+      file: `skills/${slug}`,
+      path: 'slug',
+      message: 'Creator Skill slug must use strict kebab-case',
+      severity: 'error',
+      suggestion: `Rename folder to '${suggestSkillSlug(slug)}'`,
+    })
+  }
+
+  let parsed: matter.GrayMatterFile<string>
+  try {
+    parsed = matter(markdownContent)
+  } catch {
+    return { valid: false, errors, warnings: validation.warnings }
+  }
+  const metadata = CreatorSkillMetadataSchema.safeParse(parsed.data)
+  if (!metadata.success) errors.push(...zodIssues(metadata.error, `skills/${slug}/SKILL.md`))
+  else if (metadata.data.name !== slug) {
+    errors.push({
+      file: `skills/${slug}/SKILL.md`,
+      path: 'name',
+      message: `Creator Skill name '${metadata.data.name}' must match root directory '${slug}'`,
+      severity: 'error',
+      suggestion: `Use 'name: ${slug}' or rename the root directory`,
+    })
+  }
+
+  if (errors.length === 0) return { valid: true, errors: [], warnings: validation.warnings }
   return {
     valid: false,
-    errors: [
-      ...validation.errors.filter(error => error.path !== 'slug'),
-      {
-        file: `skills/${slug}`,
-        path: 'slug',
-        message: 'Creator Skill slug must use strict kebab-case',
-        severity: 'error',
-        suggestion: `Rename folder to '${suggestSkillSlug(slug)}'`,
-      },
-    ],
+    errors,
     warnings: validation.warnings,
   }
 }
