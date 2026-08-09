@@ -49,6 +49,8 @@ describe('Windows terminal integration packaging', () => {
     expect(integrationScript).toContain('function Get-ManagedFileSpecs')
     expect(integrationScript).toContain('Path = $launcher')
     expect(integrationScript).toContain('Path = $legacyLauncher')
+    expect(integrationScript).toContain('Path = $messages')
+    expect(integrationScript).toContain('Get-WrapperMessagesContent')
     expect(integrationScript).toContain('Path = $rootPointer')
     expect(integrationScript).toContain('$legacyLauncherWasHistorical')
     expect(integrationScript).not.toContain('function Is-Managed')

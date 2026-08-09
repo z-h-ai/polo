@@ -234,6 +234,13 @@ jobs:
           set -o pipefail
           bun run electron:dist:win --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-windows-x64.log"
 
+      - name: Smoke Windows terminal launchers
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
+          & apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1
+
       - name: Require intentionally unsigned Windows installer
         if: matrix.platform == 'windows'
         shell: pwsh
