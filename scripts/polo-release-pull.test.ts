@@ -11,16 +11,16 @@ const version = '1.0.0'
 const tag = `v${version}`
 const commitSha = 'a'.repeat(40)
 
-async function createDraftAssets(root: string): Promise<string> {
+async function createDraftAssets(root: string, variant = 'A'): Promise<string> {
   const input = join(root, 'input')
   const output = join(root, 'draft')
-  await mkdir(input)
+  await mkdir(input, { recursive: true })
   const contents = {
-    'Polo-AI-x64.zip': 'macOS zip',
-    'Polo-AI-x64.dmg': 'macOS x64 dmg',
-    'Polo-AI-arm64.dmg': 'macOS arm64 dmg',
-    'Polo-AI-x64.AppImage': 'Linux AppImage',
-    'Polo-AI-x64.exe': 'Windows NSIS',
+    'Polo-AI-x64.zip': `macOS zip ${variant}`,
+    'Polo-AI-x64.dmg': `macOS x64 dmg ${variant}`,
+    'Polo-AI-arm64.dmg': `macOS arm64 dmg ${variant}`,
+    'Polo-AI-x64.AppImage': `Linux AppImage ${variant}`,
+    'Polo-AI-x64.exe': `Windows NSIS ${variant}`,
   }
   for (const [name, value] of Object.entries(contents)) await writeFile(join(input, name), value)
   const macZipHash = createHash('sha512').update(contents['Polo-AI-x64.zip']).digest('base64')
@@ -43,7 +43,10 @@ async function createDraftAssets(root: string): Promise<string> {
   return output
 }
 
-function startDraftServer(assetsDir: string, signedFailure = false): ReturnType<typeof Bun.serve> {
+function startDraftServer(
+  assetsDir: string,
+  options: { signedFailure?: boolean, includeDigests?: boolean } = {},
+): ReturnType<typeof Bun.serve> {
   let server: ReturnType<typeof Bun.serve>
   server = Bun.serve({
     port: 0,
@@ -65,13 +68,16 @@ function startDraftServer(assetsDir: string, signedFailure = false): ReturnType<
             size: (await Bun.file(join(assetsDir, name)).arrayBuffer()).byteLength,
             state: 'uploaded',
             url: `http://127.0.0.1:${server.port}/repos/${repository}/releases/assets/${index + 1}`,
+            ...(options.includeDigests
+              ? { digest: `sha256:${createHash('sha256').update(Buffer.from(await Bun.file(join(assetsDir, name)).arrayBuffer())).digest('hex')}` }
+              : {}),
           }))),
         })
       }
       const match = pathname.match(new RegExp(`^/repos/${repository}/releases/assets/(\\d+)$`))
       if (match) {
         expect(request.headers.get('authorization')).toBe('Bearer test-token')
-        if (signedFailure) {
+        if (options.signedFailure) {
           return new Response(null, {
             status: 302,
             headers: { location: `/signed-object?X-Amz-Signature=super-secret-${match[1]}` },
@@ -124,7 +130,7 @@ describe('Zeabur Draft Release puller', () => {
     const volume = join(root, 'volume')
     const assetsDir = await createDraftAssets(root)
     await mkdir(volume)
-    const server = startDraftServer(assetsDir, true)
+    const server = startDraftServer(assetsDir, { signedFailure: true })
     try {
       const error = await pullRelease({
         repository,
@@ -196,7 +202,7 @@ describe('Zeabur Draft Release puller', () => {
     const incoming = join(volume, 'electron', '.incoming', version)
     await mkdir(join(volume, 'electron', '.incoming'), { recursive: true })
     await cp(assetsDir, incoming, { recursive: true })
-    const server = startDraftServer(assetsDir, true)
+    const server = startDraftServer(assetsDir, { signedFailure: true, includeDigests: true })
     try {
       await expect(pullRelease({
         repository,
@@ -206,11 +212,67 @@ describe('Zeabur Draft Release puller', () => {
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
-        peakCapacityCheck: async () => { throw new Error('must not recalculate fresh-download capacity') },
+        peakCapacityCheck: async () => {},
         publisherOptions: { capacityCheck: async () => {} },
       })).resolves.toBe('published')
       expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
       expect(await readdir(incoming)).toHaveLength(9)
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('re-downloads every asset when Draft SHA-256 digests are unavailable and rejects same-size byte changes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-byte-compare-'))
+    const volume = join(root, 'volume')
+    const oldAssets = await createDraftAssets(join(root, 'old'), 'A')
+    const currentAssets = await createDraftAssets(join(root, 'current'), 'B')
+    const incoming = join(volume, 'electron', '.incoming', version)
+    await mkdir(join(volume, 'electron', '.incoming'), { recursive: true })
+    await cp(oldAssets, incoming, { recursive: true })
+    const server = startDraftServer(currentAssets)
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+        publisherOptions: { capacityCheck: async () => {} },
+      })).rejects.toThrow('differs byte-for-byte')
+      expect(await readdir(incoming)).toHaveLength(9)
+      await expect(readlink(join(volume, 'electron', 'latest'))).rejects.toThrow()
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('treats post-publish incoming cleanup as best effort after the latest pointer has switched', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-cleanup-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    await mkdir(volume)
+    const server = startDraftServer(assetsDir)
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+        publisherOptions: { capacityCheck: async () => {} },
+        incomingCleanup: async () => { throw new Error('simulated cleanup failure') },
+      })).resolves.toBe('published')
+      expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
+      expect(await readdir(join(volume, 'electron', '.incoming', version))).toHaveLength(9)
     } finally {
       server.stop(true)
       await rm(root, { recursive: true, force: true })

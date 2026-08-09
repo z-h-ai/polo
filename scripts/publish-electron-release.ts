@@ -36,6 +36,7 @@ export const KEEP_RELEASES = 3
 
 const CONTRACT_NAME = 'release-contract.json'
 const LOCK_NAME = '.publisher.lock'
+const ROLLBACK_MARKER_PATTERN = /^\.(rollback|confirmed)-(.+)\.json$/
 
 interface YamlFile {
   url: string
@@ -360,14 +361,40 @@ async function recordRollbackTarget(electronRoot: string, version: string): Prom
   await rename(temporary, marker)
 }
 
-async function cleanOldReleases(releaseRoot: string): Promise<void> {
+async function protectedReleaseVersions(electronRoot: string): Promise<Set<string>> {
+  const protectedVersions = new Set<string>()
+  const latest = await readLatestContract(electronRoot)
+  if (latest) protectedVersions.add(latest.version)
+  for (const entry of await readdir(electronRoot, { withFileTypes: true })) {
+    const marker = entry.name.match(ROLLBACK_MARKER_PATTERN)
+    if (!marker || !entry.isFile()) continue
+    try {
+      const parsed = JSON.parse(await readFile(join(electronRoot, entry.name), 'utf8')) as { previousTarget?: unknown }
+      if (typeof parsed.previousTarget !== 'string') continue
+      const target = parsed.previousTarget.match(/^releases\/(.+)$/)?.[1]
+      if (target && isStrictSemver(target)) protectedVersions.add(target)
+    } catch {
+      // A malformed marker must not cause retention to delete anything.
+      return new Set((await readdir(join(electronRoot, 'releases'), { withFileTypes: true }))
+        .filter((candidate) => candidate.isDirectory() && isStrictSemver(candidate.name))
+        .map((candidate) => candidate.name))
+    }
+  }
+  return protectedVersions
+}
+
+async function cleanOldReleases(electronRoot: string): Promise<void> {
   try {
+    const releaseRoot = join(electronRoot, 'releases')
     const releases = (await readdir(releaseRoot, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
       .map((entry) => entry.name)
       .sort((left, right) => compare(right, left))
+    const protectedVersions = await protectedReleaseVersions(electronRoot)
+    const retained = new Set(releases.slice(0, KEEP_RELEASES))
+    for (const version of protectedVersions) retained.add(version)
     await Promise.all(
-      releases.slice(KEEP_RELEASES).map((version) => rm(join(releaseRoot, version), {
+      releases.filter((version) => !retained.has(version)).map((version) => rm(join(releaseRoot, version), {
         recursive: true,
         force: true,
       })),
@@ -421,7 +448,6 @@ export async function publish(
       await rm(staging, { recursive: true, force: true })
       throw error
     }
-    await cleanOldReleases(releaseRoot)
     return 'published'
   })
 }
@@ -459,7 +485,26 @@ export async function confirmRelease(releasesDir: string, version: string): Prom
     if (!latest || latest.version !== version) {
       throw new Error(`Cannot confirm ${version}: it is not electron/latest`)
     }
-    await rm(join(electronRoot, `.rollback-${version}.json`), { force: true })
+    const rollbackMarker = join(electronRoot, `.rollback-${version}.json`)
+    const confirmedMarker = join(electronRoot, `.confirmed-${version}.json`)
+    try {
+      await rename(rollbackMarker, confirmedMarker)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const confirmed = await lstat(confirmedMarker).catch((confirmedError: NodeJS.ErrnoException) => {
+        if (confirmedError.code === 'ENOENT') return undefined
+        throw confirmedError
+      })
+      if (!confirmed?.isFile()) {
+        throw new Error(`Cannot confirm ${version}: rollback marker is missing`)
+      }
+    }
+    for (const entry of await readdir(electronRoot, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.startsWith('.confirmed-') && entry.name !== `.confirmed-${version}.json`) {
+        await rm(join(electronRoot, entry.name), { force: true })
+      }
+    }
+    await cleanOldReleases(electronRoot)
   })
 }
 
@@ -467,7 +512,13 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
   if (!isStrictSemver(version)) throw new Error('Failed version must be strict SemVer')
   const electronRoot = join(resolve(releasesDir), 'electron')
   await withPublisherLock(electronRoot, async () => {
-    const marker = join(electronRoot, `.rollback-${version}.json`)
+    const rollbackMarker = join(electronRoot, `.rollback-${version}.json`)
+    const confirmedMarker = join(electronRoot, `.confirmed-${version}.json`)
+    const marker = await lstat(rollbackMarker).then(() => rollbackMarker).catch(async (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+      await lstat(confirmedMarker)
+      return confirmedMarker
+    })
     const parsed = JSON.parse(await readFile(marker, 'utf8')) as { previousTarget?: unknown }
     const latest = await readLatestContract(electronRoot)
     if (!latest || latest.version !== version) {
@@ -500,6 +551,25 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
     }
     await rm(marker, { force: true })
   })
+}
+
+export async function assertConfirmedRelease(releasesDir: string, version: string): Promise<void> {
+  if (!isStrictSemver(version)) throw new Error('Confirmed version must be strict SemVer')
+  const electronRoot = join(resolve(releasesDir), 'electron')
+  const latest = await readLatestContract(electronRoot)
+  if (!latest || latest.version !== version) {
+    throw new Error(`Cannot verify ${version}: it is not electron/latest`)
+  }
+  const marker = await lstat(join(electronRoot, `.confirmed-${version}.json`))
+  if (!marker.isFile()) throw new Error(`Cannot verify ${version}: confirmation marker is missing`)
+}
+
+export async function assertNotLatest(releasesDir: string, version: string): Promise<void> {
+  if (!isStrictSemver(version)) throw new Error('Version must be strict SemVer')
+  const latest = await readLatestContract(join(resolve(releasesDir), 'electron'))
+  if (latest?.version === version) {
+    throw new Error(`Rollback verification failed: ${version} is still electron/latest`)
+  }
 }
 
 function required(values: Record<string, string | undefined>, key: string): string {
@@ -553,7 +623,19 @@ async function main(): Promise<void> {
     console.log(`Failed release ${version} rolled back`)
     return
   }
-  throw new Error('Usage: publisher <publish|rollback|confirm|rollback-failed> [options]')
+  if (command === 'assert-confirmed') {
+    const version = required(values, 'version')
+    await assertConfirmedRelease(required(values, 'releases-dir'), version)
+    console.log(`Release ${version} is confirmed`)
+    return
+  }
+  if (command === 'assert-not-latest') {
+    const version = required(values, 'version')
+    await assertNotLatest(required(values, 'releases-dir'), version)
+    console.log(`Release ${version} is no longer electron/latest`)
+    return
+  }
+  throw new Error('Usage: publisher <publish|rollback|confirm|rollback-failed|assert-confirmed|assert-not-latest> [options]')
 }
 
 if (import.meta.main) await main()

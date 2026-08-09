@@ -30,3 +30,58 @@
 ## 遗留问题
 
 Polo Admin 服务本体不在本 worktree；本仓库已提供并实测认证客户端契约：`POST /api/organizations/:organizationId/creator-app-publications` 创建 draft，`POST /api/organizations/:organizationId/creator-app-publications/:appId` 接收最终平台 Bundle 并发布。部署时 Admin 需按该契约持久化最终 Bundle、清理临时原始上传并保留审计记录。
+
+---
+
+# POO-36 Review Round 2 修复报告
+
+## 处理结果
+
+1. Caddy 内部发布状态隔离
+   - Caddy 使用有序 `route`，先拒绝 `.incoming`、隐藏 release staging 目录、publisher lock、rollback/confirmed marker 与 latest 下隐藏路径；避免后续 immutable wildcard 覆盖 deny 规则。
+   - 真实 Caddy 容器测试覆盖这些路径的 GET/HEAD 均非成功，同时保留 POST 405、manifest/contract/installer `no-cache` 和二进制 immutable。
+
+2. 回滚目标保留到确认后
+   - `publish` 不再做 retention 清理。`confirm` 将 rollback marker 原子转为 durable confirmed marker 后才清理，并保护 current latest、前三个版本和所有未完成/已确认 marker 指向的回滚目标。
+   - 新增回归：latest 手动回到最旧保留版本后，下一版本未确认发布失败仍精确回滚；confirmed 状态支持幂等确认和补偿回滚。
+
+3. 工作流最终化 fail closed
+   - public verify 失败、confirm Service Exec 失败或 confirmed pointer 校验失败都会三次重试 Service Exec `rollback-failed`，并调用 `assert-not-latest` 确认 failed version 已不再是 latest。
+   - confirm 成功后必须 `assert-confirmed`；任一最终化失败都使 production job 失败，因此 Draft Release 保持 draft。
+
+4. post-publish incoming 清理
+   - 当前调用创建的 incoming 在发布成功后改为 best-effort 清理；清理异常只给出稳定诊断，不会把已原子切换的 latest 伪装为失败或跳过后续回滚链路。
+   - 测试注入 cleanup failure，验证 pull 仍成功且 latest 保持新版本。
+
+5. existing incoming 逐字节匹配
+   - Draft Release 提供可信 `sha256:` digest 时，existing incoming 必须逐文件匹配；没有 digest 时先下载全部白名单资产到临时目录，再逐字节比较，拒绝同尺寸但 contract、manifest 或二进制内容不同的目录。
+   - existing incoming 的比较过程和发布前都执行容量预检；不匹配的既有目录不会被当前调用删除。
+
+6. 全量门禁稳定性
+   - Caddy 真实容器测试超时上限提升到 60 秒，覆盖冷镜像/冷启动情形；本地单独与完整门禁均已重跑。
+
+## 关键文件
+
+- `infra/updates-static/PoloCaddyfile`
+- `infra/updates-static/PoloCaddyfile.test.ts`
+- `scripts/publish-electron-release.ts`
+- `scripts/publish-electron-release.test.ts`
+- `scripts/polo-release-pull.ts`
+- `scripts/polo-release-pull.test.ts`
+- `.github/workflows/electron-release.yml`
+- `scripts/electron-release-workflow.test.ts`
+
+## 实际测试
+
+- `NO_COLOR=1 bun test scripts/electron-release-contract.test.ts scripts/electron-release-bundle.test.ts scripts/publish-electron-release.test.ts scripts/polo-release-pull.test.ts scripts/electron-release-workflow.test.ts scripts/__tests__/electron-artifact-pipeline.test.ts infra/updates-static/PoloCaddyfile.test.ts`
+  - 通过：49 pass、443 expects、0 fail。
+- `docker run --rm ... caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`
+  - 通过：Caddyfile 配置有效。
+- `NO_COLOR=1 bun run test`
+  - 已重新执行并通过仓库标准完整门禁；Caddy 容器测试使用 60 秒冷启动预算，不再使用此前的 5 秒默认上限。
+- `git diff --check`
+  - 通过。
+
+## 遗留项
+
+- Service Exec 或 Zeabur 平台完全不可达时，工作流只能 fail closed 并保留 Draft；本轮已对可达服务的 rollback/指针确认加三次补偿重试，未绕过任何生产权限或使用真实 token/PVC。

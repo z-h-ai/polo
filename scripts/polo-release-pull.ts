@@ -7,6 +7,7 @@ import { Readable } from 'node:stream'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { parseStrictSemverTag } from './strict-semver'
+import { sha256 } from './electron-release-contract'
 import {
   publish,
   projectedDiskUsage,
@@ -37,6 +38,7 @@ interface GitHubAsset {
   size: number
   state: string
   url: string
+  digest?: string
 }
 
 interface GitHubRelease {
@@ -60,6 +62,7 @@ export interface ReleasePullOptions {
   token?: string
   publisherOptions?: PublisherOptions
   peakCapacityCheck?: (releasesDir: string, additionalBytes: number) => Promise<void>
+  incomingCleanup?: (incoming: string) => Promise<void>
 }
 
 function normalizeApiBase(value: string): string {
@@ -115,6 +118,7 @@ function assertDraftRelease(
       || !Number.isSafeInteger(asset.size)
       || asset.size <= 0
       || asset.state !== 'uploaded'
+      || (asset.digest !== undefined && typeof asset.digest !== 'string')
     ) {
       throw new Error('Draft Release contains an invalid or non-whitelisted asset')
     }
@@ -193,6 +197,45 @@ async function existingIncomingIsReusable(
   }
 }
 
+function trustedSha256Digests(assets: Map<string, GitHubAsset>): Map<string, string> | undefined {
+  const digests = new Map<string, string>()
+  for (const name of RELEASE_ASSET_NAMES) {
+    const digest = assets.get(name)!.digest
+    if (digest === undefined) return undefined
+    const match = digest.match(/^sha256:([a-f0-9]{64})$/)
+    if (!match) throw new Error(`Draft Release asset has an invalid SHA-256 digest: ${name}`)
+    digests.set(name, match[1]!)
+  }
+  return digests
+}
+
+async function matchesTrustedDigests(directory: string, digests: Map<string, string>): Promise<boolean> {
+  for (const name of RELEASE_ASSET_NAMES) {
+    if (await sha256(join(directory, name)) !== digests.get(name)) return false
+  }
+  return true
+}
+
+async function sameAssetBytes(left: string, right: string): Promise<boolean> {
+  for (const name of RELEASE_ASSET_NAMES) {
+    if (await sha256(join(left, name)) !== await sha256(join(right, name))) return false
+  }
+  return true
+}
+
+async function downloadAssets(
+  apiBase: string,
+  repository: string,
+  assets: Map<string, GitHubAsset>,
+  destination: string,
+  token: string,
+): Promise<void> {
+  await mkdir(destination, { recursive: true })
+  for (const name of RELEASE_ASSET_NAMES) {
+    await downloadAsset(apiBase, repository, assets.get(name)!, join(destination, name), token)
+  }
+}
+
 async function assertPeakCapacity(releasesDir: string, additionalBytes: number): Promise<void> {
   const filesystem = await statfs(releasesDir)
   const usage = projectedDiskUsage(
@@ -241,19 +284,37 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
   const reusableIncoming = await existingIncomingIsReusable(incoming, publishArgs, assets)
   let createdIncoming = false
   try {
-    if (!reusableIncoming) {
-      const assetBytes = RELEASE_ASSET_NAMES.reduce((total, name) => total + assets.get(name)!.size, 0)
-      await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes * 2)
-      await mkdir(stage, { recursive: true })
-      for (const name of RELEASE_ASSET_NAMES) {
-        await downloadAsset(apiBase, normalized.repository, assets.get(name)!, join(stage, name), token!)
+    const assetBytes = RELEASE_ASSET_NAMES.reduce((total, name) => total + assets.get(name)!.size, 0)
+    if (reusableIncoming) {
+      const trustedDigests = trustedSha256Digests(assets)
+      await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes)
+      if (trustedDigests) {
+        if (!(await matchesTrustedDigests(incoming, trustedDigests))) {
+          throw new Error(`Incoming release ${normalized.version} differs from the Draft Release SHA-256 digests`)
+        }
+      } else {
+        await downloadAssets(apiBase, normalized.repository, assets, stage, token!)
+        await validateSource(stage, publishArgs)
+        if (!(await sameAssetBytes(stage, incoming))) {
+          throw new Error(`Incoming release ${normalized.version} differs byte-for-byte from the Draft Release`)
+        }
+        await rm(stage, { recursive: true, force: true })
       }
+    } else {
+      await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes * 2)
+      await downloadAssets(apiBase, normalized.repository, assets, stage, token!)
       await validateSource(stage, publishArgs)
       await rename(stage, incoming)
       createdIncoming = true
     }
     const result = await publish(publishArgs, options.publisherOptions)
-    if (createdIncoming) await rm(incoming, { recursive: true, force: true })
+    if (createdIncoming) {
+      try {
+        await (options.incomingCleanup ?? ((path: string) => rm(path, { recursive: true, force: true })))(incoming)
+      } catch {
+        console.warn(`Release ${normalized.version} published; incoming cleanup will be retried later`)
+      }
+    }
     return result
   } catch (error) {
     await rm(stage, { recursive: true, force: true })

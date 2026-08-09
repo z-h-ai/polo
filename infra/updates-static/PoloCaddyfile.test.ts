@@ -18,15 +18,22 @@ describe('updates-static Caddy cache contract', () => {
   it('serves the installer, manifests, and contract as no-cache while binaries are immutable', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-updates-caddy-'))
     const latest = join(root, 'electron', 'latest')
+    const incoming = join(root, 'electron', '.incoming', '1.0.0')
+    const staging = join(root, 'electron', 'releases', '.1.0.0.staging-123')
     const caddyfile = join(process.cwd(), 'infra/updates-static/PoloCaddyfile')
     let containerId = ''
     try {
-      await mkdir(latest, { recursive: true })
+      await Promise.all([mkdir(latest, { recursive: true }), mkdir(incoming, { recursive: true }), mkdir(staging, { recursive: true })])
       await Promise.all([
         writeFile(join(latest, 'install-app.sh'), '#!/bin/sh\n'),
         writeFile(join(latest, 'latest-mac.yml'), 'version: 1.0.0\n'),
         writeFile(join(latest, 'release-contract.json'), '{}\n'),
         writeFile(join(latest, 'Polo-AI-x64.exe'), 'windows installer'),
+        writeFile(join(incoming, 'release-contract.json'), 'private incoming'),
+        writeFile(join(staging, 'Polo-AI-x64.exe'), 'private staging'),
+        writeFile(join(root, 'electron', '.publisher.lock'), 'private lock'),
+        writeFile(join(root, 'electron', '.rollback-1.0.0.json'), 'private rollback'),
+        writeFile(join(root, 'electron', '.confirmed-1.0.0.json'), 'private confirmation'),
       ])
       containerId = await docker([
         'run', '-d', '--rm', '-p', '127.0.0.1::8080',
@@ -54,10 +61,23 @@ describe('updates-static Caddy cache contract', () => {
       }
       const binary = await fetch(`${baseUrl}/Polo-AI-x64.exe`, { method: 'HEAD' })
       expect(binary.headers.get('cache-control')).toContain('public, max-age=31536000, immutable')
+      const serviceRoot = `http://127.0.0.1:${port}`
+      for (const path of [
+        '/electron/.incoming/1.0.0/release-contract.json',
+        '/electron/releases/.1.0.0.staging-123/Polo-AI-x64.exe',
+        '/electron/.publisher.lock',
+        '/electron/.rollback-1.0.0.json',
+        '/electron/.confirmed-1.0.0.json',
+      ]) {
+        for (const method of ['GET', 'HEAD']) {
+          const response = await fetch(`${serviceRoot}${path}`, { method })
+          if (response.ok) throw new Error(`${method} ${path} was publicly served`)
+        }
+      }
       expect((await fetch(`${baseUrl}/install-app.sh`, { method: 'POST' })).status).toBe(405)
     } finally {
       if (containerId) await docker(['rm', '-f', containerId])
       await rm(root, { recursive: true, force: true })
     }
-  }, 20_000)
+  }, 60_000)
 })

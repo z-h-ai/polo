@@ -49,9 +49,11 @@ describe('Electron release workflow boundaries', () => {
 
   it('rolls back failed public verification and confirms success before publishing the Draft Release', () => {
     const verify = release.indexOf('Verify Zeabur updater bundle')
-    const rollback = release.indexOf('Roll back failed public verification')
+    const rollback = release.indexOf('Restore latest after failed public verification')
     const stop = release.indexOf('Stop release after public verification failure')
     const confirm = release.indexOf('Confirm Zeabur release after public verification')
+    const pointer = release.indexOf('Verify confirmed Zeabur pointer')
+    const finalizationRollback = release.indexOf('Restore latest after failed finalization')
     const publish = release.indexOf('publish-release:')
 
     expect(release).toContain("id: public-verify")
@@ -59,11 +61,19 @@ describe('Electron release workflow boundaries', () => {
     expect(release).toContain("if: steps.public-verify.outcome == 'failure'")
     expect(release).toContain('publish-electron-release.ts rollback-failed')
     expect(release).toContain('publish-electron-release.ts confirm')
+    expect(release).toContain('publish-electron-release.ts assert-not-latest')
+    expect(release).toContain('publish-electron-release.ts assert-confirmed')
+    expect(release).toContain('for attempt in $(seq 1 3); do')
+    expect(release).toContain("id: confirm-release")
+    expect(release).toContain("id: confirm-pointer")
+    expect(release).toContain("if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'")
     expect(verify).toBeGreaterThan(0)
     expect(verify).toBeLessThan(rollback)
     expect(rollback).toBeLessThan(stop)
     expect(stop).toBeLessThan(confirm)
-    expect(confirm).toBeLessThan(publish)
+    expect(confirm).toBeLessThan(pointer)
+    expect(pointer).toBeLessThan(finalizationRollback)
+    expect(finalizationRollback).toBeLessThan(publish)
   })
 
   it('builds and verifies both native macOS manual installers', () => {
