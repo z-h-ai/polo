@@ -63,7 +63,10 @@ const serverBuild = await Bun.build({
   plugins: [{
     name: 'markitdown-xlsx-interop',
     setup(builder) {
-      builder.onLoad({ filter: /markitdown-js\/dist\/markitdown\.js$/ }, async ({ path }) => ({
+      // Bun supplies POSIX paths on macOS/Linux and backslash paths on Windows.
+      // Match both so the CJS-to-ESM interop patch is applied in every release
+      // build instead of leaving the Windows bundle with `import XLSX`.
+      builder.onLoad({ filter: /markitdown-js[\\/]dist[\\/]markitdown\.js$/ }, async ({ path }) => ({
         contents: (await Bun.file(path).text()).replace(
           'import XLSX from "xlsx";',
           'import * as XLSX from "xlsx";',

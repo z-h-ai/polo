@@ -21,11 +21,13 @@ export interface MacReleaseSigningObservation {
   stapling: 'valid' | 'invalid'
 }
 
-/** The distributable DMG is a separately signed and stapled release object. */
-export interface MacDmgSigningObservation {
+/**
+ * A DMG is a container rather than a code object: it is notarized and stapled,
+ * while Developer ID identity is verified against the App and nested runtime
+ * after the image is mounted.
+ */
+export interface MacDmgReleaseObservation {
   label: string
-  dmgTeamId: string
-  dmgSignature: 'valid' | 'invalid'
   notarization: 'accepted' | 'rejected'
   stapling: 'valid' | 'invalid'
 }
@@ -112,18 +114,9 @@ export function verifyMacReleaseSigningIdentity(
   }
 }
 
-export function verifyMacDmgSigningIdentity(
-  expected: Pick<MacReleaseSigningIdentity, 'teamId'>,
-  actual: MacDmgSigningObservation,
+export function verifyMacDmgReleaseIntegrity(
+  actual: MacDmgReleaseObservation,
 ): Record<string, unknown> {
-  const teamId = requireValue(expected.teamId, 'macOS Team ID')
-  if (actual.dmgSignature !== 'valid') {
-    throw new Error(`${actual.label} does not have a valid outer DMG signature`)
-  }
-  if (!actual.dmgTeamId) throw new Error(`${actual.label} is ad-hoc or has no Team ID`)
-  if (actual.dmgTeamId !== teamId) {
-    throw new Error(`${actual.label} Team ID mismatch: DMG=${actual.dmgTeamId}`)
-  }
   if (actual.notarization !== 'accepted') {
     throw new Error(`${actual.label} did not pass notarization assessment`)
   }
@@ -135,10 +128,12 @@ export function verifyMacDmgSigningIdentity(
     platform: 'macos',
     artifactKind: 'dmg',
     label: actual.label,
-    expected: { teamId },
+    expected: {
+      notarization: 'accepted',
+      stapling: 'valid',
+      signingIdentity: 'verified-after-mount',
+    },
     actual: {
-      dmgTeamId: actual.dmgTeamId,
-      dmgSignature: actual.dmgSignature,
       notarization: actual.notarization,
       stapling: actual.stapling,
     },
@@ -206,10 +201,8 @@ if (import.meta.main) {
       'actual-app-requirement': { type: 'string', default: '' },
       'actual-uv-team-id': { type: 'string', default: '' },
       'actual-uv-requirement': { type: 'string', default: '' },
-      'actual-dmg-team-id': { type: 'string', default: '' },
       'app-signature': { type: 'string', default: 'invalid' },
       'uv-signature': { type: 'string', default: 'invalid' },
-      'dmg-signature': { type: 'string', default: 'invalid' },
       notarization: { type: 'string', default: 'rejected' },
       stapling: { type: 'string', default: 'invalid' },
       'expected-publisher': { type: 'string', default: '' },
@@ -246,16 +239,11 @@ if (import.meta.main) {
   } else if (command === 'verify-macos-dmg') {
     appendAudit(
       values.output,
-      verifyMacDmgSigningIdentity(
-        { teamId: values['expected-team-id'] },
-        {
-          label,
-          dmgTeamId: values['actual-dmg-team-id'],
-          dmgSignature: values['dmg-signature'] as 'valid' | 'invalid',
-          notarization: values.notarization as 'accepted' | 'rejected',
-          stapling: values.stapling as 'valid' | 'invalid',
-        },
-      ),
+      verifyMacDmgReleaseIntegrity({
+        label,
+        notarization: values.notarization as 'accepted' | 'rejected',
+        stapling: values.stapling as 'valid' | 'invalid',
+      }),
     )
   } else if (command === 'verify-windows') {
     appendAudit(
