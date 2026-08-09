@@ -131,15 +131,12 @@ function Invoke-Uninstaller {
         throw "NSIS uninstall executable is missing: $uninstaller"
     }
     Stop-InstalledPoloApp
-    # electron-builder invokes an existing uninstaller from a temporary copy
-    # and passes `_?=` with the installation root during an upgrade.  Mirror
-    # that supported NSIS path here: executing the in-place binary with a
-    # custom `/D` test location can otherwise fall back to its compiled
-    # default directory and report a false successful uninstall.
-    $uninstallerCopy = Join-Path $testRoot "Polo AI validation uninstaller.exe"
-    Copy-Item -LiteralPath $uninstaller -Destination $uninstallerCopy -Force
-    Invoke-NsisProcess -FilePath $uninstallerCopy `
-        -ArgumentList @("/S", "_?=$installDir") -Label "uninstaller"
+    # A per-user electron-builder uninstall is registered with /currentuser.
+    # The test installer uses a custom /D root, so omitting the switch lets
+    # NSIS choose its normal location and makes its custom cleanup operate on
+    # a different installation. Mirror the registered quiet uninstall path.
+    Invoke-NsisProcess -FilePath $uninstaller `
+        -ArgumentList @("/currentuser", "/S") -Label "uninstaller"
     # NSIS can hand deletion and custom-uninstall work to a short-lived child
     # process.  Waiting only for the launcher controller can therefore race
     # the terminal cleanup and report a false stale-launcher failure.  Wait
