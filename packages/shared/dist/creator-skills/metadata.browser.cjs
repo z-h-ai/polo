@@ -22,14 +22,21 @@ var metadata_exports = {};
 __export(metadata_exports, {
   CANONICAL_SKILL_FILE_MESSAGE: () => CANONICAL_SKILL_FILE_MESSAGE,
   CREATOR_SKILL_DESCRIPTION_MAX_LENGTH: () => CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
+  CREATOR_SKILL_ICON_MAX_LENGTH: () => CREATOR_SKILL_ICON_MAX_LENGTH,
+  CREATOR_SKILL_MAX_METADATA_ITEMS: () => CREATOR_SKILL_MAX_METADATA_ITEMS,
   CREATOR_SKILL_NAME_MAX_LENGTH: () => CREATOR_SKILL_NAME_MAX_LENGTH,
   CREATOR_SKILL_NAME_PATTERN: () => CREATOR_SKILL_NAME_PATTERN,
+  CREATOR_SKILL_ROOT_ERROR_MESSAGE: () => CREATOR_SKILL_ROOT_ERROR_MESSAGE,
   CreatorSkillMetadataError: () => CreatorSkillMetadataError,
   EMPTY_SKILL_CONTENT_MESSAGE: () => EMPTY_SKILL_CONTENT_MESSAGE,
   EMPTY_SKILL_CONTENT_SUGGESTION: () => EMPTY_SKILL_CONTENT_SUGGESTION,
+  INVALID_YAML_FRONTMATTER_MESSAGE: () => INVALID_YAML_FRONTMATTER_MESSAGE,
+  isCreatorSkillEmojiIcon: () => isCreatorSkillEmojiIcon,
   isCreatorSkillPackagingNoise: () => isCreatorSkillPackagingNoise,
   parseCreatorSkillDocument: () => parseCreatorSkillDocument,
-  parseCreatorSkillMetadata: () => parseCreatorSkillMetadata
+  parseCreatorSkillMetadata: () => parseCreatorSkillMetadata,
+  resolveCreatorSkillRoot: () => resolveCreatorSkillRoot,
+  validateCreatorSkillMetadata: () => validateCreatorSkillMetadata
 });
 module.exports = __toCommonJS(metadata_exports);
 
@@ -6247,9 +6254,14 @@ function parseDocument(source, options = {}) {
 var CREATOR_SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 var CREATOR_SKILL_NAME_MAX_LENGTH = 64;
 var CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+var CREATOR_SKILL_MAX_METADATA_ITEMS = 1e3;
+var CREATOR_SKILL_ICON_MAX_LENGTH = 64;
 var CANONICAL_SKILL_FILE_MESSAGE = "Exactly one SKILL.md basename is allowed and it must be at the package root";
 var EMPTY_SKILL_CONTENT_MESSAGE = "Skill content is empty (nothing after frontmatter)";
 var EMPTY_SKILL_CONTENT_SUGGESTION = "Add instructions after the frontmatter describing what the skill should do";
+var CREATOR_SKILL_ROOT_ERROR_MESSAGE = "ZIP must contain exactly one root directory matching the Creator Skill slug";
+var INVALID_YAML_FRONTMATTER_MESSAGE = "SKILL.md frontmatter must contain valid YAML metadata";
+var MAX_YAML_ALIAS_COUNT = 32;
 var CreatorSkillMetadataError = class extends Error {
   issues;
   constructor(message, issues) {
@@ -6287,6 +6299,24 @@ function canonicalSkillFileIssue(rootDirectory) {
     metadataIssue("skill_file_count", `${rootDirectory}/SKILL.md`, CANONICAL_SKILL_FILE_MESSAGE)
   ]);
 }
+function rootIssue() {
+  return new CreatorSkillMetadataError(CREATOR_SKILL_ROOT_ERROR_MESSAGE, [
+    metadataIssue("invalid_skill_root", "", CREATOR_SKILL_ROOT_ERROR_MESSAGE)
+  ]);
+}
+function resolveCreatorSkillRoot(entries, expectedRootDirectory) {
+  const businessEntries = entries.filter((entry) => entry.path.length > 0 && !isCreatorSkillPackagingNoise(entry.path));
+  const roots = /* @__PURE__ */ new Set();
+  for (const entry of businessEntries) {
+    const parts = entry.path.replace(/\/$/, "").split("/").filter(Boolean);
+    if (parts.length < 2) throw rootIssue();
+    roots.add(parts[0]);
+  }
+  if (roots.size !== 1) throw rootIssue();
+  const rootDirectory = [...roots][0];
+  if (expectedRootDirectory !== void 0 && rootDirectory !== expectedRootDirectory) throw rootIssue();
+  return rootDirectory;
+}
 function asRecord(value, path) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
@@ -6312,17 +6342,62 @@ function optionalString(data, field, path) {
       metadataIssue("invalid_skill_content", path, `Creator Skill ${field} must be a non-empty string`, field)
     ]);
   }
-  return value.trim();
+  const normalized = value.trim();
+  if (!isCreatorSkillEmojiIcon(normalized)) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue(
+        "invalid_skill_content",
+        path,
+        "Creator Skill frontmatter icon must be an emoji, not a URL, file path, or decorative text",
+        field
+      )
+    ]);
+  }
+  return normalized;
+}
+function isCreatorSkillEmojiIcon(value) {
+  if (/^https?:\/\//i.test(value) || value.includes("/") || value.includes("\\")) return false;
+  if (value.length > CREATOR_SKILL_ICON_MAX_LENGTH || !/\p{Extended_Pictographic}/u.test(value)) return false;
+  return value.replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\uFE0F\u200D\s]/gu, "").length === 0;
 }
 function optionalStrings(data, field, path) {
   const value = data[field];
   if (value === void 0) return void 0;
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.length === 0)) {
+  if (!Array.isArray(value) || value.length > CREATOR_SKILL_MAX_METADATA_ITEMS || value.some((item) => typeof item !== "string" || item.length === 0)) {
     throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
       metadataIssue("invalid_skill_content", path, `Creator Skill ${field} must be an array of strings`, field)
     ]);
   }
   return value;
+}
+function validateCreatorSkillMetadata(value, path, rootDirectory) {
+  const data = asRecord(value, path);
+  const name = requiredString(data, "name", path);
+  const description = requiredString(data, "description", path);
+  const issues = [];
+  const validName = name.length <= CREATOR_SKILL_NAME_MAX_LENGTH && CREATOR_SKILL_NAME_PATTERN.test(name);
+  if (!validName) {
+    issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill name must use strict kebab-case (for example, polo-test)", "name"));
+  }
+  if (description.length > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
+    issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill description must be at most 1024 characters", "description"));
+  }
+  if (rootDirectory !== void 0 && validName && name !== rootDirectory) {
+    issues.push(metadataIssue("invalid_skill_content", path, `Creator Skill name '${name}' must match root directory '${rootDirectory}'`, "name", `Use 'name: ${rootDirectory}' or rename the root directory`));
+  }
+  if (issues.length > 0) throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", issues);
+  const globs = optionalStrings(data, "globs", path);
+  const alwaysAllow = optionalStrings(data, "alwaysAllow", path);
+  const icon = optionalString(data, "icon", path);
+  const requiredSources = optionalStrings(data, "requiredSources", path);
+  return {
+    name,
+    description,
+    ...globs ? { globs } : {},
+    ...alwaysAllow ? { alwaysAllow } : {},
+    ...icon ? { icon } : {},
+    ...requiredSources ? { requiredSources } : {}
+  };
 }
 function parseCreatorSkillDocument(content, rootDirectory, path = `${rootDirectory}/SKILL.md`) {
   const source = content.replace(/^\uFEFF/, "");
@@ -6340,62 +6415,35 @@ function parseCreatorSkillDocument(content, rootDirectory, path = `${rootDirecto
       metadataIssue("invalid_skill_content", path, "SKILL.md frontmatter must end with a closing delimiter", "frontmatter")
     ]);
   }
-  const document = parseDocument(source.slice(opening[0].length, closing.index), {
-    prettyErrors: false,
-    strict: true,
-    uniqueKeys: true
-  });
-  if (document.errors.length > 0) {
+  let metadata;
+  try {
+    const document = parseDocument(source.slice(opening[0].length, closing.index), {
+      prettyErrors: false,
+      strict: true,
+      uniqueKeys: true
+    });
+    if (document.errors.length > 0) throw new Error("YAML parse error");
+    metadata = validateCreatorSkillMetadata(document.toJS({ maxAliasCount: MAX_YAML_ALIAS_COUNT }), path, rootDirectory);
+  } catch (error) {
+    if (error instanceof CreatorSkillMetadataError) throw error;
     throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
-      metadataIssue("invalid_skill_content", path, `Invalid YAML frontmatter: ${document.errors[0].message}`, "frontmatter")
+      metadataIssue("invalid_skill_content", path, INVALID_YAML_FRONTMATTER_MESSAGE, "frontmatter")
     ]);
   }
-  const data = asRecord(document.toJS(), path);
   const body = source.slice(closing.index + closing[0].length).replace(/^\r?\n/, "");
   if (body.trim().length === 0) {
     throw new CreatorSkillMetadataError("SKILL.md content is empty", [
       metadataIssue("invalid_skill_content", path, EMPTY_SKILL_CONTENT_MESSAGE, "content", EMPTY_SKILL_CONTENT_SUGGESTION)
     ]);
   }
-  const name = requiredString(data, "name", path);
-  const description = requiredString(data, "description", path);
-  const issues = [];
-  const validName = name.length <= CREATOR_SKILL_NAME_MAX_LENGTH && CREATOR_SKILL_NAME_PATTERN.test(name);
-  if (!validName) {
-    issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill name must use strict kebab-case (for example, polo-test)", "name"));
-  }
-  if (description.length > CREATOR_SKILL_DESCRIPTION_MAX_LENGTH) {
-    issues.push(metadataIssue("invalid_skill_content", path, "Creator Skill description must be at most 1024 characters", "description"));
-  }
-  if (validName && name !== rootDirectory) {
-    issues.push(metadataIssue("invalid_skill_content", path, `Creator Skill name '${name}' must match root directory '${rootDirectory}'`, "name", `Use 'name: ${rootDirectory}' or rename the root directory`));
-  }
-  if (issues.length > 0) throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", issues);
-  const globs = optionalStrings(data, "globs", path);
-  const alwaysAllow = optionalStrings(data, "alwaysAllow", path);
-  const icon = optionalString(data, "icon", path);
-  const requiredSources = optionalStrings(data, "requiredSources", path);
   return {
-    metadata: {
-      name,
-      description,
-      ...globs ? { globs } : {},
-      ...alwaysAllow ? { alwaysAllow } : {},
-      ...icon ? { icon } : {},
-      ...requiredSources ? { requiredSources } : {}
-    },
+    metadata,
     body
   };
 }
-function parseCreatorSkillMetadata(entries) {
+function parseCreatorSkillMetadata(entries, expectedRootDirectory) {
   const businessEntries = entries.filter((entry) => entry.path.length > 0 && !isCreatorSkillPackagingNoise(entry.path));
-  const roots = new Set(businessEntries.map((entry) => entry.path.replace(/\/$/, "").split("/")[0]).filter(Boolean));
-  if (roots.size !== 1) {
-    throw new CreatorSkillMetadataError("ZIP must contain exactly one root directory", [
-      metadataIssue("multiple_root_directories", "", "ZIP must contain exactly one root directory")
-    ]);
-  }
-  const rootDirectory = [...roots][0];
+  const rootDirectory = resolveCreatorSkillRoot(businessEntries, expectedRootDirectory);
   const skillEntries = businessEntries.filter((entry) => !entry.directory && entry.path.split("/").at(-1)?.toLocaleLowerCase("en-US") === "skill.md");
   if (skillEntries.length !== 1 || skillEntries[0]?.path !== `${rootDirectory}/SKILL.md`) {
     throw canonicalSkillFileIssue(rootDirectory);

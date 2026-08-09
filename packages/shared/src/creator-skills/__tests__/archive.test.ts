@@ -112,6 +112,17 @@ function browserIssue(entries: Parameters<typeof parseCreatorSkillMetadata>[0]) 
   }
 }
 
+async function archiveRootIssue(archivePath: string): Promise<CreatorSkillArchiveError['issues'][number]> {
+  try {
+    await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+    throw new Error('expected archive validation to fail')
+  } catch (error) {
+    expect(error).toBeInstanceOf(CreatorSkillArchiveError)
+    expect((error as CreatorSkillArchiveError).code).toBe('invalid_skill_archive')
+    return (error as CreatorSkillArchiveError).issues[0]!
+  }
+}
+
 async function archiveIssue(archivePath: string): Promise<CreatorSkillArchiveError['issues'][number]> {
   try {
     await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
@@ -161,18 +172,16 @@ describe('Creator Skill archive validation', () => {
     })
   })
 
-  it('rejects invalid roots and Creator-only remote icons with stable issues', async () => {
+  it('shares root and icon failures with browser metadata validation', async () => {
     await withTemp(async root => {
       const multipleRoots = await writeZip(root, {
         'review-helper/SKILL.md': VALID_SKILL,
         'other/file.txt': 'outside',
       }, 'roots.zip')
-      await expect(validateCreatorSkillArchive({
-        archivePath: multipleRoots,
-        slug: 'review-helper',
-      })).rejects.toMatchObject({
-        code: 'invalid_skill_archive',
-        issues: [{ code: 'root_directory_mismatch', severity: 'error' }],
+      expect(await archiveRootIssue(multipleRoots)).toMatchObject({
+        code: 'invalid_skill_root',
+        path: '',
+        message: 'ZIP must contain exactly one root directory matching the Creator Skill slug',
       })
 
       const remoteIcon = await writeZip(root, {
@@ -186,7 +195,12 @@ describe('Creator Skill archive validation', () => {
         slug: 'review-helper',
       })).rejects.toMatchObject({
         code: 'skill_validation_failed',
-        issues: [{ code: 'invalid_creator_icon', field: 'icon' }],
+        issues: [{
+          code: 'invalid_skill_content',
+          path: 'review-helper/SKILL.md',
+          field: 'icon',
+          message: 'Creator Skill frontmatter icon must be an emoji, not a URL, file path, or decorative text',
+        }],
       })
 
       const decoratedText = await writeZip(root, {
@@ -200,8 +214,52 @@ describe('Creator Skill archive validation', () => {
         slug: 'review-helper',
       })).rejects.toMatchObject({
         code: 'skill_validation_failed',
-        issues: [{ code: 'invalid_creator_icon', field: 'icon' }],
+        issues: [{ code: 'invalid_skill_content', field: 'icon' }],
       })
+
+      const pathIcon = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL.replace(
+          'icon: "🧭"',
+          'icon: "./icon.png"',
+        ),
+      }, 'path-icon.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: pathIcon,
+        slug: 'review-helper',
+      })).rejects.toMatchObject({
+        code: 'skill_validation_failed',
+        issues: [{ code: 'invalid_skill_content', field: 'icon' }],
+      })
+    })
+  })
+
+  it('matches browser root issues for empty, noise-only, wrong-root, and multiple-root ZIPs', async () => {
+    await withTemp(async root => {
+      const cases = [
+        ['empty', {}, []],
+        ['noise-only', { '__MACOSX/._SKILL.md': 'noise' }, [{ path: '__MACOSX/._SKILL.md', content: 'noise' }]],
+        ['wrong-root', { 'other/SKILL.md': VALID_SKILL }, [{ path: 'other/SKILL.md', content: VALID_SKILL }]],
+        [
+          'multiple-root',
+          { 'review-helper/SKILL.md': VALID_SKILL, 'other/README.md': 'second root' },
+          [
+            { path: 'review-helper/SKILL.md', content: VALID_SKILL },
+            { path: 'other/README.md', content: 'second root' },
+          ],
+        ],
+      ] as const
+      for (const [name, entries, browserEntries] of cases) {
+        const archivePath = await writeZip(root, entries, `${name}.zip`)
+        let expected: CreatorSkillMetadataError
+        try {
+          parseCreatorSkillMetadata(browserEntries, 'review-helper')
+          throw new Error('expected browser metadata parsing to fail')
+        } catch (error) {
+          expect(error).toBeInstanceOf(CreatorSkillMetadataError)
+          expected = error as CreatorSkillMetadataError
+        }
+        expect(await archiveRootIssue(archivePath)).toMatchObject(expected.issues[0]!)
+      }
     })
   })
 

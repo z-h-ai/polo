@@ -18,14 +18,8 @@ export declare const SkillValidationIssueSchema: z.ZodObject<{
     message: z.ZodString;
     suggestion: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
-export declare const SkillVersionMetadataSchema: z.ZodObject<{
-    name: z.ZodString;
-    description: z.ZodString;
-    globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    icon: z.ZodOptional<z.ZodString>;
-    requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
-}, z.core.$strip>;
+/** Decodes persisted metadata through the same Creator Skill constraint core. */
+export declare const SkillVersionMetadataSchema: z.ZodPipe<z.ZodUnknown, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata, unknown>>;
 export declare const CreatorArtifactSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     organizationId: z.ZodString;
@@ -147,28 +141,7 @@ export declare const CreatorArtifactDetailVersionSchema: z.ZodObject<{
     validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
     validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
     validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
-    metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-        name: z.ZodString;
-        description: z.ZodString;
-        globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        icon: z.ZodOptional<z.ZodString>;
-        requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    }, z.core.$strip>>>, z.ZodTransform<{
-        name: string;
-        description: string;
-        globs?: string[] | undefined;
-        alwaysAllow?: string[] | undefined;
-        icon?: string | undefined;
-        requiredSources?: string[] | undefined;
-    } | undefined, {
-        name: string;
-        description: string;
-        globs?: string[] | undefined;
-        alwaysAllow?: string[] | undefined;
-        icon?: string | undefined;
-        requiredSources?: string[] | undefined;
-    } | null | undefined>>>;
+    metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodUnknown, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata, unknown>>>>, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata | undefined, import("./metadata.ts").CreatorSkillMetadata | null | undefined>>>;
     validationIssues: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         code: z.ZodString;
         severity: z.ZodEnum<{
@@ -241,28 +214,7 @@ export declare const CreatorArtifactVersionSchema: z.ZodObject<{
     validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
     validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
     validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
-    metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-        name: z.ZodString;
-        description: z.ZodString;
-        globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        icon: z.ZodOptional<z.ZodString>;
-        requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    }, z.core.$strip>>>, z.ZodTransform<{
-        name: string;
-        description: string;
-        globs?: string[] | undefined;
-        alwaysAllow?: string[] | undefined;
-        icon?: string | undefined;
-        requiredSources?: string[] | undefined;
-    } | undefined, {
-        name: string;
-        description: string;
-        globs?: string[] | undefined;
-        alwaysAllow?: string[] | undefined;
-        icon?: string | undefined;
-        requiredSources?: string[] | undefined;
-    } | null | undefined>>>;
+    metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodUnknown, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata, unknown>>>>, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata | undefined, import("./metadata.ts").CreatorSkillMetadata | null | undefined>>>;
     validationIssues: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         code: z.ZodString;
         severity: z.ZodEnum<{
@@ -493,28 +445,7 @@ export declare const CreatorArtifactDetailSchema: z.ZodObject<{
         validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
-        metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-            name: z.ZodString;
-            description: z.ZodString;
-            globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            icon: z.ZodOptional<z.ZodString>;
-            requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        }, z.core.$strip>>>, z.ZodTransform<{
-            name: string;
-            description: string;
-            globs?: string[] | undefined;
-            alwaysAllow?: string[] | undefined;
-            icon?: string | undefined;
-            requiredSources?: string[] | undefined;
-        } | undefined, {
-            name: string;
-            description: string;
-            globs?: string[] | undefined;
-            alwaysAllow?: string[] | undefined;
-            icon?: string | undefined;
-            requiredSources?: string[] | undefined;
-        } | null | undefined>>>;
+        metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodUnknown, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata, unknown>>>>, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata | undefined, import("./metadata.ts").CreatorSkillMetadata | null | undefined>>>;
         validationIssues: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
             code: z.ZodString;
             severity: z.ZodEnum<{
@@ -679,28 +610,7 @@ export declare const CreatorArtifactVersionMutationResponseSchema: z.ZodObject<{
         validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
-        metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-            name: z.ZodString;
-            description: z.ZodString;
-            globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            icon: z.ZodOptional<z.ZodString>;
-            requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        }, z.core.$strip>>>, z.ZodTransform<{
-            name: string;
-            description: string;
-            globs?: string[] | undefined;
-            alwaysAllow?: string[] | undefined;
-            icon?: string | undefined;
-            requiredSources?: string[] | undefined;
-        } | undefined, {
-            name: string;
-            description: string;
-            globs?: string[] | undefined;
-            alwaysAllow?: string[] | undefined;
-            icon?: string | undefined;
-            requiredSources?: string[] | undefined;
-        } | null | undefined>>>;
+        metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodUnknown, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata, unknown>>>>, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata | undefined, import("./metadata.ts").CreatorSkillMetadata | null | undefined>>>;
         validationIssues: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
             code: z.ZodString;
             severity: z.ZodEnum<{
@@ -786,28 +696,7 @@ export declare const CreatorArtifactVersionCreatedResponseSchema: z.ZodObject<{
         validatorVersion: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedArchiveChecksum: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>, z.ZodString>>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
         validatedAt: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodString>>, z.ZodTransform<string | undefined, string | null | undefined>>>;
-        metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-            name: z.ZodString;
-            description: z.ZodString;
-            globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            icon: z.ZodOptional<z.ZodString>;
-            requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        }, z.core.$strip>>>, z.ZodTransform<{
-            name: string;
-            description: string;
-            globs?: string[] | undefined;
-            alwaysAllow?: string[] | undefined;
-            icon?: string | undefined;
-            requiredSources?: string[] | undefined;
-        } | undefined, {
-            name: string;
-            description: string;
-            globs?: string[] | undefined;
-            alwaysAllow?: string[] | undefined;
-            icon?: string | undefined;
-            requiredSources?: string[] | undefined;
-        } | null | undefined>>>;
+        metadata: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodPipe<z.ZodUnknown, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata, unknown>>>>, z.ZodTransform<import("./metadata.ts").CreatorSkillMetadata | undefined, import("./metadata.ts").CreatorSkillMetadata | null | undefined>>>;
         validationIssues: z.ZodOptional<z.ZodPipe<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
             code: z.ZodString;
             severity: z.ZodEnum<{

@@ -25,6 +25,7 @@ import {
   CreatorSkillMetadataError,
   isCreatorSkillPackagingNoise,
   parseCreatorSkillMetadata,
+  resolveCreatorSkillRoot,
 } from './metadata.ts'
 
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
@@ -386,16 +387,20 @@ function inspectArchiveDirectory(
   }
 
   const businessEntries = normalizedEntries.filter(entry => !entry.ignored)
-  const roots = new Set(
-    businessEntries
-      .map(entry => entry.normalizedPath.replace(/\/$/, '').split('/')[0])
-      .filter(Boolean),
-  )
-  if (roots.size !== 1 || !roots.has(slug)) {
+  try {
+    resolveCreatorSkillRoot(businessEntries.map(entry => ({ path: entry.normalizedPath })), slug)
+  } catch (error) {
+    if (!(error instanceof CreatorSkillMetadataError)) throw error
     throw new CreatorSkillArchiveError(
       'invalid_skill_archive',
-      'ZIP must contain exactly one root directory matching the Skill slug',
-      [issue('root_directory_mismatch', '', `Expected the only root directory to be '${slug}'`)],
+      error.message,
+      error.issues.map(metadataIssue => issue(
+        metadataIssue.code,
+        metadataIssue.path,
+        metadataIssue.message,
+        metadataIssue.field,
+        metadataIssue.suggestion,
+      )),
     )
   }
 
@@ -751,14 +756,6 @@ function validatePngIcon(data: Buffer, path: string): void {
   }
 }
 
-function isEmojiIcon(value: string): boolean {
-  if (/^https?:\/\//i.test(value) || value.includes('/') || value.includes('\\')) return false
-  if (value.length > 64 || !/\p{Extended_Pictographic}/u.test(value)) return false
-  return value
-    .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\uFE0F\u200D\s]/gu, '')
-    .length === 0
-}
-
 export function canonicalManifestJson(manifest: CreatorSkillManifestEntry[]): string {
   return JSON.stringify(manifest.map(entry => ({
     path: entry.path,
@@ -981,7 +978,7 @@ export async function validateCreatorSkillArchive(args: {
         ...(archiveEntry.normalizedPath === `${args.slug}/SKILL.md` && skillContent !== undefined
           ? { content: skillContent }
           : {}),
-      })))
+      })), args.slug)
       metadata = parsed.metadata
     } catch (error) {
       if (!(error instanceof CreatorSkillMetadataError)) throw error
@@ -997,19 +994,6 @@ export async function validateCreatorSkillArchive(args: {
         )),
       )
     }
-    if (metadata.icon && !isEmojiIcon(metadata.icon)) {
-      throw new CreatorSkillArchiveError(
-        'skill_validation_failed',
-        'Creator Skill icon must be an emoji',
-        [issue(
-          'invalid_creator_icon',
-          'SKILL.md',
-          'Creator Skill frontmatter icon must be an emoji, not a URL or file path',
-          'icon',
-        )],
-      )
-    }
-
     if (!metadata) {
       throw new CreatorSkillArchiveError(
         'skill_validation_failed',

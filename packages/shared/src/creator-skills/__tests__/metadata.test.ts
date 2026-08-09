@@ -12,9 +12,12 @@ description: Verifies a Creator Skill package.
 Use this Skill.
 `
 
-function issueFor(entries: Parameters<typeof parseCreatorSkillMetadata>[0]) {
+function issueFor(
+  entries: Parameters<typeof parseCreatorSkillMetadata>[0],
+  expectedRootDirectory?: string,
+) {
   try {
-    parseCreatorSkillMetadata(entries)
+    parseCreatorSkillMetadata(entries, expectedRootDirectory)
     throw new Error('expected metadata parsing to fail')
   } catch (error) {
     expect(error).toBeInstanceOf(CreatorSkillMetadataError)
@@ -47,6 +50,61 @@ describe('browser-safe Creator Skill metadata parser', () => {
       { path: 'polo-test/SKILL.md', content: skill },
       { path: 'other/SKILL.md', content: skill },
     ])).toThrow(CreatorSkillMetadataError)
+  })
+
+  it('returns one root issue for empty, noise-only, wrong-root, and multiple-root ZIPs', () => {
+    const expected = {
+      code: 'invalid_skill_root',
+      path: '',
+      message: 'ZIP must contain exactly one root directory matching the Creator Skill slug',
+    } as const
+    for (const entries of [
+      [],
+      [{ path: '__MACOSX/._SKILL.md', content: 'noise' }],
+      [{ path: 'other/SKILL.md', content: skill }],
+      [
+        { path: 'polo-test/SKILL.md', content: skill },
+        { path: 'other/README.md', content: 'second root' },
+      ],
+    ]) {
+      expect(issueFor(entries, 'polo-test')).toEqual(expected)
+    }
+  })
+
+  it('bounds YAML aliases and normalizes parser/materialization failures', () => {
+    const aliasExpansion = `---
+name: polo-test
+description: Verifies a Creator Skill package.
+seed: &seed [one, two]
+repeated: [${Array(80).fill('*seed').join(', ')}]
+---
+
+Use this Skill.
+`
+    const malformedAlias = skill.replace('description: Verifies a Creator Skill package.', 'description: test\nvalue: *missing')
+    const expected = {
+      code: 'invalid_skill_content',
+      path: 'polo-test/SKILL.md',
+      field: 'frontmatter',
+      message: 'SKILL.md frontmatter must contain valid YAML metadata',
+    } as const
+    expect(issueFor([{ path: 'polo-test/SKILL.md', content: aliasExpansion }])).toEqual(expected)
+    expect(issueFor([{ path: 'polo-test/SKILL.md', content: malformedAlias }])).toEqual(expected)
+  })
+
+  it('applies the shared emoji-only icon rule', () => {
+    const expected = {
+      code: 'invalid_skill_content',
+      path: 'polo-test/SKILL.md',
+      field: 'icon',
+      message: 'Creator Skill frontmatter icon must be an emoji, not a URL, file path, or decorative text',
+    } as const
+    for (const icon of ['https://example.test/icon.png', './icon.png', 'Review 🧭']) {
+      expect(issueFor([{
+        path: 'polo-test/SKILL.md',
+        content: skill.replace('---\n\nUse', `icon: ${JSON.stringify(icon)}\n---\n\nUse`),
+      }])).toEqual(expected)
+    }
   })
 
   it('accepts folded YAML, nested metadata, and inline comments', () => {

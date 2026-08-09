@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isStrictSemVer } from '../src/admin/semver.ts'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, '..')
@@ -21,16 +22,15 @@ async function readJson(path: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
 }
 
-function isSemver(value: unknown): value is string {
-  return typeof value === 'string'
-    && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value)
-}
-
 async function main(): Promise<void> {
   const developmentManifest = await readJson(join(packageRoot, 'package.json')) as PackageManifest
   const publishManifest = await readJson(join(packageRoot, 'package.publish.json')) as PackageManifest
 
-  if (publishManifest.name !== '@z-h-ai/shared' || !isSemver(publishManifest.version)) {
+  if (
+    publishManifest.name !== '@z-h-ai/shared'
+    || typeof publishManifest.version !== 'string'
+    || !isStrictSemVer(publishManifest.version)
+  ) {
     throw new Error('publish manifest must target @z-h-ai/shared with a valid SemVer version')
   }
   if (publishManifest.private !== undefined) {

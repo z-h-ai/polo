@@ -97,5 +97,37 @@ description: Valid.
         suggestion: 'Add instructions after the frontmatter describing what the skill should do',
       }],
     })
+    for (const icon of ['https://example.test/icon.png', './icon.png', 'Review 🧭']) {
+      expect(validateCreatorSkillContent(`---
+name: foo-bar
+description: Valid.
+icon: ${JSON.stringify(icon)}
+---
+
+Do the work.
+`, 'foo-bar')).toMatchObject({
+        valid: false,
+        errors: [{
+          code: 'invalid_skill_content',
+          path: 'icon',
+          message: 'Creator Skill frontmatter icon must be an emoji, not a URL, file path, or decorative text',
+        }],
+      })
+    }
+    expect(validateCreatorSkillContent(`---
+name: foo-bar
+description: test
+value: *missing
+---
+
+Do the work.
+`, 'foo-bar')).toMatchObject({
+      valid: false,
+      errors: [{
+        code: 'invalid_skill_content',
+        path: 'frontmatter',
+        message: 'SKILL.md frontmatter must contain valid YAML metadata',
+      }],
+    })
   })
 })

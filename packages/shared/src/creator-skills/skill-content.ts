@@ -1,9 +1,6 @@
 import matter from 'gray-matter'
 import { z } from 'zod'
 import {
-  CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
-  CREATOR_SKILL_NAME_MAX_LENGTH,
-  CREATOR_SKILL_NAME_PATTERN,
   CreatorSkillMetadataError,
   parseCreatorSkillDocument,
 } from './metadata.ts'
@@ -50,22 +47,6 @@ export const PortableSkillMetadataSchema = z.object({
   alwaysAllow: z.array(z.string()).optional(),
   icon: z.string().trim().min(1).optional(),
   requiredSources: z.array(z.string()).optional(),
-}).passthrough()
-
-/**
- * The published Creator Skill contract deliberately treats `name` as the
- * stable package identifier, rather than a display label. Local skills keep
- * using PortableSkillMetadataSchema for backwards compatibility.
- */
-export const CreatorSkillMetadataSchema = PortableSkillMetadataSchema.extend({
-  name: z.string().trim().min(1).max(CREATOR_SKILL_NAME_MAX_LENGTH).regex(
-    CREATOR_SKILL_NAME_PATTERN,
-    'Creator Skill name must use strict kebab-case (for example, polo-test)',
-  ),
-  description: z.string().trim().min(1).max(
-    CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
-    'Creator Skill description must be at most 1024 characters',
-  ),
 }).passthrough()
 
 export function isValidSkillSlug(slug: string): boolean {

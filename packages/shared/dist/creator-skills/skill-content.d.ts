@@ -33,19 +33,6 @@ export declare const PortableSkillMetadataSchema: z.ZodObject<{
     icon: z.ZodOptional<z.ZodString>;
     requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$loose>;
-/**
- * The published Creator Skill contract deliberately treats `name` as the
- * stable package identifier, rather than a display label. Local skills keep
- * using PortableSkillMetadataSchema for backwards compatibility.
- */
-export declare const CreatorSkillMetadataSchema: z.ZodObject<{
-    globs: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    alwaysAllow: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    icon: z.ZodOptional<z.ZodString>;
-    requiredSources: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    name: z.ZodString;
-    description: z.ZodString;
-}, z.core.$loose>;
 export declare function isValidSkillSlug(slug: string): boolean;
 export declare function isValidCreatorSkillSlug(slug: string): boolean;
 export declare function suggestSkillSlug(slug: string): string;

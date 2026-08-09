@@ -13,6 +13,7 @@ import {
   CreatorSkillUninstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
   SkillArchivePolicySchema,
+  SkillVersionMetadataSchema,
   StableSemverSchema,
 } from '../schemas'
 import { HARD_SKILL_ARCHIVE_POLICY } from '../types'
@@ -243,6 +244,22 @@ describe('Creator Skill boundary schemas', () => {
       ...HARD_SKILL_ARCHIVE_POLICY,
       maxArchiveBytes: HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes + 1,
     }).success).toBe(false)
+  })
+
+  it('decodes persisted Creator metadata through the shared document constraints', () => {
+    expect(SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: 'Reviews changes.',
+      icon: '🧭',
+      unknownNestedMetadata: { allowed: true },
+    })).toMatchObject({ success: true })
+    for (const metadata of [
+      { name: 'review-helper', description: 'Reviews changes.', icon: 'https://example.test/icon.png' },
+      { name: 'review-helper', description: 42 },
+      { name: 'Review Helper', description: 'Reviews changes.' },
+    ]) {
+      expect(SkillVersionMetadataSchema.safeParse(metadata).success).toBe(false)
+    }
   })
 
   it('accepts a SKILL.md up to the archive hard byte limit', () => {
