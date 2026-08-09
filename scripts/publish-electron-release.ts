@@ -371,6 +371,18 @@ function compensationHistoryPath(electronRoot: string, version: string): string 
   return join(electronRoot, `.compensated-history-${version}.json`)
 }
 
+async function liveRollbackMarker(electronRoot: string, version: string): Promise<string | undefined> {
+  for (const state of ['rollback', 'confirmed'] as const) {
+    const marker = markerPath(electronRoot, state, version)
+    const existing = await lstat(marker).then(() => marker).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (existing) return existing
+  }
+  return undefined
+}
+
 async function readRollbackTarget(marker: string, version: string): Promise<RollbackTarget> {
   const parsed = JSON.parse(await readFile(marker, 'utf8')) as { previousTarget?: unknown }
   if (parsed.previousTarget !== null && typeof parsed.previousTarget !== 'string') {
@@ -762,17 +774,6 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
     const latest = await readLatestContract(electronRoot)
     const compensatedMarker = markerPath(electronRoot, 'compensated', version)
     const historyMarker = compensationHistoryPath(electronRoot, version)
-    const history = await lstat(historyMarker).then(() => historyMarker).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined
-      throw error
-    })
-    if (history) {
-      // Completed compensation is immutable audit history, not an active
-      // promise about today's latest pointer. A later manual rollback or
-      // publish therefore records its actual current predecessor afresh.
-      await readArchivedCompensationTarget(history, version)
-      return
-    }
     const compensated = await lstat(compensatedMarker).then(() => compensatedMarker).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined
       throw error
@@ -785,12 +786,23 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
       return
     }
 
-    const rollbackMarker = markerPath(electronRoot, 'rollback', version)
-    const confirmedMarker = markerPath(electronRoot, 'confirmed', version)
-    const marker = await lstat(rollbackMarker).then(() => rollbackMarker).catch(async (error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT') throw error
-      return lstat(confirmedMarker).then(() => confirmedMarker)
-    })
+    // A retry writes a new live rollback/confirmed marker for this version.
+    // It must take precedence over an older archival compensation record.
+    const marker = await liveRollbackMarker(electronRoot, version)
+    if (!marker) {
+      const history = await lstat(historyMarker).then(() => historyMarker).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (history) {
+        // Completed compensation is immutable audit history, not an active
+        // promise about today's latest pointer. A later manual rollback or
+        // publish therefore records its actual current predecessor afresh.
+        await readArchivedCompensationTarget(history, version)
+        return
+      }
+      throw new Error(`Cannot compensate ${version}: rollback marker is missing`)
+    }
     const target = await readRollbackTarget(marker, version)
     if (!latest || latest.version !== version) {
       throw new Error(`Cannot compensate ${version}: electron/latest changed before rollback`)
@@ -939,6 +951,13 @@ export async function assertRollbackTarget(releasesDir: string, version: string)
     })
     if (activeMarker) {
       await assertLatestMatchesRollbackTarget(electronRoot, version, await readRollbackTarget(activeMarker, version))
+      return
+    }
+    // A newly retried publish creates a live marker for the same version;
+    // never let older archival history make that marker look already restored.
+    const liveMarker = await liveRollbackMarker(electronRoot, version)
+    if (liveMarker) {
+      await assertLatestMatchesRollbackTarget(electronRoot, version, await readRollbackTarget(liveMarker, version))
       return
     }
     // A history marker is written only after the exact assertion under the

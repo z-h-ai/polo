@@ -310,6 +310,35 @@ describe('release publisher filesystem behavior', () => {
     }
   })
 
+  it('prefers a live same-version retry marker over archived compensation and restores its exact predecessor', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+
+      await publish(second.args, testPublisherOptions)
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+
+      // The immutable directory is retried with a new live rollback marker.
+      // Its predecessor must win over the old compensation archive, before
+      // and after production confirmation changes it to .confirmed.
+      expect(await publish(second.args, testPublisherOptions)).toBe('idempotent')
+      await expect(assertRollbackTarget(first.volume, '1.1.0')).rejects.toThrow('not its exact predecessor')
+      await confirmRelease(first.volume, '1.1.0')
+      await expect(assertRollbackTarget(first.volume, '1.1.0')).rejects.toThrow('not its exact predecessor')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
   it('resumes a confirmed identical retry without overwriting its original rollback predecessor', async () => {
     const first = await createFixture('1.0.0')
     const second = await createFixture('1.1.0')
