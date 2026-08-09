@@ -168,6 +168,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $appRoot = Join-Path $resourcesRoot "app"
     $bun = Join-Path $resourcesRoot "vendor\bun\bun.exe"
     $launcher = Join-Path $testLocalAppData "Polo AI\bin\polo.cmd"
+    $terminalState = Join-Path $testLocalAppData "Polo AI\bin\terminal-integration.json"
     $manifestPath = Join-Path $appRoot "dist\cli\artifact-manifest.json"
     $metadataPath = Join-Path $appRoot "dist\cli\package.json"
     $cliPath = Join-Path $appRoot "dist\cli\polo-cli.js"
@@ -182,6 +183,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     foreach ($required in @(
         $bun,
         $launcher,
+        $terminalState,
         $wrapperMessages,
         $manifestPath,
         $metadataPath,
@@ -806,6 +808,9 @@ try {
         Invoke-Uninstaller
         if (Test-Path -LiteralPath (Join-Path $testLocalAppData "Polo AI\bin\polo.cmd")) {
             throw "NSIS uninstall left the managed Polo launcher behind"
+        }
+        if (Test-Path -LiteralPath (Join-Path $testLocalAppData "Polo AI\bin\terminal-integration.json")) {
+            throw "NSIS uninstall left the managed Polo ownership state behind"
         }
     }
     Write-Host "Final Windows artifact validation passed ($Mode)"

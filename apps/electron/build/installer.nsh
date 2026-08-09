@@ -1,7 +1,14 @@
 !macro customInstall
   DetailPrint "Installing Polo terminal command..."
-  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Install -InstallDir "$INSTDIR"'
+  ; Pass the inherited environment value explicitly. NSIS's $LOCALAPPDATA
+  ; shell variable may resolve a known-folder value in a child process rather
+  ; than the environment inherited by a per-user installer (notably in tests).
+  ; Install and uninstall must therefore target the exact same managed bin.
+  Push $R1
+  ReadEnvStr $R1 "LOCALAPPDATA"
+  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Install -InstallDir "$INSTDIR" -BinDir "$R1\Polo AI\bin"'
   Pop $0
+  Pop $R1
   ${If} $0 != 0
     ; A silent installer has no user who can dismiss a MessageBox. Returning a
     ; non-zero exit code makes CI and updater callers fail closed instead of
@@ -18,8 +25,11 @@ polo_terminal_setup_finished:
 
 !macro customUnInstall
   DetailPrint "Removing Polo terminal command..."
-  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Uninstall -InstallDir "$INSTDIR"'
+  Push $R1
+  ReadEnvStr $R1 "LOCALAPPDATA"
+  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Uninstall -InstallDir "$INSTDIR" -BinDir "$R1\Polo AI\bin"'
   Pop $0
+  Pop $R1
   ${If} $0 != 0
     ; The terminal command is outside $INSTDIR.  Continuing after its guarded
     ; cleanup fails would claim a successful uninstall while leaving a managed
