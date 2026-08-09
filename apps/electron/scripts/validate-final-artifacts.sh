@@ -39,11 +39,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "$MODE" != "smoke" ] && [ "$MODE" != "full" ] && [ "$MODE" != "bootstrap" ]; then
-  echo "Mode must be smoke, bootstrap, or full" >&2
+if [ "$MODE" != "smoke" ] && [ "$MODE" != "signing" ] && [ "$MODE" != "full" ] && [ "$MODE" != "bootstrap" ]; then
+  echo "Mode must be smoke, signing, bootstrap, or full" >&2
   exit 2
 fi
-if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
+if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ] || [ "$MODE" = "signing" ]; then
   for lifecycle_script in "$INSTALL_SCRIPT" "$UNINSTALL_SCRIPT"; do
     if [ ! -f "$lifecycle_script" ]; then
       echo "Release validation requires lifecycle script: $lifecycle_script" >&2
@@ -80,9 +80,9 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
 fi
 
 SIGNING_AUDIT_FILE="${POLO_AI_RELEASE_SIGNING_AUDIT_FILE:-$RELEASE_DIR/release-signing-audit-${SYSTEM_NAME}.jsonl}"
-if { [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; } && [ "$SYSTEM_NAME" = "Darwin" ]; then
+if { [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ] || [ "$MODE" = "signing" ]; } && [ "$SYSTEM_NAME" = "Darwin" ]; then
   : > "$SIGNING_AUDIT_FILE"
-  echo "release-signing-contract platform=macos mode=full team_id=$MACOS_TEAM_ID audit=$SIGNING_AUDIT_FILE"
+  echo "release-signing-contract platform=macos mode=$MODE team_id=$MACOS_TEAM_ID audit=$SIGNING_AUDIT_FILE"
 elif [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
   echo "release-signing-contract platform=$SYSTEM_NAME mode=full signing=not-applicable"
 else

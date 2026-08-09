@@ -310,7 +310,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -f draft=false >/dev/null
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -F draft=false >/dev/null
       - name: Verify GitHub Release publication
         id: github-publish-state
         if: steps.github-publish.outcome == 'success'
@@ -379,7 +379,7 @@ jobs:
             --tag "$GITHUB_REF_NAME" \
             --commit "$GITHUB_SHA" \
             --draft either
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -f draft=true >/dev/null
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -F draft=true >/dev/null
           gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/restored-approved-release.json
           bun scripts/electron-release-draft-identity.ts assert \
             --github-release /tmp/restored-approved-release.json \

@@ -37,6 +37,7 @@ export const KEEP_RELEASES = 3
 const CONTRACT_NAME = 'release-contract.json'
 const LOCK_NAME = '.publisher.lock'
 const ROLLBACK_MARKER_PATTERN = /^\.(rollback|confirmed|compensated)-(.+)\.json$/
+const FINALIZED_MARKER_PATTERN = /^\.finalized-(.+)\.json$/
 
 interface YamlFile {
   url: string
@@ -78,6 +79,14 @@ export interface FinalizeOptions {
   retentionCleanup?: (electronRoot: string, ignoredMarkers: ReadonlySet<string>) => Promise<void>
   /** Test seam for proving stale-marker removal is reported, rather than hidden. */
   markerCleanup?: (marker: string) => Promise<void>
+}
+
+interface FinalizedInventory {
+  schemaVersion: 1
+  version: string
+  latestTarget: string
+  sourceReleaseCount: number
+  expectedVersions: string[]
 }
 
 function validateBasename(name: string, label: string): void {
@@ -354,6 +363,10 @@ function markerPath(electronRoot: string, state: 'rollback' | 'confirmed' | 'com
   return join(electronRoot, `.${state}-${version}.json`)
 }
 
+function finalizedMarkerPath(electronRoot: string, version: string): string {
+  return join(electronRoot, `.finalized-${version}.json`)
+}
+
 async function readRollbackTarget(marker: string, version: string): Promise<RollbackTarget> {
   const parsed = JSON.parse(await readFile(marker, 'utf8')) as { previousTarget?: unknown }
   if (parsed.previousTarget !== null && typeof parsed.previousTarget !== 'string') {
@@ -416,6 +429,31 @@ async function recordRollbackTarget(electronRoot: string, version: string): Prom
   await rename(temporary, marker)
 }
 
+async function retireObsoleteCompensatedMarkers(
+  electronRoot: string,
+  activeVersion: string,
+): Promise<void> {
+  for (const entry of await readdir(electronRoot, { withFileTypes: true })) {
+    const match = entry.name.match(/^\.compensated-(.+)\.json$/)
+    if (!entry.isFile() || !match || match[1] === activeVersion) continue
+    const failedVersion = match[1]
+    if (!isStrictSemver(failedVersion)) {
+      throw new Error(`Cannot retire malformed compensated marker: ${entry.name}`)
+    }
+    // A completed compensation remains authoritative only until a later
+    // publish records its own predecessor. Under the same publisher lock,
+    // require the old marker to describe the current pointer before removing
+    // it; a changed/manual pointer is never silently erased as "obsolete".
+    const path = join(electronRoot, entry.name)
+    await assertLatestMatchesRollbackTarget(
+      electronRoot,
+      failedVersion,
+      await readRollbackTarget(path, failedVersion),
+    )
+    await rm(path, { force: true })
+  }
+}
+
 async function protectedReleaseVersions(
   electronRoot: string,
   ignoredMarkers: ReadonlySet<string> = new Set(),
@@ -466,12 +504,13 @@ async function publishedReleaseVersions(electronRoot: string): Promise<string[]>
   return (await readdir(join(electronRoot, 'releases'), { withFileTypes: true }))
     .filter(entry => entry.isDirectory() && isStrictSemver(entry.name))
     .map(entry => entry.name)
+    .sort((left, right) => compare(left, right))
 }
 
 async function assertSafeInventory(
   electronRoot: string,
   version: string,
-  expectedCount?: number,
+  expectedVersions?: readonly string[],
 ): Promise<void> {
   const latest = await readLatestContract(electronRoot)
   if (!latest || latest.version !== version) {
@@ -484,8 +523,98 @@ async function assertSafeInventory(
   if (releases.length > KEEP_RELEASES) {
     throw new Error(`Cannot verify finalization of ${version}: expected at most ${KEEP_RELEASES} releases, found ${releases.length}`)
   }
-  if (expectedCount !== undefined && releases.length !== expectedCount) {
-    throw new Error(`Cannot verify finalization of ${version}: expected exactly ${expectedCount} safe releases, found ${releases.length}`)
+  if (expectedVersions !== undefined && JSON.stringify(releases) !== JSON.stringify(expectedVersions)) {
+    throw new Error(
+      `Cannot verify finalization of ${version}: release inventory differs from the finalized set; `
+      + `expected=[${expectedVersions.join(', ')}] actual=[${releases.join(', ')}]`,
+    )
+  }
+}
+
+function parseFinalizedInventory(value: unknown, version: string): FinalizedInventory {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Finalization marker for ${version} is invalid`)
+  }
+  const marker = value as Partial<FinalizedInventory>
+  if (
+    marker.schemaVersion !== 1
+    || marker.version !== version
+    || marker.latestTarget !== `releases/${version}`
+    || !Number.isSafeInteger(marker.sourceReleaseCount)
+    || marker.sourceReleaseCount < 1
+    || !Array.isArray(marker.expectedVersions)
+  ) {
+    throw new Error(`Finalization marker for ${version} is invalid`)
+  }
+  const expectedVersions = [...marker.expectedVersions]
+  if (
+    expectedVersions.length !== Math.min(KEEP_RELEASES, marker.sourceReleaseCount)
+    || new Set(expectedVersions).size !== expectedVersions.length
+    || expectedVersions.some(candidate => !isStrictSemver(candidate))
+    || JSON.stringify(expectedVersions) !== JSON.stringify([...expectedVersions].sort((left, right) => compare(left, right)))
+    || !expectedVersions.includes(version)
+  ) {
+    throw new Error(`Finalization marker for ${version} has an invalid retained SemVer set`)
+  }
+  // Bootstrap and other genuinely short histories retain every available
+  // release; histories with three or more inputs retain exactly three.
+  if (marker.sourceReleaseCount < KEEP_RELEASES && expectedVersions.length !== marker.sourceReleaseCount) {
+    throw new Error(`Finalization marker for ${version} violates the bootstrap fewer-than-three rule`)
+  }
+  return {
+    schemaVersion: 1,
+    version,
+    latestTarget: marker.latestTarget,
+    sourceReleaseCount: marker.sourceReleaseCount,
+    expectedVersions,
+  }
+}
+
+async function readFinalizedInventory(electronRoot: string, version: string): Promise<FinalizedInventory> {
+  const marker = finalizedMarkerPath(electronRoot, version)
+  const stats = await lstat(marker)
+  if (!stats.isFile()) throw new Error(`Finalization marker for ${version} is not a regular file`)
+  return parseFinalizedInventory(JSON.parse(await readFile(marker, 'utf8')), version)
+}
+
+async function writeFinalizedInventory(
+  electronRoot: string,
+  version: string,
+  sourceReleaseCount: number,
+  expectedVersions: string[],
+): Promise<void> {
+  const marker = finalizedMarkerPath(electronRoot, version)
+  const expected = parseFinalizedInventory({
+    schemaVersion: 1,
+    version,
+    latestTarget: `releases/${version}`,
+    sourceReleaseCount,
+    expectedVersions,
+  }, version)
+  const existing = await lstat(marker).then(() => true).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return false
+    throw error
+  })
+  if (existing) {
+    if (JSON.stringify(await readFinalizedInventory(electronRoot, version)) !== JSON.stringify(expected)) {
+      throw new Error(`Finalization marker for ${version} conflicts with the retained inventory`)
+    }
+    return
+  }
+  const temporary = `${marker}.${process.pid}.tmp`
+  await writeFile(temporary, `${JSON.stringify(expected)}\n`)
+  await rename(temporary, marker)
+}
+
+async function retireObsoleteFinalizationMarkers(electronRoot: string, activeVersion: string): Promise<void> {
+  for (const entry of await readdir(electronRoot, { withFileTypes: true })) {
+    const match = entry.name.match(FINALIZED_MARKER_PATTERN)
+    if (!entry.isFile() || !match || match[1] === activeVersion) continue
+    if (!isStrictSemver(match[1])) throw new Error(`Cannot retire malformed finalization marker: ${entry.name}`)
+    // Parse before deletion so a corrupt durable record fails closed instead
+    // of being mistaken for disposable history.
+    await readFinalizedInventory(electronRoot, match[1])
+    await rm(join(electronRoot, entry.name), { force: true })
   }
 }
 
@@ -537,6 +666,7 @@ export async function publish(
         await assertLatestMatchesRollbackTarget(electronRoot, args.version, await readRollbackTarget(compensated, args.version))
         await rm(compensated)
       }
+      await retireObsoleteCompensatedMarkers(electronRoot, args.version)
       await recordRollbackTarget(electronRoot, args.version)
       await switchLatest(electronRoot, destination)
       return 'idempotent'
@@ -550,6 +680,7 @@ export async function publish(
     try {
       await cp(source, staging, { recursive: true, errorOnExist: true, force: false })
       await rename(staging, destination)
+      await retireObsoleteCompensatedMarkers(electronRoot, args.version)
       await recordRollbackTarget(electronRoot, args.version)
       await switchLatest(electronRoot, destination)
     } catch (error) {
@@ -703,9 +834,19 @@ export async function finalizeRelease(
     // disk. If cleanup fails, the marker still preserves the exact rollback
     // predecessor and a later finalize can retry safely.
     const ignoredMarkers = new Set([confirmedMarkerName])
-    const expectedInventoryCount = Math.min(KEEP_RELEASES, (await publishedReleaseVersions(electronRoot)).length)
+    const sourceReleaseCount = (await publishedReleaseVersions(electronRoot)).length
     await (options.retentionCleanup ?? cleanOldReleases)(electronRoot, ignoredMarkers)
-    await assertSafeInventory(electronRoot, version, expectedInventoryCount)
+    const expectedVersions = await publishedReleaseVersions(electronRoot)
+    await assertSafeInventory(electronRoot, version)
+    if (expectedVersions.length !== Math.min(KEEP_RELEASES, sourceReleaseCount)) {
+      throw new Error(
+        `Cannot finalize ${version}: expected exactly ${Math.min(KEEP_RELEASES, sourceReleaseCount)} retained releases, found ${expectedVersions.length}`,
+      )
+    }
+    // Finalized inventory is durable before confirmation cleanup: a retry can
+    // prove the complete SemVer set even if Service Exec loses its response.
+    await writeFinalizedInventory(electronRoot, version, sourceReleaseCount, expectedVersions)
+    await retireObsoleteFinalizationMarkers(electronRoot, version)
     await (options.markerCleanup ?? (async marker => rm(marker, { force: true })))(confirmedMarker)
     const remaining = await lstat(confirmedMarker).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined
@@ -742,7 +883,18 @@ async function assertFinalizedLocked(electronRoot: string, version: string): Pro
   if (staleMarkers.length > 0) {
     throw new Error(`Cannot verify finalization of ${version}: stale rollback markers remain: ${staleMarkers.join(', ')}`)
   }
-  await assertSafeInventory(electronRoot, version)
+  const finalizedMarkers = entries
+    .filter(entry => entry.isFile() && FINALIZED_MARKER_PATTERN.test(entry.name))
+    .map(entry => entry.name)
+  const expectedMarker = `.finalized-${version}.json`
+  if (finalizedMarkers.length !== 1 || finalizedMarkers[0] !== expectedMarker) {
+    throw new Error(`Cannot verify finalization of ${version}: stale or missing finalization marker`)
+  }
+  const finalized = await readFinalizedInventory(electronRoot, version)
+  if (await readlink(join(electronRoot, 'latest')) !== finalized.latestTarget) {
+    throw new Error(`Cannot verify finalization of ${version}: electron/latest differs from finalized pointer`)
+  }
+  await assertSafeInventory(electronRoot, version, finalized.expectedVersions)
 }
 
 export async function assertNotLatest(releasesDir: string, version: string): Promise<void> {

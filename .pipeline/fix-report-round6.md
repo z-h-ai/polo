@@ -1,30 +1,30 @@
-# POO-29 第 6 轮结果报告
+# POO-36 Round 6 修复报告
 
-## 阻塞结论
+## 处理结果
 
-本 worktree 仅包含 Electron 客户端、共享库与本机 server-core；不包含 Polo Admin 的组织级数据库、Catalog 写入 handler、对象存储或其部署配置。
+1. GitHub Draft 的两处最终 PATCH 已改为 `gh api -F draft=false/true`，保证向 GitHub API 传递 JSON boolean。工作流结构测试捕获两条 PATCH 请求，继续要求同一 `DRAFT_RELEASE_ID`，并保留 approved identity 重验。
+2. 定义 compensated marker 生命周期：新版本发布会在 publisher 锁内确认旧 `.compensated-<version>` 的 predecessor 仍精确指向当前 latest 后才移除；随后记录当前版本自己的 rollback predecessor。已补回归：补偿过的 1.1.0 不会阻塞 1.2.0 confirm/finalize。
+3. 成功最终化会在删除 `.confirmed-<version>` 前原子写入 `.finalized-<version>.json`，持久化完整 retained SemVer 集合、source release count 和 exact latest target。`assert-finalized` 在锁内要求唯一当前 finalized marker、精确 latest pointer 和磁盘目录集合逐项一致；不足三版本时明确要求保留所有可用版本。
+4. Apple Silicon 构建新增 `signing` 验证模式：不参加 updater manifest/前序升级生命周期，但严格执行 Developer ID、notarization、stapling、App/uv identity 校验，并要求 DMG/ZIP 两条 signing audit 记录后才上传。
 
-第 1 项要求的真实组织共享事务不能由本机 `creator-app-publications` 实现：它没有平台身份、其他成员无法读取、也不会写入 Admin Catalog。继续在这里伪造 HTTP URL 或把本机文件当平台发布都会违反需求，因此本轮没有将该替代方案标记为完成。
+## 关键文件
 
-第 2 项的 App 主键、事务和唯一版本约束必须由同一个 Admin 数据库事务持有；第 3 项要求的最终发布记录也必须由该服务在写入 Catalog 前验证。当前仓库无法在不越过 worktree 边界的情况下提供该事务。
+- `.github/workflows/electron-release.yml`
+- `.github/workflows/electron-artifact-full.yml`
+- `apps/electron/scripts/validate-final-artifacts.sh`
+- `apps/electron/scripts/afterAllArtifactBuild.cjs`
+- `scripts/publish-electron-release.ts`
+- `scripts/publish-electron-release.test.ts`
+- `scripts/electron-release-workflow.test.ts`
+- `scripts/__tests__/electron-artifact-pipeline.test.ts`
 
-## 需要的外部接口
+## 实际测试
 
-Polo Admin 需要提供一个受 Bearer token 认证的组织级 publish transaction，至少包括：
+- `bun test scripts/publish-electron-release.test.ts scripts/electron-release-workflow.test.ts scripts/__tests__/electron-artifact-pipeline.test.ts infra/updates-static/PoloCaddyfile.test.ts scripts/polo-release-pull.test.ts` — 53 pass / 0 fail；含真实 Caddy 容器与下载器 fixture。
+- `bun run typecheck:all` — 通过。
+- `bun run test` — 通过（主并行套件和隔离套件，退出码 0）。
+- `git diff --check` — 通过。
 
-- 接收安全预处理后的 payload 或最终 Bundle；
-- 基于稳定 `appId` 的 create/update，数据库唯一约束 `(app_id, version)` 与原子 patch 分配；
-- 写入 visibility、release、不可变 Bundle、checksum、size 和审计；
-- 在同一事务后更新组织 Catalog，供同组织其他成员/设备读取；
-- 在提交前调用与 Electron 共用的 Manifest/Bundle validator。
+## 遗留项
 
-该接口落地后，本 worktree 的 `admin:publishCreatorApp` 可只保留本机预处理与认证转发，不持久化原始上传或平台发布状态。
-
-## 本轮验证
-
-- 已确认 worktree 没有上述 Admin handler、数据库 schema 或 Catalog 写入实现。
-- 未修改产品代码，避免继续扩大本机替代发布边界。
-
-## 遗留问题
-
-第 1–3 项均等待 Polo Admin 服务仓库提供并部署组织级发布事务；需要用户授权该服务工作区后才能继续实现端到端闭环。
+无代码遗留项。真实 tag 验收仍依赖已声明的 GitHub macOS signing/notarization secrets 与 Zeabur/GitHub 发布权限。

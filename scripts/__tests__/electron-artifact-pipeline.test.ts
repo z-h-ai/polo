@@ -195,7 +195,12 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('manual_installer: Polo-AI-arm64.dmg')
     expect(workflow).toContain('manual_installer: Polo-AI-x64.exe')
     expect(workflow).toContain('updater: false')
+    expect(workflow).toContain("matrix.platform == 'macos' && matrix.arch == 'arm64' && 'signing'")
     expect(workflow).toContain("matrix.updater && (inputs.bootstrap && 'bootstrap' || 'full') || 'smoke'")
+    expect(workflow).toContain('Require macOS Developer ID signing audit')
+    expect(workflow).toContain('release-signing-audit-macos-${{ matrix.arch }}.jsonl')
+    expect(workflow).toContain('"label":"DMG"')
+    expect(workflow).toContain('"label":"ZIP"')
     expect(workflow).toContain('electron:dist:win --arch=x64')
     expect(workflow).toContain('Get-AuthenticodeSignature')
     expect(workflow).toContain("$signature.Status -ne 'NotSigned'")
@@ -216,6 +221,9 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('bun run validate:ci')
     expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildMcpServers(config)')
+    const macValidator = read('apps/electron/scripts/validate-final-artifacts.sh')
+    expect(macValidator).toContain('"$MODE" != "signing"')
+    expect(macValidator).toContain('platform=macos mode=$MODE')
   })
 
   it('verifies immutable previous assets before every setup or install write', () => {

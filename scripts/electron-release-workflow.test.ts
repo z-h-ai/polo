@@ -95,8 +95,13 @@ describe('Electron release workflow boundaries', () => {
     expect(release).toContain('releases/assets/$asset_id')
     expect(release).toContain('sha256sum')
     expect(release).toContain("if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'")
-    expect(release).toContain('gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -f draft=false')
-    expect(release).toContain('gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -f draft=true')
+    const draftPatchRequests = [...release.matchAll(
+      /gh api --method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$DRAFT_RELEASE_ID" -F draft=(true|false)/g,
+    )].map(match => match[1])
+    // Capture both mutating requests so a string-form -f value can never
+    // regress into the GitHub API's ambiguous form encoding.
+    expect(draftPatchRequests).toEqual(['false', 'true'])
+    expect(release).not.toContain(' -f draft=')
     expect(release).not.toContain('gh release edit "$GITHUB_REF_NAME"')
     expect(release).not.toContain('gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft')
     expect(release).toContain('--draft either')
@@ -128,6 +133,9 @@ describe('Electron release workflow boundaries', () => {
     expect(reusable).toContain('arch: arm64')
     expect(reusable).toContain('manual_installer: Polo-AI-x64.dmg')
     expect(reusable).toContain('manual_installer: Polo-AI-arm64.dmg')
+    expect(reusable).toContain("matrix.platform == 'macos' && matrix.arch == 'arm64' && 'signing'")
+    expect(reusable).toContain('Require macOS Developer ID signing audit')
+    expect(reusable).toContain('release-signing-audit-macos-${{ matrix.arch }}.jsonl')
     expect(reusable).toContain('platform: windows')
     expect(reusable).toContain('runner: windows-latest')
     expect(reusable).toContain('Polo-AI-x64.exe')

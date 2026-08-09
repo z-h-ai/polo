@@ -291,20 +291,17 @@ describe('release publisher filesystem behavior', () => {
   it('persists and rejects any compensation retry whose latest pointer is not the exact predecessor', async () => {
     const first = await createFixture('1.0.0')
     const second = await createFixture('1.1.0')
-    const third = await createFixture('1.2.0')
     try {
       second.args.releasesDir = first.volume
-      third.args.releasesDir = first.volume
       await publish(first.args, testPublisherOptions)
       await confirmRelease(first.volume, '1.0.0')
       await publish(second.args, testPublisherOptions)
       await rollbackFailedRelease(first.volume, '1.1.0')
       await assertRollbackTarget(first.volume, '1.1.0')
-      await publish(third.args, testPublisherOptions)
+      await rollback(first.volume, '1.1.0')
       await expect(rollbackFailedRelease(first.volume, '1.1.0'))
         .rejects.toThrow('not its exact predecessor')
     } finally {
-      await destroy(third)
       await destroy(second)
       await destroy(first)
     }
@@ -326,6 +323,34 @@ describe('release publisher filesystem behavior', () => {
       expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
     } finally {
       await destroy(second)
+      await destroy(first)
+    }
+  })
+
+  it('retires an exact old compensated marker under lock before a later release finalizes', async () => {
+    const first = await createFixture('1.0.0')
+    const failed = await createFixture('1.1.0')
+    const next = await createFixture('1.2.0')
+    try {
+      failed.args.releasesDir = first.volume
+      next.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await publish(failed.args, testPublisherOptions)
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+
+      await publish(next.args, testPublisherOptions)
+      await expect(readFile(join(first.volume, 'electron', '.compensated-1.1.0.json'))).rejects.toThrow()
+      await confirmRelease(first.volume, '1.2.0')
+      await finalizeRelease(first.volume, '1.2.0')
+      await assertFinalizedRelease(first.volume, '1.2.0')
+      expect((await readdir(join(first.volume, 'electron', 'releases'))).sort()).toEqual([
+        '1.0.0', '1.1.0', '1.2.0',
+      ])
+    } finally {
+      await destroy(next)
+      await destroy(failed)
       await destroy(first)
     }
   })
@@ -354,6 +379,49 @@ describe('release publisher filesystem behavior', () => {
         ])
       } finally { await destroy(next) }
     } finally { await destroy(first) }
+  })
+
+  it('persists and compares the complete finalized SemVer inventory, including bootstrap histories below three', async () => {
+    const first = await createFixture('1.0.0')
+    try {
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await finalizeRelease(first.volume, '1.0.0')
+      const markerPath = join(first.volume, 'electron', '.finalized-1.0.0.json')
+      expect(JSON.parse(await readFile(markerPath, 'utf8'))).toMatchObject({
+        sourceReleaseCount: 1,
+        expectedVersions: ['1.0.0'],
+      })
+      await assertFinalizedRelease(first.volume, '1.0.0')
+    } finally { await destroy(first) }
+  })
+
+  it('rejects a finalized marker whose complete retained SemVer set differs from disk', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    const third = await createFixture('1.2.0')
+    try {
+      second.args.releasesDir = first.volume
+      third.args.releasesDir = first.volume
+      for (const fixture of [first, second, third]) {
+        await publish(fixture.args, testPublisherOptions)
+        await confirmRelease(first.volume, fixture.args.version)
+      }
+      await finalizeRelease(first.volume, '1.2.0')
+      const markerPath = join(first.volume, 'electron', '.finalized-1.2.0.json')
+      await writeFile(markerPath, JSON.stringify({
+        schemaVersion: 1,
+        version: '1.2.0',
+        latestTarget: 'releases/1.2.0',
+        sourceReleaseCount: 3,
+        expectedVersions: ['1.0.0', '1.2.0', '1.3.0'],
+      }))
+      await expect(assertFinalizedRelease(first.volume, '1.2.0')).rejects.toThrow('inventory differs')
+    } finally {
+      await destroy(third)
+      await destroy(second)
+      await destroy(first)
+    }
   })
 
   it('keeps rollback history when retention fails and reports stale-marker cleanup failures for retry', async () => {
