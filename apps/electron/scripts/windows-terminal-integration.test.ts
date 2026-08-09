@@ -59,6 +59,8 @@ describe('Windows terminal integration packaging', () => {
     expect(integrationScript).toContain('Uninstall-Transactional ([bool]$UserPathFile)')
     expect(integrationScript).toContain('function Write-TerminalIntegrationDiagnostic([Exception]$Exception)')
     expect(integrationScript).toContain('Write-TerminalIntegrationDiagnostic $_.Exception')
+    expect(integrationScript).toContain('function Assert-StateTargetsCurrentBin($State)')
+    expect(integrationScript).toContain('ownership state from a different bin directory')
     expect(integrationScript).toContain('if (-not $UsesUserPathFile) {')
     expect(integrationScript).toContain('-ExpectedValue $null')
     expect(integrationScript).toContain('[AllowNull()]\n    [object]$ExpectedValue')

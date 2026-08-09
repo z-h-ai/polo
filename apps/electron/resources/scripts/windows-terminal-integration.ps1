@@ -541,6 +541,13 @@ function Read-State([string]$Path = $stateFile) {
     }
 }
 
+function Assert-StateTargetsCurrentBin($State) {
+    if ($State.schemaVersion -ge 3 -and
+        ([string]$State.binDir).TrimEnd("\") -ine $BinDir.TrimEnd("\")) {
+        throw "Polo cannot use terminal integration ownership state from a different bin directory."
+    }
+}
+
 function Get-StateFileRecord($State, [string]$Path) {
     if (-not $State -or $State.schemaVersion -lt 2 -or -not $State.files) {
         return $null
@@ -1001,6 +1008,7 @@ function Install-Transactional(
             if (-not $previousState) {
                 throw "Polo cannot repair terminal integration because its ownership state is invalid."
             }
+            Assert-StateTargetsCurrentBin $previousState
         }
 
         $legacyLauncherWasHistorical = $false
@@ -1062,6 +1070,7 @@ function Uninstall-Transactional([bool]$UsesUserPathFile) {
         if (-not $state) {
             throw "Polo cannot uninstall terminal integration because its ownership state is invalid."
         }
+        Assert-StateTargetsCurrentBin $state
 
         foreach ($spec in Get-ManagedFileSpecs) {
             $claim = Claim-ExistingPath $spec.Path "uninstall"
