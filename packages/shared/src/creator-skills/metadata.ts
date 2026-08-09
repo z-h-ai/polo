@@ -1,9 +1,3 @@
-import matter from 'gray-matter'
-import {
-  CreatorSkillMetadataSchema,
-  type ValidatedSkillMetadata,
-} from './skill-content.ts'
-
 export interface NormalizedSkillZipEntry {
   /** POSIX, normalized ZIP path (for example `polo-test/SKILL.md`). */
   path: string
@@ -11,6 +5,15 @@ export interface NormalizedSkillZipEntry {
   directory?: boolean
   /** Required only for the root SKILL.md entry. */
   content?: string | Uint8Array
+}
+
+export interface CreatorSkillMetadata {
+  name: string
+  description: string
+  globs?: string[]
+  alwaysAllow?: string[]
+  icon?: string
+  requiredSources?: string[]
 }
 
 export interface CreatorSkillMetadataIssue {
@@ -40,9 +43,11 @@ export class CreatorSkillMetadataError extends Error {
 
 export interface ParsedCreatorSkillMetadata {
   slug: string
-  metadata: ValidatedSkillMetadata
+  metadata: CreatorSkillMetadata
   body: string
 }
+
+type FrontmatterValue = string | string[]
 
 function metadataIssue(
   code: CreatorSkillMetadataIssue['code'],
@@ -52,6 +57,17 @@ function metadataIssue(
   suggestion?: string,
 ): CreatorSkillMetadataIssue {
   return { code, path, ...(field ? { field } : {}), message, ...(suggestion ? { suggestion } : {}) }
+}
+
+/** Shared packaging-noise policy for ZIP directory inspection and browser metadata parsing. */
+export function isCreatorSkillPackagingNoise(path: string): boolean {
+  const parts = path.split('/').filter(Boolean)
+  if (parts[0] === '__MACOSX') return true
+  const name = parts.at(-1) ?? ''
+  return name === '.DS_Store'
+    || name === 'Thumbs.db'
+    || name === 'desktop.ini'
+    || name.startsWith('._')
 }
 
 function readContent(entry: NormalizedSkillZipEntry): string {
@@ -70,15 +86,125 @@ function readContent(entry: NormalizedSkillZipEntry): string {
   }
 }
 
+function decodeScalar(value: string, path: string, field: string): string {
+  const trimmed = value.trim()
+  if (trimmed.startsWith('"')) {
+    try {
+      const decoded = JSON.parse(trimmed)
+      if (typeof decoded === 'string') return decoded
+    } catch {
+      // Report the uniform frontmatter error below.
+    }
+    throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
+      metadataIssue('invalid_skill_metadata', path, `Invalid quoted value for '${field}'`, field),
+    ])
+  }
+  if (trimmed.startsWith("'")) {
+    if (!trimmed.endsWith("'") || trimmed.length < 2) {
+      throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
+        metadataIssue('invalid_skill_metadata', path, `Invalid quoted value for '${field}'`, field),
+      ])
+    }
+    return trimmed.slice(1, -1).replace(/''/g, "'")
+  }
+  return trimmed
+}
+
+function parseFrontmatter(content: string, path: string): { data: Map<string, FrontmatterValue>; body: string } {
+  const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/)
+  if (lines[0]?.trim() !== '---') {
+    throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
+      metadataIssue('invalid_skill_metadata', path, 'SKILL.md must start with YAML frontmatter', 'frontmatter'),
+    ])
+  }
+  const end = lines.findIndex((line, index) => index > 0 && /^(?:---|\.\.\.)\s*$/.test(line))
+  if (end === -1) {
+    throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
+      metadataIssue('invalid_skill_metadata', path, 'SKILL.md frontmatter is missing its closing delimiter', 'frontmatter'),
+    ])
+  }
+
+  const data = new Map<string, FrontmatterValue>()
+  for (let index = 1; index < end; index += 1) {
+    const line = lines[index]!
+    if (/^\s*(?:#.*)?$/.test(line)) continue
+    if (/\t/.test(line)) {
+      throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
+        metadataIssue('invalid_skill_metadata', path, 'YAML frontmatter cannot use tab indentation', 'frontmatter'),
+      ])
+    }
+    const property = /^([A-Za-z][A-Za-z0-9_-]*):(?:[ ](.*)|\s*)$/.exec(line)
+    if (!property) {
+      throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
+        metadataIssue('invalid_skill_metadata', path, 'Invalid YAML frontmatter property', 'frontmatter'),
+      ])
+    }
+    const key = property[1]!
+    if (data.has(key)) {
+      throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
+        metadataIssue('invalid_skill_metadata', path, `Duplicate frontmatter field '${key}'`, key),
+      ])
+    }
+    const rawValue = property[2]
+    if (rawValue !== undefined && rawValue.length > 0) {
+      data.set(key, decodeScalar(rawValue, path, key))
+      continue
+    }
+
+    const values: string[] = []
+    while (index + 1 < end && /^  - /.test(lines[index + 1]!)) {
+      index += 1
+      values.push(decodeScalar(lines[index]!.slice(4), path, key))
+    }
+    data.set(key, values)
+  }
+  return { data, body: lines.slice(end + 1).join('\n') }
+}
+
+function requiredString(data: Map<string, FrontmatterValue>, field: 'name' | 'description', path: string): string {
+  const value = data.get(field)
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', [
+      metadataIssue('invalid_skill_metadata', path, `Creator Skill ${field} is required`, field),
+    ])
+  }
+  return value.trim()
+}
+
+function optionalString(data: Map<string, FrontmatterValue>, field: 'icon', path: string): string | undefined {
+  const value = data.get(field)
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', [
+      metadataIssue('invalid_skill_metadata', path, `Creator Skill ${field} must be a non-empty string`, field),
+    ])
+  }
+  return value.trim()
+}
+
+function optionalStrings(
+  data: Map<string, FrontmatterValue>,
+  field: 'globs' | 'alwaysAllow' | 'requiredSources',
+  path: string,
+): string[] | undefined {
+  const value = data.get(field)
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some(item => item.length === 0)) {
+    throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', [
+      metadataIssue('invalid_skill_metadata', path, `Creator Skill ${field} must be an array of strings`, field),
+    ])
+  }
+  return value
+}
+
 /**
- * Browser-safe parser for ZIP readers that have already normalized their
- * entries. It intentionally has no Node imports: callers supply entry paths
- * and the root SKILL.md bytes, then receive the canonical Creator Skill slug.
+ * Browser-safe parser for normalized ZIP entries. No runtime polyfills or
+ * Node globals are required; callers provide the root SKILL.md bytes.
  */
 export function parseCreatorSkillMetadata(
   entries: readonly NormalizedSkillZipEntry[],
 ): ParsedCreatorSkillMetadata {
-  const businessEntries = entries.filter(entry => entry.path.length > 0)
+  const businessEntries = entries.filter(entry => entry.path.length > 0 && !isCreatorSkillPackagingNoise(entry.path))
   const roots = new Set(businessEntries.map(entry => entry.path.replace(/\/$/, '').split('/')[0]).filter(Boolean))
   if (roots.size !== 1) {
     throw new CreatorSkillMetadataError('ZIP must contain exactly one root directory', [
@@ -107,53 +233,44 @@ export function parseCreatorSkillMetadata(
       metadataIssue('skill_file_not_root', skillEntry.path, 'Place SKILL.md directly under the Skill root directory'),
     ])
   }
-  if (!roots.has(rootDirectory)) {
-    throw new CreatorSkillMetadataError('SKILL.md root does not match ZIP root', [
-      metadataIssue('skill_file_not_root', skillEntry.path, 'Place SKILL.md under the only ZIP root directory'),
-    ])
-  }
 
   const content = readContent(skillEntry)
-  let parsed: matter.GrayMatterFile<string>
-  try {
-    parsed = matter(content)
-  } catch (error) {
-    throw new CreatorSkillMetadataError('SKILL.md frontmatter is invalid', [
-      metadataIssue('invalid_skill_metadata', skillEntry.path, `Invalid YAML frontmatter: ${error instanceof Error ? error.message : 'Unknown error'}`, 'frontmatter'),
-    ])
-  }
-  const validation = CreatorSkillMetadataSchema.safeParse(parsed.data)
-  if (!validation.success) {
-    throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', validation.error.issues.map(issue => metadataIssue(
-      'invalid_skill_metadata',
-      skillEntry.path,
-      issue.message,
-      issue.path.join('.') || 'frontmatter',
-    )))
-  }
-  const metadata = validation.data
+  const { data, body } = parseFrontmatter(content, skillEntry.path)
+  const name = requiredString(data, 'name', skillEntry.path)
+  const description = requiredString(data, 'description', skillEntry.path)
   const issues: CreatorSkillMetadataIssue[] = []
-  if (metadata.name !== rootDirectory) {
+  if (name.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+    issues.push(metadataIssue('invalid_skill_metadata', skillEntry.path, 'Creator Skill name must use strict kebab-case (for example, polo-test)', 'name'))
+  }
+  if (description.length > 1_024) {
+    issues.push(metadataIssue('invalid_skill_metadata', skillEntry.path, 'Creator Skill description must be at most 1024 characters', 'description'))
+  }
+  if (name !== rootDirectory) {
     issues.push(metadataIssue(
       'invalid_skill_metadata',
       skillEntry.path,
-      `Creator Skill name '${metadata.name}' must match root directory '${rootDirectory}'`,
+      `Creator Skill name '${name}' must match root directory '${rootDirectory}'`,
       'name',
       `Use 'name: ${rootDirectory}' or rename the root directory`,
     ))
   }
   if (issues.length > 0) throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', issues)
 
+  const globs = optionalStrings(data, 'globs', skillEntry.path)
+  const alwaysAllow = optionalStrings(data, 'alwaysAllow', skillEntry.path)
+  const icon = optionalString(data, 'icon', skillEntry.path)
+  const requiredSources = optionalStrings(data, 'requiredSources', skillEntry.path)
+
   return {
-    slug: metadata.name,
+    slug: name,
     metadata: {
-      name: metadata.name,
-      description: metadata.description,
-      ...(metadata.globs ? { globs: metadata.globs } : {}),
-      ...(metadata.alwaysAllow ? { alwaysAllow: metadata.alwaysAllow } : {}),
-      ...(metadata.icon ? { icon: metadata.icon } : {}),
-      ...(metadata.requiredSources ? { requiredSources: metadata.requiredSources } : {}),
+      name,
+      description,
+      ...(globs ? { globs } : {}),
+      ...(alwaysAllow ? { alwaysAllow } : {}),
+      ...(icon ? { icon } : {}),
+      ...(requiredSources ? { requiredSources } : {}),
     },
-    body: parsed.content,
+    body,
   }
 }

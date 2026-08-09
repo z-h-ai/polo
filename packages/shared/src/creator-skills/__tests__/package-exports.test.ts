@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 describe('@polo-ai/shared Creator Skill package exports', () => {
   it('loads validation, DTOs, schemas, and fixtures through declared package exports', () => {
@@ -47,5 +48,25 @@ describe('@polo-ai/shared Creator Skill package exports', () => {
     expect(metadataPath.endsWith('/dist/creator-skills/metadata.browser.cjs')).toBe(true)
     expect(result.exitCode).toBe(0)
     expect(result.stderr.toString()).toBe('')
+
+    const browserRuntimeScript = `
+      globalThis.Buffer = undefined
+      globalThis.process = undefined
+      globalThis.require = undefined
+      const metadata = await import(${JSON.stringify(pathToFileURL(metadataPath).href)})
+      const result = metadata.parseCreatorSkillMetadata([{
+        path: 'polo-test/SKILL.md',
+        content: new TextEncoder().encode('---\\nname: polo-test\\ndescription: Browser proof.\\n---\\n'),
+      }])
+      if (result.slug !== 'polo-test') process.exitCode = 1
+    `
+    const browserRuntime = Bun.spawnSync({
+      cmd: [process.execPath, '--input-type=module', '--eval', browserRuntimeScript],
+      cwd: repositoryRoot,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(browserRuntime.exitCode).toBe(0)
+    expect(browserRuntime.stderr.toString()).toBe('')
   })
 })

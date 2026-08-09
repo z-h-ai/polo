@@ -23,6 +23,7 @@ import {
 } from './types.ts'
 import {
   CreatorSkillMetadataError,
+  isCreatorSkillPackagingNoise,
   parseCreatorSkillMetadata,
 } from './metadata.ts'
 
@@ -201,16 +202,6 @@ function effectivePolicy(policy?: SkillArchivePolicy): SkillArchivePolicy {
   }
 }
 
-function isPackagingNoise(path: string): boolean {
-  const parts = path.split('/').filter(Boolean)
-  if (parts[0] === '__MACOSX') return true
-  const name = parts.at(-1) ?? ''
-  return name === '.DS_Store'
-    || name === 'Thumbs.db'
-    || name === 'desktop.ini'
-    || name.startsWith('._')
-}
-
 function normalizeArchivePath(rawPath: string): string {
   if (!rawPath || rawPath.includes('\0')) {
     throw new CreatorSkillArchiveError(
@@ -313,7 +304,7 @@ function inspectArchiveDirectory(
       )
     }
     const directory = kind === 'directory'
-    const ignored = isPackagingNoise(normalizedPath)
+    const ignored = isCreatorSkillPackagingNoise(normalizedPath)
     if (ignored) {
       warnings.push(issue(
         'packaging_noise_removed',
@@ -913,7 +904,7 @@ export async function validateCreatorSkillArchive(args: {
 
     const manifest: CreatorSkillManifestEntry[] = []
     let metadata: SkillVersionMetadata | undefined
-    let skillContent: string | undefined
+    let skillContent: Uint8Array | undefined
     let expandedBytes = 0
     const destination = args.destinationRoot
       ? resolve(args.destinationRoot)
@@ -972,7 +963,7 @@ export async function validateCreatorSkillArchive(args: {
         validatePngIcon(data, archiveEntry.normalizedPath)
       }
       if (archiveEntry.normalizedPath === `${args.slug}/SKILL.md`) {
-        skillContent = data.toString('utf8')
+        skillContent = data
       }
 
       const relativePath = archiveEntry.normalizedPath.slice(args.slug.length + 1)

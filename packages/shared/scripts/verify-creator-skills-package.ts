@@ -294,8 +294,8 @@ async function inspectPackageDirectory(
     'utf8',
   )
   assert(
-    !/node:(?:crypto|fs|path|zlib|stream)|require\(['"](?:crypto|fs|path|zlib|stream)['"]\)/.test(browserMetadataBundle),
-    'browser metadata export must not contain Node-only dependencies',
+    !/\b(?:Buffer|process|require)\b|node:/.test(browserMetadataBundle),
+    'browser metadata export must not reference Buffer, process, require, or Node builtins',
   )
   assert(!('main' in packageJson), 'published package root must not define main')
   assert(!('types' in packageJson), 'published package root must not define types')

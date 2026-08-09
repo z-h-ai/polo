@@ -3301,10 +3301,10 @@ var require_stringify = __commonJS({
       data = Object.assign({}, file2.data, data);
       const open3 = opts.delimiters[0];
       const close = opts.delimiters[1];
-      const matter3 = engine.stringify(data, options2).trim();
+      const matter2 = engine.stringify(data, options2).trim();
       let buf = "";
-      if (matter3 !== "{}") {
-        buf = newline(open3) + newline(matter3) + newline(close);
+      if (matter2 !== "{}") {
+        buf = newline(open3) + newline(matter2) + newline(close);
       }
       if (typeof file2.excerpt === "string" && file2.excerpt !== "") {
         if (str2.indexOf(file2.excerpt.trim()) === -1) {
@@ -3410,19 +3410,19 @@ var require_gray_matter = __commonJS({
     var toFile = require_to_file();
     var parse4 = require_parse();
     var utils = require_utils();
-    function matter3(input, options2) {
+    function matter2(input, options2) {
       if (input === "") {
         return { data: {}, content: input, excerpt: "", orig: input };
       }
       let file2 = toFile(input);
-      const cached2 = matter3.cache[file2.content];
+      const cached2 = matter2.cache[file2.content];
       if (!options2) {
         if (cached2) {
           file2 = Object.assign({}, cached2);
           file2.orig = cached2.orig;
           return file2;
         }
-        matter3.cache[file2.content] = file2;
+        matter2.cache[file2.content] = file2;
       }
       return parseMatter(file2, options2);
     }
@@ -3444,7 +3444,7 @@ var require_gray_matter = __commonJS({
       }
       str2 = str2.slice(openLen);
       const len = str2.length;
-      const language = matter3.language(str2, opts);
+      const language = matter2.language(str2, opts);
       if (language.name) {
         file2.language = language.name;
         str2 = str2.slice(language.raw.length);
@@ -3479,24 +3479,24 @@ var require_gray_matter = __commonJS({
       }
       return file2;
     }
-    matter3.engines = engines2;
-    matter3.stringify = function(file2, data, options2) {
-      if (typeof file2 === "string") file2 = matter3(file2, options2);
+    matter2.engines = engines2;
+    matter2.stringify = function(file2, data, options2) {
+      if (typeof file2 === "string") file2 = matter2(file2, options2);
       return stringify(file2, data, options2);
     };
-    matter3.read = function(filepath, options2) {
+    matter2.read = function(filepath, options2) {
       const str2 = fs.readFileSync(filepath, "utf8");
-      const file2 = matter3(str2, options2);
+      const file2 = matter2(str2, options2);
       file2.path = filepath;
       return file2;
     };
-    matter3.test = function(str2, options2) {
+    matter2.test = function(str2, options2) {
       return utils.startsWith(str2, defaults(options2).delimiters[0]);
     };
-    matter3.language = function(str2, options2) {
+    matter2.language = function(str2, options2) {
       const opts = defaults(options2);
       const open3 = opts.delimiters[0];
-      if (matter3.test(str2)) {
+      if (matter2.test(str2)) {
         str2 = str2.slice(open3.length);
       }
       const language = str2.slice(0, str2.search(/\r?\n/));
@@ -3505,11 +3505,11 @@ var require_gray_matter = __commonJS({
         name: language ? language.trim() : ""
       };
     };
-    matter3.cache = {};
-    matter3.clearCache = function() {
-      matter3.cache = {};
+    matter2.cache = {};
+    matter2.clearCache = function() {
+      matter2.cache = {};
     };
-    module2.exports = matter3;
+    module2.exports = matter2;
   }
 });
 
@@ -4832,6 +4832,7 @@ __export(creator_skills_exports, {
   hasPendingCreatorSkillForceDelete: () => hasPendingCreatorSkillForceDelete,
   inferBackupCreatedAt: () => inferBackupCreatedAt,
   installCreatorSkill: () => installCreatorSkill,
+  isCreatorSkillPackagingNoise: () => isCreatorSkillPackagingNoise,
   isValidCreatorSkillSlug: () => isValidCreatorSkillSlug,
   isValidSkillSlug: () => isValidSkillSlug,
   listCreatorSkillBackups: () => listCreatorSkillBackups,
@@ -19100,7 +19101,6 @@ function readValidatedSkillMetadata(markdownContent, slug) {
 }
 
 // src/creator-skills/metadata.ts
-var import_gray_matter2 = __toESM(require_gray_matter(), 1);
 var CreatorSkillMetadataError = class extends Error {
   issues;
   constructor(message, issues) {
@@ -19111,6 +19111,12 @@ var CreatorSkillMetadataError = class extends Error {
 };
 function metadataIssue(code, path, message, field, suggestion) {
   return { code, path, ...field ? { field } : {}, message, ...suggestion ? { suggestion } : {} };
+}
+function isCreatorSkillPackagingNoise(path) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts[0] === "__MACOSX") return true;
+  const name = parts.at(-1) ?? "";
+  return name === ".DS_Store" || name === "Thumbs.db" || name === "desktop.ini" || name.startsWith("._");
 }
 function readContent(entry) {
   if (typeof entry.content === "string") return entry.content;
@@ -19127,8 +19133,107 @@ function readContent(entry) {
     ]);
   }
 }
+function decodeScalar(value, path, field) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"')) {
+    try {
+      const decoded = JSON.parse(trimmed);
+      if (typeof decoded === "string") return decoded;
+    } catch {
+    }
+    throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
+      metadataIssue("invalid_skill_metadata", path, `Invalid quoted value for '${field}'`, field)
+    ]);
+  }
+  if (trimmed.startsWith("'")) {
+    if (!trimmed.endsWith("'") || trimmed.length < 2) {
+      throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
+        metadataIssue("invalid_skill_metadata", path, `Invalid quoted value for '${field}'`, field)
+      ]);
+    }
+    return trimmed.slice(1, -1).replace(/''/g, "'");
+  }
+  return trimmed;
+}
+function parseFrontmatter(content, path) {
+  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
+      metadataIssue("invalid_skill_metadata", path, "SKILL.md must start with YAML frontmatter", "frontmatter")
+    ]);
+  }
+  const end = lines.findIndex((line, index) => index > 0 && /^(?:---|\.\.\.)\s*$/.test(line));
+  if (end === -1) {
+    throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
+      metadataIssue("invalid_skill_metadata", path, "SKILL.md frontmatter is missing its closing delimiter", "frontmatter")
+    ]);
+  }
+  const data = /* @__PURE__ */ new Map();
+  for (let index = 1; index < end; index += 1) {
+    const line = lines[index];
+    if (/^\s*(?:#.*)?$/.test(line)) continue;
+    if (/\t/.test(line)) {
+      throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
+        metadataIssue("invalid_skill_metadata", path, "YAML frontmatter cannot use tab indentation", "frontmatter")
+      ]);
+    }
+    const property = /^([A-Za-z][A-Za-z0-9_-]*):(?:[ ](.*)|\s*)$/.exec(line);
+    if (!property) {
+      throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
+        metadataIssue("invalid_skill_metadata", path, "Invalid YAML frontmatter property", "frontmatter")
+      ]);
+    }
+    const key = property[1];
+    if (data.has(key)) {
+      throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
+        metadataIssue("invalid_skill_metadata", path, `Duplicate frontmatter field '${key}'`, key)
+      ]);
+    }
+    const rawValue = property[2];
+    if (rawValue !== void 0 && rawValue.length > 0) {
+      data.set(key, decodeScalar(rawValue, path, key));
+      continue;
+    }
+    const values = [];
+    while (index + 1 < end && /^  - /.test(lines[index + 1])) {
+      index += 1;
+      values.push(decodeScalar(lines[index].slice(4), path, key));
+    }
+    data.set(key, values);
+  }
+  return { data, body: lines.slice(end + 1).join("\n") };
+}
+function requiredString(data, field, path) {
+  const value = data.get(field);
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue("invalid_skill_metadata", path, `Creator Skill ${field} is required`, field)
+    ]);
+  }
+  return value.trim();
+}
+function optionalString(data, field, path) {
+  const value = data.get(field);
+  if (value === void 0) return void 0;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue("invalid_skill_metadata", path, `Creator Skill ${field} must be a non-empty string`, field)
+    ]);
+  }
+  return value.trim();
+}
+function optionalStrings(data, field, path) {
+  const value = data.get(field);
+  if (value === void 0) return void 0;
+  if (!Array.isArray(value) || value.some((item) => item.length === 0)) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue("invalid_skill_metadata", path, `Creator Skill ${field} must be an array of strings`, field)
+    ]);
+  }
+  return value;
+}
 function parseCreatorSkillMetadata(entries) {
-  const businessEntries = entries.filter((entry) => entry.path.length > 0);
+  const businessEntries = entries.filter((entry) => entry.path.length > 0 && !isCreatorSkillPackagingNoise(entry.path));
   const roots = new Set(businessEntries.map((entry) => entry.path.replace(/\/$/, "").split("/")[0]).filter(Boolean));
   if (roots.size !== 1) {
     throw new CreatorSkillMetadataError("ZIP must contain exactly one root directory", [
@@ -19153,52 +19258,42 @@ function parseCreatorSkillMetadata(entries) {
       metadataIssue("skill_file_not_root", skillEntry.path, "Place SKILL.md directly under the Skill root directory")
     ]);
   }
-  if (!roots.has(rootDirectory)) {
-    throw new CreatorSkillMetadataError("SKILL.md root does not match ZIP root", [
-      metadataIssue("skill_file_not_root", skillEntry.path, "Place SKILL.md under the only ZIP root directory")
-    ]);
-  }
   const content = readContent(skillEntry);
-  let parsed;
-  try {
-    parsed = (0, import_gray_matter2.default)(content);
-  } catch (error48) {
-    throw new CreatorSkillMetadataError("SKILL.md frontmatter is invalid", [
-      metadataIssue("invalid_skill_metadata", skillEntry.path, `Invalid YAML frontmatter: ${error48 instanceof Error ? error48.message : "Unknown error"}`, "frontmatter")
-    ]);
-  }
-  const validation = CreatorSkillMetadataSchema.safeParse(parsed.data);
-  if (!validation.success) {
-    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", validation.error.issues.map((issue3) => metadataIssue(
-      "invalid_skill_metadata",
-      skillEntry.path,
-      issue3.message,
-      issue3.path.join(".") || "frontmatter"
-    )));
-  }
-  const metadata = validation.data;
+  const { data, body } = parseFrontmatter(content, skillEntry.path);
+  const name = requiredString(data, "name", skillEntry.path);
+  const description = requiredString(data, "description", skillEntry.path);
   const issues = [];
-  if (metadata.name !== rootDirectory) {
+  if (name.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+    issues.push(metadataIssue("invalid_skill_metadata", skillEntry.path, "Creator Skill name must use strict kebab-case (for example, polo-test)", "name"));
+  }
+  if (description.length > 1024) {
+    issues.push(metadataIssue("invalid_skill_metadata", skillEntry.path, "Creator Skill description must be at most 1024 characters", "description"));
+  }
+  if (name !== rootDirectory) {
     issues.push(metadataIssue(
       "invalid_skill_metadata",
       skillEntry.path,
-      `Creator Skill name '${metadata.name}' must match root directory '${rootDirectory}'`,
+      `Creator Skill name '${name}' must match root directory '${rootDirectory}'`,
       "name",
       `Use 'name: ${rootDirectory}' or rename the root directory`
     ));
   }
   if (issues.length > 0) throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", issues);
+  const globs = optionalStrings(data, "globs", skillEntry.path);
+  const alwaysAllow = optionalStrings(data, "alwaysAllow", skillEntry.path);
+  const icon = optionalString(data, "icon", skillEntry.path);
+  const requiredSources = optionalStrings(data, "requiredSources", skillEntry.path);
   return {
-    slug: metadata.name,
+    slug: name,
     metadata: {
-      name: metadata.name,
-      description: metadata.description,
-      ...metadata.globs ? { globs: metadata.globs } : {},
-      ...metadata.alwaysAllow ? { alwaysAllow: metadata.alwaysAllow } : {},
-      ...metadata.icon ? { icon: metadata.icon } : {},
-      ...metadata.requiredSources ? { requiredSources: metadata.requiredSources } : {}
+      name,
+      description,
+      ...globs ? { globs } : {},
+      ...alwaysAllow ? { alwaysAllow } : {},
+      ...icon ? { icon } : {},
+      ...requiredSources ? { requiredSources } : {}
     },
-    body: parsed.content
+    body
   };
 }
 
@@ -19328,12 +19423,6 @@ function effectivePolicy(policy) {
     )
   };
 }
-function isPackagingNoise(path) {
-  const parts = path.split("/").filter(Boolean);
-  if (parts[0] === "__MACOSX") return true;
-  const name = parts.at(-1) ?? "";
-  return name === ".DS_Store" || name === "Thumbs.db" || name === "desktop.ini" || name.startsWith("._");
-}
 function normalizeArchivePath(rawPath) {
   if (!rawPath || rawPath.includes("\0")) {
     throw new CreatorSkillArchiveError(
@@ -19416,7 +19505,7 @@ function inspectArchiveDirectory(rawEntries, policy, slug) {
       );
     }
     const directory = kind === "directory";
-    const ignored = isPackagingNoise(normalizedPath);
+    const ignored = isCreatorSkillPackagingNoise(normalizedPath);
     if (ignored) {
       warnings.push(issue2(
         "packaging_noise_removed",
@@ -19969,7 +20058,7 @@ async function validateCreatorSkillArchive(args) {
         validatePngIcon(data, archiveEntry.normalizedPath);
       }
       if (archiveEntry.normalizedPath === `${args.slug}/SKILL.md`) {
-        skillContent = data.toString("utf8");
+        skillContent = data;
       }
       const relativePath = archiveEntry.normalizedPath.slice(args.slug.length + 1);
       manifest.push({
@@ -22130,6 +22219,7 @@ var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "b5326fb33894331f09a1b0e80650435c8c2c
   hasPendingCreatorSkillForceDelete,
   inferBackupCreatedAt,
   installCreatorSkill,
+  isCreatorSkillPackagingNoise,
   isValidCreatorSkillSlug,
   isValidSkillSlug,
   listCreatorSkillBackups,

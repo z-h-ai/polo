@@ -263,11 +263,59 @@ describe('Creator Skill archive validation', () => {
         ['root-mismatch', VALID_SKILL.replace('name: review-helper', 'name: another-skill')],
       ] as const) {
         const archivePath = await writeZip(root, { 'review-helper/SKILL.md': content }, `${name}.zip`)
-        await expect(validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })).rejects.toMatchObject({
-          code: 'skill_validation_failed',
-          issues: [{ code: 'invalid_skill_content', field: 'name' }],
-        })
+        try {
+          await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+          throw new Error('expected invalid Creator metadata to fail')
+        } catch (error) {
+          expect(error).toBeInstanceOf(CreatorSkillArchiveError)
+          const archiveError = error as CreatorSkillArchiveError
+          expect(archiveError.code).toBe('skill_validation_failed')
+          expect(archiveError.issues).toContainEqual(expect.objectContaining({
+            code: 'invalid_skill_content',
+            field: 'name',
+          }))
+        }
       }
+    })
+  })
+
+  it("uses the browser parser's strict UTF-8 error and packaging-noise policy", async () => {
+    await withTemp(async root => {
+      const noisyArchive = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL,
+        '__MACOSX/._SKILL.md': 'noise',
+        'review-helper/.DS_Store': 'noise',
+        'review-helper/Thumbs.db': 'noise',
+        'review-helper/desktop.ini': 'noise',
+        'review-helper/._resource': 'noise',
+      }, 'noise.zip')
+      const noisyResult = await validateCreatorSkillArchive({
+        archivePath: noisyArchive,
+        slug: 'review-helper',
+      })
+      expect(noisyResult.manifest.map(entry => entry.path)).toEqual(['SKILL.md'])
+      expect(noisyResult.warnings.map(warning => warning.code)).toEqual([
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+      ])
+
+      const invalidUtf8Archive = await writeZip(root, {
+        'review-helper/SKILL.md': new Uint8Array([0xff, 0xfe]),
+      }, 'invalid-utf8.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: invalidUtf8Archive,
+        slug: 'review-helper',
+      })).rejects.toMatchObject({
+        code: 'skill_validation_failed',
+        issues: [{
+          code: 'invalid_skill_utf8',
+          path: 'review-helper/SKILL.md',
+          message: 'SKILL.md must contain valid UTF-8 text',
+        }],
+      })
     })
   })
 
