@@ -8,7 +8,8 @@ param(
     [scriptblock]$TestMutationHook = $null,
     [string]$UserPathRegistrySubKey = "Environment",
     [string]$UserPathRegistryValueName = "Path",
-    [string]$TestRegistryRaceValue = $null
+    [string]$TestRegistryRaceValue = $null,
+    [switch]$RequireOwnershipState
 )
 
 $ErrorActionPreference = "Stop"
@@ -1054,7 +1055,10 @@ function Install-Transactional(
     }
 }
 
-function Uninstall-Transactional([bool]$UsesUserPathFile) {
+function Uninstall-Transactional(
+    [bool]$UsesUserPathFile,
+    [bool]$RequireOwnershipState
+) {
     $claims = New-Object 'Collections.Generic.List[object]'
     $published = New-Object 'Collections.Generic.List[object]'
     $pathMutation = $null
@@ -1062,6 +1066,9 @@ function Uninstall-Transactional([bool]$UsesUserPathFile) {
     try {
         $stateClaim = Claim-ExistingPath $stateFile "state"
         if (-not $stateClaim) {
+            if ($RequireOwnershipState) {
+                throw "Polo cannot uninstall terminal integration because its required ownership state is absent."
+            }
             Write-Warning "Polo left terminal files unchanged because ownership state is absent."
             return
         }
@@ -1180,7 +1187,7 @@ if ($Mode -eq "Install") {
 }
 
 try {
-    Uninstall-Transactional ([bool]$UserPathFile)
+    Uninstall-Transactional ([bool]$UserPathFile) ([bool]$RequireOwnershipState)
 } catch {
     Write-TerminalIntegrationDiagnostic $_.Exception
     throw

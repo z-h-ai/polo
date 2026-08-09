@@ -29,18 +29,23 @@ polo_terminal_setup_finished:
   ${EndIf}
 !macroend
 
-!macro customUnInstall
+!macro customUnInit
   DetailPrint "Removing Polo terminal command..."
   Push $R1
+  Push $R2
+  StrCpy $R2 ""
   ReadINIStr $R1 "$INSTDIR\polo-terminal-integration.ini" "terminal" "binDir"
   ${If} $R1 == ""
     ; Legacy installs predate the persisted target. Their conventional
     ; per-user location remains the safe fallback.
     ReadEnvStr $R1 "LOCALAPPDATA"
     StrCpy $R1 "$R1\Polo AI\bin"
+  ${Else}
+    StrCpy $R2 "-RequireOwnershipState"
   ${EndIf}
-  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Uninstall -InstallDir "$INSTDIR" -BinDir "$R1"'
+  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Uninstall -InstallDir "$INSTDIR" -BinDir "$R1" $R2'
   Pop $0
+  Pop $R2
   Pop $R1
   ${If} $0 != 0
     ; The terminal command is outside $INSTDIR.  Continuing after its guarded
@@ -50,6 +55,6 @@ polo_terminal_setup_finished:
     MessageBox MB_ICONEXCLAMATION|MB_OK "Polo could not remove its terminal command. Close any shells using 'polo' and try uninstalling again."
 polo_terminal_uninstall_silent_failure:
     SetErrorLevel 1
-    Quit
+    Abort
   ${EndIf}
 !macroend
