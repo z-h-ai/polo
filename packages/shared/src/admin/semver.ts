@@ -57,6 +57,11 @@ export function isValidCatalogSemVer(version: string): boolean {
   return parseCatalogSemVer(version) !== null
 }
 
+/** Strict SemVer 2.0 without the Catalog-only compatibility `v` prefix. */
+export function isStrictSemVer(version: string): boolean {
+  return CATALOG_SEMVER_PATTERN.test(version)
+}
+
 /**
  * Compares two strict Catalog SemVer values. Build metadata is ignored as
  * required by SemVer 2.0. Returns null when either side is invalid.

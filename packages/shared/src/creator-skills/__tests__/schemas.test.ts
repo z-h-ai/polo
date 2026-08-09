@@ -13,6 +13,7 @@ import {
   CreatorSkillUninstallRpcInputSchema,
   DeleteSkillRpcInputSchema,
   SkillArchivePolicySchema,
+  SkillVersionMetadataSchema,
   StableSemverSchema,
 } from '../schemas'
 import { HARD_SKILL_ARCHIVE_POLICY } from '../types'
@@ -243,6 +244,55 @@ describe('Creator Skill boundary schemas', () => {
       ...HARD_SKILL_ARCHIVE_POLICY,
       maxArchiveBytes: HARD_SKILL_ARCHIVE_POLICY.maxArchiveBytes + 1,
     }).success).toBe(false)
+  })
+
+  it('decodes persisted Creator metadata through the shared document constraints', () => {
+    expect(SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: 'Reviews changes.',
+      icon: '🧭',
+      unknownNestedMetadata: { allowed: true },
+    })).toMatchObject({ success: true })
+    for (const metadata of [
+      { name: 'review-helper', description: 'Reviews changes.', icon: 'https://example.test/icon.png' },
+      { name: 'review-helper', description: 42 },
+      { name: 'Review Helper', description: 'Reviews changes.' },
+    ]) {
+      expect(SkillVersionMetadataSchema.safeParse(metadata).success).toBe(false)
+    }
+    expect(SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: 'Reviews changes.',
+      globs: ['x'.repeat(2_048)],
+      alwaysAllow: ['x'.repeat(512)],
+      requiredSources: ['x'.repeat(512)],
+    }).success).toBe(true)
+    for (const [field, maxLength] of [
+      ['globs', 2_048],
+      ['alwaysAllow', 512],
+      ['requiredSources', 512],
+    ] as const) {
+      expect(SkillVersionMetadataSchema.safeParse({
+        name: 'review-helper',
+        description: 'Reviews changes.',
+        [field]: ['x'.repeat(maxLength + 1)],
+      }).success).toBe(false)
+    }
+    expect(SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: '😀'.repeat(1_024),
+    }).success).toBe(true)
+    const oversizedDescription = SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: '😀'.repeat(1_025),
+    })
+    expect(oversizedDescription.success).toBe(false)
+    if (!oversizedDescription.success) {
+      expect(oversizedDescription.error.issues).toContainEqual(expect.objectContaining({
+        path: ['description'],
+        message: 'Creator Skill description must be at most 1024 characters',
+      }))
+    }
   })
 
   it('accepts a SKILL.md up to the archive hard byte limit', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   compareCatalogSemVer,
+  isStrictSemVer,
   isValidCatalogSemVer,
   normalizeCatalogSemVer,
 } from '../semver.ts'
@@ -11,6 +12,8 @@ describe('Catalog strict SemVer 2.0', () => {
       '1.2.3-rc.1+build.5',
     )
     expect(isValidCatalogSemVer('v0.0.0')).toBe(true)
+    expect(isStrictSemVer('1.2.3-rc.1+build.5')).toBe(true)
+    expect(isStrictSemVer('v1.2.3')).toBe(false)
   })
 
   it('compares numeric identifiers as strings beyond JavaScript safe integers', () => {
@@ -36,6 +39,7 @@ describe('Catalog strict SemVer 2.0', () => {
       '1.2.3.4',
       '01.2.3',
       '1.0.0-01',
+      '1.0.0-alpha.01',
       '1.0.0-alpha..1',
       'release-1',
       'V1.2.3',
@@ -46,6 +50,7 @@ describe('Catalog strict SemVer 2.0', () => {
     ]) {
       expect(normalizeCatalogSemVer(version)).toBeNull()
       expect(compareCatalogSemVer(version, '1.0.0')).toBeNull()
+      expect(isStrictSemVer(version)).toBe(false)
     }
   })
 })

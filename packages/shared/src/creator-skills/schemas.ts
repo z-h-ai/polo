@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import {
+  CreatorSkillMetadataError,
+  validateCreatorSkillMetadata,
+} from './metadata.ts'
 import { HARD_SKILL_ARCHIVE_POLICY } from './types.ts'
 
 const entityId = z.string().trim().min(1).max(512)
@@ -52,13 +56,21 @@ export const SkillValidationIssueSchema = z.object({
   suggestion: z.string().max(4_096).optional(),
 })
 
-export const SkillVersionMetadataSchema = z.object({
-  name: z.string().min(1).max(512),
-  description: z.string().min(1).max(8_192),
-  globs: z.array(z.string().max(2_048)).max(1_000).optional(),
-  alwaysAllow: z.array(z.string().max(512)).max(1_000).optional(),
-  icon: z.string().max(64).optional(),
-  requiredSources: z.array(z.string().max(512)).max(1_000).optional(),
+/** Decodes persisted metadata through the same Creator Skill constraint core. */
+export const SkillVersionMetadataSchema = z.unknown().transform((value, ctx) => {
+  try {
+    return validateCreatorSkillMetadata(value, 'SKILL.md')
+  } catch (error) {
+    if (!(error instanceof CreatorSkillMetadataError)) throw error
+    for (const issue of error.issues) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: issue.field ? [issue.field] : [],
+        message: issue.message,
+      })
+    }
+    return z.NEVER
+  }
 })
 
 const creatorArtifactBaseSchema = z.object({

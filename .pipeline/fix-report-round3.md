@@ -1,33 +1,33 @@
-# POO-29 第 3 轮修复报告
+# POO-37 Round 3 修复报告
 
-## 处理结果
+## 逐项修复结果
 
-1. 移除了不存在的 Admin HTTP publication URL。嵌入式 server-core 现在提供持久化的 `CreatorAppPublicationService`：最终 Bundle 以一次性原子写入保存，index 与 audit JSONL 持久化，原始上传只在内存中分析后丢弃。服务集成测试覆盖实际 ZIP 文件、审计与多入口选择。
-2. `admin:publishCreatorApp` 已加入 `LOCAL_ONLY_CHANNELS`；增加显式分类快照和远程 workspace 下本地 client 路由测试。
-3. ZIP 与目录现在为独立 file inputs；目录输入启用 `webkitdirectory`，服务端会安全剥离唯一共同外层根并拒绝冲突路径。
-4. 多入口返回结构化 `needs_entry_selection/candidates`，前端显示唯一的启动文件选择并回传 `selectedEntry`；服务端只接受分析候选。
-5. 最终 Bundle 校验补充非空 appId、版本格式、entry、权限、healthcheck 与 webPath 校验。
-6. ZIP central directory 在解压前限制条目数、单项/总未压缩尺寸和压缩比；覆盖 traversal、symlink、伪锁、无健康端点与高压缩比归档。
-7. 授权解析只接受 active organization + active membership；无权限、删除或空来源不会进入发布。
-8. website 改为直接单次持久化发布，不再创建 draft/release 或 Bundle。
+1. 共享 browser-safe YAML core 将 `toJS` 的 alias 展开限制为 32，并把 parse、materialization、未知/坏 alias 或 tag 相关异常统一转换为 `invalid_skill_content`、`field: frontmatter`、稳定 message `SKILL.md frontmatter must contain valid YAML metadata`。archive 和 `validateCreatorSkillContent` 均通过该核心传播相同结构化失败，不再泄露 YAML 原始异常。
+2. emoji-only icon 校验已移入 `validateCreatorSkillMetadata`。URL、文件路径和带装饰文字的 emoji 都在 browser、content validator、archive 中统一产生 `invalid_skill_content` / `icon` 及同一 message；archive 原有独立 icon 分支已删除。
+3. 增加 `resolveCreatorSkillRoot` 单一根目录契约。empty、noise-only、wrong-root（archive/browser 传入预期 slug）和 multiple-root 都返回 `invalid_skill_root`、空 path、`ZIP must contain exactly one root directory matching the Creator Skill slug`；archive 结构检查复用它。
+4. package staging 改用仓库现有完整 SemVer 2.0 实现的 `isStrictSemVer`，支持合法 prerelease/build metadata，拒绝 `1.0.0-01`、`1.0.0-alpha.01`、leading-zero core、四段版本和 `v` 前缀。
+5. 删除会漂移的公开 `CreatorSkillMetadataSchema`；`SkillVersionMetadataSchema` 现在仅作为 Zod transport adapter，并调用同一个 `validateCreatorSkillMetadata` core。name、description、数组、icon 与根目录规则的生产实现只保留该核心。
 
 ## 关键文件
 
-- `packages/server-core/src/services/creator-app-publications.ts`
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/shared/src/admin/creator-app-publishing.ts`
-- `packages/shared/src/protocol/routing.ts`
-- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
+- `packages/shared/src/creator-skills/metadata.ts`
+- `packages/shared/src/creator-skills/archive.ts`
+- `packages/shared/src/creator-skills/skill-content.ts`
+- `packages/shared/src/creator-skills/schemas.ts`
+- `packages/shared/src/admin/semver.ts`
+- `packages/shared/scripts/stage-creator-skills-package.ts`
+- `packages/shared/src/creator-skills/__tests__/{metadata,archive,skill-content,schemas}.test.ts`
+- `packages/shared/src/admin/__tests__/semver.test.ts`
 
-## 自测
+## 执行命令与结果
 
-- `bun test packages/shared/src/admin/__tests__/creator-app-publishing.test.ts`：9 pass。
-- `bun test packages/server-core/src/handlers/rpc/admin.test.ts packages/server-core/src/services/creator-app-publications.test.ts`：29 pass。
-- `bun test packages/shared/src/protocol/__tests__/routing.test.ts apps/electron/src/transport/__tests__/routed-client.test.ts`：通过。
-- `bun test --isolate ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`：17 pass。
-- `bun run typecheck:all`：通过。
-- `NO_COLOR=1 bun run test`：通过；`scripts/build-cli-artifacts.test.ts` 的 production build 重定向回归也通过。
+- `bun run --cwd packages/shared build:creator-skills`：通过。
+- `bun run typecheck:shared`：通过。
+- `bun test packages/shared/src/creator-skills/__tests__ packages/shared/src/admin/__tests__/semver.test.ts`：98 pass、0 fail、581 assertions。覆盖 alias 限制、稳定 YAML 错误、三类非法 icon、empty/noise-only/wrong/multiple root、严格 UTF-8、包装噪音、无 Node global browser runtime 与 SemVer 边界。
+- `bun run --cwd packages/shared test:creator-skills-package-failures`：通过（early-exit、spawn-error、wrapper spawn-error lifecycle）。
+- `git diff --check`：通过。
+- `bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --allow-dirty-snapshot --output-dir /tmp/poo-37-shared-fix-round3-final`：通过。客观产物为 `/tmp/poo-37-shared-fix-round3-final/proof.json` 与 `lifecycle-proof.json`；local tarball SHA-256 为 `97603727521ac1715502fb99faab29e9567ff8cd0c0630f5c1a09b8171f103fd`，npm integrity 为 `sha512-5cZPU1RL8pWcffJ86wSSAgTW0THwkA79nyNnGzF+ha96JmG5yhm/IWqWbdZQgtwlkdCg9i4TsniO3bZJu16EdQ==`。proof 中 `npm ci` frozen install、CJS/ESM、TypeScript、Next production route/client build、browser metadata contract 与 tarball boundary 均为 passed；Next SIGTERM 退出 `forcedKill: false`，lifecycle proof `exitCode: 0`、`processGroupReaped: true`。
 
-## 遗留问题
+## 未处理的外部发布授权
 
-远端 Polo Admin 服务不在本 worktree。本轮不再调用未部署的 HTTP URL；发布由本机受认证 server-core 边界完成并持久化最终 Bundle。若未来需要跨设备组织共享，应由 Admin 服务接收该最终 Bundle/audit 契约，而不是客户端上传原始 payload。
+未创建 `shared-v0.13.2` tag、未 push、未发布 GitHub Packages，也未执行 registry-backed clean install。上述仅为本地候选 tarball 的冻结 clean-install/lifecycle 证据，不能替代 registry release 或 registry 验证。
