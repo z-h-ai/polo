@@ -30,7 +30,7 @@ try {
     & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
 
     $state = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
-    Assert-True ($state.schemaVersion -eq 3) "Polo did not write the identity-bound ownership state schema."
+    Assert-True ($state.schemaVersion -eq 4) "Polo did not write the installation-bound ownership state schema."
     Assert-True ($state.files.Count -eq 4) "Polo did not record both launchers, wrapper messages, and the root pointer."
     Assert-True ([bool]$state.files[0].sha256) "Polo did not record a managed launcher SHA-256."
     Assert-True ([bool]$state.files[0].identity) "Polo did not record a managed launcher filesystem identity."

@@ -131,6 +131,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(nsis).toContain('WriteINIStr "$INSTDIR\\polo-terminal-integration.ini" "terminal" "binDir" "$R1"')
     expect(nsis).toContain('ReadINIStr $R1 "$INSTDIR\\polo-terminal-integration.ini" "terminal" "binDir"')
     expect(nsis).toContain('-BinDir "$R1"')
+    expect(nsis).toContain('StrCpy $R2 "-RequireInstallBinding"')
     expect(nsis).toContain('SetErrorLevel 1')
     expect(nsis).toContain('Quit')
     expect(nsis).toContain('IfSilent polo_terminal_uninstall_silent_failure')
