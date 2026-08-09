@@ -3,7 +3,16 @@
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Install -InstallDir "$INSTDIR"'
   Pop $0
   ${If} $0 != 0
+    ; A silent installer has no user who can dismiss a MessageBox. Returning a
+    ; non-zero exit code makes CI and updater callers fail closed instead of
+    ; hanging forever after terminal setup fails.
+    IfSilent polo_terminal_setup_silent_failure
     MessageBox MB_ICONEXCLAMATION|MB_OK "Polo was installed, but terminal setup could not be completed. Another command named 'polo' may already exist. Run the repair action from Polo Settings after resolving the conflict."
+    Goto polo_terminal_setup_finished
+polo_terminal_setup_silent_failure:
+    SetErrorLevel 1
+    Quit
+polo_terminal_setup_finished:
   ${EndIf}
 !macroend
 

@@ -64,16 +64,28 @@ function Invoke-NsisProcess {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string[]]$ArgumentList,
-        [Parameter(Mandatory = $true)][string]$Label
+        [Parameter(Mandatory = $true)][string]$Label,
+        [switch]$UseCurrentPath
     )
-    Write-Host "NSIS validation phase=$Label:start"
+    Write-Host "NSIS validation phase=${Label}:start"
     # Start-Process -Wait waits for the Windows process tree. An NSIS
     # installer may launch the desktop app after a successful silent install,
     # which would turn a successful installer into an unbounded wait. Wait for
     # the NSIS controller itself instead and retain a bounded failure signal.
-    $process = Start-Process -FilePath $FilePath `
-        -ArgumentList $ArgumentList `
-        -PassThru -WindowStyle Hidden
+    $savedPath = $env:Path
+    try {
+        if (-not $UseCurrentPath) {
+            # The installer protects an existing user command named `polo`.
+            # The artifact test must therefore not inherit an unrelated runner
+            # command and mistake it for a user-owned conflict.
+            $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        }
+        $process = Start-Process -FilePath $FilePath `
+            -ArgumentList $ArgumentList `
+            -PassThru -WindowStyle Hidden
+    } finally {
+        $env:Path = $savedPath
+    }
     if (-not $process.WaitForExit(90000)) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         throw "NSIS $Label timed out after 90 seconds"
@@ -82,7 +94,7 @@ function Invoke-NsisProcess {
     if ($process.ExitCode -ne 0) {
         throw "NSIS $Label exited with $($process.ExitCode)"
     }
-    Write-Host "NSIS validation phase=$Label:complete"
+    Write-Host "NSIS validation phase=${Label}:complete"
 }
 
 function Stop-InstalledPoloApp([string]$TargetInstallDir = $installDir) {
@@ -371,7 +383,7 @@ function Test-UserCommandConflict {
         $env:Path = "$conflictBin;$savedPath"
         Invoke-NsisProcess -FilePath $installer `
             -ArgumentList @("/S", "/D=$conflictInstall") `
-            -Label "conflict-installer"
+            -Label "conflict-installer" -UseCurrentPath
         Stop-InstalledPoloApp $conflictInstall
         if ((Get-Content -LiteralPath $userCommand -Raw) -cne "@echo off`r`necho user-owned`r`n") {
             throw "NSIS terminal setup overwrote a user-owned polo command"
