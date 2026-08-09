@@ -8,7 +8,7 @@
 
   @latestManifests {
     method GET HEAD
-    path /electron/latest/latest-mac.yml /electron/latest/latest.yml /electron/latest/latest-linux.yml /electron/latest/release-contract.json
+    path /electron/latest/latest-mac.yml /electron/latest/latest.yml /electron/latest/latest-linux.yml /electron/latest/release-contract.json /electron/latest/install-app.sh
   }
   handle @latestManifests {
     header Cache-Control "no-cache"

@@ -1,107 +1,34 @@
-# POO-21 / POO-26 v0.12.0 Integration Report
----
+# POO-36 实现报告
 
-# POO-29 实现报告
+## 变更摘要
 
-## Integration scope
+- Tag 发布工作流现在要求 macOS x64、macOS arm64、Linux x64 与 Windows x64 全部构建成功；Windows 生成未签名的 NSIS `.exe`，并显式校验其 `NotSigned` 状态。
+- Draft GitHub Release 收集 9 个受控资产，生成 schema v2 `release-contract.json`，其中包含两个 macOS DMG 和 Windows 安装包的 SHA-256；仍可读取线上旧 schema v1 合约作为前序版本。
+- `production` 审批后通过 Zeabur Service Exec 调用 `updates-static-v4` 容器内的 `/app/polo-release-pull`。下载器只读取 Draft Release 的固定白名单，校验 tag/commit、所有 SHA-256、manifest SHA-512/大小后才调用现有原子发布器。
+- 公网校验覆盖所有合约资产；成功后才将 Draft GitHub Release 转为正式发布。下载或校验失败不会切换 `electron/latest`。
+- `updates-static` 镜像包含 Bun 下载器和最小依赖，Caddy 仍仅暴露既有 8080 静态端口；`install-app.sh`、manifest 与 contract 都使用 `no-cache`。
 
-This follow-up branch starts from POO-21 commit `54d51093` and integrates the two independently reviewed POO-26 strict-contract commits. The original POO-21 worktree and its untracked session/design files remain untouched.
+## 关键文件
 
-- Upload grant and completion require the same `sizeBytes`, `archiveChecksum`, and current `uploadGeneration`.
-- Electron renderer performs chunked, cancellable SHA-256 and direct object-storage PUT without exposing an account token or sending ZIP bytes through main/server-core.
-- AdminClient uses the authoritative `/api/installed-artifacts/status` endpoint for exact artifact/version/checksum Safety lookup.
-- Member detail responses remain stripped of storage, validation-policy, manifest, and internal validation metadata.
-- The published package identity is `@z-h-ai/shared@0.12.0`; release tag, registry tarball, attestation, and polo-admin clean-consumer proof are recorded by POO-26.
+- `.github/workflows/electron-artifact-full.yml`
+- `.github/workflows/electron-release.yml`
+- `scripts/electron-release-contract.ts`
+- `scripts/electron-release-bundle.ts`
+- `scripts/publish-electron-release.ts`
+- `scripts/polo-release-pull.ts`
+- `infra/updates-static/Dockerfile`
+- `infra/updates-static/polo-release-pull`
 
-## POO-26 release evidence
+## 自测结果
 
-- Release commit: `7bbde0b78bcaafdc0e785ad404373820f5c4b7b5`
-- Tag: `shared-v0.12.0`
-- Candidate/registry SHA-256: `385609a812223c7dc3c947689bd915e68c69c7ff970247e0ea303059c3c98711`
-- Publish workflow: `https://github.com/z-h-ai/polo/actions/runs/31083340263`
-- polo-admin downstream proof: `https://github.com/z-h-ai/polo-admin/actions/runs/31083974149`
----
-
-- Creator Space 中选择 **Web App** 后，入口先展示两种面向结果的发布方式：
-  - **已上线网站（推荐）**：填写 HTTPS 地址，Polo 直接创建并发布。
-  - **上传应用**：拖入可运行 ZIP 或文件夹，Polo 自动分析入口并准备平台发布包；仅在无法唯一确定入口时追加询问。
-- 发布入口不再要求或展示 `polo-app.json`、`appId`、checksum、平台或架构等平台内部交付物。
-- 进入 Organization Console 时保持传入 `organizationId`：`/organization-apps?organizationId=<来源组织>`，使已登录发布页可默认选中来源组织。
-- 所有支持语言补齐相同的 Creator 文案，避免不同语言重新暴露旧的 Manifest/ZIP 根目录约束。
-
-## POO-21 baseline evidence retained
-
-The POO-21 baseline previously proved a real loopback Admin/Electron lifecycle, authenticated server-core download boundaries, install/update/uninstall Ledger and journal behavior, and `skills:changed` refresh. That proof used the older Admin contract and must now be rerun against the POL-59 strict asynchronous service and isolated COS staging resources.
----
-
-- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
-  - Web App 发布入口改为双路径说明，并保留携带来源组织 ID 的跳转。
-- `apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
-  - 回归验证 Creator 不见平台 Bundle 字段，且跳转 URL 携带 `organizationId`。
-- `packages/shared/src/i18n/locales/{de,en,es,hu,ja,pl,zh-Hans}.json`
-  - 新增并对齐 Web App 发布入口文案。
-
-## Latest dev integration
-
-- Merged current `origin/dev` while preserving the strict upload v2 flow, authoritative Safety endpoint, Member response redaction, renderer-only archive hashing/upload, and authenticated download boundary.
-- Resolved overlapping Creator Skill/AdminClient changes together with the newer Catalog, authentication-timeout, Electron packaging, and CLI work from `dev`.
-- Focused Creator Skill suites passed: 88 standard tests, 10 isolated server-core boundary tests, and 15 isolated panel interaction tests.
-- `bun run typecheck:all`, Creator Skill E2E TypeScript validation, and `bun run electron:build` passed on the merged tree.
-- The first full regression exposed a `dev`-side release preflight bug: redirected `electron:dist` prepared the complete runtime before reaching the CLI artifact fail-closed guard, so its 5-second regression timed out after about 103 seconds. `scripts/electron-dist.ts` now rejects the test-only output override before any runtime preparation. The focused regression passed in 67 ms, and the full rerun passed with `5282 passed / 19 skipped` plus every isolated suite.
----
-
-- `NO_COLOR=1 bun test --isolate ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
-  - 通过：16 pass，0 fail，75 expect；测试运行时输出了一条既有异步轮询的 React `act(...)` 警告，不影响结果。
-- `NO_COLOR=1 bun run lint:i18n:parity`
-  - 通过：6 个非英语 locale、每个 1933 keys。
-- `NO_COLOR=1 bun run lint:i18n:coverage`
-  - 通过：所有静态翻译键均可解析。
-- `NO_COLOR=1 bun scripts/sort-locales.ts --check`
-  - 通过。
-- `NO_COLOR=1 bun run typecheck:shared`
-  - 通过。
-- `NO_COLOR=1 bun run typecheck:electron`
-  - 通过。
-- `NO_COLOR=1 bun x eslint src/renderer/components/organization/CreatorArtifactsPanel.tsx src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`
-  - 通过。
-- `NO_COLOR=1 bun run test`
-  - 通过（普通测试及隔离测试脚本均以退出码 0 结束）。
+- `NO_COLOR=1 bun test scripts/electron-release-contract.test.ts scripts/electron-release-bundle.test.ts scripts/publish-electron-release.test.ts scripts/polo-release-pull.test.ts scripts/electron-release-workflow.test.ts`
+  - 通过：29 tests、97 expects、0 fail。
+- `docker build -f infra/updates-static/Dockerfile -t polo-updates-static-poo36:test .`
+  - 通过；随后以 `/app/polo-release-pull` 启动镜像，确认 Bun 运行时、下载器入口与 `GH_TOKEN` fail-closed 前置检查可用。
 - `git diff --check`
   - 通过。
 
-## 2026-08-06 real staging E2E fixes
+## 遗留问题
 
-- The real staging E2E initially failed before launch because the main-process harness bundled `koffi` and esbuild attempted to inline all platform-specific `.node` binaries.
-- Marked `koffi` external and made the temporary harness resolve the repository native dependency; the authenticated download wrapper now treats Fetch `preconnect` as optional because Electron/Node Fetch does not guarantee that extension.
-- Fixed a stale cross-account Catalog result after Owner changes a Member role by invalidating the organization-wide cache on member update/remove. Added a regression proving a cached Member view observes a newly visible draft after promotion.
-- Aligned the authoritative Safety request with POL-59: `{ identities: [...] }` and algorithm-labelled `sha256:<digest>` on the wire, while retaining the canonical 64-character checksum inside the desktop contract.
-- Removed the contradictory E2E assertion that required Member detail to expose `validationPolicy`; the same response is still recursively checked to reject validation policy, manifest, upload generation, and internal validation metadata.
-
-## Real POL-59 staging acceptance
-
-`POO21_ADMIN_BASE_URL=http://127.0.0.1:3000 bun run electron:e2e:creator-skill` passed against the deployed staging Admin, validation/cleanup workers, PostgreSQL, and real Tencent COS through a loopback safety proxy. The proxy only kept the harness loopback-only invariant and rewrote the public download URL back to that local gateway; upstream API, direct PUT, workers, and COS remained real.
-
-- Owner created the Creator Space, draft, and versions; Member management and draft download were rejected.
-- Bob was promoted to Manager and published `1.0.0` and `1.1.0`, then demoted to Member for download and install.
-- Negative checks passed: invalid credentials/body, stale upload generation, Member management, and cross-user download token binding.
-- Electron install/update/uninstall passed with progress stages `download`, `validate`, `prepare`, `commit`, `refresh`; `skills:changed` fired three times and two cleanup-safe backups remained.
-- Accepted versions used distinct archive checksums/content digests; staging cleanup then removed 2 users, 8 retry organizations, 8 artifacts, 9 versions, and all 9 referenced COS objects. Post-cleanup database counts are zero for the fixture users, organizations, and artifacts.
-
-## Remaining acceptance gate
-
-The real cross-repository lifecycle gate is now satisfied. Final regression passed with `5283 passed / 19 skipped` in the 429-file standard suite, every isolated suite passing, `bun run typecheck:all` passing, and `bun run electron:build` passing. Do not mark POO-21 complete until a fresh independent reviewer returns `pass`.
-
-## 2026-08-06 reviewer round 1 remediation
-
-- Restored `CreatorSkillUploadGrant.headers` as an optional field in the source type, Zod response schema, and public package declaration. The new archive identity fields remain required, preserving the strict v2 contract without breaking older Admin responses.
-- Moved the renderer incremental SHA-256 implementation into a focused module and documented its FIPS 180-4 provenance, endian/padding rules, unsigned 32-bit arithmetic, bounded-memory purpose, and safe counter invariant.
-- Fixed the staging stale-generation check to send the full required archive identity. It now asserts the HTTP 409 conflict produced after schema validation instead of accepting any generic rejection.
-- Extended the real staging Electron E2E to read the committed Ledger after install, assert an empty Ledger and no journals after uninstall, and exercise startup recovery in a separate Electron-as-Node process against a deliberately persisted `preparing` crash journal.
-- The extended real Tencent COS staging lifecycle passed with `ledgerCommitted`, `journalsCleaned`, and `restartRecoveryPassed` all true. The rerun fixture was removed together with 2 users, 2 organizations, 2 artifacts, 3 versions, and all 3 COS objects.
-- Final standard suite evidence: one isolated full run passed `5303 / 5303` with 19 skips and 0 failures. Two prior full runs exposed the repository's existing RPC registration ordering flake (the same four tests passed immediately in isolation); the final full run and all isolated suites were green. `bun run typecheck:all` and `bun run electron:build` passed.
-
-The remaining release gate is an independent reviewer `pass` plus manual GitHub token revocation/replacement described in the POL-59 report.
----
-
-- 本 worktree 只包含 Polo Creator/Electron 入口；Polo Admin 内的自动草稿、Bundle 重打包和最终发布服务由既有 Organization Console 路径承接，本轮未越过仓库边界修改该服务。
-- 本轮没有已知的 Creator 入口实现遗留问题；仍需独立 reviewer 按完整跨仓库发布流程验收。
+- 首次真实 tag 联调前，仍需按任务前置授权在 GitHub `production` 配置 Zeabur Service Exec 所需 secret/vars，并在 `updates-static-v4` 配置仅限 `z-h-ai/polo` 只读的 `GH_TOKEN`。
+- 本地卷当前预计使用率高于发布器 70% 阈值；下载器集成测试使用临时注入的容量检查，生产下载器不会绕过该阈值。

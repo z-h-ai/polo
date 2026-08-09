@@ -4,8 +4,7 @@ Deploy these services in the dedicated `polo-public` project on `Polo-release`. 
 
 | Service | Image/build | Volume | Public domain |
 | --- | --- | --- | --- |
-| `updates-static` | `infra/updates-static/Dockerfile` (loads `PoloCaddyfile`) | `/data/releases`, 15 GB | `updates.polo.z-h-ai.com` |
-| `electron-release-publisher` | `infra/electron-release-publisher/Dockerfile` initially; CI replaces it with a temporary publisher context | existing releases PVC at `/data/releases` | none |
+| `updates-static-v4` | `infra/updates-static/Dockerfile` (Caddy plus the one-shot release puller) | `/data/releases`, 15 GB | `updates.polo.z-h-ai.com` |
 | `polo-public-api` | `infra/polo-public/Dockerfile.public-api` | none | `app.polo.z-h-ai.com` |
 | `postgresql` | PostgreSQL 16 | database data, 10 GB | private network only |
 
@@ -21,11 +20,11 @@ zeabur domain create --id <polo-public-api-service-id> --env-id <env-id> --domai
 zeabur service network --id <service-id> --env-id <env-id>
 ```
 
-Create the returned CNAME records at the DNS provider, then verify Zeabur HTTPS issuance. Create the publisher placeholder from `infra/electron-release-publisher`, then use the Zeabur console to attach the existing 15 GiB releases PVC at `/data/releases`. The CLI cannot currently attach an existing PVC. Do not delete the old suspended service holding that volume until the mount and ownership have been verified.
+Create the returned CNAME records at the DNS provider, then verify Zeabur HTTPS issuance. Update `updates-static-v4` with `infra/updates-static/Dockerfile` and retain its existing 15 GiB PVC mount at `/data/releases`. The downloader runs only through Zeabur Service Exec and is the sole writer of that PVC; do not start or restore `electron-release-publisher`.
 
-Configure a protected GitHub `production` Environment with required reviewers. Store `ZEABUR_TOKEN` as an Environment secret, and `ZEABUR_PROJECT_ID`, `ZEABUR_ENVIRONMENT_ID`, and `ZEABUR_PUBLISHER_SERVICE_ID` as Environment variables. Signing secrets remain repository secrets; the reusable build receives only the named macOS/Windows credentials and never receives the Zeabur token. Configure the signing identity variables referenced by `.github/workflows/electron-artifact-full.yml`.
+Configure a protected GitHub `production` Environment with required reviewers. Store `ZEABUR_TOKEN` as an Environment secret, and `ZEABUR_UPDATES_SERVICE_ID` plus `ZEABUR_ENVIRONMENT_ID` as Environment variables. Set `GH_TOKEN` on `updates-static-v4` to a rotatable fine-grained token restricted to read the `z-h-ai/polo` repository's Contents and Releases. Signing secrets remain repository secrets; the reusable build receives only the named macOS credentials and never receives the Zeabur token.
 
-`v0.15.2` is the sole bootstrap release. Push its tag only after root and Electron versions both equal `0.15.2`. The tag workflow builds and validates all three signed packages, creates a Draft GitHub Release, pauses at the `production` Environment, deploys the temporary publisher context, verifies the public bytes, then publishes the GitHub Release. Later versions derive the previous release tag, commit, names, and hashes from the public release contract and exercise the real cross-version upgrade path automatically.
+`v0.15.2` is the sole bootstrap release. Push its tag only after root and Electron versions both equal `0.15.2`. The tag workflow builds signed macOS x64 and arm64 packages, Linux x64, and an intentionally unsigned Windows x64 NSIS installer; it creates a Draft GitHub Release, pauses at the `production` Environment, invokes `/app/polo-release-pull` in `updates-static-v4`, verifies the public bytes, then publishes the GitHub Release. Later versions derive the previous release tag, commit, names, and hashes from the public release contract and exercise the real cross-version upgrade path automatically.
 
 The publisher rejects projected volume use above 70%, validates the fixed release contract plus every YAML size and hash, serializes writers with a PVC lock, rejects downgrades and conflicting same-version retries, atomically switches `electron/latest`, and keeps the newest three release directories. Public verification failure restores the exact pre-release link. Use the manual `Roll Back Electron Update Pointer` workflow to repoint `latest` to a retained version; rollback never deletes binaries. The scheduled validation workflow has read-only GitHub permissions and no Zeabur credentials or PVC path.
 

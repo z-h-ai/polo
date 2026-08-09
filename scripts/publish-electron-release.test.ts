@@ -42,12 +42,18 @@ async function createFixture(version = '1.0.0'): Promise<Fixture> {
   await Promise.all([mkdir(source), mkdir(volume)])
   const files = {
     macosZip: join(source, 'Polo-AI-x64.zip'),
+    macosX64Dmg: join(source, 'Polo-AI-x64.dmg'),
+    macosArm64Dmg: join(source, 'Polo-AI-arm64.dmg'),
     linuxAppImage: join(source, 'Polo-AI-x64.AppImage'),
+    windowsExe: join(source, 'Polo-AI-x64.exe'),
     installApp: join(source, 'install-app.sh'),
   }
   await Promise.all([
     writeFile(files.macosZip, 'macOS release'),
+    writeFile(files.macosX64Dmg, 'macOS x64 DMG'),
+    writeFile(files.macosArm64Dmg, 'macOS arm64 DMG'),
     writeFile(files.linuxAppImage, 'Linux release'),
+    writeFile(files.windowsExe, 'Windows release'),
     writeFile(files.installApp, '#!/bin/sh\n'),
   ])
   const artifacts = [files.macosZip, files.linuxAppImage]
@@ -86,7 +92,7 @@ describe('release publisher validation', () => {
   it('accepts the complete curated release directory', async () => {
     const fixture = await createFixture()
     try {
-      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(6)
+      expect((await validateSource(fixture.source, fixture.args)).files).toHaveLength(9)
     } finally { await destroy(fixture) }
   })
 
@@ -95,11 +101,13 @@ describe('release publisher validation', () => {
     try {
       const manifestPath = join(fixture.source, 'latest-mac.yml')
       const manifest = await readFile(manifestPath, 'utf8')
+      const dmgContents = await readFile(join(fixture.source, 'Polo-AI-x64.dmg'))
+      const dmgHash = createHash('sha512').update(dmgContents).digest('base64')
       await writeFile(
         manifestPath,
         manifest.replace(
           'files:\n',
-          `files:\n  - url: Polo-AI-x64.dmg\n    sha512: ${'a'.repeat(88)}\n    size: 123\n`,
+          `files:\n  - url: Polo-AI-x64.dmg\n    sha512: ${dmgHash}\n    size: ${dmgContents.byteLength}\n`,
         ),
       )
 

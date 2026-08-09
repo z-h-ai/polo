@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util'
 import { gt } from 'semver'
 import { isStrictSemver, parseStrictSemverTag } from './strict-semver'
 
-export const RELEASE_CONTRACT_SCHEMA_VERSION = 1 as const
+export const RELEASE_CONTRACT_SCHEMA_VERSION = 2 as const
 export const BOOTSTRAP_VERSION = '0.15.2'
 export const DEFAULT_RELEASE_CONTRACT_URL =
   'https://updates.polo.z-h-ai.com/electron/latest/release-contract.json'
@@ -18,14 +18,30 @@ const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 export const RELEASE_ARTIFACT_KEYS = [
   'macosZip',
+  'macosX64Dmg',
+  'macosArm64Dmg',
   'linuxAppImage',
+  'windowsExe',
 ] as const
+
+const LEGACY_RELEASE_ARTIFACT_KEYS = ['macosZip', 'linuxAppImage'] as const
 
 export type ReleaseArtifactKey = (typeof RELEASE_ARTIFACT_KEYS)[number]
 
 export interface ReleaseArtifactContract {
   fileName: string
   sha256: string
+}
+
+export interface LegacyReleaseContract {
+  schemaVersion: 1
+  repository: string
+  tag: string
+  version: string
+  commitSha: string
+  publishedAt: string
+  artifacts: Record<(typeof LEGACY_RELEASE_ARTIFACT_KEYS)[number], ReleaseArtifactContract>
+  installApp: ReleaseArtifactContract
 }
 
 export interface ReleaseContract {
@@ -39,6 +55,8 @@ export interface ReleaseContract {
   installApp: ReleaseArtifactContract
 }
 
+export type ParsedReleaseContract = ReleaseContract | LegacyReleaseContract
+
 export interface ReleasePreflightInput {
   repository: string
   tag: string
@@ -46,13 +64,13 @@ export interface ReleasePreflightInput {
   tagCommitSha: string
   rootVersion: string
   electronVersion: string
-  onlineContract?: ReleaseContract
+  onlineContract?: ParsedReleaseContract
 }
 
 export interface ReleasePreflightResult {
   bootstrap: boolean
   version: string
-  previous?: ReleaseContract
+  previous?: ParsedReleaseContract
 }
 
 function assertExactKeys(
@@ -88,7 +106,7 @@ function parseArtifact(value: unknown, label: string): ReleaseArtifactContract {
   return { fileName: record.fileName, sha256: record.sha256 }
 }
 
-export function parseReleaseContract(value: unknown): ReleaseContract {
+export function parseReleaseContract(value: unknown): ParsedReleaseContract {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Release contract must be an object')
   }
@@ -103,7 +121,7 @@ export function parseReleaseContract(value: unknown): ReleaseContract {
     'artifacts',
     'installApp',
   ], 'Release contract')
-  if (record.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION) {
+  if (record.schemaVersion !== 1 && record.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION) {
     throw new Error(`Unsupported release contract schema: ${String(record.schemaVersion)}`)
   }
   if (typeof record.repository !== 'string' || !REPOSITORY_PATTERN.test(record.repository)) {
@@ -131,20 +149,38 @@ export function parseReleaseContract(value: unknown): ReleaseContract {
     throw new Error('Release contract artifacts must be an object')
   }
   const artifactRecord = record.artifacts as Record<string, unknown>
-  assertExactKeys(artifactRecord, RELEASE_ARTIFACT_KEYS, 'Release contract artifacts')
-  const contract: ReleaseContract = {
-    schemaVersion: RELEASE_CONTRACT_SCHEMA_VERSION,
+  const artifactKeys = record.schemaVersion === 1
+    ? LEGACY_RELEASE_ARTIFACT_KEYS
+    : RELEASE_ARTIFACT_KEYS
+  assertExactKeys(artifactRecord, artifactKeys, 'Release contract artifacts')
+  const base = {
     repository: record.repository,
     tag: record.tag,
     version: record.version,
     commitSha: record.commitSha,
     publishedAt: record.publishedAt,
-    artifacts: {
-      macosZip: parseArtifact(artifactRecord.macosZip, 'artifacts.macosZip'),
-      linuxAppImage: parseArtifact(artifactRecord.linuxAppImage, 'artifacts.linuxAppImage'),
-    },
     installApp: parseArtifact(record.installApp, 'installApp'),
   }
+  const contract: ParsedReleaseContract = record.schemaVersion === 1
+    ? {
+        schemaVersion: 1,
+        ...base,
+        artifacts: {
+          macosZip: parseArtifact(artifactRecord.macosZip, 'artifacts.macosZip'),
+          linuxAppImage: parseArtifact(artifactRecord.linuxAppImage, 'artifacts.linuxAppImage'),
+        },
+      }
+    : {
+        schemaVersion: RELEASE_CONTRACT_SCHEMA_VERSION,
+        ...base,
+        artifacts: {
+          macosZip: parseArtifact(artifactRecord.macosZip, 'artifacts.macosZip'),
+          macosX64Dmg: parseArtifact(artifactRecord.macosX64Dmg, 'artifacts.macosX64Dmg'),
+          macosArm64Dmg: parseArtifact(artifactRecord.macosArm64Dmg, 'artifacts.macosArm64Dmg'),
+          linuxAppImage: parseArtifact(artifactRecord.linuxAppImage, 'artifacts.linuxAppImage'),
+          windowsExe: parseArtifact(artifactRecord.windowsExe, 'artifacts.windowsExe'),
+        },
+      }
   const names = [
     ...Object.values(contract.artifacts).map((artifact) => artifact.fileName),
     contract.installApp.fileName,
@@ -158,6 +194,13 @@ export function parseReleaseContract(value: unknown): ReleaseContract {
     || contract.installApp.fileName !== 'install-app.sh'
   ) {
     throw new Error('Release contract artifact types are invalid')
+  }
+  if (contract.schemaVersion === RELEASE_CONTRACT_SCHEMA_VERSION && (
+    contract.artifacts.macosX64Dmg.fileName !== 'Polo-AI-x64.dmg'
+    || contract.artifacts.macosArm64Dmg.fileName !== 'Polo-AI-arm64.dmg'
+    || contract.artifacts.windowsExe.fileName !== 'Polo-AI-x64.exe'
+  )) {
+    throw new Error('Release contract manual installer names are invalid')
   }
   return contract
 }
@@ -209,10 +252,13 @@ export async function createReleaseContract(input: {
   commitSha: string
   publishedAt: string
   macosZip: string
+  macosX64Dmg: string
+  macosArm64Dmg: string
   linuxAppImage: string
+  windowsExe: string
   installApp: string
 }): Promise<ReleaseContract> {
-  return parseReleaseContract({
+  const contract = parseReleaseContract({
     schemaVersion: RELEASE_CONTRACT_SCHEMA_VERSION,
     repository: input.repository,
     tag: input.tag,
@@ -221,10 +267,17 @@ export async function createReleaseContract(input: {
     publishedAt: input.publishedAt,
     artifacts: {
       macosZip: { fileName: basename(input.macosZip), sha256: await sha256(input.macosZip) },
+      macosX64Dmg: { fileName: basename(input.macosX64Dmg), sha256: await sha256(input.macosX64Dmg) },
+      macosArm64Dmg: { fileName: basename(input.macosArm64Dmg), sha256: await sha256(input.macosArm64Dmg) },
       linuxAppImage: { fileName: basename(input.linuxAppImage), sha256: await sha256(input.linuxAppImage) },
+      windowsExe: { fileName: basename(input.windowsExe), sha256: await sha256(input.windowsExe) },
     },
     installApp: { fileName: basename(input.installApp), sha256: await sha256(input.installApp) },
   })
+  if (contract.schemaVersion !== RELEASE_CONTRACT_SCHEMA_VERSION) {
+    throw new Error('New release contract unexpectedly used a legacy schema')
+  }
+  return contract
 }
 
 function appendOutput(lines: string[], key: string, value: string | boolean): void {
@@ -256,7 +309,7 @@ async function runPreflight(argv: string[]): Promise<void> {
     readFile(resolve(values['root-package']!), 'utf8').then(JSON.parse),
     readFile(resolve(values['electron-package']!), 'utf8').then(JSON.parse),
   ])
-  let onlineContract: ReleaseContract | undefined
+  let onlineContract: ParsedReleaseContract | undefined
   const response = await fetch(values['contract-url']!, {
     headers: { 'cache-control': 'no-cache' },
   })

@@ -23,13 +23,14 @@ import { compare } from 'semver'
 import {
   parseReleaseContract,
   sha256,
+  type ParsedReleaseContract,
   type ReleaseArtifactContract,
   type ReleaseContract,
 } from './electron-release-contract'
 import { isStrictSemver } from './strict-semver'
 
 export const MANIFEST_NAMES = ['latest-mac.yml', 'latest-linux.yml'] as const
-export const MACOS_DMG_NAME = 'Polo-AI-x64.dmg'
+export const MACOS_X64_DMG_NAME = 'Polo-AI-x64.dmg'
 export const MAX_DISK_USAGE = 0.70
 export const KEEP_RELEASES = 3
 
@@ -115,7 +116,7 @@ function manifestEntryForArtifact(
   expectedArtifact: ReleaseArtifactContract,
 ): YamlFile {
   const allowed = name === 'latest-mac.yml'
-    ? new Set([expectedArtifact.fileName, MACOS_DMG_NAME])
+    ? new Set([expectedArtifact.fileName, MACOS_X64_DMG_NAME])
     : new Set([expectedArtifact.fileName])
   const unsupported = manifest.files.find(entry => !allowed.has(entry.url))
   if (unsupported) {
@@ -170,6 +171,9 @@ export async function validateSource(
     throw new Error('release-contract.json must be a regular file')
   }
   const contract = parseReleaseContract(JSON.parse(await readFile(contractPath, 'utf8')))
+  if (contract.schemaVersion !== 2) {
+    throw new Error('Release source must use contract schema version 2')
+  }
   if (contract.version !== expected.version) {
     throw new Error(`Release contract has version ${contract.version}, expected ${expected.version}`)
   }
@@ -207,13 +211,15 @@ export async function validateSource(
       throw new Error(`${name} has version ${manifest.version}, expected ${expected.version}`)
     }
     const expectedArtifact = manifestArtifacts[name]
-    const entry = manifestEntryForArtifact(manifest, name, expectedArtifact)
-    const artifactPath = join(source, entry.url)
-    const artifactStat = await stat(artifactPath)
-    if (!artifactStat.isFile()) throw new Error(`${name} references a non-file artifact: ${entry.url}`)
-    if (artifactStat.size !== entry.size) throw new Error(`${name} has an incorrect size for ${entry.url}`)
-    if ((await checksum(artifactPath, 'sha512')) !== entry.sha512) {
-      throw new Error(`${name} has an incorrect SHA-512 for ${entry.url}`)
+    manifestEntryForArtifact(manifest, name, expectedArtifact)
+    for (const manifestEntry of manifest.files) {
+      const artifactPath = join(source, manifestEntry.url)
+      const artifactStat = await stat(artifactPath)
+      if (!artifactStat.isFile()) throw new Error(`${name} references a non-file artifact: ${manifestEntry.url}`)
+      if (artifactStat.size !== manifestEntry.size) throw new Error(`${name} has an incorrect size for ${manifestEntry.url}`)
+      if ((await checksum(artifactPath, 'sha512')) !== manifestEntry.sha512) {
+        throw new Error(`${name} has an incorrect SHA-512 for ${manifestEntry.url}`)
+      }
     }
     manifests[name] = manifest
   }
@@ -297,7 +303,7 @@ async function sameContents(left: string, right: string): Promise<boolean> {
   return JSON.stringify(leftInventory) === JSON.stringify(rightInventory)
 }
 
-async function readLatestContract(electronRoot: string): Promise<ReleaseContract | undefined> {
+async function readLatestContract(electronRoot: string): Promise<ParsedReleaseContract | undefined> {
   const latest = join(electronRoot, 'latest')
   try {
     const latestStat = await lstat(latest)

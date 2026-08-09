@@ -53,7 +53,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is intentionally excluded until its Authenticode credentials are configured.
         include:
           - platform: macos
             arch: x64
@@ -75,6 +74,13 @@ jobs:
             updater: true
             manifest: latest-linux.yml
             artifact: Polo-AI-x64.AppImage
+          # Windows is deliberately unsigned in this release phase. It is a
+          # manual NSIS installer and does not participate in updater manifests.
+          - platform: windows
+            arch: x64
+            runner: windows-latest
+            updater: false
+            manual_installer: Polo-AI-x64.exe
     runs-on: ${{ matrix.runner }}
     env:
       PREVIOUS_RELEASE_TAG: ${{ inputs.previous_release_tag }}
@@ -219,6 +225,25 @@ jobs:
             bun run electron:dist:linux --arch=x64 2>&1 | tee "$1"
           ' _ "$RUNNER_TEMP/full-validation-linux.log"
 
+      - name: Build and validate unsigned Windows release
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run electron:dist:win --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-windows-x64.log"
+
+      - name: Require intentionally unsigned Windows installer
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $installer = 'apps/electron/release/Polo-AI-x64.exe'
+          if (-not (Test-Path -LiteralPath $installer)) { throw "Missing $installer" }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'NotSigned') {
+            throw "Windows installer must be explicitly unsigned for this release phase; got $($signature.Status)"
+          }
+          Write-Host 'Windows NSIS installer is intentionally unsigned.'
+
       - name: Require updater outputs
         if: matrix.updater
         shell: bash
@@ -242,6 +267,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: electron-release-macos-dmg-${{ matrix.arch }}-${{ github.sha }}
+          path: apps/electron/release/${{ matrix.manual_installer }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows manual installer
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-release-windows-${{ matrix.arch }}-${{ github.sha }}
           path: apps/electron/release/${{ matrix.manual_installer }}
           if-no-files-found: error
           retention-days: 14

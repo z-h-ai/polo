@@ -36,10 +36,13 @@ describe('Electron release workflow boundaries', () => {
     expect(rollback).not.toContain('/app/publisher rollback')
   })
 
-  it('keeps the manual production gate free of Zeabur write credentials', () => {
-    expect(release).toContain('Verify manually uploaded updater bundle')
-    expect(release).toContain('Verify manually uploaded DMG')
-    expect(release).not.toContain('ZEABUR_TOKEN')
+  it('pulls the approved Draft Release through the sole PVC writer before public verification', () => {
+    expect(release).toContain('Trigger Zeabur release pull')
+    expect(release).toContain('ZEABUR_TOKEN')
+    expect(release).toContain('ZEABUR_UPDATES_SERVICE_ID')
+    expect(release).toContain('npx zeabur@latest service exec')
+    expect(release).toContain('/app/polo-release-pull')
+    expect(release).toContain('Verify Zeabur updater bundle')
     expect(release).not.toContain('zeabur deploy')
     expect(release).not.toContain('/app/publisher')
   })
@@ -51,16 +54,17 @@ describe('Electron release workflow boundaries', () => {
     expect(reusable).toContain('arch: arm64')
     expect(reusable).toContain('manual_installer: Polo-AI-x64.dmg')
     expect(reusable).toContain('manual_installer: Polo-AI-arm64.dmg')
+    expect(reusable).toContain('platform: windows')
+    expect(reusable).toContain('runner: windows-latest')
+    expect(reusable).toContain('Polo-AI-x64.exe')
+    expect(reusable).toContain('Get-AuthenticodeSignature')
     expect(reusable).toContain('electron:dist:mac --arch=${{ matrix.arch }}')
-    expect(release).toContain('test -f collected/Polo-AI-x64.dmg')
-    expect(release).toContain('test -f collected/Polo-AI-arm64.dmg')
-    expect(release).toContain('for arch in x64 arm64; do')
+    expect(release).toContain('test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 9')
   })
 
-  it('grants contents write only to Draft Release, production verification, and publishing', () => {
-    expect(release.match(/contents: write/g)).toHaveLength(3)
+  it('grants contents write only to Draft Release assembly and final publishing', () => {
+    expect(release.match(/contents: write/g)).toHaveLength(2)
     expect(release).toContain('Create immutable Draft GitHub Release')
-    expect(release).toContain('Production needs this permission only to download the expected DMG')
     expect(release).toContain('Publish approved GitHub Release')
   })
 })
