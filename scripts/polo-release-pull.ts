@@ -215,6 +215,39 @@ async function existingIncomingIsReusable(
   }
 }
 
+async function existingPublishedReleaseIsApproved(
+  destination: string,
+  args: ReleaseArguments,
+  assets: Map<string, GitHubAsset>,
+  trustedDigests: Map<string, string>,
+): Promise<boolean> {
+  const existing = await lstat(destination).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (!existing) return false
+  try {
+    if (!existing.isDirectory()) throw new Error('release path is not a directory')
+    // Validate the complete contract/manifests before accepting an existing
+    // directory as a retry. Size alone is insufficient for same-size bytes.
+    await validateSource(destination, args)
+    for (const name of RELEASE_ASSET_NAMES) {
+      const file = await stat(join(destination, name))
+      if (!file.isFile() || file.size !== assets.get(name)!.size) {
+        throw new Error('release asset size differs')
+      }
+    }
+    if (!(await matchesTrustedDigests(destination, trustedDigests))) {
+      throw new Error('release asset digest differs')
+    }
+    return true
+  } catch (error) {
+    // Do not make a partially published or different same-version directory
+    // eligible for a new-byte download, capacity bypass, or pointer switch.
+    throw new Error(`Existing release ${args.version} conflicts with the approved Draft Release`)
+  }
+}
+
 function trustedSha256Digests(identity: DraftReleaseIdentity): Map<string, string> {
   return new Map(identity.assets.map(asset => [asset.name, asset.sha256]))
 }
@@ -276,6 +309,7 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
   const incomingRoot = join(releasesDir, 'electron', '.incoming')
   const incoming = join(incomingRoot, normalized.version)
   const stage = join(incomingRoot, `.${normalized.version}.download-${process.pid}-${Date.now()}`)
+  const destination = join(releasesDir, 'electron', 'releases', normalized.version)
   const publishArgs: ReleaseArguments = {
     source: incoming,
     releasesDir,
@@ -284,11 +318,23 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
     tag: normalized.tag,
     commitSha: normalized.commitSha,
   }
+  const trustedDigests = trustedSha256Digests(approvedIdentity)
+  if (await existingPublishedReleaseIsApproved(destination, publishArgs, assets, trustedDigests)) {
+    // An interrupted caller may have published the exact immutable directory
+    // but lost its Service Exec result. Resume from it before any capacity
+    // preflight or download; publish keeps the usual locked pointer semantics.
+    const result = await publish({ ...publishArgs, source: destination }, options.publisherOptions)
+    try {
+      await (options.incomingCleanup ?? ((path: string) => rm(path, { recursive: true, force: true })))(incoming)
+    } catch {
+      console.warn(`Release ${normalized.version} resumed; incoming cleanup will be retried later`)
+    }
+    return result
+  }
   const reusableIncoming = await existingIncomingIsReusable(incoming, publishArgs, assets)
   let createdIncoming = false
   try {
     const assetBytes = RELEASE_ASSET_NAMES.reduce((total, name) => total + assets.get(name)!.size, 0)
-    const trustedDigests = trustedSha256Digests(approvedIdentity)
     if (reusableIncoming) {
       await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes)
       if (!(await matchesTrustedDigests(incoming, trustedDigests))) {

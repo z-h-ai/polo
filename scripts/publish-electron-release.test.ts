@@ -288,7 +288,7 @@ describe('release publisher filesystem behavior', () => {
     } finally { await destroy(first) }
   })
 
-  it('persists and rejects any compensation retry whose latest pointer is not the exact predecessor', async () => {
+  it('archives an exactly asserted compensation without permanently pinning latest', async () => {
     const first = await createFixture('1.0.0')
     const second = await createFixture('1.1.0')
     try {
@@ -299,8 +299,11 @@ describe('release publisher filesystem behavior', () => {
       await rollbackFailedRelease(first.volume, '1.1.0')
       await assertRollbackTarget(first.volume, '1.1.0')
       await rollback(first.volume, '1.1.0')
-      await expect(rollbackFailedRelease(first.volume, '1.1.0'))
-        .rejects.toThrow('not its exact predecessor')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await assertRollbackTarget(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.1.0')
+      expect(await readFile(join(first.volume, 'electron', '.compensated-history-1.1.0.json'), 'utf8'))
+        .toContain('releases/1.0.0')
     } finally {
       await destroy(second)
       await destroy(first)
@@ -327,30 +330,41 @@ describe('release publisher filesystem behavior', () => {
     }
   })
 
-  it('retires an exact old compensated marker under lock before a later release finalizes', async () => {
+  it('records the actual manual rollback pointer as a later publish predecessor while retaining archival compensation history', async () => {
     const first = await createFixture('1.0.0')
-    const failed = await createFixture('1.1.0')
-    const next = await createFixture('1.2.0')
+    const second = await createFixture('1.1.0')
+    const failed = await createFixture('1.2.0')
+    const next = await createFixture('1.3.0')
     try {
+      second.args.releasesDir = first.volume
       failed.args.releasesDir = first.volume
       next.args.releasesDir = first.volume
       await publish(first.args, testPublisherOptions)
       await confirmRelease(first.volume, '1.0.0')
+      await finalizeRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.1.0')
+      await finalizeRelease(first.volume, '1.1.0')
       await publish(failed.args, testPublisherOptions)
-      await rollbackFailedRelease(first.volume, '1.1.0')
-      await assertRollbackTarget(first.volume, '1.1.0')
+      await rollbackFailedRelease(first.volume, '1.2.0')
+      await assertRollbackTarget(first.volume, '1.2.0')
+      await rollback(first.volume, '1.0.0')
 
       await publish(next.args, testPublisherOptions)
-      await expect(readFile(join(first.volume, 'electron', '.compensated-1.1.0.json'))).rejects.toThrow()
-      await confirmRelease(first.volume, '1.2.0')
-      await finalizeRelease(first.volume, '1.2.0')
-      await assertFinalizedRelease(first.volume, '1.2.0')
+      expect(JSON.parse(await readFile(join(first.volume, 'electron', '.rollback-1.3.0.json'), 'utf8')))
+        .toMatchObject({ previousTarget: 'releases/1.0.0' })
+      expect(await readFile(join(first.volume, 'electron', '.compensated-history-1.2.0.json'), 'utf8'))
+        .toContain('releases/1.1.0')
+      await confirmRelease(first.volume, '1.3.0')
+      await finalizeRelease(first.volume, '1.3.0')
+      await assertFinalizedRelease(first.volume, '1.3.0')
       expect((await readdir(join(first.volume, 'electron', 'releases'))).sort()).toEqual([
-        '1.0.0', '1.1.0', '1.2.0',
+        '1.1.0', '1.2.0', '1.3.0',
       ])
     } finally {
       await destroy(next)
       await destroy(failed)
+      await destroy(second)
       await destroy(first)
     }
   })

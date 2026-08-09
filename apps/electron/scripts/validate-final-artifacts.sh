@@ -61,7 +61,7 @@ if [ "$MODE" = "full" ]; then
     exit 1
   fi
 fi
-if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ]; then
+if [ "$MODE" = "full" ] || [ "$MODE" = "bootstrap" ] || [ "$MODE" = "signing" ]; then
   if [ "$SYSTEM_NAME" = "Darwin" ]; then
     for release_identity in \
       "$MACOS_TEAM_ID" \
@@ -163,6 +163,34 @@ validate_macos_release_identity() {
     --actual-uv-requirement "$uv_requirement" \
     --app-signature "$app_signature" \
     --uv-signature "$uv_signature" \
+    --notarization "$notarization" \
+    --stapling "$stapling" \
+    --output "$SIGNING_AUDIT_FILE"
+}
+
+validate_macos_dmg_release_identity() {
+  local dmg="$1"
+  local dmg_signature=invalid
+  local notarization=rejected
+  local stapling=invalid
+  local dmg_team_id
+
+  if codesign --verify --strict "$dmg"; then dmg_signature=valid; fi
+  dmg_team_id="$(macos_team_id "$dmg")"
+  if spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1 \
+    | grep -F 'source=Notarized Developer ID' >/dev/null; then
+    notarization=accepted
+  fi
+  if xcrun stapler validate "$dmg" >/dev/null 2>&1; then stapling=valid; fi
+
+  # The mounted App and nested uv have their own records below.  Keep this
+  # outer-DMG record separate: the downloadable release object must itself be
+  # Developer ID signed, notarized, and stapled before it is mounted.
+  "$HOST_BUN" run "$SIGNING_CONTRACT" verify-macos-dmg \
+    --label "DMG outer" \
+    --expected-team-id "$MACOS_TEAM_ID" \
+    --actual-dmg-team-id "$dmg_team_id" \
+    --dmg-signature "$dmg_signature" \
     --notarization "$notarization" \
     --stapling "$stapling" \
     --output "$SIGNING_AUDIT_FILE"
@@ -391,6 +419,10 @@ validate_macos() {
   if [ ! -f "$dmg" ] || [ ! -f "$zip" ]; then
     echo "Final macOS validation requires both $dmg and $zip" >&2
     exit 1
+  fi
+
+  if [ "$MODE" != "smoke" ]; then
+    validate_macos_dmg_release_identity "$dmg"
   fi
 
   local mount_point="$TEMP_ROOT/dmg"

@@ -367,6 +367,10 @@ function finalizedMarkerPath(electronRoot: string, version: string): string {
   return join(electronRoot, `.finalized-${version}.json`)
 }
 
+function compensationHistoryPath(electronRoot: string, version: string): string {
+  return join(electronRoot, `.compensated-history-${version}.json`)
+}
+
 async function readRollbackTarget(marker: string, version: string): Promise<RollbackTarget> {
   const parsed = JSON.parse(await readFile(marker, 'utf8')) as { previousTarget?: unknown }
   if (parsed.previousTarget !== null && typeof parsed.previousTarget !== 'string') {
@@ -429,29 +433,45 @@ async function recordRollbackTarget(electronRoot: string, version: string): Prom
   await rename(temporary, marker)
 }
 
-async function retireObsoleteCompensatedMarkers(
-  electronRoot: string,
-  activeVersion: string,
-): Promise<void> {
+async function assertNoActiveCompensationMarkers(electronRoot: string): Promise<void> {
   for (const entry of await readdir(electronRoot, { withFileTypes: true })) {
     const match = entry.name.match(/^\.compensated-(.+)\.json$/)
-    if (!entry.isFile() || !match || match[1] === activeVersion) continue
+    if (!entry.isFile() || !match || entry.name.startsWith('.compensated-history-')) continue
     const failedVersion = match[1]
     if (!isStrictSemver(failedVersion)) {
-      throw new Error(`Cannot retire malformed compensated marker: ${entry.name}`)
+      throw new Error(`Cannot resume with malformed compensated marker: ${entry.name}`)
     }
-    // A completed compensation remains authoritative only until a later
-    // publish records its own predecessor. Under the same publisher lock,
-    // require the old marker to describe the current pointer before removing
-    // it; a changed/manual pointer is never silently erased as "obsolete".
-    const path = join(electronRoot, entry.name)
-    await assertLatestMatchesRollbackTarget(
-      electronRoot,
-      failedVersion,
-      await readRollbackTarget(path, failedVersion),
-    )
-    await rm(path, { force: true })
+    // An interrupted compensation has not yet been asserted and archived.
+    // Do not let a new publish overwrite that recovery proof.
+    throw new Error(`Cannot resume while compensation for ${failedVersion} is incomplete`)
   }
+}
+
+async function archiveCompensation(
+  electronRoot: string,
+  version: string,
+  target: RollbackTarget,
+): Promise<void> {
+  const active = markerPath(electronRoot, 'compensated', version)
+  const history = compensationHistoryPath(electronRoot, version)
+  const temporary = `${history}.${process.pid}.tmp`
+  await writeFile(temporary, `${JSON.stringify({
+    previousTarget: target.previousTarget,
+    completedAt: new Date().toISOString(),
+  })}\n`)
+  await rename(temporary, history)
+  await rm(active, { force: true })
+}
+
+async function readArchivedCompensationTarget(marker: string, version: string): Promise<RollbackTarget> {
+  const parsed = JSON.parse(await readFile(marker, 'utf8')) as {
+    previousTarget?: unknown
+    completedAt?: unknown
+  }
+  if (typeof parsed.completedAt !== 'string' || !parsed.completedAt) {
+    throw new Error(`Compensation history for ${version} is invalid`)
+  }
+  return readRollbackTarget(marker, version)
 }
 
 async function protectedReleaseVersions(
@@ -464,7 +484,7 @@ async function protectedReleaseVersions(
   for (const entry of await readdir(electronRoot, { withFileTypes: true })) {
     if (ignoredMarkers.has(entry.name)) continue
     const marker = entry.name.match(ROLLBACK_MARKER_PATTERN)
-    if (!marker || !entry.isFile()) continue
+    if (!marker || !entry.isFile() || entry.name.startsWith('.compensated-history-')) continue
     try {
       const parsed = JSON.parse(await readFile(join(electronRoot, entry.name), 'utf8')) as { previousTarget?: unknown }
       if (typeof parsed.previousTarget !== 'string') continue
@@ -654,19 +674,7 @@ export async function publish(
       if (latestContract?.version === args.version && confirmed?.isFile()) {
         return 'idempotent'
       }
-      const compensatedMarker = markerPath(electronRoot, 'compensated', args.version)
-      const compensated = await lstat(compensatedMarker).then(() => compensatedMarker).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined
-        throw error
-      })
-      if (compensated) {
-        // This is a new attempt after an earlier compensation. It may replace
-        // the old durable proof only after proving its predecessor is still
-        // current; recordRollbackTarget then persists the same new promise.
-        await assertLatestMatchesRollbackTarget(electronRoot, args.version, await readRollbackTarget(compensated, args.version))
-        await rm(compensated)
-      }
-      await retireObsoleteCompensatedMarkers(electronRoot, args.version)
+      await assertNoActiveCompensationMarkers(electronRoot)
       await recordRollbackTarget(electronRoot, args.version)
       await switchLatest(electronRoot, destination)
       return 'idempotent'
@@ -674,13 +682,13 @@ export async function publish(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
 
+    await assertNoActiveCompensationMarkers(electronRoot)
     await (options.capacityCheck ?? assertDiskCapacity)(releasesDir, source)
     const staging = join(releaseRoot, `.${args.version}.staging-${process.pid}`)
     await rm(staging, { recursive: true, force: true })
     try {
       await cp(source, staging, { recursive: true, errorOnExist: true, force: false })
       await rename(staging, destination)
-      await retireObsoleteCompensatedMarkers(electronRoot, args.version)
       await recordRollbackTarget(electronRoot, args.version)
       await switchLatest(electronRoot, destination)
     } catch (error) {
@@ -753,6 +761,18 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
   await withPublisherLock(electronRoot, async () => {
     const latest = await readLatestContract(electronRoot)
     const compensatedMarker = markerPath(electronRoot, 'compensated', version)
+    const historyMarker = compensationHistoryPath(electronRoot, version)
+    const history = await lstat(historyMarker).then(() => historyMarker).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (history) {
+      // Completed compensation is immutable audit history, not an active
+      // promise about today's latest pointer. A later manual rollback or
+      // publish therefore records its actual current predecessor afresh.
+      await readArchivedCompensationTarget(history, version)
+      return
+    }
     const compensated = await lstat(compensatedMarker).then(() => compensatedMarker).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined
       throw error
@@ -803,6 +823,7 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
     // the workflow composite can therefore prove restoration, including the
     // bootstrap case where the only correct result is no latest symlink.
     await rename(marker, compensatedMarker)
+    await archiveCompensation(electronRoot, version, target)
   })
 }
 
@@ -878,7 +899,9 @@ export async function assertFinalizedRelease(releasesDir: string, version: strin
 async function assertFinalizedLocked(electronRoot: string, version: string): Promise<void> {
   const entries = await readdir(electronRoot, { withFileTypes: true })
   const staleMarkers = entries
-    .filter(entry => entry.isFile() && ROLLBACK_MARKER_PATTERN.test(entry.name))
+    .filter(entry => entry.isFile()
+      && ROLLBACK_MARKER_PATTERN.test(entry.name)
+      && !entry.name.startsWith('.compensated-history-'))
     .map(entry => entry.name)
   if (staleMarkers.length > 0) {
     throw new Error(`Cannot verify finalization of ${version}: stale rollback markers remain: ${staleMarkers.join(', ')}`)
@@ -909,9 +932,18 @@ export async function assertRollbackTarget(releasesDir: string, version: string)
   if (!isStrictSemver(version)) throw new Error('Version must be strict SemVer')
   const electronRoot = join(resolve(releasesDir), 'electron')
   await withPublisherLock(electronRoot, async () => {
-    const marker = markerPath(electronRoot, 'compensated', version)
-    await lstat(marker)
-    await assertLatestMatchesRollbackTarget(electronRoot, version, await readRollbackTarget(marker, version))
+    const active = markerPath(electronRoot, 'compensated', version)
+    const activeMarker = await lstat(active).then(() => active).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (activeMarker) {
+      await assertLatestMatchesRollbackTarget(electronRoot, version, await readRollbackTarget(activeMarker, version))
+      return
+    }
+    // A history marker is written only after the exact assertion under the
+    // publisher lock. It intentionally does not constrain a later pointer.
+    await readArchivedCompensationTarget(compensationHistoryPath(electronRoot, version), version)
   })
 }
 

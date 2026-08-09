@@ -249,6 +249,90 @@ describe('Zeabur Draft Release puller', () => {
     }
   })
 
+  it('resumes an exact existing published release before capacity preflight or any download', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-existing-release-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    const destination = join(volume, 'electron', 'releases', version)
+    const assetRequests = { count: 0 }
+    let capacityChecks = 0
+    await mkdir(join(volume, 'electron', 'releases'), { recursive: true })
+    await cp(assetsDir, destination, { recursive: true })
+    const server = startDraftServer(assetsDir, { signedFailure: true, assetRequests })
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => { capacityChecks += 1 },
+        publisherOptions: { capacityCheck: async () => { throw new Error('publisher capacity should not run') } },
+      })).resolves.toBe('idempotent')
+      expect(capacityChecks).toBe(0)
+      expect(assetRequests.count).toBe(0)
+      expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a conflicting existing release before capacity preflight or new-byte download', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-existing-conflict-'))
+    const volume = join(root, 'volume')
+    const oldAssets = await createDraftAssets(join(root, 'old'), 'A')
+    const approvedAssets = await createDraftAssets(join(root, 'approved'), 'B')
+    const destination = join(volume, 'electron', 'releases', version)
+    const assetRequests = { count: 0 }
+    let capacityChecks = 0
+    await mkdir(join(volume, 'electron', 'releases'), { recursive: true })
+    await cp(oldAssets, destination, { recursive: true })
+    const server = startDraftServer(approvedAssets, { assetRequests })
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(approvedAssets),
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => { capacityChecks += 1 },
+      })).rejects.toThrow('Existing release 1.0.0 conflicts with the approved Draft Release')
+      expect(capacityChecks).toBe(0)
+      expect(assetRequests.count).toBe(0)
+      await expect(readlink(join(volume, 'electron', 'latest'))).rejects.toThrow()
+
+      // A partially written directory is also a conflict, not a missing
+      // retry source that can proceed to a new-byte capacity/download path.
+      await rm(join(destination, 'Polo-AI-arm64.dmg'))
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(approvedAssets),
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => { capacityChecks += 1 },
+      })).rejects.toThrow('Existing release 1.0.0 conflicts with the approved Draft Release')
+      expect(capacityChecks).toBe(0)
+      expect(assetRequests.count).toBe(0)
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('rejects a current Draft whose approved identity has the same sizes but different bytes before PVC writes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-byte-compare-'))
     const volume = join(root, 'volume')

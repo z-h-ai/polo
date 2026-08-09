@@ -260,6 +260,7 @@ jobs:
           set -euo pipefail
           audit='apps/electron/release/release-signing-audit-macos-${{ matrix.arch }}.jsonl'
           test -s "$audit"
+          grep -F '"label":"DMG outer"' "$audit" >/dev/null
           grep -F '"label":"DMG"' "$audit" >/dev/null
           grep -F '"label":"ZIP"' "$audit" >/dev/null
 

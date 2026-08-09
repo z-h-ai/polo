@@ -136,6 +136,7 @@ describe('Electron release workflow boundaries', () => {
     expect(reusable).toContain("matrix.platform == 'macos' && matrix.arch == 'arm64' && 'signing'")
     expect(reusable).toContain('Require macOS Developer ID signing audit')
     expect(reusable).toContain('release-signing-audit-macos-${{ matrix.arch }}.jsonl')
+    expect(reusable).toContain('"label":"DMG outer"')
     expect(reusable).toContain('platform: windows')
     expect(reusable).toContain('runner: windows-latest')
     expect(reusable).toContain('Polo-AI-x64.exe')
