@@ -121,6 +121,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(validator).toContain('NSIS uninstaller did not complete terminal cleanup within 30 seconds')
     expect(validator).toContain('$deadline = [DateTime]::UtcNow.AddSeconds(30)')
     expect(validator).toContain('Start-Sleep -Milliseconds 250')
+    expect(validator).toContain('"_?=$installDir"')
+    expect(validator).toContain('NSIS uninstaller left the installed application payload behind')
     expect(validator).toContain('terminal-integration-error.log')
     expect(validator).toContain('No terminal integration diagnostic was written.')
     expect(validator).toContain('function Stop-InstalledPoloApp')
