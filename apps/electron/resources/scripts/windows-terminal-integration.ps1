@@ -545,7 +545,7 @@ function Read-State([string]$Path = $stateFile) {
 function Assert-StateTargetsCurrentBin($State) {
     if ($State.schemaVersion -ge 3 -and
         ([string]$State.binDir).TrimEnd("\") -ine $BinDir.TrimEnd("\")) {
-        throw "Polo cannot use terminal integration ownership state from a different bin directory."
+        throw "Polo cannot use terminal integration ownership state from a different bin directory (current: $BinDir; recorded: $($State.binDir))."
     }
 }
 

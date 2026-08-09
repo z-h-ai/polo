@@ -32,6 +32,7 @@ describe('Windows terminal integration packaging', () => {
   it('persists PATH ownership and only removes entries owned by Polo', () => {
     expect(integrationScript).toContain('pathEntryAddedByPolo')
     expect(integrationScript).toContain('Get-StateFileRecord')
+    expect(integrationScript).toContain('current: $BinDir; recorded: $($State.binDir)')
     expect(integrationScript).toContain('Get-Sha256')
     expect(integrationScript).toContain('schemaVersion = 3')
     expect(integrationScript).toContain('GetRegularFileIdentity')
