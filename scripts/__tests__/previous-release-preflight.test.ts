@@ -14,6 +14,9 @@ import { join } from 'node:path'
 
 const roots: string[] = []
 const repoRoot = join(import.meta.dir, '..', '..')
+const electronVersion = (JSON.parse(
+  readFileSync(join(repoRoot, 'apps', 'electron', 'package.json'), 'utf8'),
+) as { version: string }).version
 const script = join(repoRoot, 'scripts', 'preflight-previous-release.sh')
 const commit = '0123456789abcdef0123456789abcdef01234567'
 const artifactBody = 'trusted previous artifact\n'
@@ -142,7 +145,7 @@ describe('previous release runner-only preflight', () => {
       installer: { sha256: digest(installerBody) },
     })
     expect(readFileSync(value.githubEnv, 'utf8')).toContain(
-      'CURRENT_ELECTRON_VERSION=0.15.3',
+      `CURRENT_ELECTRON_VERSION=${electronVersion}`,
     )
   })
 

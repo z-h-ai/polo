@@ -132,7 +132,7 @@
     },
     "apps/electron": {
       "name": "@polo-ai/electron",
-      "version": "0.15.3",
+      "version": "0.15.5",
       "dependencies": {
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -374,6 +374,7 @@
         "incr-regex-package": "^1.0.4",
         "koffi": "^2.15.1",
         "shell-quote": "^1.8.3",
+        "yaml": "^2.8.2",
         "yauzl": "^2.10.0",
       },
       "devDependencies": {
