@@ -1,32 +1,34 @@
-# POO-29 第 2 轮修复报告
+# POO-37 Round 2 修复报告
 
-## 逐条处理结果
+## 逐项修复结果
 
-1. 发布入口不再以 URL 交接。`CreatorArtifactsPanel` 通过认证的本地 RPC 提交网站名称、HTTPS URL 和 `all_members` 可见范围；上传 ZIP 的原始字节会 base64 传输，选择文件夹时客户端先保留相对路径重建 ZIP 后再传输。交互测试断言两条路径的实际 RPC 输入及上传内容，不再断言 `openUrl`。
-2. 新增 `admin:publishCreatorApp` 认证 RPC 和 Admin Client 发布契约。RPC 先用已登录会话获取可访问组织、由 Admin 创建草稿取得服务端 App/Release/版本，再对真实 ZIP 解包、分析、生成并验证最终 Bundle，最后将不可变最终 ZIP、checksum、size 提交给 Admin 发布端点。网站路径同样创建草稿并发布，返回实际 publication 结果。
-3. Bundle 链路改为真实 ZIP 字节，不再使用 NUL 分隔字符串。入口必须来自分析候选集；ZIP central-directory 会拒绝 traversal、重复路径和 Unix symlink；依赖锁需要符合最低锁文件结构，Python/JS 入口必须具备 `/health`。最终 Bundle 再以安装器所需 Manifest 契约校验 `appId`、版本、runtime、存在的 entry 和 `permissions: []`。测试覆盖二进制保真、旧 Manifest 身份重写、恶意 traversal、伪锁文件、无健康端点、缺失/越界/runtime 不匹配入口。
-4. 来源组织 resolver 已接入生产 RPC 接收端。该端从认证的 `listOrganizations` 结果解析请求组织，不提供未授权或已删除组织的 fallback。服务端 RPC 测试验证有效组织发布、无权限/已删除/空来源被拒绝且不会创建草稿。
+1. `metadata.ts` 现在是 archive、browser export 与 Creator server content validation 共用的 browser-safe YAML/元数据核心。它使用浏览器可运行的 `yaml` 解析完整 frontmatter，覆盖 folded scalar、block scalar、嵌套字段和 inline comment；`description` 不是非空字符串时统一返回 `invalid_skill_content` / `description`。发布 manifest 声明 `yaml` 依赖，且 browser runtime 测试在 `Buffer`、`process`、`require` 均为 `undefined` 时实际解析成功。
+2. 归并 `SKILL.md` 入口契约：缺失、仅嵌套、大小写变体及多个候选均由共享核心返回同一个 `skill_file_count`、`<root>/SKILL.md` 与相同 message。archive validator 仅透传该核心 issue，不再保留会漂移的独立 basename 校验。
+3. 恢复正文非空要求。browser/archive 的错误为 `invalid_skill_content`，`field: content`、统一 message/suggestion；`validateCreatorSkillContent` 同时保留该 code 并把 field 映射到 server content-validation 的 `path`。
+4. 保留 Round 1 的严格 UTF-8 解码与包装噪音单一过滤契约。package verifier 会在去除注释和字面量后拒绝可执行代码中的 `Buffer`、`process`、`require` 及 `node:*` builtin 引用；它不会把 YAML 库内部仅用于错误文本的单词误报为运行时依赖。
 
 ## 关键文件
 
-- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
-- `apps/electron/src/preload/admin-api.ts`
-- `apps/electron/src/transport/channel-map.ts`
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/shared/src/admin/creator-app-publishing.ts`
-- `packages/shared/src/admin/client.ts`
-- `packages/shared/src/admin/types.ts`
-- `packages/shared/src/protocol/channels.ts`
+- `packages/shared/src/creator-skills/metadata.ts`
+- `packages/shared/src/creator-skills/archive.ts`
+- `packages/shared/src/creator-skills/skill-content.ts`
+- `packages/shared/src/creator-skills/__tests__/metadata.test.ts`
+- `packages/shared/src/creator-skills/__tests__/archive.test.ts`
+- `packages/shared/src/creator-skills/__tests__/skill-content.test.ts`
+- `packages/shared/scripts/verify-creator-skills-package.ts`
+- `packages/shared/package.json`
+- `packages/shared/package.publish.json`
 
-## 自测结果
+## 执行命令与结果
 
-- `bun test packages/shared/src/admin/__tests__/creator-app-publishing.test.ts`：9 pass。
-- `bun test packages/server-core/src/handlers/rpc/admin.test.ts`：27 pass。
-- `bun test --isolate ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`：17 pass。
-- `bun test --isolate ./apps/electron/src/main/handlers/__tests__/admin-local-app-session-ending.isolated.ts`：23 pass。
-- `bun run typecheck:all`：通过。
-- `NO_COLOR=1 bun run test`：通过；其中 `scripts/build-cli-artifacts.test.ts` 的 redirected production build 回归测试本轮稳定通过。
+- `bun install --frozen-lockfile`：通过。
+- `bun run --cwd packages/shared build:creator-skills`：通过。
+- `bun test packages/shared/src/creator-skills/__tests__`：89 pass、0 fail、493 assertions；包含无 Node global browser runtime、严格 UTF-8、包装噪音、真实 YAML、四种 `SKILL.md` 候选布局和空正文回归。
+- `bun run typecheck:shared`：通过。
+- `bun run --cwd packages/shared test:creator-skills-package-failures`：通过（early-exit、spawn-error、wrapper spawn-error 生命周期回归）。
+- `git diff --check`：通过。
+- `bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --allow-dirty-snapshot --output-dir /tmp/poo-37-shared-fix-round2-final`：通过。客观产物为 `/tmp/poo-37-shared-fix-round2-final/proof.json` 与 `lifecycle-proof.json`；本地 tarball SHA-256 为 `1bd1c127a5d5bf4a4b32f5ed76f4e9bb1e69ff219b4de7e46a82f3ef2a4f46ef`，npm integrity 为 `sha512-74tmw0Xde/+Y18b24rM8MoXd2FzseqPj4odkVyCE/nhcvcC4VFyoKtd6xbP/lcM7faC1ZTbhAouX3kIkLS8kzA==`。该 proof 的 `npm ci` frozen install、CommonJS/ESM import、TypeScript、Next production build/route/client build、browser metadata contract 均为 passed；生产 Next 进程 SIGTERM 退出，`forcedKill: false`，生命周期 proof `exitCode: 0` 且 `processGroupReaped: true`。
 
-## 遗留问题
+## 尚未处理的外部发布决策
 
-Polo Admin 服务本体不在本 worktree；本仓库已提供并实测认证客户端契约：`POST /api/organizations/:organizationId/creator-app-publications` 创建 draft，`POST /api/organizations/:organizationId/creator-app-publications/:appId` 接收最终平台 Bundle 并发布。部署时 Admin 需按该契约持久化最终 Bundle、清理临时原始上传并保留审计记录。
+未创建 `shared-v0.13.2` tag、未 push、未发布 GitHub Packages，也未执行 registry-backed clean install。这些是 policy 延后的外部授权事项；上面的证据仅证明本地候选 tarball 的冻结 clean-install，不能替代 registry release 或 registry 证据。

@@ -399,27 +399,6 @@ function inspectArchiveDirectory(
     )
   }
 
-  const fileEntries = businessEntries.filter(entry => !entry.directory)
-  const skillFiles = fileEntries.filter(entry => (
-    basename(entry.normalizedPath)
-      .normalize('NFC')
-      .toLocaleLowerCase('en-US') === 'skill.md'
-  ))
-  if (
-    skillFiles.length !== 1
-    || skillFiles[0]?.normalizedPath !== `${slug}/SKILL.md`
-  ) {
-    throw new CreatorSkillArchiveError(
-      'invalid_skill_archive',
-      'ZIP must contain exactly one canonical root SKILL.md',
-      [issue(
-        'skill_file_count',
-        `${slug}/SKILL.md`,
-        'Exactly one SKILL.md basename is allowed and it must be at the package root',
-      )],
-    )
-  }
-
   for (const archiveEntry of businessEntries) {
     const relative = archiveEntry.normalizedPath
       .replace(/\/$/, '')
@@ -1010,7 +989,7 @@ export async function validateCreatorSkillArchive(args: {
         'skill_validation_failed',
         error.message,
         error.issues.map(metadataIssue => issue(
-          metadataIssue.code === 'invalid_skill_metadata' ? 'invalid_skill_content' : metadataIssue.code,
+          metadataIssue.code,
           metadataIssue.path || 'SKILL.md',
           metadataIssue.message,
           metadataIssue.field,

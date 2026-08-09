@@ -56,7 +56,7 @@ describe('@polo-ai/shared Creator Skill package exports', () => {
       const metadata = await import(${JSON.stringify(pathToFileURL(metadataPath).href)})
       const result = metadata.parseCreatorSkillMetadata([{
         path: 'polo-test/SKILL.md',
-        content: new TextEncoder().encode('---\\nname: polo-test\\ndescription: Browser proof.\\n---\\n'),
+        content: new TextEncoder().encode('---\\nname: polo-test\\ndescription: Browser proof.\\n---\\n\\nUse the skill.\\n'),
       }])
       if (result.slug !== 'polo-test') process.exitCode = 1
     `

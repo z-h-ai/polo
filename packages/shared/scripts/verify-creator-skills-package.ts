@@ -89,6 +89,13 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
+function executableJavaScript(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\r\n]*/g, '')
+    .replace(/(['"`])(?:\\.|(?!\1)[^\\\r\n])*\1/g, '')
+}
+
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = { keepTemp: false }
   for (let index = 0; index < argv.length; index += 1) {
@@ -294,7 +301,8 @@ async function inspectPackageDirectory(
     'utf8',
   )
   assert(
-    !/\b(?:Buffer|process|require)\b|node:/.test(browserMetadataBundle),
+    !/\b(?:Buffer|process|require)\b/.test(executableJavaScript(browserMetadataBundle))
+      && !/\bnode:[a-z][a-z0-9_-]*/i.test(browserMetadataBundle),
     'browser metadata export must not reference Buffer, process, require, or Node builtins',
   )
   assert(!('main' in packageJson), 'published package root must not define main')
@@ -571,7 +579,7 @@ import { parseCreatorSkillMetadata } from '${packageName}/creator-skills/metadat
 export function ClientProof() {
   const slug = parseCreatorSkillMetadata([{
     path: 'polo-test/SKILL.md',
-    content: '---\\nname: polo-test\\ndescription: Browser-safe export proof.\\n---\\n',
+    content: '---\\nname: polo-test\\ndescription: Browser-safe export proof.\\n---\\n\\nUse the exported parser.\\n',
   }]).slug
   return <output data-testid="browser-safe-payload-limit">{CREATOR_APP_PAYLOAD_MAX_BYTES}:{slug}</output>
 }

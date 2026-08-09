@@ -21,6 +21,7 @@
     "node": ">=20.9.0"
   },
   "dependencies": {
+    "yaml": "^2.8.2",
     "zod": "^4.0.0"
   },
   "exports": {

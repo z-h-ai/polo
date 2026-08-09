@@ -1,5 +1,6 @@
 import { z } from 'zod';
 export interface SkillContentValidationIssue {
+    code?: string;
     file: string;
     path: string;
     message: string;

@@ -55,4 +55,47 @@ describe('local and Creator Skill slug policies', () => {
       errors: [{ path: 'name', message: expect.stringContaining("must match root directory 'foo-bar'") }],
     })
   })
+
+  it('uses the shared YAML parser and empty-body issue for Creator content validation', () => {
+    const yamlContent = `---
+name: foo-bar # inline comment
+description: >-
+  Supports folded descriptions
+  and nested metadata.
+metadata:
+  owner:
+    team: Creator
+---
+
+Do the work.
+`
+    expect(validateCreatorSkillContent(yamlContent, 'foo-bar')).toMatchObject({ valid: true })
+    expect(validateCreatorSkillContent(`---
+name: foo-bar
+description: 42
+---
+
+Do the work.
+`, 'foo-bar')).toMatchObject({
+      valid: false,
+      errors: [{
+        code: 'invalid_skill_content',
+        path: 'description',
+        message: 'Creator Skill description is required and must be a string',
+      }],
+    })
+    expect(validateCreatorSkillContent(`---
+name: foo-bar
+description: Valid.
+---
+`, 'foo-bar')).toMatchObject({
+      valid: false,
+      errors: [{
+        code: 'invalid_skill_content',
+        path: 'content',
+        message: 'Skill content is empty (nothing after frontmatter)',
+        suggestion: 'Add instructions after the frontmatter describing what the skill should do',
+      }],
+    })
+  })
 })

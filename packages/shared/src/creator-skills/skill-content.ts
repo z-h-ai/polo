@@ -1,7 +1,15 @@
 import matter from 'gray-matter'
 import { z } from 'zod'
+import {
+  CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
+  CREATOR_SKILL_NAME_MAX_LENGTH,
+  CREATOR_SKILL_NAME_PATTERN,
+  CreatorSkillMetadataError,
+  parseCreatorSkillDocument,
+} from './metadata.ts'
 
 export interface SkillContentValidationIssue {
+  code?: string
   file: string
   path: string
   message: string
@@ -50,12 +58,12 @@ export const PortableSkillMetadataSchema = z.object({
  * using PortableSkillMetadataSchema for backwards compatibility.
  */
 export const CreatorSkillMetadataSchema = PortableSkillMetadataSchema.extend({
-  name: z.string().trim().min(1).max(64).regex(
-    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+  name: z.string().trim().min(1).max(CREATOR_SKILL_NAME_MAX_LENGTH).regex(
+    CREATOR_SKILL_NAME_PATTERN,
     'Creator Skill name must use strict kebab-case (for example, polo-test)',
   ),
   description: z.string().trim().min(1).max(
-    1_024,
+    CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
     'Creator Skill description must be at most 1024 characters',
   ),
 }).passthrough()
@@ -149,8 +157,7 @@ export function validateCreatorSkillContent(
   markdownContent: string,
   slug: string,
 ): SkillContentValidationResult {
-  const validation = validatePortableSkillContent(markdownContent, slug)
-  const errors = validation.errors.filter(error => error.path !== 'slug')
+  const errors: SkillContentValidationIssue[] = []
   if (!isValidCreatorSkillSlug(slug)) {
     errors.push({
       file: `skills/${slug}`,
@@ -161,29 +168,28 @@ export function validateCreatorSkillContent(
     })
   }
 
-  let parsed: matter.GrayMatterFile<string>
   try {
-    parsed = matter(markdownContent)
-  } catch {
-    return { valid: false, errors, warnings: validation.warnings }
-  }
-  const metadata = CreatorSkillMetadataSchema.safeParse(parsed.data)
-  if (!metadata.success) errors.push(...zodIssues(metadata.error, `skills/${slug}/SKILL.md`))
-  else if (metadata.data.name !== slug) {
-    errors.push({
-      file: `skills/${slug}/SKILL.md`,
-      path: 'name',
-      message: `Creator Skill name '${metadata.data.name}' must match root directory '${slug}'`,
-      severity: 'error',
-      suggestion: `Use 'name: ${slug}' or rename the root directory`,
-    })
+    parseCreatorSkillDocument(markdownContent, slug, `skills/${slug}/SKILL.md`)
+  } catch (error) {
+    if (error instanceof CreatorSkillMetadataError) {
+      errors.push(...error.issues.map(issue => ({
+        code: issue.code,
+        file: `skills/${slug}/SKILL.md`,
+        path: issue.field ?? 'frontmatter',
+        message: issue.message,
+        severity: 'error' as const,
+        ...(issue.suggestion ? { suggestion: issue.suggestion } : {}),
+      })))
+    } else {
+      throw error
+    }
   }
 
-  if (errors.length === 0) return { valid: true, errors: [], warnings: validation.warnings }
+  if (errors.length === 0) return { valid: true, errors: [], warnings: [] }
   return {
     valid: false,
     errors,
-    warnings: validation.warnings,
+    warnings: [],
   }
 }
 

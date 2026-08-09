@@ -1,9 +1,12 @@
+export declare const CREATOR_SKILL_NAME_PATTERN: RegExp;
+export declare const CREATOR_SKILL_NAME_MAX_LENGTH = 64;
+export declare const CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+export declare const CANONICAL_SKILL_FILE_MESSAGE = "Exactly one SKILL.md basename is allowed and it must be at the package root";
+export declare const EMPTY_SKILL_CONTENT_MESSAGE = "Skill content is empty (nothing after frontmatter)";
+export declare const EMPTY_SKILL_CONTENT_SUGGESTION = "Add instructions after the frontmatter describing what the skill should do";
 export interface NormalizedSkillZipEntry {
-    /** POSIX, normalized ZIP path (for example `polo-test/SKILL.md`). */
     path: string;
-    /** Omit for files when the ZIP reader does not expose explicit directory entries. */
     directory?: boolean;
-    /** Required only for the root SKILL.md entry. */
     content?: string | Uint8Array;
 }
 export interface CreatorSkillMetadata {
@@ -15,7 +18,7 @@ export interface CreatorSkillMetadata {
     requiredSources?: string[];
 }
 export interface CreatorSkillMetadataIssue {
-    code: 'missing_skill_file' | 'multiple_skill_files' | 'skill_file_not_root' | 'multiple_root_directories' | 'missing_skill_content' | 'invalid_skill_utf8' | 'invalid_skill_metadata';
+    code: 'skill_file_count' | 'multiple_root_directories' | 'missing_skill_content' | 'invalid_skill_utf8' | 'invalid_skill_content';
     path: string;
     field?: string;
     message: string;
@@ -30,10 +33,10 @@ export interface ParsedCreatorSkillMetadata {
     metadata: CreatorSkillMetadata;
     body: string;
 }
-/** Shared packaging-noise policy for ZIP directory inspection and browser metadata parsing. */
 export declare function isCreatorSkillPackagingNoise(path: string): boolean;
-/**
- * Browser-safe parser for normalized ZIP entries. No runtime polyfills or
- * Node globals are required; callers provide the root SKILL.md bytes.
- */
+/** Browser-safe YAML and metadata core shared by ZIP and server validation paths. */
+export declare function parseCreatorSkillDocument(content: string, rootDirectory: string, path?: string): {
+    metadata: CreatorSkillMetadata;
+    body: string;
+};
 export declare function parseCreatorSkillMetadata(entries: readonly NormalizedSkillZipEntry[]): ParsedCreatorSkillMetadata;

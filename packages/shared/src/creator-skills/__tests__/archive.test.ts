@@ -10,6 +10,7 @@ import {
   scanCreatorSkillDirectory,
   validateCreatorSkillArchive,
 } from '../archive'
+import { CreatorSkillMetadataError, parseCreatorSkillMetadata } from '../metadata'
 import { DEFAULT_SKILL_ARCHIVE_POLICY } from '../types'
 
 const VALID_SKILL = `---
@@ -98,6 +99,27 @@ async function withTemp(
     await run(root)
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+}
+
+function browserIssue(entries: Parameters<typeof parseCreatorSkillMetadata>[0]) {
+  try {
+    parseCreatorSkillMetadata(entries)
+    throw new Error('expected browser metadata parsing to fail')
+  } catch (error) {
+    expect(error).toBeInstanceOf(CreatorSkillMetadataError)
+    return (error as CreatorSkillMetadataError).issues[0]!
+  }
+}
+
+async function archiveIssue(archivePath: string): Promise<CreatorSkillArchiveError['issues'][number]> {
+  try {
+    await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+    throw new Error('expected archive validation to fail')
+  } catch (error) {
+    expect(error).toBeInstanceOf(CreatorSkillArchiveError)
+    expect((error as CreatorSkillArchiveError).code).toBe('skill_validation_failed')
+    return (error as CreatorSkillArchiveError).issues[0]!
   }
 }
 
@@ -392,26 +414,51 @@ describe('Creator Skill archive validation', () => {
     })
   })
 
-  it('rejects every additional or non-canonical SKILL.md basename', async () => {
+  it('shares canonical SKILL.md failures with browser metadata parsing', async () => {
     await withTemp(async root => {
       for (const [name, entries] of [
+        ['missing', {
+          'review-helper/README.md': 'missing entrypoint',
+        }],
         ['nested', {
-          'review-helper/SKILL.md': VALID_SKILL,
           'review-helper/references/SKILL.md': 'not another entrypoint',
         }],
         ['case-variant', {
           'review-helper/skill.MD': VALID_SKILL,
         }],
+        ['multiple', {
+          'review-helper/SKILL.md': VALID_SKILL,
+          'review-helper/references/SKILL.md': 'not another entrypoint',
+        }],
       ] as const) {
         const archivePath = await writeZip(root, entries, `${name}.zip`)
-        await expect(validateCreatorSkillArchive({
-          archivePath,
-          slug: 'review-helper',
-        })).rejects.toMatchObject({
-          code: 'invalid_skill_archive',
-          issues: [{ code: 'skill_file_count' }],
+        const metadataEntries = Object.entries(entries).map(([path, content]) => ({ path, content }))
+        const expected = browserIssue(metadataEntries)
+        expect(await archiveIssue(archivePath)).toMatchObject({
+          code: expected.code,
+          path: expected.path,
+          message: expected.message,
         })
       }
+    })
+  })
+
+  it('shares the empty SKILL.md body failure with browser and content validation', async () => {
+    await withTemp(async root => {
+      const emptySkill = `---
+name: review-helper
+description: Reviews changes against a checklist.
+---
+`
+      const expected = browserIssue([{ path: 'review-helper/SKILL.md', content: emptySkill }])
+      const archivePath = await writeZip(root, { 'review-helper/SKILL.md': emptySkill }, 'empty-body.zip')
+      expect(await archiveIssue(archivePath)).toMatchObject({
+        code: expected.code,
+        path: expected.path,
+        field: expected.field,
+        message: expected.message,
+        suggestion: expected.suggestion,
+      })
     })
   })
 
