@@ -255,8 +255,26 @@ jobs:
         if: matrix.platform == 'macos'
         shell: bash
         run: |
-          set -o pipefail
-          bun run electron:dist:mac --arch=${{ matrix.arch }} 2>&1 | tee "$RUNNER_TEMP/full-validation-macos-${{ matrix.arch }}.log"
+          set -euo pipefail
+          log="$RUNNER_TEMP/full-validation-macos-${{ matrix.arch }}.log"
+          for attempt in 1 2; do
+            set +e
+            bun run electron:dist:mac --arch=${{ matrix.arch }} 2>&1 | tee "$log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            # A transient GitHub DNS outage occurred on macos-15-intel while
+            # electron-builder fetched its pinned Electron archive.  Retry
+            # only that transport failure from a clean release directory;
+            # signing, notarization and artifact-validation errors stay fatal.
+            if [ "$attempt" -eq 2 ] || ! grep -Fq 'lookup github.com: no such host' "$log"; then
+              exit "$status"
+            fi
+            rm -rf apps/electron/release
+            sleep 10
+          done
 
       - name: Build and validate Linux release
         if: matrix.platform == 'linux'
@@ -272,8 +290,26 @@ jobs:
         if: matrix.platform == 'windows'
         shell: bash
         run: |
-          set -o pipefail
-          bun run electron:dist:win --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-windows-x64.log"
+          set -euo pipefail
+          log="$RUNNER_TEMP/full-validation-windows-x64.log"
+          for attempt in 1 2; do
+            set +e
+            bun run electron:dist:win --arch=x64 2>&1 | tee "$log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            # Electron-builder can momentarily lock a copied build output on
+            # hosted Windows runners.  Retry only this EBUSY copy race after
+            # removing the partial package; all product validation failures
+            # remain one-shot, blocking failures.
+            if [ "$attempt" -eq 2 ] || ! grep -Fq 'EBUSY: resource busy or locked' "$log"; then
+              exit "$status"
+            fi
+            rm -rf apps/electron/release
+            sleep 10
+          done
 
       - name: Require intentionally unsigned Windows installer
         if: matrix.platform == 'windows'
