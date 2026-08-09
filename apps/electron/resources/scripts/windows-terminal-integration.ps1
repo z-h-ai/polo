@@ -531,7 +531,10 @@ function Read-State([string]$Path = $stateFile) {
         return $null
     }
     try {
-        $state = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        # WriteUtf8New deliberately writes UTF-8 without a BOM. Windows PowerShell 5
+        # otherwise decodes it using the active ANSI code page, corrupting non-ASCII
+        # user profile paths (for example, a Chinese LocalAppData directory).
+        $state = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json
         if ($state.schemaVersion -ne 1 -and $state.schemaVersion -ne 2 -and
             $state.schemaVersion -ne 3) {
             return $null
