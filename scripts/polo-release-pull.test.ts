@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
@@ -43,40 +43,59 @@ async function createDraftAssets(root: string): Promise<string> {
   return output
 }
 
+function startDraftServer(assetsDir: string, signedFailure = false): ReturnType<typeof Bun.serve> {
+  let server: ReturnType<typeof Bun.serve>
+  server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const { pathname } = new URL(request.url)
+      if (pathname === `/repos/${repository}/commits/${tag}`) {
+        expect(request.headers.get('authorization')).toBe('Bearer test-token')
+        return Response.json({ sha: commitSha })
+      }
+      if (pathname === `/repos/${repository}/releases/tags/${tag}`) {
+        expect(request.headers.get('authorization')).toBe('Bearer test-token')
+        return Response.json({
+          draft: true,
+          tag_name: tag,
+          target_commitish: commitSha,
+          assets: await Promise.all(RELEASE_ASSET_NAMES.map(async (name, index) => ({
+            id: index + 1,
+            name,
+            size: (await Bun.file(join(assetsDir, name)).arrayBuffer()).byteLength,
+            state: 'uploaded',
+            url: `http://127.0.0.1:${server.port}/repos/${repository}/releases/assets/${index + 1}`,
+          }))),
+        })
+      }
+      const match = pathname.match(new RegExp(`^/repos/${repository}/releases/assets/(\\d+)$`))
+      if (match) {
+        expect(request.headers.get('authorization')).toBe('Bearer test-token')
+        if (signedFailure) {
+          return new Response(null, {
+            status: 302,
+            headers: { location: `/signed-object?X-Amz-Signature=super-secret-${match[1]}` },
+          })
+        }
+        return new Response(Bun.file(join(assetsDir, RELEASE_ASSET_NAMES[Number(match[1]) - 1]!)))
+      }
+      if (pathname === '/signed-object') {
+        expect(request.headers.get('authorization')).toBeNull()
+        return new Response('object-store failed', { status: 503 })
+      }
+      return new Response('not found', { status: 404 })
+    },
+  })
+  return server
+}
+
 describe('Zeabur Draft Release puller', () => {
   it('downloads only the strict asset whitelist, validates it, and atomically publishes it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-'))
     const volume = join(root, 'volume')
     const assetsDir = await createDraftAssets(root)
     await mkdir(volume)
-    let server: ReturnType<typeof Bun.serve>
-    server = Bun.serve({
-      port: 0,
-      async fetch(request) {
-        expect(request.headers.get('authorization')).toBe('Bearer test-token')
-        const { pathname } = new URL(request.url)
-        if (pathname === `/repos/${repository}/commits/${tag}`) {
-          return Response.json({ sha: commitSha })
-        }
-        if (pathname === `/repos/${repository}/releases/tags/${tag}`) {
-          return Response.json({
-            draft: true,
-            tag_name: tag,
-            target_commitish: commitSha,
-            assets: await Promise.all(RELEASE_ASSET_NAMES.map(async (name, index) => ({
-              id: index + 1,
-              name,
-              size: (await Bun.file(join(assetsDir, name)).arrayBuffer()).byteLength,
-              state: 'uploaded',
-              url: `http://127.0.0.1:${server.port}/repos/${repository}/releases/assets/${index + 1}`,
-            }))),
-          })
-        }
-        const match = pathname.match(new RegExp(`^/repos/${repository}/releases/assets/(\\d+)$`))
-        if (match) return new Response(Bun.file(join(assetsDir, RELEASE_ASSET_NAMES[Number(match[1]) - 1]!)))
-        return new Response('not found', { status: 404 })
-      },
-    })
+    const server = startDraftServer(assetsDir)
     try {
       const result = await pullRelease({
         repository,
@@ -86,6 +105,7 @@ describe('Zeabur Draft Release puller', () => {
         releasesDir: volume,
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
+        peakCapacityCheck: async () => {},
         publisherOptions: { capacityCheck: async () => {} },
       })
       expect(result).toBe('published')
@@ -93,6 +113,104 @@ describe('Zeabur Draft Release puller', () => {
       expect(await readdir(join(volume, 'electron', 'releases', version))).toHaveLength(9)
       expect(await readdir(join(volume, 'electron', '.incoming'))).toEqual([])
       expect(JSON.parse(await readFile(join(volume, 'electron', 'latest', 'release-contract.json'), 'utf8')).version).toBe(version)
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('redacts signed object-store failures and keeps the incoming directory absent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-signed-failure-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    await mkdir(volume)
+    const server = startDraftServer(assetsDir, true)
+    try {
+      const error = await pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+      }).then(() => undefined, reason => reason as Error)
+      expect(error).toBeInstanceOf(Error)
+      expect(error!.message).toBe('Unable to download signed GitHub release asset: Polo-AI-x64.dmg')
+      expect(error!.message).not.toContain('X-Amz-Signature')
+      expect(error!.message).not.toContain('super-secret')
+      await expect(readdir(join(volume, 'electron', '.incoming'))).resolves.toEqual([])
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('checks peak capacity before downloads and removes only its own incoming directory after publish failure', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-capacity-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    await mkdir(volume)
+    const server = startDraftServer(assetsDir)
+    let requestedBytes = 0
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async (_releasesDir, bytes) => {
+          requestedBytes = bytes
+          throw new Error('peak capacity exceeded')
+        },
+      })).rejects.toThrow('peak capacity exceeded')
+      expect(requestedBytes).toBeGreaterThan(0)
+      await expect(readdir(join(volume, 'electron', '.incoming'))).rejects.toThrow()
+
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+        publisherOptions: { capacityCheck: async () => { throw new Error('publisher failed') } },
+      })).rejects.toThrow('publisher failed')
+      await expect(readdir(join(volume, 'electron', '.incoming'))).resolves.toEqual([])
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reuses only a fully validated matching incoming directory without downloading again', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-retry-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    const incoming = join(volume, 'electron', '.incoming', version)
+    await mkdir(join(volume, 'electron', '.incoming'), { recursive: true })
+    await cp(assetsDir, incoming, { recursive: true })
+    const server = startDraftServer(assetsDir, true)
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => { throw new Error('must not recalculate fresh-download capacity') },
+        publisherOptions: { capacityCheck: async () => {} },
+      })).resolves.toBe('published')
+      expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
+      expect(await readdir(incoming)).toHaveLength(9)
     } finally {
       server.stop(true)
       await rm(root, { recursive: true, force: true })

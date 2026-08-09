@@ -105,6 +105,17 @@ function requireCacheControl(response: Response, directive: string, label: strin
   }
 }
 
+function cacheDirectiveFor(fileName: string): 'no-cache' | 'immutable' {
+  if (
+    fileName === 'install-app.sh'
+    || fileName === 'release-contract.json'
+    || MANIFEST_NAMES.includes(fileName as (typeof MANIFEST_NAMES)[number])
+  ) {
+    return 'no-cache'
+  }
+  return 'immutable'
+}
+
 async function verifyArtifact(
   baseUrl: string,
   contractArtifact: ReleaseArtifactContract,
@@ -112,7 +123,7 @@ async function verifyArtifact(
 ): Promise<void> {
   const url = `${baseUrl}/${encodeURIComponent(contractArtifact.fileName)}`
   const head = await fetchOk(url, { method: 'HEAD', cache: 'no-store' })
-  requireCacheControl(head, 'immutable', contractArtifact.fileName)
+  requireCacheControl(head, cacheDirectiveFor(contractArtifact.fileName), contractArtifact.fileName)
   const contents = new Uint8Array(await (await fetchOk(url, { cache: 'no-store' })).arrayBuffer())
   const headerSize = head.headers.get('content-length')
   if (headerSize !== null && Number(headerSize) !== contents.byteLength) {

@@ -108,3 +108,51 @@
 ## 遗留问题
 
 - Polo Admin 的 HTTP 路由及生产归档存储不在本 worktree；该服务应直接调用本轮新增的共享发布契约完成真实上传、重打包和发布。当前 Electron/Console 交接已使用固定、测试覆盖的 mode + organizationId 查询契约。
+
+---
+
+# POO-36 Review Round 1 修复报告
+
+## 处理结果
+
+1. 缓存契约统一
+   - `install-app.sh` 继续由 `updates-static` Caddy 按 `no-cache` 提供；发布验证器不再将其误判为 immutable。
+   - 新增真实 Caddy 容器回归测试，覆盖 installer、manifest、contract 的 `no-cache` 与二进制的 immutable 缓存头，以及 POST 405。
+
+2. 公网验收后的确认与失败回滚
+   - 公网验证改为可观测的 `public-verify` 步骤。失败时同一 `updates-static-v4` Service Exec 调用 `publish-electron-release.ts rollback-failed`，之后 job 明确失败，Draft Release 不会发布。
+   - 成功时 Service Exec 调用 `confirm` 清除 rollback marker；确认完成后才进入 `publish-release`。
+
+3. signed object-store URL 脱敏
+   - GitHub API 重定向后的 object-store fetch、响应和流式写入都被稳定错误边界包裹；异常不保留 cause、签名 URL、query 或 header。
+   - 回归测试使用含模拟 `X-Amz-Signature` 的本地重定向，断言错误消息不泄露签名并且 token 不会转发到 object store。
+
+4. 下载前峰值容量与 incoming 重试安全
+   - 首次下载前按 Draft Release 资产总量的两倍（incoming + 原子发布复制）计算 70% 峰值容量，未通过时不会创建 incoming 目录或下载任何资产。
+   - 当前调用创建的 `.incoming/<version>` 在 publish 失败时清理；已有 incoming 仅在完整 release contract/manifest 校验和所有资产大小与 Draft Release 一致时复用，不会重下或绕过发布器容量门槛。
+
+5. Windows 工作流断言更新
+   - `electron-artifact-pipeline` 现在要求 `windows-latest`、Windows x64 NSIS `.exe`、明确 `NotSigned` Authenticode 检查与 artifact 上传，同时断言 `updater: false`/`matrix.updater` 边界存在。
+
+## 关键文件
+
+- `.github/workflows/electron-release.yml`
+- `scripts/electron-release-bundle.ts`
+- `scripts/polo-release-pull.ts`
+- `scripts/polo-release-pull.test.ts`
+- `infra/updates-static/PoloCaddyfile.test.ts`
+- `scripts/electron-release-workflow.test.ts`
+- `scripts/__tests__/electron-artifact-pipeline.test.ts`
+
+## 实际测试
+
+- `NO_COLOR=1 bun test scripts/polo-release-pull.test.ts scripts/electron-release-bundle.test.ts infra/updates-static/PoloCaddyfile.test.ts scripts/electron-release-workflow.test.ts scripts/__tests__/electron-artifact-pipeline.test.ts`
+  - 通过：25 pass、365 expects、0 fail。
+- `NO_COLOR=1 bun run test`
+  - 通过；包含仓库标准 `bun test --isolate` 与 `scripts/run-isolated-tests.sh`。
+- `git diff --check`
+  - 通过。
+
+## 遗留问题
+
+- 真实 tag 联调仍依赖生产 Environment 的 Zeabur token/service/environment 配置，以及 `updates-static-v4` 服务上的最小只读 `GH_TOKEN`；本轮未使用真实 token、生产 PVC 或执行 push。

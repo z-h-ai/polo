@@ -157,6 +157,8 @@ jobs:
               --version "$VERSION" \
               --commit "$GITHUB_SHA"
       - name: Verify Zeabur updater bundle
+        id: public-verify
+        continue-on-error: true
         run: |
           for attempt in $(seq 1 6); do
             if bun scripts/electron-release-bundle.ts verify \
@@ -170,6 +172,31 @@ jobs:
             if [ "$attempt" -lt 6 ]; then sleep 10; fi
           done
           exit 1
+      - name: Roll back failed public verification
+        if: steps.public-verify.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx zeabur@latest service exec \
+            --id "$ZEABUR_UPDATES_SERVICE_ID" \
+            --env-id "$ZEABUR_ENVIRONMENT_ID" \
+            -- /usr/local/bin/bun /app/publish-electron-release.ts rollback-failed \
+              --releases-dir /data/releases \
+              --version "$VERSION"
+      - name: Stop release after public verification failure
+        if: steps.public-verify.outcome == 'failure'
+        run: exit 1
+      - name: Confirm Zeabur release after public verification
+        if: steps.public-verify.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx zeabur@latest service exec \
+            --id "$ZEABUR_UPDATES_SERVICE_ID" \
+            --env-id "$ZEABUR_ENVIRONMENT_ID" \
+            -- /usr/local/bin/bun /app/publish-electron-release.ts confirm \
+              --releases-dir /data/releases \
+              --version "$VERSION"
   publish-release:
     needs: production
     runs-on: ubuntu-latest

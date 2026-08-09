@@ -47,6 +47,25 @@ describe('Electron release workflow boundaries', () => {
     expect(release).not.toContain('/app/publisher')
   })
 
+  it('rolls back failed public verification and confirms success before publishing the Draft Release', () => {
+    const verify = release.indexOf('Verify Zeabur updater bundle')
+    const rollback = release.indexOf('Roll back failed public verification')
+    const stop = release.indexOf('Stop release after public verification failure')
+    const confirm = release.indexOf('Confirm Zeabur release after public verification')
+    const publish = release.indexOf('publish-release:')
+
+    expect(release).toContain("id: public-verify")
+    expect(release).toContain("continue-on-error: true")
+    expect(release).toContain("if: steps.public-verify.outcome == 'failure'")
+    expect(release).toContain('publish-electron-release.ts rollback-failed')
+    expect(release).toContain('publish-electron-release.ts confirm')
+    expect(verify).toBeGreaterThan(0)
+    expect(verify).toBeLessThan(rollback)
+    expect(rollback).toBeLessThan(stop)
+    expect(stop).toBeLessThan(confirm)
+    expect(confirm).toBeLessThan(publish)
+  })
+
   it('builds and verifies both native macOS manual installers', () => {
     expect(reusable).toContain('runner: macos-15-intel')
     expect(reusable).toContain('runner: macos-15')

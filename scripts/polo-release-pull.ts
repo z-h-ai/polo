@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
 
 import { createWriteStream } from 'node:fs'
-import { lstat, mkdir, readdir, rename, rm } from 'node:fs/promises'
+import { lstat, mkdir, rename, rm, stat, statfs } from 'node:fs/promises'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { parseStrictSemverTag } from './strict-semver'
-import { sha256 } from './electron-release-contract'
 import {
   publish,
+  projectedDiskUsage,
   validateSource,
+  MAX_DISK_USAGE,
   type PublisherOptions,
   type ReleaseArguments,
 } from './publish-electron-release'
@@ -58,6 +59,7 @@ export interface ReleasePullOptions {
   apiBase?: string
   token?: string
   publisherOptions?: PublisherOptions
+  peakCapacityCheck?: (releasesDir: string, additionalBytes: number) => Promise<void>
 }
 
 function normalizeApiBase(value: string): string {
@@ -110,7 +112,7 @@ function assertDraftRelease(
       || asset.id <= 0
       || typeof asset.name !== 'string'
       || !expectedNames.has(asset.name)
-      || typeof asset.size !== 'number'
+      || !Number.isSafeInteger(asset.size)
       || asset.size <= 0
       || asset.state !== 'uploaded'
     ) {
@@ -143,48 +145,67 @@ async function downloadAsset(
   if (response.status >= 300 && response.status < 400) {
     const location = response.headers.get('location')
     if (!location) throw new Error('GitHub asset download redirect is missing its location')
-    // GitHub redirects the API request to a short-lived object-store URL. Do
-    // not forward the Draft Release token beyond the GitHub API origin.
-    response = await fetch(new URL(location, url), {
-      headers: { accept: 'application/octet-stream' },
-      redirect: 'error',
-    })
+    try {
+      // GitHub redirects the API request to a short-lived object-store URL. Do
+      // not forward the Draft Release token beyond the GitHub API origin.
+      response = await fetch(new URL(location, url), {
+        headers: { accept: 'application/octet-stream' },
+        redirect: 'error',
+      })
+      if (!response.ok || !response.body) throw new Error('signed object-store response failed')
+      await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination, { flags: 'wx' }))
+    } catch {
+      // Do not preserve a cause here: object-store URLs include short-lived
+      // credentials in their query string and must never reach CI or service logs.
+      throw new Error(`Unable to download signed GitHub release asset: ${asset.name}`)
+    }
+  } else {
+    if (!response.ok || !response.body) {
+      throw new Error(`Unable to download whitelisted release asset: HTTP ${response.status}`)
+    }
+    await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination, { flags: 'wx' }))
   }
-  if (!response.ok || !response.body) {
-    throw new Error(`Unable to download whitelisted release asset: HTTP ${response.status}`)
-  }
-  await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination, { flags: 'wx' }))
   const downloaded = await lstat(destination)
   if (!downloaded.isFile() || downloaded.size !== asset.size) {
     throw new Error(`Downloaded release asset has an unexpected size: ${asset.name}`)
   }
 }
 
-async function sameValidatedContents(left: string, right: string, args: ReleaseArguments): Promise<boolean> {
-  const [leftValidated, rightValidated] = await Promise.all([
-    validateSource(left, args),
-    validateSource(right, args),
-  ])
-  if (leftValidated.files.length !== rightValidated.files.length) return false
-  for (const name of leftValidated.files) {
-    if (!rightValidated.files.includes(name) || await sha256(join(left, name)) !== await sha256(join(right, name))) {
-      return false
-    }
-  }
-  return true
-}
-
-async function installIncoming(stage: string, incoming: string, args: ReleaseArguments): Promise<void> {
+async function existingIncomingIsReusable(
+  incoming: string,
+  args: ReleaseArguments,
+  assets: Map<string, GitHubAsset>,
+): Promise<boolean> {
   try {
     const existing = await lstat(incoming)
     if (!existing.isDirectory()) throw new Error(`Incoming release path is not a directory: ${incoming}`)
-    if (!(await sameValidatedContents(stage, incoming, args))) {
-      throw new Error(`Incoming release ${args.version} already exists with different contents`)
+    await validateSource(incoming, args)
+    for (const name of RELEASE_ASSET_NAMES) {
+      const file = await stat(join(incoming, name))
+      if (!file.isFile() || file.size !== assets.get(name)!.size) {
+        throw new Error(`Incoming release ${args.version} does not match the Draft Release asset sizes`)
+      }
     }
-    await rm(stage, { recursive: true, force: true })
+    return true
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    await rename(stage, incoming)
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function assertPeakCapacity(releasesDir: string, additionalBytes: number): Promise<void> {
+  const filesystem = await statfs(releasesDir)
+  const usage = projectedDiskUsage(
+    Number(filesystem.blocks),
+    Number(filesystem.bfree),
+    Number(filesystem.bsize),
+    additionalBytes,
+  )
+  if (usage > MAX_DISK_USAGE) {
+    throw new Error(
+      `Refusing release pull: projected peak releases volume use is ${Math.ceil(usage * 100)}% `
+      + `(limit ${MAX_DISK_USAGE * 100}%)`,
+    )
   }
 }
 
@@ -217,18 +238,26 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
     tag: normalized.tag,
     commitSha: normalized.commitSha,
   }
-  await mkdir(stage, { recursive: true })
+  const reusableIncoming = await existingIncomingIsReusable(incoming, publishArgs, assets)
+  let createdIncoming = false
   try {
-    for (const name of RELEASE_ASSET_NAMES) {
-      await downloadAsset(apiBase, normalized.repository, assets.get(name)!, join(stage, name), token!)
+    if (!reusableIncoming) {
+      const assetBytes = RELEASE_ASSET_NAMES.reduce((total, name) => total + assets.get(name)!.size, 0)
+      await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes * 2)
+      await mkdir(stage, { recursive: true })
+      for (const name of RELEASE_ASSET_NAMES) {
+        await downloadAsset(apiBase, normalized.repository, assets.get(name)!, join(stage, name), token!)
+      }
+      await validateSource(stage, publishArgs)
+      await rename(stage, incoming)
+      createdIncoming = true
     }
-    await validateSource(stage, publishArgs)
-    await installIncoming(stage, incoming, publishArgs)
     const result = await publish(publishArgs, options.publisherOptions)
-    await rm(incoming, { recursive: true, force: true })
+    if (createdIncoming) await rm(incoming, { recursive: true, force: true })
     return result
   } catch (error) {
     await rm(stage, { recursive: true, force: true })
+    if (createdIncoming) await rm(incoming, { recursive: true, force: true })
     throw error
   }
 }

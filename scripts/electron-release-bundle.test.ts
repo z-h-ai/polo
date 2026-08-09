@@ -57,7 +57,7 @@ describe('release bundle assembly and public verification', () => {
           const name = basename(new URL(request.url).pathname)
           const file = Bun.file(join(output, name))
           if (!(await file.exists())) return new Response('Not found', { status: 404 })
-          const noCache = name.endsWith('.yml') || name === 'release-contract.json'
+          const noCache = name.endsWith('.yml') || name === 'release-contract.json' || name === 'install-app.sh'
           const headers = {
             'content-length': String(file.size),
             'cache-control': noCache ? 'no-cache' : 'public, max-age=31536000, immutable',
