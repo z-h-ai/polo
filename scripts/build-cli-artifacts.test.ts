@@ -32,6 +32,13 @@ function buildArtifacts(outputDir: string): void {
 }
 
 describe('packaged CLI artifact reproducibility', () => {
+  it('applies the markitdown xlsx interop patch to Windows module paths', () => {
+    const source = readFileSync(buildScript, 'utf8')
+
+    expect(source).toContain('filter: /markitdown-js[\\\\/]dist[\\\\/]markitdown\\.js$/')
+    expect(source).toContain('import * as XLSX from "xlsx";')
+  })
+
   it('writes identical manifest bytes for consecutive builds with unchanged inputs', () => {
     const outputDir = mkdtempSync(join(tmpdir(), 'polo-cli-artifacts-'))
     roots.push(outputDir)
