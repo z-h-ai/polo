@@ -8,8 +8,7 @@ param(
     [scriptblock]$TestMutationHook = $null,
     [string]$UserPathRegistrySubKey = "Environment",
     [string]$UserPathRegistryValueName = "Path",
-    [string]$TestRegistryRaceValue = $null,
-    [switch]$RequireInstallBinding
+    [string]$TestRegistryRaceValue = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -533,7 +532,7 @@ function Read-State([string]$Path = $stateFile) {
     try {
         $state = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
         if ($state.schemaVersion -ne 1 -and $state.schemaVersion -ne 2 -and
-            $state.schemaVersion -ne 3 -and $state.schemaVersion -ne 4) {
+            $state.schemaVersion -ne 3) {
             return $null
         }
         return $state
@@ -546,10 +545,6 @@ function Assert-StateTargetsCurrentBin($State) {
     if ($State.schemaVersion -ge 3 -and
         ([string]$State.binDir).TrimEnd("\") -ine $BinDir.TrimEnd("\")) {
         throw "Polo cannot use terminal integration ownership state from a different bin directory."
-    }
-    if ($State.schemaVersion -ge 4 -and
-        ([string]$State.installDir).TrimEnd("\") -ine $InstallDir.TrimEnd("\")) {
-        throw "Polo cannot use terminal integration ownership state from a different installation directory."
     }
 }
 
@@ -849,10 +844,9 @@ function New-StateContent([bool]$PathEntryAddedByPolo, $PublishedRecords) {
         }
     }
     return @{
-        schemaVersion = 4
+        schemaVersion = 3
         pathEntryAddedByPolo = $PathEntryAddedByPolo
         binDir = $BinDir
-        installDir = $InstallDir
         files = $files
         updatedAt = [DateTime]::UtcNow.ToString("o")
     } | ConvertTo-Json -Depth 4
@@ -1060,10 +1054,7 @@ function Install-Transactional(
     }
 }
 
-function Uninstall-Transactional(
-    [bool]$UsesUserPathFile,
-    [bool]$RequireInstallBinding
-) {
+function Uninstall-Transactional([bool]$UsesUserPathFile) {
     $claims = New-Object 'Collections.Generic.List[object]'
     $published = New-Object 'Collections.Generic.List[object]'
     $pathMutation = $null
@@ -1071,9 +1062,6 @@ function Uninstall-Transactional(
     try {
         $stateClaim = Claim-ExistingPath $stateFile "state"
         if (-not $stateClaim) {
-            if ($RequireInstallBinding) {
-                throw "Polo cannot uninstall terminal integration because its installation-bound ownership state is absent."
-            }
             Write-Warning "Polo left terminal files unchanged because ownership state is absent."
             return
         }
@@ -1093,6 +1081,18 @@ function Uninstall-Transactional(
             if (-not (Test-ClaimMatchesState -State $state -OriginalPath $spec.Path -ClaimPath $claim.Claim)) {
                 throw "Polo left modified or user-owned file unchanged: $($spec.Path)"
             }
+        }
+
+        $rootPointerClaim = @($claims | Where-Object {
+            $_.Path.TrimEnd("\") -ieq $rootPointer.TrimEnd("\")
+        }) | Select-Object -First 1
+        if (-not $rootPointerClaim) {
+            throw "Polo cannot uninstall terminal integration because its root pointer is missing."
+        }
+        $expectedRoot = (Join-Path $InstallDir "resources").TrimEnd("\")
+        $recordedRoot = ([IO.File]::ReadAllText($rootPointerClaim.Claim)).Trim().TrimEnd("\")
+        if ($recordedRoot -ine $expectedRoot) {
+            throw "Polo cannot uninstall terminal integration owned by a different installation directory."
         }
 
         if ($state.pathEntryAddedByPolo) {
@@ -1180,7 +1180,7 @@ if ($Mode -eq "Install") {
 }
 
 try {
-    Uninstall-Transactional ([bool]$UserPathFile) ([bool]$RequireInstallBinding)
+    Uninstall-Transactional ([bool]$UserPathFile)
 } catch {
     Write-TerminalIntegrationDiagnostic $_.Exception
     throw
