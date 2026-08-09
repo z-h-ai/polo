@@ -132,19 +132,23 @@ try {
     # Upgrade from the old install-app.ps1 launcher. That installer added the
     # same bin directory to PATH but had no ownership state file. The exact
     # legacy launcher is sufficient evidence that Polo owns this PATH entry.
+    # Its batch file was ASCII encoded, so use an ASCII App root for this
+    # historical fixture while retaining the Unicode move coverage above.
+    $legacyInstallDir = Join-Path $root "Polo AI Legacy"
+    Copy-Item -LiteralPath $installDir -Destination $legacyInstallDir -Recurse
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     $legacyLauncher = Join-Path $binDir "polo-ai.cmd"
-    $exePath = Join-Path $installDir "Polo AI.exe"
+    $exePath = Join-Path $legacyInstallDir "Polo AI.exe"
     Set-Content -Path $legacyLauncher -Value "@echo off`r`nstart `"`" `"$exePath`" %*" -Encoding ASCII
     Set-Content -Path $userPathFile -Value "$binDir;C:\User Tools" -Encoding ASCII
 
-    & $scriptPath -Mode Install -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
+    & $scriptPath -Mode Install -InstallDir $legacyInstallDir -BinDir $binDir -UserPathFile $userPathFile -SkipCommandConflict
 
     $migratedState = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
     Assert-True ($migratedState.schemaVersion -eq 3) "Legacy launcher migration did not create identity-bound state."
     Assert-True $migratedState.pathEntryAddedByPolo "Polo did not claim its legacy PATH entry during upgrade."
 
-    & $scriptPath -Mode Uninstall -InstallDir $installDir -BinDir $binDir -UserPathFile $userPathFile
+    & $scriptPath -Mode Uninstall -InstallDir $legacyInstallDir -BinDir $binDir -UserPathFile $userPathFile
 
     $migratedPath = (Get-Content $userPathFile -Raw).Trim()
     Assert-True ($migratedPath -eq "C:\User Tools") "Uninstall left the legacy Polo PATH entry behind."

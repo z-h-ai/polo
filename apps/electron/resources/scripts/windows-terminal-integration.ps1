@@ -567,15 +567,23 @@ function Assert-PackagedArtifacts {
 }
 
 function Get-LauncherContent {
-    return [IO.File]::ReadAllText($launcherTemplate)
+    return ConvertTo-WindowsBatchContent ([IO.File]::ReadAllText($launcherTemplate))
 }
 
 function Get-LegacyShimContent {
-    return [IO.File]::ReadAllText($legacyLauncherTemplate)
+    return ConvertTo-WindowsBatchContent ([IO.File]::ReadAllText($legacyLauncherTemplate))
 }
 
 function Get-WrapperMessagesContent {
-    return [IO.File]::ReadAllText($messageTemplate)
+    return ConvertTo-WindowsBatchContent ([IO.File]::ReadAllText($messageTemplate))
+}
+
+function ConvertTo-WindowsBatchContent([string]$Content) {
+    # cmd.exe parses multiline parenthesized blocks reliably only with Windows
+    # line endings. The templates are checked out on all platforms, so make
+    # the bytes explicit at the atomic write boundary rather than relying on
+    # each Git checkout's autocrlf setting.
+    return [regex]::Replace($Content, "\r?\n", "`r`n")
 }
 
 function Get-HistoricalLauncherAllowlist([string]$Path) {
@@ -725,11 +733,11 @@ function Test-ClaimMatchesState($State, [string]$OriginalPath, [string]$ClaimPat
 }
 
 function Test-ClaimOwnedForUpgrade($State, [string]$OriginalPath, [string]$ClaimPath) {
-    if ($State -and (Test-ClaimMatchesState $State $OriginalPath $ClaimPath)) {
+    if ($State -and (Test-ClaimMatchesState -State $State -OriginalPath $OriginalPath -ClaimPath $ClaimPath)) {
         return $true
     }
     if (-not $State -and
-        (Test-ExactContent $ClaimPath (Get-HistoricalLauncherAllowlist $OriginalPath))) {
+        (Test-ExactContent -Path $ClaimPath -AllowedContents (Get-HistoricalLauncherAllowlist $OriginalPath))) {
         return $true
     }
     return $false
@@ -838,7 +846,8 @@ function New-StateContent([bool]$PathEntryAddedByPolo, $PublishedRecords) {
 
 function Mutate-UserPathFile(
     [bool]$EnsurePresent,
-    [string]$ExpectedValue,
+    [AllowNull()]
+    [object]$ExpectedValue,
     [Collections.Generic.List[object]]$Claims,
     [Collections.Generic.List[object]]$Published
 ) {
@@ -874,14 +883,16 @@ function Mutate-UserPathFile(
 
 function Mutate-UserPath(
     [bool]$EnsurePresent,
-    [string]$ExpectedValue,
+    [AllowNull()]
+    [object]$ExpectedValue,
     [Collections.Generic.List[object]]$Claims,
     [Collections.Generic.List[object]]$Published,
     [string]$RaceValue,
     [string]$ReplacementValue = $null
 ) {
     if ($UserPathFile) {
-        return Mutate-UserPathFile $EnsurePresent $ExpectedValue $Claims $Published
+        return Mutate-UserPathFile -EnsurePresent $EnsurePresent -ExpectedValue $ExpectedValue `
+            -Claims $Claims -Published $Published
     }
     return [PoloWindowsTerminalAtomic]::MutateUserPath(
         $UserPathRegistrySubKey,
@@ -898,15 +909,15 @@ function Undo-UserPathMutation($Mutation, [bool]$InstallMutation) {
     if (-not $Mutation -or -not $Mutation.Changed) {
         return
     }
-    if ($UserPathFile) {
-        # The file-backed native fixture is restored from its exact atomic claim.
-        return
-    }
+    # File-backed mutations are restored by their exact atomic claims before
+    # this helper is reached. Only the registry variant needs a second guarded
+    # mutation to restore the previous value.
     try {
         $throwawayClaims = New-Object 'Collections.Generic.List[object]'
         $throwawayPublished = New-Object 'Collections.Generic.List[object]'
-        Mutate-UserPath (-not $InstallMutation) $Mutation.Value `
-            $throwawayClaims $throwawayPublished $null $Mutation.PreviousValue | Out-Null
+        Mutate-UserPath -EnsurePresent (-not $InstallMutation) -ExpectedValue $Mutation.Value `
+            -Claims $throwawayClaims -Published $throwawayPublished -RaceValue $null `
+            -ReplacementValue $Mutation.PreviousValue | Out-Null
     } catch {
         Write-Warning "Polo did not roll back PATH because it changed concurrently: $($_.Exception.Message)"
     }
@@ -960,7 +971,10 @@ function Restore-AllClaims([Collections.Generic.List[object]]$Claims, [string]$S
     }
 }
 
-function Install-Transactional([bool]$CheckCommandConflict) {
+function Install-Transactional(
+    [bool]$CheckCommandConflict,
+    [bool]$UsesUserPathFile
+) {
     Assert-PackagedArtifacts
     if ($CheckCommandConflict) {
         $existing = Get-Command polo -ErrorAction SilentlyContinue
@@ -991,7 +1005,7 @@ function Install-Transactional([bool]$CheckCommandConflict) {
             $claim = Claim-ExistingPath $spec.Path "install"
             if ($claim) {
                 $claims.Add($claim)
-                if (-not (Test-ClaimOwnedForUpgrade $previousState $spec.Path $claim.Claim)) {
+                if (-not (Test-ClaimOwnedForUpgrade -State $previousState -OriginalPath $spec.Path -ClaimPath $claim.Claim)) {
                     throw "Polo cannot replace $($spec.Path) because it is modified or user-owned."
                 }
                 if (-not $previousState -and
@@ -1006,7 +1020,8 @@ function Install-Transactional([bool]$CheckCommandConflict) {
             $managedPublished.Add($record)
         }
 
-        $pathMutation = Mutate-UserPath $true $null $claims $published $TestRegistryRaceValue
+        $pathMutation = Mutate-UserPath -EnsurePresent $true -ExpectedValue $null `
+            -Claims $claims -Published $published -RaceValue $TestRegistryRaceValue
         $pathEntryOwned = [bool](
             ($previousState -and $previousState.pathEntryAddedByPolo) -or
             (-not $pathMutation.WasPresent) -or
@@ -1018,7 +1033,9 @@ function Install-Transactional([bool]$CheckCommandConflict) {
     } finally {
         if (-not $committed) {
             Remove-PublishedForRollback $published "install-rollback"
-            Undo-UserPathMutation $pathMutation $true
+            if (-not $UsesUserPathFile) {
+                Undo-UserPathMutation -Mutation $pathMutation -InstallMutation $true
+            }
             Restore-AllClaims $claims "install-rollback"
         } else {
             Discard-ClaimsAfterCommit $claims "install"
@@ -1026,7 +1043,7 @@ function Install-Transactional([bool]$CheckCommandConflict) {
     }
 }
 
-function Uninstall-Transactional {
+function Uninstall-Transactional([bool]$UsesUserPathFile) {
     $claims = New-Object 'Collections.Generic.List[object]'
     $published = New-Object 'Collections.Generic.List[object]'
     $pathMutation = $null
@@ -1049,13 +1066,14 @@ function Uninstall-Transactional {
                 throw "Polo cannot uninstall terminal integration because $($spec.Path) is missing."
             }
             $claims.Add($claim)
-            if (-not (Test-ClaimMatchesState $state $spec.Path $claim.Claim)) {
+            if (-not (Test-ClaimMatchesState -State $state -OriginalPath $spec.Path -ClaimPath $claim.Claim)) {
                 throw "Polo left modified or user-owned file unchanged: $($spec.Path)"
             }
         }
 
         if ($state.pathEntryAddedByPolo) {
-            $pathMutation = Mutate-UserPath $false $null $claims $published $TestRegistryRaceValue
+            $pathMutation = Mutate-UserPath -EnsurePresent $false -ExpectedValue $null `
+                -Claims $claims -Published $published -RaceValue $TestRegistryRaceValue
         }
 
         foreach ($claim in $claims) {
@@ -1077,7 +1095,9 @@ function Uninstall-Transactional {
     } finally {
         if (-not $committed) {
             Remove-PublishedForRollback $published "uninstall-rollback"
-            Undo-UserPathMutation $pathMutation $false
+            if (-not $UsesUserPathFile) {
+                Undo-UserPathMutation -Mutation $pathMutation -InstallMutation $false
+            }
             Restore-AllClaims $claims "uninstall-rollback"
         }
     }
@@ -1094,7 +1114,7 @@ if ($Mode -eq "Validate") {
         $rootPointer = Join-Path $BinDir "polo-install-root.txt"
         $stateFile = Join-Path $BinDir "terminal-integration.json"
         $UserPathFile = Join-Path $validationRoot "user-path.txt"
-        Install-Transactional $false
+        Install-Transactional $false ([bool]$UserPathFile)
         $actualContent = Get-Content $launcher -Raw
         if ((Normalize-LineEndings $actualContent) -cne
             (Normalize-LineEndings ([IO.File]::ReadAllText($launcherTemplate)))) {
@@ -1112,11 +1132,11 @@ if ($Mode -eq "Validate") {
 }
 
 if ($Mode -eq "Install") {
-    Install-Transactional (-not $SkipCommandConflict)
+    Install-Transactional (-not $SkipCommandConflict) ([bool]$UserPathFile)
     return
 }
 
-Uninstall-Transactional
+Uninstall-Transactional ([bool]$UserPathFile)
 
 if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir -Force | Select-Object -First 1)) {
     Remove-Item $BinDir -Force

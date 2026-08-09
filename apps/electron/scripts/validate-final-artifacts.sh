@@ -172,12 +172,23 @@ validate_macos_dmg_release_identity() {
   local dmg="$1"
   local notarization=rejected
   local stapling=invalid
+  local gatekeeper_output
 
-  if spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1 \
-    | grep -F 'source=Notarized Developer ID' >/dev/null; then
+  # Keep Gatekeeper's assessment in the build log, but do not make the release
+  # contract depend on one OS-version-specific diagnostic string. macOS 15 can
+  # validate a stapled DMG without printing `source=Notarized Developer ID`.
+  gatekeeper_output="$(
+    spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" 2>&1 || true
+  )"
+  printf '%s\n' "macOS DMG Gatekeeper assessment: $gatekeeper_output"
+
+  # A valid stapled Apple ticket is bound to this exact disk image and is only
+  # issued after Notary service acceptance. It is therefore the portable,
+  # cryptographic release proof for the outer DMG.
+  if xcrun stapler validate "$dmg" >/dev/null 2>&1; then
+    stapling=valid
     notarization=accepted
   fi
-  if xcrun stapler validate "$dmg" >/dev/null 2>&1; then stapling=valid; fi
 
   # A DMG is not a code object and therefore cannot itself be verified with
   # codesign. The mounted App and nested uv get their Developer ID/Team ID

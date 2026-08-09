@@ -210,6 +210,27 @@ jobs:
           args+=(--installer "$POLO_AI_PREVIOUS_INSTALL_SCRIPT" --installer-sha256 "$EXPECTED_PREVIOUS_INSTALLER_SHA256")
           bun run scripts/validate-previous-release-contract.ts "${args[@]}"
 
+      - name: Smoke Windows terminal launchers
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke Windows PowerShell installer compatibility
+        if: matrix.platform == 'windows'
+        # afterPack and NSIS invoke the integration script with Windows
+        # PowerShell. Keep the pre-packaging ASCII launch on that same engine
+        # so a PowerShell 7-only pass cannot hide an installer failure. The
+        # Unicode argument regression remains on PowerShell 7, whose native
+        # command-line transport preserves it.
+        shell: powershell
+        run: |
+          & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1 -AsciiOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build and validate macOS release
         if: matrix.platform == 'macos'
         shell: bash
@@ -233,13 +254,6 @@ jobs:
         run: |
           set -o pipefail
           bun run electron:dist:win --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-windows-x64.log"
-
-      - name: Smoke Windows terminal launchers
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
-          & apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1
 
       - name: Require intentionally unsigned Windows installer
         if: matrix.platform == 'windows'
