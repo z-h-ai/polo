@@ -133,6 +133,7 @@ function Invoke-Uninstaller {
     Stop-InstalledPoloApp
     $savedTraceFile = $env:POLO_NSIS_UNINSTALL_TRACE_FILE
     $traceFile = Join-Path $testRoot "nsis-uninstall-trace.txt"
+    New-Item -ItemType File -Force -Path (Join-Path $installDir ".polo-validation-trace") | Out-Null
     try {
         $env:POLO_NSIS_UNINSTALL_TRACE_FILE = $traceFile
         Invoke-NsisProcess -FilePath $uninstaller -ArgumentList @("/S") -Label "uninstaller"

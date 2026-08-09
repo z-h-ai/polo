@@ -54,6 +54,16 @@ polo_terminal_setup_finished:
       FileClose $R4
     ${EndIf}
   ${EndIf}
+  IfFileExists "$INSTDIR\.polo-validation-trace" polo_uninstall_write_marker_trace 0
+  Goto polo_uninstall_marker_trace_started
+polo_uninstall_write_marker_trace:
+    ClearErrors
+    FileOpen $R4 "$INSTDIR\..\nsis-uninstall-trace.txt" w
+    ${IfNot} ${Errors}
+      FileWrite $R4 "customUnInit entered$\r$\ninstDir=$INSTDIR$\r$\nbinDir=$R1$\r$\n"
+      FileClose $R4
+    ${EndIf}
+polo_uninstall_marker_trace_started:
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Uninstall -InstallDir "$INSTDIR" -BinDir "$R1" $R2'
   Pop $0
   ${If} $R3 != ""
@@ -64,6 +74,16 @@ polo_terminal_setup_finished:
       FileClose $R4
     ${EndIf}
   ${EndIf}
+  IfFileExists "$INSTDIR\.polo-validation-trace" polo_uninstall_append_marker_trace 0
+  Goto polo_uninstall_marker_trace_finished
+polo_uninstall_append_marker_trace:
+    ClearErrors
+    FileOpen $R4 "$INSTDIR\..\nsis-uninstall-trace.txt" a
+    ${IfNot} ${Errors}
+      FileWrite $R4 "exitCode=$0$\r$\n"
+      FileClose $R4
+    ${EndIf}
+polo_uninstall_marker_trace_finished:
   Pop $R4
   Pop $R3
   Pop $R2

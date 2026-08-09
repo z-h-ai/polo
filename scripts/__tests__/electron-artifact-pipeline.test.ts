@@ -135,6 +135,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(nsis).toContain('Abort')
     expect(nsis).toContain('!macro customUnInit')
     expect(nsis).toContain('POLO_NSIS_UNINSTALL_TRACE_FILE')
+    expect(nsis).toContain('.polo-validation-trace')
     expect(nsis).toContain('IfSilent polo_terminal_uninstall_silent_failure')
     expect(nsis).not.toContain('polo_terminal_uninstall_finished')
     const terminalIntegration = read('apps/electron/resources/scripts/windows-terminal-integration.ps1')
