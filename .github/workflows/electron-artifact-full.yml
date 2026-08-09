@@ -53,7 +53,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is intentionally excluded until its Authenticode credentials are configured.
         include:
           - platform: macos
             arch: x64
@@ -75,6 +74,13 @@ jobs:
             updater: true
             manifest: latest-linux.yml
             artifact: Polo-AI-x64.AppImage
+          # Windows is deliberately unsigned in this release phase. It is a
+          # manual NSIS installer and does not participate in updater manifests.
+          - platform: windows
+            arch: x64
+            runner: windows-latest
+            updater: false
+            manual_installer: Polo-AI-x64.exe
     runs-on: ${{ matrix.runner }}
     env:
       PREVIOUS_RELEASE_TAG: ${{ inputs.previous_release_tag }}
@@ -83,15 +89,17 @@ jobs:
       EXPECTED_PREVIOUS_ARTIFACT_SHA256: ${{ (matrix.platform == 'macos' && inputs.previous_macos_sha256) || inputs.previous_linux_sha256 }}
       EXPECTED_PREVIOUS_INSTALLER_SHA256: ${{ inputs.previous_installer_sha256 }}
       PREVIOUS_ARTIFACT_NAME: ${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || inputs.previous_linux_name }}
-      # The arm64 DMG is a separately validated manual installer. It has no
-      # architecture-safe predecessor update payload yet, so it must not run
-      # the x64 upgrade lifecycle.
-      POLO_AI_ARTIFACT_VALIDATION_MODE: ${{ matrix.updater && (inputs.bootstrap && 'bootstrap' || 'full') || 'smoke' }}
+      # Apple Silicon remains outside updater lifecycle manifests, but manual
+      # installation does not relax Developer ID/notarization/stapling gates.
+      # `signing` runs the complete macOS identity audit without requiring an
+      # architecture-unsafe x64 predecessor upgrade fixture.
+      POLO_AI_ARTIFACT_VALIDATION_MODE: ${{ matrix.platform == 'macos' && matrix.arch == 'arm64' && 'signing' || matrix.updater && (inputs.bootstrap && 'bootstrap' || 'full') || 'smoke' }}
       POLO_AI_PREVIOUS_ARTIFACT: ${{ github.workspace }}/previous/${{ (matrix.platform == 'macos' && inputs.previous_macos_name) || inputs.previous_linux_name }}
       POLO_AI_PREVIOUS_INSTALL_SCRIPT: ${{ github.workspace }}/previous/install-app.sh
       POLO_AI_RELEASE_MACOS_TEAM_ID: ${{ vars.POLO_AI_RELEASE_MACOS_TEAM_ID }}
       POLO_AI_RELEASE_MACOS_APP_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_APP_REQUIREMENT }}
       POLO_AI_RELEASE_MACOS_UV_REQUIREMENT: ${{ vars.POLO_AI_RELEASE_MACOS_UV_REQUIREMENT }}
+      POLO_AI_RELEASE_SIGNING_AUDIT_FILE: ${{ matrix.platform == 'macos' && format('{0}/apps/electron/release/release-signing-audit-macos-{1}.jsonl', github.workspace, matrix.arch) || '' }}
       CSC_LINK: ${{ matrix.platform == 'macos' && secrets.macos_csc_link || '' }}
       CSC_KEY_PASSWORD: ${{ matrix.platform == 'macos' && secrets.macos_csc_key_password || '' }}
       APPLE_ID: ${{ matrix.platform == 'macos' && secrets.apple_id || '' }}
@@ -121,7 +129,7 @@ jobs:
               exit 1
             fi
           fi
-          if [ "${{ inputs.bootstrap }}" != "true" ]; then
+          if [ "${{ inputs.bootstrap }}" != "true" ] && [ "${{ matrix.updater }}" = "true" ]; then
             for name in PREVIOUS_RELEASE_TAG PREVIOUS_RELEASE_VERSION PREVIOUS_RELEASE_COMMIT_SHA EXPECTED_PREVIOUS_ARTIFACT_SHA256 PREVIOUS_ARTIFACT_NAME; do
               if [ -z "${!name:-}" ]; then missing="$missing $name"; fi
             done
@@ -219,12 +227,42 @@ jobs:
             bun run electron:dist:linux --arch=x64 2>&1 | tee "$1"
           ' _ "$RUNNER_TEMP/full-validation-linux.log"
 
+      - name: Build and validate unsigned Windows release
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run electron:dist:win --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-windows-x64.log"
+
+      - name: Require intentionally unsigned Windows installer
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $installer = 'apps/electron/release/Polo-AI-x64.exe'
+          if (-not (Test-Path -LiteralPath $installer)) { throw "Missing $installer" }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'NotSigned') {
+            throw "Windows installer must be explicitly unsigned for this release phase; got $($signature.Status)"
+          }
+          Write-Host 'Windows NSIS installer is intentionally unsigned.'
+
       - name: Require updater outputs
         if: matrix.updater
         shell: bash
         run: |
           test -f "apps/electron/release/${{ matrix.artifact }}"
           test -f "apps/electron/release/${{ matrix.manifest }}"
+
+      - name: Require macOS Developer ID signing audit
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit='apps/electron/release/release-signing-audit-macos-${{ matrix.arch }}.jsonl'
+          test -s "$audit"
+          grep -F '"label":"DMG outer"' "$audit" >/dev/null
+          grep -F '"label":"DMG"' "$audit" >/dev/null
+          grep -F '"label":"ZIP"' "$audit" >/dev/null
 
       - name: Upload curated release input
         if: matrix.updater
@@ -242,6 +280,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: electron-release-macos-dmg-${{ matrix.arch }}-${{ github.sha }}
+          path: apps/electron/release/${{ matrix.manual_installer }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows manual installer
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-release-windows-${{ matrix.arch }}-${{ github.sha }}
           path: apps/electron/release/${{ matrix.manual_installer }}
           if-no-files-found: error
           retention-days: 14

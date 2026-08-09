@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  verifyMacDmgSigningIdentity,
   verifyMacReleaseSigningIdentity,
   verifyWindowsReleaseSigningIdentity,
 } from '../release-signing-contract'
@@ -22,6 +23,13 @@ const macActual = {
   uvDesignatedRequirement: macExpected.uvDesignatedRequirement,
   appSignature: 'valid' as const,
   uvSignature: 'valid' as const,
+  notarization: 'accepted' as const,
+  stapling: 'valid' as const,
+}
+const macDmgActual = {
+  label: 'fixture DMG outer',
+  dmgTeamId: macExpected.teamId,
+  dmgSignature: 'valid' as const,
   notarization: 'accepted' as const,
   stapling: 'valid' as const,
 }
@@ -79,6 +87,27 @@ describe('release signing identity contract', () => {
     expect(verifyMacReleaseSigningIdentity(macExpected, macActual)).toMatchObject({
       platform: 'macos',
       expected: macExpected,
+      verified: true,
+    })
+  })
+
+  it('requires a separately verified outer DMG release object', () => {
+    expect(() => verifyMacDmgSigningIdentity({ teamId: '' }, macDmgActual))
+      .toThrow('requires macOS Team ID')
+    expect(() => verifyMacDmgSigningIdentity(macExpected, {
+      ...macDmgActual,
+      dmgSignature: 'invalid',
+    })).toThrow('outer DMG signature')
+    expect(() => verifyMacDmgSigningIdentity(macExpected, {
+      ...macDmgActual,
+      notarization: 'rejected',
+    })).toThrow('notarization assessment')
+    expect(() => verifyMacDmgSigningIdentity(macExpected, {
+      ...macDmgActual,
+      stapling: 'invalid',
+    })).toThrow('stapled ticket')
+    expect(verifyMacDmgSigningIdentity(macExpected, macDmgActual)).toMatchObject({
+      artifactKind: 'dmg',
       verified: true,
     })
   })

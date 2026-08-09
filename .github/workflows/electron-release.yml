@@ -80,6 +80,9 @@ jobs:
   draft-release:
     needs: [preflight, build]
     runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.draft-identity.outputs.release_id }}
+      asset_identity: ${{ steps.draft-identity.outputs.asset_identity }}
     permissions:
       actions: read
       contents: write
@@ -104,10 +107,6 @@ jobs:
             --version "${{ needs.preflight.outputs.version }}" \
             --commit "$GITHUB_SHA" \
             --published-at "$(git show -s --format=%cI "$GITHUB_SHA")"
-          test -f collected/Polo-AI-x64.dmg
-          test -f collected/Polo-AI-arm64.dmg
-          cp collected/Polo-AI-x64.dmg release/Polo-AI-x64.dmg
-          cp collected/Polo-AI-arm64.dmg release/Polo-AI-arm64.dmg
       - name: Create immutable Draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,34 +115,104 @@ jobs:
             test "$(jq -r .isDraft /tmp/release.json)" = "true"
             mkdir existing-release
             gh release download "$GITHUB_REF_NAME" --dir existing-release
-            test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 8
+            test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 9
             for file in release/*; do
               cmp "$file" "existing-release/$(basename "$file")"
             done
           else
             gh release create "$GITHUB_REF_NAME" release/* \
-              --draft --verify-tag --title "$GITHUB_REF_NAME" \
+              --draft --verify-tag --target "$GITHUB_SHA" --title "$GITHUB_REF_NAME" \
               --generate-notes
           fi
+      - name: Snapshot approved immutable Draft identity
+        id: draft-identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > /tmp/draft-release.json
+          bun scripts/electron-release-draft-identity.ts \
+            --release-dir release \
+            --github-release /tmp/draft-release.json \
+            --output /tmp/draft-identity.json
+          release_id="$(jq -r .releaseId /tmp/draft-identity.json)"
+          asset_identity="$(jq -c . /tmp/draft-identity.json)"
+          test "$release_id" -gt 0
+          test "$(jq '.assets | length' /tmp/draft-identity.json)" -eq 9
+          {
+            echo "release_id=$release_id"
+            echo "asset_identity=$asset_identity"
+          } >> "$GITHUB_OUTPUT"
   production:
     needs: [preflight, draft-release]
     runs-on: ubuntu-latest
     environment: production
     permissions:
-      # Draft Releases are not readable by a contents:read workflow token.
-      # Production needs this permission only to download the expected DMG before
-      # comparing it with the manually uploaded immutable public artifact.
       contents: write
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
+      DRAFT_RELEASE_ID: ${{ needs.draft-release.outputs.release_id }}
+      DRAFT_ASSET_IDENTITY: ${{ needs.draft-release.outputs.asset_identity }}
+      GH_TOKEN: ${{ github.token }}
+      ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
+      ZEABUR_UPDATES_SERVICE_ID: ${{ vars.ZEABUR_UPDATES_SERVICE_ID }}
+      ZEABUR_ENVIRONMENT_ID: ${{ vars.ZEABUR_ENVIRONMENT_ID }}
     steps:
+      # State lifecycle: Draft -> pulled (rollback marker) -> publicly verified
+      # -> confirmed -> GitHub published. Every uncertain transition compensates
+      # through the sole PVC writer, then independently proves this version is
+      # no longer latest before the Draft release may remain or be restored.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
-      - name: Verify manually uploaded updater bundle
+      - name: Check production release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ZEABUR_TOKEN ZEABUR_UPDATES_SERVICE_ID ZEABUR_ENVIRONMENT_ID DRAFT_RELEASE_ID DRAFT_ASSET_IDENTITY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing production configuration: $name"
+              exit 1
+            fi
+          done
+      - name: Trigger Zeabur release pull
+        id: zeabur-pull
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx zeabur@latest auth login --token "$ZEABUR_TOKEN"
+          npx zeabur@latest service exec \
+            --id "$ZEABUR_UPDATES_SERVICE_ID" \
+            --env-id "$ZEABUR_ENVIRONMENT_ID" \
+            -- /app/polo-release-pull \
+              --repo "$GITHUB_REPOSITORY" \
+              --tag "$GITHUB_REF_NAME" \
+              --version "$VERSION" \
+              --commit "$GITHUB_SHA" \
+              --release-id "$DRAFT_RELEASE_ID" \
+              --asset-identity "$DRAFT_ASSET_IDENTITY"
+      - name: Compensate failed or uncertain Zeabur release pull
+        id: pull-compensation
+        if: steps.zeabur-pull.outcome == 'failure'
+        continue-on-error: true
+        uses: ./.github/actions/zeabur-rollback-failed
+        with:
+          token: ${{ env.ZEABUR_TOKEN }}
+          service-id: ${{ env.ZEABUR_UPDATES_SERVICE_ID }}
+          environment-id: ${{ env.ZEABUR_ENVIRONMENT_ID }}
+          version: ${{ env.VERSION }}
+      - name: Stop release after Zeabur pull failure
+        if: steps.zeabur-pull.outcome == 'failure'
+        run: exit 1
+      - name: Verify Zeabur updater bundle
+        id: public-verify
+        if: steps.zeabur-pull.outcome == 'success'
+        continue-on-error: true
         run: |
           for attempt in $(seq 1 6); do
             if bun scripts/electron-release-bundle.ts verify \
@@ -157,29 +226,167 @@ jobs:
             if [ "$attempt" -lt 6 ]; then sleep 10; fi
           done
           exit 1
-      - name: Verify manually uploaded DMG
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Compensate failed public verification
+        id: public-verify-compensation
+        if: steps.public-verify.outcome == 'failure'
+        continue-on-error: true
+        uses: ./.github/actions/zeabur-rollback-failed
+        with:
+          token: ${{ env.ZEABUR_TOKEN }}
+          service-id: ${{ env.ZEABUR_UPDATES_SERVICE_ID }}
+          environment-id: ${{ env.ZEABUR_ENVIRONMENT_ID }}
+          version: ${{ env.VERSION }}
+      - name: Stop release after public verification failure
+        if: steps.public-verify.outcome == 'failure'
+        run: exit 1
+      - name: Confirm Zeabur release after public verification
+        id: confirm-release
+        if: steps.public-verify.outcome == 'success'
+        continue-on-error: true
+        shell: bash
         run: |
-          mkdir expected-dmg
-          for arch in x64 arm64; do
-            dmg="Polo-AI-$arch.dmg"
-            gh release download "$GITHUB_REF_NAME" --pattern "$dmg" --dir expected-dmg
-            curl -fsS --retry 5 --retry-delay 10 \
-              "https://updates.polo.z-h-ai.com/electron/latest/$dmg" \
-              --output "uploaded-$arch.dmg"
-            cmp "expected-dmg/$dmg" "uploaded-$arch.dmg"
-            curl -fsSI "https://updates.polo.z-h-ai.com/electron/latest/$dmg" \
-              | tr -d '\r' | grep -i '^cache-control:.*immutable'
+          set -euo pipefail
+          npx zeabur@latest service exec \
+            --id "$ZEABUR_UPDATES_SERVICE_ID" \
+            --env-id "$ZEABUR_ENVIRONMENT_ID" \
+            -- /usr/local/bin/bun /app/publish-electron-release.ts confirm \
+              --releases-dir /data/releases \
+              --version "$VERSION"
+      - name: Verify confirmed Zeabur pointer
+        id: confirm-pointer
+        if: steps.confirm-release.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx zeabur@latest service exec \
+            --id "$ZEABUR_UPDATES_SERVICE_ID" \
+            --env-id "$ZEABUR_ENVIRONMENT_ID" \
+            -- /usr/local/bin/bun /app/publish-electron-release.ts assert-confirmed \
+              --releases-dir /data/releases \
+              --version "$VERSION"
+      - name: Compensate failed or uncertain Zeabur finalization
+        id: finalization-compensation
+        if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'
+        continue-on-error: true
+        uses: ./.github/actions/zeabur-rollback-failed
+        with:
+          token: ${{ env.ZEABUR_TOKEN }}
+          service-id: ${{ env.ZEABUR_UPDATES_SERVICE_ID }}
+          environment-id: ${{ env.ZEABUR_ENVIRONMENT_ID }}
+          version: ${{ env.VERSION }}
+      - name: Stop release after finalization failure
+        if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'
+        run: exit 1
+      - name: Revalidate approved immutable Draft before GitHub publication
+        id: approved-draft-revalidate
+        if: steps.confirm-pointer.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DRAFT_RELEASE_ID" in (''|*[!0-9]*) echo '::error::Invalid approved Draft Release ID'; exit 1;; esac
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/approved-draft-current.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/approved-draft-current.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft true
+          # Metadata binds asset IDs/names/sizes; re-read every approved asset
+          # by ID so a same-size mutation cannot publish after PVC validation.
+          mkdir -p /tmp/approved-draft-assets
+          jq -r '.assets[] | [.id, .name, .sha256] | @tsv' <<<"$DRAFT_ASSET_IDENTITY" | \
+          while IFS=$'\t' read -r asset_id asset_name expected_sha256; do
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "/tmp/approved-draft-assets/$asset_name"
+            actual_sha256="$(sha256sum "/tmp/approved-draft-assets/$asset_name" | awk '{print $1}')"
+            test "$actual_sha256" = "$expected_sha256"
           done
-
-  publish-release:
-    needs: production
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
       - name: Publish approved GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+        id: github-publish
+        if: steps.approved-draft-revalidate.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -F draft=false >/dev/null
+      - name: Verify GitHub Release publication
+        id: github-publish-state
+        if: steps.github-publish.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/published-approved-release.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/published-approved-release.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft false
+      - name: Finalize confirmed Zeabur release after GitHub publication
+        id: zeabur-finalize
+        if: steps.github-publish-state.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 3); do
+            if npx zeabur@latest auth login --token "$ZEABUR_TOKEN" >/dev/null \
+              && npx zeabur@latest service exec \
+                --id "$ZEABUR_UPDATES_SERVICE_ID" \
+                --env-id "$ZEABUR_ENVIRONMENT_ID" \
+                -- /usr/local/bin/bun /app/publish-electron-release.ts finalize \
+                  --releases-dir /data/releases \
+                  --version "$VERSION" \
+              && npx zeabur@latest service exec \
+                --id "$ZEABUR_UPDATES_SERVICE_ID" \
+                --env-id "$ZEABUR_ENVIRONMENT_ID" \
+                -- /usr/local/bin/bun /app/publish-electron-release.ts assert-finalized \
+                  --releases-dir /data/releases \
+                  --version "$VERSION"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 5; fi
+          done
+          echo "::error::Could not finalize confirmed Zeabur release after GitHub publication"
+          exit 1
+      - name: Stop release after Zeabur finalization failure
+        if: steps.github-publish-state.outcome == 'success' && steps.zeabur-finalize.outcome == 'failure'
+        run: exit 1
+      - name: Compensate failed or uncertain GitHub finalization
+        id: github-finalization-compensation
+        if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
+        continue-on-error: true
+        uses: ./.github/actions/zeabur-rollback-failed
+        with:
+          token: ${{ env.ZEABUR_TOKEN }}
+          service-id: ${{ env.ZEABUR_UPDATES_SERVICE_ID }}
+          environment-id: ${{ env.ZEABUR_ENVIRONMENT_ID }}
+          version: ${{ env.VERSION }}
+      - name: Restore Draft after failed GitHub finalization
+        id: github-draft-restore
+        if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/restore-approved-release.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/restore-approved-release.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft either
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -F draft=true >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/restored-approved-release.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/restored-approved-release.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft true
+      - name: Stop release after GitHub finalization failure
+        if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success' || steps.github-finalization-compensation.outcome == 'failure' || steps.github-draft-restore.outcome == 'failure'
+        run: exit 1

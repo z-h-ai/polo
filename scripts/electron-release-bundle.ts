@@ -12,14 +12,17 @@ import {
   type ReleaseContract,
 } from './electron-release-contract'
 import {
-  MACOS_DMG_NAME,
+  MACOS_X64_DMG_NAME,
   MANIFEST_NAMES,
   validateSource,
 } from './publish-electron-release'
 
 const BUNDLE_FILES = [
   'Polo-AI-x64.zip',
+  'Polo-AI-x64.dmg',
+  'Polo-AI-arm64.dmg',
   'Polo-AI-x64.AppImage',
+  'Polo-AI-x64.exe',
   ...MANIFEST_NAMES,
 ] as const
 
@@ -67,7 +70,10 @@ export async function prepareReleaseBundle(input: BundleMetadata & {
     commitSha: input.commitSha,
     publishedAt: input.publishedAt,
     macosZip: join(outputDir, 'Polo-AI-x64.zip'),
+    macosX64Dmg: join(outputDir, 'Polo-AI-x64.dmg'),
+    macosArm64Dmg: join(outputDir, 'Polo-AI-arm64.dmg'),
     linuxAppImage: join(outputDir, 'Polo-AI-x64.AppImage'),
+    windowsExe: join(outputDir, 'Polo-AI-x64.exe'),
     installApp: join(outputDir, 'install-app.sh'),
   })
   await writeFile(
@@ -99,6 +105,17 @@ function requireCacheControl(response: Response, directive: string, label: strin
   }
 }
 
+function cacheDirectiveFor(fileName: string): 'no-cache' | 'immutable' {
+  if (
+    fileName === 'install-app.sh'
+    || fileName === 'release-contract.json'
+    || MANIFEST_NAMES.includes(fileName as (typeof MANIFEST_NAMES)[number])
+  ) {
+    return 'no-cache'
+  }
+  return 'immutable'
+}
+
 async function verifyArtifact(
   baseUrl: string,
   contractArtifact: ReleaseArtifactContract,
@@ -106,7 +123,7 @@ async function verifyArtifact(
 ): Promise<void> {
   const url = `${baseUrl}/${encodeURIComponent(contractArtifact.fileName)}`
   const head = await fetchOk(url, { method: 'HEAD', cache: 'no-store' })
-  requireCacheControl(head, 'immutable', contractArtifact.fileName)
+  requireCacheControl(head, cacheDirectiveFor(contractArtifact.fileName), contractArtifact.fileName)
   const contents = new Uint8Array(await (await fetchOk(url, { cache: 'no-store' })).arrayBuffer())
   const headerSize = head.headers.get('content-length')
   if (headerSize !== null && Number(headerSize) !== contents.byteLength) {
@@ -142,10 +159,16 @@ export async function verifyPublishedRelease(
     throw new Error('Published contract does not match the release being verified')
   }
 
+  if (contract.schemaVersion !== 2) {
+    throw new Error('Published contract must use schema version 2')
+  }
   const manifestContracts: Record<string, ReleaseArtifactContract> = {
     'latest-mac.yml': contract.artifacts.macosZip,
     'latest-linux.yml': contract.artifacts.linuxAppImage,
   }
+  const contractByFileName = new Map(
+    Object.values(contract.artifacts).map((artifact) => [artifact.fileName, artifact]),
+  )
   for (const manifestName of MANIFEST_NAMES) {
     const manifestResponse = await fetchOk(`${normalizedBase}/${manifestName}`, { cache: 'no-store' })
     requireCacheControl(manifestResponse, 'no-cache', manifestName)
@@ -158,7 +181,7 @@ export async function verifyPublishedRelease(
     const artifact = manifestContracts[manifestName]!
     const entry = manifest.files?.find(item => item.url === artifact.fileName)
     const allowed = manifestName === 'latest-mac.yml'
-      ? new Set([artifact.fileName, MACOS_DMG_NAME])
+      ? new Set([artifact.fileName, MACOS_X64_DMG_NAME])
       : new Set([artifact.fileName])
     if (
       manifest.version !== expected.version
@@ -174,12 +197,25 @@ export async function verifyPublishedRelease(
     ) {
       throw new Error(`${manifestName} does not match the published contract`)
     }
-    await verifyArtifact(normalizedBase, artifact, {
-      size: entry.size!,
-      sha512: entry.sha512,
-    })
+    for (const manifestEntry of manifest.files) {
+      const manifestArtifact = contractByFileName.get(manifestEntry.url!)
+      if (!manifestArtifact || !Number.isSafeInteger(manifestEntry.size) || typeof manifestEntry.sha512 !== 'string') {
+        throw new Error(`${manifestName} references an artifact outside the published contract`)
+      }
+      await verifyArtifact(normalizedBase, manifestArtifact, {
+        size: manifestEntry.size,
+        sha512: manifestEntry.sha512,
+      })
+    }
   }
-  await verifyArtifact(normalizedBase, contract.installApp)
+  for (const artifact of [
+    contract.artifacts.macosX64Dmg,
+    contract.artifacts.macosArm64Dmg,
+    contract.artifacts.windowsExe,
+    contract.installApp,
+  ]) {
+    await verifyArtifact(normalizedBase, artifact)
+  }
 
   const methodCheck = await fetch(`${normalizedBase}/release-contract.json`, { method: 'POST' })
   if (methodCheck.status !== 405) {
