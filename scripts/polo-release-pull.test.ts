@@ -216,7 +216,7 @@ describe('Zeabur Draft Release puller', () => {
         publisherOptions: { capacityCheck: async () => {} },
       })).resolves.toBe('published')
       expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
-      expect(await readdir(incoming)).toHaveLength(9)
+      await expect(readdir(incoming)).rejects.toThrow()
     } finally {
       server.stop(true)
       await rm(root, { recursive: true, force: true })
@@ -273,6 +273,52 @@ describe('Zeabur Draft Release puller', () => {
       })).resolves.toBe('published')
       expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
       expect(await readdir(join(volume, 'electron', '.incoming', version))).toHaveLength(9)
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('retries cleanup after an idempotent reuse when the first post-publish cleanup failed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-cleanup-retry-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    await mkdir(volume)
+    const server = startDraftServer(assetsDir, { includeDigests: true })
+    let cleanupCalls = 0
+    try {
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+        publisherOptions: { capacityCheck: async () => {} },
+        incomingCleanup: async () => {
+          cleanupCalls += 1
+          throw new Error('first cleanup is unavailable')
+        },
+      })).resolves.toBe('published')
+      const incoming = join(volume, 'electron', '.incoming', version)
+      expect(await readdir(incoming)).toHaveLength(9)
+
+      await expect(pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+        publisherOptions: { capacityCheck: async () => {} },
+      })).resolves.toBe('idempotent')
+      expect(cleanupCalls).toBe(1)
+      await expect(readdir(incoming)).rejects.toThrow()
+      expect(await readlink(join(volume, 'electron', 'latest'))).toBe(`releases/${version}`)
     } finally {
       server.stop(true)
       await rm(root, { recursive: true, force: true })

@@ -308,12 +308,14 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
       createdIncoming = true
     }
     const result = await publish(publishArgs, options.publisherOptions)
-    if (createdIncoming) {
-      try {
-        await (options.incomingCleanup ?? ((path: string) => rm(path, { recursive: true, force: true })))(incoming)
-      } catch {
-        console.warn(`Release ${normalized.version} published; incoming cleanup will be retried later`)
-      }
+    try {
+      // A validated pre-existing incoming directory is safe to reuse for this
+      // publish, but it is not durable state. Retrying this cleanup on a later
+      // idempotent pull prevents a transient post-switch error from filling
+      // the PVC while never turning a completed atomic switch into a failure.
+      await (options.incomingCleanup ?? ((path: string) => rm(path, { recursive: true, force: true })))(incoming)
+    } catch {
+      console.warn(`Release ${normalized.version} published; incoming cleanup will be retried later`)
     }
     return result
   } catch (error) {

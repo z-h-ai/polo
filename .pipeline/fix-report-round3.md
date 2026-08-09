@@ -1,33 +1,35 @@
-# POO-29 第 3 轮修复报告
+# POO-36 第 3 轮修复报告
 
 ## 处理结果
 
-1. 移除了不存在的 Admin HTTP publication URL。嵌入式 server-core 现在提供持久化的 `CreatorAppPublicationService`：最终 Bundle 以一次性原子写入保存，index 与 audit JSONL 持久化，原始上传只在内存中分析后丢弃。服务集成测试覆盖实际 ZIP 文件、审计与多入口选择。
-2. `admin:publishCreatorApp` 已加入 `LOCAL_ONLY_CHANNELS`；增加显式分类快照和远程 workspace 下本地 client 路由测试。
-3. ZIP 与目录现在为独立 file inputs；目录输入启用 `webkitdirectory`，服务端会安全剥离唯一共同外层根并拒绝冲突路径。
-4. 多入口返回结构化 `needs_entry_selection/candidates`，前端显示唯一的启动文件选择并回传 `selectedEntry`；服务端只接受分析候选。
-5. 最终 Bundle 校验补充非空 appId、版本格式、entry、权限、healthcheck 与 webPath 校验。
-6. ZIP central directory 在解压前限制条目数、单项/总未压缩尺寸和压缩比；覆盖 traversal、symlink、伪锁、无健康端点与高压缩比归档。
-7. 授权解析只接受 active organization + active membership；无权限、删除或空来源不会进入发布。
-8. website 改为直接单次持久化发布，不再创建 draft/release 或 Bundle。
+1. 发布 workflow 现在是可观测的补偿状态机：Zeabur pull、公开校验、Zeabur confirm/指针校验，以及 GitHub Release 最终发布都使用 `continue-on-error` 捕捉明确失败和响应不确定，并在后续发布前以同一 `updates-static-v4` Service Exec 重试 `rollback-failed` 和独立 `assert-not-latest`。三次均不可达时 job fail closed，Draft 不会被发布。
+2. GitHub 最终发布移入生产状态机。`gh release edit --draft=false` 成功后仍会读取 `isDraft`；任何失败或结果不确定都会先补偿 PVC，再通过 GitHub API 尝试恢复 Draft 并验证。仅全部确认成功才结束为公开 Release。
+3. Caddy 将所有 `electron` 下点前缀内部状态、锁及其子路径、`.latest-*` 临时软链接及其子路径，以及未确认的版本目录拒绝为非成功响应；公共下载仅经 `electron/latest`。真实 Caddy 容器对 GET/HEAD 覆盖这些嵌套路径，写请求仍为 405。
+4. 已验证复用的 `.incoming/<version>` 与新下载路径同样在成功 publish 后清理；清理首次失败只告警、不把原子切换变成失败，下一次幂等 pull 会再次清理。回归测试证明第二次实际移除该目录。
+5. `rollback-failed` 对“首次 Service Exec 已断连但尚未切换”及“已完成过补偿”的重试安全幂等：目标版本已经不是 latest 时返回成功，随后由独立断言证明这一事实。代码注释说明 rollback/confirmed marker 的生命周期和跨 Service Exec 不变量。
+6. 主测试套件不再使用宿主 CPU 核数的无上限并行与 5 秒默认 timeout。`bun run test` 固定为 4 个 worker、每 worker 最多 8 个并发测试、15 秒默认单测 timeout；原先在共享负载下偶发超时的 CLI 测试已在完整门禁中通过。
 
 ## 关键文件
 
-- `packages/server-core/src/services/creator-app-publications.ts`
-- `packages/server-core/src/handlers/rpc/admin.ts`
-- `packages/shared/src/admin/creator-app-publishing.ts`
-- `packages/shared/src/protocol/routing.ts`
-- `apps/electron/src/renderer/components/organization/CreatorArtifactsPanel.tsx`
+- `.github/workflows/electron-release.yml`
+- `infra/updates-static/PoloCaddyfile`
+- `infra/updates-static/PoloCaddyfile.test.ts`
+- `scripts/publish-electron-release.ts`
+- `scripts/publish-electron-release.test.ts`
+- `scripts/polo-release-pull.ts`
+- `scripts/polo-release-pull.test.ts`
+- `scripts/electron-release-workflow.test.ts`
+- `package.json`
 
-## 自测
+## 实际自测
 
-- `bun test packages/shared/src/admin/__tests__/creator-app-publishing.test.ts`：9 pass。
-- `bun test packages/server-core/src/handlers/rpc/admin.test.ts packages/server-core/src/services/creator-app-publications.test.ts`：29 pass。
-- `bun test packages/shared/src/protocol/__tests__/routing.test.ts apps/electron/src/transport/__tests__/routed-client.test.ts`：通过。
-- `bun test --isolate ./apps/electron/src/renderer/components/organization/__tests__/CreatorArtifactsPanel.interaction.isolated.ts`：17 pass。
-- `bun run typecheck:all`：通过。
-- `NO_COLOR=1 bun run test`：通过；`scripts/build-cli-artifacts.test.ts` 的 production build 重定向回归也通过。
+- `NO_COLOR=1 bun test infra/updates-static/PoloCaddyfile.test.ts scripts/electron-release-workflow.test.ts scripts/polo-release-pull.test.ts scripts/publish-electron-release.test.ts`：33 pass、0 fail、207 assertions。
+- `docker run --rm ... caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`：通过；Caddyfile 仅有格式化提示。
+- `NO_COLOR=1 bun run typecheck:all`：通过。
+- `NO_COLOR=1 bun run test`：完整门禁通过，包含隔离测试；4 worker / 8 并发 / 15 秒运行契约下未再出现上一轮的 5 秒 CLI timeout。
+- `git diff --check`：通过。
 
-## 遗留问题
+## 遗留项
 
-远端 Polo Admin 服务不在本 worktree。本轮不再调用未部署的 HTTP URL；发布由本机受认证 server-core 边界完成并持久化最终 Bundle。若未来需要跨设备组织共享，应由 Admin 服务接收该最终 Bundle/audit 契约，而不是客户端上传原始 payload。
+- 本地测试使用临时目录、fixture 和真实 Caddy 容器；未调用生产 Zeabur 服务、真实 GitHub Draft Release 或任何 token。首次线上联调仍需任务快照列出的 production Environment 与 Zeabur `GH_TOKEN` 授权。
+- 若 Zeabur 完全不可达，workflow 无法远程证明指针，但会在三次补偿失败后停止，且不会执行 GitHub Release 正式发布。

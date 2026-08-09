@@ -11,9 +11,18 @@
     # paths are never public, even when an immutable wildcard would otherwise
     # match them. `route` preserves this deny rule ahead of file_server routes.
     @internalReleaseState {
-      path /electron/.incoming /electron/.incoming/* /electron/.publisher.lock /electron/.rollback-* /electron/.confirmed-* /electron/releases/.* /electron/releases/.*/* /electron/latest/.* /electron/latest/.*/*
+      # Every dot-prefixed name below electron is publisher state, including
+      # lock children and the temporary latest symlink used during rename.
+      # The second expression closes hidden entries inside public namespaces.
+      path_regexp release_internal ^/electron(?:/\.[^/]+(?:/.*)?|/(?:latest|releases/[^/]+)/\.[^/]+(?:/.*)?)$
     }
     respond @internalReleaseState "Not found" 404
+
+    # Version directories are an implementation detail until their content is
+    # selected by electron/latest. Serving only latest prevents an unconfirmed
+    # staging publish from being fetched by guessing its versioned path.
+    @releaseDirectories path /electron/releases /electron/releases/*
+    respond @releaseDirectories "Not found" 404
 
     @latestManifests {
       method GET HEAD
@@ -26,7 +35,7 @@
 
     @immutableArtifacts {
       method GET HEAD
-      path /electron/latest/* /electron/releases/*
+      path /electron/latest/*
     }
     handle @immutableArtifacts {
       header Cache-Control "public, max-age=31536000, immutable"

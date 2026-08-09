@@ -20,10 +20,22 @@ describe('updates-static Caddy cache contract', () => {
     const latest = join(root, 'electron', 'latest')
     const incoming = join(root, 'electron', '.incoming', '1.0.0')
     const staging = join(root, 'electron', 'releases', '.1.0.0.staging-123')
+    const published = join(root, 'electron', 'releases', '1.0.0')
+    const temporaryLatest = join(root, 'electron', '.latest-123')
     const caddyfile = join(process.cwd(), 'infra/updates-static/PoloCaddyfile')
     let containerId = ''
     try {
-      await Promise.all([mkdir(latest, { recursive: true }), mkdir(incoming, { recursive: true }), mkdir(staging, { recursive: true })])
+      await Promise.all([
+        mkdir(latest, { recursive: true }),
+        mkdir(incoming, { recursive: true }),
+        mkdir(staging, { recursive: true }),
+        mkdir(published, { recursive: true }),
+        mkdir(temporaryLatest, { recursive: true }),
+        mkdir(join(root, 'electron', '.publisher.lock'), { recursive: true }),
+        mkdir(join(temporaryLatest, 'nested'), { recursive: true }),
+        mkdir(join(latest, '.publisher-state'), { recursive: true }),
+        mkdir(join(published, '.publisher-state'), { recursive: true }),
+      ])
       await Promise.all([
         writeFile(join(latest, 'install-app.sh'), '#!/bin/sh\n'),
         writeFile(join(latest, 'latest-mac.yml'), 'version: 1.0.0\n'),
@@ -31,7 +43,12 @@ describe('updates-static Caddy cache contract', () => {
         writeFile(join(latest, 'Polo-AI-x64.exe'), 'windows installer'),
         writeFile(join(incoming, 'release-contract.json'), 'private incoming'),
         writeFile(join(staging, 'Polo-AI-x64.exe'), 'private staging'),
-        writeFile(join(root, 'electron', '.publisher.lock'), 'private lock'),
+        writeFile(join(published, 'Polo-AI-x64.exe'), 'version directory is not public before confirmation'),
+        writeFile(join(root, 'electron', '.publisher.lock', 'owner.json'), 'private lock owner'),
+        writeFile(join(temporaryLatest, 'release-contract.json'), 'private temporary latest'),
+        writeFile(join(temporaryLatest, 'nested', 'state.json'), 'private temporary latest child'),
+        writeFile(join(latest, '.publisher-state', 'state.json'), 'private latest child'),
+        writeFile(join(published, '.publisher-state', 'state.json'), 'private release child'),
         writeFile(join(root, 'electron', '.rollback-1.0.0.json'), 'private rollback'),
         writeFile(join(root, 'electron', '.confirmed-1.0.0.json'), 'private confirmation'),
       ])
@@ -66,8 +83,14 @@ describe('updates-static Caddy cache contract', () => {
         '/electron/.incoming/1.0.0/release-contract.json',
         '/electron/releases/.1.0.0.staging-123/Polo-AI-x64.exe',
         '/electron/.publisher.lock',
+        '/electron/.publisher.lock/owner.json',
+        '/electron/.latest-123/release-contract.json',
+        '/electron/.latest-123/nested/state.json',
+        '/electron/latest/.publisher-state/state.json',
         '/electron/.rollback-1.0.0.json',
         '/electron/.confirmed-1.0.0.json',
+        '/electron/releases/1.0.0/Polo-AI-x64.exe',
+        '/electron/releases/1.0.0/.publisher-state/state.json',
       ]) {
         for (const method of ['GET', 'HEAD']) {
           const response = await fetch(`${serviceRoot}${path}`, { method })

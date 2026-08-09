@@ -21,7 +21,7 @@
     "!apps/online-docs"
   ],
   "scripts": {
-    "test": "bun test --isolate --path-ignore-patterns='**/release/**' --path-ignore-patterns='**/dist/**' --path-ignore-patterns='**/generated/**' && bash scripts/run-isolated-tests.sh",
+    "test": "bun test --isolate --parallel=4 --max-concurrency=8 --timeout=15000 --path-ignore-patterns='**/release/**' --path-ignore-patterns='**/dist/**' --path-ignore-patterns='**/generated/**' && bash scripts/run-isolated-tests.sh",
     "typecheck": "bun run typecheck:shared",
     "typecheck:shared": "cd packages/shared && bun run tsc --noEmit",
     "typecheck:staged": "bash scripts/typecheck-staged.sh",

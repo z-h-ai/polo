@@ -294,6 +294,24 @@ describe('release publisher filesystem behavior', () => {
     } finally { await destroy(fixture) }
   })
 
+  it('treats a retried compensation as a no-op after the old latest is already restored', async () => {
+    const first = await createFixture('1.0.0')
+    const second = await createFixture('1.1.0')
+    try {
+      second.args.releasesDir = first.volume
+      await publish(first.args, testPublisherOptions)
+      await confirmRelease(first.volume, '1.0.0')
+      await publish(second.args, testPublisherOptions)
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      await rollbackFailedRelease(first.volume, '1.1.0')
+      expect(await readlink(join(first.volume, 'electron', 'latest'))).toBe('releases/1.0.0')
+      await assertNotLatest(first.volume, '1.1.0')
+    } finally {
+      await destroy(second)
+      await destroy(first)
+    }
+  })
+
   it('calculates capacity from current usage plus incoming payload', () => {
     expect(projectedDiskUsage(100, 40, 10, 99)).toBeCloseTo(0.699)
     expect(projectedDiskUsage(100, 40, 10, 101)).toBeCloseTo(0.701)

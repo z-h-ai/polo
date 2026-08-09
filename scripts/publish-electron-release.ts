@@ -340,6 +340,10 @@ async function switchLatest(electronRoot: string, destination: string): Promise<
 }
 
 async function recordRollbackTarget(electronRoot: string, version: string): Promise<void> {
+  // Marker lifecycle is deliberately durable across Service Exec boundaries:
+  // publish writes .rollback-<version>, confirm renames it to .confirmed, and
+  // either marker can compensate an ambiguous caller result back to its exact
+  // predecessor before it is removed. This makes retries idempotent.
   const marker = join(electronRoot, `.rollback-${version}.json`)
   try {
     await lstat(marker)
@@ -512,6 +516,11 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
   if (!isStrictSemver(version)) throw new Error('Failed version must be strict SemVer')
   const electronRoot = join(resolve(releasesDir), 'electron')
   await withPublisherLock(electronRoot, async () => {
+    const latest = await readLatestContract(electronRoot)
+    // A response may be lost before publish atomically switches latest, or
+    // after a previous compensation already restored it. In both cases the
+    // target is provably not current and this retry is a safe no-op.
+    if (!latest || latest.version !== version) return
     const rollbackMarker = join(electronRoot, `.rollback-${version}.json`)
     const confirmedMarker = join(electronRoot, `.confirmed-${version}.json`)
     const marker = await lstat(rollbackMarker).then(() => rollbackMarker).catch(async (error: NodeJS.ErrnoException) => {
@@ -520,10 +529,6 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
       return confirmedMarker
     })
     const parsed = JSON.parse(await readFile(marker, 'utf8')) as { previousTarget?: unknown }
-    const latest = await readLatestContract(electronRoot)
-    if (!latest || latest.version !== version) {
-      throw new Error(`Cannot roll back failed ${version}: it is not electron/latest`)
-    }
     if (parsed.previousTarget === null) {
       const latestPath = join(electronRoot, 'latest')
       const latestStat = await lstat(latestPath)

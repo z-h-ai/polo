@@ -125,19 +125,26 @@ jobs:
     needs: [preflight, draft-release]
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: write
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
       ZEABUR_TOKEN: ${{ secrets.ZEABUR_TOKEN }}
       ZEABUR_UPDATES_SERVICE_ID: ${{ vars.ZEABUR_UPDATES_SERVICE_ID }}
       ZEABUR_ENVIRONMENT_ID: ${{ vars.ZEABUR_ENVIRONMENT_ID }}
     steps:
+      # State lifecycle: Draft -> pulled (rollback marker) -> publicly verified
+      # -> confirmed -> GitHub published. Every uncertain transition compensates
+      # through the sole PVC writer, then independently proves this version is
+      # no longer latest before the Draft release may remain or be restored.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
-      - name: Trigger Zeabur release pull
+      - name: Check production release configuration
         shell: bash
         run: |
           set -euo pipefail
@@ -147,6 +154,12 @@ jobs:
               exit 1
             fi
           done
+      - name: Trigger Zeabur release pull
+        id: zeabur-pull
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
           npx zeabur@latest auth login --token "$ZEABUR_TOKEN"
           npx zeabur@latest service exec \
             --id "$ZEABUR_UPDATES_SERVICE_ID" \
@@ -156,8 +169,39 @@ jobs:
               --tag "$GITHUB_REF_NAME" \
               --version "$VERSION" \
               --commit "$GITHUB_SHA"
+      - name: Compensate failed or uncertain Zeabur release pull
+        id: pull-compensation
+        if: steps.zeabur-pull.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 3); do
+            if npx zeabur@latest auth login --token "$ZEABUR_TOKEN" >/dev/null \
+              && npx zeabur@latest service exec \
+                --id "$ZEABUR_UPDATES_SERVICE_ID" \
+                --env-id "$ZEABUR_ENVIRONMENT_ID" \
+                -- /usr/local/bin/bun /app/publish-electron-release.ts rollback-failed \
+                  --releases-dir /data/releases \
+                  --version "$VERSION" \
+              && npx zeabur@latest service exec \
+                --id "$ZEABUR_UPDATES_SERVICE_ID" \
+                --env-id "$ZEABUR_ENVIRONMENT_ID" \
+                -- /usr/local/bin/bun /app/publish-electron-release.ts assert-not-latest \
+                  --releases-dir /data/releases \
+                  --version "$VERSION"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 5; fi
+          done
+          echo "::error::Could not prove the old latest pointer after Zeabur pull failure"
+          exit 1
+      - name: Stop release after Zeabur pull failure
+        if: steps.zeabur-pull.outcome == 'failure'
+        run: exit 1
       - name: Verify Zeabur updater bundle
         id: public-verify
+        if: steps.zeabur-pull.outcome == 'success'
         continue-on-error: true
         run: |
           for attempt in $(seq 1 6); do
@@ -172,13 +216,16 @@ jobs:
             if [ "$attempt" -lt 6 ]; then sleep 10; fi
           done
           exit 1
-      - name: Restore latest after failed public verification
+      - name: Compensate failed public verification
+        id: public-verify-compensation
         if: steps.public-verify.outcome == 'failure'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           for attempt in $(seq 1 3); do
-            if npx zeabur@latest service exec \
+            if npx zeabur@latest auth login --token "$ZEABUR_TOKEN" >/dev/null \
+              && npx zeabur@latest service exec \
               --id "$ZEABUR_UPDATES_SERVICE_ID" \
               --env-id "$ZEABUR_ENVIRONMENT_ID" \
               -- /usr/local/bin/bun /app/publish-electron-release.ts rollback-failed \
@@ -194,6 +241,7 @@ jobs:
             fi
             if [ "$attempt" -lt 3 ]; then sleep 5; fi
           done
+          echo "::error::Could not prove the old latest pointer after public verification failure"
           exit 1
       - name: Stop release after public verification failure
         if: steps.public-verify.outcome == 'failure'
@@ -224,13 +272,16 @@ jobs:
             -- /usr/local/bin/bun /app/publish-electron-release.ts assert-confirmed \
               --releases-dir /data/releases \
               --version "$VERSION"
-      - name: Restore latest after failed finalization
+      - name: Compensate failed or uncertain Zeabur finalization
+        id: finalization-compensation
         if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           for attempt in $(seq 1 3); do
-            if npx zeabur@latest service exec \
+            if npx zeabur@latest auth login --token "$ZEABUR_TOKEN" >/dev/null \
+              && npx zeabur@latest service exec \
               --id "$ZEABUR_UPDATES_SERVICE_ID" \
               --env-id "$ZEABUR_ENVIRONMENT_ID" \
               -- /usr/local/bin/bun /app/publish-electron-release.ts rollback-failed \
@@ -246,17 +297,61 @@ jobs:
             fi
             if [ "$attempt" -lt 3 ]; then sleep 5; fi
           done
+          echo "::error::Could not prove the old latest pointer after finalization failure"
           exit 1
       - name: Stop release after finalization failure
         if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'
         run: exit 1
-  publish-release:
-    needs: production
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
       - name: Publish approved GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
+        id: github-publish
+        if: steps.confirm-pointer.outcome == 'success'
+        continue-on-error: true
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+      - name: Verify GitHub Release publication
+        id: github-publish-state
+        if: steps.github-publish.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+      - name: Compensate failed or uncertain GitHub finalization
+        id: github-finalization-compensation
+        if: steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 3); do
+            if npx zeabur@latest auth login --token "$ZEABUR_TOKEN" >/dev/null \
+              && npx zeabur@latest service exec \
+                --id "$ZEABUR_UPDATES_SERVICE_ID" \
+                --env-id "$ZEABUR_ENVIRONMENT_ID" \
+                -- /usr/local/bin/bun /app/publish-electron-release.ts rollback-failed \
+                  --releases-dir /data/releases \
+                  --version "$VERSION" \
+              && npx zeabur@latest service exec \
+                --id "$ZEABUR_UPDATES_SERVICE_ID" \
+                --env-id "$ZEABUR_ENVIRONMENT_ID" \
+                -- /usr/local/bin/bun /app/publish-electron-release.ts assert-not-latest \
+                  --releases-dir /data/releases \
+                  --version "$VERSION"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 5; fi
+          done
+          echo "::error::Could not prove the old latest pointer after GitHub finalization failure"
+          exit 1
+      - name: Restore Draft after failed GitHub finalization
+        id: github-draft-restore
+        if: steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f draft=true >/dev/null
+          test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+      - name: Stop release after GitHub finalization failure
+        if: steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success' || steps.github-finalization-compensation.outcome == 'failure' || steps.github-draft-restore.outcome == 'failure'
+        run: exit 1
