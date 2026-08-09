@@ -60,13 +60,47 @@ $originalProcessPath = $env:Path
 $currentVersion = $null
 $previousVersion = $null
 
-function Invoke-Installer([string]$InstallerPath = $installer) {
-    $process = Start-Process -FilePath $InstallerPath `
-        -ArgumentList @("/S", "/D=$installDir") `
-        -PassThru -Wait -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) {
-        throw "NSIS installer exited with $($process.ExitCode)"
+function Invoke-NsisProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    Write-Host "NSIS validation phase=$Label:start"
+    # Start-Process -Wait waits for the Windows process tree. An NSIS
+    # installer may launch the desktop app after a successful silent install,
+    # which would turn a successful installer into an unbounded wait. Wait for
+    # the NSIS controller itself instead and retain a bounded failure signal.
+    $process = Start-Process -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -PassThru -WindowStyle Hidden
+    if (-not $process.WaitForExit(90000)) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        throw "NSIS $Label timed out after 90 seconds"
     }
+    $process.Refresh()
+    if ($process.ExitCode -ne 0) {
+        throw "NSIS $Label exited with $($process.ExitCode)"
+    }
+    Write-Host "NSIS validation phase=$Label:complete"
+}
+
+function Stop-InstalledPoloApp([string]$TargetInstallDir = $installDir) {
+    $target = Join-Path $TargetInstallDir "Polo AI.exe"
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name = 'Polo AI.exe'" `
+        -ErrorAction SilentlyContinue | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath -ieq $target
+        })) {
+        Write-Host "NSIS validation phase=desktop-app:stop pid=$($process.ProcessId)"
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-Installer([string]$InstallerPath = $installer) {
+    Invoke-NsisProcess -FilePath $InstallerPath `
+        -ArgumentList @("/S", "/D=$installDir") `
+        -Label "installer"
+    Stop-InstalledPoloApp
 }
 
 function Invoke-Uninstaller {
@@ -74,12 +108,8 @@ function Invoke-Uninstaller {
     if (-not (Test-Path -LiteralPath $uninstaller)) {
         throw "NSIS uninstall executable is missing: $uninstaller"
     }
-    $process = Start-Process -FilePath $uninstaller `
-        -ArgumentList @("/S") `
-        -PassThru -Wait -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) {
-        throw "NSIS uninstaller exited with $($process.ExitCode)"
-    }
+    Stop-InstalledPoloApp
+    Invoke-NsisProcess -FilePath $uninstaller -ArgumentList @("/S") -Label "uninstaller"
 }
 
 function Assert-ReleaseAuthenticodeIdentity([string]$Path, [string]$Label) {
@@ -339,12 +369,10 @@ function Test-UserCommandConflict {
     try {
         $env:LOCALAPPDATA = $conflictLocalAppData
         $env:Path = "$conflictBin;$savedPath"
-        $process = Start-Process -FilePath $installer `
+        Invoke-NsisProcess -FilePath $installer `
             -ArgumentList @("/S", "/D=$conflictInstall") `
-            -PassThru -Wait -WindowStyle Hidden
-        if ($process.ExitCode -ne 0) {
-            throw "Conflict NSIS install unexpectedly failed at process level"
-        }
+            -Label "conflict-installer"
+        Stop-InstalledPoloApp $conflictInstall
         if ((Get-Content -LiteralPath $userCommand -Raw) -cne "@echo off`r`necho user-owned`r`n") {
             throw "NSIS terminal setup overwrote a user-owned polo command"
         }
@@ -357,8 +385,9 @@ function Test-UserCommandConflict {
     } finally {
         $uninstaller = Join-Path $conflictInstall "Uninstall Polo AI.exe"
         if (Test-Path -LiteralPath $uninstaller) {
-            Start-Process -FilePath $uninstaller -ArgumentList @("/S") `
-                -Wait -WindowStyle Hidden | Out-Null
+            Stop-InstalledPoloApp $conflictInstall
+            Invoke-NsisProcess -FilePath $uninstaller `
+                -ArgumentList @("/S") -Label "conflict-uninstaller"
         }
         $env:LOCALAPPDATA = $savedLocalAppData
         $env:Path = $savedPath
@@ -759,6 +788,7 @@ try {
     }
     Write-Host "Final Windows artifact validation passed ($Mode)"
 } finally {
+    Stop-InstalledPoloApp
     [Environment]::SetEnvironmentVariable("Path", $originalUserPath, "User")
     $env:Path = $originalProcessPath
     $env:LOCALAPPDATA = $originalLocalAppData
