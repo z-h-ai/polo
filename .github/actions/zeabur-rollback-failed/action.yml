@@ -1,5 +1,5 @@
 name: Restore failed Zeabur release
-description: Retry the sole PVC writer rollback and independently prove the failed version is not latest.
+description: Retry the sole PVC writer rollback and prove its durable exact predecessor is latest.
 
 inputs:
   token:
@@ -28,12 +28,12 @@ runs:
             && npx zeabur@latest service exec \
               --id "${{ inputs.service-id }}" \
               --env-id "${{ inputs.environment-id }}" \
-              -- /usr/local/bin/bun /app/publish-electron-release.ts assert-not-latest \
+              -- /usr/local/bin/bun /app/publish-electron-release.ts assert-rollback-target \
                 --releases-dir /data/releases \
                 --version "${{ inputs.version }}"; then
             exit 0
           fi
           if [ "$attempt" -lt 3 ]; then sleep 5; fi
         done
-        echo "::error::Could not prove the old latest pointer after release failure"
+        echo "::error::Could not prove the exact predecessor latest pointer after release failure"
         exit 1

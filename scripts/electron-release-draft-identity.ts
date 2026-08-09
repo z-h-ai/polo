@@ -39,6 +39,8 @@ interface GitHubDraftAsset {
 interface GitHubDraftRelease {
   id: unknown
   draft: unknown
+  tag_name?: unknown
+  target_commitish?: unknown
   assets: unknown
 }
 
@@ -132,17 +134,72 @@ export async function createDraftReleaseIdentity(
   return parseDraftReleaseIdentity({ releaseId: release.id, assets })
 }
 
+export function assertApprovedReleaseIdentity(
+  githubRelease: unknown,
+  approvedIdentity: unknown,
+  expected: { tag: string; commit: string; draft: boolean | 'either' },
+): void {
+  const identity = parseDraftReleaseIdentity(approvedIdentity)
+  const release = githubRelease as Partial<GitHubDraftRelease>
+  if (!release || typeof release !== 'object' || Array.isArray(release)) {
+    throw new Error('GitHub Release identity is invalid')
+  }
+  if (release.id !== identity.releaseId) {
+    throw new Error('GitHub Release ID does not match the approved Draft identity')
+  }
+  if (expected.draft !== 'either' && release.draft !== expected.draft) {
+    throw new Error(`GitHub Release draft state does not match the required ${expected.draft ? 'Draft' : 'published'} state`)
+  }
+  if (release.tag_name !== expected.tag || typeof release.target_commitish !== 'string'
+    || release.target_commitish.toLowerCase() !== expected.commit.toLowerCase()) {
+    throw new Error('GitHub Release tag or target commit does not match the approved Draft identity')
+  }
+  if (!Array.isArray(release.assets) || release.assets.length !== RELEASE_ASSET_NAMES.length) {
+    throw new Error('GitHub Release assets do not match the approved Draft identity')
+  }
+  const actual = new Map<string, GitHubDraftAsset>()
+  for (const asset of release.assets as GitHubDraftAsset[]) {
+    if (!asset || typeof asset !== 'object' || typeof asset.name !== 'string' || actual.has(asset.name)) {
+      throw new Error('GitHub Release assets do not match the approved Draft identity')
+    }
+    actual.set(asset.name, asset)
+  }
+  for (const asset of identity.assets) {
+    const current = actual.get(asset.name)
+    if (!current || current.id !== asset.id || current.name !== asset.name || current.size !== asset.size || current.state !== 'uploaded') {
+      throw new Error(`GitHub Release asset does not match the approved Draft identity: ${asset.name}`)
+    }
+  }
+}
+
 async function main(): Promise<void> {
+  const [command = 'create', ...argv] = process.argv.slice(2)
   const { values } = parseArgs({
-    args: process.argv.slice(2),
+    args: argv,
     options: {
       'release-dir': { type: 'string' },
       'github-release': { type: 'string' },
       output: { type: 'string' },
+      identity: { type: 'string' },
+      tag: { type: 'string' },
+      commit: { type: 'string' },
+      draft: { type: 'string' },
     },
     strict: true,
   })
-  if (!values['release-dir'] || !values['github-release'] || !values.output) {
+  if (command === 'assert') {
+    if (!values['github-release'] || !values.identity || !values.tag || !values.commit || !values.draft) {
+      throw new Error('Usage: electron-release-draft-identity assert --github-release <json> --identity <json> --tag <tag> --commit <sha> --draft <true|false>')
+    }
+    if (values.draft !== 'true' && values.draft !== 'false' && values.draft !== 'either') throw new Error('--draft must be true, false, or either')
+    assertApprovedReleaseIdentity(
+      JSON.parse(await readFile(values['github-release'], 'utf8')),
+      JSON.parse(values.identity),
+      { tag: values.tag, commit: values.commit, draft: values.draft === 'either' ? 'either' : values.draft === 'true' },
+    )
+    return
+  }
+  if (command !== 'create' || !values['release-dir'] || !values['github-release'] || !values.output) {
     throw new Error('Usage: electron-release-draft-identity --release-dir <dir> --github-release <json> --output <json>')
   }
   const identity = await createDraftReleaseIdentity(

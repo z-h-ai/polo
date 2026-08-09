@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
+  assertApprovedReleaseIdentity,
   createDraftReleaseIdentity,
   parseDraftReleaseIdentity,
   RELEASE_ASSET_NAMES,
@@ -41,6 +42,30 @@ describe('approved Draft Release identity', () => {
       const identity = await createDraftReleaseIdentity(root, release)
       identity.assets[0]!.sha256 = 'not-a-digest'
       expect(() => parseDraftReleaseIdentity(identity)).toThrow('asset identity is invalid')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('revalidates only the exact approved release ID, Draft state, tag, commit, and complete asset identity', async () => {
+    const { root, release } = await fixture()
+    try {
+      const identity = await createDraftReleaseIdentity(root, release)
+      const approved = {
+        ...release,
+        tag_name: 'v1.2.3',
+        target_commitish: 'a'.repeat(40),
+      }
+      expect(() => assertApprovedReleaseIdentity(approved, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).not.toThrow()
+      expect(() => assertApprovedReleaseIdentity({ ...approved, id: 124 }, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).toThrow('ID does not match')
+      expect(() => assertApprovedReleaseIdentity({ ...approved, draft: false }, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).toThrow('draft state')
+      expect(() => assertApprovedReleaseIdentity({ ...approved, assets: approved.assets.slice(1) }, identity, {
+        tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
+      })).toThrow('assets do not match')
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 })

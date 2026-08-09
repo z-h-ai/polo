@@ -36,7 +36,7 @@ export const KEEP_RELEASES = 3
 
 const CONTRACT_NAME = 'release-contract.json'
 const LOCK_NAME = '.publisher.lock'
-const ROLLBACK_MARKER_PATTERN = /^\.(rollback|confirmed)-(.+)\.json$/
+const ROLLBACK_MARKER_PATTERN = /^\.(rollback|confirmed|compensated)-(.+)\.json$/
 
 interface YamlFile {
   url: string
@@ -71,6 +71,13 @@ export type PublishResult = 'published' | 'idempotent'
 
 export interface PublisherOptions {
   capacityCheck?: (releasesDir: string, source: string) => Promise<void>
+}
+
+export interface FinalizeOptions {
+  /** Test seam for proving that recovery state survives a failed retention pass. */
+  retentionCleanup?: (electronRoot: string, ignoredMarkers: ReadonlySet<string>) => Promise<void>
+  /** Test seam for proving stale-marker removal is reported, rather than hidden. */
+  markerCleanup?: (marker: string) => Promise<void>
 }
 
 function validateBasename(name: string, label: string): void {
@@ -339,12 +346,56 @@ async function switchLatest(electronRoot: string, destination: string): Promise<
   }
 }
 
+interface RollbackTarget {
+  previousTarget: string | null
+}
+
+function markerPath(electronRoot: string, state: 'rollback' | 'confirmed' | 'compensated', version: string): string {
+  return join(electronRoot, `.${state}-${version}.json`)
+}
+
+async function readRollbackTarget(marker: string, version: string): Promise<RollbackTarget> {
+  const parsed = JSON.parse(await readFile(marker, 'utf8')) as { previousTarget?: unknown }
+  if (parsed.previousTarget !== null && typeof parsed.previousTarget !== 'string') {
+    throw new Error(`Rollback marker for ${version} is invalid`)
+  }
+  if (typeof parsed.previousTarget === 'string') {
+    if (!parsed.previousTarget.match(/^releases\/[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/)) {
+      throw new Error(`Rollback marker for ${version} has an unsafe predecessor`)
+    }
+  }
+  return { previousTarget: parsed.previousTarget }
+}
+
+async function assertLatestMatchesRollbackTarget(
+  electronRoot: string,
+  version: string,
+  target: RollbackTarget,
+): Promise<void> {
+  const latestPath = join(electronRoot, 'latest')
+  if (target.previousTarget === null) {
+    const latest = await lstat(latestPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (latest) throw new Error(`Rollback verification failed for ${version}: expected no electron/latest pointer`)
+    return
+  }
+  const latest = await lstat(latestPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (!latest?.isSymbolicLink() || await readlink(latestPath) !== target.previousTarget) {
+    throw new Error(`Rollback verification failed for ${version}: electron/latest is not its exact predecessor`)
+  }
+}
+
 async function recordRollbackTarget(electronRoot: string, version: string): Promise<void> {
   // Marker lifecycle is deliberately durable across Service Exec boundaries:
   // publish writes .rollback-<version>, confirm renames it to .confirmed, and
   // either marker can compensate an ambiguous caller result back to its exact
   // predecessor before it is removed. This makes retries idempotent.
-  const marker = join(electronRoot, `.rollback-${version}.json`)
+  const marker = markerPath(electronRoot, 'rollback', version)
   try {
     await lstat(marker)
     return
@@ -365,11 +416,15 @@ async function recordRollbackTarget(electronRoot: string, version: string): Prom
   await rename(temporary, marker)
 }
 
-async function protectedReleaseVersions(electronRoot: string): Promise<Set<string>> {
+async function protectedReleaseVersions(
+  electronRoot: string,
+  ignoredMarkers: ReadonlySet<string> = new Set(),
+): Promise<Set<string>> {
   const protectedVersions = new Set<string>()
   const latest = await readLatestContract(electronRoot)
   if (latest) protectedVersions.add(latest.version)
   for (const entry of await readdir(electronRoot, { withFileTypes: true })) {
+    if (ignoredMarkers.has(entry.name)) continue
     const marker = entry.name.match(ROLLBACK_MARKER_PATTERN)
     if (!marker || !entry.isFile()) continue
     try {
@@ -387,24 +442,50 @@ async function protectedReleaseVersions(electronRoot: string): Promise<Set<strin
   return protectedVersions
 }
 
-async function cleanOldReleases(electronRoot: string): Promise<void> {
-  try {
-    const releaseRoot = join(electronRoot, 'releases')
-    const releases = (await readdir(releaseRoot, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => entry.name)
-      .sort((left, right) => compare(right, left))
-    const protectedVersions = await protectedReleaseVersions(electronRoot)
-    const retained = new Set(releases.slice(0, KEEP_RELEASES))
-    for (const version of protectedVersions) retained.add(version)
-    await Promise.all(
-      releases.filter((version) => !retained.has(version)).map((version) => rm(join(releaseRoot, version), {
-        recursive: true,
-        force: true,
-      })),
-    )
-  } catch (error) {
-    console.warn(`Release succeeded, but retention cleanup failed: ${(error as Error).message}`)
+async function cleanOldReleases(
+  electronRoot: string,
+  ignoredMarkers: ReadonlySet<string> = new Set(),
+): Promise<void> {
+  const releaseRoot = join(electronRoot, 'releases')
+  const releases = (await readdir(releaseRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => entry.name)
+    .sort((left, right) => compare(right, left))
+  const protectedVersions = await protectedReleaseVersions(electronRoot, ignoredMarkers)
+  const retained = new Set(releases.slice(0, KEEP_RELEASES))
+  for (const version of protectedVersions) retained.add(version)
+  await Promise.all(
+    releases.filter((version) => !retained.has(version)).map((version) => rm(join(releaseRoot, version), {
+      recursive: true,
+      force: true,
+    })),
+  )
+}
+
+async function publishedReleaseVersions(electronRoot: string): Promise<string[]> {
+  return (await readdir(join(electronRoot, 'releases'), { withFileTypes: true }))
+    .filter(entry => entry.isDirectory() && isStrictSemver(entry.name))
+    .map(entry => entry.name)
+}
+
+async function assertSafeInventory(
+  electronRoot: string,
+  version: string,
+  expectedCount?: number,
+): Promise<void> {
+  const latest = await readLatestContract(electronRoot)
+  if (!latest || latest.version !== version) {
+    throw new Error(`Cannot verify finalization of ${version}: it is not electron/latest`)
+  }
+  const releases = await publishedReleaseVersions(electronRoot)
+  if (!releases.includes(version)) {
+    throw new Error(`Cannot verify finalization of ${version}: latest is missing from release inventory`)
+  }
+  if (releases.length > KEEP_RELEASES) {
+    throw new Error(`Cannot verify finalization of ${version}: expected at most ${KEEP_RELEASES} releases, found ${releases.length}`)
+  }
+  if (expectedCount !== undefined && releases.length !== expectedCount) {
+    throw new Error(`Cannot verify finalization of ${version}: expected exactly ${expectedCount} safe releases, found ${releases.length}`)
   }
 }
 
@@ -436,13 +517,25 @@ export async function publish(
       // A runner may resume after confirm but before GitHub publication. In
       // that state .confirmed records the only exact predecessor; recreating
       // .rollback from the current latest would replace it with self-history.
-      const confirmedMarker = join(electronRoot, `.confirmed-${args.version}.json`)
+      const confirmedMarker = markerPath(electronRoot, 'confirmed', args.version)
       const confirmed = await lstat(confirmedMarker).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return undefined
         throw error
       })
       if (latestContract?.version === args.version && confirmed?.isFile()) {
         return 'idempotent'
+      }
+      const compensatedMarker = markerPath(electronRoot, 'compensated', args.version)
+      const compensated = await lstat(compensatedMarker).then(() => compensatedMarker).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (compensated) {
+        // This is a new attempt after an earlier compensation. It may replace
+        // the old durable proof only after proving its predecessor is still
+        // current; recordRollbackTarget then persists the same new promise.
+        await assertLatestMatchesRollbackTarget(electronRoot, args.version, await readRollbackTarget(compensated, args.version))
+        await rm(compensated)
       }
       await recordRollbackTarget(electronRoot, args.version)
       await switchLatest(electronRoot, destination)
@@ -500,8 +593,8 @@ export async function confirmRelease(releasesDir: string, version: string): Prom
     if (!latest || latest.version !== version) {
       throw new Error(`Cannot confirm ${version}: it is not electron/latest`)
     }
-    const rollbackMarker = join(electronRoot, `.rollback-${version}.json`)
-    const confirmedMarker = join(electronRoot, `.confirmed-${version}.json`)
+    const rollbackMarker = markerPath(electronRoot, 'rollback', version)
+    const confirmedMarker = markerPath(electronRoot, 'confirmed', version)
     try {
       await rename(rollbackMarker, confirmedMarker)
     } catch (error) {
@@ -528,27 +621,38 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
   const electronRoot = join(resolve(releasesDir), 'electron')
   await withPublisherLock(electronRoot, async () => {
     const latest = await readLatestContract(electronRoot)
-    // A response may be lost before publish atomically switches latest, or
-    // after a previous compensation already restored it. In both cases the
-    // target is provably not current and this retry is a safe no-op.
-    if (!latest || latest.version !== version) return
-    const rollbackMarker = join(electronRoot, `.rollback-${version}.json`)
-    const confirmedMarker = join(electronRoot, `.confirmed-${version}.json`)
+    const compensatedMarker = markerPath(electronRoot, 'compensated', version)
+    const compensated = await lstat(compensatedMarker).then(() => compensatedMarker).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (compensated) {
+      // A compensation retry is only safe when the durable predecessor is
+      // still the exact pointer.  "not this version" is insufficient: an
+      // unrelated manual pointer must fail closed instead of being accepted.
+      await assertLatestMatchesRollbackTarget(electronRoot, version, await readRollbackTarget(compensated, version))
+      return
+    }
+
+    const rollbackMarker = markerPath(electronRoot, 'rollback', version)
+    const confirmedMarker = markerPath(electronRoot, 'confirmed', version)
     const marker = await lstat(rollbackMarker).then(() => rollbackMarker).catch(async (error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') throw error
-      await lstat(confirmedMarker)
-      return confirmedMarker
+      return lstat(confirmedMarker).then(() => confirmedMarker)
     })
-    const parsed = JSON.parse(await readFile(marker, 'utf8')) as { previousTarget?: unknown }
-    if (parsed.previousTarget === null) {
+    const target = await readRollbackTarget(marker, version)
+    if (!latest || latest.version !== version) {
+      throw new Error(`Cannot compensate ${version}: electron/latest changed before rollback`)
+    }
+    if (target.previousTarget === null) {
       const latestPath = join(electronRoot, 'latest')
       const latestStat = await lstat(latestPath)
       if (!latestStat.isSymbolicLink()) throw new Error('electron/latest must be a symbolic link')
       await rm(latestPath)
-    } else if (typeof parsed.previousTarget === 'string') {
-      const target = resolve(electronRoot, parsed.previousTarget)
+    } else {
+      const targetPath = resolve(electronRoot, target.previousTarget)
       const releaseRoot = await realpath(join(electronRoot, 'releases'))
-      const targetRealPath = await realpath(target)
+      const targetRealPath = await realpath(targetPath)
       if (relative(releaseRoot, targetRealPath).startsWith('..')) {
         throw new Error('Recorded rollback target points outside electron/releases')
       }
@@ -561,15 +665,21 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
         tag: contract.tag,
         commitSha: contract.commitSha,
       })
-      await switchLatest(electronRoot, target)
-    } else {
-      throw new Error(`Rollback marker for ${version} is invalid`)
+      await switchLatest(electronRoot, targetPath)
     }
-    await rm(marker, { force: true })
+    await assertLatestMatchesRollbackTarget(electronRoot, version, target)
+    // Keep the exact predecessor under lock after the switch.  Retries and
+    // the workflow composite can therefore prove restoration, including the
+    // bootstrap case where the only correct result is no latest symlink.
+    await rename(marker, compensatedMarker)
   })
 }
 
-export async function finalizeRelease(releasesDir: string, version: string): Promise<void> {
+export async function finalizeRelease(
+  releasesDir: string,
+  version: string,
+  options: FinalizeOptions = {},
+): Promise<void> {
   if (!isStrictSemver(version)) throw new Error('Finalized version must be strict SemVer')
   const electronRoot = join(resolve(releasesDir), 'electron')
   await withPublisherLock(electronRoot, async () => {
@@ -577,12 +687,31 @@ export async function finalizeRelease(releasesDir: string, version: string): Pro
     if (!latest || latest.version !== version) {
       throw new Error(`Cannot finalize ${version}: it is not electron/latest`)
     }
-    // GitHub publication was positively verified before this transition. The
-    // predecessor marker is no longer a rollback promise, so remove it before
-    // retention to return the PVC to its exact three-release policy. Missing
-    // is intentional: repeated Service Exec finalization is idempotent.
-    await rm(join(electronRoot, `.confirmed-${version}.json`), { force: true })
-    await cleanOldReleases(electronRoot)
+    const confirmedMarkerName = `.confirmed-${version}.json`
+    const confirmedMarker = join(electronRoot, confirmedMarkerName)
+    const confirmed = await lstat(confirmedMarker).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (!confirmed) {
+      // A completed finalization is idempotent, but a missing marker before
+      // retention is never silently treated as permission to discard history.
+      await assertFinalizedLocked(electronRoot, version)
+      return
+    }
+    // Retention intentionally ignores only this marker while it remains on
+    // disk. If cleanup fails, the marker still preserves the exact rollback
+    // predecessor and a later finalize can retry safely.
+    const ignoredMarkers = new Set([confirmedMarkerName])
+    const expectedInventoryCount = Math.min(KEEP_RELEASES, (await publishedReleaseVersions(electronRoot)).length)
+    await (options.retentionCleanup ?? cleanOldReleases)(electronRoot, ignoredMarkers)
+    await assertSafeInventory(electronRoot, version, expectedInventoryCount)
+    await (options.markerCleanup ?? (async marker => rm(marker, { force: true })))(confirmedMarker)
+    const remaining = await lstat(confirmedMarker).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (remaining) throw new Error(`Cannot finalize ${version}: confirmation marker cleanup failed`)
   })
 }
 
@@ -600,15 +729,20 @@ export async function assertConfirmedRelease(releasesDir: string, version: strin
 export async function assertFinalizedRelease(releasesDir: string, version: string): Promise<void> {
   if (!isStrictSemver(version)) throw new Error('Finalized version must be strict SemVer')
   const electronRoot = join(resolve(releasesDir), 'electron')
-  const latest = await readLatestContract(electronRoot)
-  if (!latest || latest.version !== version) {
-    throw new Error(`Cannot verify finalization of ${version}: it is not electron/latest`)
-  }
-  const confirmed = await lstat(join(electronRoot, `.confirmed-${version}.json`)).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined
-    throw error
+  await withPublisherLock(electronRoot, async () => {
+    await assertFinalizedLocked(electronRoot, version)
   })
-  if (confirmed) throw new Error(`Cannot verify finalization of ${version}: confirmation marker remains`)
+}
+
+async function assertFinalizedLocked(electronRoot: string, version: string): Promise<void> {
+  const entries = await readdir(electronRoot, { withFileTypes: true })
+  const staleMarkers = entries
+    .filter(entry => entry.isFile() && ROLLBACK_MARKER_PATTERN.test(entry.name))
+    .map(entry => entry.name)
+  if (staleMarkers.length > 0) {
+    throw new Error(`Cannot verify finalization of ${version}: stale rollback markers remain: ${staleMarkers.join(', ')}`)
+  }
+  await assertSafeInventory(electronRoot, version)
 }
 
 export async function assertNotLatest(releasesDir: string, version: string): Promise<void> {
@@ -617,6 +751,16 @@ export async function assertNotLatest(releasesDir: string, version: string): Pro
   if (latest?.version === version) {
     throw new Error(`Rollback verification failed: ${version} is still electron/latest`)
   }
+}
+
+export async function assertRollbackTarget(releasesDir: string, version: string): Promise<void> {
+  if (!isStrictSemver(version)) throw new Error('Version must be strict SemVer')
+  const electronRoot = join(resolve(releasesDir), 'electron')
+  await withPublisherLock(electronRoot, async () => {
+    const marker = markerPath(electronRoot, 'compensated', version)
+    await lstat(marker)
+    await assertLatestMatchesRollbackTarget(electronRoot, version, await readRollbackTarget(marker, version))
+  })
 }
 
 function required(values: Record<string, string | undefined>, key: string): string {
@@ -694,7 +838,13 @@ async function main(): Promise<void> {
     console.log(`Release ${version} is no longer electron/latest`)
     return
   }
-  throw new Error('Usage: publisher <publish|rollback|confirm|rollback-failed|finalize|assert-confirmed|assert-finalized|assert-not-latest> [options]')
+  if (command === 'assert-rollback-target') {
+    const version = required(values, 'version')
+    await assertRollbackTarget(required(values, 'releases-dir'), version)
+    console.log(`Rollback predecessor for ${version} is restored exactly`)
+    return
+  }
+  throw new Error('Usage: publisher <publish|rollback|confirm|rollback-failed|finalize|assert-confirmed|assert-finalized|assert-not-latest|assert-rollback-target> [options]')
 }
 
 if (import.meta.main) await main()

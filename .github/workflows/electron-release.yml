@@ -278,11 +278,39 @@ jobs:
       - name: Stop release after finalization failure
         if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'
         run: exit 1
-      - name: Publish approved GitHub Release
-        id: github-publish
+      - name: Revalidate approved immutable Draft before GitHub publication
+        id: approved-draft-revalidate
         if: steps.confirm-pointer.outcome == 'success'
         continue-on-error: true
-        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DRAFT_RELEASE_ID" in (''|*[!0-9]*) echo '::error::Invalid approved Draft Release ID'; exit 1;; esac
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/approved-draft-current.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/approved-draft-current.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft true
+          # Metadata binds asset IDs/names/sizes; re-read every approved asset
+          # by ID so a same-size mutation cannot publish after PVC validation.
+          mkdir -p /tmp/approved-draft-assets
+          jq -r '.assets[] | [.id, .name, .sha256] | @tsv' <<<"$DRAFT_ASSET_IDENTITY" | \
+          while IFS=$'\t' read -r asset_id asset_name expected_sha256; do
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "/tmp/approved-draft-assets/$asset_name"
+            actual_sha256="$(sha256sum "/tmp/approved-draft-assets/$asset_name" | awk '{print $1}')"
+            test "$actual_sha256" = "$expected_sha256"
+          done
+      - name: Publish approved GitHub Release
+        id: github-publish
+        if: steps.approved-draft-revalidate.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -f draft=false >/dev/null
       - name: Verify GitHub Release publication
         id: github-publish-state
         if: steps.github-publish.outcome == 'success'
@@ -290,7 +318,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/published-approved-release.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/published-approved-release.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft false
       - name: Finalize confirmed Zeabur release after GitHub publication
         id: zeabur-finalize
         if: steps.github-publish-state.outcome == 'success'
@@ -323,7 +357,7 @@ jobs:
         run: exit 1
       - name: Compensate failed or uncertain GitHub finalization
         id: github-finalization-compensation
-        if: steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
+        if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
         continue-on-error: true
         uses: ./.github/actions/zeabur-rollback-failed
         with:
@@ -333,14 +367,26 @@ jobs:
           version: ${{ env.VERSION }}
       - name: Restore Draft after failed GitHub finalization
         id: github-draft-restore
-        if: steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
+        if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)"
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f draft=true >/dev/null
-          test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/restore-approved-release.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/restore-approved-release.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft either
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" -f draft=true >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" > /tmp/restored-approved-release.json
+          bun scripts/electron-release-draft-identity.ts assert \
+            --github-release /tmp/restored-approved-release.json \
+            --identity "$DRAFT_ASSET_IDENTITY" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --draft true
       - name: Stop release after GitHub finalization failure
-        if: steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success' || steps.github-finalization-compensation.outcome == 'failure' || steps.github-draft-restore.outcome == 'failure'
+        if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success' || steps.github-finalization-compensation.outcome == 'failure' || steps.github-draft-restore.outcome == 'failure'
         run: exit 1

@@ -1,20 +1,30 @@
-# POO-29 第 5 轮修复报告
+# POO-36 Round 5 修复报告
 
 ## 处理结果
 
-- 修复 `admin:publishCreatorApp` 漏入 IPC 稳定性快照的问题：更新 `EXPECTED_CHANNELS`，当前 wire-format 总数为 379。
-- 重跑路由分类、IPC 快照、类型检查和全量门禁；未复现 reviewer 所述 `mode-manager.test.ts` 无期限占用。
+1. GitHub 最终发布链路现在只使用 `DRAFT_RELEASE_ID`。生产审批后、PATCH `draft=false` 前会按该 ID 重新读取 Release，严格校验 Draft 状态、tag、target commit、九个 asset 的 ID/名称/大小，并逐个按 asset ID 重新下载校验 SHA-256。发布后的查看和失败后的 Draft 恢复也只访问同一 ID；ID 缺失或任何身份变化均失败关闭，绝不按 tag 查找替代 Release。
+2. 最终化保留策略改为严格且可重试。保留 `.confirmed-<version>` 到容量清理和三（或不足三时全部）安全目录清单均验证完成后才删除；清理或 marker 删除失败均返回非零并保留状态。`assert-finalized` 在发布锁内验证 latest、无残留 rollback/confirmed/compensated marker、latest 在目录清单中且目录数不超过三。
+3. 回滚补偿将原 predecessor 持久化为 `.compensated-<version>.json`，所有重试均在 publisher 锁内要求 `electron/latest` 精确等于该 predecessor（bootstrap 时要求不存在 latest）。复用的 composite action 改为调用 `assert-rollback-target`，不再把“不是失败版本”误判为成功。
 
 ## 关键文件
 
-- `apps/electron/src/shared/__tests__/ipc-channels.test.ts`
+- `.github/workflows/electron-release.yml`
+- `.github/actions/zeabur-rollback-failed/action.yml`
+- `scripts/electron-release-draft-identity.ts`
+- `scripts/publish-electron-release.ts`
+- `scripts/electron-release-draft-identity.test.ts`
+- `scripts/publish-electron-release.test.ts`
+- `scripts/electron-release-workflow.test.ts`
 
 ## 实际测试
 
-- `bun test apps/electron/src/shared/__tests__/ipc-channels.test.ts packages/shared/src/protocol/__tests__/routing.test.ts`：15 pass。
-- `bun run typecheck:all`：通过。
-- `NO_COLOR=1 bun run test`：通过。
+- `bun test scripts/publish-electron-release.test.ts scripts/electron-release-draft-identity.test.ts scripts/electron-release-workflow.test.ts` — 32 pass / 0 fail。
+  - 覆盖精确 Draft ID/资产身份拒绝、错误 latest 指针的补偿重试拒绝、bootstrap 无 latest、保留清理失败和 stale marker 删除失败。
+- `bun test infra/updates-static/PoloCaddyfile.test.ts scripts/polo-release-pull.test.ts` — 10 pass / 0 fail，包含真实 Caddy 容器与下载器 fixture。
+- `bun run typecheck:all` — 通过。
+- `bun run test` — 通过（主并行套件及隔离套件；命令退出码 0）。
+- `git diff --check` — 通过。
 
-## 遗留问题
+## 遗留项
 
-第 5 轮第 1–3 项要求的平台 Admin 组织级事务、共享 Catalog 写入和唯一安装器 validator，依赖不在本 worktree 的 Polo Admin 服务实现。本仓库当前没有可复用的组织级发布 HTTP handler；继续把本机 `creator-app-publications` 当成平台发布会违反需求，因此未将其表述为完成。
+无代码遗留项。首次真实 tag 联调仍需要任务快照中列出的 GitHub production/Zeabur secrets 与服务授权。
