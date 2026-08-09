@@ -64,9 +64,22 @@ jobs:
 
       - name: Attest the verified tarball
         if: startsWith(github.ref, 'refs/tags/')
+        id: attest
+        continue-on-error: true
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: ${{ steps.package.outputs.tarball_path }}
+
+      - name: Record unavailable provenance attestation
+        if: startsWith(github.ref, 'refs/tags/') && steps.attest.outcome == 'failure'
+        run: |
+          echo "::warning::GitHub provenance attestation is unavailable for this repository plan; publishing continues with the registry metadata and clean-consumer proof."
+          {
+            echo "## Provenance attestation unavailable"
+            echo
+            echo "GitHub Actions could not persist a provenance attestation for this repository plan."
+            echo "The package publication is still gated by the verified tarball, immutable registry metadata, and registry-backed clean-consumer proof."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure GitHub Packages authentication
         if: startsWith(github.ref, 'refs/tags/') || inputs.verify_published
