@@ -18,6 +18,7 @@ if (-not $BinDir) {
 
 $launcher = Join-Path $BinDir "polo.cmd"
 $legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
+$messages = Join-Path $BinDir "polo-messages.cmd"
 $rootPointer = Join-Path $BinDir "polo-install-root.txt"
 $stateFile = Join-Path $BinDir "terminal-integration.json"
 $exePath = Join-Path $InstallDir "Polo AI.exe"
@@ -573,6 +574,10 @@ function Get-LegacyShimContent {
     return [IO.File]::ReadAllText($legacyLauncherTemplate)
 }
 
+function Get-WrapperMessagesContent {
+    return [IO.File]::ReadAllText($messageTemplate)
+}
+
 function Get-HistoricalLauncherAllowlist([string]$Path) {
     if ($Path.TrimEnd("\") -ieq $launcher.TrimEnd("\")) {
         # Exact POO-14 pre-template launcher. This allowlist is intentionally
@@ -664,6 +669,9 @@ function Get-ManagedFileSpecs {
     return @(
         [PSCustomObject]@{ Path = $launcher; Content = Get-LauncherContent },
         [PSCustomObject]@{ Path = $legacyLauncher; Content = Get-LegacyShimContent },
+        # The launchers call this companion by their own directory. It must be
+        # installed atomically and owned alongside the two wrapper entrypoints.
+        [PSCustomObject]@{ Path = $messages; Content = Get-WrapperMessagesContent },
         [PSCustomObject]@{
             Path = $rootPointer
             Content = Join-Path $InstallDir "resources"
@@ -1082,6 +1090,7 @@ if ($Mode -eq "Validate") {
         $BinDir = $validationRoot
         $launcher = Join-Path $BinDir "polo.cmd"
         $legacyLauncher = Join-Path $BinDir "polo-ai.cmd"
+        $messages = Join-Path $BinDir "polo-messages.cmd"
         $rootPointer = Join-Path $BinDir "polo-install-root.txt"
         $stateFile = Join-Path $BinDir "terminal-integration.json"
         $UserPathFile = Join-Path $validationRoot "user-path.txt"

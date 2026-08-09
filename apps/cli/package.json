@@ -1,6 +1,6 @@
 {
   "name": "@polo-ai/cli",
-  "version": "0.15.6",
+  "version": "0.15.7",
   "license": "Apache-2.0",
   "description": "Terminal client for Polo AI server",
   "type": "module",
