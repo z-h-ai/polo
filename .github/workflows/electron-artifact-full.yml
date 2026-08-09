@@ -342,7 +342,6 @@ jobs:
           path: |
             ${{ runner.temp }}/full-validation-${{ matrix.platform }}-${{ matrix.arch }}.log
             apps/electron/release/release-signing-audit-*.jsonl
-            apps/electron/release/Polo-AI-x64.__uninstaller.exe
             previous/verified-contract-${{ matrix.platform }}.json
           if-no-files-found: ignore
           retention-days: 14

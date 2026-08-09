@@ -29,14 +29,11 @@ polo_terminal_setup_finished:
   ${EndIf}
 !macroend
 
-!macro customUnInit
+!macro customUnInstall
   DetailPrint "Removing Polo terminal command..."
   Push $R1
   Push $R2
-  Push $R3
-  Push $R4
   StrCpy $R2 ""
-  ReadEnvStr $R3 "POLO_NSIS_UNINSTALL_TRACE_FILE"
   ReadINIStr $R1 "$INSTDIR\polo-terminal-integration.ini" "terminal" "binDir"
   ${If} $R1 == ""
     ; Legacy installs predate the persisted target. Their conventional
@@ -46,46 +43,8 @@ polo_terminal_setup_finished:
   ${Else}
     StrCpy $R2 "-RequireOwnershipState"
   ${EndIf}
-  ${If} $R3 != ""
-    ClearErrors
-    FileOpen $R4 "$R3" w
-    ${IfNot} ${Errors}
-      FileWrite $R4 "customUnInit entered$\r$\ninstDir=$INSTDIR$\r$\nbinDir=$R1$\r$\n"
-      FileClose $R4
-    ${EndIf}
-  ${EndIf}
-  IfFileExists "$INSTDIR\.polo-validation-trace" polo_uninstall_write_marker_trace 0
-  Goto polo_uninstall_marker_trace_started
-polo_uninstall_write_marker_trace:
-    ClearErrors
-    FileOpen $R4 "$INSTDIR\..\nsis-uninstall-trace.txt" w
-    ${IfNot} ${Errors}
-      FileWrite $R4 "customUnInit entered$\r$\ninstDir=$INSTDIR$\r$\nbinDir=$R1$\r$\n"
-      FileClose $R4
-    ${EndIf}
-polo_uninstall_marker_trace_started:
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Uninstall -InstallDir "$INSTDIR" -BinDir "$R1" $R2'
   Pop $0
-  ${If} $R3 != ""
-    ClearErrors
-    FileOpen $R4 "$R3" a
-    ${IfNot} ${Errors}
-      FileWrite $R4 "exitCode=$0$\r$\n"
-      FileClose $R4
-    ${EndIf}
-  ${EndIf}
-  IfFileExists "$INSTDIR\.polo-validation-trace" polo_uninstall_append_marker_trace 0
-  Goto polo_uninstall_marker_trace_finished
-polo_uninstall_append_marker_trace:
-    ClearErrors
-    FileOpen $R4 "$INSTDIR\..\nsis-uninstall-trace.txt" a
-    ${IfNot} ${Errors}
-      FileWrite $R4 "exitCode=$0$\r$\n"
-      FileClose $R4
-    ${EndIf}
-polo_uninstall_marker_trace_finished:
-  Pop $R4
-  Pop $R3
   Pop $R2
   Pop $R1
   ${If} $0 != 0
@@ -96,6 +55,6 @@ polo_uninstall_marker_trace_finished:
     MessageBox MB_ICONEXCLAMATION|MB_OK "Polo could not remove its terminal command. Close any shells using 'polo' and try uninstalling again."
 polo_terminal_uninstall_silent_failure:
     SetErrorLevel 1
-    Abort
+    Quit
   ${EndIf}
 !macroend

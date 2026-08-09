@@ -131,15 +131,7 @@ function Invoke-Uninstaller {
         throw "NSIS uninstall executable is missing: $uninstaller"
     }
     Stop-InstalledPoloApp
-    $savedTraceFile = $env:POLO_NSIS_UNINSTALL_TRACE_FILE
-    $traceFile = Join-Path $testRoot "nsis-uninstall-trace.txt"
-    New-Item -ItemType File -Force -Path (Join-Path $installDir ".polo-validation-trace") | Out-Null
-    try {
-        $env:POLO_NSIS_UNINSTALL_TRACE_FILE = $traceFile
-        Invoke-NsisProcess -FilePath $uninstaller -ArgumentList @("/S") -Label "uninstaller"
-    } finally {
-        $env:POLO_NSIS_UNINSTALL_TRACE_FILE = $savedTraceFile
-    }
+    Invoke-NsisProcess -FilePath $uninstaller -ArgumentList @("/S") -Label "uninstaller"
     # NSIS can hand deletion and custom-uninstall work to a short-lived child
     # process.  Waiting only for the launcher controller can therefore race
     # the terminal cleanup and report a false stale-launcher failure.  Wait
@@ -164,11 +156,6 @@ function Invoke-Uninstaller {
     })
     if ($remaining.Count -gt 0) {
         throw "NSIS uninstaller did not complete terminal cleanup within 30 seconds: $($remaining -join ', ')"
-    }
-    if (Test-Path -LiteralPath $traceFile -PathType Leaf) {
-        Write-Host "NSIS uninstaller trace: $((Get-Content -LiteralPath $traceFile -Raw).Trim())"
-    } else {
-        Write-Host "NSIS uninstaller trace: macro did not write the temporary trace"
     }
 }
 
