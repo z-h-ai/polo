@@ -92,7 +92,13 @@ function Invoke-NsisProcess {
     }
     $process.Refresh()
     if ($process.ExitCode -ne 0) {
-        throw "NSIS $Label exited with $($process.ExitCode)"
+        $diagnostic = Join-Path $testLocalAppData "Polo AI\terminal-integration-error.log"
+        $detail = if (Test-Path -LiteralPath $diagnostic -PathType Leaf) {
+            (Get-Content -LiteralPath $diagnostic -Raw).Trim()
+        } else {
+            "No terminal integration diagnostic was written."
+        }
+        throw "NSIS $Label exited with $($process.ExitCode): $detail"
     }
     Write-Host "NSIS validation phase=${Label}:complete"
 }

@@ -1132,7 +1132,23 @@ if ($Mode -eq "Validate") {
 }
 
 if ($Mode -eq "Install") {
-    Install-Transactional (-not $SkipCommandConflict) ([bool]$UserPathFile)
+    try {
+        Install-Transactional (-not $SkipCommandConflict) ([bool]$UserPathFile)
+    } catch {
+        # NSIS can only return an exit code from this child process. Preserve
+        # the actionable failure locally so both the desktop repair flow and
+        # artifact validation can report the underlying ownership/registry
+        # error without exposing it through a public installer channel.
+        $diagnosticDirectory = Join-Path $env:LOCALAPPDATA "Polo AI"
+        $diagnosticFile = Join-Path $diagnosticDirectory "terminal-integration-error.log"
+        try {
+            New-Item -ItemType Directory -Force -Path $diagnosticDirectory | Out-Null
+            Set-Content -LiteralPath $diagnosticFile -Value $_.Exception.ToString() -Encoding UTF8
+        } catch {
+            # The original terminal integration error remains authoritative.
+        }
+        throw
+    }
     return
 }
 
