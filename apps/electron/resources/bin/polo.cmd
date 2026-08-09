@@ -24,7 +24,11 @@ set "POLO_LOCALE=%POLO_AI_LOCALE%"
 if not defined POLO_LOCALE set "POLO_LOCALE=%LC_ALL%"
 if not defined POLO_LOCALE set "POLO_LOCALE=%LC_MESSAGES%"
 if not defined POLO_LOCALE set "POLO_LOCALE=%LANG%"
-set "POLO_MESSAGES=%POLO_AI_APP_ROOT%\resources\bin\polo-messages.cmd"
+rem Keep the message table beside the executable launcher. The terminal
+rem integration transaction publishes this pair together with explicit CRLF
+rem bytes, so an installed launcher must not fall back to an unchecked copy
+rem inside a moved App bundle.
+set "POLO_MESSAGES=%~dp0polo-messages.cmd"
 if not exist "%POLO_MESSAGES%" (
   echo [POLO_E_TERMINAL_FILES_MISSING] 1>&2
   exit /b 1

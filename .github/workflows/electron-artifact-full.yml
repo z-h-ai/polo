@@ -210,12 +210,71 @@ jobs:
           args+=(--installer "$POLO_AI_PREVIOUS_INSTALL_SCRIPT" --installer-sha256 "$EXPECTED_PREVIOUS_INSTALLER_SHA256")
           bun run scripts/validate-previous-release-contract.ts "${args[@]}"
 
+      - name: Smoke Windows terminal launchers
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke Windows PowerShell installer compatibility
+        if: matrix.platform == 'windows'
+        # afterPack and NSIS invoke the integration script with Windows
+        # PowerShell. Keep the pre-packaging ASCII launch on that same engine
+        # so a PowerShell 7-only pass cannot hide an installer failure. The
+        # Unicode argument regression remains on PowerShell 7, whose native
+        # command-line transport preserves it.
+        shell: powershell
+        run: |
+          & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1 -AsciiOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Parse Windows final artifact validator with Windows PowerShell
+        if: matrix.platform == 'windows'
+        # The final NSIS lifecycle validator contains Unicode filesystem cases.
+        # Windows PowerShell requires the source to retain its UTF-8 BOM, so
+        # reject a parser regression before electron-builder reaches afterAll.
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          $validator = (Resolve-Path 'apps/electron/scripts/validate-final-artifacts.ps1').Path
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            $validator,
+            [ref]$tokens,
+            [ref]$parseErrors
+          )
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+
       - name: Build and validate macOS release
         if: matrix.platform == 'macos'
         shell: bash
         run: |
-          set -o pipefail
-          bun run electron:dist:mac --arch=${{ matrix.arch }} 2>&1 | tee "$RUNNER_TEMP/full-validation-macos-${{ matrix.arch }}.log"
+          set -euo pipefail
+          log="$RUNNER_TEMP/full-validation-macos-${{ matrix.arch }}.log"
+          for attempt in 1 2; do
+            set +e
+            bun run electron:dist:mac --arch=${{ matrix.arch }} 2>&1 | tee "$log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            # A transient GitHub DNS outage occurred on macos-15-intel while
+            # electron-builder fetched its pinned Electron archive.  Retry
+            # only that transport failure from a clean release directory;
+            # signing, notarization and artifact-validation errors stay fatal.
+            if [ "$attempt" -eq 2 ] || ! grep -Fq 'lookup github.com: no such host' "$log"; then
+              exit "$status"
+            fi
+            rm -rf apps/electron/release
+            sleep 10
+          done
 
       - name: Build and validate Linux release
         if: matrix.platform == 'linux'
@@ -231,15 +290,26 @@ jobs:
         if: matrix.platform == 'windows'
         shell: bash
         run: |
-          set -o pipefail
-          bun run electron:dist:win --arch=x64 2>&1 | tee "$RUNNER_TEMP/full-validation-windows-x64.log"
-
-      - name: Smoke Windows terminal launchers
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1
-          & apps/electron/resources/scripts/tests/windows-terminal-integration.test.ps1
+          set -euo pipefail
+          log="$RUNNER_TEMP/full-validation-windows-x64.log"
+          for attempt in 1 2; do
+            set +e
+            bun run electron:dist:win --arch=x64 2>&1 | tee "$log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            # Electron-builder can momentarily lock a copied build output on
+            # hosted Windows runners.  Retry only this EBUSY copy race after
+            # removing the partial package; all product validation failures
+            # remain one-shot, blocking failures.
+            if [ "$attempt" -eq 2 ] || ! grep -Fq 'EBUSY: resource busy or locked' "$log"; then
+              exit "$status"
+            fi
+            rm -rf apps/electron/release
+            sleep 10
+          done
 
       - name: Require intentionally unsigned Windows installer
         if: matrix.platform == 'windows'

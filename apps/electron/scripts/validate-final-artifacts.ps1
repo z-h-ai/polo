@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("Smoke", "Bootstrap", "Full")]
     [string]$Mode = "Smoke",
     [string]$ReleaseDir = "",
@@ -60,13 +60,86 @@ $originalProcessPath = $env:Path
 $currentVersion = $null
 $previousVersion = $null
 
-function Invoke-Installer([string]$InstallerPath = $installer) {
-    $process = Start-Process -FilePath $InstallerPath `
-        -ArgumentList @("/S", "/D=$installDir") `
-        -PassThru -Wait -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) {
-        throw "NSIS installer exited with $($process.ExitCode)"
+function Invoke-NsisProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$RawArgumentLine = "",
+        [Parameter(Mandatory = $true)][string]$Label,
+        [switch]$UseCurrentPath
+    )
+    Write-Host "NSIS validation phase=${Label}:start"
+    # Start-Process -Wait waits for the Windows process tree. An NSIS
+    # installer may launch the desktop app after a successful silent install,
+    # which would turn a successful installer into an unbounded wait. Wait for
+    # the NSIS controller itself instead and retain a bounded failure signal.
+    $savedPath = $env:Path
+    try {
+        if (-not $UseCurrentPath) {
+            # The installer protects an existing user command named `polo`.
+            # The artifact test must therefore not inherit an unrelated runner
+            # command and mistake it for a user-owned conflict.
+            $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        }
+        if ($RawArgumentLine) {
+            # `_?=` is an NSIS command-line escape hatch. It must be the last
+            # argument and must not be quoted even when the target contains
+            # spaces, which ProcessStartInfo.ArgumentList cannot guarantee.
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $FilePath
+            $startInfo.Arguments = $RawArgumentLine
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+                throw "NSIS $Label could not start: $FilePath"
+            }
+        } else {
+            $process = Start-Process -FilePath $FilePath `
+                -ArgumentList $ArgumentList `
+                -PassThru -WindowStyle Hidden
+        }
+    } finally {
+        $env:Path = $savedPath
     }
+    # Hosted Windows runners can spend over a minute extracting and scanning a
+    # first-run NSIS payload. Keep the wait bounded (unlike Start-Process
+    # -Wait's process-tree wait), but leave enough headroom to avoid turning a
+    # valid installer into a flaky release gate.
+    if (-not $process.WaitForExit(180000)) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        throw "NSIS $Label timed out after 180 seconds"
+    }
+    $process.Refresh()
+    if ($process.ExitCode -ne 0) {
+        $diagnostic = Join-Path $testLocalAppData "Polo AI\terminal-integration-error.log"
+        $detail = if (Test-Path -LiteralPath $diagnostic -PathType Leaf) {
+            (Get-Content -LiteralPath $diagnostic -Raw).Trim()
+        } else {
+            "No terminal integration diagnostic was written."
+        }
+        throw "NSIS $Label exited with $($process.ExitCode): $detail"
+    }
+    Write-Host "NSIS validation phase=${Label}:complete"
+}
+
+function Stop-InstalledPoloApp([string]$TargetInstallDir = $installDir) {
+    $target = Join-Path $TargetInstallDir "Polo AI.exe"
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name = 'Polo AI.exe'" `
+        -ErrorAction SilentlyContinue | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath -ieq $target
+        })) {
+        Write-Host "NSIS validation phase=desktop-app:stop pid=$($process.ProcessId)"
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-Installer([string]$InstallerPath = $installer) {
+    Invoke-NsisProcess -FilePath $InstallerPath `
+        -ArgumentList @("/S", "/D=$installDir") `
+        -Label "installer"
+    Stop-InstalledPoloApp
 }
 
 function Invoke-Uninstaller {
@@ -74,11 +147,42 @@ function Invoke-Uninstaller {
     if (-not (Test-Path -LiteralPath $uninstaller)) {
         throw "NSIS uninstall executable is missing: $uninstaller"
     }
-    $process = Start-Process -FilePath $uninstaller `
-        -ArgumentList @("/S") `
-        -PassThru -Wait -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) {
-        throw "NSIS uninstaller exited with $($process.ExitCode)"
+    Stop-InstalledPoloApp
+    # electron-builder's upgrade flow invokes an uninstaller from a temporary
+    # copy and passes the exact installation root via `_?=`. Keep that form:
+    # running it in place first exits a self-copying NSIS launcher, which can
+    # hide the custom-uninstall result from this release gate.
+    $uninstallerCopy = Join-Path $testRoot "Polo AI validation uninstaller.exe"
+    Copy-Item -LiteralPath $uninstaller -Destination $uninstallerCopy -Force
+    Invoke-NsisProcess -FilePath $uninstallerCopy `
+        -RawArgumentLine "/S _?=$installDir" -Label "uninstaller"
+    # NSIS can hand deletion and custom-uninstall work to a short-lived child
+    # process.  Waiting only for the launcher controller can therefore race
+    # the terminal cleanup and report a false stale-launcher failure.  Wait
+    # for the external state the uninstaller is required to remove, with a
+    # hard bound so a real cleanup regression remains a failing validation.
+    $terminalPaths = @(
+        (Join-Path $testLocalAppData "Polo AI\bin\polo.cmd"),
+        (Join-Path $testLocalAppData "Polo AI\bin\terminal-integration.json")
+    )
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $remaining = @($terminalPaths | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        })
+        if ($remaining.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    $remaining = @($terminalPaths | Where-Object {
+        Test-Path -LiteralPath $_ -PathType Leaf
+    })
+    if ($remaining.Count -gt 0) {
+        throw "NSIS uninstaller did not complete terminal cleanup within 30 seconds: $($remaining -join ', ')"
+    }
+    if (Test-Path -LiteralPath (Join-Path $installDir "Polo AI.exe") -PathType Leaf) {
+        throw "NSIS uninstaller left the installed application payload behind"
     }
 }
 
@@ -116,6 +220,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $appRoot = Join-Path $resourcesRoot "app"
     $bun = Join-Path $resourcesRoot "vendor\bun\bun.exe"
     $launcher = Join-Path $testLocalAppData "Polo AI\bin\polo.cmd"
+    $terminalState = Join-Path $testLocalAppData "Polo AI\bin\terminal-integration.json"
     $manifestPath = Join-Path $appRoot "dist\cli\artifact-manifest.json"
     $metadataPath = Join-Path $appRoot "dist\cli\package.json"
     $cliPath = Join-Path $appRoot "dist\cli\polo-cli.js"
@@ -130,6 +235,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     foreach ($required in @(
         $bun,
         $launcher,
+        $terminalState,
         $wrapperMessages,
         $manifestPath,
         $metadataPath,
@@ -339,12 +445,10 @@ function Test-UserCommandConflict {
     try {
         $env:LOCALAPPDATA = $conflictLocalAppData
         $env:Path = "$conflictBin;$savedPath"
-        $process = Start-Process -FilePath $installer `
+        Invoke-NsisProcess -FilePath $installer `
             -ArgumentList @("/S", "/D=$conflictInstall") `
-            -PassThru -Wait -WindowStyle Hidden
-        if ($process.ExitCode -ne 0) {
-            throw "Conflict NSIS install unexpectedly failed at process level"
-        }
+            -Label "conflict-installer" -UseCurrentPath
+        Stop-InstalledPoloApp $conflictInstall
         if ((Get-Content -LiteralPath $userCommand -Raw) -cne "@echo off`r`necho user-owned`r`n") {
             throw "NSIS terminal setup overwrote a user-owned polo command"
         }
@@ -357,8 +461,9 @@ function Test-UserCommandConflict {
     } finally {
         $uninstaller = Join-Path $conflictInstall "Uninstall Polo AI.exe"
         if (Test-Path -LiteralPath $uninstaller) {
-            Start-Process -FilePath $uninstaller -ArgumentList @("/S") `
-                -Wait -WindowStyle Hidden | Out-Null
+            Stop-InstalledPoloApp $conflictInstall
+            Invoke-NsisProcess -FilePath $uninstaller `
+                -ArgumentList @("/S") -Label "conflict-uninstaller"
         }
         $env:LOCALAPPDATA = $savedLocalAppData
         $env:Path = $savedPath
@@ -756,9 +861,13 @@ try {
         if (Test-Path -LiteralPath (Join-Path $testLocalAppData "Polo AI\bin\polo.cmd")) {
             throw "NSIS uninstall left the managed Polo launcher behind"
         }
+        if (Test-Path -LiteralPath (Join-Path $testLocalAppData "Polo AI\bin\terminal-integration.json")) {
+            throw "NSIS uninstall left the managed Polo ownership state behind"
+        }
     }
     Write-Host "Final Windows artifact validation passed ($Mode)"
 } finally {
+    Stop-InstalledPoloApp
     [Environment]::SetEnvironmentVariable("Path", $originalUserPath, "User")
     $env:Path = $originalProcessPath
     $env:LOCALAPPDATA = $originalLocalAppData
