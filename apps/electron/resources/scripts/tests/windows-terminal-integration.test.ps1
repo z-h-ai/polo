@@ -31,7 +31,7 @@ try {
 
     $state = Get-Content (Join-Path $binDir "terminal-integration.json") -Raw | ConvertFrom-Json
     Assert-True ($state.schemaVersion -eq 3) "Polo did not write the identity-bound ownership state schema."
-    Assert-True ($state.files.Count -eq 3) "Polo did not record both launchers and the root pointer."
+    Assert-True ($state.files.Count -eq 4) "Polo did not record both launchers, wrapper messages, and the root pointer."
     Assert-True ([bool]$state.files[0].sha256) "Polo did not record a managed launcher SHA-256."
     Assert-True ([bool]$state.files[0].identity) "Polo did not record a managed launcher filesystem identity."
     Assert-True (-not $state.pathEntryAddedByPolo) "Polo incorrectly claimed a pre-existing PATH entry."
@@ -41,6 +41,7 @@ try {
         "Installed launcher differs from the checked-in template."
     Assert-True ($launcher -notmatch "--polo-cli") "Launcher still delegates CLI commands to Electron."
     Assert-True ($launcher -notmatch 'if /I "%~1"=="app"') "Launcher still intercepts polo app."
+    Assert-True (Test-Path (Join-Path $binDir "polo-messages.cmd")) "Polo did not install the launcher message companion."
 
     # Repair after an App-root move must keep the launcher bytes identical and
     # update only the owned sidecar resolved relative to the launcher.

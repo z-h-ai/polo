@@ -19,6 +19,7 @@ try {
         $binDir, $runtimeDir, (Split-Path -Parent $cliPath), (Split-Path -Parent $serverPath) | Out-Null
     Copy-Item -LiteralPath (Join-Path $binSource "polo.cmd") -Destination $binDir
     Copy-Item -LiteralPath (Join-Path $binSource "polo-ai.cmd") -Destination $binDir
+    Copy-Item -LiteralPath (Join-Path $binSource "polo-messages.cmd") -Destination $binDir
     Set-Content -LiteralPath $cliPath -Value "fixture cli" -Encoding UTF8
     Set-Content -LiteralPath $serverPath -Value "fixture server" -Encoding UTF8
 
