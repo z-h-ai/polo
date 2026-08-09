@@ -140,6 +140,31 @@ function Invoke-Uninstaller {
     } finally {
         $env:POLO_NSIS_UNINSTALL_TRACE_FILE = $savedTraceFile
     }
+    # NSIS can hand deletion and custom-uninstall work to a short-lived child
+    # process.  Waiting only for the launcher controller can therefore race
+    # the terminal cleanup and report a false stale-launcher failure.  Wait
+    # for the external state the uninstaller is required to remove, with a
+    # hard bound so a real cleanup regression remains a failing validation.
+    $terminalPaths = @(
+        (Join-Path $testLocalAppData "Polo AI\bin\polo.cmd"),
+        (Join-Path $testLocalAppData "Polo AI\bin\terminal-integration.json")
+    )
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $remaining = @($terminalPaths | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        })
+        if ($remaining.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    $remaining = @($terminalPaths | Where-Object {
+        Test-Path -LiteralPath $_ -PathType Leaf
+    })
+    if ($remaining.Count -gt 0) {
+        throw "NSIS uninstaller did not complete terminal cleanup within 30 seconds: $($remaining -join ', ')"
+    }
     if (Test-Path -LiteralPath $traceFile -PathType Leaf) {
         Write-Host "NSIS uninstaller trace: $((Get-Content -LiteralPath $traceFile -Raw).Trim())"
     } else {
