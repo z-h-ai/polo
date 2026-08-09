@@ -26,10 +26,8 @@ polo_terminal_setup_finished:
     ; command or PATH entry behind, so let callers retry instead.
     IfSilent polo_terminal_uninstall_silent_failure
     MessageBox MB_ICONEXCLAMATION|MB_OK "Polo could not remove its terminal command. Close any shells using 'polo' and try uninstalling again."
-    Goto polo_terminal_uninstall_finished
 polo_terminal_uninstall_silent_failure:
     SetErrorLevel 1
     Quit
-polo_terminal_uninstall_finished:
   ${EndIf}
 !macroend
