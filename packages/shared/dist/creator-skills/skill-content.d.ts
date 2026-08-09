@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type CreatorSkillMetadata } from './metadata.ts';
 export interface SkillContentValidationIssue {
     code?: string;
     file: string;
@@ -12,14 +13,7 @@ export interface SkillContentValidationResult {
     errors: SkillContentValidationIssue[];
     warnings: SkillContentValidationIssue[];
 }
-export interface ValidatedSkillMetadata {
-    name: string;
-    description: string;
-    globs?: string[];
-    alwaysAllow?: string[];
-    icon?: string;
-    requiredSources?: string[];
-}
+export type ValidatedSkillMetadata = CreatorSkillMetadata;
 /**
  * Portable Creator/local Skill metadata contract. This module intentionally
  * has no config, filesystem, Node, or Electron imports so the Admin validator

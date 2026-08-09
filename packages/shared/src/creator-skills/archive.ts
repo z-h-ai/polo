@@ -388,7 +388,10 @@ function inspectArchiveDirectory(
 
   const businessEntries = normalizedEntries.filter(entry => !entry.ignored)
   try {
-    resolveCreatorSkillRoot(businessEntries.map(entry => ({ path: entry.normalizedPath })), slug)
+    resolveCreatorSkillRoot(businessEntries.map(entry => ({
+      path: entry.normalizedPath,
+      directory: entry.directory,
+    })), slug)
   } catch (error) {
     if (!(error instanceof CreatorSkillMetadataError)) throw error
     throw new CreatorSkillArchiveError(

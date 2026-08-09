@@ -260,6 +260,24 @@ describe('Creator Skill boundary schemas', () => {
     ]) {
       expect(SkillVersionMetadataSchema.safeParse(metadata).success).toBe(false)
     }
+    expect(SkillVersionMetadataSchema.safeParse({
+      name: 'review-helper',
+      description: 'Reviews changes.',
+      globs: ['x'.repeat(2_048)],
+      alwaysAllow: ['x'.repeat(512)],
+      requiredSources: ['x'.repeat(512)],
+    }).success).toBe(true)
+    for (const [field, maxLength] of [
+      ['globs', 2_048],
+      ['alwaysAllow', 512],
+      ['requiredSources', 512],
+    ] as const) {
+      expect(SkillVersionMetadataSchema.safeParse({
+        name: 'review-helper',
+        description: 'Reviews changes.',
+        [field]: ['x'.repeat(maxLength + 1)],
+      }).success).toBe(false)
+    }
   })
 
   it('accepts a SKILL.md up to the archive hard byte limit', () => {

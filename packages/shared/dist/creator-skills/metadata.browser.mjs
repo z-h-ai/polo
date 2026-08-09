@@ -6214,6 +6214,8 @@ var CREATOR_SKILL_NAME_MAX_LENGTH = 64;
 var CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 var CREATOR_SKILL_MAX_METADATA_ITEMS = 1e3;
 var CREATOR_SKILL_ICON_MAX_LENGTH = 64;
+var CREATOR_SKILL_GLOB_MAX_LENGTH = 2048;
+var CREATOR_SKILL_PERMISSION_MAX_LENGTH = 512;
 var CANONICAL_SKILL_FILE_MESSAGE = "Exactly one SKILL.md basename is allowed and it must be at the package root";
 var EMPTY_SKILL_CONTENT_MESSAGE = "Skill content is empty (nothing after frontmatter)";
 var EMPTY_SKILL_CONTENT_SUGGESTION = "Add instructions after the frontmatter describing what the skill should do";
@@ -6267,7 +6269,13 @@ function resolveCreatorSkillRoot(entries, expectedRootDirectory) {
   const roots = /* @__PURE__ */ new Set();
   for (const entry of businessEntries) {
     const parts = entry.path.replace(/\/$/, "").split("/").filter(Boolean);
-    if (parts.length < 2) throw rootIssue();
+    if (parts.length < 2) {
+      if (parts.length === 1 && (entry.directory || entry.path.endsWith("/"))) {
+        roots.add(parts[0]);
+        continue;
+      }
+      throw rootIssue();
+    }
     roots.add(parts[0]);
   }
   if (roots.size !== 1) throw rootIssue();
@@ -6283,11 +6291,20 @@ function asRecord(value, path) {
   }
   return value;
 }
-function requiredString(data, field, path) {
-  const value = data[field];
+function requiredName(data, path) {
+  const value = data.name;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue("invalid_skill_content", path, "Creator Skill name is required and must be a string", "name")
+    ]);
+  }
+  return value;
+}
+function requiredDescription(data, path) {
+  const value = data.description;
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
-      metadataIssue("invalid_skill_content", path, `Creator Skill ${field} is required and must be a string`, field)
+      metadataIssue("invalid_skill_content", path, "Creator Skill description is required and must be a string", "description")
     ]);
   }
   return value.trim();
@@ -6326,12 +6343,23 @@ function optionalStrings(data, field, path) {
       metadataIssue("invalid_skill_content", path, `Creator Skill ${field} must be an array of strings`, field)
     ]);
   }
+  const itemMaxLength = field === "globs" ? CREATOR_SKILL_GLOB_MAX_LENGTH : CREATOR_SKILL_PERMISSION_MAX_LENGTH;
+  if (value.some((item) => item.length > itemMaxLength)) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue(
+        "invalid_skill_content",
+        path,
+        `Creator Skill ${field} entries must be at most ${itemMaxLength} characters`,
+        field
+      )
+    ]);
+  }
   return value;
 }
 function validateCreatorSkillMetadata(value, path, rootDirectory) {
   const data = asRecord(value, path);
-  const name = requiredString(data, "name", path);
-  const description = requiredString(data, "description", path);
+  const name = requiredName(data, path);
+  const description = requiredDescription(data, path);
   const issues = [];
   const validName = name.length <= CREATOR_SKILL_NAME_MAX_LENGTH && CREATOR_SKILL_NAME_PATTERN.test(name);
   if (!validName) {
@@ -6413,10 +6441,12 @@ function parseCreatorSkillMetadata(entries, expectedRootDirectory) {
 export {
   CANONICAL_SKILL_FILE_MESSAGE,
   CREATOR_SKILL_DESCRIPTION_MAX_LENGTH,
+  CREATOR_SKILL_GLOB_MAX_LENGTH,
   CREATOR_SKILL_ICON_MAX_LENGTH,
   CREATOR_SKILL_MAX_METADATA_ITEMS,
   CREATOR_SKILL_NAME_MAX_LENGTH,
   CREATOR_SKILL_NAME_PATTERN,
+  CREATOR_SKILL_PERMISSION_MAX_LENGTH,
   CREATOR_SKILL_ROOT_ERROR_MESSAGE,
   CreatorSkillMetadataError,
   EMPTY_SKILL_CONTENT_MESSAGE,

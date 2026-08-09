@@ -138,6 +138,7 @@ describe('Creator Skill archive validation', () => {
   it('validates, normalizes, hashes, and safely extracts a package', async () => {
     await withTemp(async root => {
       const archivePath = await writeZip(root, {
+        'review-helper/': '',
         'review-helper/SKILL.md': VALID_SKILL,
         'review-helper/references/checklist.txt': 'Check authorization.\n',
         '__MACOSX/._SKILL.md': 'packaging noise',
@@ -263,6 +264,29 @@ describe('Creator Skill archive validation', () => {
     })
   })
 
+  it('accepts an explicit root-directory record and rejects ordinary root files', async () => {
+    await withTemp(async root => {
+      const explicitRoot = await writeZip(root, {
+        'review-helper/': '',
+        'review-helper/SKILL.md': VALID_SKILL,
+      }, 'explicit-root.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: explicitRoot,
+        slug: 'review-helper',
+      })).resolves.toMatchObject({ metadata: { name: 'review-helper' } })
+
+      const rootFile = await writeZip(root, {
+        'README.md': 'ordinary root file',
+        'review-helper/SKILL.md': VALID_SKILL,
+      }, 'root-file.zip')
+      expect(await archiveRootIssue(rootFile)).toMatchObject({
+        code: 'invalid_skill_root',
+        path: '',
+        message: 'ZIP must contain exactly one root directory matching the Creator Skill slug',
+      })
+    })
+  })
+
   it('keeps client preflight structural and leaves content validation to the server', async () => {
     await withTemp(async root => {
       const archivePath = await writeZip(root, {
@@ -340,6 +364,8 @@ describe('Creator Skill archive validation', () => {
     await withTemp(async root => {
       for (const [name, content] of [
         ['invalid-name', VALID_SKILL.replace('name: review-helper', 'name: Polo Test')],
+        ['leading-name-space', VALID_SKILL.replace('name: review-helper', 'name: " review-helper"')],
+        ['trailing-name-space', VALID_SKILL.replace('name: review-helper', 'name: "review-helper "')],
         ['root-mismatch', VALID_SKILL.replace('name: review-helper', 'name: another-skill')],
       ] as const) {
         const archivePath = await writeZip(root, { 'review-helper/SKILL.md': content }, `${name}.zip`)
@@ -355,6 +381,33 @@ describe('Creator Skill archive validation', () => {
             field: 'name',
           }))
         }
+      }
+    })
+  })
+
+  it('uses the shared per-entry metadata length limits', async () => {
+    await withTemp(async root => {
+      for (const [field, maxLength] of [
+        ['globs', 2_048],
+        ['alwaysAllow', 512],
+        ['requiredSources', 512],
+      ] as const) {
+        const archivePath = await writeZip(root, {
+          'review-helper/SKILL.md': `---
+name: review-helper
+description: Reviews changes against a checklist.
+${field}: [${JSON.stringify('x'.repeat(maxLength + 1))}]
+---
+
+Review the selected change carefully.
+`,
+        }, `${field}-too-long.zip`)
+        expect(await archiveIssue(archivePath)).toEqual(expect.objectContaining({
+          code: 'invalid_skill_content',
+          path: 'review-helper/SKILL.md',
+          field,
+          message: `Creator Skill ${field} entries must be at most ${maxLength} characters`,
+        }))
       }
     })
   })

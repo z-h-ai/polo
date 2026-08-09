@@ -12064,10 +12064,12 @@ __export(creator_skills_exports, {
   CREATOR_SKILL_FIXTURE_METADATA: () => CREATOR_SKILL_FIXTURE_METADATA,
   CREATOR_SKILL_FIXTURE_POLICY: () => CREATOR_SKILL_FIXTURE_POLICY,
   CREATOR_SKILL_FIXTURE_SLUG: () => CREATOR_SKILL_FIXTURE_SLUG,
+  CREATOR_SKILL_GLOB_MAX_LENGTH: () => CREATOR_SKILL_GLOB_MAX_LENGTH,
   CREATOR_SKILL_ICON_MAX_LENGTH: () => CREATOR_SKILL_ICON_MAX_LENGTH,
   CREATOR_SKILL_MAX_METADATA_ITEMS: () => CREATOR_SKILL_MAX_METADATA_ITEMS,
   CREATOR_SKILL_NAME_MAX_LENGTH: () => CREATOR_SKILL_NAME_MAX_LENGTH,
   CREATOR_SKILL_NAME_PATTERN: () => CREATOR_SKILL_NAME_PATTERN,
+  CREATOR_SKILL_PERMISSION_MAX_LENGTH: () => CREATOR_SKILL_PERMISSION_MAX_LENGTH,
   CREATOR_SKILL_ROOT_ERROR_MESSAGE: () => CREATOR_SKILL_ROOT_ERROR_MESSAGE,
   CreateCreatorArtifactRpcInputSchema: () => CreateCreatorArtifactRpcInputSchema,
   CreateCreatorArtifactVersionRpcInputSchema: () => CreateCreatorArtifactVersionRpcInputSchema,
@@ -25948,6 +25950,8 @@ var CREATOR_SKILL_NAME_MAX_LENGTH = 64;
 var CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 var CREATOR_SKILL_MAX_METADATA_ITEMS = 1e3;
 var CREATOR_SKILL_ICON_MAX_LENGTH = 64;
+var CREATOR_SKILL_GLOB_MAX_LENGTH = 2048;
+var CREATOR_SKILL_PERMISSION_MAX_LENGTH = 512;
 var CANONICAL_SKILL_FILE_MESSAGE = "Exactly one SKILL.md basename is allowed and it must be at the package root";
 var EMPTY_SKILL_CONTENT_MESSAGE = "Skill content is empty (nothing after frontmatter)";
 var EMPTY_SKILL_CONTENT_SUGGESTION = "Add instructions after the frontmatter describing what the skill should do";
@@ -26001,7 +26005,13 @@ function resolveCreatorSkillRoot(entries, expectedRootDirectory) {
   const roots = /* @__PURE__ */ new Set();
   for (const entry of businessEntries) {
     const parts = entry.path.replace(/\/$/, "").split("/").filter(Boolean);
-    if (parts.length < 2) throw rootIssue();
+    if (parts.length < 2) {
+      if (parts.length === 1 && (entry.directory || entry.path.endsWith("/"))) {
+        roots.add(parts[0]);
+        continue;
+      }
+      throw rootIssue();
+    }
     roots.add(parts[0]);
   }
   if (roots.size !== 1) throw rootIssue();
@@ -26017,11 +26027,20 @@ function asRecord(value, path) {
   }
   return value;
 }
-function requiredString(data, field, path) {
-  const value = data[field];
+function requiredName(data, path) {
+  const value = data.name;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue("invalid_skill_content", path, "Creator Skill name is required and must be a string", "name")
+    ]);
+  }
+  return value;
+}
+function requiredDescription(data, path) {
+  const value = data.description;
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
-      metadataIssue("invalid_skill_content", path, `Creator Skill ${field} is required and must be a string`, field)
+      metadataIssue("invalid_skill_content", path, "Creator Skill description is required and must be a string", "description")
     ]);
   }
   return value.trim();
@@ -26060,12 +26079,23 @@ function optionalStrings(data, field, path) {
       metadataIssue("invalid_skill_content", path, `Creator Skill ${field} must be an array of strings`, field)
     ]);
   }
+  const itemMaxLength = field === "globs" ? CREATOR_SKILL_GLOB_MAX_LENGTH : CREATOR_SKILL_PERMISSION_MAX_LENGTH;
+  if (value.some((item) => item.length > itemMaxLength)) {
+    throw new CreatorSkillMetadataError("SKILL.md metadata is invalid", [
+      metadataIssue(
+        "invalid_skill_content",
+        path,
+        `Creator Skill ${field} entries must be at most ${itemMaxLength} characters`,
+        field
+      )
+    ]);
+  }
   return value;
 }
 function validateCreatorSkillMetadata(value, path, rootDirectory) {
   const data = asRecord(value, path);
-  const name = requiredString(data, "name", path);
-  const description = requiredString(data, "description", path);
+  const name = requiredName(data, path);
+  const description = requiredDescription(data, path);
   const issues = [];
   const validName = name.length <= CREATOR_SKILL_NAME_MAX_LENGTH && CREATOR_SKILL_NAME_PATTERN.test(name);
   if (!validName) {
@@ -26489,7 +26519,7 @@ function isValidSkillSlug(slug) {
   return /^[a-z0-9-]+$/.test(slug);
 }
 function isValidCreatorSkillSlug(slug) {
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+  return CREATOR_SKILL_NAME_PATTERN.test(slug);
 }
 function suggestSkillSlug(slug) {
   return slug.normalize("NFC").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-") || "valid-slug-name";
@@ -26889,7 +26919,10 @@ function inspectArchiveDirectory(rawEntries, policy, slug) {
   }
   const businessEntries = normalizedEntries.filter((entry) => !entry.ignored);
   try {
-    resolveCreatorSkillRoot(businessEntries.map((entry) => ({ path: entry.normalizedPath })), slug);
+    resolveCreatorSkillRoot(businessEntries.map((entry) => ({
+      path: entry.normalizedPath,
+      directory: entry.directory
+    })), slug);
   } catch (error48) {
     if (!(error48 instanceof CreatorSkillMetadataError)) throw error48;
     throw new CreatorSkillArchiveError(
@@ -29442,10 +29475,12 @@ var CREATOR_SKILL_FIXTURE_CONTENT_DIGEST = "b5326fb33894331f09a1b0e80650435c8c2c
   CREATOR_SKILL_FIXTURE_METADATA,
   CREATOR_SKILL_FIXTURE_POLICY,
   CREATOR_SKILL_FIXTURE_SLUG,
+  CREATOR_SKILL_GLOB_MAX_LENGTH,
   CREATOR_SKILL_ICON_MAX_LENGTH,
   CREATOR_SKILL_MAX_METADATA_ITEMS,
   CREATOR_SKILL_NAME_MAX_LENGTH,
   CREATOR_SKILL_NAME_PATTERN,
+  CREATOR_SKILL_PERMISSION_MAX_LENGTH,
   CREATOR_SKILL_ROOT_ERROR_MESSAGE,
   CreateCreatorArtifactRpcInputSchema,
   CreateCreatorArtifactVersionRpcInputSchema,

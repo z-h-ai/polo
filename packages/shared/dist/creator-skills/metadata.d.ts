@@ -3,6 +3,8 @@ export declare const CREATOR_SKILL_NAME_MAX_LENGTH = 64;
 export declare const CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 export declare const CREATOR_SKILL_MAX_METADATA_ITEMS = 1000;
 export declare const CREATOR_SKILL_ICON_MAX_LENGTH = 64;
+export declare const CREATOR_SKILL_GLOB_MAX_LENGTH = 2048;
+export declare const CREATOR_SKILL_PERMISSION_MAX_LENGTH = 512;
 export declare const CANONICAL_SKILL_FILE_MESSAGE = "Exactly one SKILL.md basename is allowed and it must be at the package root";
 export declare const EMPTY_SKILL_CONTENT_MESSAGE = "Skill content is empty (nothing after frontmatter)";
 export declare const EMPTY_SKILL_CONTENT_SUGGESTION = "Add instructions after the frontmatter describing what the skill should do";
@@ -39,7 +41,7 @@ export interface ParsedCreatorSkillMetadata {
 }
 export declare function isCreatorSkillPackagingNoise(path: string): boolean;
 /** Resolves the one ZIP root used by both browser and archive validation. */
-export declare function resolveCreatorSkillRoot(entries: readonly Pick<NormalizedSkillZipEntry, 'path'>[], expectedRootDirectory?: string): string;
+export declare function resolveCreatorSkillRoot(entries: readonly Pick<NormalizedSkillZipEntry, 'path' | 'directory'>[], expectedRootDirectory?: string): string;
 export declare function isCreatorSkillEmojiIcon(value: string): boolean;
 /**
  * The sole production Creator Skill metadata constraint. Structured consumers

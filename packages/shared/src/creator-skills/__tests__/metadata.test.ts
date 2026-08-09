@@ -41,6 +41,22 @@ describe('browser-safe Creator Skill metadata parser', () => {
     })
   })
 
+  it('accepts an explicit root-directory record but rejects ordinary root files', () => {
+    expect(parseCreatorSkillMetadata([
+      { path: 'polo-test/', directory: true },
+      { path: 'polo-test/SKILL.md', content: skill },
+    ], 'polo-test')).toMatchObject({ slug: 'polo-test' })
+
+    expect(issueFor([
+      { path: 'README.md', content: 'ordinary root file' },
+      { path: 'polo-test/SKILL.md', content: skill },
+    ], 'polo-test')).toEqual({
+      code: 'invalid_skill_root',
+      path: '',
+      message: 'ZIP must contain exactly one root directory matching the Creator Skill slug',
+    })
+  })
+
   it('shares the root and metadata failures used by archive validation', () => {
     expect(() => parseCreatorSkillMetadata([
       { path: 'polo-test/SKILL.md', content: skill.replace('name: polo-test', 'name: Polo Test') },
@@ -147,6 +163,37 @@ Follow the repository conventions.
       field: 'description',
       message: 'Creator Skill description is required and must be a string',
     })
+  })
+
+  it('uses raw names and shared per-entry metadata limits', () => {
+    const nameIssue = {
+      code: 'invalid_skill_content',
+      path: 'polo-test/SKILL.md',
+      field: 'name',
+      message: 'Creator Skill name must use strict kebab-case (for example, polo-test)',
+    } as const
+    for (const name of [' polo-test', 'polo-test ']) {
+      expect(issueFor([{
+        path: 'polo-test/SKILL.md',
+        content: skill.replace('name: polo-test', `name: ${JSON.stringify(name)}`),
+      }])).toEqual(nameIssue)
+    }
+
+    for (const [field, maxLength] of [
+      ['globs', 2_048],
+      ['alwaysAllow', 512],
+      ['requiredSources', 512],
+    ] as const) {
+      expect(issueFor([{
+        path: 'polo-test/SKILL.md',
+        content: skill.replace('---\n\nUse', `${field}: [${JSON.stringify('x'.repeat(maxLength + 1))}]\n---\n\nUse`),
+      }])).toEqual({
+        code: 'invalid_skill_content',
+        path: 'polo-test/SKILL.md',
+        field,
+        message: `Creator Skill ${field} entries must be at most ${maxLength} characters`,
+      })
+    }
   })
 
   it('uses one canonical SKILL.md failure for every invalid candidate layout', () => {

@@ -129,5 +129,44 @@ Do the work.
         message: 'SKILL.md frontmatter must contain valid YAML metadata',
       }],
     })
+
+    for (const name of [' foo-bar', 'foo-bar ']) {
+      expect(validateCreatorSkillContent(`---
+name: ${JSON.stringify(name)}
+description: Valid.
+---
+
+Do the work.
+`, 'foo-bar')).toMatchObject({
+        valid: false,
+        errors: [{
+          code: 'invalid_skill_content',
+          path: 'name',
+          message: 'Creator Skill name must use strict kebab-case (for example, polo-test)',
+        }],
+      })
+    }
+
+    for (const [field, maxLength] of [
+      ['globs', 2_048],
+      ['alwaysAllow', 512],
+      ['requiredSources', 512],
+    ] as const) {
+      expect(validateCreatorSkillContent(`---
+name: foo-bar
+description: Valid.
+${field}: [${JSON.stringify('x'.repeat(maxLength + 1))}]
+---
+
+Do the work.
+`, 'foo-bar')).toMatchObject({
+        valid: false,
+        errors: [{
+          code: 'invalid_skill_content',
+          path: field,
+          message: `Creator Skill ${field} entries must be at most ${maxLength} characters`,
+        }],
+      })
+    }
   })
 })

@@ -5,6 +5,8 @@ export const CREATOR_SKILL_NAME_MAX_LENGTH = 64
 export const CREATOR_SKILL_DESCRIPTION_MAX_LENGTH = 1_024
 export const CREATOR_SKILL_MAX_METADATA_ITEMS = 1_000
 export const CREATOR_SKILL_ICON_MAX_LENGTH = 64
+export const CREATOR_SKILL_GLOB_MAX_LENGTH = 2_048
+export const CREATOR_SKILL_PERMISSION_MAX_LENGTH = 512
 export const CANONICAL_SKILL_FILE_MESSAGE = 'Exactly one SKILL.md basename is allowed and it must be at the package root'
 export const EMPTY_SKILL_CONTENT_MESSAGE = 'Skill content is empty (nothing after frontmatter)'
 export const EMPTY_SKILL_CONTENT_SUGGESTION = 'Add instructions after the frontmatter describing what the skill should do'
@@ -106,14 +108,20 @@ function rootIssue(): CreatorSkillMetadataError {
 
 /** Resolves the one ZIP root used by both browser and archive validation. */
 export function resolveCreatorSkillRoot(
-  entries: readonly Pick<NormalizedSkillZipEntry, 'path'>[],
+  entries: readonly Pick<NormalizedSkillZipEntry, 'path' | 'directory'>[],
   expectedRootDirectory?: string,
 ): string {
   const businessEntries = entries.filter(entry => entry.path.length > 0 && !isCreatorSkillPackagingNoise(entry.path))
   const roots = new Set<string>()
   for (const entry of businessEntries) {
     const parts = entry.path.replace(/\/$/, '').split('/').filter(Boolean)
-    if (parts.length < 2) throw rootIssue()
+    if (parts.length < 2) {
+      if (parts.length === 1 && (entry.directory || entry.path.endsWith('/'))) {
+        roots.add(parts[0]!)
+        continue
+      }
+      throw rootIssue()
+    }
     roots.add(parts[0]!)
   }
   if (roots.size !== 1) throw rootIssue()
@@ -131,11 +139,21 @@ function asRecord(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-function requiredString(data: Record<string, unknown>, field: 'name' | 'description', path: string): string {
-  const value = data[field]
+function requiredName(data: Record<string, unknown>, path: string): string {
+  const value = data.name
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', [
+      metadataIssue('invalid_skill_content', path, 'Creator Skill name is required and must be a string', 'name'),
+    ])
+  }
+  return value
+}
+
+function requiredDescription(data: Record<string, unknown>, path: string): string {
+  const value = data.description
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', [
-      metadataIssue('invalid_skill_content', path, `Creator Skill ${field} is required and must be a string`, field),
+      metadataIssue('invalid_skill_content', path, 'Creator Skill description is required and must be a string', 'description'),
     ])
   }
   return value.trim()
@@ -187,6 +205,19 @@ function optionalStrings(
       metadataIssue('invalid_skill_content', path, `Creator Skill ${field} must be an array of strings`, field),
     ])
   }
+  const itemMaxLength = field === 'globs'
+    ? CREATOR_SKILL_GLOB_MAX_LENGTH
+    : CREATOR_SKILL_PERMISSION_MAX_LENGTH
+  if (value.some(item => item.length > itemMaxLength)) {
+    throw new CreatorSkillMetadataError('SKILL.md metadata is invalid', [
+      metadataIssue(
+        'invalid_skill_content',
+        path,
+        `Creator Skill ${field} entries must be at most ${itemMaxLength} characters`,
+        field,
+      ),
+    ])
+  }
   return value
 }
 
@@ -200,8 +231,8 @@ export function validateCreatorSkillMetadata(
   rootDirectory?: string,
 ): CreatorSkillMetadata {
   const data = asRecord(value, path)
-  const name = requiredString(data, 'name', path)
-  const description = requiredString(data, 'description', path)
+  const name = requiredName(data, path)
+  const description = requiredDescription(data, path)
   const issues: CreatorSkillMetadataIssue[] = []
   const validName = name.length <= CREATOR_SKILL_NAME_MAX_LENGTH && CREATOR_SKILL_NAME_PATTERN.test(name)
   if (!validName) {

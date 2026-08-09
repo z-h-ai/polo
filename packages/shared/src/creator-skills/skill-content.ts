@@ -1,8 +1,10 @@
 import matter from 'gray-matter'
 import { z } from 'zod'
 import {
+  CREATOR_SKILL_NAME_PATTERN,
   CreatorSkillMetadataError,
   parseCreatorSkillDocument,
+  type CreatorSkillMetadata,
 } from './metadata.ts'
 
 export interface SkillContentValidationIssue {
@@ -20,14 +22,7 @@ export interface SkillContentValidationResult {
   warnings: SkillContentValidationIssue[]
 }
 
-export interface ValidatedSkillMetadata {
-  name: string
-  description: string
-  globs?: string[]
-  alwaysAllow?: string[]
-  icon?: string
-  requiredSources?: string[]
-}
+export type ValidatedSkillMetadata = CreatorSkillMetadata
 
 /**
  * Portable Creator/local Skill metadata contract. This module intentionally
@@ -54,7 +49,7 @@ export function isValidSkillSlug(slug: string): boolean {
 }
 
 export function isValidCreatorSkillSlug(slug: string): boolean {
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)
+  return CREATOR_SKILL_NAME_PATTERN.test(slug)
 }
 
 export function suggestSkillSlug(slug: string): string {
