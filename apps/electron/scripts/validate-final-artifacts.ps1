@@ -63,7 +63,8 @@ $previousVersion = $null
 function Invoke-NsisProcess {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
-        [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+        [string[]]$ArgumentList = @(),
+        [string]$RawArgumentLine = "",
         [Parameter(Mandatory = $true)][string]$Label,
         [switch]$UseCurrentPath
     )
@@ -80,9 +81,25 @@ function Invoke-NsisProcess {
             # command and mistake it for a user-owned conflict.
             $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine")
         }
-        $process = Start-Process -FilePath $FilePath `
-            -ArgumentList $ArgumentList `
-            -PassThru -WindowStyle Hidden
+        if ($RawArgumentLine) {
+            # `_?=` is an NSIS command-line escape hatch. It must be the last
+            # argument and must not be quoted even when the target contains
+            # spaces, which ProcessStartInfo.ArgumentList cannot guarantee.
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $FilePath
+            $startInfo.Arguments = $RawArgumentLine
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+                throw "NSIS $Label could not start: $FilePath"
+            }
+        } else {
+            $process = Start-Process -FilePath $FilePath `
+                -ArgumentList $ArgumentList `
+                -PassThru -WindowStyle Hidden
+        }
     } finally {
         $env:Path = $savedPath
     }
@@ -131,12 +148,14 @@ function Invoke-Uninstaller {
         throw "NSIS uninstall executable is missing: $uninstaller"
     }
     Stop-InstalledPoloApp
-    # A per-user electron-builder uninstall is registered with /currentuser.
-    # The test installer uses a custom /D root, so omitting the switch lets
-    # NSIS choose its normal location and makes its custom cleanup operate on
-    # a different installation. Mirror the registered quiet uninstall path.
-    Invoke-NsisProcess -FilePath $uninstaller `
-        -ArgumentList @("/currentuser", "/S") -Label "uninstaller"
+    # electron-builder's upgrade flow invokes an uninstaller from a temporary
+    # copy and passes the exact installation root via `_?=`. Keep that form:
+    # running it in place first exits a self-copying NSIS launcher, which can
+    # hide the custom-uninstall result from this release gate.
+    $uninstallerCopy = Join-Path $testRoot "Polo AI validation uninstaller.exe"
+    Copy-Item -LiteralPath $uninstaller -Destination $uninstallerCopy -Force
+    Invoke-NsisProcess -FilePath $uninstallerCopy `
+        -RawArgumentLine "/S _?=$installDir" -Label "uninstaller"
     # NSIS can hand deletion and custom-uninstall work to a short-lived child
     # process.  Waiting only for the launcher controller can therefore race
     # the terminal cleanup and report a false stale-launcher failure.  Wait
