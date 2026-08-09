@@ -231,6 +231,26 @@ jobs:
           & apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1 -AsciiOnly
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Parse Windows final artifact validator with Windows PowerShell
+        if: matrix.platform == 'windows'
+        # The final NSIS lifecycle validator contains Unicode filesystem cases.
+        # Windows PowerShell requires the source to retain its UTF-8 BOM, so
+        # reject a parser regression before electron-builder reaches afterAll.
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          $validator = (Resolve-Path 'apps/electron/scripts/validate-final-artifacts.ps1').Path
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            $validator,
+            [ref]$tokens,
+            [ref]$parseErrors
+          )
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+
       - name: Build and validate macOS release
         if: matrix.platform == 'macos'
         shell: bash

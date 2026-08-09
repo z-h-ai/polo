@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("Smoke", "Bootstrap", "Full")]
     [string]$Mode = "Smoke",
     [string]$ReleaseDir = "",

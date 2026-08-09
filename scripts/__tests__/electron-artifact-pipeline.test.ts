@@ -108,7 +108,9 @@ describe('Electron final artifact validation pipeline', () => {
 
   it('validates the installed NSIS container and real previous-to-current lifecycle', () => {
     const validator = read('apps/electron/scripts/validate-final-artifacts.ps1')
+    const validatorBytes = readFileSync(join(root, 'apps/electron/scripts/validate-final-artifacts.ps1'))
 
+    expect(validatorBytes.subarray(0, 3).toString('hex')).toBe('efbbbf')
     expect(validator).toContain('Full validation requires -PreviousArtifact')
     expect(validator).toContain('Invoke-Installer')
     expect(validator).toContain('Test-InstalledContainer')
@@ -231,6 +233,8 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('shell: powershell')
     expect(workflow).toContain('Smoke Windows PowerShell installer compatibility')
     expect(workflow).toContain('PowerShell 7-only pass cannot hide an installer failure')
+    expect(workflow).toContain('Parse Windows final artifact validator with Windows PowerShell')
+    expect(workflow).toContain('[System.Management.Automation.Language.Parser]::ParseFile')
     const wrapperSmoke = read('apps/electron/resources/scripts/tests/windows-wrapper-smoke.test.ps1')
     expect(wrapperSmoke).toContain('Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe')
     expect(wrapperSmoke).toContain('/target:exe')
