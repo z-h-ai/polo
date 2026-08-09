@@ -294,7 +294,7 @@ jobs:
           log="$RUNNER_TEMP/full-validation-windows-x64.log"
           for attempt in 1 2; do
             set +e
-            bun run electron:dist:win --arch=x64 2>&1 | tee "$log"
+            DEBUG=electron-builder bun run electron:dist:win --arch=x64 2>&1 | tee "$log"
             status=${PIPESTATUS[0]}
             set -e
             if [ "$status" -eq 0 ]; then
@@ -378,6 +378,7 @@ jobs:
           path: |
             ${{ runner.temp }}/full-validation-${{ matrix.platform }}-${{ matrix.arch }}.log
             apps/electron/release/release-signing-audit-*.jsonl
+            apps/electron/release/builder-debug.yml
             previous/verified-contract-${{ matrix.platform }}.json
           if-no-files-found: ignore
           retention-days: 14
