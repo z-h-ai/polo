@@ -86,9 +86,13 @@ function Invoke-NsisProcess {
     } finally {
         $env:Path = $savedPath
     }
-    if (-not $process.WaitForExit(90000)) {
+    # Hosted Windows runners can spend over a minute extracting and scanning a
+    # first-run NSIS payload. Keep the wait bounded (unlike Start-Process
+    # -Wait's process-tree wait), but leave enough headroom to avoid turning a
+    # valid installer into a flaky release gate.
+    if (-not $process.WaitForExit(180000)) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        throw "NSIS $Label timed out after 90 seconds"
+        throw "NSIS $Label timed out after 180 seconds"
     }
     $process.Refresh()
     if ($process.ExitCode -ne 0) {
