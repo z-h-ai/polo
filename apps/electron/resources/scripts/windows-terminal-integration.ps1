@@ -1134,28 +1134,36 @@ if ($Mode -eq "Validate") {
     return
 }
 
+function Write-TerminalIntegrationDiagnostic([Exception]$Exception) {
+    # NSIS only communicates the child process status. Preserve its actionable
+    # error locally for repair and artifact validation without exposing it in
+    # the installer UI or a public release channel.
+    $diagnosticDirectory = Join-Path $env:LOCALAPPDATA "Polo AI"
+    $diagnosticFile = Join-Path $diagnosticDirectory "terminal-integration-error.log"
+    try {
+        New-Item -ItemType Directory -Force -Path $diagnosticDirectory | Out-Null
+        Set-Content -LiteralPath $diagnosticFile -Value $Exception.ToString() -Encoding UTF8
+    } catch {
+        # The original terminal integration error remains authoritative.
+    }
+}
+
 if ($Mode -eq "Install") {
     try {
         Install-Transactional (-not $SkipCommandConflict) ([bool]$UserPathFile)
     } catch {
-        # NSIS can only return an exit code from this child process. Preserve
-        # the actionable failure locally so both the desktop repair flow and
-        # artifact validation can report the underlying ownership/registry
-        # error without exposing it through a public installer channel.
-        $diagnosticDirectory = Join-Path $env:LOCALAPPDATA "Polo AI"
-        $diagnosticFile = Join-Path $diagnosticDirectory "terminal-integration-error.log"
-        try {
-            New-Item -ItemType Directory -Force -Path $diagnosticDirectory | Out-Null
-            Set-Content -LiteralPath $diagnosticFile -Value $_.Exception.ToString() -Encoding UTF8
-        } catch {
-            # The original terminal integration error remains authoritative.
-        }
+        Write-TerminalIntegrationDiagnostic $_.Exception
         throw
     }
     return
 }
 
-Uninstall-Transactional ([bool]$UserPathFile)
+try {
+    Uninstall-Transactional ([bool]$UserPathFile)
+} catch {
+    Write-TerminalIntegrationDiagnostic $_.Exception
+    throw
+}
 
 if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir -Force | Select-Object -First 1)) {
     Remove-Item $BinDir -Force

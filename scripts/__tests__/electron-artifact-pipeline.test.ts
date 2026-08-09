@@ -128,6 +128,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(nsis).toContain('IfSilent polo_terminal_setup_silent_failure')
     expect(nsis).toContain('SetErrorLevel 1')
     expect(nsis).toContain('Quit')
+    expect(nsis).toContain('IfSilent polo_terminal_uninstall_silent_failure')
     const terminalIntegration = read('apps/electron/resources/scripts/windows-terminal-integration.ps1')
     expect(terminalIntegration).toContain('terminal-integration-error.log')
     expect(terminalIntegration).toContain('The original terminal integration error remains authoritative.')
