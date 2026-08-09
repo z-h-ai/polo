@@ -33,7 +33,10 @@ polo_terminal_setup_finished:
   DetailPrint "Removing Polo terminal command..."
   Push $R1
   Push $R2
+  Push $R3
+  Push $R4
   StrCpy $R2 ""
+  ReadEnvStr $R3 "POLO_NSIS_UNINSTALL_TRACE_FILE"
   ReadINIStr $R1 "$INSTDIR\polo-terminal-integration.ini" "terminal" "binDir"
   ${If} $R1 == ""
     ; Legacy installs predate the persisted target. Their conventional
@@ -43,8 +46,26 @@ polo_terminal_setup_finished:
   ${Else}
     StrCpy $R2 "-RequireOwnershipState"
   ${EndIf}
+  ${If} $R3 != ""
+    ClearErrors
+    FileOpen $R4 "$R3" w
+    ${IfNot} ${Errors}
+      FileWrite $R4 "customUnInit entered$\r$\ninstDir=$INSTDIR$\r$\nbinDir=$R1$\r$\n"
+      FileClose $R4
+    ${EndIf}
+  ${EndIf}
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\app\resources\scripts\windows-terminal-integration.ps1" -Mode Uninstall -InstallDir "$INSTDIR" -BinDir "$R1" $R2'
   Pop $0
+  ${If} $R3 != ""
+    ClearErrors
+    FileOpen $R4 "$R3" a
+    ${IfNot} ${Errors}
+      FileWrite $R4 "exitCode=$0$\r$\n"
+      FileClose $R4
+    ${EndIf}
+  ${EndIf}
+  Pop $R4
+  Pop $R3
   Pop $R2
   Pop $R1
   ${If} $0 != 0

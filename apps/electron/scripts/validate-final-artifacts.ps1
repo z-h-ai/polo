@@ -131,7 +131,19 @@ function Invoke-Uninstaller {
         throw "NSIS uninstall executable is missing: $uninstaller"
     }
     Stop-InstalledPoloApp
-    Invoke-NsisProcess -FilePath $uninstaller -ArgumentList @("/S") -Label "uninstaller"
+    $savedTraceFile = $env:POLO_NSIS_UNINSTALL_TRACE_FILE
+    $traceFile = Join-Path $testRoot "nsis-uninstall-trace.txt"
+    try {
+        $env:POLO_NSIS_UNINSTALL_TRACE_FILE = $traceFile
+        Invoke-NsisProcess -FilePath $uninstaller -ArgumentList @("/S") -Label "uninstaller"
+    } finally {
+        $env:POLO_NSIS_UNINSTALL_TRACE_FILE = $savedTraceFile
+    }
+    if (Test-Path -LiteralPath $traceFile -PathType Leaf) {
+        Write-Host "NSIS uninstaller trace: $((Get-Content -LiteralPath $traceFile -Raw).Trim())"
+    } else {
+        Write-Host "NSIS uninstaller trace: macro did not write the temporary trace"
+    }
 }
 
 function Assert-ReleaseAuthenticodeIdentity([string]$Path, [string]$Label) {
