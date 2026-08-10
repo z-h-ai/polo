@@ -6,7 +6,7 @@ import { describe, expect, it } from 'bun:test'
 import { prepareReleaseBundle, verifyPublishedRelease } from './electron-release-bundle'
 
 describe('release bundle assembly and public verification', () => {
-  it('builds the complete desktop bundle and verifies it over HEAD/GET', async () => {
+  it('builds the complete desktop bundle and verifies every latest resource over HEAD/GET', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-release-bundle-'))
     const input = join(root, 'input')
     const output = join(root, 'output')
@@ -57,10 +57,9 @@ describe('release bundle assembly and public verification', () => {
           const name = basename(new URL(request.url).pathname)
           const file = Bun.file(join(output, name))
           if (!(await file.exists())) return new Response('Not found', { status: 404 })
-          const noCache = name.endsWith('.yml') || name === 'release-contract.json' || name === 'install-app.sh'
           const headers = {
             'content-length': String(file.size),
-            'cache-control': noCache ? 'no-cache' : 'public, max-age=31536000, immutable',
+            'cache-control': 'no-cache',
           }
           return request.method === 'HEAD'
             ? new Response(null, { headers })

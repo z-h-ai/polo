@@ -133,6 +133,14 @@ describe('updates-static Caddy cache contract', () => {
       }
       for (const method of ['POST', 'PUT', 'DELETE']) {
         expect((await fetch(`${baseUrl}/install-app.sh`, { method })).status).toBe(405)
+        expect((await fetch(
+          `${serviceRoot}/electron/releases/1.0.0/Polo-AI-x64.zip`,
+          { method },
+        )).status).toBe(405)
+        expect((await fetch(
+          `${serviceRoot}/electron/.jobs/1.0.0/state.json`,
+          { method },
+        )).status).toBe(404)
       }
     } finally {
       if (containerId) await docker(['rm', '-f', containerId])

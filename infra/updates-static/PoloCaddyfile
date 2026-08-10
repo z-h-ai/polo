@@ -43,7 +43,10 @@
 
 		# Do not let an unknown release-like directory fall through to the general
 		# file server. Hidden entries were rejected above before this catch-all.
-		@unpublishedReleaseDirectories path /electron/releases /electron/releases/*
+		@unpublishedReleaseDirectories {
+			method GET HEAD
+			path /electron/releases /electron/releases/*
+		}
 		respond @unpublishedReleaseDirectories "Not found" 404
 
 		@readonly method GET HEAD
