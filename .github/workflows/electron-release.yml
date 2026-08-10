@@ -154,7 +154,7 @@ jobs:
           release_id="$(jq -r .id /tmp/draft-release-selection.json)"
           case "$release_id" in (''|*[!0-9]*) echo '::error::Invalid Draft Release ID'; exit 1;; esac
           gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > /tmp/draft-release.json
-          bun scripts/electron-release-draft-identity.ts \
+          bun scripts/electron-release-draft-identity.ts create \
             --release-dir release \
             --github-release /tmp/draft-release.json \
             --output /tmp/draft-identity.json

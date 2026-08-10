@@ -71,6 +71,15 @@ describe("Electron release workflow boundaries", () => {
     expect(recovery).not.toContain("zeabur");
   });
 
+  it("uses the explicit create command when snapshotting a newly assembled Draft", () => {
+    const draftIdentity = release.slice(
+      release.indexOf("Snapshot approved immutable Draft identity"),
+      release.indexOf("  production:"),
+    );
+    expect(draftIdentity).toContain(`bun scripts/electron-release-draft-identity.ts create \\
+            --release-dir release`);
+  });
+
   it("keeps Zeabur credentials and PVC writes out of scheduled validation", () => {
     expect(scheduled).not.toContain("ZEABUR_TOKEN");
     expect(scheduled).not.toContain("/data/releases");
