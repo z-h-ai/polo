@@ -4,6 +4,7 @@ import { lstat, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { sha256 } from './electron-release-contract'
+import { parseStrictSemverTag } from './strict-semver'
 
 export const RELEASE_ASSET_NAMES = [
   'Polo-AI-x64.dmg',
@@ -46,6 +47,15 @@ interface GitHubDraftRelease {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const expectedAssetNames = new Set<string>(RELEASE_ASSET_NAMES)
+
+function asReleaseList(value: unknown): unknown[] {
+  if (!Array.isArray(value)) throw new Error('GitHub Releases response must be an array')
+  if (value.every(item => Array.isArray(item))) return value.flat()
+  if (value.some(item => Array.isArray(item))) {
+    throw new Error('GitHub Releases response mixes pages and releases')
+  }
+  return value
+}
 
 function assertReleaseId(value: unknown, message: string): asserts value is number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(message)
@@ -90,6 +100,35 @@ export function parseDraftReleaseIdentity(value: unknown): DraftReleaseIdentity 
   const identity = value as Partial<DraftReleaseIdentity>
   assertReleaseId(identity.releaseId, 'Approved Draft release ID is invalid')
   return { releaseId: identity.releaseId, assets: assertAssetIdentity(identity.assets) }
+}
+
+export function selectDraftRelease(
+  githubReleases: unknown,
+  expected: { tag: string; commit: string },
+): GitHubDraftRelease {
+  const commit = expected.commit.toLowerCase()
+  if (!parseStrictSemverTag(expected.tag)) {
+    throw new Error('Draft recovery tag must be a strict v-prefixed SemVer')
+  }
+  if (!/^[a-f0-9]{40}$/.test(commit)) {
+    throw new Error('Draft recovery commit must be a full SHA-1')
+  }
+  const matches = asReleaseList(githubReleases).filter((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return false
+    const release = candidate as Partial<GitHubDraftRelease>
+    return release.draft === true
+      && release.tag_name === expected.tag
+      && typeof release.target_commitish === 'string'
+      && release.target_commitish.toLowerCase() === commit
+  })
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected exactly one Draft Release for ${expected.tag} at ${commit}; found ${matches.length}`,
+    )
+  }
+  const selected = matches[0] as GitHubDraftRelease
+  assertReleaseId(selected.id, 'Selected GitHub Draft Release ID is invalid')
+  return selected
 }
 
 export async function createDraftReleaseIdentity(
@@ -179,6 +218,7 @@ async function main(): Promise<void> {
     options: {
       'release-dir': { type: 'string' },
       'github-release': { type: 'string' },
+      'github-releases': { type: 'string' },
       output: { type: 'string' },
       identity: { type: 'string' },
       tag: { type: 'string' },
@@ -197,6 +237,17 @@ async function main(): Promise<void> {
       JSON.parse(values.identity),
       { tag: values.tag, commit: values.commit, draft: values.draft === 'either' ? 'either' : values.draft === 'true' },
     )
+    return
+  }
+  if (command === 'select') {
+    if (!values['github-releases'] || !values.tag || !values.commit || !values.output) {
+      throw new Error('Usage: electron-release-draft-identity select --github-releases <json> --tag <tag> --commit <sha> --output <json>')
+    }
+    const release = selectDraftRelease(
+      JSON.parse(await readFile(values['github-releases'], 'utf8')),
+      { tag: values.tag, commit: values.commit },
+    )
+    await writeFile(values.output, `${JSON.stringify(release)}\n`)
     return
   }
   if (command !== 'create' || !values['release-dir'] || !values['github-release'] || !values.output) {

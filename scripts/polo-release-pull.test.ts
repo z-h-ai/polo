@@ -59,7 +59,13 @@ async function approvedDraftIdentity(assetsDir: string): Promise<string> {
 
 function startDraftServer(
   assetsDir: string,
-  options: { signedFailure?: boolean, includeDigests?: boolean, assetRequests?: { count: number } } = {},
+  options: {
+    signedFailure?: boolean
+    signedSuccess?: boolean
+    includeDigests?: boolean
+    assetRequests?: { count: number }
+    rangeRequests?: { count: number }
+  } = {},
 ): ReturnType<typeof Bun.serve> {
   let server: ReturnType<typeof Bun.serve>
   server = Bun.serve({
@@ -93,17 +99,37 @@ function startDraftServer(
       if (match) {
         if (options.assetRequests) options.assetRequests.count += 1
         expect(request.headers.get('authorization')).toBe('Bearer test-token')
-        if (options.signedFailure) {
+        if (options.signedFailure || options.signedSuccess) {
           return new Response(null, {
             status: 302,
-            headers: { location: `/signed-object?X-Amz-Signature=super-secret-${match[1]}` },
+            headers: { location: `/signed-object/${match[1]}?X-Amz-Signature=super-secret-${match[1]}` },
           })
         }
         return new Response(Bun.file(join(assetsDir, RELEASE_ASSET_NAMES[Number(match[1]) - 1]!)))
       }
-      if (pathname === '/signed-object') {
+      const signedMatch = pathname.match(/^\/signed-object\/(\d+)$/)
+      if (signedMatch) {
         expect(request.headers.get('authorization')).toBeNull()
-        return new Response('object-store failed', { status: 503 })
+        if (options.signedFailure) return new Response('object-store failed', { status: 503 })
+        if (options.rangeRequests) options.rangeRequests.count += 1
+        const name = RELEASE_ASSET_NAMES[Number(signedMatch[1]) - 1]!
+        const bytes = Buffer.from(await Bun.file(join(assetsDir, name)).arrayBuffer())
+        const range = request.headers.get('range')?.match(/^bytes=(\d+)-(\d+)$/)
+        if (!range) return new Response('range required', { status: 400 })
+        const start = Number(range[1])
+        const end = Number(range[2])
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end >= bytes.length) {
+          return new Response('invalid range', { status: 416 })
+        }
+        const body = bytes.subarray(start, end + 1)
+        return new Response(body, {
+          status: 206,
+          headers: {
+            'accept-ranges': 'bytes',
+            'content-length': String(body.byteLength),
+            'content-range': `bytes ${start}-${end}/${bytes.length}`,
+          },
+        })
       }
       return new Response('not found', { status: 404 })
     },
@@ -161,12 +187,48 @@ describe('Zeabur Draft Release puller', () => {
         apiBase: `http://127.0.0.1:${server.port}`,
         token: 'test-token',
         peakCapacityCheck: async () => {},
+        signedDownloadChunkBytes: 4,
+        signedDownloadConcurrency: 4,
       }).then(() => undefined, reason => reason as Error)
       expect(error).toBeInstanceOf(Error)
       expect(error!.message).toBe('Unable to download signed GitHub release asset: Polo-AI-x64.dmg')
       expect(error!.message).not.toContain('X-Amz-Signature')
       expect(error!.message).not.toContain('super-secret')
       await expect(readdir(join(volume, 'electron', '.incoming'))).resolves.toEqual([])
+    } finally {
+      server.stop(true)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reassembles signed object-store assets from bounded byte ranges without forwarding the token', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'polo-release-pull-signed-ranges-'))
+    const volume = join(root, 'volume')
+    const assetsDir = await createDraftAssets(root)
+    await mkdir(volume)
+    const rangeRequests = { count: 0 }
+    const server = startDraftServer(assetsDir, { signedSuccess: true, rangeRequests })
+    try {
+      const result = await pullRelease({
+        repository,
+        tag,
+        version,
+        commitSha,
+        releaseId,
+        assetIdentity: await approvedDraftIdentity(assetsDir),
+        releasesDir: volume,
+        apiBase: `http://127.0.0.1:${server.port}`,
+        token: 'test-token',
+        peakCapacityCheck: async () => {},
+        publisherOptions: { capacityCheck: async () => {} },
+        signedDownloadChunkBytes: 64,
+        signedDownloadConcurrency: 4,
+      })
+      expect(result).toBe('published')
+      expect(rangeRequests.count).toBeGreaterThan(RELEASE_ASSET_NAMES.length)
+      for (const name of RELEASE_ASSET_NAMES) {
+        expect(await readFile(join(volume, 'electron', 'releases', version, name))).toEqual(await readFile(join(assetsDir, name)))
+      }
     } finally {
       server.stop(true)
       await rm(root, { recursive: true, force: true })

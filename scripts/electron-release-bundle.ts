@@ -276,7 +276,21 @@ async function main(): Promise<void> {
     })
     return
   }
-  throw new Error('Usage: electron-release-bundle.ts <prepare|verify> [options]')
+  if (command === 'validate') {
+    const { values } = parseArgs({
+      args,
+      options: { ...common, input: { type: 'string' } },
+      strict: true,
+    })
+    await validateSource(required(values, 'input'), {
+      repository: required(values, 'repository'),
+      tag: required(values, 'tag'),
+      version: required(values, 'version'),
+      commitSha: required(values, 'commit').toLowerCase(),
+    })
+    return
+  }
+  throw new Error('Usage: electron-release-bundle.ts <prepare|validate|verify> [options]')
 }
 
 if (import.meta.main) await main()
