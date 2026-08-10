@@ -8,6 +8,7 @@ import {
   type PreparePlatformRuntimeOptions,
 } from './prepare-platform-runtime'
 import type { Arch, Platform } from './build/common'
+import { finalizeMacUpdateManifest } from './finalize-electron-update-manifest'
 
 export interface ElectronDistOptions {
   platform: Platform
@@ -24,6 +25,7 @@ interface ElectronDistDependencies {
     options: Omit<PreparePlatformRuntimeOptions, 'bunSource' | 'uvSource'>,
   ) => void
   package: (options: ElectronDistOptions, env: Record<string, string>) => Promise<void>
+  finalizeArtifacts: (options: ElectronDistOptions) => Promise<void>
 }
 
 function inheritedEnvironment(overrides: Record<string, string>): Record<string, string> {
@@ -80,6 +82,12 @@ const defaultDependencies: ElectronDistDependencies = {
       env,
     )
   },
+  async finalizeArtifacts(options) {
+    if (options.platform === 'darwin' && options.arch === 'x64') {
+      await finalizeMacUpdateManifest(resolve(options.electronDir, 'release'))
+      console.log('Finalized latest-mac.yml from final ZIP and DMG bytes')
+    }
+  },
 }
 
 export async function runElectronDist(
@@ -116,6 +124,7 @@ export async function runElectronDist(
   await dependencies.build(options, env)
   dependencies.stageHelpers(runtimeOptions)
   await dependencies.package(options, env)
+  await dependencies.finalizeArtifacts(options)
 }
 
 if (import.meta.main) {

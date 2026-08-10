@@ -16,7 +16,7 @@ describe('target-aware Electron release entry', () => {
     expect(source).toContain("options.platform === 'darwin' && options.dev")
   })
 
-  it('always prepares the complete target runtime before build, helpers, and package', async () => {
+  it('always prepares the complete target runtime and finalizes artifacts after packaging', async () => {
     const calls: string[] = []
     const options: ElectronDistOptions = {
       platform: process.platform as Platform,
@@ -43,6 +43,9 @@ describe('target-aware Electron release entry', () => {
       package: async () => {
         calls.push('package')
       },
+      finalizeArtifacts: async () => {
+        calls.push('finalize')
+      },
     })
 
     expect(calls).toEqual([
@@ -50,6 +53,7 @@ describe('target-aware Electron release entry', () => {
       'build',
       'helpers',
       'package',
+      'finalize',
     ])
   })
 
@@ -70,6 +74,7 @@ describe('target-aware Electron release entry', () => {
       build: async () => {},
       stageHelpers: () => {},
       package: async () => {},
+      finalizeArtifacts: async () => {},
     })).rejects.toThrow('must run on its native platform')
     expect(prepared).toBe(false)
   })
