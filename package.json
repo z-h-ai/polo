@@ -109,7 +109,9 @@
     "release": "bun run scripts/release.ts",
     "release:publish": "bun run scripts/publish-electron-release.ts publish",
     "release:rollback": "bun run scripts/publish-electron-release.ts rollback",
-    "check-version": "bun run scripts/check-version.ts",
+    "release:version:set": "bun run scripts/release-version.ts set",
+    "release:version:check": "bun run scripts/release-version.ts check",
+    "check-version": "bun run release:version:check",
     "oss:sync": "bun run scripts/oss-sync.ts",
     "prepare": "husky"
   },
