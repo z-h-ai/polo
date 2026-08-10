@@ -711,6 +711,28 @@ export async function publish(
   })
 }
 
+export async function prepareReleaseRollback(releasesDir: string, version: string): Promise<void> {
+  if (!isStrictSemver(version)) throw new Error('Prepared version must be strict SemVer')
+  const electronRoot = join(resolve(releasesDir), 'electron')
+  await mkdir(join(electronRoot, 'releases'), { recursive: true })
+  await withPublisherLock(electronRoot, async () => {
+    await assertNoActiveCompensationMarkers(electronRoot)
+    const liveMarker = await liveRollbackMarker(electronRoot, version)
+    if (liveMarker) {
+      const latest = await readLatestContract(electronRoot)
+      if (latest?.version === version) return
+      await assertLatestMatchesRollbackTarget(electronRoot, version, await readRollbackTarget(liveMarker, version))
+      return
+    }
+    await recordRollbackTarget(electronRoot, version)
+    await assertLatestMatchesRollbackTarget(
+      electronRoot,
+      version,
+      await readRollbackTarget(markerPath(electronRoot, 'rollback', version), version),
+    )
+  })
+}
+
 export async function rollback(releasesDir: string, targetVersion: string): Promise<void> {
   if (!isStrictSemver(targetVersion)) throw new Error('Rollback target must be strict SemVer')
   const electronRoot = join(resolve(releasesDir), 'electron')
@@ -805,7 +827,13 @@ export async function rollbackFailedRelease(releasesDir: string, version: string
     }
     const target = await readRollbackTarget(marker, version)
     if (!latest || latest.version !== version) {
-      throw new Error(`Cannot compensate ${version}: electron/latest changed before rollback`)
+      // A prepared asynchronous pull may fail before it ever switches latest.
+      // Accept that state only when latest still matches the exact durable
+      // predecessor captured before the worker started.
+      await assertLatestMatchesRollbackTarget(electronRoot, version, target)
+      await rename(marker, compensatedMarker)
+      await archiveCompensation(electronRoot, version, target)
+      return
     }
     if (target.previousTarget === null) {
       const latestPath = join(electronRoot, 'latest')
@@ -999,6 +1027,12 @@ async function main(): Promise<void> {
     console.log(`Release ${version}: ${result}`)
     return
   }
+  if (command === 'prepare') {
+    const version = required(values, 'version')
+    await prepareReleaseRollback(required(values, 'releases-dir'), version)
+    console.log(`Release ${version} rollback predecessor prepared`)
+    return
+  }
   if (command === 'rollback') {
     const version = required(values, 'version')
     await rollback(required(values, 'releases-dir'), version)
@@ -1047,7 +1081,7 @@ async function main(): Promise<void> {
     console.log(`Rollback predecessor for ${version} is restored exactly`)
     return
   }
-  throw new Error('Usage: publisher <publish|rollback|confirm|rollback-failed|finalize|assert-confirmed|assert-finalized|assert-not-latest|assert-rollback-target> [options]')
+  throw new Error('Usage: publisher <prepare|publish|rollback|confirm|rollback-failed|finalize|assert-confirmed|assert-finalized|assert-not-latest|assert-rollback-target> [options]')
 }
 
 if (import.meta.main) await main()

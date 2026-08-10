@@ -56,13 +56,15 @@ const OP_FORCE_DELETE_LEDGER_COMMITTED = '46464646-4646-4646-8646-464646464646'
 const OP_FORCE_DELETE_COMMITTED = '47474747-4747-4747-8747-474747474747'
 const OP_FORCE_DELETE_RECOVERY = '48484848-4848-4848-8848-484848484848'
 
-function skillContent(version: string): string {
+function skillContent(slugOrVersion: string, version?: string): string {
+  const slug = version === undefined ? 'install-test' : slugOrVersion
+  const resolvedVersion = version ?? slugOrVersion
   return `---
-name: Install Test
+name: ${slug}
 description: Exercises the Creator Skill installer.
 ---
 
-Installed content for ${version}.
+Installed content for ${resolvedVersion}.
 `
 }
 
@@ -77,7 +79,7 @@ async function packageGrant(
 ): Promise<{ bytes: Uint8Array; grant: CreatorSkillDownloadGrant }> {
   const slug = options.slug ?? 'install-test'
   const bytes = zipSync({
-    [`${slug}/SKILL.md`]: strToU8(skillContent(version)),
+    [`${slug}/SKILL.md`]: strToU8(skillContent(slug, version)),
     [`${slug}/references/version.txt`]: strToU8(version),
   })
   const archivePath = join(root, `${slug}-${version}.zip`)

@@ -22,6 +22,7 @@ describe('updates-static Caddy cache contract', () => {
     const staging = join(root, 'electron', 'releases', '.1.0.0.staging-123')
     const published = join(root, 'electron', 'releases', '1.0.0')
     const temporaryLatest = join(root, 'electron', '.latest-123')
+    const releaseJob = join(root, 'electron', '.jobs', '1.0.0')
     const caddyfile = join(process.cwd(), 'infra/updates-static/PoloCaddyfile')
     let containerId = ''
     try {
@@ -31,6 +32,7 @@ describe('updates-static Caddy cache contract', () => {
         mkdir(staging, { recursive: true }),
         mkdir(published, { recursive: true }),
         mkdir(temporaryLatest, { recursive: true }),
+        mkdir(releaseJob, { recursive: true }),
         mkdir(join(root, 'electron', '.publisher.lock'), { recursive: true }),
         mkdir(join(temporaryLatest, 'nested'), { recursive: true }),
         mkdir(join(latest, '.publisher-state'), { recursive: true }),
@@ -51,6 +53,7 @@ describe('updates-static Caddy cache contract', () => {
         writeFile(join(published, '.publisher-state', 'state.json'), 'private release child'),
         writeFile(join(root, 'electron', '.rollback-1.0.0.json'), 'private rollback'),
         writeFile(join(root, 'electron', '.confirmed-1.0.0.json'), 'private confirmation'),
+        writeFile(join(releaseJob, 'state.json'), 'private job state'),
       ])
       containerId = await docker([
         'run', '-d', '--rm', '-p', '127.0.0.1::8080',
@@ -88,6 +91,7 @@ describe('updates-static Caddy cache contract', () => {
         '/electron/.latest-123/nested/state.json',
         '/electron/latest/.publisher-state/state.json',
         '/electron/.rollback-1.0.0.json',
+        '/electron/.jobs/1.0.0/state.json',
         '/electron/.confirmed-1.0.0.json',
         '/electron/releases/1.0.0/Polo-AI-x64.exe',
         '/electron/releases/1.0.0/.publisher-state/state.json',

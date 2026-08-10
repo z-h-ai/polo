@@ -1,153 +1,253 @@
-import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'bun:test'
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "bun:test";
 
-const reusable = readFileSync('.github/workflows/electron-artifact-full.yml', 'utf8')
-const release = readFileSync('.github/workflows/electron-release.yml', 'utf8')
-const scheduled = readFileSync('.github/workflows/electron-scheduled-validation.yml', 'utf8')
-const rollback = readFileSync('.github/workflows/electron-rollback.yml', 'utf8')
-const rollbackAction = readFileSync('.github/actions/zeabur-rollback-failed/action.yml', 'utf8')
+const reusable = readFileSync(
+  ".github/workflows/electron-artifact-full.yml",
+  "utf8",
+);
+const release = readFileSync(".github/workflows/electron-release.yml", "utf8");
+const scheduled = readFileSync(
+  ".github/workflows/electron-scheduled-validation.yml",
+  "utf8",
+);
+const rollback = readFileSync(
+  ".github/workflows/electron-rollback.yml",
+  "utf8",
+);
+const rollbackAction = readFileSync(
+  ".github/actions/zeabur-rollback-failed/action.yml",
+  "utf8",
+);
 
-describe('Electron release workflow boundaries', () => {
-  it('uses a reusable build without release.created publication', () => {
-    expect(reusable).toContain('workflow_call:')
-    expect(reusable).not.toContain('release:\n    types:')
-    expect(reusable).toContain('contents: read')
-    expect(reusable).not.toContain('contents: write')
-  })
+describe("Electron release workflow boundaries", () => {
+  it("uses a reusable build without release.created publication", () => {
+    expect(reusable).toContain("workflow_call:");
+    expect(reusable).not.toContain("release:\n    types:");
+    expect(reusable).toContain("contents: read");
+    expect(reusable).not.toContain("contents: write");
+  });
 
-  it('blocks production on all platform builds and Draft Release assembly', () => {
-    expect(release).toContain('needs: [preflight, build]')
-    expect(release).toContain('needs: [preflight, draft-release]')
-    expect(release).toContain('environment: production')
-    expect(release).toContain('group: electron-production-release')
-    expect(release).toContain('cancel-in-progress: false')
-  })
+  it("blocks production on all platform builds and Draft Release assembly", () => {
+    expect(release).toContain("needs: [preflight, build]");
+    expect(release).toContain(
+      "needs: [preflight, draft-release, recover-draft]",
+    );
+    expect(release).toContain(
+      "github.event_name == 'push' && needs.preflight.result == 'success' && needs.draft-release.result == 'success'",
+    );
+    expect(release).toContain("environment: production");
+    expect(release).toContain("group: electron-production-release");
+    expect(release).toContain("cancel-in-progress: false");
+  });
 
-  it('keeps Zeabur credentials and PVC writes out of scheduled validation', () => {
-    expect(scheduled).not.toContain('ZEABUR_TOKEN')
-    expect(scheduled).not.toContain('/data/releases')
-    expect(scheduled).not.toContain('environment: production')
-  })
+  it("recovers only one exact existing Draft without rebuilding or moving its immutable tag", () => {
+    const recovery = release.slice(
+      release.indexOf("  recover-draft:"),
+      release.indexOf("  production:"),
+    );
+    expect(release).toContain("workflow_dispatch:");
+    expect(release).toContain("recover_tag:");
+    expect(release).toContain("recover_commit:");
+    expect(release).toContain(
+      "Download and strictly validate existing Draft assets",
+    );
+    expect(release).toContain("electron-release-draft-identity.ts select");
+    expect(release).toContain("releases?per_page=100");
+    expect(release).not.toContain("releases/tags/$GITHUB_REF_NAME");
+    expect(release).toContain("electron-release-bundle.ts validate");
+    expect(release).toContain(
+      "github.event_name == 'workflow_dispatch' && needs.recover-draft.result == 'success'",
+    );
+    expect(release).toContain("RELEASE_TAG:");
+    expect(release).toContain("RELEASE_COMMIT:");
+    expect(release).not.toContain("git tag -f");
+    expect(release).not.toContain("git push --force");
+    expect(recovery).toContain("contents: write");
+    expect(recovery).not.toContain("gh api --method");
+    expect(recovery).not.toContain("gh release create");
+    expect(recovery).not.toContain("gh release edit");
+    expect(recovery).not.toContain("git push");
+    expect(recovery).not.toContain("ZEABUR_TOKEN");
+    expect(recovery).not.toContain("zeabur");
+  });
 
-  it('requires production approval to verify a manual rollback', () => {
-    expect(rollback).toContain('workflow_dispatch:')
-    expect(rollback).toContain('environment: production')
-    expect(rollback).toContain('electron-release-bundle.ts verify')
-    expect(rollback).not.toContain('ZEABUR_TOKEN')
-    expect(rollback).not.toContain('/app/publisher rollback')
-  })
+  it("keeps Zeabur credentials and PVC writes out of scheduled validation", () => {
+    expect(scheduled).not.toContain("ZEABUR_TOKEN");
+    expect(scheduled).not.toContain("/data/releases");
+    expect(scheduled).not.toContain("environment: production");
+  });
 
-  it('pulls the approved Draft Release through the sole PVC writer before public verification', () => {
-    expect(release).toContain('Trigger Zeabur release pull')
-    expect(release).toContain('ZEABUR_TOKEN')
-    expect(release).toContain('ZEABUR_UPDATES_SERVICE_ID')
-    expect(release).toContain('npx zeabur@latest service exec')
-    expect(release).toContain('/app/polo-release-pull')
-    expect(release).toContain('--release-id "$DRAFT_RELEASE_ID"')
-    expect(release).toContain('--asset-identity "$DRAFT_ASSET_IDENTITY"')
-    expect(release).toContain('Snapshot approved immutable Draft identity')
-    expect(release).toContain('needs.draft-release.outputs.release_id')
-    expect(release).toContain('needs.draft-release.outputs.asset_identity')
-    expect(release).toContain('Verify Zeabur updater bundle')
-    expect(release).not.toContain('zeabur deploy')
-    expect(release).not.toContain('/app/publisher')
-  })
+  it("requires production approval to verify a manual rollback", () => {
+    expect(rollback).toContain("workflow_dispatch:");
+    expect(rollback).toContain("environment: production");
+    expect(rollback).toContain("electron-release-bundle.ts verify");
+    expect(rollback).not.toContain("ZEABUR_TOKEN");
+    expect(rollback).not.toContain("/app/publisher rollback");
+  });
 
-  it('uses an observable fail-closed compensation state machine before publishing the Draft Release', () => {
-    const pull = release.indexOf('Trigger Zeabur release pull')
-    const pullRollback = release.indexOf('Compensate failed or uncertain Zeabur release pull')
-    const verify = release.indexOf('Verify Zeabur updater bundle')
-    const rollback = release.indexOf('Compensate failed public verification')
-    const stop = release.indexOf('Stop release after public verification failure')
-    const confirm = release.indexOf('Confirm Zeabur release after public verification')
-    const pointer = release.indexOf('Verify confirmed Zeabur pointer')
-    const finalizationRollback = release.indexOf('Compensate failed or uncertain Zeabur finalization')
-    const draftRevalidate = release.indexOf('Revalidate approved immutable Draft before GitHub publication')
-    const githubPublish = release.indexOf('Publish approved GitHub Release')
-    const githubState = release.indexOf('Verify GitHub Release publication')
-    const githubFinalize = release.indexOf('Finalize confirmed Zeabur release after GitHub publication')
-    const githubRollback = release.indexOf('Compensate failed or uncertain GitHub finalization')
-    const restoreDraft = release.indexOf('Restore Draft after failed GitHub finalization')
+  it("pulls the approved Draft Release through the sole PVC writer before public verification", () => {
+    expect(release).toContain("Trigger Zeabur release pull");
+    expect(release).toContain("ZEABUR_TOKEN");
+    expect(release).toContain("ZEABUR_UPDATES_SERVICE_ID");
+    expect(release).toContain(
+      "bash scripts/zeabur-cli-checked.sh service exec",
+    );
+    expect(release).not.toContain("npx zeabur@latest service exec");
+    expect(release).toContain("publish-electron-release.ts prepare");
+    expect(release).toContain("/app/polo-release-job start");
+    expect(release).toContain("/app/polo-release-job status");
+    expect(release).toContain("POLO_RELEASE_JOB_STATUS=success");
+    expect(release).toContain("Zeabur release pull job exceeded 30 minutes");
+    expect(release).toContain('--release-id "$DRAFT_RELEASE_ID"');
+    expect(release).toContain('--asset-identity "$DRAFT_ASSET_IDENTITY"');
+    expect(release).toContain("Snapshot approved immutable Draft identity");
+    expect(release).toContain("needs.draft-release.outputs.release_id");
+    expect(release).toContain("needs.draft-release.outputs.asset_identity");
+    expect(release).toContain("Verify Zeabur updater bundle");
+    expect(release).not.toContain("zeabur deploy");
+    expect(release).not.toContain("/app/publisher");
+  });
 
-    expect(release).toContain('# State lifecycle: Draft -> pulled (rollback marker) -> publicly verified')
-    expect(release).toContain("id: zeabur-pull")
-    expect(release).toContain("id: public-verify")
-    expect(release).toContain("continue-on-error: true")
-    expect(release).toContain("if: steps.zeabur-pull.outcome == 'failure'")
-    expect(release).toContain("if: steps.public-verify.outcome == 'failure'")
-    expect(release).toContain('publish-electron-release.ts confirm')
-    expect(release).toContain('publish-electron-release.ts assert-confirmed')
-    expect(release.match(/uses: \.\/\.github\/actions\/zeabur-rollback-failed/g)).toHaveLength(4)
-    expect(rollbackAction).toContain('publish-electron-release.ts rollback-failed')
-    expect(rollbackAction).toContain('publish-electron-release.ts assert-rollback-target')
-    expect(rollbackAction).toContain('for attempt in $(seq 1 3); do')
-    expect(release).toContain("id: confirm-release")
-    expect(release).toContain("id: confirm-pointer")
-    expect(release).toContain("if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'")
-    expect(release).toContain("id: github-publish")
-    expect(release).toContain("id: github-publish-state")
-    expect(release).toContain("id: github-finalization-compensation")
-    expect(release).toContain("id: github-draft-restore")
-    expect(release).toContain("id: approved-draft-revalidate")
-    expect(release).toContain('repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID')
-    expect(release).toContain('--identity "$DRAFT_ASSET_IDENTITY"')
-    expect(release).toContain('--draft true')
-    expect(release).toContain('releases/assets/$asset_id')
-    expect(release).toContain('sha256sum')
-    expect(release).toContain("if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'")
-    const draftPatchRequests = [...release.matchAll(
-      /gh api --method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$DRAFT_RELEASE_ID" -F draft=(true|false)/g,
-    )].map(match => match[1])
+  it("uses an observable fail-closed compensation state machine before publishing the Draft Release", () => {
+    const pull = release.indexOf("Trigger Zeabur release pull");
+    const pullRollback = release.indexOf(
+      "Compensate failed or uncertain Zeabur release pull",
+    );
+    const verify = release.indexOf("Verify Zeabur updater bundle");
+    const rollback = release.indexOf("Compensate failed public verification");
+    const stop = release.indexOf(
+      "Stop release after public verification failure",
+    );
+    const confirm = release.indexOf(
+      "Confirm Zeabur release after public verification",
+    );
+    const pointer = release.indexOf("Verify confirmed Zeabur pointer");
+    const finalizationRollback = release.indexOf(
+      "Compensate failed or uncertain Zeabur finalization",
+    );
+    const draftRevalidate = release.indexOf(
+      "Revalidate approved immutable Draft before GitHub publication",
+    );
+    const githubPublish = release.indexOf("Publish approved GitHub Release");
+    const githubState = release.indexOf("Verify GitHub Release publication");
+    const githubFinalize = release.indexOf(
+      "Finalize confirmed Zeabur release after GitHub publication",
+    );
+    const githubRollback = release.indexOf(
+      "Compensate failed or uncertain GitHub finalization",
+    );
+    const restoreDraft = release.indexOf(
+      "Restore Draft after failed GitHub finalization",
+    );
+
+    expect(release).toContain(
+      "# State lifecycle: Draft -> pulled (rollback marker) -> publicly verified",
+    );
+    expect(release).toContain("id: zeabur-pull");
+    expect(release).toContain("id: public-verify");
+    expect(release).toContain("continue-on-error: true");
+    expect(release).toContain("if: steps.zeabur-pull.outcome == 'failure'");
+    expect(release).toContain("if: steps.public-verify.outcome == 'failure'");
+    expect(release).toContain("publish-electron-release.ts confirm");
+    expect(release).toContain("publish-electron-release.ts assert-confirmed");
+    expect(
+      release.match(/uses: \.\/\.github\/actions\/zeabur-rollback-failed/g),
+    ).toHaveLength(4);
+    expect(rollbackAction).toContain(
+      "publish-electron-release.ts rollback-failed",
+    );
+    expect(rollbackAction).toContain("/app/polo-release-job cancel");
+    expect(rollbackAction).toContain(
+      "publish-electron-release.ts assert-rollback-target",
+    );
+    expect(rollbackAction).toContain(
+      "bash scripts/zeabur-cli-checked.sh service exec",
+    );
+    expect(rollbackAction).not.toContain("npx zeabur@latest service exec");
+    expect(rollbackAction).toContain("for attempt in $(seq 1 3); do");
+    expect(release).toContain("id: confirm-release");
+    expect(release).toContain("id: confirm-pointer");
+    expect(release).toContain(
+      "if: steps.confirm-release.outcome == 'failure' || steps.confirm-pointer.outcome == 'failure'",
+    );
+    expect(release).toContain("id: github-publish");
+    expect(release).toContain("id: github-publish-state");
+    expect(release).toContain("id: github-finalization-compensation");
+    expect(release).toContain("id: github-draft-restore");
+    expect(release).toContain("id: approved-draft-revalidate");
+    expect(release).toContain(
+      "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID",
+    );
+    expect(release).toContain('--identity "$DRAFT_ASSET_IDENTITY"');
+    expect(release).toContain("--draft true");
+    expect(release).toContain("releases/assets/$asset_id");
+    expect(release).toContain("sha256sum");
+    expect(release).toContain(
+      "if: steps.approved-draft-revalidate.outcome != 'success' || steps.github-publish.outcome != 'success' || steps.github-publish-state.outcome != 'success'",
+    );
+    const draftPatchRequests = [
+      ...release.matchAll(
+        /gh api --method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$DRAFT_RELEASE_ID" -F draft=(true|false)/g,
+      ),
+    ].map((match) => match[1]);
     // Capture both mutating requests so a string-form -f value can never
     // regress into the GitHub API's ambiguous form encoding.
-    expect(draftPatchRequests).toEqual(['false', 'true'])
-    expect(release).not.toContain(' -f draft=')
-    expect(release).not.toContain('gh release edit "$GITHUB_REF_NAME"')
-    expect(release).not.toContain('gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft')
-    expect(release).toContain('--draft either')
-    expect(release).toContain('publish-electron-release.ts finalize')
-    expect(release).toContain('publish-electron-release.ts assert-finalized')
-    expect(pull).toBeGreaterThan(0)
-    expect(pull).toBeLessThan(pullRollback)
-    expect(pullRollback).toBeLessThan(verify)
-    expect(verify).toBeGreaterThan(0)
-    expect(verify).toBeLessThan(rollback)
-    expect(rollback).toBeLessThan(stop)
-    expect(stop).toBeLessThan(confirm)
-    expect(confirm).toBeLessThan(pointer)
-    expect(pointer).toBeLessThan(finalizationRollback)
-    expect(finalizationRollback).toBeLessThan(githubPublish)
-    expect(finalizationRollback).toBeLessThan(draftRevalidate)
-    expect(draftRevalidate).toBeLessThan(githubPublish)
-    expect(githubPublish).toBeLessThan(githubState)
-    expect(githubState).toBeLessThan(githubFinalize)
-    expect(githubFinalize).toBeLessThan(githubRollback)
-    expect(githubState).toBeLessThan(githubRollback)
-    expect(githubRollback).toBeLessThan(restoreDraft)
-  })
+    expect(draftPatchRequests).toEqual(["false", "true"]);
+    expect(release).not.toContain(" -f draft=");
+    expect(release).not.toContain('gh release edit "$GITHUB_REF_NAME"');
+    expect(release).not.toContain(
+      'gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft',
+    );
+    expect(release).toContain("--draft either");
+    expect(release).toContain("publish-electron-release.ts finalize");
+    expect(release).toContain("publish-electron-release.ts assert-finalized");
+    expect(pull).toBeGreaterThan(0);
+    expect(pull).toBeLessThan(pullRollback);
+    expect(pullRollback).toBeLessThan(verify);
+    expect(verify).toBeGreaterThan(0);
+    expect(verify).toBeLessThan(rollback);
+    expect(rollback).toBeLessThan(stop);
+    expect(stop).toBeLessThan(confirm);
+    expect(confirm).toBeLessThan(pointer);
+    expect(pointer).toBeLessThan(finalizationRollback);
+    expect(finalizationRollback).toBeLessThan(githubPublish);
+    expect(finalizationRollback).toBeLessThan(draftRevalidate);
+    expect(draftRevalidate).toBeLessThan(githubPublish);
+    expect(githubPublish).toBeLessThan(githubState);
+    expect(githubState).toBeLessThan(githubFinalize);
+    expect(githubFinalize).toBeLessThan(githubRollback);
+    expect(githubState).toBeLessThan(githubRollback);
+    expect(githubRollback).toBeLessThan(restoreDraft);
+  });
 
-  it('builds and verifies both native macOS manual installers', () => {
-    expect(reusable).toContain('runner: macos-15-intel')
-    expect(reusable).toContain('runner: macos-15')
-    expect(reusable).toContain('arch: x64')
-    expect(reusable).toContain('arch: arm64')
-    expect(reusable).toContain('manual_installer: Polo-AI-x64.dmg')
-    expect(reusable).toContain('manual_installer: Polo-AI-arm64.dmg')
-    expect(reusable).toContain("matrix.platform == 'macos' && matrix.arch == 'arm64' && 'signing'")
-    expect(reusable).toContain('Require macOS Developer ID signing audit')
-    expect(reusable).toContain('release-signing-audit-macos-${{ matrix.arch }}.jsonl')
-    expect(reusable).toContain('"label":"DMG outer"')
-    expect(reusable).toContain('platform: windows')
-    expect(reusable).toContain('runner: windows-latest')
-    expect(reusable).toContain('Polo-AI-x64.exe')
-    expect(reusable).toContain('Get-AuthenticodeSignature')
-    expect(reusable).toContain('electron:dist:mac --arch=${{ matrix.arch }}')
-    expect(release).toContain('test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 9')
-  })
+  it("builds and verifies both native macOS manual installers", () => {
+    expect(reusable).toContain("runner: macos-15-intel");
+    expect(reusable).toContain("runner: macos-15");
+    expect(reusable).toContain("arch: x64");
+    expect(reusable).toContain("arch: arm64");
+    expect(reusable).toContain("manual_installer: Polo-AI-x64.dmg");
+    expect(reusable).toContain("manual_installer: Polo-AI-arm64.dmg");
+    expect(reusable).toContain(
+      "matrix.platform == 'macos' && matrix.arch == 'arm64' && 'signing'",
+    );
+    expect(reusable).toContain("Require macOS Developer ID signing audit");
+    expect(reusable).toContain(
+      "release-signing-audit-macos-${{ matrix.arch }}.jsonl",
+    );
+    expect(reusable).toContain('"label":"DMG outer"');
+    expect(reusable).toContain("platform: windows");
+    expect(reusable).toContain("runner: windows-latest");
+    expect(reusable).toContain("Polo-AI-x64.exe");
+    expect(reusable).toContain("Get-AuthenticodeSignature");
+    expect(reusable).toContain("electron:dist:mac --arch=${{ matrix.arch }}");
+    expect(release).toContain(
+      'test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 9',
+    );
+  });
 
-  it('grants contents write only to Draft Release assembly and the approved production state machine', () => {
-    expect(release.match(/contents: write/g)).toHaveLength(2)
-    expect(release).toContain('Create immutable Draft GitHub Release')
-    expect(release).toContain('Publish approved GitHub Release')
-  })
-})
+  it("grants contents write only to Draft assembly, GET-only Draft recovery, and production", () => {
+    expect(release.match(/contents: write/g)).toHaveLength(3);
+    expect(release).toContain("Create immutable Draft GitHub Release");
+    expect(release).toContain("Publish approved GitHub Release");
+  });
+});

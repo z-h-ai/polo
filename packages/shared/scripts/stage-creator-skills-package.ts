@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isStrictSemVer } from '../src/admin/semver.ts'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, '..')
@@ -25,8 +26,12 @@ async function main(): Promise<void> {
   const developmentManifest = await readJson(join(packageRoot, 'package.json')) as PackageManifest
   const publishManifest = await readJson(join(packageRoot, 'package.publish.json')) as PackageManifest
 
-  if (publishManifest.name !== '@z-h-ai/shared' || publishManifest.version !== '0.13.1') {
-    throw new Error('publish manifest must target @z-h-ai/shared@0.13.1')
+  if (
+    publishManifest.name !== '@z-h-ai/shared'
+    || typeof publishManifest.version !== 'string'
+    || !isStrictSemVer(publishManifest.version)
+  ) {
+    throw new Error('publish manifest must target @z-h-ai/shared with a valid SemVer version')
   }
   if (publishManifest.private !== undefined) {
     throw new Error('publish manifest must be publishable')
@@ -37,7 +42,7 @@ async function main(): Promise<void> {
   }
   const developmentExports = developmentManifest.exports as Record<string, unknown> | undefined
   const publishExports = publishManifest.exports as Record<string, unknown> | undefined
-  for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-app-publishing']) {
+  for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-skills/metadata', './creator-app-publishing']) {
     const developmentExport = developmentExports?.[subpath] as Record<string, unknown> | undefined
     const publishExport = publishExports?.[subpath] as Record<string, unknown> | undefined
     for (const condition of ['types', 'browser', 'import', 'default']) {
@@ -59,6 +64,9 @@ async function main(): Promise<void> {
     'index.d.ts',
     'installer.d.ts',
     'ledger.d.ts',
+    'metadata.browser.cjs',
+    'metadata.browser.mjs',
+    'metadata.d.ts',
     'schemas.d.ts',
     'skill-content.d.ts',
     'types.d.ts',

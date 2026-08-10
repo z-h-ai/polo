@@ -10,10 +10,11 @@ import {
   scanCreatorSkillDirectory,
   validateCreatorSkillArchive,
 } from '../archive'
+import { CreatorSkillMetadataError, parseCreatorSkillMetadata } from '../metadata'
 import { DEFAULT_SKILL_ARCHIVE_POLICY } from '../types'
 
 const VALID_SKILL = `---
-name: Review Helper
+name: review-helper
 description: Reviews changes against a checklist.
 icon: "🧭"
 requiredSources:
@@ -101,10 +102,43 @@ async function withTemp(
   }
 }
 
+function browserIssue(entries: Parameters<typeof parseCreatorSkillMetadata>[0]) {
+  try {
+    parseCreatorSkillMetadata(entries)
+    throw new Error('expected browser metadata parsing to fail')
+  } catch (error) {
+    expect(error).toBeInstanceOf(CreatorSkillMetadataError)
+    return (error as CreatorSkillMetadataError).issues[0]!
+  }
+}
+
+async function archiveRootIssue(archivePath: string): Promise<CreatorSkillArchiveError['issues'][number]> {
+  try {
+    await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+    throw new Error('expected archive validation to fail')
+  } catch (error) {
+    expect(error).toBeInstanceOf(CreatorSkillArchiveError)
+    expect((error as CreatorSkillArchiveError).code).toBe('invalid_skill_archive')
+    return (error as CreatorSkillArchiveError).issues[0]!
+  }
+}
+
+async function archiveIssue(archivePath: string): Promise<CreatorSkillArchiveError['issues'][number]> {
+  try {
+    await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+    throw new Error('expected archive validation to fail')
+  } catch (error) {
+    expect(error).toBeInstanceOf(CreatorSkillArchiveError)
+    expect((error as CreatorSkillArchiveError).code).toBe('skill_validation_failed')
+    return (error as CreatorSkillArchiveError).issues[0]!
+  }
+}
+
 describe('Creator Skill archive validation', () => {
   it('validates, normalizes, hashes, and safely extracts a package', async () => {
     await withTemp(async root => {
       const archivePath = await writeZip(root, {
+        'review-helper/': '',
         'review-helper/SKILL.md': VALID_SKILL,
         'review-helper/references/checklist.txt': 'Check authorization.\n',
         '__MACOSX/._SKILL.md': 'packaging noise',
@@ -118,7 +152,7 @@ describe('Creator Skill archive validation', () => {
       })
 
       expect(validated.metadata).toEqual({
-        name: 'Review Helper',
+        name: 'review-helper',
         description: 'Reviews changes against a checklist.',
         icon: '🧭',
         requiredSources: ['github'],
@@ -139,18 +173,16 @@ describe('Creator Skill archive validation', () => {
     })
   })
 
-  it('rejects invalid roots and Creator-only remote icons with stable issues', async () => {
+  it('shares root and icon failures with browser metadata validation', async () => {
     await withTemp(async root => {
       const multipleRoots = await writeZip(root, {
         'review-helper/SKILL.md': VALID_SKILL,
         'other/file.txt': 'outside',
       }, 'roots.zip')
-      await expect(validateCreatorSkillArchive({
-        archivePath: multipleRoots,
-        slug: 'review-helper',
-      })).rejects.toMatchObject({
-        code: 'invalid_skill_archive',
-        issues: [{ code: 'root_directory_mismatch', severity: 'error' }],
+      expect(await archiveRootIssue(multipleRoots)).toMatchObject({
+        code: 'invalid_skill_root',
+        path: '',
+        message: 'ZIP must contain exactly one root directory matching the Creator Skill slug',
       })
 
       const remoteIcon = await writeZip(root, {
@@ -164,7 +196,12 @@ describe('Creator Skill archive validation', () => {
         slug: 'review-helper',
       })).rejects.toMatchObject({
         code: 'skill_validation_failed',
-        issues: [{ code: 'invalid_creator_icon', field: 'icon' }],
+        issues: [{
+          code: 'invalid_skill_content',
+          path: 'review-helper/SKILL.md',
+          field: 'icon',
+          message: 'Creator Skill frontmatter icon must be an emoji, not a URL, file path, or decorative text',
+        }],
       })
 
       const decoratedText = await writeZip(root, {
@@ -178,7 +215,74 @@ describe('Creator Skill archive validation', () => {
         slug: 'review-helper',
       })).rejects.toMatchObject({
         code: 'skill_validation_failed',
-        issues: [{ code: 'invalid_creator_icon', field: 'icon' }],
+        issues: [{ code: 'invalid_skill_content', field: 'icon' }],
+      })
+
+      const pathIcon = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL.replace(
+          'icon: "🧭"',
+          'icon: "./icon.png"',
+        ),
+      }, 'path-icon.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: pathIcon,
+        slug: 'review-helper',
+      })).rejects.toMatchObject({
+        code: 'skill_validation_failed',
+        issues: [{ code: 'invalid_skill_content', field: 'icon' }],
+      })
+    })
+  })
+
+  it('matches browser root issues for empty, noise-only, wrong-root, and multiple-root ZIPs', async () => {
+    await withTemp(async root => {
+      const cases = [
+        ['empty', {}, []],
+        ['noise-only', { '__MACOSX/._SKILL.md': 'noise' }, [{ path: '__MACOSX/._SKILL.md', content: 'noise' }]],
+        ['wrong-root', { 'other/SKILL.md': VALID_SKILL }, [{ path: 'other/SKILL.md', content: VALID_SKILL }]],
+        [
+          'multiple-root',
+          { 'review-helper/SKILL.md': VALID_SKILL, 'other/README.md': 'second root' },
+          [
+            { path: 'review-helper/SKILL.md', content: VALID_SKILL },
+            { path: 'other/README.md', content: 'second root' },
+          ],
+        ],
+      ] as const
+      for (const [name, entries, browserEntries] of cases) {
+        const archivePath = await writeZip(root, entries, `${name}.zip`)
+        let expected: CreatorSkillMetadataError
+        try {
+          parseCreatorSkillMetadata(browserEntries, 'review-helper')
+          throw new Error('expected browser metadata parsing to fail')
+        } catch (error) {
+          expect(error).toBeInstanceOf(CreatorSkillMetadataError)
+          expected = error as CreatorSkillMetadataError
+        }
+        expect(await archiveRootIssue(archivePath)).toMatchObject(expected.issues[0]!)
+      }
+    })
+  })
+
+  it('accepts an explicit root-directory record and rejects ordinary root files', async () => {
+    await withTemp(async root => {
+      const explicitRoot = await writeZip(root, {
+        'review-helper/': '',
+        'review-helper/SKILL.md': VALID_SKILL,
+      }, 'explicit-root.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: explicitRoot,
+        slug: 'review-helper',
+      })).resolves.toMatchObject({ metadata: { name: 'review-helper' } })
+
+      const rootFile = await writeZip(root, {
+        'README.md': 'ordinary root file',
+        'review-helper/SKILL.md': VALID_SKILL,
+      }, 'root-file.zip')
+      expect(await archiveRootIssue(rootFile)).toMatchObject({
+        code: 'invalid_skill_root',
+        path: '',
+        message: 'ZIP must contain exactly one root directory matching the Creator Skill slug',
       })
     })
   })
@@ -230,6 +334,149 @@ describe('Creator Skill archive validation', () => {
         slug: 'review-helper',
         expectedArchiveChecksum: '0'.repeat(64),
       })).rejects.toMatchObject({ code: 'checksum_mismatch' })
+    })
+  })
+
+  it('allows arbitrary business directories while retaining every archive safety check', async () => {
+    await withTemp(async root => {
+      const archivePath = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL,
+        'review-helper/agents/reviewer.md': 'Review changes.',
+        'review-helper/scripts/check.sh': '#!/bin/sh\necho safe script text\n',
+        'review-helper/assets/prompt.txt': 'asset',
+        'review-helper/templates/report.md': '# Report',
+        'review-helper/custom-ai-data/example.json': '{"ok":true}',
+      }, 'business-directories.zip')
+      const validated = await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+      expect(validated.metadata.name).toBe('review-helper')
+      expect(validated.manifest.map(entry => entry.path)).toEqual([
+        'SKILL.md',
+        'agents/reviewer.md',
+        'assets/prompt.txt',
+        'custom-ai-data/example.json',
+        'scripts/check.sh',
+        'templates/report.md',
+      ])
+    })
+  })
+
+  it('rejects invalid Creator metadata names and root-name mismatches', async () => {
+    await withTemp(async root => {
+      for (const [name, content] of [
+        ['invalid-name', VALID_SKILL.replace('name: review-helper', 'name: Polo Test')],
+        ['leading-name-space', VALID_SKILL.replace('name: review-helper', 'name: " review-helper"')],
+        ['trailing-name-space', VALID_SKILL.replace('name: review-helper', 'name: "review-helper "')],
+        ['root-mismatch', VALID_SKILL.replace('name: review-helper', 'name: another-skill')],
+      ] as const) {
+        const archivePath = await writeZip(root, { 'review-helper/SKILL.md': content }, `${name}.zip`)
+        try {
+          await validateCreatorSkillArchive({ archivePath, slug: 'review-helper' })
+          throw new Error('expected invalid Creator metadata to fail')
+        } catch (error) {
+          expect(error).toBeInstanceOf(CreatorSkillArchiveError)
+          const archiveError = error as CreatorSkillArchiveError
+          expect(archiveError.code).toBe('skill_validation_failed')
+          expect(archiveError.issues).toContainEqual(expect.objectContaining({
+            code: 'invalid_skill_content',
+            field: 'name',
+          }))
+        }
+      }
+    })
+  })
+
+  it('uses the shared per-entry metadata length limits', async () => {
+    await withTemp(async root => {
+      for (const [field, maxLength] of [
+        ['globs', 2_048],
+        ['alwaysAllow', 512],
+        ['requiredSources', 512],
+      ] as const) {
+        const archivePath = await writeZip(root, {
+          'review-helper/SKILL.md': `---
+name: review-helper
+description: Reviews changes against a checklist.
+${field}: [${JSON.stringify('x'.repeat(maxLength + 1))}]
+---
+
+Review the selected change carefully.
+`,
+        }, `${field}-too-long.zip`)
+        expect(await archiveIssue(archivePath)).toEqual(expect.objectContaining({
+          code: 'invalid_skill_content',
+          path: 'review-helper/SKILL.md',
+          field,
+          message: `Creator Skill ${field} entries must be at most ${maxLength} characters`,
+        }))
+      }
+    })
+  })
+
+  it('counts description length by Unicode code point through archive validation', async () => {
+    await withTemp(async root => {
+      const accepted = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL.replace(
+          'description: Reviews changes against a checklist.',
+          `description: ${JSON.stringify('😀'.repeat(1_024))}`,
+        ),
+      }, 'description-at-limit.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: accepted,
+        slug: 'review-helper',
+      })).resolves.toMatchObject({ metadata: { description: '😀'.repeat(1_024) } })
+
+      const rejected = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL.replace(
+          'description: Reviews changes against a checklist.',
+          `description: ${JSON.stringify('😀'.repeat(1_025))}`,
+        ),
+      }, 'description-over-limit.zip')
+      expect(await archiveIssue(rejected)).toEqual(expect.objectContaining({
+        code: 'invalid_skill_content',
+        path: 'review-helper/SKILL.md',
+        field: 'description',
+        message: 'Creator Skill description must be at most 1024 characters',
+      }))
+    })
+  })
+
+  it("uses the browser parser's strict UTF-8 error and packaging-noise policy", async () => {
+    await withTemp(async root => {
+      const noisyArchive = await writeZip(root, {
+        'review-helper/SKILL.md': VALID_SKILL,
+        '__MACOSX/._SKILL.md': 'noise',
+        'review-helper/.DS_Store': 'noise',
+        'review-helper/Thumbs.db': 'noise',
+        'review-helper/desktop.ini': 'noise',
+        'review-helper/._resource': 'noise',
+      }, 'noise.zip')
+      const noisyResult = await validateCreatorSkillArchive({
+        archivePath: noisyArchive,
+        slug: 'review-helper',
+      })
+      expect(noisyResult.manifest.map(entry => entry.path)).toEqual(['SKILL.md'])
+      expect(noisyResult.warnings.map(warning => warning.code)).toEqual([
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+        'packaging_noise_removed',
+      ])
+
+      const invalidUtf8Archive = await writeZip(root, {
+        'review-helper/SKILL.md': new Uint8Array([0xff, 0xfe]),
+      }, 'invalid-utf8.zip')
+      await expect(validateCreatorSkillArchive({
+        archivePath: invalidUtf8Archive,
+        slug: 'review-helper',
+      })).rejects.toMatchObject({
+        code: 'skill_validation_failed',
+        issues: [{
+          code: 'invalid_skill_utf8',
+          path: 'review-helper/SKILL.md',
+          message: 'SKILL.md must contain valid UTF-8 text',
+        }],
+      })
     })
   })
 
@@ -295,40 +542,62 @@ describe('Creator Skill archive validation', () => {
         issues: [{ code: 'path_type_conflict', path: 'review-helper/references/nested.txt' }],
       })
 
-      const referencesFile = await writeZip(root, {
+      const ordinaryReferencesFile = await writeZip(root, {
         'review-helper/SKILL.md': VALID_SKILL,
-        'review-helper/references': 'must be a directory',
+        'review-helper/references': 'ordinary business content is allowed',
       }, 'references-file.zip')
       await expect(preflightCreatorSkillArchive({
-        archivePath: referencesFile,
+        archivePath: ordinaryReferencesFile,
         slug: 'review-helper',
-      })).rejects.toMatchObject({
-        code: 'invalid_skill_archive',
-        issues: [{ code: 'skill_structure_type_mismatch' }],
-      })
+      })).resolves.toBeDefined()
     })
   })
 
-  it('rejects every additional or non-canonical SKILL.md basename', async () => {
+  it('shares canonical SKILL.md failures with browser metadata parsing', async () => {
     await withTemp(async root => {
       for (const [name, entries] of [
+        ['missing', {
+          'review-helper/README.md': 'missing entrypoint',
+        }],
         ['nested', {
-          'review-helper/SKILL.md': VALID_SKILL,
           'review-helper/references/SKILL.md': 'not another entrypoint',
         }],
         ['case-variant', {
           'review-helper/skill.MD': VALID_SKILL,
         }],
+        ['multiple', {
+          'review-helper/SKILL.md': VALID_SKILL,
+          'review-helper/references/SKILL.md': 'not another entrypoint',
+        }],
       ] as const) {
         const archivePath = await writeZip(root, entries, `${name}.zip`)
-        await expect(validateCreatorSkillArchive({
-          archivePath,
-          slug: 'review-helper',
-        })).rejects.toMatchObject({
-          code: 'invalid_skill_archive',
-          issues: [{ code: 'skill_file_count' }],
+        const metadataEntries = Object.entries(entries).map(([path, content]) => ({ path, content }))
+        const expected = browserIssue(metadataEntries)
+        expect(await archiveIssue(archivePath)).toMatchObject({
+          code: expected.code,
+          path: expected.path,
+          message: expected.message,
         })
       }
+    })
+  })
+
+  it('shares the empty SKILL.md body failure with browser and content validation', async () => {
+    await withTemp(async root => {
+      const emptySkill = `---
+name: review-helper
+description: Reviews changes against a checklist.
+---
+`
+      const expected = browserIssue([{ path: 'review-helper/SKILL.md', content: emptySkill }])
+      const archivePath = await writeZip(root, { 'review-helper/SKILL.md': emptySkill }, 'empty-body.zip')
+      expect(await archiveIssue(archivePath)).toMatchObject({
+        code: expected.code,
+        path: expected.path,
+        field: expected.field,
+        message: expected.message,
+        suggestion: expected.suggestion,
+      })
     })
   })
 

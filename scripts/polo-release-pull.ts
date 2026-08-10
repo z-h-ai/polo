@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 
 import { createWriteStream } from 'node:fs'
-import { lstat, mkdir, rename, rm, stat, statfs } from 'node:fs/promises'
+import { lstat, mkdir, open, rename, rm, stat, statfs, type FileHandle } from 'node:fs/promises'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { parseStrictSemverTag } from './strict-semver'
 import { sha256 } from './electron-release-contract'
@@ -26,6 +27,10 @@ export { RELEASE_ASSET_NAMES }
 
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+const DEFAULT_SIGNED_DOWNLOAD_CHUNK_BYTES = 64 * 1024
+const DEFAULT_SIGNED_DOWNLOAD_CONCURRENCY = 512
+const SIGNED_DOWNLOAD_ATTEMPTS = 3
+const SIGNED_DOWNLOAD_TIMEOUT_MS = 60_000
 
 interface GitHubAsset {
   id: number
@@ -60,6 +65,8 @@ export interface ReleasePullOptions {
   publisherOptions?: PublisherOptions
   peakCapacityCheck?: (releasesDir: string, additionalBytes: number) => Promise<void>
   incomingCleanup?: (incoming: string) => Promise<void>
+  signedDownloadChunkBytes?: number
+  signedDownloadConcurrency?: number
 }
 
 function normalizeApiBase(value: string): string {
@@ -161,6 +168,8 @@ async function downloadAsset(
   asset: GitHubAsset,
   destination: string,
   token: string,
+  chunkBytes: number,
+  concurrency: number,
 ): Promise<void> {
   const url = new URL(`/repos/${repository}/releases/assets/${asset.id}`, `${apiBase}/`).toString()
   let response = await fetch(url, { headers: apiHeaders(token, true), redirect: 'manual' })
@@ -170,12 +179,13 @@ async function downloadAsset(
     try {
       // GitHub redirects the API request to a short-lived object-store URL. Do
       // not forward the Draft Release token beyond the GitHub API origin.
-      response = await fetch(new URL(location, url), {
-        headers: { accept: 'application/octet-stream' },
-        redirect: 'error',
-      })
-      if (!response.ok || !response.body) throw new Error('signed object-store response failed')
-      await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination, { flags: 'wx' }))
+      await downloadSignedAsset(
+        new URL(location, url).toString(),
+        asset,
+        destination,
+        chunkBytes,
+        concurrency,
+      )
     } catch {
       // Do not preserve a cause here: object-store URLs include short-lived
       // credentials in their query string and must never reach CI or service logs.
@@ -191,6 +201,95 @@ async function downloadAsset(
   if (!downloaded.isFile() || downloaded.size !== asset.size) {
     throw new Error(`Downloaded release asset has an unexpected size: ${asset.name}`)
   }
+}
+
+async function downloadSignedRange(
+  signedUrl: string,
+  asset: GitHubAsset,
+  destination: FileHandle,
+  start: number,
+  end: number,
+  signal: AbortSignal,
+): Promise<void> {
+  const expectedLength = end - start + 1
+  const expectedRange = `bytes ${start}-${end}/${asset.size}`
+  for (let attempt = 1; attempt <= SIGNED_DOWNLOAD_ATTEMPTS; attempt += 1) {
+    if (signal.aborted) throw new Error('signed range download aborted')
+    try {
+      const response = await fetch(signedUrl, {
+        headers: {
+          accept: 'application/octet-stream',
+          range: `bytes=${start}-${end}`,
+        },
+        redirect: 'error',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(SIGNED_DOWNLOAD_TIMEOUT_MS)]),
+      })
+      if (response.status !== 206 || response.headers.get('content-range') !== expectedRange) {
+        await response.body?.cancel()
+        throw new Error('signed object-store did not honor the requested byte range')
+      }
+      const bytes = Buffer.from(await response.arrayBuffer())
+      if (bytes.byteLength !== expectedLength) {
+        throw new Error('signed object-store returned an incomplete byte range')
+      }
+      const written = await destination.write(bytes, 0, bytes.byteLength, start)
+      if (written.bytesWritten !== bytes.byteLength) {
+        throw new Error('release asset range was not fully written')
+      }
+      return
+    } catch {
+      if (signal.aborted || attempt === SIGNED_DOWNLOAD_ATTEMPTS) {
+        throw new Error('signed range download failed')
+      }
+      await delay(attempt * 100)
+    }
+  }
+}
+
+async function downloadSignedAsset(
+  signedUrl: string,
+  asset: GitHubAsset,
+  destination: string,
+  chunkBytes: number,
+  concurrency: number,
+): Promise<void> {
+  if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
+    throw new Error('Signed download chunk size is invalid')
+  }
+  if (!Number.isSafeInteger(concurrency) || concurrency <= 0) {
+    throw new Error('Signed download concurrency is invalid')
+  }
+  const chunks = Math.ceil(asset.size / chunkBytes)
+  const file = await open(destination, 'wx', 0o600)
+  try {
+    await file.truncate(asset.size)
+    let nextChunk = 0
+    const abort = new AbortController()
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const chunk = nextChunk
+        nextChunk += 1
+        if (chunk >= chunks) return
+        const start = chunk * chunkBytes
+        const end = Math.min(asset.size, start + chunkBytes) - 1
+        await downloadSignedRange(signedUrl, asset, file, start, end, abort.signal)
+      }
+    }
+    const workers = Array.from({ length: Math.min(concurrency, chunks) }, worker)
+    try {
+      await Promise.all(workers)
+    } catch (error) {
+      abort.abort()
+      await Promise.allSettled(workers)
+      throw error
+    }
+    await file.sync()
+  } catch (error) {
+    await file.close()
+    await rm(destination, { force: true })
+    throw error
+  }
+  await file.close()
 }
 
 async function existingIncomingIsReusable(
@@ -265,10 +364,20 @@ async function downloadAssets(
   assets: Map<string, GitHubAsset>,
   destination: string,
   token: string,
+  chunkBytes: number,
+  concurrency: number,
 ): Promise<void> {
   await mkdir(destination, { recursive: true })
   for (const name of RELEASE_ASSET_NAMES) {
-    await downloadAsset(apiBase, repository, assets.get(name)!, join(destination, name), token)
+    await downloadAsset(
+      apiBase,
+      repository,
+      assets.get(name)!,
+      join(destination, name),
+      token,
+      chunkBytes,
+      concurrency,
+    )
   }
 }
 
@@ -342,7 +451,15 @@ export async function pullRelease(options: ReleasePullOptions): Promise<'publish
       }
     } else {
       await (options.peakCapacityCheck ?? assertPeakCapacity)(releasesDir, assetBytes * 2)
-      await downloadAssets(apiBase, normalized.repository, assets, stage, token!)
+      await downloadAssets(
+        apiBase,
+        normalized.repository,
+        assets,
+        stage,
+        token!,
+        options.signedDownloadChunkBytes ?? DEFAULT_SIGNED_DOWNLOAD_CHUNK_BYTES,
+        options.signedDownloadConcurrency ?? DEFAULT_SIGNED_DOWNLOAD_CONCURRENCY,
+      )
       if (!(await matchesTrustedDigests(stage, trustedDigests))) {
         throw new Error(`Downloaded release assets differ from the approved Draft SHA-256 digests`)
       }

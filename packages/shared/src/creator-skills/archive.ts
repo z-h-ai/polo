@@ -22,9 +22,11 @@ import {
   type SkillVersionMetadata,
 } from './types.ts'
 import {
-  readValidatedSkillMetadata,
-  validateCreatorSkillContent,
-} from './skill-content.ts'
+  CreatorSkillMetadataError,
+  isCreatorSkillPackagingNoise,
+  parseCreatorSkillMetadata,
+  resolveCreatorSkillRoot,
+} from './metadata.ts'
 
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -201,16 +203,6 @@ function effectivePolicy(policy?: SkillArchivePolicy): SkillArchivePolicy {
   }
 }
 
-function isPackagingNoise(path: string): boolean {
-  const parts = path.split('/').filter(Boolean)
-  if (parts[0] === '__MACOSX') return true
-  const name = parts.at(-1) ?? ''
-  return name === '.DS_Store'
-    || name === 'Thumbs.db'
-    || name === 'desktop.ini'
-    || name.startsWith('._')
-}
-
 function normalizeArchivePath(rawPath: string): string {
   if (!rawPath || rawPath.includes('\0')) {
     throw new CreatorSkillArchiveError(
@@ -313,7 +305,7 @@ function inspectArchiveDirectory(
       )
     }
     const directory = kind === 'directory'
-    const ignored = isPackagingNoise(normalizedPath)
+    const ignored = isCreatorSkillPackagingNoise(normalizedPath)
     if (ignored) {
       warnings.push(issue(
         'packaging_noise_removed',
@@ -395,37 +387,23 @@ function inspectArchiveDirectory(
   }
 
   const businessEntries = normalizedEntries.filter(entry => !entry.ignored)
-  const roots = new Set(
-    businessEntries
-      .map(entry => entry.normalizedPath.replace(/\/$/, '').split('/')[0])
-      .filter(Boolean),
-  )
-  if (roots.size !== 1 || !roots.has(slug)) {
+  try {
+    resolveCreatorSkillRoot(businessEntries.map(entry => ({
+      path: entry.normalizedPath,
+      directory: entry.directory,
+    })), slug)
+  } catch (error) {
+    if (!(error instanceof CreatorSkillMetadataError)) throw error
     throw new CreatorSkillArchiveError(
       'invalid_skill_archive',
-      'ZIP must contain exactly one root directory matching the Skill slug',
-      [issue('root_directory_mismatch', '', `Expected the only root directory to be '${slug}'`)],
-    )
-  }
-
-  const fileEntries = businessEntries.filter(entry => !entry.directory)
-  const skillFiles = fileEntries.filter(entry => (
-    basename(entry.normalizedPath)
-      .normalize('NFC')
-      .toLocaleLowerCase('en-US') === 'skill.md'
-  ))
-  if (
-    skillFiles.length !== 1
-    || skillFiles[0]?.normalizedPath !== `${slug}/SKILL.md`
-  ) {
-    throw new CreatorSkillArchiveError(
-      'invalid_skill_archive',
-      'ZIP must contain exactly one canonical root SKILL.md',
-      [issue(
-        'skill_file_count',
-        `${slug}/SKILL.md`,
-        'Exactly one SKILL.md basename is allowed and it must be at the package root',
-      )],
+      error.message,
+      error.issues.map(metadataIssue => issue(
+        metadataIssue.code,
+        metadataIssue.path,
+        metadataIssue.message,
+        metadataIssue.field,
+        metadataIssue.suggestion,
+      )),
     )
   }
 
@@ -434,30 +412,14 @@ function inspectArchiveDirectory(
       .replace(/\/$/, '')
       .slice(slug.length + 1)
     if (!relative) continue
-    const allowed = relative === 'SKILL.md'
-      || relative === 'icon.png'
-      || relative === 'references'
-      || relative.startsWith('references/')
-    if (!allowed) {
-      throw new CreatorSkillArchiveError(
-        'invalid_skill_archive',
-        'ZIP contains a file outside the allowed Skill structure',
-        [issue('unexpected_skill_path', archiveEntry.normalizedPath, 'Only SKILL.md, icon.png, and references/ are allowed')],
-      )
-    }
-    if (
-      (relative === 'icon.png' && archiveEntry.directory)
-      || (relative === 'references' && !archiveEntry.directory)
-    ) {
+    if (relative === 'icon.png' && archiveEntry.directory) {
       throw new CreatorSkillArchiveError(
         'invalid_skill_archive',
         'ZIP contains a file or directory with the wrong type',
         [issue(
           'skill_structure_type_mismatch',
           archiveEntry.normalizedPath,
-          relative === 'icon.png'
-            ? 'icon.png must be a regular file'
-            : 'references must be a directory',
+          'icon.png must be a regular file',
         )],
       )
     }
@@ -797,14 +759,6 @@ function validatePngIcon(data: Buffer, path: string): void {
   }
 }
 
-function isEmojiIcon(value: string): boolean {
-  if (/^https?:\/\//i.test(value) || value.includes('/') || value.includes('\\')) return false
-  if (value.length > 64 || !/\p{Extended_Pictographic}/u.test(value)) return false
-  return value
-    .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\uFE0F\u200D\s]/gu, '')
-    .length === 0
-}
-
 export function canonicalManifestJson(manifest: CreatorSkillManifestEntry[]): string {
   return JSON.stringify(manifest.map(entry => ({
     path: entry.path,
@@ -929,6 +883,7 @@ export async function validateCreatorSkillArchive(args: {
 
     const manifest: CreatorSkillManifestEntry[] = []
     let metadata: SkillVersionMetadata | undefined
+    let skillContent: Uint8Array | undefined
     let expandedBytes = 0
     const destination = args.destinationRoot
       ? resolve(args.destinationRoot)
@@ -987,41 +942,7 @@ export async function validateCreatorSkillArchive(args: {
         validatePngIcon(data, archiveEntry.normalizedPath)
       }
       if (archiveEntry.normalizedPath === `${args.slug}/SKILL.md`) {
-        const content = data.toString('utf8')
-        const contentValidation = validateCreatorSkillContent(content, args.slug)
-        if (!contentValidation.valid) {
-          throw new CreatorSkillArchiveError(
-            'skill_validation_failed',
-            'SKILL.md validation failed',
-            contentValidation.errors.map(error => issue(
-              'invalid_skill_content',
-              'SKILL.md',
-              error.message,
-              error.path,
-              error.suggestion,
-            )),
-          )
-        }
-        const parsed = readValidatedSkillMetadata(content, args.slug)
-        if (!parsed) {
-          throw new CreatorSkillArchiveError(
-            'skill_validation_failed',
-            'SKILL.md validation failed',
-          )
-        }
-        if (parsed.metadata.icon && !isEmojiIcon(parsed.metadata.icon)) {
-          throw new CreatorSkillArchiveError(
-            'skill_validation_failed',
-            'Creator Skill icon must be an emoji',
-            [issue(
-              'invalid_creator_icon',
-              'SKILL.md',
-              'Creator Skill frontmatter icon must be an emoji, not a URL or file path',
-              'icon',
-            )],
-          )
-        }
-        metadata = parsed.metadata
+        skillContent = data
       }
 
       const relativePath = archiveEntry.normalizedPath.slice(args.slug.length + 1)
@@ -1053,6 +974,29 @@ export async function validateCreatorSkillArchive(args: {
       }
     }
 
+    try {
+      const parsed = parseCreatorSkillMetadata(businessEntries.map(archiveEntry => ({
+        path: archiveEntry.normalizedPath,
+        directory: archiveEntry.directory,
+        ...(archiveEntry.normalizedPath === `${args.slug}/SKILL.md` && skillContent !== undefined
+          ? { content: skillContent }
+          : {}),
+      })), args.slug)
+      metadata = parsed.metadata
+    } catch (error) {
+      if (!(error instanceof CreatorSkillMetadataError)) throw error
+      throw new CreatorSkillArchiveError(
+        'skill_validation_failed',
+        error.message,
+        error.issues.map(metadataIssue => issue(
+          metadataIssue.code,
+          metadataIssue.path || 'SKILL.md',
+          metadataIssue.message,
+          metadataIssue.field,
+          metadataIssue.suggestion,
+        )),
+      )
+    }
     if (!metadata) {
       throw new CreatorSkillArchiveError(
         'skill_validation_failed',
