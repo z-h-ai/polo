@@ -19,6 +19,7 @@ COPY scripts/polo-release-pull.ts /app/polo-release-pull.ts
 COPY scripts/strict-semver.ts /app/strict-semver.ts
 COPY scripts/strict-semver-pattern.txt /app/strict-semver-pattern.txt
 COPY infra/updates-static/polo-release-pull /app/polo-release-pull
+RUN chmod 0755 /app/polo-release-pull
 
 COPY infra/updates-static/PoloCaddyfile /etc/caddy/Caddyfile
 
