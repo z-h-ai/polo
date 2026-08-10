@@ -1,52 +1,59 @@
 {
-  admin off
-  auto_https off
+	admin off
+	auto_https off
 }
 
 :8080 {
-  root * /data/releases
+	root * /data/releases
 
-  route {
-    # The PVC also contains release staging, locks, and rollback state. These
-    # paths are never public, even when an immutable wildcard would otherwise
-    # match them. `route` preserves this deny rule ahead of file_server routes.
-    @internalReleaseState {
-      # Every dot-prefixed name below electron is publisher state, including
-      # lock children and the temporary latest symlink used during rename.
-      # The second expression closes hidden entries inside public namespaces.
-      path_regexp release_internal ^/electron(?:/\.[^/]+(?:/.*)?|/(?:latest|releases/[^/]+)/\.[^/]+(?:/.*)?)$
-    }
-    respond @internalReleaseState "Not found" 404
+	route {
+		# The PVC also contains release staging, locks, and rollback state. These
+		# paths are never public, even when a public release matcher would otherwise
+		# match them. `route` preserves this deny rule ahead of file_server routes.
+		@internalReleaseState {
+			# Every dot-prefixed path segment below electron is publisher state,
+			# including lock children, temporary latest symlinks, and hidden files in
+			# a release directory.
+			path_regexp release_internal ^/electron(?:/[^/]+)*/\.[^/]+(?:/.*)?$
+		}
+		respond @internalReleaseState "Not found" 404
 
-    # Version directories are an implementation detail until their content is
-    # selected by electron/latest. Serving only latest prevents an unconfirmed
-    # staging publish from being fetched by guessing its versioned path.
-    @releaseDirectories path /electron/releases /electron/releases/*
-    respond @releaseDirectories "Not found" 404
+		# latest is an atomically replaced pointer. Every file below it must be
+		# revalidated, otherwise a newly fetched manifest can name an old cached
+		# installer at the same fixed URL.
+		@latestResources {
+			method GET HEAD
+			path /electron/latest/*
+		}
+		handle @latestResources {
+			header Cache-Control "no-cache"
+			file_server
+		}
 
-    @latestManifests {
-      method GET HEAD
-      path /electron/latest/latest-mac.yml /electron/latest/latest.yml /electron/latest/latest-linux.yml /electron/latest/release-contract.json /electron/latest/install-app.sh
-    }
-    handle @latestManifests {
-      header Cache-Control "no-cache"
-      file_server
-    }
+		# The publisher accepts only strict SemVer release directories. Their
+		# contents are immutable archives once the atomic latest switch completes.
+		@immutableReleaseArtifacts {
+			method GET HEAD
+			path_regexp published_release ^/electron/releases/(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?/.+$
+		}
+		handle @immutableReleaseArtifacts {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
 
-    @immutableArtifacts {
-      method GET HEAD
-      path /electron/latest/*
-    }
-    handle @immutableArtifacts {
-      header Cache-Control "public, max-age=31536000, immutable"
-      file_server
-    }
+		# Do not let an unknown release-like directory fall through to the general
+		# file server. Hidden entries were rejected above before this catch-all.
+		@unpublishedReleaseDirectories {
+			method GET HEAD
+			path /electron/releases /electron/releases/*
+		}
+		respond @unpublishedReleaseDirectories "Not found" 404
 
-    @readonly method GET HEAD
-    handle @readonly {
-      file_server
-    }
+		@readonly method GET HEAD
+		handle @readonly {
+			file_server
+		}
 
-    respond "Method not allowed" 405
-  }
+		respond "Method not allowed" 405
+	}
 }
