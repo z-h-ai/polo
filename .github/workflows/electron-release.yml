@@ -175,7 +175,10 @@ jobs:
       release_id: ${{ steps.identity.outputs.release_id }}
       asset_identity: ${{ steps.identity.outputs.asset_identity }}
     permissions:
-      contents: read
+      # GitHub hides Draft Releases from a read-only GITHUB_TOKEN even though
+      # this job performs only authenticated GETs. Write scope is required for
+      # Draft visibility; every mutation remains in the approved production job.
+      contents: write
     env:
       RELEASE_TAG: ${{ inputs.recover_tag }}
       RELEASE_COMMIT: ${{ inputs.recover_commit }}

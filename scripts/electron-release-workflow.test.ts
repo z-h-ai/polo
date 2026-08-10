@@ -25,6 +25,10 @@ describe('Electron release workflow boundaries', () => {
   })
 
   it('recovers only one exact existing Draft without rebuilding or moving its immutable tag', () => {
+    const recovery = release.slice(
+      release.indexOf('  recover-draft:'),
+      release.indexOf('  production:'),
+    )
     expect(release).toContain('workflow_dispatch:')
     expect(release).toContain('recover_tag:')
     expect(release).toContain('recover_commit:')
@@ -38,6 +42,13 @@ describe('Electron release workflow boundaries', () => {
     expect(release).toContain('RELEASE_COMMIT:')
     expect(release).not.toContain('git tag -f')
     expect(release).not.toContain('git push --force')
+    expect(recovery).toContain('contents: write')
+    expect(recovery).not.toContain('gh api --method')
+    expect(recovery).not.toContain('gh release create')
+    expect(recovery).not.toContain('gh release edit')
+    expect(recovery).not.toContain('git push')
+    expect(recovery).not.toContain('ZEABUR_TOKEN')
+    expect(recovery).not.toContain('zeabur')
   })
 
   it('keeps Zeabur credentials and PVC writes out of scheduled validation', () => {
@@ -162,8 +173,8 @@ describe('Electron release workflow boundaries', () => {
     expect(release).toContain('test "$(find existing-release -maxdepth 1 -type f | wc -l)" -eq 9')
   })
 
-  it('grants contents write only to Draft Release assembly and the approved production state machine', () => {
-    expect(release.match(/contents: write/g)).toHaveLength(2)
+  it('grants contents write only to Draft assembly, GET-only Draft recovery, and production', () => {
+    expect(release.match(/contents: write/g)).toHaveLength(3)
     expect(release).toContain('Create immutable Draft GitHub Release')
     expect(release).toContain('Publish approved GitHub Release')
   })
