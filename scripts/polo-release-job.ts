@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { parseDraftReleaseIdentity } from './electron-release-draft-identity'
-import { pullRelease, type ReleasePullOptions } from './polo-release-pull'
+import { pullRelease, type ReleasePullOptions } from './polo-release-pull.ts'
 import { parseStrictSemverTag } from './strict-semver'
 
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/
