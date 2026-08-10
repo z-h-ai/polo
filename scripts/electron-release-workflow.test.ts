@@ -17,10 +17,27 @@ describe('Electron release workflow boundaries', () => {
 
   it('blocks production on all platform builds and Draft Release assembly', () => {
     expect(release).toContain('needs: [preflight, build]')
-    expect(release).toContain('needs: [preflight, draft-release]')
+    expect(release).toContain('needs: [preflight, draft-release, recover-draft]')
+    expect(release).toContain("github.event_name == 'push' && needs.preflight.result == 'success' && needs.draft-release.result == 'success'")
     expect(release).toContain('environment: production')
     expect(release).toContain('group: electron-production-release')
     expect(release).toContain('cancel-in-progress: false')
+  })
+
+  it('recovers only one exact existing Draft without rebuilding or moving its immutable tag', () => {
+    expect(release).toContain('workflow_dispatch:')
+    expect(release).toContain('recover_tag:')
+    expect(release).toContain('recover_commit:')
+    expect(release).toContain('Download and strictly validate existing Draft assets')
+    expect(release).toContain('electron-release-draft-identity.ts select')
+    expect(release).toContain('releases?per_page=100')
+    expect(release).not.toContain('releases/tags/$GITHUB_REF_NAME')
+    expect(release).toContain('electron-release-bundle.ts validate')
+    expect(release).toContain("github.event_name == 'workflow_dispatch' && needs.recover-draft.result == 'success'")
+    expect(release).toContain('RELEASE_TAG:')
+    expect(release).toContain('RELEASE_COMMIT:')
+    expect(release).not.toContain('git tag -f')
+    expect(release).not.toContain('git push --force')
   })
 
   it('keeps Zeabur credentials and PVC writes out of scheduled validation', () => {

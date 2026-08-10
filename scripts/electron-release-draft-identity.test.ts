@@ -7,6 +7,7 @@ import {
   createDraftReleaseIdentity,
   parseDraftReleaseIdentity,
   RELEASE_ASSET_NAMES,
+  selectDraftRelease,
 } from './electron-release-draft-identity'
 
 async function fixture(): Promise<{ root: string, release: object }> {
@@ -67,5 +68,32 @@ describe('approved Draft Release identity', () => {
         tag: 'v1.2.3', commit: 'a'.repeat(40), draft: true,
       })).toThrow('assets do not match')
     } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('selects one authenticated Draft from paginated releases by exact tag and commit', () => {
+    const commit = 'a'.repeat(40)
+    const selected = {
+      id: 123,
+      draft: true,
+      tag_name: 'v0.15.9',
+      target_commitish: commit,
+      assets: [],
+    }
+    expect(selectDraftRelease([
+      [{ ...selected, id: 122, draft: false }],
+      [selected, { ...selected, id: 124, tag_name: 'v0.15.8' }],
+    ], { tag: 'v0.15.9', commit })).toEqual(selected)
+    expect(() => selectDraftRelease([[selected], [{ ...selected, id: 124 }]], {
+      tag: 'v0.15.9', commit,
+    })).toThrow('found 2')
+    expect(() => selectDraftRelease([[selected]], {
+      tag: 'v0.15.9', commit: 'b'.repeat(40),
+    })).toThrow('found 0')
+    expect(() => selectDraftRelease([[selected]], {
+      tag: '../v0.15.9', commit,
+    })).toThrow('strict v-prefixed SemVer')
+    expect(() => selectDraftRelease([[selected]], {
+      tag: 'v0.15.9-01', commit,
+    })).toThrow('strict v-prefixed SemVer')
   })
 })
