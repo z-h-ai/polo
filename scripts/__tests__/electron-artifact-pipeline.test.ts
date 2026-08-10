@@ -373,6 +373,11 @@ describe('Electron final artifact validation pipeline', () => {
     expect(distEntry.indexOf('dependencies.stageHelpers(runtimeOptions)')).toBeLessThan(
       distEntry.indexOf('dependencies.package(options, env)'),
     )
+    expect(distEntry.indexOf('dependencies.package(options, env)')).toBeLessThan(
+      distEntry.indexOf('dependencies.finalizeArtifacts(options)'),
+    )
+    expect(distEntry).toContain("options.platform === 'darwin' && options.arch === 'x64'")
+    expect(distEntry).toContain('finalizeMacUpdateManifest')
   })
 
   it('keeps full validation preflight and native display contracts ahead of lifecycle writes', () => {
