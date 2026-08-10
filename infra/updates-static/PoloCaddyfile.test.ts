@@ -15,12 +15,13 @@ async function docker(args: string[]): Promise<string> {
 }
 
 describe('updates-static Caddy cache contract', () => {
-  it('serves the installer, manifests, and contract as no-cache while binaries are immutable', async () => {
+  it('revalidates every latest resource, caches only published releases, and hides publisher state', async () => {
     const root = await mkdtemp(join(tmpdir(), 'polo-updates-caddy-'))
     const latest = join(root, 'electron', 'latest')
     const incoming = join(root, 'electron', '.incoming', '1.0.0')
     const staging = join(root, 'electron', 'releases', '.1.0.0.staging-123')
     const published = join(root, 'electron', 'releases', '1.0.0')
+    const invalidRelease = join(root, 'electron', 'releases', 'not-a-version')
     const temporaryLatest = join(root, 'electron', '.latest-123')
     const releaseJob = join(root, 'electron', '.jobs', '1.0.0')
     const caddyfile = join(process.cwd(), 'infra/updates-static/PoloCaddyfile')
@@ -31,26 +32,35 @@ describe('updates-static Caddy cache contract', () => {
         mkdir(incoming, { recursive: true }),
         mkdir(staging, { recursive: true }),
         mkdir(published, { recursive: true }),
+        mkdir(invalidRelease, { recursive: true }),
         mkdir(temporaryLatest, { recursive: true }),
         mkdir(releaseJob, { recursive: true }),
         mkdir(join(root, 'electron', '.publisher.lock'), { recursive: true }),
         mkdir(join(temporaryLatest, 'nested'), { recursive: true }),
         mkdir(join(latest, '.publisher-state'), { recursive: true }),
         mkdir(join(published, '.publisher-state'), { recursive: true }),
+        mkdir(join(published, 'nested', '.publisher-state'), { recursive: true }),
       ])
       await Promise.all([
         writeFile(join(latest, 'install-app.sh'), '#!/bin/sh\n'),
         writeFile(join(latest, 'latest-mac.yml'), 'version: 1.0.0\n'),
+        writeFile(join(latest, 'latest.yml'), 'version: 1.0.0\n'),
+        writeFile(join(latest, 'latest-linux.yml'), 'version: 1.0.0\n'),
         writeFile(join(latest, 'release-contract.json'), '{}\n'),
+        writeFile(join(latest, 'Polo-AI-x64.zip'), 'macOS update ZIP'),
+        writeFile(join(latest, 'Polo-AI-x64.dmg'), 'macOS installer'),
         writeFile(join(latest, 'Polo-AI-x64.exe'), 'windows installer'),
+        writeFile(join(latest, 'Polo-AI-x64.AppImage'), 'linux installer'),
         writeFile(join(incoming, 'release-contract.json'), 'private incoming'),
         writeFile(join(staging, 'Polo-AI-x64.exe'), 'private staging'),
-        writeFile(join(published, 'Polo-AI-x64.exe'), 'version directory is not public before confirmation'),
+        writeFile(join(published, 'Polo-AI-x64.zip'), 'published macOS update ZIP'),
+        writeFile(join(invalidRelease, 'Polo-AI-x64.zip'), 'unpublished release-like directory'),
         writeFile(join(root, 'electron', '.publisher.lock', 'owner.json'), 'private lock owner'),
         writeFile(join(temporaryLatest, 'release-contract.json'), 'private temporary latest'),
         writeFile(join(temporaryLatest, 'nested', 'state.json'), 'private temporary latest child'),
         writeFile(join(latest, '.publisher-state', 'state.json'), 'private latest child'),
         writeFile(join(published, '.publisher-state', 'state.json'), 'private release child'),
+        writeFile(join(published, 'nested', '.publisher-state', 'state.json'), 'private nested release child'),
         writeFile(join(root, 'electron', '.rollback-1.0.0.json'), 'private rollback'),
         writeFile(join(root, 'electron', '.confirmed-1.0.0.json'), 'private confirmation'),
         writeFile(join(releaseJob, 'state.json'), 'private job state'),
@@ -75,13 +85,32 @@ describe('updates-static Caddy cache contract', () => {
         await Bun.sleep(50)
       }
       expect(response?.ok).toBe(true)
-      for (const name of ['install-app.sh', 'latest-mac.yml', 'release-contract.json']) {
-        const head = await fetch(`${baseUrl}/${name}`, { method: 'HEAD' })
-        expect(head.headers.get('cache-control')).toContain('no-cache')
-      }
-      const binary = await fetch(`${baseUrl}/Polo-AI-x64.exe`, { method: 'HEAD' })
-      expect(binary.headers.get('cache-control')).toContain('public, max-age=31536000, immutable')
       const serviceRoot = `http://127.0.0.1:${port}`
+      for (const name of [
+        'install-app.sh',
+        'latest-mac.yml',
+        'latest.yml',
+        'latest-linux.yml',
+        'release-contract.json',
+        'Polo-AI-x64.zip',
+        'Polo-AI-x64.dmg',
+        'Polo-AI-x64.exe',
+        'Polo-AI-x64.AppImage',
+      ]) {
+        for (const method of ['GET', 'HEAD']) {
+          const response = await fetch(`${baseUrl}/${name}`, { method })
+          expect(response.ok).toBe(true)
+          expect(response.headers.get('cache-control')).toContain('no-cache')
+        }
+      }
+      for (const method of ['GET', 'HEAD']) {
+        const response = await fetch(
+          `${serviceRoot}/electron/releases/1.0.0/Polo-AI-x64.zip`,
+          { method },
+        )
+        expect(response.ok).toBe(true)
+        expect(response.headers.get('cache-control')).toContain('public, max-age=31536000, immutable')
+      }
       for (const path of [
         '/electron/.incoming/1.0.0/release-contract.json',
         '/electron/releases/.1.0.0.staging-123/Polo-AI-x64.exe',
@@ -93,15 +122,18 @@ describe('updates-static Caddy cache contract', () => {
         '/electron/.rollback-1.0.0.json',
         '/electron/.jobs/1.0.0/state.json',
         '/electron/.confirmed-1.0.0.json',
-        '/electron/releases/1.0.0/Polo-AI-x64.exe',
         '/electron/releases/1.0.0/.publisher-state/state.json',
+        '/electron/releases/1.0.0/nested/.publisher-state/state.json',
+        '/electron/releases/not-a-version/Polo-AI-x64.zip',
       ]) {
         for (const method of ['GET', 'HEAD']) {
           const response = await fetch(`${serviceRoot}${path}`, { method })
-          if (response.ok) throw new Error(`${method} ${path} was publicly served`)
+          expect(response.status).toBe(404)
         }
       }
-      expect((await fetch(`${baseUrl}/install-app.sh`, { method: 'POST' })).status).toBe(405)
+      for (const method of ['POST', 'PUT', 'DELETE']) {
+        expect((await fetch(`${baseUrl}/install-app.sh`, { method })).status).toBe(405)
+      }
     } finally {
       if (containerId) await docker(['rm', '-f', containerId])
       await rm(root, { recursive: true, force: true })
