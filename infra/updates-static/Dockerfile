@@ -15,11 +15,13 @@ COPY --from=dependencies /app/node_modules /app/node_modules
 COPY scripts/electron-release-contract.ts /app/electron-release-contract.ts
 COPY scripts/electron-release-draft-identity.ts /app/electron-release-draft-identity.ts
 COPY scripts/publish-electron-release.ts /app/publish-electron-release.ts
+COPY scripts/polo-release-job.ts /app/polo-release-job.ts
 COPY scripts/polo-release-pull.ts /app/polo-release-pull.ts
 COPY scripts/strict-semver.ts /app/strict-semver.ts
 COPY scripts/strict-semver-pattern.txt /app/strict-semver-pattern.txt
 COPY infra/updates-static/polo-release-pull /app/polo-release-pull
-RUN chmod 0755 /app/polo-release-pull
+COPY infra/updates-static/polo-release-job /app/polo-release-job
+RUN chmod 0755 /app/polo-release-pull /app/polo-release-job
 
 COPY infra/updates-static/PoloCaddyfile /etc/caddy/Caddyfile
 

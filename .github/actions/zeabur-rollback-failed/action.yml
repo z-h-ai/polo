@@ -22,6 +22,11 @@ runs:
             && bash scripts/zeabur-cli-checked.sh service exec \
               --id "${{ inputs.service-id }}" \
               --env-id "${{ inputs.environment-id }}" \
+              -- /app/polo-release-job cancel \
+                --version "${{ inputs.version }}" \
+            && bash scripts/zeabur-cli-checked.sh service exec \
+              --id "${{ inputs.service-id }}" \
+              --env-id "${{ inputs.environment-id }}" \
               -- /usr/local/bin/bun /app/publish-electron-release.ts rollback-failed \
                 --releases-dir /data/releases \
                 --version "${{ inputs.version }}" \

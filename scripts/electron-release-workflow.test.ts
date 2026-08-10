@@ -93,7 +93,11 @@ describe("Electron release workflow boundaries", () => {
       "bash scripts/zeabur-cli-checked.sh service exec",
     );
     expect(release).not.toContain("npx zeabur@latest service exec");
-    expect(release).toContain("/app/polo-release-pull");
+    expect(release).toContain("publish-electron-release.ts prepare");
+    expect(release).toContain("/app/polo-release-job start");
+    expect(release).toContain("/app/polo-release-job status");
+    expect(release).toContain("POLO_RELEASE_JOB_STATUS=success");
+    expect(release).toContain("Zeabur release pull job exceeded 30 minutes");
     expect(release).toContain('--release-id "$DRAFT_RELEASE_ID"');
     expect(release).toContain('--asset-identity "$DRAFT_ASSET_IDENTITY"');
     expect(release).toContain("Snapshot approved immutable Draft identity");
@@ -152,6 +156,7 @@ describe("Electron release workflow boundaries", () => {
     expect(rollbackAction).toContain(
       "publish-electron-release.ts rollback-failed",
     );
+    expect(rollbackAction).toContain("/app/polo-release-job cancel");
     expect(rollbackAction).toContain(
       "publish-electron-release.ts assert-rollback-target",
     );

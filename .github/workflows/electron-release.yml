@@ -316,13 +316,35 @@ jobs:
           bash scripts/zeabur-cli-checked.sh service exec \
             --id "$ZEABUR_UPDATES_SERVICE_ID" \
             --env-id "$ZEABUR_ENVIRONMENT_ID" \
-            -- /app/polo-release-pull \
+            -- /usr/local/bin/bun /app/publish-electron-release.ts prepare \
+              --releases-dir /data/releases \
+              --version "$VERSION"
+          bash scripts/zeabur-cli-checked.sh service exec \
+            --id "$ZEABUR_UPDATES_SERVICE_ID" \
+            --env-id "$ZEABUR_ENVIRONMENT_ID" \
+            -- /app/polo-release-job start \
               --repo "$GITHUB_REPOSITORY" \
               --tag "$RELEASE_TAG" \
               --version "$VERSION" \
               --commit "$RELEASE_COMMIT" \
               --release-id "$DRAFT_RELEASE_ID" \
               --asset-identity "$DRAFT_ASSET_IDENTITY"
+          for attempt in $(seq 1 120); do
+            status_output="$(bash scripts/zeabur-cli-checked.sh service exec \
+              --id "$ZEABUR_UPDATES_SERVICE_ID" \
+              --env-id "$ZEABUR_ENVIRONMENT_ID" \
+              -- /app/polo-release-job status --version "$VERSION")"
+            if grep -Eq 'POLO_RELEASE_JOB_STATUS=success([[:space:]]|$)' <<<"$status_output"; then
+              exit 0
+            fi
+            if ! grep -Eq 'POLO_RELEASE_JOB_STATUS=running([[:space:]]|$)' <<<"$status_output"; then
+              echo "::error::Zeabur release pull job failed or disappeared"
+              exit 1
+            fi
+            if [ "$attempt" -lt 120 ]; then sleep 10; fi
+          done
+          echo "::error::Zeabur release pull job exceeded 30 minutes"
+          exit 1
       - name: Compensate failed or uncertain Zeabur release pull
         id: pull-compensation
         if: steps.zeabur-pull.outcome == 'failure'
