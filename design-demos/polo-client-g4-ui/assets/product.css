@@ -155,6 +155,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .assistant-card .app-art { background: var(--accent-soft); color: var(--accent); }
 .assistant-card .card-action + .card-action { margin-left: 0; }
 .placement-card { min-height: 210px; }
+.placement-card .status-line { flex-wrap: wrap; }
+.placement-card .card-action + .card-action { margin-left: 0; }
 .home-placement { color: var(--fg-50); font-size: 10px; white-space: nowrap; }
 .home-placement.on { color: var(--accent); }
 .card-kicker { margin: 0 0 4px; color: var(--accent); font-size: 9px; font-weight: 720; letter-spacing: .08em; text-transform: uppercase; }
@@ -205,6 +207,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: transparent; color: var(--foreground); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .button:hover { background: var(--fg-5); }
+.button:disabled { cursor: not-allowed; opacity: .48; }
+.button:disabled:hover { background: transparent; }
 .button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
 .button.danger { border-color: var(--destructive); background: var(--destructive); color: #fff; }
 .button.quiet { min-height: 28px; }

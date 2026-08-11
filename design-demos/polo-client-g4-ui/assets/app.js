@@ -49,7 +49,10 @@
     weekly: { name: "销售周报助手", icon: "app", source: "企业内部导入 · 北辰智能科技", version: "企业版 v2.7.1", description: "基于企业授权数据生成本周销售摘要。", availability: "available" },
     knowledge: { name: "企业知识检索", icon: "grid", source: "企业内部导入 · 北辰智能科技", version: "企业版 v3.2.0", description: "只读取企业已经授权的知识库。", availability: "available" },
     legacy: { name: "旧版报价助手", icon: "grid", source: "企业内部导入 · 北辰智能科技", version: "企业版 v1.9.4", description: "企业已停用此版本，历史结果仍归企业。", availability: "unavailable", reason: "企业管理员已停用该版本。成员不能重新启用；如需恢复，请联系北辰智能科技管理员。" },
-    compliance: { name: "合规文档检索", icon: "shield", source: "企业内部导入 · 北辰智能科技", version: "企业版 v1.1.0", description: "已向你分发，添加后可从首页快速打开。", availability: "available" }
+    compliance: { name: "合规文档检索", icon: "shield", source: "企业内部导入 · 北辰智能科技", version: "企业版 v1.1.0", description: "检索企业已授权的合规文档并保留引用。", availability: "available" },
+    contract: { name: "合同风险扫描", icon: "shield", source: "企业内部导入 · 北辰智能科技", version: "企业版 v2.1.0", description: "识别合同中的付款、交付和责任风险。", availability: "available" },
+    review: { name: "项目复盘生成", icon: "app", source: "企业内部导入 · 北辰智能科技", version: "企业版 v1.4.0", description: "将里程碑、任务和会议材料整理为项目复盘。", availability: "available" },
+    customer_summary: { name: "客户资料摘要", icon: "grid", source: "企业内部导入 · 北辰智能科技", version: "企业版 v2.0.0", description: "从企业授权的客户材料中提取背景与待跟进事项。", availability: "available" }
   };
 
   const catalog = {
@@ -74,8 +77,8 @@
       ]
     },
     enterprise: {
-      added: ["board", "weekly", "knowledge", "legacy"],
-      available: ["compliance"],
+      added: ["board", "weekly", "knowledge", "legacy", "compliance"],
+      available: ["contract", "review", "customer_summary"],
       recent: [
         { id: "board", detail: "季度交付 · 6 分钟前" },
         { id: "assistant", detail: "企业知识检索 · 昨天" },
@@ -109,6 +112,7 @@
     highlightedSkill: null,
     circleQuery: "",
     circleFilter: "all",
+    catalogQuery: "",
     circleMemberships: space === "personal" ? { bridge: "active", north: "active", growth: "cancelled" } : {},
     assistantPanel: "chat",
     fileQuery: "",
@@ -153,7 +157,10 @@
     board: space => `读取${space.name}已向当前成员授权的项目、里程碑和交付材料`,
     weekly: space => `读取${space.name}已授权的销售数据与本次选择的补充材料`,
     knowledge: space => `只检索${space.name}已向当前成员开放的企业知识库`,
-    compliance: space => `只检索${space.name}已授权的合规文档，并保存引用记录`
+    compliance: space => `只检索${space.name}已授权的合规文档，并保存引用记录`,
+    contract: space => `只读取${space.name}中本次明确选择的合同，并将风险清单写回企业空间`,
+    review: space => `读取${space.name}已向当前成员授权的项目材料，并保存复盘结果`,
+    customer_summary: space => `只读取${space.name}已授权的客户资料，并保存摘要与待办`
   };
 
   const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
@@ -250,17 +257,18 @@
       ? `<button class="card-action" data-remove="${id}">移出首页</button>`
       : atLimit
         ? `<button class="card-action" disabled title="请先移出一个工作 App">首页已满</button>`
-        : `<button class="card-action ${item.availability === "available" ? "primary" : ""}" data-add="${id}">显示在首页</button>`;
-    const action = `${reasonAction}${placementAction}`;
+        : `<button class="card-action" data-add="${id}">显示在首页</button>`;
+    const openAction = item.availability === "available" ? `<button class="card-action primary" data-open="${id}">打开</button>` : "";
+    const action = `${reasonAction}${placementAction}${openAction}`;
     const highlighted = current().highlightedApp === id && (!current().highlightedCircle || current().highlightedCircle === circle?.id);
     return `<article class="product-card placement-card ${highlighted ? "highlighted-card" : ""}"><div class="card-heading"><span class="app-art ${item.availability === "blocked" ? "ink" : item.update ? "amber" : "teal"}">${icon(item.icon)}</span><div class="card-title"><h3>${item.name}</h3><p class="source-line">来源圈子：${circle?.name || item.source}</p></div></div><p class="product-description">${item.description}</p><div class="card-meta">${circle?.creator || item.source} · ${item.version}</div><div class="status-line"><span class="status ${available.tone}">${available.label}</span>${running ? `<span class="status info">${statusLabel(running.status)}</span>` : ""}<span class="home-placement ${onHome ? "on" : ""}">${onHome ? "已在首页" : "未在首页"}</span>${action}</div></article>`;
   }
 
-  function circleAppGroup(circle) {
+  function circleAppGroup(circle, appIds = circle.apps) {
     const membership = circleMembership(circle);
-    const homeCount = circle.apps.filter(id => current().added.includes(id)).length;
+    const homeCount = appIds.filter(id => current().added.includes(id)).length;
     const highlighted = current().highlightedCircle === circle.id;
-    return `<section class="circle-app-section ${highlighted ? "highlighted-section" : ""}"><header class="circle-app-header"><span class="circle-avatar">${circle.initials}</span><div><div class="circle-app-title"><h3>${circle.name}</h3><span class="status ${membership.tone}">${membership.label}</span></div><p>${circle.creator} · ${circle.apps.length} 个 Apps · ${homeCount} 个显示在首页</p></div><button class="section-link" data-circle="${circle.id}">查看圈子详情</button></header><div class="card-grid">${circle.apps.map(id => homePlacementCard(id, circle)).join("")}</div></section>`;
+    return `<section class="circle-app-section ${highlighted ? "highlighted-section" : ""}"><header class="circle-app-header"><span class="circle-avatar">${circle.initials}</span><div><div class="circle-app-title"><h3>${circle.name}</h3><span class="status ${membership.tone}">${membership.label}</span></div><p>${circle.creator} · ${appIds.length} 个 Apps · ${homeCount} 个显示在首页</p></div><button class="section-link" data-circle="${circle.id}">查看圈子详情</button></header><div class="card-grid">${appIds.map(id => homePlacementCard(id, circle)).join("")}</div></section>`;
   }
 
   function utilityCard(id, title, description, meta) {
@@ -273,31 +281,54 @@
     const data = catalog[state.space];
     const circleEntry = state.space === "personal" ? `<button class="home-context-link" data-home-view="circles">${icon("circle")}<span><strong>我的圈子</strong><small>${visibleCircles().length} 个圈子</small></span>${icon("arrow")}</button>` : "";
     return `<section class="home-hero"><div><p class="eyebrow">Polo workspace</p><h1>早上好，林然</h1><p>在 <strong>${space.name}</strong> 继续今天的工作。你可以打开一个 App，或让 Polo 助手帮你整理下一步。</p></div>${circleEntry}</section>
-      ${section("常用 Apps", `每个 App 在${space.name}中拥有独立的 Tab 和运行状态。`, `<div class="card-grid home-app-grid">${assistantHomeCard()}${context.added.map(id => appCard(id)).join("")}</div>`, `<button class="section-link" data-home-view="catalog">管理首页 Apps</button>`)}
+      ${section("常用 Apps", `每个 App 在${space.name}中拥有独立的 Tab 和运行状态。`, `<div class="card-grid home-app-grid">${assistantHomeCard()}${context.added.map(id => appCard(id)).join("")}</div>`, `<button class="section-link" data-home-view="catalog">全部 Apps</button>`)}
       ${section("系统工具", "它们以 Tab 打开，但不拥有 App 的业务流程。", `<div class="utility-grid">${utilityCard("files", "文件", "当前空间上传、保存和导出的文件。", `${data.results.length + 9} 项内容`)}${utilityCard("tasks", "任务与结果", "Polo 掌握的执行状态与明确保存结果。", `${activeExecutions().length} 项运行中`)}</div>`)}
     `;
+  }
+
+  function matchesCatalogQuery(id, query, extra = []) {
+    if (!query) return true;
+    const item = apps[id];
+    return [item.name, item.description, item.source, item.version, ...extra].some(value => value.toLowerCase().includes(query));
+  }
+
+  function catalogSearchToolbar(visibleCount, totalCount) {
+    return `<div class="circle-browser-toolbar app-catalog-toolbar"><label><span>搜索当前空间的 App</span><input id="app-catalog-search" type="search" value="${escapeHtml(current().catalogQuery)}" placeholder="搜索 App 名称、功能或来源"></label><span>显示 <strong>${visibleCount}</strong> / ${totalCount} 个 Apps</span></div>`;
   }
 
   function catalogView() {
     const context = current();
     const data = catalog[state.space];
+    const query = context.catalogQuery.trim().toLowerCase();
+    const homeSection = section("首页快捷入口", `与首页保持一致：Polo 助手固定，另有 ${context.added.length} / 5 个工作 App。这里只管理首页位置，不影响 App 的授权。`, `<div class="card-grid">${assistantManagementCard()}${context.added.map(id => appCard(id, "manage")).join("")}</div>`);
     if (state.space === "personal") {
       const circles = visibleCircles();
       const appCount = circles.reduce((total, circle) => total + circle.apps.length, 0);
-      const groups = circles.map(circle => circleAppGroup(circle)).join("") || `<div class="empty-state"><h2>还没有圈子 Apps</h2><p>加入圈子后，获得的 Apps 会按来源出现在这里。</p></div>`;
-      const homeSection = section("首页当前展示", `与首页保持一致：Polo 助手固定，另有 ${context.added.length} / 5 个工作 App。可直接在这里移出。`, `<div class="card-grid">${assistantManagementCard()}${context.added.map(id => appCard(id, "manage")).join("")}</div>`);
-      const circleSection = section("圈子 Apps", `${circles.length} 个圈子，共 ${appCount} 个作品。同名作品也会分别显示，请通过来源圈子区分。`, `<div class="circle-app-list">${groups}</div>`);
-      return `${subpageHeader("管理首页 Apps", "上方就是首页当前布局；下方按圈子查看全部作品并选择哪些显示在首页。", `<button class="button" data-home-view="circles">${icon("circle")}我的圈子</button>`)}${homeSection}${circleSection}`;
+      const matchedGroups = circles.map(circle => ({ circle, ids: circle.apps.filter(id => matchesCatalogQuery(id, query, [circle.name, circle.creator])) })).filter(group => group.ids.length);
+      const visibleCount = matchedGroups.reduce((total, group) => total + group.ids.length, 0);
+      const groups = matchedGroups.map(group => circleAppGroup(group.circle, group.ids)).join("") || `<div class="empty-note">没有找到匹配的 App。试试作品名、功能或圈子名。</div>`;
+      const circleSection = section("当前空间的全部 Apps", `${circles.length} 个圈子，共 ${appCount} 个作品。同名作品会分别显示，并持续标明来源圈子。`, `${catalogSearchToolbar(visibleCount, appCount)}<div class="circle-app-list">${groups}</div>`, `<button class="section-link" data-home-view="circles">我的圈子</button>`);
+      return `${subpageHeader("全部 Apps", "首页只放最常用的 5 个工作 App；当前空间获得的其他 Apps 始终可以在这里搜索、打开和配置。")}${homeSection}${circleSection}`;
     }
-    const allIds = state.space === "personal" ? authorizedCircleAppIds() : [...new Set([...data.added, ...data.available])];
-    const availableIds = allIds.filter(id => !context.added.includes(id) && apps[id].availability === "available");
-    const unavailableIds = allIds.filter(id => !context.added.includes(id) && apps[id].availability !== "available");
-    const atLimit = context.added.length >= 5;
-    const sourceAction = `<button class="button" data-action="enterprise-admin">${icon("grid")}企业目录</button>`;
-    const addedSection = section("首页中的 Apps", `Polo 助手固定显示；另外最多放 5 个工作 App。当前共 ${context.added.length + 1} / 6 个。`, `<div class="card-grid">${assistantManagementCard()}${context.added.map(id => appCard(id, "manage")).join("")}</div>`);
-    const availableSection = section("其他可添加 Apps", atLimit ? "首页已满。请先从上方移出一个工作 App，再添加新的 App。" : "添加后会出现在首页，但不会自动打开或运行。", `<div class="card-grid compact-grid">${availableIds.map(id => appCard(id, atLimit ? "add-full" : "add")).join("") || `<div class="empty-note">所有可添加 App 都已在首页。</div>`}</div>`);
-    const unavailableSection = unavailableIds.length ? section("当前不可添加", "这些 App 的授权或安全状态不允许添加到首页；可以查看具体原因。", `<div class="card-grid compact-grid">${unavailableIds.map(id => appCard(id)).join("")}</div>`) : "";
-    return `${subpageHeader("管理首页 Apps", "在一个页面中添加或移除首页快捷入口。这里的操作不会运行或卸载 App。", sourceAction)}${addedSection}${availableSection}${unavailableSection}`;
+    const allIds = [...new Set([...data.added, ...data.available])];
+    const visibleIds = allIds.filter(id => matchesCatalogQuery(id, query, [currentSpace().name, "企业目录"]));
+    const directorySection = section("企业目录 Apps", `企业已向当前成员分发 ${allIds.length} 个 Apps。首页未展示的 App 仍可以直接打开。`, `${catalogSearchToolbar(visibleIds.length, allIds.length)}<div class="circle-browser-grid enterprise-app-grid">${visibleIds.map(id => enterpriseDirectoryCard(id)).join("") || `<div class="empty-note">没有找到匹配的企业 App。</div>`}</div>`, `<button class="section-link" data-action="enterprise-admin">企业目录来源</button>`);
+    return `${subpageHeader("全部 Apps", "首页只放最常用的 5 个工作 App；企业向你分发的其他 Apps 始终保留在当前空间目录中。")}${homeSection}${directorySection}`;
+  }
+
+  function enterpriseDirectoryCard(id) {
+    const item = apps[id];
+    const available = availability(item);
+    const running = executionFor(id);
+    const onHome = current().added.includes(id);
+    const atLimit = current().added.length >= 5;
+    const homeAction = onHome
+      ? `<button class="button" data-remove="${id}">移出首页</button>`
+      : atLimit
+        ? `<button class="button" disabled title="请先从上方移出一个工作 App">首页已满</button>`
+        : `<button class="button" data-add="${id}">显示在首页</button>`;
+    const openAction = item.availability === "available" ? `<button class="button primary" data-open="${id}">打开</button>` : `<button class="button" data-explain="${id}">查看原因</button>`;
+    return `<article class="circle-browser-card"><div class="circle-browser-heading"><span class="app-art ${item.availability === "blocked" ? "ink" : item.update ? "amber" : "teal"}">${icon(item.icon)}</span><div><h3>${item.name}</h3><span class="circle-source-pill">北辰智能科技企业目录</span></div></div><p>${item.description}</p><small>${item.version}</small><div class="circle-browser-status"><span class="status ${available.tone}">${available.label}</span>${running ? `<span class="status info">${statusLabel(running.status)}</span>` : ""}<span class="home-placement ${onHome ? "on" : ""}">${onHome ? "已在首页" : "未在首页"}</span></div><div class="circle-browser-actions">${homeAction}${openAction}</div></article>`;
   }
 
   function circlesView() {
@@ -315,7 +346,7 @@
     });
     const filters = `<div class="circle-filter-row" aria-label="按圈子筛选"><button class="circle-filter ${current().circleFilter === "all" ? "active" : ""}" data-circle-filter="all" aria-pressed="${current().circleFilter === "all"}">全部圈子 <span>${entries.length}</span></button>${circles.map(circle => `<button class="circle-filter ${current().circleFilter === circle.id ? "active" : ""}" data-circle-filter="${circle.id}" aria-pressed="${current().circleFilter === circle.id}">${circle.name} <span>${circle.apps.length}</span></button>`).join("")}</div>`;
     const browser = circles.length
-      ? `${section("全部圈子 Apps", "不需要先想起它属于哪个圈子。可以直接搜索、打开，每个作品都会标明来源圈子。", `<div class="circle-browser-toolbar"><label><span>搜索圈子 App</span><input id="circle-app-search" type="search" value="${escapeHtml(current().circleQuery)}" placeholder="搜索 App 名称、功能或来源圈子"></label><span>显示 <strong>${visibleEntries.length}</strong> / ${entries.length} 个 Apps</span></div>${filters}<div class="circle-browser-grid">${visibleEntries.map(({ id, circle }) => circleBrowserCard(id, circle)).join("") || `<div class="empty-note">没有找到匹配的圈子 App。试试作品名、功能或圈子名。</div>`}</div>`, `<button class="section-link" data-home-view="catalog">管理首页 Apps</button>`)}`
+      ? `${section("全部圈子 Apps", "不需要先想起它属于哪个圈子。可以直接搜索、打开，每个作品都会标明来源圈子。", `<div class="circle-browser-toolbar"><label><span>搜索圈子 App</span><input id="circle-app-search" type="search" value="${escapeHtml(current().circleQuery)}" placeholder="搜索 App 名称、功能或来源圈子"></label><span>显示 <strong>${visibleEntries.length}</strong> / ${entries.length} 个 Apps</span></div>${filters}<div class="circle-browser-grid">${visibleEntries.map(({ id, circle }) => circleBrowserCard(id, circle)).join("") || `<div class="empty-note">没有找到匹配的圈子 App。试试作品名、功能或圈子名。</div>`}</div>`, `<button class="section-link" data-home-view="catalog">全部 Apps</button>`)}`
       : `<div class="empty-state"><h2>还没有加入圈子</h2><p>通过创作者邀请、加入链接或二维码加入后，获得的作品会进入我的空间。</p></div>`;
     const memberships = circles.length ? section("已加入的圈子", "在这里查看单个圈子的详情、Skills 和成员资格。", `<div class="circle-list">${circles.map(circle => circleListCard(circle)).join("")}</div>`) : "";
     return `${subpageHeader("我的圈子", `已加入 ${circles.length} 个圈子。所有圈子 Apps 会先汇总展示，圈子仍只是作品来源，不是工作空间。`)}${browser}${memberships}`;
@@ -693,10 +724,11 @@
   });
 
   document.addEventListener("input", event => {
-    if (!["file-search", "circle-app-search"].includes(event.target.id)) return;
+    if (!["file-search", "circle-app-search", "app-catalog-search"].includes(event.target.id)) return;
     const inputId = event.target.id;
     if (inputId === "file-search") current().fileQuery = event.target.value;
-    else current().circleQuery = event.target.value;
+    else if (inputId === "circle-app-search") current().circleQuery = event.target.value;
+    else current().catalogQuery = event.target.value;
     renderMain();
     const input = $(`#${inputId}`);
     input?.focus();
