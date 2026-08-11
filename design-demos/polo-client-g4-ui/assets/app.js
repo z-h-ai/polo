@@ -33,8 +33,8 @@
   };
 
   const spaces = {
-    personal: { name: "我的空间", type: "个人空间", role: "个人", short: "我", dataOwner: "林然", payer: "林然", payerLine: "由你承担 AI 算力" },
-    enterprise: { name: "北辰智能科技", type: "企业空间", role: "Member", short: "北", dataOwner: "北辰智能科技", payer: "北辰智能科技", payerLine: "由企业承担 AI 算力" }
+    personal: { name: "我的空间", type: "个人空间", role: "个人", short: "我", dataOwner: "林然" },
+    enterprise: { name: "北辰智能科技", type: "企业空间", role: "Member", short: "北", dataOwner: "北辰智能科技" }
   };
 
   const apps = {
@@ -122,7 +122,7 @@
       ? [{ id: "exec-research", appId: "research", name: "客户访谈整理", detail: "正在分析 18 份访谈材料", status: "running", background: false }]
       : [{ id: "exec-weekly", appId: "weekly", name: "销售周报助手", detail: "正在准备企业授权数据", status: "preparing", background: true }],
     messages: [
-      { role: "assistant", text: space === "personal" ? "你好，林然。当前对话只使用“我的空间”的文件、Skills 和费用上下文。" : "你好，林然。当前对话属于北辰智能科技，数据和算力费用均归企业。" }
+      { role: "assistant", text: space === "personal" ? "你好，林然。当前对话只使用“我的空间”的文件和 Skills。" : "你好，林然。当前对话和数据均属于北辰智能科技。" }
     ]
   });
 
@@ -180,7 +180,7 @@
   const statusLabel = status => ({ preparing: "准备中", running: "运行中", waiting_for_network: "等待网络", stopping: "停止中", stopped: "已终止", failed: "失败", completed: "已完成" }[status] || status);
 
   function renderSpaceMenu() {
-    $("#space-menu").innerHTML = `<div class="menu-label">切换空间</div>${Object.entries(spaces).map(([id, space]) => `<button class="space-row ${state.space === id ? "active" : ""}" data-space="${id}" role="menuitem"><span class="space-avatar">${space.short}</span><span><b>${space.name}</b><small>${space.type} · ${space.role} · ${space.payerLine}</small></span>${state.space === id ? icon("check", "check") : ""}</button>`).join("")}`;
+    $("#space-menu").innerHTML = `<div class="menu-label">切换空间</div>${Object.entries(spaces).map(([id, space]) => `<button class="space-row ${state.space === id ? "active" : ""}" data-space="${id}" role="menuitem"><span class="space-avatar">${space.short}</span><span><b>${space.name}</b><small>${space.type} · ${space.role}</small></span>${state.space === id ? icon("check", "check") : ""}</button>`).join("")}`;
   }
 
   function renderAccountMenu() {
@@ -238,7 +238,7 @@
 
   function assistantHomeCard() {
     const enabledCount = Object.values(current().skillEnabled).filter(Boolean).length;
-    return `<article class="product-card assistant-card"><div class="card-heading"><span class="app-art">${icon("spark")}</span><div class="card-title"><p class="card-kicker">固定内置 App</p><h3>Polo 助手</h3><p class="source-line">Polo 内置 · ${enabledCount} 个 Skill 已启用</p></div></div><p class="product-description">把想法交给助手，使用当前空间已经启用的 Skills 完成研究、整理和执行。</p><div class="card-meta">${currentSpace().payerLine}</div><div class="status-line"><span class="status good">可使用</span><button class="card-action" data-open-assistant-skills>管理 Skills</button><button class="card-action primary" data-open="assistant">打开</button></div></article>`;
+    return `<article class="product-card assistant-card"><div class="card-heading"><span class="app-art">${icon("spark")}</span><div class="card-title"><p class="card-kicker">固定内置 App</p><h3>Polo 助手</h3><p class="source-line">Polo 内置 · ${enabledCount} 个 Skill 已启用</p></div></div><p class="product-description">把想法交给助手，使用当前空间已经启用的 Skills 完成研究、整理和执行。</p><div class="status-line"><span class="status good">可使用</span><button class="card-action" data-open-assistant-skills>管理 Skills</button><button class="card-action primary" data-open="assistant">打开</button></div></article>`;
   }
 
   function assistantManagementCard() {
@@ -397,7 +397,7 @@
     const membership = circleMembership(circle);
     const priceLabel = circle.price === "免费" ? "内容费免费" : `内容费 ${circle.price}`;
     const renewalLabel = membership.renewal === "长期有效" || membership.renewal.startsWith("可用至") ? membership.renewal : `下次续费 ${membership.renewal}`;
-    return `<div class="subpage-heading circle-detail-heading"><button class="back-button" data-circle-list>${icon("left")}返回我的圈子</button><div><p class="eyebrow">我的空间 · 认证创作者圈子</p><h1>${circle.name}</h1><p>${circle.creator} · 已获得 ${circle.apps.length} 个 Apps 和 ${circle.skills.length} 个 Skills。作品统一进入我的空间目录和 Polo 助手。</p></div><div class="circle-heading-meta"><span class="status ${membership.tone}">${membership.label}</span><small>${priceLabel} · AI 算力另计 · ${renewalLabel}</small><button class="button quiet" data-circle-membership="${circle.id}">管理成员资格</button></div></div>${section("这个圈子的 Apps", "可以直接打开；添加到首页只是固定快捷入口。", `<div class="circle-work-list">${circle.apps.map(id => circleAppRow(id, circle)).join("")}</div>`, `<button class="section-link" data-home-view="catalog">查看全部 Apps</button>`)}${section("这个圈子的 Skills", "Skill 的启用、停用和调用统一在 Polo 助手中完成。", `<div class="circle-work-list">${circle.skills.map(id => circleSkillRow(id)).join("") || `<div class="empty-note">这个圈子当前没有分发 Skill。</div>`}</div>`, `<button class="section-link" data-open-assistant-skills>打开助手 Skills</button>`)}`;
+    return `<div class="subpage-heading circle-detail-heading"><button class="back-button" data-circle-list>${icon("left")}返回我的圈子</button><div><p class="eyebrow">我的空间 · 认证创作者圈子</p><h1>${circle.name}</h1><p>${circle.creator} · 已获得 ${circle.apps.length} 个 Apps 和 ${circle.skills.length} 个 Skills。作品统一进入我的空间目录和 Polo 助手。</p></div><div class="circle-heading-meta"><span class="status ${membership.tone}">${membership.label}</span><small>${priceLabel} · ${renewalLabel}</small><button class="button quiet" data-circle-membership="${circle.id}">管理成员资格</button></div></div>${section("这个圈子的 Apps", "可以直接打开；添加到首页只是固定快捷入口。", `<div class="circle-work-list">${circle.apps.map(id => circleAppRow(id, circle)).join("")}</div>`, `<button class="section-link" data-home-view="catalog">查看全部 Apps</button>`)}${section("这个圈子的 Skills", "Skill 的启用、停用和调用统一在 Polo 助手中完成。", `<div class="circle-work-list">${circle.skills.map(id => circleSkillRow(id)).join("") || `<div class="empty-note">这个圈子当前没有分发 Skill。</div>`}</div>`, `<button class="section-link" data-open-assistant-skills>打开助手 Skills</button>`)}`;
   }
 
   function subpageHeader(title, description, action = "") {
@@ -407,7 +407,8 @@
   function assistantView() {
     const context = current();
     const enabledSkills = currentSkills().filter(skill => context.skillEnabled[skill.id]);
-    return `<div class="assistant-shell"><aside class="assistant-sidebar"><div class="assistant-sidebar-head"><div><p class="eyebrow">Polo 助手</p><h2>对话</h2></div><button class="icon-button" data-action="new-chat" aria-label="新建对话">+</button></div><div class="session-row active"><strong>8 月项目复盘</strong><span>刚刚 · 当前空间</span></div><div class="session-row muted"><strong>整理客户访谈</strong><span>昨天 · 历史预览</span></div><div class="session-row muted"><strong>品牌语气分析</strong><span>周一 · 历史预览</span></div><div class="sidebar-foot"><span>${currentSpace().name}</span><small>切换空间后不会打开其他空间的旧对话</small></div></aside><section class="assistant-main"><header class="assistant-header"><div><h1>${context.assistantPanel === "skills" ? "Skills" : "8 月项目复盘"}</h1><p>Polo 内置 · ${currentSpace().name} · ${enabledSkills.length} 个 Skill 已启用</p></div><div class="assistant-header-actions"><div class="segmented"><button class="${context.assistantPanel === "chat" ? "active" : ""}" data-assistant-panel="chat">对话</button><button class="${context.assistantPanel === "skills" ? "active" : ""}" data-assistant-panel="skills">Skills</button></div><button class="button quiet" data-permissions="assistant">${icon("shield")}权限</button></div></header>${context.assistantPanel === "skills" ? skillsPanel() : chatPanel(enabledSkills)}</section></div>`;
+    const chatActive = context.assistantPanel === "chat";
+    return `<div class="prototype-boundary-note" role="note"><strong>界面示意</strong><span>正式实现直接复用现有 Polo 助手代码。本原型只验证它在当前空间中以 Tab 打开，不重新定义助手内部模块。</span></div><div class="assistant-shell"><aside class="assistant-sidebar" aria-label="Polo 助手导航"><button class="assistant-new-session" data-action="new-chat">${icon("plus")}新建对话</button><nav class="assistant-nav"><button class="assistant-nav-item ${chatActive ? "active" : ""}" data-assistant-panel="chat">${icon("app")}<span>全部对话</span></button><div class="assistant-nav-nested"><button class="assistant-nav-item muted">${icon("info")}<span>已标记</span></button><button class="assistant-nav-item muted">${icon("folder")}<span>已归档</span></button></div><div class="assistant-nav-divider"></div><button class="assistant-nav-item">${icon("folder")}<span>资料源</span></button><button class="assistant-nav-item ${context.assistantPanel === "skills" ? "active" : ""}" data-assistant-panel="skills">${icon("spark")}<span>Skills</span></button><button class="assistant-nav-item">${icon("task")}<span>自动化</span></button></nav><div class="sidebar-foot"><span>${currentSpace().name}</span><small>对话、资料源、Skills 和运行上下文只属于当前空间</small></div></aside><section class="assistant-navigator" aria-label="对话列表"><header><div><strong>对话</strong><span>${currentSpace().name}</span></div><button class="icon-button" data-action="new-chat" aria-label="新建对话">${icon("plus")}</button></header><p class="assistant-list-label">最近对话</p><button class="session-row active"><strong>8 月项目复盘</strong><span>刚刚</span></button><button class="session-row"><strong>整理客户访谈</strong><span>昨天</span></button><button class="session-row"><strong>品牌语气分析</strong><span>周一</span></button><p class="assistant-list-label">已保存视图</p><button class="session-row muted"><strong>已标记</strong><span>2 个对话</span></button><button class="session-row muted"><strong>已归档</strong><span>5 个对话</span></button></section><section class="assistant-main"><header class="assistant-header"><div><h1>${context.assistantPanel === "skills" ? "Skills" : "8 月项目复盘"}${context.assistantPanel === "chat" ? icon("arrow") : ""}</h1><p>${currentSpace().name} · ${enabledSkills.length} 个 Skill 已启用</p></div><div class="assistant-header-actions"><button class="icon-button" aria-label="分享对话">${icon("external")}</button><button class="button quiet" data-permissions="assistant">${icon("shield")}权限</button></div></header>${context.assistantPanel === "skills" ? skillsPanel() : chatPanel(enabledSkills)}</section></div>`;
   }
 
   function skillsPanel() {
@@ -418,16 +419,16 @@
 
   function chatPanel(enabledSkills) {
     const context = current();
-    return `<div class="chat-panel"><div class="message-list">${context.messages.map(message => `<div class="message ${message.role}"><span class="message-avatar">${message.role === "assistant" ? "P" : "林"}</span><div><small>${message.role === "assistant" ? "Polo 助手" : "林然"}</small><p>${escapeHtml(message.text)}</p>${message.call ? skillCallView(message.call) : ""}</div></div>`).join("")}</div><form class="chat-composer" id="chat-form"><div class="composer-context"><label>调用方式<select id="skill-select"><option value="none">不调用 Skill</option>${enabledSkills.map(skill => `<option value="${skill.id}">${skill.name} · ${skill.source}</option>`).join("")}</select></label><span>${currentSpace().payerLine}</span></div><div class="composer-row"><button type="button" class="icon-button" data-action="attach-file" aria-label="添加文件">+</button><textarea id="chat-input" rows="2" placeholder="给 Polo 助手发消息…"></textarea><button class="button primary" type="submit">发送 ${icon("arrow")}</button></div></form></div>`;
+    return `<div class="chat-panel"><div class="message-list">${context.messages.map(message => `<div class="message ${message.role}"><span class="message-avatar">${message.role === "assistant" ? "P" : "林"}</span><div><small>${message.role === "assistant" ? "Polo 助手" : "林然"}</small><p>${escapeHtml(message.text)}</p>${message.call ? skillCallView(message.call) : ""}</div></div>`).join("")}</div><div class="composer-wrap"><div class="composer-mode"><button type="button" class="assistant-mode-badge">${icon("info")}Ask ${icon("arrow")}</button><span>${currentSpace().name}</span></div><form class="chat-composer" id="chat-form"><textarea id="chat-input" rows="3" placeholder="你想让 Polo 助手做什么？"></textarea><div class="composer-footer"><button type="button" class="composer-tool" data-action="attach-file">${icon("plus")}添加文件</button><label class="composer-tool">${icon("spark")}<select id="skill-select"><option value="none">不调用 Skill</option>${enabledSkills.map(skill => `<option value="${skill.id}">${skill.name} · ${skill.source}</option>`).join("")}</select></label><span></span><button class="composer-send" type="submit" aria-label="发送消息">${icon("arrow")}</button></div></form></div></div>`;
   }
 
   function skillCallView(call) {
     const skill = catalog[state.space].skills.find(item => item.id === call.skillId);
     if (!skill) return "";
-    if (call.stage === "permission") return `<div class="tool-call permission-call">${icon("shield")}<span><strong>确认调用：${skill.name} · ${skill.source}</strong><small>${skill.permissions} · ${currentSpace().payerLine}</small></span><div class="tool-actions"><button class="button" data-cancel-skill-call="${call.id}">取消</button><button class="button primary" data-confirm-skill-call="${call.id}">确认权限并运行</button></div></div>`;
+    if (call.stage === "permission") return `<div class="tool-call permission-call">${icon("shield")}<span><strong>确认调用：${skill.name} · ${skill.source}</strong><small>${skill.permissions}</small></span><div class="tool-actions"><button class="button" data-cancel-skill-call="${call.id}">取消</button><button class="button primary" data-confirm-skill-call="${call.id}">确认权限并运行</button></div></div>`;
     if (call.stage === "running") return `<div class="tool-call">${icon("spark")}<span><strong>${skill.name} · ${skill.source}</strong><small>正在读取已确认材料并生成结果；过程保留在本对话中</small></span><span class="status info">运行中</span></div>`;
-    if (call.stage === "cancelled") return `<div class="tool-call">${icon("shield")}<span><strong>${skill.name} · ${skill.source}</strong><small>未授予本次权限，没有读取文件或产生费用</small></span><span class="status neutral">已取消</span></div>`;
-    return `<div class="tool-call">${icon("check")}<span><strong>${skill.name} · ${skill.source}</strong><small>已生成结构化结果并保存到${currentSpace().name} · ${currentSpace().payerLine}</small></span><span class="status good">已完成</span></div>`;
+    if (call.stage === "cancelled") return `<div class="tool-call">${icon("shield")}<span><strong>${skill.name} · ${skill.source}</strong><small>未授予本次权限，没有读取文件或开始执行</small></span><span class="status neutral">已取消</span></div>`;
+    return `<div class="tool-call">${icon("check")}<span><strong>${skill.name} · ${skill.source}</strong><small>已生成结构化结果并保存到${currentSpace().name}</small></span><span class="status good">已完成</span></div>`;
   }
 
   function filesView() {
@@ -444,7 +445,7 @@
     const executions = activeExecutions();
     const recentExecutions = finishedExecutions();
     const results = catalog[state.space].results;
-    const activeRows = executions.map(item => `<article class="task-row"><span class="app-art compact amber">${icon(appMeta(item.appId).icon)}</span><div><h3>${item.name}</h3><p>${item.detail}</p><small>${currentSpace().name} · ${item.background ? "后台运行" : "前台运行"} · ${currentSpace().payerLine}</small></div><span class="status info">${statusLabel(item.status)}</span><button class="button" data-open="${item.appId}">打开</button><button class="button" data-stop-execution="${item.id}">${icon("stop")}终止</button></article>`).join("");
+    const activeRows = executions.map(item => `<article class="task-row"><span class="app-art compact amber">${icon(appMeta(item.appId).icon)}</span><div><h3>${item.name}</h3><p>${item.detail}</p><small>${currentSpace().name} · ${item.background ? "后台运行" : "前台运行"}</small></div><span class="status info">${statusLabel(item.status)}</span><button class="button" data-open="${item.appId}">打开</button><button class="button" data-stop-execution="${item.id}">${icon("stop")}终止</button></article>`).join("");
     const recentRows = recentExecutions.map(item => `<article class="task-row finished"><span class="app-art compact">${icon(appMeta(item.appId).icon)}</span><div><h3>${item.name}</h3><p>${item.detail}</p><small>${currentSpace().name} · 执行记录保留 · 已保存结果不受影响</small></div><span class="status ${item.status === "failed" ? "bad" : item.status === "completed" ? "good" : "neutral"}">${statusLabel(item.status)}</span><button class="button" data-open="${item.appId}">打开 App</button></article>`).join("");
     return `<div class="app-page-heading"><div><p class="eyebrow">系统工具 · Polo 内置</p><h1>任务与结果</h1><p>只显示${currentSpace().name}中 Polo 掌握的执行状态、最小计量和明确保存的结果。</p></div><div class="heading-actions"><span class="status ${executions.length ? "info" : "good"}">${executions.length ? `${executions.length} 项活动执行` : "当前无活动执行"}</span><button class="button quiet" data-permissions="tasks">${icon("shield")}权限</button></div></div>${section("当前执行", "关闭 App Tab 后可以在这里继续查看；切换空间前必须终止。", `<div class="task-list">${activeRows || `<div class="empty-state"><h2>当前没有运行项</h2><p>App 和 Polo 助手的新执行会出现在这里。</p></div>`}</div>`)}${recentRows ? section("最近执行", "终止和失败不会从历史中消失；它们与已保存结果分开记录。", `<div class="task-list">${recentRows}</div>`) : ""}${section("已保存结果", "App 内部业务历史仍由 App 自己管理。", `<div class="results-grid">${results.map(result => `<article class="result-card"><h3>${result.title}</h3><p>${result.description}</p><div class="result-foot"><span>${result.meta}</span><button class="text-button" data-result="${escapeHtml(result.title)}">查看</button></div></article>`).join("")}</div>`)}`;
   }
@@ -453,11 +454,12 @@
     const item = apps[id];
     const execution = executionFor(id);
     const available = availability(item);
-    return `<div class="app-page-heading"><div><p class="eyebrow">工作 App</p><h1>${item.name}</h1><p class="page-meta">${item.source} · ${item.version}</p><p>${item.description}</p></div><div class="heading-actions"><span class="status ${execution ? "info" : available.tone}">${execution ? statusLabel(execution.status) : available.label}</span><button class="button quiet" data-permissions="${id}">${icon("shield")}权限</button></div></div><div class="app-workspace"><div class="app-workspace-icon">${icon(item.icon)}</div><p class="eyebrow">${currentSpace().name} · App 工作区</p><h2>${execution ? execution.detail : "准备开始一次新的使用"}</h2><p>${execution ? `本次执行固定使用 ${item.version}，切换 Tab 不会终止。` : `启动前会重新验证当前空间、授权、版本和付款方。`}</p><div class="app-actions">${execution ? `<button class="button" data-open="tasks">在任务与结果中查看</button><button class="button" data-stop-execution="${execution.id}">${icon("stop")}终止执行</button>` : `<button class="button primary" data-start-app="${id}">${icon("play")}开始使用</button>`}</div></div>`;
+    return `<div class="app-page-heading"><div><p class="eyebrow">工作 App</p><h1>${item.name}</h1><p class="page-meta">${item.source} · ${item.version}</p><p>${item.description}</p></div><div class="heading-actions"><span class="status ${execution ? "info" : available.tone}">${execution ? statusLabel(execution.status) : available.label}</span><button class="button quiet" data-permissions="${id}">${icon("shield")}权限</button></div></div><div class="app-workspace"><div class="app-workspace-icon">${icon(item.icon)}</div><p class="eyebrow">${currentSpace().name} · App 工作区</p><h2>${execution ? execution.detail : "准备开始一次新的使用"}</h2><p>${execution ? `本次执行固定使用 ${item.version}，切换 Tab 不会终止。` : `启动前会重新验证当前空间、授权和版本。`}</p><div class="app-actions">${execution ? `<button class="button" data-open="tasks">在任务与结果中查看</button><button class="button" data-stop-execution="${execution.id}">${icon("stop")}终止执行</button>` : `<button class="button primary" data-start-app="${id}">${icon("play")}开始使用</button>`}</div></div>`;
   }
 
   function renderMain() {
     const context = current();
+    main.classList.toggle("assistant-mode", context.activeTab === "assistant");
     if (context.activeTab === "home") main.innerHTML = context.homeView === "circles" ? circlesView() : context.homeView === "catalog" ? catalogView() : homeView();
     else if (context.activeTab === "assistant") main.innerHTML = assistantView();
     else if (context.activeTab === "files") main.innerHTML = filesView();
@@ -493,7 +495,7 @@
   function requestCloseTab(id) {
     const execution = executionFor(id);
     if (!execution) { closeTabNow(id); return; }
-    showModal(dialog(`关闭 ${appMeta(id).name}`, "该 App 仍有活动执行。关闭 Tab 不等于终止执行。", `<div class="impact-card">${icon("clock")}<span><strong>${execution.detail}</strong><small>${currentSpace().name} · ${statusLabel(execution.status)} · ${currentSpace().payerLine}</small></span></div>`, `<button class="button" data-close-modal>取消</button><button class="button" data-background-close="${id}">后台继续</button><button class="button danger" data-stop-close="${id}">终止并关闭</button>`));
+    showModal(dialog(`关闭 ${appMeta(id).name}`, "该 App 仍有活动执行。关闭 Tab 不等于终止执行。", `<div class="impact-card">${icon("clock")}<span><strong>${execution.detail}</strong><small>${currentSpace().name} · ${statusLabel(execution.status)}</small></span></div>`, `<button class="button" data-close-modal>取消</button><button class="button" data-background-close="${id}">后台继续</button><button class="button danger" data-stop-close="${id}">终止并关闭</button>`));
   }
 
   function showToast(message) {
@@ -561,7 +563,7 @@
     if (executionFor(id)) return;
     current().executions.push({ id: `exec-${id}-${Date.now()}`, appId: id, name: item.name, detail: "正在准备本次执行", status: "preparing", background: false });
     render();
-    showToast(`“${item.name}”正在准备，本次执行由${currentSpace().payer}承担费用。`);
+    showToast(`“${item.name}”正在准备本次执行。`);
   }
 
   function stopExecution(executionId) {
@@ -588,7 +590,7 @@
     state.runtimeOpen = false;
     state.notificationOpen = false;
     render();
-    showToast(`已进入${spaces[next].name}，目录、对话、文件、权限和付款方已整体切换。`);
+    showToast(`已进入${spaces[next].name}，目录、对话、文件和权限已整体切换。`);
   }
 
   function toggleSkill(id) {
@@ -601,7 +603,7 @@
       showToast(`已在${currentSpace().name}停用“${skill.name}”。`);
       return;
     }
-    showModal(dialog(`启用 ${skill.name}`, "启用状态按你的账号与当前空间保存，不会替其他企业成员启用。", `<div class="permission-summary"><span><b>来源</b>${skill.source}</span><span><b>权限</b>${skill.permissions}</span><span><b>运行位置</b>仅在 Polo 助手对话中</span><span><b>付款方</b>${currentSpace().payer}</span></div>`, `<button class="button" data-close-modal>取消</button><button class="button primary" data-confirm-skill="${id}">确认启用</button>`));
+    showModal(dialog(`启用 ${skill.name}`, "启用状态按你的账号与当前空间保存，不会替其他企业成员启用。", `<div class="permission-summary"><span><b>来源</b>${skill.source}</span><span><b>权限</b>${skill.permissions}</span><span><b>运行位置</b>仅在 Polo 助手对话中</span><span><b>当前空间</b>${currentSpace().name}</span></div>`, `<button class="button" data-close-modal>取消</button><button class="button primary" data-confirm-skill="${id}">确认启用</button>`));
   }
 
   function openCircleMembership(id) {
@@ -611,7 +613,7 @@
     const renewalAction = current().circleMemberships[id] === "cancelled"
       ? `<button class="button" data-resume-circle-renewal="${id}">恢复续费</button>`
       : circle.price === "免费" ? "" : `<button class="button" data-cancel-circle-renewal="${id}">取消续费</button>`;
-    showModal(dialog(`管理 ${circle.name}`, "成员资格只决定这个圈子的授权来源，不会创建新的工作空间。", `<div class="permission-summary"><span><b>当前状态</b>${membership.label}</span><span><b>圈子内容费</b>${circle.price}</span><span><b>续费或有效期</b>${membership.renewal}</span><span><b>AI 算力</b>使用作品时由林然另行承担</span></div>`, `<button class="button" data-close-modal>关闭</button>${renewalAction}<button class="button danger" data-leave-circle="${id}">立即退出</button>`));
+    showModal(dialog(`管理 ${circle.name}`, "成员资格只决定这个圈子的授权来源，不会创建新的工作空间。", `<div class="permission-summary"><span><b>当前状态</b>${membership.label}</span><span><b>圈子内容费</b>${circle.price}</span><span><b>续费或有效期</b>${membership.renewal}</span></div>`, `<button class="button" data-close-modal>关闭</button>${renewalAction}<button class="button danger" data-leave-circle="${id}">立即退出</button>`));
   }
 
   function confirmLeaveCircle(id) {
@@ -699,7 +701,7 @@
     if (target.dataset.action === "view-runtime") { closeModal(); state.runtimeOpen = false; openTab("tasks"); return; }
     if (target.dataset.action === "theme") { state.theme = state.theme === "dark" ? "light" : "dark"; state.openMenu = null; localStorage.setItem("polo-g4-theme", state.theme); render(); showToast(`已切换到${state.theme === "dark" ? "深色" : "浅色"}主题。`); return; }
     if (["settings", "enterprise-admin", "creator-workbench"].includes(target.dataset.action)) { state.openMenu = null; render(); showToast(target.dataset.action === "settings" ? "账号与偏好将在设置中打开。" : "管理入口将在系统浏览器中打开，不会生成客户端 Tab。"); return; }
-    if (target.matches("[data-permissions]")) { const id = target.dataset.permissions; const meta = appMeta(id); const scope = permissionScopes[id]?.(currentSpace()) || `只使用${currentSpace().name}已向当前成员授权的数据`; showModal(dialog(`${meta.name}权限`, "完整权限信息由 Polo 外壳展示，App 和系统工具不能伪造。", `<div class="permission-summary"><span><b>空间</b>${currentSpace().name}</span><span><b>来源与版本</b>${meta.source} · ${meta.version}</span><span><b>允许范围</b>${scope}</span><span><b>数据归属</b>${currentSpace().dataOwner}</span><span><b>费用</b>${currentSpace().payerLine}</span></div>`, `<button class="button primary" data-close-modal>关闭</button>`)); return; }
+    if (target.matches("[data-permissions]")) { const id = target.dataset.permissions; const meta = appMeta(id); const scope = permissionScopes[id]?.(currentSpace()) || `只使用${currentSpace().name}已向当前成员授权的数据`; showModal(dialog(`${meta.name}权限`, "完整权限信息由 Polo 外壳展示，App 和系统工具不能伪造。", `<div class="permission-summary"><span><b>空间</b>${currentSpace().name}</span><span><b>来源与版本</b>${meta.source} · ${meta.version}</span><span><b>允许范围</b>${scope}</span><span><b>数据归属</b>${currentSpace().dataOwner}</span></div>`, `<button class="button primary" data-close-modal>关闭</button>`)); return; }
     if (target.dataset.action === "upload") { showToast(`文件选择器将把文件上传到${currentSpace().name}，归${currentSpace().dataOwner}所有。`); return; }
     if (target.dataset.action === "attach-file") { showToast(`请选择${currentSpace().name}中的文件；只有确认发送后助手才能读取。`); return; }
     if (target.matches("[data-file-details]")) { const name = target.dataset.fileDetails; showModal(dialog(name, "该文件的来源与归属由 Polo 外壳记录。", `<div class="permission-summary"><span><b>所在空间</b>${currentSpace().name}</span><span><b>数据归属</b>${currentSpace().dataOwner}</span><span><b>可用操作</b>打开、下载或从当前空间移除</span></div>`, `<button class="button primary" data-close-modal>关闭</button>`)); return; }
