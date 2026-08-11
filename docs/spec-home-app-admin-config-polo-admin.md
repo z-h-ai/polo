@@ -1,7 +1,7 @@
 # 首页 App 管理 — polo-admin 服务端
 
 > 生成时间: 2026-06-25
-> 拆分自: spec-home-app-admin-config.md
+> 原始汇总规格已拆分并清理；本文件是服务端范围的保留版本。
 > 任务: POL-51
 > 归属: polo-admin（服务端 + 管理后台）
 

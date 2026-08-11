@@ -276,9 +276,6 @@ Handler 逻辑：
 
 ### Phase 3: Electron Renderer UI
 
-> **视觉参考**: `docs/prototype-login.html`（Python HTTP server 启动后可在浏览器中预览）
-> 右上角场景切换器可切换所有状态，实现时不需要场景切换器本身。
-
 #### 3.1 Admin 登录页
 
 **新建**: `apps/electron/src/renderer/components/onboarding/AdminLoginStep.tsx`
