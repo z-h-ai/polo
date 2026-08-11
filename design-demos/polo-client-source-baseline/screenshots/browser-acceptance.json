@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "baseURL": "http://127.0.0.1:4183",
+  "checks": [
+    {
+      "name": "home heading",
+      "pass": true
+    },
+    {
+      "name": "resources navigation",
+      "pass": true
+    },
+    {
+      "name": "chat send interaction",
+      "pass": true
+    },
+    {
+      "name": "organization lifecycle to management",
+      "pass": true
+    },
+    {
+      "name": "single-file settings",
+      "pass": true
+    },
+    {
+      "name": "single-file runtime",
+      "pass": true
+    }
+  ],
+  "pageErrors": [],
+  "generatedAt": "2026-08-11T06:39:01.733Z"
+}

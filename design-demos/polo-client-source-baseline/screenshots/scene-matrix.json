@@ -1,0 +1,795 @@
+{
+  "generatedAt": "2026-08-11T06:39:00.193Z",
+  "rows": [
+    {
+      "scene": "splash",
+      "state": "normal",
+      "group": "lifecycle",
+      "label": "启动 Splash",
+      "source": [
+        "src/renderer/components/SplashScreen.tsx"
+      ]
+    },
+    {
+      "scene": "splash",
+      "state": "loading",
+      "group": "lifecycle",
+      "label": "启动 Splash",
+      "source": [
+        "src/renderer/components/SplashScreen.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "admin-login",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "admin-kicked",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "welcome",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "git-bash",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "provider-select",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "local-model",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "credentials",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "onboarding",
+      "state": "complete",
+      "group": "lifecycle",
+      "label": "首次启动引导",
+      "source": [
+        "src/renderer/components/onboarding/OnboardingWizard.tsx"
+      ]
+    },
+    {
+      "scene": "reauth",
+      "state": "normal",
+      "group": "lifecycle",
+      "label": "重新认证",
+      "source": [
+        "src/renderer/components/onboarding/ReauthScreen.tsx"
+      ]
+    },
+    {
+      "scene": "reauth",
+      "state": "failure",
+      "group": "lifecycle",
+      "label": "重新认证",
+      "source": [
+        "src/renderer/components/onboarding/ReauthScreen.tsx"
+      ]
+    },
+    {
+      "scene": "workspace-picker",
+      "state": "loading",
+      "group": "lifecycle",
+      "label": "空间选择",
+      "source": [
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "workspace-picker",
+      "state": "list",
+      "group": "lifecycle",
+      "label": "空间选择",
+      "source": [
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "workspace-picker",
+      "state": "error",
+      "group": "lifecycle",
+      "label": "空间选择",
+      "source": [
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "workspace-picker",
+      "state": "create",
+      "group": "lifecycle",
+      "label": "空间选择",
+      "source": [
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "workspace-picker",
+      "state": "open-folder",
+      "group": "lifecycle",
+      "label": "空间选择",
+      "source": [
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "workspace-picker",
+      "state": "connect-remote",
+      "group": "lifecycle",
+      "label": "空间选择",
+      "source": [
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "home",
+      "state": "normal",
+      "group": "workbench",
+      "label": "我的空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/app-shell/AppShell.tsx"
+      ]
+    },
+    {
+      "scene": "home",
+      "state": "empty",
+      "group": "workbench",
+      "label": "我的空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/app-shell/AppShell.tsx"
+      ]
+    },
+    {
+      "scene": "home",
+      "state": "loading",
+      "group": "workbench",
+      "label": "我的空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/app-shell/AppShell.tsx"
+      ]
+    },
+    {
+      "scene": "home",
+      "state": "failure",
+      "group": "workbench",
+      "label": "我的空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/app-shell/AppShell.tsx"
+      ]
+    },
+    {
+      "scene": "home",
+      "state": "restricted",
+      "group": "workbench",
+      "label": "我的空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/app-shell/AppShell.tsx"
+      ]
+    },
+    {
+      "scene": "enterprise-home",
+      "state": "normal",
+      "group": "workbench",
+      "label": "企业空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "enterprise-home",
+      "state": "empty",
+      "group": "workbench",
+      "label": "企业空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "enterprise-home",
+      "state": "loading",
+      "group": "workbench",
+      "label": "企业空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "enterprise-home",
+      "state": "failure",
+      "group": "workbench",
+      "label": "企业空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "enterprise-home",
+      "state": "restricted",
+      "group": "workbench",
+      "label": "企业空间首页",
+      "source": [
+        "src/renderer/components/tab-browser/HomePage.tsx",
+        "src/renderer/components/workspace"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "normal",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "detail",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "streaming",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "error",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "empty",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "archived",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "loading",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat",
+      "state": "restricted",
+      "group": "assistant",
+      "label": "Polo 助手会话",
+      "source": [
+        "src/renderer/pages/ChatPage.tsx",
+        "src/renderer/components/app-shell"
+      ]
+    },
+    {
+      "scene": "chat-permission",
+      "state": "normal",
+      "group": "assistant",
+      "label": "权限确认",
+      "source": [
+        "src/renderer/components/chat",
+        "src/renderer/components/permissions"
+      ]
+    },
+    {
+      "scene": "chat-permission",
+      "state": "failure",
+      "group": "assistant",
+      "label": "权限确认",
+      "source": [
+        "src/renderer/components/chat",
+        "src/renderer/components/permissions"
+      ]
+    },
+    {
+      "scene": "chat-permission",
+      "state": "restricted",
+      "group": "assistant",
+      "label": "权限确认",
+      "source": [
+        "src/renderer/components/chat",
+        "src/renderer/components/permissions"
+      ]
+    },
+    {
+      "scene": "skills",
+      "state": "list",
+      "group": "resources",
+      "label": "Skill 详情",
+      "source": [
+        "src/renderer/pages/SkillInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "skills",
+      "state": "detail",
+      "group": "resources",
+      "label": "Skill 详情",
+      "source": [
+        "src/renderer/pages/SkillInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "skills",
+      "state": "empty",
+      "group": "resources",
+      "label": "Skill 详情",
+      "source": [
+        "src/renderer/pages/SkillInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "skills",
+      "state": "loading",
+      "group": "resources",
+      "label": "Skill 详情",
+      "source": [
+        "src/renderer/pages/SkillInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "skills",
+      "state": "failure",
+      "group": "resources",
+      "label": "Skill 详情",
+      "source": [
+        "src/renderer/pages/SkillInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "skills",
+      "state": "restricted",
+      "group": "resources",
+      "label": "Skill 详情",
+      "source": [
+        "src/renderer/pages/SkillInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "sources",
+      "state": "list",
+      "group": "resources",
+      "label": "Source 详情",
+      "source": [
+        "src/renderer/pages/SourceInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "sources",
+      "state": "detail",
+      "group": "resources",
+      "label": "Source 详情",
+      "source": [
+        "src/renderer/pages/SourceInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "sources",
+      "state": "empty",
+      "group": "resources",
+      "label": "Source 详情",
+      "source": [
+        "src/renderer/pages/SourceInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "sources",
+      "state": "loading",
+      "group": "resources",
+      "label": "Source 详情",
+      "source": [
+        "src/renderer/pages/SourceInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "sources",
+      "state": "failure",
+      "group": "resources",
+      "label": "Source 详情",
+      "source": [
+        "src/renderer/pages/SourceInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "sources",
+      "state": "restricted",
+      "group": "resources",
+      "label": "Source 详情",
+      "source": [
+        "src/renderer/pages/SourceInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "automations",
+      "state": "list",
+      "group": "resources",
+      "label": "Automation 详情",
+      "source": [
+        "src/renderer/components/automations/AutomationInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "automations",
+      "state": "detail",
+      "group": "resources",
+      "label": "Automation 详情",
+      "source": [
+        "src/renderer/components/automations/AutomationInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "automations",
+      "state": "empty",
+      "group": "resources",
+      "label": "Automation 详情",
+      "source": [
+        "src/renderer/components/automations/AutomationInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "automations",
+      "state": "test",
+      "group": "resources",
+      "label": "Automation 详情",
+      "source": [
+        "src/renderer/components/automations/AutomationInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "automations",
+      "state": "loading",
+      "group": "resources",
+      "label": "Automation 详情",
+      "source": [
+        "src/renderer/components/automations/AutomationInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "automations",
+      "state": "failure",
+      "group": "resources",
+      "label": "Automation 详情",
+      "source": [
+        "src/renderer/components/automations/AutomationInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "automations",
+      "state": "restricted",
+      "group": "resources",
+      "label": "Automation 详情",
+      "source": [
+        "src/renderer/components/automations/AutomationInfoPage.tsx"
+      ]
+    },
+    {
+      "scene": "browser",
+      "state": "normal",
+      "group": "apps",
+      "label": "Browser App",
+      "source": [
+        "src/renderer/components/browser",
+        "src/renderer/browser-empty-state.tsx"
+      ]
+    },
+    {
+      "scene": "browser",
+      "state": "empty",
+      "group": "apps",
+      "label": "Browser App",
+      "source": [
+        "src/renderer/components/browser",
+        "src/renderer/browser-empty-state.tsx"
+      ]
+    },
+    {
+      "scene": "browser",
+      "state": "loading",
+      "group": "apps",
+      "label": "Browser App",
+      "source": [
+        "src/renderer/components/browser",
+        "src/renderer/browser-empty-state.tsx"
+      ]
+    },
+    {
+      "scene": "browser",
+      "state": "failure",
+      "group": "apps",
+      "label": "Browser App",
+      "source": [
+        "src/renderer/components/browser",
+        "src/renderer/browser-empty-state.tsx"
+      ]
+    },
+    {
+      "scene": "browser",
+      "state": "restricted",
+      "group": "apps",
+      "label": "Browser App",
+      "source": [
+        "src/renderer/components/browser",
+        "src/renderer/browser-empty-state.tsx"
+      ]
+    },
+    {
+      "scene": "app-menu",
+      "state": "normal",
+      "group": "apps",
+      "label": "应用菜单",
+      "source": [
+        "src/renderer/components/AppMenu.tsx",
+        "src/renderer/components/app-menu/DesktopAppMenu.tsx"
+      ]
+    },
+    {
+      "scene": "settings",
+      "state": "list",
+      "group": "settings",
+      "label": "设置",
+      "source": [
+        "src/renderer/pages/settings/SettingsNavigator.tsx",
+        "src/renderer/pages/settings"
+      ]
+    },
+    {
+      "scene": "settings",
+      "state": "detail",
+      "group": "settings",
+      "label": "设置",
+      "source": [
+        "src/renderer/pages/settings/SettingsNavigator.tsx",
+        "src/renderer/pages/settings"
+      ]
+    },
+    {
+      "scene": "settings",
+      "state": "appearance",
+      "group": "settings",
+      "label": "设置",
+      "source": [
+        "src/renderer/pages/settings/SettingsNavigator.tsx",
+        "src/renderer/pages/settings"
+      ]
+    },
+    {
+      "scene": "settings",
+      "state": "notifications",
+      "group": "settings",
+      "label": "设置",
+      "source": [
+        "src/renderer/pages/settings/SettingsNavigator.tsx",
+        "src/renderer/pages/settings"
+      ]
+    },
+    {
+      "scene": "settings",
+      "state": "loading",
+      "group": "settings",
+      "label": "设置",
+      "source": [
+        "src/renderer/pages/settings/SettingsNavigator.tsx",
+        "src/renderer/pages/settings"
+      ]
+    },
+    {
+      "scene": "settings",
+      "state": "failure",
+      "group": "settings",
+      "label": "设置",
+      "source": [
+        "src/renderer/pages/settings/SettingsNavigator.tsx",
+        "src/renderer/pages/settings"
+      ]
+    },
+    {
+      "scene": "settings",
+      "state": "restricted",
+      "group": "settings",
+      "label": "设置",
+      "source": [
+        "src/renderer/pages/settings/SettingsNavigator.tsx",
+        "src/renderer/pages/settings"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "loading",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "join",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "select",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "create",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "normal",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "members",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "artifacts",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "organization",
+      "state": "failure",
+      "group": "organization",
+      "label": "组织管理",
+      "source": [
+        "src/renderer/components/organization/OrganizationManagementDialog.tsx",
+        "src/renderer/components/organization/OrganizationOnboarding.tsx"
+      ]
+    },
+    {
+      "scene": "notifications",
+      "state": "normal",
+      "group": "system",
+      "label": "通知中心",
+      "source": [
+        "src/renderer/components/notifications"
+      ]
+    },
+    {
+      "scene": "notifications",
+      "state": "empty",
+      "group": "system",
+      "label": "通知中心",
+      "source": [
+        "src/renderer/components/notifications"
+      ]
+    },
+    {
+      "scene": "shortcuts",
+      "state": "normal",
+      "group": "system",
+      "label": "键盘快捷键",
+      "source": [
+        "src/renderer/components/KeyboardShortcutsDialog.tsx",
+        "src/renderer/pages/ShortcutsPage.tsx"
+      ]
+    },
+    {
+      "scene": "reset",
+      "state": "normal",
+      "group": "system",
+      "label": "重置确认",
+      "source": [
+        "src/renderer/components/ResetConfirmationDialog.tsx"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "schemaVersion": "1.0.0",
+  "default": {
+    "scene": "home",
+    "state": "normal",
+    "theme": "light",
+    "lang": "zh-Hans"
+  },
+  "states": ["normal", "empty", "loading", "failure", "restricted"],
+  "scenes": [
+    {
+      "id": "splash",
+      "label": "启动 Splash",
+      "group": "lifecycle",
+      "states": ["normal", "loading"],
+      "regions": ["splash"],
+      "source": ["src/renderer/components/SplashScreen.tsx"]
+    },
+    {
+      "id": "onboarding",
+      "label": "首次启动引导",
+      "group": "lifecycle",
+      "states": ["admin-login", "admin-kicked", "welcome", "git-bash", "provider-select", "local-model", "credentials", "complete"],
+      "regions": ["onboarding-card", "onboarding-progress"],
+      "source": ["src/renderer/components/onboarding/OnboardingWizard.tsx"]
+    },
+    {
+      "id": "reauth",
+      "label": "重新认证",
+      "group": "lifecycle",
+      "states": ["normal", "failure"],
+      "regions": ["reauth-card"],
+      "source": ["src/renderer/components/onboarding/ReauthScreen.tsx"]
+    },
+    {
+      "id": "workspace-picker",
+      "label": "空间选择",
+      "group": "lifecycle",
+      "states": ["loading", "list", "error", "create", "open-folder", "connect-remote"],
+      "regions": ["workspace-picker", "workspace-list"],
+      "source": ["src/renderer/components/workspace"]
+    },
+    {
+      "id": "home",
+      "label": "我的空间首页",
+      "group": "workbench",
+      "states": ["normal", "empty", "loading", "failure", "restricted"],
+      "regions": ["workbench-bar", "space-switcher", "app-tabs", "home-content", "app-card-grid", "skills-grid", "result-grid"],
+      "source": ["src/renderer/components/tab-browser/HomePage.tsx", "src/renderer/components/app-shell/AppShell.tsx"]
+    },
+    {
+      "id": "enterprise-home",
+      "label": "企业空间首页",
+      "group": "workbench",
+      "states": ["normal", "empty", "loading", "failure", "restricted"],
+      "regions": ["workbench-bar", "space-switcher", "app-tabs", "home-content", "app-card-grid"],
+      "source": ["src/renderer/components/tab-browser/HomePage.tsx", "src/renderer/components/workspace"]
+    },
+    {
+      "id": "chat",
+      "label": "Polo 助手会话",
+      "group": "assistant",
+      "states": ["normal", "detail", "streaming", "error", "empty", "archived", "loading", "restricted"],
+      "regions": ["workbench-bar", "session-sidebar", "chat-header", "message-list", "composer"],
+      "source": ["src/renderer/pages/ChatPage.tsx", "src/renderer/components/app-shell"]
+    },
+    {
+      "id": "chat-permission",
+      "label": "权限确认",
+      "group": "assistant",
+      "states": ["normal", "failure", "restricted"],
+      "regions": ["chat", "permission-dialog"],
+      "source": ["src/renderer/components/chat", "src/renderer/components/permissions"]
+    },
+    {
+      "id": "skills",
+      "label": "Skill 详情",
+      "group": "resources",
+      "states": ["list", "detail", "empty", "loading", "failure", "restricted"],
+      "regions": ["resource-header", "resource-detail", "resource-actions"],
+      "source": ["src/renderer/pages/SkillInfoPage.tsx"]
+    },
+    {
+      "id": "sources",
+      "label": "Source 详情",
+      "group": "resources",
+      "states": ["list", "detail", "empty", "loading", "failure", "restricted"],
+      "regions": ["resource-header", "resource-detail", "resource-actions"],
+      "source": ["src/renderer/pages/SourceInfoPage.tsx"]
+    },
+    {
+      "id": "automations",
+      "label": "Automation 详情",
+      "group": "resources",
+      "states": ["list", "detail", "empty", "test", "loading", "failure", "restricted"],
+      "regions": ["resource-header", "automation-detail", "automation-actions"],
+      "source": ["src/renderer/components/automations/AutomationInfoPage.tsx"]
+    },
+    {
+      "id": "browser",
+      "label": "Browser App",
+      "group": "apps",
+      "states": ["normal", "empty", "loading", "failure", "restricted"],
+      "regions": ["browser-tab-strip", "browser-toolbar", "browser-content"],
+      "source": ["src/renderer/components/browser", "src/renderer/browser-empty-state.tsx"]
+    },
+    {
+      "id": "app-menu",
+      "label": "应用菜单",
+      "group": "apps",
+      "states": ["normal"],
+      "regions": ["app-menu", "app-menu-items"],
+      "source": ["src/renderer/components/AppMenu.tsx", "src/renderer/components/app-menu/DesktopAppMenu.tsx"]
+    },
+    {
+      "id": "settings",
+      "label": "设置",
+      "group": "settings",
+      "states": ["list", "detail", "appearance", "notifications", "loading", "failure", "restricted"],
+      "regions": ["settings-navigator", "settings-content", "settings-form"],
+      "source": ["src/renderer/pages/settings/SettingsNavigator.tsx", "src/renderer/pages/settings"]
+    },
+    {
+      "id": "organization",
+      "label": "组织管理",
+      "group": "organization",
+      "states": ["loading", "join", "select", "create", "normal", "members", "artifacts", "failure"],
+      "regions": ["organization-shell", "organization-list", "organization-actions"],
+      "source": ["src/renderer/components/organization/OrganizationManagementDialog.tsx", "src/renderer/components/organization/OrganizationOnboarding.tsx"]
+    },
+    {
+      "id": "shortcuts",
+      "label": "键盘快捷键",
+      "group": "system",
+      "states": ["normal"],
+      "regions": ["shortcuts-dialog"],
+      "source": ["src/renderer/components/KeyboardShortcutsDialog.tsx", "src/renderer/pages/ShortcutsPage.tsx"]
+    },
+    {
+      "id": "reset",
+      "label": "重置确认",
+      "group": "system",
+      "states": ["normal"],
+      "regions": ["reset-dialog"],
+      "source": ["src/renderer/components/ResetConfirmationDialog.tsx"]
+    }
+  ]
+}

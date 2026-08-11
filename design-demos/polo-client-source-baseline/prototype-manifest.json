@@ -1,0 +1,132 @@
+{
+  "schemaVersion": "1.0.0",
+  "baselineVersion": "0.2.0-in-progress",
+  "name": "Polo Electron source baseline",
+  "status": "reconstruction_in_progress",
+  "source": {
+    "root": "/Users/wow/project/z-h-ai/polo-dir/dev/apps/electron",
+    "repositoryRoot": "/Users/wow/project/z-h-ai/polo-dir/dev",
+    "gitRevision": "01f4447cf77612ca2c62d9c7155601a51bdb7b5b",
+    "worktreeCleanAtCapture": true,
+    "capturedAt": "2026-08-10",
+    "provenance": "Renderer reconstruction in progress. Earlier generic mock is rejected and must not be treated as source-faithful."
+  },
+  "artifacts": {
+    "moduleEntry": "index.html",
+    "singleFile": "prototype.html",
+    "assets": "assets/",
+    "sourceAssets": [
+      {
+        "file": "assets/brand/polo_ai_logo_c.svg",
+        "source": "apps/electron/src/renderer/assets/polo_ai_logo_c.svg",
+        "classification": "runtime_exact"
+      },
+      {
+        "file": "assets/renderer/polo-app-icon.png",
+        "source": "apps/electron/resources/icon.png",
+        "sha256": "2ad974e25cf23e44274fbea52dc3a34530b1541a5ddd12fc8c5e3f68512331b1",
+        "classification": "runtime_exact"
+      }
+    ],
+    "sceneCatalog": "scene-catalog.json",
+    "screenshots": "screenshots/",
+    "singleFileBytes": 301325,
+    "singleFileSha256": "c0b6c1a467dc463341e6cafa7047526326af35ee967b4a7f76e1eb93d30bb04c",
+    "moduleBuild": "dist/"
+  },
+  "protocol": {
+    "query": [
+      "scene",
+      "state",
+      "theme",
+      "lang"
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "languages": [
+      "zh-Hans",
+      "en",
+      "es",
+      "ja",
+      "hu",
+      "de",
+      "pl"
+    ],
+    "viewports": [
+      {
+        "id": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "minimum-window",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "coverage": {
+    "sceneCatalog": "scene-catalog.json",
+    "sourceEvidence": "SOURCE-EVIDENCE.md",
+    "sceneTraceability": "SCENE-TRACEABILITY.md",
+    "regions": "All catalog scenes are reconstructed by static translation of the listed Renderer source. Runtime screenshots are optional validation evidence; account, organization, catalog, conversation and permission values use named deterministic fixtures where source code cannot uniquely derive a value.",
+    "sourceClassification": [
+      "runtime_exact",
+      "playground_exact",
+      "source_derived",
+      "approximate"
+    ],
+    "nativeBoundaries": [
+      "Electron Main",
+      "Preload",
+      "BrowserView",
+      "OS dialogs",
+      "real IPC"
+    ]
+  },
+  "verification": {
+    "static": "passed",
+    "browser": "not_run_for_reconstruction",
+    "visual": "not_run_for_reconstruction",
+    "interactive": "not_run_for_reconstruction",
+    "sourceFidelity": "static-source-derived"
+  },
+  "approximations": [
+    {
+      "id": "electron-native-boundaries",
+      "surface": "Main process, preload, IPC, OS dialogs",
+      "reason": "Standalone HTML cannot access Electron native APIs",
+      "representation": "Deterministic local fixtures and visible boundary notes"
+    },
+    {
+      "id": "remote-webview",
+      "surface": "Browser/WebAppView",
+      "reason": "Loading remote pages would make review nondeterministic and introduce a network dependency",
+      "representation": "Static translation of the Renderer BrowserEmptyStateCard; no BrowserView or remote page is instantiated"
+    },
+    {
+      "id": "runtime-data-fixtures",
+      "surface": "Account, organization, app catalog, conversation and permission state",
+      "reason": "These values are fetched or persisted at runtime and cannot be uniquely inferred from static Renderer source.",
+      "representation": "Named deterministic fixtures that preserve the source component's empty, fresh-profile, loading or default branch."
+    }
+  ],
+  "evidence": {
+    "sourceEvidence": "SOURCE-EVIDENCE.md",
+    "screenshots": [
+      "screenshots/reference-renderer-login-1440x900.png",
+      "screenshots/reference-playground-index-1440x900.png",
+      "screenshots/reference-playground-browser-empty-1440x900.png",
+      "screenshots/reference-playground-entity-sources-1440x900.png",
+      "screenshots/reference-playground-entity-skills-1440x900.png",
+      "screenshots/reference-playground-automations-list-1440x900.png",
+      "screenshots/reference-playground-chat-empty-hint-1440x900.png",
+      "screenshots/reference-playground-chat-input-1440x900.png",
+      "screenshots/reference-playground-browser-tab-strip-1440x900.png",
+      "screenshots/reference-playground-onboarding-welcome-1440x900.png",
+      "screenshots/reference-playground-onboarding-wizard-1440x900.png"
+    ]
+  }
+}
