@@ -13,10 +13,10 @@
   },
   "source": {
     "root": "/Users/wow/project/z-h-ai/polo-dir/POO-41/feat/polo-client-g4-ui",
-    "gitRevision": "2722335835905ea1c488e0b9175456d41c2b653f",
+    "gitRevision": "33dc085be08493810f7b516e713aa9c43b802889",
     "workingTree": {
       "dirty": true,
-      "diffSha256": "eb9864a304932938df7c8d117a537302d39324c01e55fa06ee4c101e88e81198"
+      "diffSha256": "44600e9c7ea6cb5eeabb5d63fcda8f1ca3bb5fffe58c126cb42bff8dfcd690ce"
     },
     "build": {
       "mode": "static_source",
@@ -122,12 +122,12 @@
       "sourceEvidence": [
         {
           "path": "design-demos/polo-client-g4-ui/assets/app.js",
-          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "sha256": "44348898ecf8347492ef1b40f0d8745434d0655802599eee71cd3ef36bc5a090",
           "kind": "component"
         },
         {
           "path": "design-demos/polo-client-g4-ui/assets/product.css",
-          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "sha256": "be0a7d84669635edb7f837e595370615bca68737ccdd91f5cde190fd766004ea",
           "kind": "style"
         }
       ]
@@ -146,12 +146,12 @@
       "sourceEvidence": [
         {
           "path": "design-demos/polo-client-g4-ui/assets/app.js",
-          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "sha256": "44348898ecf8347492ef1b40f0d8745434d0655802599eee71cd3ef36bc5a090",
           "kind": "component"
         },
         {
           "path": "design-demos/polo-client-g4-ui/assets/product.css",
-          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "sha256": "be0a7d84669635edb7f837e595370615bca68737ccdd91f5cde190fd766004ea",
           "kind": "style"
         }
       ]
@@ -170,12 +170,12 @@
       "sourceEvidence": [
         {
           "path": "design-demos/polo-client-g4-ui/assets/app.js",
-          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "sha256": "44348898ecf8347492ef1b40f0d8745434d0655802599eee71cd3ef36bc5a090",
           "kind": "component"
         },
         {
           "path": "design-demos/polo-client-g4-ui/assets/product.css",
-          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "sha256": "be0a7d84669635edb7f837e595370615bca68737ccdd91f5cde190fd766004ea",
           "kind": "style"
         }
       ]
@@ -194,12 +194,12 @@
       "sourceEvidence": [
         {
           "path": "design-demos/polo-client-g4-ui/assets/app.js",
-          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "sha256": "44348898ecf8347492ef1b40f0d8745434d0655802599eee71cd3ef36bc5a090",
           "kind": "component"
         },
         {
           "path": "design-demos/polo-client-g4-ui/assets/product.css",
-          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "sha256": "be0a7d84669635edb7f837e595370615bca68737ccdd91f5cde190fd766004ea",
           "kind": "style"
         }
       ]
@@ -218,12 +218,12 @@
       "sourceEvidence": [
         {
           "path": "design-demos/polo-client-g4-ui/assets/app.js",
-          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "sha256": "44348898ecf8347492ef1b40f0d8745434d0655802599eee71cd3ef36bc5a090",
           "kind": "component"
         },
         {
           "path": "design-demos/polo-client-g4-ui/assets/product.css",
-          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "sha256": "be0a7d84669635edb7f837e595370615bca68737ccdd91f5cde190fd766004ea",
           "kind": "style"
         }
       ]

@@ -200,7 +200,7 @@
   };
   const permissionScopes = {
     assistant: space => `只读取${space.name}中本次对话明确选择的文件，并只调用当前账号在该空间启用的 Skills`,
-    files: space => `浏览、上传和管理${space.name}中的文件；不会访问其他空间文件`,
+    files: space => `查看${space.name}最近处理的文件记录和本机位置；不会导入或上传新文件`,
     tasks: space => `查看和终止${space.name}中的 Polo 执行，并打开已经保存的结果`,
     research: space => `读取${space.name}中本次明确选择的访谈材料，并把结果写回该空间`,
     cleaner: space => `读取${space.name}中本次选择的素材，并在确认后保存清洗结果`,
@@ -488,8 +488,8 @@
       ${utilityCard(
         "files",
         "文件",
-        "查看当前空间已经保存的文件。",
-        `${state.scene === "home-empty" ? 0 : data.results.length + 9} 项内容`
+        "找到最近通过附件、App 或 AI 处理的本机文件。",
+        `${state.scene === "home-empty" ? 0 : 3} 个最近文件`
       )}
       ${utilityCard(
         "tasks",
@@ -672,11 +672,19 @@
   function filesView() {
     const space = currentSpace();
     const rows = state.scene === "home-empty" ? [] : state.space === "personal"
-      ? [["Q3 用户访谈记录.pdf", "用户上传", "林然", "今天 09:42", "24.6 MB"], ["客户访谈洞察.docx", "客户访谈整理", "林然", "昨天 18:21", "4.2 MB"], ["品牌语气分析.zip", "Polo 助手", "林然", "周一 14:08", "18.4 MB"]]
-      : [["季度交付摘要.pdf", "项目交付看板", "北辰智能科技", "今天 10:12", "8.6 MB"], ["销售周报材料.xlsx", "销售周报助手", "北辰智能科技", "昨天 17:32", "2.1 MB"], ["合规知识库索引.json", "企业知识检索", "北辰智能科技", "周一 11:06", "912 KB"]];
+      ? [
+          { name: "Q3 用户访谈记录.pdf", source: "Polo 助手 · 附件导入", location: "~/Documents/Polo/我的空间/附件", modified: "今天 09:42", size: "24.6 MB" },
+          { name: "客户访谈洞察.docx", source: "客户访谈整理 · App 导出", location: "~/Documents/Polo/我的空间/导出", modified: "昨天 18:21", size: "4.2 MB" },
+          { name: "品牌语气分析.zip", source: "Polo 助手 · AI 生成", location: "~/Documents/Polo/我的空间/生成", modified: "周一 14:08", size: "18.4 MB" }
+        ]
+      : [
+          { name: "季度交付摘要.pdf", source: "项目交付看板 · App 导出", location: "~/Documents/Polo/北辰智能科技/导出", modified: "今天 10:12", size: "8.6 MB" },
+          { name: "销售周报材料.xlsx", source: "销售周报助手 · 附件导入", location: "~/Documents/Polo/北辰智能科技/附件", modified: "昨天 17:32", size: "2.1 MB" },
+          { name: "合规知识库索引.json", source: "企业知识检索 · AI 生成", location: "~/Documents/Polo/北辰智能科技/生成", modified: "周一 11:06", size: "912 KB" }
+        ];
     const query = current().fileQuery.trim().toLowerCase();
-    const visibleRows = rows.filter(row => !query || row.some(value => value.toLowerCase().includes(query)));
-    return `<div class="app-page-heading"><div><p class="eyebrow">系统工具 · Polo 内置</p><h1>文件</h1><p>只显示${space.name}中的上传、保存、生成和导出文件。</p></div><div class="heading-actions"><button class="button quiet" data-permissions="files">${icon("shield")}权限</button><button class="button primary" data-action="upload" ${state.online ? "" : "disabled"}>${icon("upload")}${state.online ? "上传文件" : "离线不可上传"}</button></div></div><div class="file-toolbar"><label>搜索文件<input id="file-search" type="search" value="${escapeHtml(current().fileQuery)}" placeholder="搜索文件名或来源"></label><span>${visibleRows.length} 个文件</span></div><div class="table-card"><table><thead><tr><th>名称</th><th>来源</th><th>创建者 / 所有方</th><th>最近修改</th><th>大小</th><th></th></tr></thead><tbody>${visibleRows.map(row => `<tr><td><span class="file-name">${icon("file")}<strong>${row[0]}</strong></span></td><td>${row[1]}</td><td>${row[2]}</td><td>${row[3]}</td><td>${row[4]}</td><td><button class="icon-button" data-file-details="${escapeHtml(row[0])}" aria-label="查看 ${row[0]} 详情">${icon("more")}</button></td></tr>`).join("") || `<tr><td colspan="6"><div class="empty-note">没有匹配“${escapeHtml(current().fileQuery)}”的文件。</div></td></tr>`}</tbody></table></div>`;
+    const visibleRows = rows.filter(row => !query || Object.values(row).some(value => value.toLowerCase().includes(query)));
+    return `<div class="app-page-heading"><div><p class="eyebrow">系统工具 · Polo 内置</p><h1>文件</h1><p>记录${space.name}最近通过附件、App 或 AI 处理的文件，方便回到电脑中的保存位置。</p></div><div class="heading-actions"><button class="button quiet" data-permissions="files">${icon("shield")}权限</button></div></div><div class="file-toolbar"><label>搜索最近文件<input id="file-search" type="search" value="${escapeHtml(current().fileQuery)}" placeholder="搜索文件名、来源或本机位置"></label><span>${visibleRows.length} 个最近文件</span></div><div class="table-card"><table><thead><tr><th>名称</th><th>处理来源</th><th>本机位置</th><th>最近处理</th><th>大小</th><th></th></tr></thead><tbody>${visibleRows.map(row => `<tr><td><span class="file-name">${icon("file")}<strong>${row.name}</strong></span></td><td>${row.source}</td><td><span class="local-path" title="${escapeHtml(row.location)}">${row.location}</span></td><td>${row.modified}</td><td>${row.size}</td><td><button class="icon-button" data-file-details="${escapeHtml(row.name)}" data-file-source="${escapeHtml(row.source)}" data-file-location="${escapeHtml(row.location)}" aria-label="查看 ${row.name} 详情">${icon("more")}</button></td></tr>`).join("") || `<tr><td colspan="6"><div class="empty-note">没有匹配“${escapeHtml(current().fileQuery)}”的最近文件。</div></td></tr>`}</tbody></table></div>`;
   }
 
   function tasksView() {
@@ -1116,9 +1124,9 @@
     if (target.dataset.action === "theme") { state.theme = state.theme === "dark" ? "light" : "dark"; state.openMenu = null; localStorage.setItem("polo-g4-theme", state.theme); render(); showToast(`已切换到${state.theme === "dark" ? "深色" : "浅色"}主题。`); return; }
     if (["settings", "enterprise-admin", "creator-workbench"].includes(target.dataset.action)) { state.openMenu = null; render(); showToast(target.dataset.action === "settings" ? "账号与偏好将在设置中打开。" : "管理入口将在系统浏览器中打开，不会生成客户端 Tab。"); return; }
     if (target.matches("[data-permissions]")) { const id = target.dataset.permissions; const meta = appMeta(id); const scope = permissionScopes[id]?.(currentSpace()) || `只使用${currentSpace().name}已向当前成员授权的数据`; showModal(dialog(`${meta.name}权限`, "完整权限信息由 Polo 外壳展示，App 和系统工具不能伪造。", `<div class="permission-summary"><span><b>空间</b>${currentSpace().name}</span><span><b>来源与版本</b>${meta.source} · ${meta.version}</span><span><b>允许范围</b>${scope}</span><span><b>数据归属</b>${currentSpace().dataOwner}</span></div>`, `<button class="button primary" data-close-modal>关闭</button>`)); return; }
-    if (target.dataset.action === "upload") { showToast(state.online ? `文件选择器将把文件上传到${currentSpace().name}，归${currentSpace().dataOwner}所有。` : "当前离线，只能查看本机文件，不能上传新内容。"); return; }
     if (target.dataset.action === "attach-file") { showToast(state.online ? `请选择${currentSpace().name}中的文件；只有确认发送后助手才能读取。` : "当前离线，不能向助手添加新的附件。"); return; }
-    if (target.matches("[data-file-details]")) { const name = target.dataset.fileDetails; showModal(dialog(name, "该文件的来源与归属由 Polo 外壳记录。", `<div class="permission-summary"><span><b>所在空间</b>${currentSpace().name}</span><span><b>数据归属</b>${currentSpace().dataOwner}</span><span><b>可用操作</b>打开、下载或从当前空间移除</span></div>`, `<button class="button primary" data-close-modal>关闭</button>`)); return; }
+    if (target.matches("[data-file-details]")) { const name = target.dataset.fileDetails; const source = target.dataset.fileSource; const location = target.dataset.fileLocation; showModal(dialog(name, "Polo 只记录最近处理信息和本机位置，不在这里提供独立上传或云端存储。", `<div class="permission-summary"><span><b>所在空间</b>${currentSpace().name}</span><span><b>处理来源</b>${source}</span><span><b>本机位置</b><code>${location}</code></span></div>`, `<button class="button" data-close-modal>关闭</button><button class="button primary" data-reveal-file="${escapeHtml(name)}">在访达中显示</button>`)); return; }
+    if (target.matches("[data-reveal-file]")) { const name = target.dataset.revealFile; closeModal(); showToast(`将在访达中显示“${name}”。`); return; }
     if (target.dataset.action === "new-chat") { current().messages = [{ role: "assistant", text: `这是${currentSpace().name}中的新对话。` }]; render(); return; }
     if (target.dataset.result) { event.preventDefault(); showToast(`已打开“${target.dataset.result}”。`); }
   });

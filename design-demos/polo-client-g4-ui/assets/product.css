@@ -749,11 +749,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .file-toolbar > span { color: var(--fg-50); font-size: 11px; }
 .file-toolbar strong { color: var(--foreground); }
 .table-card { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-minimal); }
+.table-card table { min-width: 900px; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th { padding: 10px 12px; background: var(--bg-elevated); color: var(--fg-50); font-size: 10px; font-weight: 500; text-align: left; white-space: nowrap; }
 td { padding: 12px; border-top: 1px solid var(--border); color: var(--fg-60); white-space: nowrap; }
 .file-name { display: inline-flex; align-items: center; gap: 8px; color: var(--foreground); }
 .file-name .icon { color: var(--accent); }
+.local-path { display: block; max-width: 280px; overflow: hidden; color: var(--fg-50); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .task-list { display: grid; gap: 8px; }
 .task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 13px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-minimal); }
 .task-row h3 { margin: 0; font-size: 13px; }
@@ -849,6 +851,7 @@ td { padding: 12px; border-top: 1px solid var(--border); color: var(--fg-60); wh
 .permission-summary span { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .permission-summary span:last-child { border-bottom: 0; }
 .permission-summary b { color: var(--fg-50); font-weight: 500; }
+.permission-summary code { overflow-wrap: anywhere; color: var(--foreground); font-family: var(--font-mono); font-size: 11px; }
 .notice-list { display: grid; gap: 3px; }
 .notice { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 9px; padding: 10px; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; }
 .notice:hover { background: var(--fg-5); }
