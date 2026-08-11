@@ -10,7 +10,7 @@
 
 - G0—G3、F01-A、F01-B 已完成。
 - G4-A 的 22 个实施项已全部映射为正式看板任务；等待产品用户集中确认任务图后冻结。
-- G4-B 的四个产品入口均已建立 UI v1 任务。POO-41 已完成客户端结构对齐和现有原型收敛，进入最终走查/冻结；其余三端仍按各自任务推进，因此整体 G4-B 尚未通过。
+- G4-B 的四个产品入口均已建立 UI v1 任务。POO-41 已于 2026-08-11 完成最终走查并冻结客户端 UI v1（artifact commit `ef3528ef`）；其余三端仍按各自任务推进，因此整体 G4-B 尚未通过。
 - POL-72 及后续实现任务全部保持 `todo`。在 G4-A 与 G4-B 同时通过前，不启动正式产品编码。
 
 ## 2. 正式任务映射
@@ -19,7 +19,7 @@
 
 | 产品入口 | 流程数 | UI 任务 | 项目 / 分支 | 设计入口（任务产出） | 状态 |
 | --- | ---: | --- | --- | --- | --- |
-| Polo 客户端 | 11 | POO-41 | Polo-工作台 / `POO-41/feat/polo-client-g4-ui` | `design-demos/polo-client-g4-ui/index.html` | 结构已确认，原型已收敛，待最终冻结 |
+| Polo 客户端 | 11 | POO-41 | Polo-工作台 / `POO-41/feat/polo-client-g4-ui` | `design-demos/polo-client-g4-ui/index.html` | UI v1 已冻结：`ef3528ef` |
 | 企业组织管理端 | 12 | POL-73 | polo-admin / `POL-73/feat/enterprise-admin-ui-v1` | `design-demos/enterprise-admin-ui-v1/index.html` | 旧稿待按专项计划覆盖 |
 | 创作者工作台 | 10 | POL-74 | polo-admin / `POL-74/feat/creator-workbench-ui-v1` | `design-demos/creator-workbench-ui-v1/index.html` | 旧稿待按专项计划覆盖 |
 | 平台运营端 | 13 | POL-75 | polo-admin / `POL-75/feat/platform-operations-ui-v1` | `design-demos/platform-operations-ui-v1/index.html` | 旧稿待按专项计划覆盖 |
