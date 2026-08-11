@@ -1,0 +1,1450 @@
+{
+  "schemaVersion": "1.1.0",
+  "flow": {
+    "id": "polo-start-work",
+    "name": "在 Polo 开始一项工作",
+    "intent": "让新用户在不超过三次点击内进入助手，或找到并启动当前空间中的任意 App。",
+    "entryState": "space-home",
+    "successStates": [
+      "assistant-boundary",
+      "app-preparing"
+    ],
+    "exitStates": []
+  },
+  "source": {
+    "root": "/Users/wow/project/z-h-ai/polo-dir/POO-41/feat/polo-client-g4-ui",
+    "gitRevision": "2722335835905ea1c488e0b9175456d41c2b653f",
+    "workingTree": {
+      "dirty": true,
+      "diffSha256": "eb9864a304932938df7c8d117a537302d39324c01e55fa06ee4c101e88e81198"
+    },
+    "build": {
+      "mode": "static_source",
+      "status": "captured",
+      "command": "Mechanical translation of current vanilla prototype templates; no production build",
+      "evidence": [
+        "evidence/build/static-source.txt"
+      ]
+    }
+  },
+  "files": {
+    "canvas": "flow-canvas.html",
+    "prototype": "prototype.html",
+    "assets": "assets",
+    "evidence": "evidence",
+    "screenshots": "screenshots"
+  },
+  "protocol": {
+    "query": [
+      "scene",
+      "theme",
+      "lang",
+      "viewport",
+      "scenario"
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "langs": [
+      "zh-Hans"
+    ],
+    "defaultViewport": "desktop",
+    "captureViewports": [
+      "desktop",
+      "tablet-portrait",
+      "mobile",
+      "mobile-compact"
+    ],
+    "viewports": [
+      {
+        "id": "desktop-fhd",
+        "name": "Desktop FHD",
+        "width": 1920,
+        "height": 1080
+      },
+      {
+        "id": "desktop",
+        "name": "Desktop",
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "id": "laptop",
+        "name": "Laptop",
+        "width": 1280,
+        "height": 800
+      },
+      {
+        "id": "tablet-landscape",
+        "name": "Tablet Landscape",
+        "width": 1024,
+        "height": 768
+      },
+      {
+        "id": "tablet-portrait",
+        "name": "Tablet Portrait",
+        "width": 768,
+        "height": 1024
+      },
+      {
+        "id": "mobile-large",
+        "name": "Mobile Large",
+        "width": 430,
+        "height": 932
+      },
+      {
+        "id": "mobile",
+        "name": "Mobile Standard",
+        "width": 390,
+        "height": 844
+      },
+      {
+        "id": "mobile-compact",
+        "name": "Mobile Compact",
+        "width": 360,
+        "height": 800
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "space-home",
+      "name": "当前空间首页",
+      "userGoal": "立即开始一项工作，或找到当前空间中的其他 App。",
+      "systemFeedback": "首页显示当前空间、常用 Apps 和唯一主行动“打开助手”。",
+      "route": "?scene=home-normal",
+      "interfaceType": "page",
+      "canvas": {
+        "column": 0,
+        "lane": 0
+      },
+      "sourceEvidence": [
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/app.js",
+          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "kind": "component"
+        },
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/product.css",
+          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "kind": "style"
+        }
+      ]
+    },
+    {
+      "id": "assistant-boundary",
+      "name": "进入 Polo 助手",
+      "userGoal": "使用当前空间中的 Polo 助手。",
+      "systemFeedback": "同一个助手宿主以 Tab 打开，并持续保留当前空间隔离边界。",
+      "route": null,
+      "interfaceType": "page",
+      "canvas": {
+        "column": 1,
+        "lane": 0
+      },
+      "sourceEvidence": [
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/app.js",
+          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "kind": "component"
+        },
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/product.css",
+          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "kind": "style"
+        }
+      ]
+    },
+    {
+      "id": "app-catalog",
+      "name": "浏览全部 Apps",
+      "userGoal": "不记忆圈子来源也能快速找到需要的 App。",
+      "systemFeedback": "搜索框自动聚焦，作品按来源展示，目标 App 可直接打开。",
+      "route": null,
+      "interfaceType": "page",
+      "canvas": {
+        "column": 1,
+        "lane": 1
+      },
+      "sourceEvidence": [
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/app.js",
+          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "kind": "component"
+        },
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/product.css",
+          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "kind": "style"
+        }
+      ]
+    },
+    {
+      "id": "app-open",
+      "name": "App 已打开",
+      "userGoal": "确认作品来源和版本后开始使用。",
+      "systemFeedback": "商务写作在独立 Tab 中打开，页面只突出“开始使用”。",
+      "route": null,
+      "interfaceType": "page",
+      "canvas": {
+        "column": 2,
+        "lane": 1
+      },
+      "sourceEvidence": [
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/app.js",
+          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "kind": "component"
+        },
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/product.css",
+          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "kind": "style"
+        }
+      ]
+    },
+    {
+      "id": "app-preparing",
+      "name": "执行正在准备",
+      "userGoal": "确认执行请求已经被 Polo 接受。",
+      "systemFeedback": "执行进入准备中；切换 Tab 不会终止，且没有虚构后续运行状态。",
+      "route": null,
+      "interfaceType": "page",
+      "canvas": {
+        "column": 3,
+        "lane": 1
+      },
+      "sourceEvidence": [
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/app.js",
+          "sha256": "cd1f28a33c3bd64bf855eff50d70b6f2d56c913936bb4cf6e30d7bbd909d47a8",
+          "kind": "component"
+        },
+        {
+          "path": "design-demos/polo-client-g4-ui/assets/product.css",
+          "sha256": "27ce06a5e16f8738633b4350f0b0d9cdba431dbbdddfc438169d3b20de692379",
+          "kind": "style"
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "open-assistant",
+      "from": "space-home",
+      "to": "assistant-boundary",
+      "action": "点击“打开助手”",
+      "condition": "用户希望直接让 Polo 助手处理任务",
+      "systemResult": "Polo 助手在当前空间的 Tab 中打开",
+      "resultType": "success",
+      "trigger": {
+        "selector": "[data-open='assistant']"
+      },
+      "fixture": {
+        "id": "default",
+        "label": "默认助手入口"
+      }
+    },
+    {
+      "id": "browse-all-apps",
+      "from": "space-home",
+      "to": "app-catalog",
+      "action": "点击“全部 Apps”",
+      "condition": "目标 App 不在首页常用入口中",
+      "systemResult": "打开当前空间全部 Apps，并自动聚焦搜索框",
+      "resultType": "navigation",
+      "trigger": {
+        "selector": "[data-home-view='catalog']"
+      },
+      "fixture": {
+        "id": "default",
+        "label": "查找未固定 App"
+      }
+    },
+    {
+      "id": "open-writing",
+      "from": "app-catalog",
+      "to": "app-open",
+      "action": "点击商务写作的“打开”",
+      "condition": "搜索结果来自桥见圈子且当前可使用",
+      "systemResult": "商务写作以独立 Tab 打开，并显示来源与固定版本",
+      "resultType": "navigation",
+      "trigger": {
+        "selector": "[data-open='writing']"
+      },
+      "fixture": {
+        "id": "default",
+        "label": "商务写作可使用"
+      }
+    },
+    {
+      "id": "start-writing",
+      "from": "app-open",
+      "to": "app-preparing",
+      "action": "点击“开始使用”",
+      "condition": "当前空间、授权与版本重新验证通过",
+      "systemResult": "执行请求被接受并进入准备中",
+      "resultType": "success",
+      "trigger": {
+        "selector": "[data-start-app='writing']"
+      },
+      "fixture": {
+        "id": "default",
+        "label": "验证通过并准备执行"
+      }
+    }
+  ],
+  "fidelity": {
+    "mode": "static_source",
+    "claim": "source_derived",
+    "components": [
+      {
+        "classification": "derived",
+        "bundlePath": "prototype.html",
+        "provenance": [
+          "design-demos/polo-client-g4-ui/index.html",
+          "design-demos/polo-client-g4-ui/assets/app.js"
+        ]
+      }
+    ],
+    "css": [
+      {
+        "classification": "derived",
+        "bundlePath": "assets/source-derived.css",
+        "provenance": [
+          "design-demos/polo-client-g4-ui/assets/product.css"
+        ]
+      }
+    ],
+    "assets": [],
+    "limitations": [
+      "该画布来自当前独立 HTML 产品原型，不是已认证的 Electron Renderer 运行态。",
+      "正式 Polo 助手内部界面不在本画布重制；助手成功态只验证 Tab、宿主复用和空间隔离边界。",
+      "当前原型只证明执行进入 preparing；没有虚构 preparing 自动晋级 running 的状态。",
+      "640px 及以下沿用桌面客户端窗口过窄保护，不承诺移动工作台。"
+    ]
+  },
+  "captures": [
+    {
+      "id": "space-home-light-zh-Hans-desktop",
+      "state": "space-home",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-light-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-light-zh-Hans-desktop.html",
+        "styles": "evidence/styles/space-home-light-zh-Hans-desktop.json",
+        "resources": "evidence/resources/space-home-light-zh-Hans-desktop.json",
+        "console": "evidence/console/space-home-light-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "space-home-light-zh-Hans-tablet-portrait",
+      "state": "space-home",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-light-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-light-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/space-home-light-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/space-home-light-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/space-home-light-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "space-home-light-zh-Hans-mobile",
+      "state": "space-home",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-light-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-light-zh-Hans-mobile.html",
+        "styles": "evidence/styles/space-home-light-zh-Hans-mobile.json",
+        "resources": "evidence/resources/space-home-light-zh-Hans-mobile.json",
+        "console": "evidence/console/space-home-light-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "space-home-light-zh-Hans-mobile-compact",
+      "state": "space-home",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-light-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-light-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/space-home-light-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/space-home-light-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/space-home-light-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "space-home-dark-zh-Hans-desktop",
+      "state": "space-home",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-dark-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-dark-zh-Hans-desktop.html",
+        "styles": "evidence/styles/space-home-dark-zh-Hans-desktop.json",
+        "resources": "evidence/resources/space-home-dark-zh-Hans-desktop.json",
+        "console": "evidence/console/space-home-dark-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "space-home-dark-zh-Hans-tablet-portrait",
+      "state": "space-home",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-dark-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-dark-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/space-home-dark-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/space-home-dark-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/space-home-dark-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "space-home-dark-zh-Hans-mobile",
+      "state": "space-home",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-dark-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-dark-zh-Hans-mobile.html",
+        "styles": "evidence/styles/space-home-dark-zh-Hans-mobile.json",
+        "resources": "evidence/resources/space-home-dark-zh-Hans-mobile.json",
+        "console": "evidence/console/space-home-dark-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "space-home-dark-zh-Hans-mobile-compact",
+      "state": "space-home",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/space-home-dark-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/space-home-dark-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/space-home-dark-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/space-home-dark-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/space-home-dark-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "assistant-boundary-light-zh-Hans-desktop",
+      "state": "assistant-boundary",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-light-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-light-zh-Hans-desktop.html",
+        "styles": "evidence/styles/assistant-boundary-light-zh-Hans-desktop.json",
+        "resources": "evidence/resources/assistant-boundary-light-zh-Hans-desktop.json",
+        "console": "evidence/console/assistant-boundary-light-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "assistant-boundary-light-zh-Hans-tablet-portrait",
+      "state": "assistant-boundary",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-light-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-light-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/assistant-boundary-light-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/assistant-boundary-light-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/assistant-boundary-light-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "assistant-boundary-light-zh-Hans-mobile",
+      "state": "assistant-boundary",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-light-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-light-zh-Hans-mobile.html",
+        "styles": "evidence/styles/assistant-boundary-light-zh-Hans-mobile.json",
+        "resources": "evidence/resources/assistant-boundary-light-zh-Hans-mobile.json",
+        "console": "evidence/console/assistant-boundary-light-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "assistant-boundary-light-zh-Hans-mobile-compact",
+      "state": "assistant-boundary",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-light-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-light-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/assistant-boundary-light-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/assistant-boundary-light-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/assistant-boundary-light-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "assistant-boundary-dark-zh-Hans-desktop",
+      "state": "assistant-boundary",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-dark-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-dark-zh-Hans-desktop.html",
+        "styles": "evidence/styles/assistant-boundary-dark-zh-Hans-desktop.json",
+        "resources": "evidence/resources/assistant-boundary-dark-zh-Hans-desktop.json",
+        "console": "evidence/console/assistant-boundary-dark-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "assistant-boundary-dark-zh-Hans-tablet-portrait",
+      "state": "assistant-boundary",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-dark-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-dark-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/assistant-boundary-dark-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/assistant-boundary-dark-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/assistant-boundary-dark-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "assistant-boundary-dark-zh-Hans-mobile",
+      "state": "assistant-boundary",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-dark-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-dark-zh-Hans-mobile.html",
+        "styles": "evidence/styles/assistant-boundary-dark-zh-Hans-mobile.json",
+        "resources": "evidence/resources/assistant-boundary-dark-zh-Hans-mobile.json",
+        "console": "evidence/console/assistant-boundary-dark-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "assistant-boundary-dark-zh-Hans-mobile-compact",
+      "state": "assistant-boundary",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/assistant-boundary-dark-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/assistant-boundary-dark-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/assistant-boundary-dark-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/assistant-boundary-dark-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/assistant-boundary-dark-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "app-catalog-light-zh-Hans-desktop",
+      "state": "app-catalog",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-light-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-light-zh-Hans-desktop.html",
+        "styles": "evidence/styles/app-catalog-light-zh-Hans-desktop.json",
+        "resources": "evidence/resources/app-catalog-light-zh-Hans-desktop.json",
+        "console": "evidence/console/app-catalog-light-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "app-catalog-light-zh-Hans-tablet-portrait",
+      "state": "app-catalog",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-light-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-light-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/app-catalog-light-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/app-catalog-light-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/app-catalog-light-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "app-catalog-light-zh-Hans-mobile",
+      "state": "app-catalog",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-light-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-light-zh-Hans-mobile.html",
+        "styles": "evidence/styles/app-catalog-light-zh-Hans-mobile.json",
+        "resources": "evidence/resources/app-catalog-light-zh-Hans-mobile.json",
+        "console": "evidence/console/app-catalog-light-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "app-catalog-light-zh-Hans-mobile-compact",
+      "state": "app-catalog",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-light-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-light-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/app-catalog-light-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/app-catalog-light-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/app-catalog-light-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "app-catalog-dark-zh-Hans-desktop",
+      "state": "app-catalog",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-dark-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-dark-zh-Hans-desktop.html",
+        "styles": "evidence/styles/app-catalog-dark-zh-Hans-desktop.json",
+        "resources": "evidence/resources/app-catalog-dark-zh-Hans-desktop.json",
+        "console": "evidence/console/app-catalog-dark-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "app-catalog-dark-zh-Hans-tablet-portrait",
+      "state": "app-catalog",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-dark-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-dark-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/app-catalog-dark-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/app-catalog-dark-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/app-catalog-dark-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "app-catalog-dark-zh-Hans-mobile",
+      "state": "app-catalog",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-dark-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-dark-zh-Hans-mobile.html",
+        "styles": "evidence/styles/app-catalog-dark-zh-Hans-mobile.json",
+        "resources": "evidence/resources/app-catalog-dark-zh-Hans-mobile.json",
+        "console": "evidence/console/app-catalog-dark-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "app-catalog-dark-zh-Hans-mobile-compact",
+      "state": "app-catalog",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/app-catalog-dark-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/app-catalog-dark-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/app-catalog-dark-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/app-catalog-dark-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/app-catalog-dark-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "app-open-light-zh-Hans-desktop",
+      "state": "app-open",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-light-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-light-zh-Hans-desktop.html",
+        "styles": "evidence/styles/app-open-light-zh-Hans-desktop.json",
+        "resources": "evidence/resources/app-open-light-zh-Hans-desktop.json",
+        "console": "evidence/console/app-open-light-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "app-open-light-zh-Hans-tablet-portrait",
+      "state": "app-open",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-light-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-light-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/app-open-light-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/app-open-light-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/app-open-light-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "app-open-light-zh-Hans-mobile",
+      "state": "app-open",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-light-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-light-zh-Hans-mobile.html",
+        "styles": "evidence/styles/app-open-light-zh-Hans-mobile.json",
+        "resources": "evidence/resources/app-open-light-zh-Hans-mobile.json",
+        "console": "evidence/console/app-open-light-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "app-open-light-zh-Hans-mobile-compact",
+      "state": "app-open",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-light-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-light-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/app-open-light-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/app-open-light-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/app-open-light-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "app-open-dark-zh-Hans-desktop",
+      "state": "app-open",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-dark-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-dark-zh-Hans-desktop.html",
+        "styles": "evidence/styles/app-open-dark-zh-Hans-desktop.json",
+        "resources": "evidence/resources/app-open-dark-zh-Hans-desktop.json",
+        "console": "evidence/console/app-open-dark-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "app-open-dark-zh-Hans-tablet-portrait",
+      "state": "app-open",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-dark-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-dark-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/app-open-dark-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/app-open-dark-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/app-open-dark-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "app-open-dark-zh-Hans-mobile",
+      "state": "app-open",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-dark-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-dark-zh-Hans-mobile.html",
+        "styles": "evidence/styles/app-open-dark-zh-Hans-mobile.json",
+        "resources": "evidence/resources/app-open-dark-zh-Hans-mobile.json",
+        "console": "evidence/console/app-open-dark-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "app-open-dark-zh-Hans-mobile-compact",
+      "state": "app-open",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/app-open-dark-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/app-open-dark-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/app-open-dark-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/app-open-dark-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/app-open-dark-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "app-preparing-light-zh-Hans-desktop",
+      "state": "app-preparing",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-light-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-light-zh-Hans-desktop.html",
+        "styles": "evidence/styles/app-preparing-light-zh-Hans-desktop.json",
+        "resources": "evidence/resources/app-preparing-light-zh-Hans-desktop.json",
+        "console": "evidence/console/app-preparing-light-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "app-preparing-light-zh-Hans-tablet-portrait",
+      "state": "app-preparing",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-light-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-light-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/app-preparing-light-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/app-preparing-light-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/app-preparing-light-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "app-preparing-light-zh-Hans-mobile",
+      "state": "app-preparing",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-light-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-light-zh-Hans-mobile.html",
+        "styles": "evidence/styles/app-preparing-light-zh-Hans-mobile.json",
+        "resources": "evidence/resources/app-preparing-light-zh-Hans-mobile.json",
+        "console": "evidence/console/app-preparing-light-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "app-preparing-light-zh-Hans-mobile-compact",
+      "state": "app-preparing",
+      "theme": "light",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-light-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-light-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/app-preparing-light-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/app-preparing-light-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/app-preparing-light-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    },
+    {
+      "id": "app-preparing-dark-zh-Hans-desktop",
+      "state": "app-preparing",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "desktop",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-dark-zh-Hans-desktop.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-dark-zh-Hans-desktop.html",
+        "styles": "evidence/styles/app-preparing-dark-zh-Hans-desktop.json",
+        "resources": "evidence/resources/app-preparing-dark-zh-Hans-desktop.json",
+        "console": "evidence/console/app-preparing-dark-zh-Hans-desktop.json"
+      },
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1440,
+        "screenHeight": 900
+      }
+    },
+    {
+      "id": "app-preparing-dark-zh-Hans-tablet-portrait",
+      "state": "app-preparing",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "tablet-portrait",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-dark-zh-Hans-tablet-portrait.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-dark-zh-Hans-tablet-portrait.html",
+        "styles": "evidence/styles/app-preparing-dark-zh-Hans-tablet-portrait.json",
+        "resources": "evidence/resources/app-preparing-dark-zh-Hans-tablet-portrait.json",
+        "console": "evidence/console/app-preparing-dark-zh-Hans-tablet-portrait.json"
+      },
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 768,
+        "height": 1024,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 768,
+        "screenHeight": 1024
+      }
+    },
+    {
+      "id": "app-preparing-dark-zh-Hans-mobile",
+      "state": "app-preparing",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-dark-zh-Hans-mobile.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-dark-zh-Hans-mobile.html",
+        "styles": "evidence/styles/app-preparing-dark-zh-Hans-mobile.json",
+        "resources": "evidence/resources/app-preparing-dark-zh-Hans-mobile.json",
+        "console": "evidence/console/app-preparing-dark-zh-Hans-mobile.json"
+      },
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 390,
+        "screenHeight": 844
+      }
+    },
+    {
+      "id": "app-preparing-dark-zh-Hans-mobile-compact",
+      "state": "app-preparing",
+      "theme": "dark",
+      "lang": "zh-Hans",
+      "viewport": "mobile-compact",
+      "scenario": "default",
+      "screenshot": "screenshots/app-preparing-dark-zh-Hans-mobile-compact.png",
+      "evidence": {
+        "dom": "evidence/dom/app-preparing-dark-zh-Hans-mobile-compact.html",
+        "styles": "evidence/styles/app-preparing-dark-zh-Hans-mobile-compact.json",
+        "resources": "evidence/resources/app-preparing-dark-zh-Hans-mobile-compact.json",
+        "console": "evidence/console/app-preparing-dark-zh-Hans-mobile-compact.json"
+      },
+      "innerWidth": 360,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "deviceMetrics": {
+        "method": "Emulation.setDeviceMetricsOverride",
+        "appliedBeforeNavigation": true,
+        "width": 360,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": true,
+        "screenWidth": 360,
+        "screenHeight": 800
+      }
+    }
+  ]
+}

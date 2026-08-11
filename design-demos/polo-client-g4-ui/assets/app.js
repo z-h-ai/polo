@@ -328,7 +328,16 @@
   }
 
   function section(title, subtitle, content, action = "") {
-    return `<section class="section"><div class="section-header"><div><h2>${title}</h2>${subtitle ? `<p>${subtitle}</p>` : ""}</div>${action}</div>${content}</section>`;
+    return `<section class="section">
+      <div class="section-header">
+        <div>
+          <h2>${title}</h2>
+          ${subtitle ? `<p>${subtitle}</p>` : ""}
+        </div>
+        ${action}
+      </div>
+      ${content}
+    </section>`;
   }
 
   function availability(item) {
@@ -342,17 +351,70 @@
     const item = apps[id];
     const available = availability(item);
     const running = executionFor(id);
+    const isHome = mode === "open";
+
     const action = mode === "manage"
-      ? `${item.availability === "available" ? "" : `<button class="card-action" data-explain="${id}">查看原因</button>`}<button class="card-action" data-remove="${id}">移出首页</button>`
+      ? `${item.availability === "available" ? "" : `<button class="card-action" data-explain="${id}">查看原因</button>`}
+         <button class="card-action" data-remove="${id}">移出首页</button>`
       : item.availability === "available"
-        ? mode === "add" ? `<button class="card-action primary" data-add="${id}">添加到首页</button>` : mode === "add-full" ? `<button class="card-action" disabled title="请先移出一个工作 App">首页已满</button>` : `<button class="card-action primary" data-open="${id}">打开</button>`
-        : `<button class="card-action" data-explain="${id}">查看原因</button>`;
-    return `<article class="product-card ${current().highlightedApp === id ? "highlighted-card" : ""}"><div class="card-heading"><span class="app-art ${item.availability === "blocked" ? "ink" : item.update ? "amber" : "teal"}">${icon(item.icon)}</span><div class="card-title"><h3>${item.name}</h3><p class="source-line">${item.source}</p></div></div><p class="product-description">${item.description}</p><div class="card-meta">${item.version}</div><div class="status-line"><span class="status ${available.tone}">${available.label}</span>${running ? `<span class="status info">${statusLabel(running.status)}</span>` : ""}${action}</div></article>`;
+        ? mode === "add"
+          ? `<button class="card-action primary" data-add="${id}">添加到首页</button>`
+          : mode === "add-full"
+            ? `<button class="card-action" disabled title="请先移出一个工作 App">首页已满</button>`
+            : `<button class="card-action home-ghost-action" data-open="${id}" aria-label="打开 ${item.name}">打开</button>`
+        : `<button class="card-action ${isHome ? "home-ghost-action" : ""}" data-explain="${id}">查看原因</button>`;
+
+    const availabilityBadge = isHome
+      ? item.availability === "blocked"
+        ? `<span class="status bad">已阻断</span>`
+        : item.availability === "unavailable"
+          ? `<span class="status neutral">不可用</span>`
+          : item.update
+            ? `<span class="status info">有更新</span>`
+            : ""
+      : `<span class="status ${available.tone}">${available.label}</span>`;
+
+    const runningBadge = running
+      ? `<span class="status info">${statusLabel(running.status)}</span>`
+      : "";
+
+    const badges = `${availabilityBadge}${runningBadge}`;
+    const version = isHome ? "" : `<div class="card-meta">${item.version}</div>`;
+
+    return `<article class="product-card ${current().highlightedApp === id ? "highlighted-card" : ""}">
+      <div class="card-heading">
+        <span class="app-art ${item.availability === "blocked" ? "ink" : item.update ? "amber" : "teal"}">${icon(item.icon)}</span>
+        <div class="card-title">
+          <h3>${item.name}</h3>
+          <p class="source-line">${item.source}</p>
+        </div>
+      </div>
+      <p class="product-description">${item.description}</p>
+      ${version}
+      <div class="status-line ${badges ? "" : "actions-only"}">
+        ${badges}
+        ${action}
+      </div>
+    </article>`;
   }
 
   function assistantHomeCard() {
     const enabledCount = Object.values(current().skillEnabled).filter(Boolean).length;
-    return `<article class="product-card assistant-card"><div class="card-heading"><span class="app-art">${icon("spark")}</span><div class="card-title"><p class="card-kicker">固定内置 App</p><h3>Polo 助手</h3><p class="source-line">Polo 内置 · ${enabledCount} 个 Skill 已启用</p></div></div><p class="product-description">把想法交给助手，使用当前空间已经启用的 Skills 完成研究、整理和执行。</p><div class="status-line"><span class="status good">可使用</span><button class="card-action" data-open-assistant-skills>管理 Skills</button><button class="card-action primary" data-open="assistant">打开</button></div></article>`;
+
+    return `<article class="product-card assistant-card">
+      <div class="card-heading">
+        <span class="app-art">${icon("spark")}</span>
+        <div class="card-title">
+          <h3>Polo 助手</h3>
+          <p class="source-line">Polo 内置 · ${enabledCount} 个 Skill 已启用</p>
+        </div>
+      </div>
+      <p class="product-description">使用当前空间已经启用的 Skills 完成研究、整理和执行。</p>
+      <div class="status-line actions-only">
+        <button class="card-action home-ghost-action" data-open-assistant-skills>管理 Skills</button>
+        <button class="card-action primary home-primary-action" data-open="assistant" aria-label="打开 Polo 助手">打开助手</button>
+      </div>
+    </article>`;
   }
 
   function assistantManagementCard() {
@@ -386,18 +448,75 @@
   }
 
   function utilityCard(id, title, description, meta) {
-    return `<button class="utility-card" data-open="${id}"><span class="app-art compact ${id === "files" ? "teal" : "amber"}">${icon(appMeta(id).icon)}</span><span><strong>${title}</strong><small>${description}</small><em>${meta}</em></span>${icon("arrow")}</button>`;
+    return `<button class="utility-card" data-open="${id}" aria-label="打开${title}">
+      <span class="app-art compact ${id === "files" ? "teal" : "amber"}">${icon(appMeta(id).icon)}</span>
+      <span>
+        <strong>${title}</strong>
+        <small>${description}</small>
+        <em>${meta}</em>
+      </span>
+      ${icon("arrow")}
+    </button>`;
   }
 
   function homeView() {
     const space = currentSpace();
     const context = current();
     const data = catalog[state.space];
-    const circleEntry = state.space === "personal" && visibleCircles().length ? `<button class="home-context-link" data-home-view="circles">${icon("circle")}<span><strong>我的圈子</strong><small>${visibleCircles().length} 个圈子</small></span>${icon("arrow")}</button>` : "";
-    return `<section class="home-hero"><div><p class="eyebrow">Polo workspace</p><h1>早上好，林然</h1><p>在 <strong>${space.name}</strong> 继续今天的工作。你可以打开一个 App，或让 Polo 助手帮你整理下一步。</p></div>${circleEntry}</section>
-      ${section("常用 Apps", `每个 App 在${space.name}中拥有独立的 Tab 和运行状态。`, `<div class="card-grid home-app-grid">${assistantHomeCard()}${context.added.map(id => appCard(id)).join("")}</div>`, `<button class="section-link" data-home-view="catalog">全部 Apps</button>`)}
-      ${section("系统工具", "它们以 Tab 打开，但不拥有 App 的业务流程。", `<div class="utility-grid">${utilityCard("files", "文件", "当前空间上传、保存和导出的文件。", `${state.scene === "home-empty" ? 0 : data.results.length + 9} 项内容`)}${utilityCard("tasks", "任务与结果", "Polo 掌握的执行状态与明确保存结果。", `${activeExecutions().length} 项运行中`)}</div>`)}
-    `;
+
+    const circleEntry = state.space === "personal" && visibleCircles().length
+      ? `<button class="home-context-link home-context-secondary" data-home-view="circles">
+          ${icon("circle")}
+          <span>
+            <strong>我的圈子</strong>
+            <small>${visibleCircles().length} 个圈子</small>
+          </span>
+          ${icon("arrow")}
+        </button>`
+      : "";
+
+    const commonApps = `<div class="card-grid home-app-grid">
+      ${assistantHomeCard()}
+      ${context.added.map(id => appCard(id)).join("")}
+    </div>`;
+
+    const commonAppsAction = `<button class="section-link home-section-action" data-home-view="catalog">
+      全部 Apps
+    </button>`;
+
+    const utilities = `<div class="utility-grid">
+      ${utilityCard(
+        "files",
+        "文件",
+        "查看当前空间已经保存的文件。",
+        `${state.scene === "home-empty" ? 0 : data.results.length + 9} 项内容`
+      )}
+      ${utilityCard(
+        "tasks",
+        "任务与结果",
+        "查看执行状态和明确保存的结果。",
+        `${activeExecutions().length} 项运行中`
+      )}
+    </div>`;
+
+    return `<section class="home-hero">
+        <div>
+          <h1>早上好，林然</h1>
+          <p>在 <strong>${space.name}</strong> 继续今天的工作。Apps、文件和运行状态始终跟随当前空间。</p>
+        </div>
+        ${circleEntry}
+      </section>
+      ${section(
+        "常用 Apps",
+        `Polo 助手固定在第一位，其余入口来自${space.name}。`,
+        commonApps,
+        commonAppsAction
+      )}
+      ${section(
+        "系统工具",
+        "查看当前空间的文件、执行状态和已保存结果。",
+        utilities
+      )}`;
   }
 
   function matchesCatalogQuery(id, query, extra = []) {
@@ -494,9 +613,14 @@
     const onHome = current().added.includes(id);
     const atLimit = current().added.length >= 5;
     const sourceNote = `由${circle.name}授权到我的空间；即使名称相同，也是该圈子独立分发的作品。`;
+    const placementAction = onHome
+      ? `<button class="button" data-remove="${id}">移出首页</button>`
+      : atLimit
+        ? `<button class="button" data-manage-circle-app="${id}" data-circle-source="${circle.id}">首页已满 · 去管理</button>`
+        : `<button class="button" data-add="${id}">显示在首页</button>`;
     const actions = item.availability !== "available"
-      ? `<button class="button" data-explain="${id}">查看原因</button>`
-      : `<button class="button" data-open="${id}">打开</button><button class="button ${onHome || atLimit ? "" : "primary"}" data-manage-circle-app="${id}" data-circle-source="${circle.id}">${onHome ? "管理首页位置" : atLimit ? "首页已满 · 去管理" : "添加到首页"}</button>`;
+      ? `<button class="button" data-explain="${id}">查看原因</button>${placementAction}`
+      : `<button class="button" data-open="${id}">打开</button>${placementAction}`;
     return `<article class="circle-work-row"><span class="app-art ${item.update ? "amber" : "teal"}">${icon(item.icon)}</span><div><h3>${item.name}</h3><p>${item.description}</p><small>${item.source} · ${item.version}</small><em>${sourceNote}</em></div><span class="status ${available.tone}">${available.label}</span><div class="circle-work-actions">${actions}</div></article>`;
   }
 
@@ -939,7 +1063,17 @@
     if (target.matches("[data-circle-filter]")) { current().circleFilter = target.dataset.circleFilter; renderMain(); return; }
     if (target.matches("[data-manage-circle-app]")) { current().highlightedApp = target.dataset.manageCircleApp; current().highlightedCircle = target.dataset.circleSource || null; current().activeTab = "home"; current().homeView = "catalog"; render(); return; }
     if (target.matches("[data-open-assistant-skill]")) { current().highlightedSkill = target.dataset.openAssistantSkill; current().assistantPanel = "skills"; openTab("assistant"); return; }
-    if (target.matches("[data-home-view]")) { current().activeTab = "home"; current().homeView = target.dataset.homeView; if (target.dataset.homeView === "circles") current().selectedCircle = null; current().highlightedApp = null; current().highlightedCircle = null; render(); return; }
+    if (target.matches("[data-home-view]")) {
+      const nextHomeView = target.dataset.homeView;
+      current().activeTab = "home";
+      current().homeView = nextHomeView;
+      if (nextHomeView === "circles") current().selectedCircle = null;
+      current().highlightedApp = null;
+      current().highlightedCircle = null;
+      render();
+      if (nextHomeView === "catalog") $("#app-catalog-search")?.focus();
+      return;
+    }
     if (target.matches("[data-open-assistant-skills]")) { current().assistantPanel = "skills"; openTab("assistant"); return; }
     if (target.matches("[data-assistant-panel]")) { current().assistantPanel = target.dataset.assistantPanel; render(); return; }
     if (target.matches("[data-skill-toggle]")) { toggleSkill(target.dataset.skillToggle); return; }

@@ -1,0 +1,7 @@
+Evidence mode: static_source
+Claim: source_derived
+Reason: the current Polo client deliverable is a standalone vanilla HTML product prototype, not the authenticated Electron Renderer runtime. The flow states are mechanically derived from its templates, selectors, fixture data and CSS tokens.
+Source entry: design-demos/polo-client-g4-ui/index.html
+Source behavior: design-demos/polo-client-g4-ui/assets/app.js
+Source style: design-demos/polo-client-g4-ui/assets/product.css
+No real write API is called. All navigation remains inside the local review bundle.

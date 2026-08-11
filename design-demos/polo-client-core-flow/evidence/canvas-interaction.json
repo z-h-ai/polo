@@ -1,0 +1,929 @@
+{
+  "checks": {
+    "desktop": true,
+    "hand": true,
+    "pan": true,
+    "zoom": true,
+    "select": true,
+    "nodeDrag": true,
+    "interact": true,
+    "minimap": true,
+    "navigation": true,
+    "variants": true,
+    "viewportReset": true,
+    "allViewportNodes": true,
+    "noOverlap": true,
+    "edges": true,
+    "focus": true,
+    "fitAll": true,
+    "narrow": true
+  },
+  "viewports": [
+    {
+      "viewport": "desktop-fhd",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 1920,
+            "height": 1080
+          },
+          "iframe": {
+            "innerWidth": 1920,
+            "innerHeight": 1080
+          },
+          "preview": {
+            "width": 480,
+            "height": 270
+          },
+          "scale": 0.25,
+          "scaledBounds": {
+            "width": 480,
+            "height": 270
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 1920,
+            "height": 1080
+          },
+          "iframe": {
+            "innerWidth": 1920,
+            "innerHeight": 1080
+          },
+          "preview": {
+            "width": 480,
+            "height": 270
+          },
+          "scale": 0.25,
+          "scaledBounds": {
+            "width": 480,
+            "height": 270
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 1920,
+            "height": 1080
+          },
+          "iframe": {
+            "innerWidth": 1920,
+            "innerHeight": 1080
+          },
+          "preview": {
+            "width": 480,
+            "height": 270
+          },
+          "scale": 0.25,
+          "scaledBounds": {
+            "width": 480,
+            "height": 270
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 1920,
+            "height": 1080
+          },
+          "iframe": {
+            "innerWidth": 1920,
+            "innerHeight": 1080
+          },
+          "preview": {
+            "width": 480,
+            "height": 270
+          },
+          "scale": 0.25,
+          "scaledBounds": {
+            "width": 480,
+            "height": 270
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 1920,
+            "height": 1080
+          },
+          "iframe": {
+            "innerWidth": 1920,
+            "innerHeight": 1080
+          },
+          "preview": {
+            "width": 480,
+            "height": 270
+          },
+          "scale": 0.25,
+          "scaledBounds": {
+            "width": 480,
+            "height": 270
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    },
+    {
+      "viewport": "desktop",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 1440,
+            "height": 900
+          },
+          "iframe": {
+            "innerWidth": 1440,
+            "innerHeight": 900
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.3333333333333333,
+          "scaledBounds": {
+            "width": 479.99951999999996,
+            "height": 299.9997
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 1440,
+            "height": 900
+          },
+          "iframe": {
+            "innerWidth": 1440,
+            "innerHeight": 900
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.3333333333333333,
+          "scaledBounds": {
+            "width": 479.99951999999996,
+            "height": 299.9997
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 1440,
+            "height": 900
+          },
+          "iframe": {
+            "innerWidth": 1440,
+            "innerHeight": 900
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.3333333333333333,
+          "scaledBounds": {
+            "width": 479.99951999999996,
+            "height": 299.9997
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 1440,
+            "height": 900
+          },
+          "iframe": {
+            "innerWidth": 1440,
+            "innerHeight": 900
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.3333333333333333,
+          "scaledBounds": {
+            "width": 479.99951999999996,
+            "height": 299.9997
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 1440,
+            "height": 900
+          },
+          "iframe": {
+            "innerWidth": 1440,
+            "innerHeight": 900
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.3333333333333333,
+          "scaledBounds": {
+            "width": 479.99951999999996,
+            "height": 299.9997
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    },
+    {
+      "viewport": "laptop",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 1280,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.375,
+          "scaledBounds": {
+            "width": 480,
+            "height": 300
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 1280,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.375,
+          "scaledBounds": {
+            "width": 480,
+            "height": 300
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 1280,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.375,
+          "scaledBounds": {
+            "width": 480,
+            "height": 300
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 1280,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.375,
+          "scaledBounds": {
+            "width": 480,
+            "height": 300
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 1280,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 480,
+            "height": 300
+          },
+          "scale": 0.375,
+          "scaledBounds": {
+            "width": 480,
+            "height": 300
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    },
+    {
+      "viewport": "tablet-landscape",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 1024,
+            "height": 768
+          },
+          "iframe": {
+            "innerWidth": 1024,
+            "innerHeight": 768
+          },
+          "preview": {
+            "width": 480,
+            "height": 360
+          },
+          "scale": 0.46875,
+          "scaledBounds": {
+            "width": 480,
+            "height": 360
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 1024,
+            "height": 768
+          },
+          "iframe": {
+            "innerWidth": 1024,
+            "innerHeight": 768
+          },
+          "preview": {
+            "width": 480,
+            "height": 360
+          },
+          "scale": 0.46875,
+          "scaledBounds": {
+            "width": 480,
+            "height": 360
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 1024,
+            "height": 768
+          },
+          "iframe": {
+            "innerWidth": 1024,
+            "innerHeight": 768
+          },
+          "preview": {
+            "width": 480,
+            "height": 360
+          },
+          "scale": 0.46875,
+          "scaledBounds": {
+            "width": 480,
+            "height": 360
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 1024,
+            "height": 768
+          },
+          "iframe": {
+            "innerWidth": 1024,
+            "innerHeight": 768
+          },
+          "preview": {
+            "width": 480,
+            "height": 360
+          },
+          "scale": 0.46875,
+          "scaledBounds": {
+            "width": 480,
+            "height": 360
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 1024,
+            "height": 768
+          },
+          "iframe": {
+            "innerWidth": 1024,
+            "innerHeight": 768
+          },
+          "preview": {
+            "width": 480,
+            "height": 360
+          },
+          "scale": 0.46875,
+          "scaledBounds": {
+            "width": 480,
+            "height": 360
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    },
+    {
+      "viewport": "tablet-portrait",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 768,
+            "height": 1024
+          },
+          "iframe": {
+            "innerWidth": 768,
+            "innerHeight": 1024
+          },
+          "preview": {
+            "width": 480,
+            "height": 640
+          },
+          "scale": 0.625,
+          "scaledBounds": {
+            "width": 480,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 768,
+            "height": 1024
+          },
+          "iframe": {
+            "innerWidth": 768,
+            "innerHeight": 1024
+          },
+          "preview": {
+            "width": 480,
+            "height": 640
+          },
+          "scale": 0.625,
+          "scaledBounds": {
+            "width": 480,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 768,
+            "height": 1024
+          },
+          "iframe": {
+            "innerWidth": 768,
+            "innerHeight": 1024
+          },
+          "preview": {
+            "width": 480,
+            "height": 640
+          },
+          "scale": 0.625,
+          "scaledBounds": {
+            "width": 480,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 768,
+            "height": 1024
+          },
+          "iframe": {
+            "innerWidth": 768,
+            "innerHeight": 1024
+          },
+          "preview": {
+            "width": 480,
+            "height": 640
+          },
+          "scale": 0.625,
+          "scaledBounds": {
+            "width": 480,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 768,
+            "height": 1024
+          },
+          "iframe": {
+            "innerWidth": 768,
+            "innerHeight": 1024
+          },
+          "preview": {
+            "width": 480,
+            "height": 640
+          },
+          "scale": 0.625,
+          "scaledBounds": {
+            "width": 480,
+            "height": 640
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    },
+    {
+      "viewport": "mobile-large",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 430,
+            "height": 932
+          },
+          "iframe": {
+            "innerWidth": 430,
+            "innerHeight": 932
+          },
+          "preview": {
+            "width": 295.266,
+            "height": 640
+          },
+          "scale": 0.6866952789699571,
+          "scaledBounds": {
+            "width": 295.27885000000003,
+            "height": 639.9997400000001
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 430,
+            "height": 932
+          },
+          "iframe": {
+            "innerWidth": 430,
+            "innerHeight": 932
+          },
+          "preview": {
+            "width": 295.266,
+            "height": 640
+          },
+          "scale": 0.6866952789699571,
+          "scaledBounds": {
+            "width": 295.27885000000003,
+            "height": 639.9997400000001
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 430,
+            "height": 932
+          },
+          "iframe": {
+            "innerWidth": 430,
+            "innerHeight": 932
+          },
+          "preview": {
+            "width": 295.266,
+            "height": 640
+          },
+          "scale": 0.6866952789699571,
+          "scaledBounds": {
+            "width": 295.27885000000003,
+            "height": 639.9997400000001
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 430,
+            "height": 932
+          },
+          "iframe": {
+            "innerWidth": 430,
+            "innerHeight": 932
+          },
+          "preview": {
+            "width": 295.266,
+            "height": 640
+          },
+          "scale": 0.6866952789699571,
+          "scaledBounds": {
+            "width": 295.27885000000003,
+            "height": 639.9997400000001
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 430,
+            "height": 932
+          },
+          "iframe": {
+            "innerWidth": 430,
+            "innerHeight": 932
+          },
+          "preview": {
+            "width": 295.266,
+            "height": 640
+          },
+          "scale": 0.6866952789699571,
+          "scaledBounds": {
+            "width": 295.27885000000003,
+            "height": 639.9997400000001
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    },
+    {
+      "viewport": "mobile",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 390,
+            "height": 844
+          },
+          "iframe": {
+            "innerWidth": 390,
+            "innerHeight": 844
+          },
+          "preview": {
+            "width": 295.734,
+            "height": 640
+          },
+          "scale": 0.7582938388625592,
+          "scaledBounds": {
+            "width": 295.73466,
+            "height": 640.000136
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 390,
+            "height": 844
+          },
+          "iframe": {
+            "innerWidth": 390,
+            "innerHeight": 844
+          },
+          "preview": {
+            "width": 295.734,
+            "height": 640
+          },
+          "scale": 0.7582938388625592,
+          "scaledBounds": {
+            "width": 295.73466,
+            "height": 640.000136
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 390,
+            "height": 844
+          },
+          "iframe": {
+            "innerWidth": 390,
+            "innerHeight": 844
+          },
+          "preview": {
+            "width": 295.734,
+            "height": 640
+          },
+          "scale": 0.7582938388625592,
+          "scaledBounds": {
+            "width": 295.73466,
+            "height": 640.000136
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 390,
+            "height": 844
+          },
+          "iframe": {
+            "innerWidth": 390,
+            "innerHeight": 844
+          },
+          "preview": {
+            "width": 295.734,
+            "height": 640
+          },
+          "scale": 0.7582938388625592,
+          "scaledBounds": {
+            "width": 295.73466,
+            "height": 640.000136
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 390,
+            "height": 844
+          },
+          "iframe": {
+            "innerWidth": 390,
+            "innerHeight": 844
+          },
+          "preview": {
+            "width": 295.734,
+            "height": 640
+          },
+          "scale": 0.7582938388625592,
+          "scaledBounds": {
+            "width": 295.73466,
+            "height": 640.000136
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    },
+    {
+      "viewport": "mobile-compact",
+      "nodes": [
+        {
+          "state": "space-home",
+          "declared": {
+            "width": 360,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 360,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 288,
+            "height": 640
+          },
+          "scale": 0.8,
+          "scaledBounds": {
+            "width": 288,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "assistant-boundary",
+          "declared": {
+            "width": 360,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 360,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 288,
+            "height": 640
+          },
+          "scale": 0.8,
+          "scaledBounds": {
+            "width": 288,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-catalog",
+          "declared": {
+            "width": 360,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 360,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 288,
+            "height": 640
+          },
+          "scale": 0.8,
+          "scaledBounds": {
+            "width": 288,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-open",
+          "declared": {
+            "width": 360,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 360,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 288,
+            "height": 640
+          },
+          "scale": 0.8,
+          "scaledBounds": {
+            "width": 288,
+            "height": 640
+          },
+          "clipped": false
+        },
+        {
+          "state": "app-preparing",
+          "declared": {
+            "width": 360,
+            "height": 800
+          },
+          "iframe": {
+            "innerWidth": 360,
+            "innerHeight": 800
+          },
+          "preview": {
+            "width": 288,
+            "height": 640
+          },
+          "scale": 0.8,
+          "scaledBounds": {
+            "width": 288,
+            "height": 640
+          },
+          "clipped": false
+        }
+      ],
+      "noOverlap": true,
+      "edgeCount": 4,
+      "minimapNodeCount": 5
+    }
+  ],
+  "errors": [],
+  "checkedAt": "2026-08-11T16:11:51.461Z"
+}

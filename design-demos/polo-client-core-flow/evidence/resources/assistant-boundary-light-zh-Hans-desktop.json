@@ -1,0 +1,28 @@
+{
+  "performance": [
+    {
+      "name": "http://127.0.0.1:9921/assets/source-derived.css",
+      "initiatorType": "link",
+      "transferSize": 9660,
+      "decodedBodySize": 9360
+    },
+    {
+      "name": "http://127.0.0.1:9921/favicon.ico",
+      "initiatorType": "other",
+      "transferSize": 0,
+      "decodedBodySize": 0
+    }
+  ],
+  "failedRequests": [],
+  "responses": [
+    {
+      "url": "http://127.0.0.1:9921/prototype.html?scene=assistant-boundary&theme=light&lang=zh-Hans&viewport=desktop&scenario=default",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:9921/assets/source-derived.css",
+      "status": 200
+    }
+  ],
+  "blockedWrites": []
+}
