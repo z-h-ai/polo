@@ -123,6 +123,8 @@ type ProductSpaceSummary =
 - 平台工作人员账号调用该接口返回 `403 staff_account_not_allowed`，不能获得“我的空间”。
 - 客户端没有有效本地选择或原选择已失效时，回到 `personalProductSpaceId`；服务端不保存“当前空间”。
 
+这里的 `payer` 只供授权、计量和账务解析。Polo 客户端不把它渲染为 badge、可信栏字段或“由谁承担算力”说明。
+
 ## 5. 统一 Catalog
 
 ### 5.1 操作
@@ -285,6 +287,8 @@ type LaunchDelivery =
     };
 ```
 
+`ResolveLaunchResponse.payer` 是内部执行契约，不是客户端展示字段。
+
 约束：
 
 - 每次新启动都必须调用，服务端重新验证账号、空间、作品授权、Skill 启用、稳定/企业版本、平台检查、全局治理和付款能力。
@@ -374,7 +378,7 @@ type ExecutionStatus =
 4. 用户确认后调用 `stopAllExecutions`；用户取消时不改变任何上下文。
 5. 只有全部执行进入 `stopped / failed` 终态后才继续；任一 `stopping` 或终止失败时保留原空间。
 6. 原子写入当前设备的 `activeProductSpaceId`。
-7. 丢弃当前页面内存中的旧 Catalog、Skills、助手 Session 列表、文件投影、权限与付款方，再加载目标空间。
+7. 丢弃当前页面内存中的旧 Catalog、Skills、助手 Session 列表、文件投影、权限与内部计量授权，再加载目标空间。
 8. 目标加载成功后展示目标首页；失败时显示单一安全错误页，不能同时展示新旧空间内容。
 
 企业访问权在使用中失效时使用同一终止机制，但不需要用户确认；终止后回到“我的空间”。
@@ -485,7 +489,7 @@ interface ProductSpaceErrorResponse {
 
 - Skill 启用状态以 `accountId + productSpaceId + artifactInstanceId` 隔离并跨该账号设备同步。
 - 企业成员 A 启用 Skill 不会替成员 B 启用。
-- 两个 ProductSpace 的 Polo 助手拥有不同 Session、附件、文件、Skills 与付款方。
+- 两个 ProductSpace 的 Polo 助手拥有不同 Session、附件、文件、Skills 与内部计量授权；客户端不展示付款主体。
 - Skill 在 resolve-launch 后固定作品版本；Polo 助手执行固定其 ProductSpace Scope，目录更新不切换已开始执行。
 
 ### 13.4 Runtime 与切换

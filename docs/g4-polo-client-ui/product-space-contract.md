@@ -111,6 +111,8 @@ Enterprise 保存企业本身及其管理关系；enterprise ProductSpace 保存
 
 不能仅依赖当前 UI 选中的空间来解释已有记录。记录创建后切换空间，不得改变其 `productSpaceId`。
 
+费用付款主体只用于服务端授权、计量和账务解析，不是 Polo 客户端常驻可见字段；客户端不得据此生成 payer badge、可信栏文案或“由谁承担算力”说明。
+
 用户对 Skill 的启用偏好按 `accountId + productSpaceId + artifactInstanceId` 保存并跨该账号设备同步；企业内一名成员启用 Skill 不会替其他成员启用。设备本地缓存和运行准备状态仍按设备保存，不能反向作为授权或用户启用事实。
 
 ## 6. 标识契约

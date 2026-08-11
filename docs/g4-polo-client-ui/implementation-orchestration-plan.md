@@ -6,11 +6,11 @@
 
 ## 1. 当前阶段
 
-截至 2026-08-10：
+截至 2026-08-11：
 
 - G0—G3、F01-A、F01-B 已完成。
 - G4-A 的 22 个实施项已全部映射为正式看板任务；等待产品用户集中确认任务图后冻结。
-- G4-B 的四个产品入口均已建立完整 UI v1 任务。产品用户已确认重新实现合同并授权覆盖现有四套 G4 原型；新原型尚未按专项计划完成，因此 G4-B 仍未通过。
+- G4-B 的四个产品入口均已建立 UI v1 任务。POO-41 已完成客户端结构对齐和现有原型收敛，进入最终走查/冻结；其余三端仍按各自任务推进，因此整体 G4-B 尚未通过。
 - POL-72 及后续实现任务全部保持 `todo`。在 G4-A 与 G4-B 同时通过前，不启动正式产品编码。
 
 ## 2. 正式任务映射
@@ -19,7 +19,7 @@
 
 | 产品入口 | 流程数 | UI 任务 | 项目 / 分支 | 设计入口（任务产出） | 状态 |
 | --- | ---: | --- | --- | --- | --- |
-| Polo 客户端 | 11 | POO-41 | Polo-工作台 / `POO-41/feat/polo-client-g4-ui` | `design-demos/polo-client-g4-ui/index.html` | 旧稿待按专项计划覆盖 |
+| Polo 客户端 | 11 | POO-41 | Polo-工作台 / `POO-41/feat/polo-client-g4-ui` | `design-demos/polo-client-g4-ui/index.html` | 结构已确认，原型已收敛，待最终冻结 |
 | 企业组织管理端 | 12 | POL-73 | polo-admin / `POL-73/feat/enterprise-admin-ui-v1` | `design-demos/enterprise-admin-ui-v1/index.html` | 旧稿待按专项计划覆盖 |
 | 创作者工作台 | 10 | POL-74 | polo-admin / `POL-74/feat/creator-workbench-ui-v1` | `design-demos/creator-workbench-ui-v1/index.html` | 旧稿待按专项计划覆盖 |
 | 平台运营端 | 13 | POL-75 | polo-admin / `POL-75/feat/platform-operations-ui-v1` | `design-demos/platform-operations-ui-v1/index.html` | 旧稿待按专项计划覆盖 |
@@ -64,8 +64,20 @@
 | L01 | POL-92 实现企业圈子账号生命周期与支持授权 | polo-admin / `POL-92/feat/lifecycle-support-authorization` | POL-79、POL-80、POL-90、POL-91 |
 | P01 | POO-42 重构 Polo 客户端 ProductSpace 上下文与安全切换 | Polo-工作台 / `POO-42/refactor/product-space-switching` | POO-41、POL-72、POL-76、POL-87 |
 | P02 | POO-43 重构成员首页、统一 Catalog 与 App Runtime | Polo-工作台 / `POO-43/refactor/catalog-runtime-home` | POO-41、POO-42、POL-84—POL-87 |
-| P03 | POO-44 隔离 Polo 助手会话、文件与 Skills 的 ProductSpace 上下文 | Polo-工作台 / `POO-44/refactor/assistant-space-isolation` | POO-41、POO-42、POL-72、POL-84、POL-85、POL-89 |
+| P03 | POO-44 将 Polo 助手重构为内置 App，并隔离会话、附件、文件与 Skills 的 ProductSpace 上下文 | Polo-工作台 / `POO-44/refactor/assistant-space-isolation` | POO-41、POO-42、POO-43、POL-72、POL-84、POL-85、POL-89 |
 | X01 | POL-93 执行 ProductSpace 直接切换与旧模型清理 | polo-admin / `POL-93/refactor/direct-cutover-cleanup` | POL-87—POL-92、POO-43、POO-44、四端 E2E |
+
+### 2.4 Polo 客户端三项正式实现边界
+
+POO-42—POO-44 共同把当前“助手承担整个客户端外壳”的结构迁移为“工作台外壳 + 多 App Tab + Polo 助手内置 App”。三项任务不得把同一全局能力保留两套入口：
+
+| 正式任务 | 必须交付的边界 |
+| --- | --- |
+| POO-42 / P01 | 建立客户端唯一的 ProductSpace 上下文和顶部切换器；安全切换时统一刷新 Tab、助手、目录、文件和运行上下文 |
+| POO-43 / P02 | 建立首页、统一 Catalog、App Runtime、顶部运行中心、“任务与结果”和“文件”等外壳目的地，先承接从旧助手移出的全局能力 |
+| POO-44 / P03 | 保留会话列表、消息、输入框、附件、代码块、工具调用、进度、结果和 Skill 能力；移除助手内部 `OrganizationSwitcher`、账号、App 目录、下载中心、全局文件、通用偏好和管理端入口 |
+
+POO-44 的去壳层不是视觉隐藏任务：必须解除旧助手控件的导航、状态和上下文所有权，并改接 POO-42/POO-43 提供的客户端外壳。`WorkspaceSwitcher` 不能改名或映射为 ProductSpace 切换器；如助手仍需要本地工作目录，只能作为本次对话上下文或高级设置。POO-41 已冻结 `Sources`、`Automations` 和 Browser 为助手内部能力；POO-44 复用其唯一入口，POO-42/POO-43 不新增顶层入口。
 
 ## 3. UI v1 回写规则
 
@@ -101,8 +113,9 @@ UI 任务完成后，不只是把 HTML 路径写在本文件中。以下实施�
 | 5 | POL-84、POL-85、POL-86、POL-91 | 个人授权、企业导入、治理、订阅账本完成 |
 | 6 | POL-87、POL-88、POL-92 | 统一 Catalog、管理端拆权、生命周期完成 |
 | 7 | POO-42 | ProductSpace 安全切换 E2E 通过 |
-| 8 | POO-43、POO-44 | 成员首页/App runtime 与 Polo 助手隔离 E2E 通过 |
-| 9 | POL-93 | 跨仓 Convert/Switch/Rebuild/Cleanup 与四端最终验收通过 |
+| 8 | POO-43 | 成员首页、统一 Catalog、App Runtime、运行中心和全局文件目的地 E2E 通过 |
+| 9 | POO-44 | Polo 助手完成去壳层并作为内置 App 运行；会话、附件、文件与 Skills 隔离 E2E 通过 |
+| 10 | POL-93 | 跨仓 Convert/Switch/Rebuild/Cleanup 与四端最终验收通过 |
 
 ## 5. 自动继续规则
 

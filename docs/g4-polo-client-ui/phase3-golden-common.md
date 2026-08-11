@@ -50,6 +50,7 @@
 - 场景语义与 Before 一一对应（同一 scene 在两边表达同一业务状态）。
 - 交互真实可点：流程附件"交互轨迹"中的动作必须在 after.html 里以纯前端状态机走通（含确认 Dialog、重新验证、 loading/失败/受限态）。
 - 权限差异：角色变体 scene 中，无权操作禁用并附原因（foundation §6 规则）。
+- PC-F04 例外：既有 Polo 助手内部状态只冻结入口、ProductSpace 交接和真实组件复用边界，不在 POO-41 静态 After 中重写会话、输入、Sources、Automations、Browser 或 Skill 执行状态机；内部交互由 POO-44 E2E 证明。
 
 ## 6. 自检（执行者必须完成并贴输出）
 

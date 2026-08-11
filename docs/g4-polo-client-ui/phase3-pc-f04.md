@@ -6,9 +6,25 @@
 
 场景集：`skills-list` / `skill-enable-confirm` / `skill-enabled` / `assistant-home` / `chat-normal` / `skill-source-picker` / `skill-permission-confirm` / `skill-running` / `skill-result` / `chat-failed` / `skill-expired` / `skill-blocked` / `skills-empty` / `history-loading`。
 
-交互轨迹（after.html 必须真实走通）：Skills 区启用「纪要整理」→ 打开 Polo 助手 → 发任务 → 对话内确认权限 → 看到 Skill 调用过程与结果 → 费用归我的空间。
+POO-41 交互轨迹：从首页或全部 Apps 打开 Polo 助手 → 助手作为客户端 Tab 出现 → 当前 ProductSpace 正确交接 → 助手内部没有第二套全局空间、账号、目录、文件或 Browser Tab 外壳。内部计量归属遵守当前空间契约，但常规助手界面不持续展示算力承担说明。
 
-黄金重点（主计划 §7）：**旧助手保留**（尽量保留真实源码的会话列表、消息布局、输入框、附件、代码块、工具调用、执行进度、结果和错误反馈）、新工作台外壳、Skill 新定位（不能独立打开、不生成 Tab、启用/调用/确认都在助手对话中）、权限确认。
+黄金重点（主计划 §7）：**POO-41 冻结复用边界，不在静态原型重做助手内部状态机**。正式 POO-44 选择性复用真实源码的会话列表、消息布局、输入框、附件、代码块、工具调用、执行进度、结果和错误反馈；ProductSpace、账号、目录、运行和全局文件由新工作台外壳承载。Skill 不能独立打开或生成 Tab，启用、调用和权限确认由真实助手组件完成。
+
+## Phase 3-A 前置任务：Polo 助手内嵌化与去壳层重构
+
+PC-F04 的 After 必须建立在 Phase 2 工作台壳层已经确认的基础上。先完成以下模块归属迁移，再实现 Skill 黄金流程：
+
+| 旧助手模块或能力 | 处理方式 |
+| --- | --- |
+| `OrganizationSwitcher` | 从助手移除；使用客户端顶部唯一的 ProductSpace 切换器 |
+| 账号、退出、全局设置和企业/创作者管理入口 | 移到客户端账号菜单 |
+| App 目录、下载和全局运行状态 | 移到首页、顶部运行中心和“任务与结果” |
+| 全局文件入口 | 移到“文件”内置 App；助手只保留当前对话附件与结果文件 |
+| 会话列表、消息区、输入框、附件、代码块、工具调用、进度和结果 | 保留并复用真实助手组件 |
+| Skill 启用、选择、权限确认与调用 | 保留在助手内，按当前 ProductSpace 隔离 |
+| `WorkspaceSwitcher` | 不映射为 ProductSpace；确需工作目录时改为本次对话上下文或高级设置 |
+
+v1 已确认：`Sources`、`Automations` 和 Browser 只属于 Polo 助手内部能力，不进入客户端顶层导航、首页、系统工具或独立 App Tab。Browser 从助手会话触发并在输入/工具区域显示状态，不迁移旧 `BrowserTabStrip`。移除旧控件必须解除其导航和状态所有权，不能只用 CSS 隐藏。
 
 ## 输出位置
 
@@ -35,8 +51,11 @@
 
 ## 本流程特有验收项
 
-1. `skills-list` 中每个 Skill 显示名称/创作者/来源圈子/状态（CONTEXT.md 作品身份规则：同名能力必须显示来源）。
-2. `skill-source-picker` 呈现两个圈子同名 Skill 的来源选择（不静默调用）。
-3. `skill-permission-confirm` 与 `skill-running`/`skill-result` 全部在助手对话流内呈现，不生成新 Tab、无独立 Skill 窗口。
-4. `skill-blocked` 显示安全原因 + 历史结果保留但标记来源版本已阻断。
-5. After 的对话区结构必须能从 ChatPage.tsx 逐项追溯（manifest regions 记录对应关系）。
+1. POO-41 After 只呈现助手入口、客户端 Tab 容器、当前空间标识和源码复用边界；内部状态 scene 可以落到同一真实助手容器并标注预期状态，不要求静态原型复制实现。
+2. Skills、Sources、Automations 和 Browser 都只有助手内部入口；Skill 不生成新 Tab或独立窗口。
+3. POO-44 E2E 必须覆盖同名 Skill 来源选择、权限确认、运行、结果、失败、失效、阻断和历史加载，并可追溯到真实 `ChatPage`、输入区和工具调用组件。
+4. `skill-blocked` 的正式实现保留历史结果并标记来源版本已阻断。
+5. 真实助手组件映射和被移除的旧外壳区域必须记录在 POO-44 验收证据中。
+6. 助手内部不出现 `OrganizationSwitcher`、账号菜单、App 目录、下载中心、全局文件、通用偏好或管理端入口。
+7. 客户端只有一个 ProductSpace 切换入口；切换后助手的会话、附件、Skills 和运行上下文整体切换，不自动打开目标空间的旧对话。
+8. 本地 Workspace 不伪装成 ProductSpace；需要工作目录时只显示为当前对话上下文或高级设置。

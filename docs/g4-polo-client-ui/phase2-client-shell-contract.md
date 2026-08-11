@@ -12,7 +12,7 @@ G4 重新实现要求四个产品入口的 `index.html` 从 Phase 2 起就是**�
 
 1. `index.html` 通过本地 HTTP 服务打开无控制台错误、无失败资源请求（用 Playwright/Chromium 实测，不允许"应该没问题"）。
 2. 顶部工作台栏包含：空间切换入口（我的空间 + 一个企业空间示例）、应用 Tab 区、运行状态入口、通知入口、账号菜单。首页 Tab 固定不可关闭；打开第二个 App 出现新 Tab，重复打开回到已有 Tab（计划 §4.1）。
-3. 首页按序呈现（计划 §4.3）：继续使用和最近打开 / 当前空间已添加的 Apps / 可添加的 Apps / Polo 内置应用（Polo 助手、文件、任务与结果）/ 当前空间可供 Polo 助手使用的 Skills / 最近结果与内容变化。Skills 明确标注"由 Polo 助手调用"，不伪装成 App（计划 §4.4）。
+3. 首页只呈现：当前空间摘要 / “常用 Apps” / “系统工具”。常用 Apps 固定第一个 Polo 助手，加最多 5 个工作 App；标题右侧提供唯一“全部 Apps”入口。系统工具为“文件”和“任务与结果”。首页不显示最近结果、内容变化、Skills 摘要、可添加 Apps 长列表或统一“继续工作”队列。
 4. 空间菜单只出现"我的空间"和企业空间，不出现创作者圈子（计划 §4.2）；切换空间时首页内容整体替换（用前端状态模拟两个空间的不同目录）。
 5. 浅色/深色主题可切换（账号菜单内），双主题下文字对比符合 foundation §2.3 规则（正文 ≥fg-60）。
 6. 全部文案为正式中文，词汇遵循 `CONTEXT.md`（我的空间/企业空间/创作者圈子/Polo 助手等）；无 lorem ipsum、无"流程编号"、无评审/状态切换/来源说明等任何评审 UI。
@@ -27,10 +27,10 @@ G4 重新实现要求四个产品入口的 `index.html` 从 Phase 2 起就是**�
 
 ## 4. 必读上下文（按此顺序）
 
-1. `/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs/docs/g4-ui-prototype-reimplementation-plan.md` §3、§4（客户端产品结构全部小节）。
-2. `/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs/docs/four-end-design-foundation.md`（全部 token 与组件契约）。
+1. `/Users/wow/project/z-h-ai/polo-dir/POO-41/feat/polo-client-g4-ui/docs/g4-polo-client-ui/g4-ui-prototype-reimplementation-plan.md` §3、§4（客户端产品结构全部小节）。
+2. `/Users/wow/project/z-h-ai/polo-dir/POO-41/feat/polo-client-g4-ui/docs/g4-polo-client-ui/four-end-design-foundation.md`（全部 token 与组件契约）。
 3. `/Users/wow/project/z-h-ai/polo-dir/dev/docs/DESIGN.md`（客户端视觉语言的 exact 来源）。
-4. `/Users/wow/project/z-h-ai/polo-admin-dir/POL-68/refactor/comm-defs/CONTEXT.md`（产品词汇）。
+4. 本目录的 `product-space-contract.md`、`polo-client-user-flows.md` 与 `g4-ui-prototype-scene-matrix.md`（产品词汇、边界和状态）。
 
 ## 5. MUST DO
 
@@ -45,6 +45,7 @@ G4 重新实现要求四个产品入口的 `index.html` 从 Phase 2 起就是**�
 
 - 不在产品 HTML 中加入任何评审 UI：流程选择器、状态切换器（normal/empty/loading/failure/restricted）、场景参数面板、设计说明、来源标注、TODO 注释。
 - 不实现 Skill 独立打开界面、不把圈子做成空间、不做全局左侧栏（计划 §4.1 明确无常驻左侧栏）。
-- 不做登录页、不做平台级"继续工作/待人工确认"队列（计划 §4.3 明确不做）。
+- 登录、会话失效和首次准备属于业务壳加载前的系统阶段，不放进已登录工作台的 Tab 或首页；不做平台级"继续工作/待人工确认"队列。
+- 必须能从客户端冷启动进入登录/会话恢复，再经过“我的空间”准备与加载进入首页；受限和契约不一致时业务壳不得提前显示。
 - 不修改生产代码、不动 git 提交、不新建 git 分支、不删除任何既有文件。
 - 不使用 emoji 充当图标；图标用内联 SVG（线性、16px 基准）。

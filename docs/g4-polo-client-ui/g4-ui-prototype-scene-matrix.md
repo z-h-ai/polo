@@ -37,14 +37,14 @@ N/A：restricted 独立场景——账号受限即 `account-suspended`，企业�
 交互轨迹：首页→打开「访谈洞察」→可信栏显示运行态→执行任务→结果归我的空间。
 
 ### PC-F03 加入和管理创作者圈子 — fully_absent
-场景：`my-circles-empty` 未加入任何圈子；`circle-invite` 打开邀请/链接/二维码（圈子/创作者/加入方式/分发内容说明）；`join-free-confirm` 免费直接加入；`join-invite-pending` 仅邀请通用链接→待 Creator Owner 审批；`join-paid-confirm` 付费：价格/周期/续费规则，内容费与算力费分列；`pay-processing` 支付结果未知（不重复扣款）；`price-changed-reconfirm` 确认前涨价按新价重确认；`join-success-detail` 圈子详情展示新获得 Apps/Skills（不自动打开/启用）；`my-circles` 我的圈子列表；`cancel-renewal` 取消续费（周期内可用到期失效）；`leave-now` 立即退出确认（剩余周期提示）；`grace-period` 续费失败宽限期；`refund-processing` 退款/拒付处理中；`circle-join-closed` 链接失效/停止加入不建关系；`already-joined` 已加入打开现有关系。
+场景：`my-circles-empty` 未加入任何圈子；`circle-invite` 从邀请链接/二维码进入（圈子/创作者/加入方式/分发内容说明）；`join-free-confirm` 免费直接加入；`join-invite-pending` 仅邀请通用链接→待 Creator Owner 审批；`join-paid-confirm` 付费：客户端说明价格/周期/续费规则并打开系统浏览器结算；`pay-processing` 支付结果未知（不重复扣款）；`price-changed-reconfirm` 确认前涨价按新价重确认；`join-success-detail` 回到客户端圈子详情并展示新获得 Apps/Skills（不自动打开/启用）；`my-circles` 我的圈子列表；`cancel-renewal` 取消续费（周期内可用到期失效）；`leave-now` 立即退出确认（剩余周期提示）；`grace-period` 续费失败宽限期；`refund-processing` 退款/拒付处理中；`circle-join-closed` 链接失效/停止加入不建关系；`already-joined` 已加入打开现有关系。
 N/A：restricted——圈子侧无独立受限角色态。
-交互轨迹：我的圈子→打开邀请→付费确认（两笔费用分列）→圈子详情出现新作品且未自动启用。
+交互轨迹：打开圈子邀请→客户端查看加入说明→付费时进入系统浏览器→完成后回到圈子详情，新作品出现但未自动启用。
 
 ### PC-F04 启用 Skill 并使用 Polo 助手（黄金）— partial_surface（ChatPage 真实；显式启用 UI 缺失）
-场景：`skills-list` 当前空间可用 Skills（内置+圈子来源）；`skill-enable-confirm` 首次启用统一说明；`skill-enabled` 启用态（账号+空间保存，不替他人启用）；`assistant-home` 助手会话列表/新对话；`chat-normal` 对话；`skill-source-picker` 多圈子同名 Skill 先选来源；`skill-permission-confirm` 调用前权限确认；`skill-running` 调用执行进度；`skill-result` 结果与文件；`chat-failed` 调用失败错误反馈；`skill-expired` 执行前失效提示重选；`skill-blocked` 全局阻断终止调用+历史结果标记；`skills-empty` 无可用 Skills；`history-loading` 会话历史加载。
+POO-41 原型只冻结以下可见边界：`skills-list` / `skill-enable-confirm` / `skill-enabled` 用于确认 Skill 入口只在助手中；`assistant-home` / `chat-normal` 用于确认首页入口、助手 Tab、当前 ProductSpace 交接和复用容器。`skill-source-picker` / `skill-permission-confirm` / `skill-running` / `skill-result` / `chat-failed` / `skill-expired` / `skill-blocked` / `skills-empty` / `history-loading` 保留为真实助手组件复用后的 E2E 场景别名，不在 POO-41 静态原型另造内部状态机。
 N/A：restricted——空间级受限归 PC-F07/08。
-交互轨迹：Skills 区启用「纪要整理」→打开助手→发任务→确认权限→看到调用过程与结果→费用归我的空间。
+交互轨迹：首页打开 Polo 助手→作为客户端 Tab 出现→当前空间正确交接→内部没有第二套 OrganizationSwitcher、WorkspaceSwitcher、账号、目录、文件或 Browser Tab 外壳。Skill、Sources、Automations 和 Browser 的内部交互由 POO-44 基于现有助手代码复用并完成 E2E。
 
 ### PC-F05 接受企业邀请并进入企业空间 — partial_surface（客户端交接真实；落地页归 ENT-F03）
 场景：`landing-reference` 邀请落地页**引用 ENT-F03 bundle**（不复制实现）；`handoff-open-client` 加入成功页引导下载/打开客户端；`client-space-appears` 客户端空间切换器出现新企业（不强制切换，不影响其他设备）；`pending-approval` 快速共享待审批（可登录客户端但无企业空间）；`invite-mismatch` 指定邀请账号不匹配提示切换；`already-member` 已是成员返回现有关系；`create-enterprise-handoff` 创建企业→管理端完成→返回客户端→新空间出现；`handoff-refresh-failed` 目录刷新失败可重试（成员关系保留，不混入个人目录）。
@@ -52,12 +52,12 @@ N/A：empty/loading 常规态归 landing 所在 bundle；restricted 无（被企
 交互轨迹：接受邀请后打开客户端→空间切换器出现「星图科技」→不自动切换→手动进入看到企业目录。
 
 ### PC-F06 空间安全切换 — partial_surface（OrganizationSwitcher 旧语义真实）
-场景：`switcher-normal` 切换器仅我的空间+有效企业（无圈子）；`switch-running-confirm` 运行项列表+"终止全部并切换"主操作；`terminating-progress` 逐项终止状态；`terminate-failed` 失败项重试/取消，保持原空间；`terminate-cancelled` 取消后留原空间任务继续；`target-access-lost` 目标企业访问失效（移除/标记不可用）；`target-load-failed` 不显示新旧混合内容，重试或返回；`switch-success` 目录/Skills/助手/文件/权限/付款方整体刷新后展示目标首页；`assistant-switch` 助手中切换→目标空间助手列表/新对话（不自动打开旧对话）；助手页持续显示当前空间名与付款方。
+场景：`switcher-normal` 切换器仅我的空间+有效企业（无圈子）；`switch-running-confirm` 运行项列表+"终止全部并切换"主操作；`terminating-progress` 逐项终止状态；`terminate-failed` 失败项重试/取消，保持原空间；`terminate-cancelled` 取消后留原空间任务继续；`target-access-lost` 目标企业访问失效（移除/标记不可用）；`target-load-failed` 不显示新旧混合内容，重试或返回；`switch-success` 目录/Skills/助手/文件/权限和运行上下文整体刷新后展示目标首页；`assistant-switch` 助手中切换→目标空间助手列表/新对话（不自动打开旧对话）；助手页持续显示当前空间名。
 交互轨迹：企业空间有运行中任务→发起切换→确认终止全部→逐项终止→进入我的空间首页；断言旧空间无后台运行。
 
 ### PC-F07 企业空间使用 App/Skill/助手 — partial_surface（OrganizationAppCard/组织态真实）
-场景：`ent-home` 企业首页（仅已导入+启用+分发给该用户的作品）；`ent-catalog-empty` 无可消费作品；`ent-app-running` 企业身份运行（数据/费用归企业）；`ent-skills` 仅企业授权 Skills；`ent-assistant` 企业独立助手实例；`personal-no-ent-history` 切回我的空间无企业历史（对照）；`member-out-of-scope` 范围外成员目录无该 App 且旧链接不可达；`payer-badge` 付款方=企业贯穿标识；`ent-restricted` 欠费/治理暂停：只读+原因+恢复路径（Member/Manager 不能绕过）。
-交互轨迹：切到星图科技→打开「报价助手」→运行→断言可信栏付款方=企业；切回我的空间→断言无企业会话。
+场景：`ent-home` 企业首页（仅已导入+启用+分发给该用户的作品）；`ent-catalog-empty` 无可消费作品；`ent-app-running` 企业身份运行（数据与结果归企业）；`ent-skills` 仅企业授权 Skills；`ent-assistant` 企业独立助手实例；`personal-no-ent-history` 切回我的空间无企业历史（对照）；`member-out-of-scope` 范围外成员目录无该 App 且旧链接不可达；`ent-context` 当前空间、Member 身份、企业数据归属和运行状态一致；`ent-restricted` 欠费/治理暂停：只读+原因+恢复路径（Member/Manager 不能绕过）。
+交互轨迹：切到北辰智能科技→打开企业 App→运行→断言当前空间、Member 身份和企业数据归属一致；切回我的空间→断言无企业会话。
 
 ### PC-F08 权限或作品失效后的退出与保留 — partial_surface（SkillInfoPage 失效 UI 真实）
 角色变体：Member / Manager / Owner。
@@ -65,12 +65,12 @@ N/A：empty/loading 常规态归 landing 所在 bundle；restricted 无（被企
 交互轨迹：企业空间中成员被移除→客户端发现→停止新操作并终止运行项→回到我的空间→企业作品出现不可用说明。
 
 ### PC-F09 个人账号与管理入口 — partial_surface（settings 真实）
-场景：`account-overview` 个人账号状态/个人费用/安全设置；`admin-entry-owner` 显示企业组织管理端入口（浏览器打开）；`admin-entry-creator-active` 创作者工作台可写入口；`admin-entry-creator-suspended` 暂停/撤销后只读责任处理入口；`logout` 退出登录不删本地数据；`deletion-blocked` 注销阻塞清单（Owner/Creator Owner/未结财务逐项）；`session-expired` 会话失效恢复登录。
+场景：`account-overview` 账号状态/安全/外观/通知/本机存储和授权记录；`admin-entry-owner` 显示企业组织管理端入口（浏览器打开）；`admin-entry-creator-active` 创作者工作台可写入口；`admin-entry-creator-suspended` 暂停/撤销后只读责任处理入口；`logout` 退出登录不删本地数据；`deletion-blocked` 注销阻塞摘要（Owner/Creator Owner/未结责任逐项，具体处理进入浏览器）；`session-expired` 会话失效恢复登录。
 N/A：empty——账号页无空态语义。
 交互轨迹：账号菜单→看到与身份匹配的管理入口→点企业入口→系统浏览器打开（非客户端 Tab）。
 
 ### PC-F10 离线和运行中断网 — static_surface（HomePage 离线行为有测试证据）
-场景：`offline-home` 离线查看本机历史结果/文件/目录说明+"缓存非最新授权"提示；`offline-start-blocked` 离线禁止启动新 App/助手/AI；`running-disconnected` 运行中断网：停止新 AI/网络调用，任务"等待恢复或终止"；`reconnect-revalidate` 恢复网络重新验证空间/授权/版本/付款方后继续；`unknown-not-success` 未知结果不显示为成功；`terminate-offline` 用户终止等待中任务。
+场景：`offline-home` 离线查看本机历史结果/文件/目录说明+"缓存非最新授权"提示；`offline-start-blocked` 离线禁止启动新 App/助手/AI；`running-disconnected` 运行中断网：停止新 AI/网络调用，任务"等待恢复或终止"；`reconnect-revalidate` 恢复网络重新验证空间/授权/版本后继续；`unknown-not-success` 未知结果不显示为成功；`terminate-offline` 用户终止等待中任务。
 N/A：empty/restricted——离线本身即受限表达，不单列。
 交互轨迹：助手任务运行中→断网→任务进入等待恢复→恢复→重新验证通过→任务继续。
 
