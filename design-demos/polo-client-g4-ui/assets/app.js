@@ -30,7 +30,7 @@
 
   const spaces = {
     personal: { name: "我的空间", type: "个人工作上下文", short: "我", payer: "个人承担 AI 算力" },
-    enterprise: { name: "知远智能", type: "企业空间 · Member", short: "知", payer: "知远智能承担 AI 算力" }
+    enterprise: { name: "北辰智能科技", type: "企业空间 · Member", short: "北", payer: "北辰智能科技承担 AI 算力" }
   };
 
   const catalog = {
@@ -49,7 +49,7 @@
       ],
       available: [
         { id: "writing", name: "商务写作", source: "认证创作者 · 桥见圈子", description: "根据选定材料生成正式商务文本。", status: "可添加", tone: "good", action: "添加到首页" },
-        { id: "weekly", name: "销售周报助手", source: "企业内部导入 · 仅知远智能", description: "企业成员可用，个人空间不能添加。", status: "不可用", tone: "bad", action: "查看权限", disabled: true }
+        { id: "weekly", name: "销售周报助手", source: "企业内部导入 · 仅北辰智能科技", description: "企业成员可用，个人空间不能添加。", status: "不可用", tone: "bad", action: "查看权限", disabled: true }
       ],
       skills: [
         { name: "资料研究", source: "Polo 内置", description: "检索已授权的材料并整理出处。", status: "已启用", tone: "good" },
@@ -69,18 +69,18 @@
         { id: "tasks", name: "任务与结果", detail: "3 项运行记录 · 周一", kind: "task", action: "查看" }
       ],
       added: [
-        { id: "board", name: "项目交付看板", source: "企业内部导入 · 知远智能", description: "查看当前项目的里程碑、风险和交付材料。", status: "可使用", tone: "good", action: "打开" },
-        { id: "weekly", name: "销售周报助手", source: "企业内部导入 · 知远智能", description: "正在生成本周销售摘要，完成后通知你。", status: "准备中", tone: "info", action: "查看" },
-        { id: "knowledge", name: "企业知识检索", source: "企业内部导入 · 知远智能", description: "只读取企业已授权的知识库。", status: "可使用", tone: "good", action: "打开" },
-        { id: "legacy", name: "旧版报价助手", source: "企业内部导入 · 知远智能", description: "企业已停用此版本，历史结果仍保留。", status: "已停用", tone: "neutral", action: "查看结果" }
+        { id: "board", name: "项目交付看板", source: "企业内部导入 · 北辰智能科技", description: "查看当前项目的里程碑、风险和交付材料。", status: "可使用", tone: "good", action: "打开" },
+        { id: "weekly", name: "销售周报助手", source: "企业内部导入 · 北辰智能科技", description: "正在生成本周销售摘要，完成后通知你。", status: "准备中", tone: "info", action: "查看" },
+        { id: "knowledge", name: "企业知识检索", source: "企业内部导入 · 北辰智能科技", description: "只读取企业已授权的知识库。", status: "可使用", tone: "good", action: "打开" },
+        { id: "legacy", name: "旧版报价助手", source: "企业内部导入 · 北辰智能科技", description: "企业已停用此版本，历史结果仍保留。", status: "已停用", tone: "neutral", action: "查看结果" }
       ],
       available: [
         { id: "research", name: "客户访谈整理", source: "认证创作者 · 北极星工作室", description: "该作品已获授权，但尚未添加到企业首页。", status: "可添加", tone: "good", action: "添加到首页" },
         { id: "private", name: "财务摘要", source: "企业内部导入 · 财务组", description: "需要 Owner 扩大成员范围后才能使用。", status: "不可用", tone: "bad", action: "查看权限", disabled: true }
       ],
       skills: [
-        { name: "企业知识检索", source: "企业内部导入 · 知远智能", description: "在企业授权范围内检索资料。", status: "已启用", tone: "good" },
-        { name: "项目风险摘要", source: "企业内部导入 · 知远智能", description: "整理项目材料中的风险和阻塞。", status: "已启用", tone: "good" },
+        { name: "企业知识检索", source: "企业内部导入 · 北辰智能科技", description: "在企业授权范围内检索资料。", status: "已启用", tone: "good" },
+        { name: "项目风险摘要", source: "企业内部导入 · 北辰智能科技", description: "整理项目材料中的风险和阻塞。", status: "已启用", tone: "good" },
         { name: "资料研究", source: "个人空间授权不可继承", description: "个人空间中的 Skill 不会进入企业空间。", status: "不可用", tone: "bad" }
       ],
       results: [
@@ -209,7 +209,7 @@
     state.runtimeOpen = false;
     state.notificationOpen = true;
     renderChrome();
-    showModal(`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="notification-title" tabindex="-1"><div class="dialog-header"><div><h2 id="notification-title">通知中心</h2><p>通知可以来自不同空间，每条通知都会标明所属空间。</p></div><button class="close-button" data-close-modal aria-label="关闭">${icon("close")}</button></div><div class="dialog-body"><div class="notice-list"><div class="notice"><span class="notice-mark"></span><div><strong>销售周报助手正在准备材料</strong><p>任务准备完成后，你可以在知远智能中继续查看。</p><small>知远智能 · 6 分钟前</small></div></div><div class="notice success"><span class="notice-mark"></span><div><strong>客户访谈整理已保存结果</strong><p>新增 4 条洞察和 2 个待确认问题。</p><small>我的空间 · 12 分钟前</small></div></div><div class="notice"><span class="notice-mark"></span><div><strong>品牌洞察有新版本</strong><p>下次启动时将使用更新后的稳定版本。</p><small>我的空间 · 周一</small></div></div></div></div><div class="dialog-footer"><button class="button" data-close-modal>关闭</button></div></section>`);
+    showModal(`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="notification-title" tabindex="-1"><div class="dialog-header"><div><h2 id="notification-title">通知中心</h2><p>通知可以来自不同空间，每条通知都会标明所属空间。</p></div><button class="close-button" data-close-modal aria-label="关闭">${icon("close")}</button></div><div class="dialog-body"><div class="notice-list"><div class="notice"><span class="notice-mark"></span><div><strong>销售周报助手正在准备材料</strong><p>任务准备完成后，你可以在北辰智能科技中继续查看。</p><small>北辰智能科技 · 6 分钟前</small></div></div><div class="notice success"><span class="notice-mark"></span><div><strong>客户访谈整理已保存结果</strong><p>新增 4 条洞察和 2 个待确认问题。</p><small>我的空间 · 12 分钟前</small></div></div><div class="notice"><span class="notice-mark"></span><div><strong>品牌洞察有新版本</strong><p>下次启动时将使用更新后的稳定版本。</p><small>我的空间 · 周一</small></div></div></div></div><div class="dialog-footer"><button class="button" data-close-modal>关闭</button></div></section>`);
   }
 
   function requestSpace(next) {
@@ -217,7 +217,7 @@
     if (state.space === "personal") {
       state.openMenu = null;
       render();
-      showModal(`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="switch-title" tabindex="-1"><div class="dialog-header"><div><h2 id="switch-title">切换到知远智能</h2><p>当前空间有一项运行中的任务。必须先终止它，才能安全切换空间。</p></div><button class="close-button" data-close-modal aria-label="关闭">${icon("close")}</button></div><div class="dialog-body"><div class="dialog-list"><div class="dialog-row"><span class="app-art amber">${icon("app")}</span><span class="row-copy"><strong>客户访谈整理</strong><small>我的空间 · 材料准备中</small></span><span class="row-state">运行中</span></div></div></div><div class="dialog-footer"><button class="button" data-close-modal>留在我的空间</button><button class="button primary" data-action="stop-and-switch">终止并切换</button></div></section>`);
+      showModal(`<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="switch-title" tabindex="-1"><div class="dialog-header"><div><h2 id="switch-title">切换到北辰智能科技</h2><p>当前空间有一项运行中的任务。必须先终止它，才能安全切换空间。</p></div><button class="close-button" data-close-modal aria-label="关闭">${icon("close")}</button></div><div class="dialog-body"><div class="dialog-list"><div class="dialog-row"><span class="app-art amber">${icon("app")}</span><span class="row-copy"><strong>客户访谈整理</strong><small>我的空间 · 材料准备中</small></span><span class="row-state">运行中</span></div></div></div><div class="dialog-footer"><button class="button" data-close-modal>留在我的空间</button><button class="button primary" data-action="stop-and-switch">终止并切换</button></div></section>`);
     } else {
       state.space = next;
       state.activeTab = "home";
@@ -243,7 +243,7 @@
     if (target.dataset.action === "notifications") { openNotifications(); return; }
     if (target.dataset.action === "theme") { state.theme = state.theme === "dark" ? "light" : "dark"; localStorage.setItem("polo-g4-theme", state.theme); render(); showToast(`已切换到${state.theme === "dark" ? "深色" : "浅色"}主题。`); return; }
     if (["settings", "enterprise-admin", "creator-workbench"].includes(target.dataset.action)) { state.openMenu = null; render(); showToast(target.dataset.action === "settings" ? "账号与偏好将在设置中打开。" : "此入口将在系统浏览器中打开。"); return; }
-    if (target.dataset.action === "stop-and-switch") { closeModal(); state.space = "enterprise"; state.activeTab = "home"; state.tabs = []; state.runtimeOpen = false; render(); showToast("运行项已终止，已安全切换到知远智能。"); return; }
+    if (target.dataset.action === "stop-and-switch") { closeModal(); state.space = "enterprise"; state.activeTab = "home"; state.tabs = []; state.runtimeOpen = false; render(); showToast("运行项已终止，已安全切换到北辰智能科技。"); return; }
     if (target.dataset.action === "view-runtime") { closeModal(); state.activeTab = "tasks"; state.runtimeOpen = false; openTab("tasks"); return; }
     if (target.dataset.action === "app-primary") { showToast("已在当前 App Tab 中准备新的使用。后续流程将在此继续。"); return; }
     if (target.dataset.result) { event.preventDefault(); showToast(`已打开“${target.dataset.result}”。`); return; }
