@@ -161,6 +161,7 @@
     enterpriseRestriction: ["ent-restricted", "ent-restricted-owner", "ent-restricted-manager", "ent-closing"].includes(initialScene) ? initialScene : null,
     catalogFailed: initialScene === "catalog-failed",
     homeLoading: initialScene === "home-loading",
+    unavailableSpaces: new Set(),
     spaces: { personal: createSpaceState("personal"), enterprise: createSpaceState("enterprise") }
   };
 
@@ -309,7 +310,7 @@
   const statusLabel = status => ({ preparing: "准备中", running: "运行中", waiting_for_network: "等待网络", stopping: "停止中", stopped: "已终止", failed: "失败", completed: "已完成", unknown: "结果待确认" }[status] || status);
 
   function renderSpaceMenu() {
-    $("#space-menu").innerHTML = `<div class="menu-label">切换空间</div>${Object.entries(spaces).map(([id, space]) => `<button class="space-row ${state.space === id ? "active" : ""}" data-space="${id}" role="menuitem"><span class="space-avatar">${space.short}</span><span><b>${space.name}</b><small>${space.type} · ${space.role}</small></span>${state.space === id ? icon("check", "check") : ""}</button>`).join("")}`;
+    $("#space-menu").innerHTML = `<div class="menu-label">切换空间</div>${Object.entries(spaces).filter(([id]) => !state.unavailableSpaces.has(id)).map(([id, space]) => `<button class="space-row ${state.space === id ? "active" : ""}" data-space="${id}" role="menuitem"><span class="space-avatar">${space.short}</span><span><b>${space.name}</b><small>${space.type} · ${space.role}</small></span>${state.space === id ? icon("check", "check") : ""}</button>`).join("")}`;
   }
 
   function renderAccountMenu() {
@@ -402,8 +403,8 @@
     const waiting = activeExecutions().some(item => item.status === "waiting_for_network");
     banner.hidden = false;
     banner.innerHTML = state.reconnecting
-      ? `<span class="connection-icon state-spinning">${icon("refresh")}</span><span class="connection-copy"><strong>正在恢复连接</strong><small>重新检查访问权限</small></span>`
-      : `<span class="connection-icon">${icon("wifi")}</span><span class="connection-copy"><strong>${waiting ? "等待网络" : "当前离线"}</strong><small>${waiting ? "恢复网络或终止任务" : "查看本机文件与结果"}</small></span><button class="button quiet" data-reconnect>重试连接</button>`;
+      ? `<span class="connection-icon state-spinning">${icon("refresh")}</span><span class="connection-copy"><strong>正在恢复连接</strong><small>校验空间、授权和版本</small></span>`
+      : `<span class="connection-icon">${icon("wifi")}</span><span class="connection-copy"><strong>${waiting ? "等待网络" : "当前离线"}</strong><small>缓存非最新授权</small><small>${waiting ? "恢复网络或终止任务" : "禁止启动 App、Skill 与助手"}</small></span><button class="button quiet" data-reconnect>重试连接</button>`;
   }
 
   function section(title, subtitle, content, action = "") {
@@ -755,7 +756,7 @@
     const owner = state.scene === "admin-entry-owner";
     const creator = state.scene === "admin-entry-creator-active" || creatorSuspended;
     const identityStatus = creatorSuspended ? "创作者资格已暂停" : owner ? "北辰智能科技 Owner" : creator ? "有效创作者" : "普通业务账号";
-    const blocker = deletionBlocked ? `<div class="inline-alert bad"><i></i><span><strong>暂时不能注销账号</strong><br>先转让 Owner 并处理未结订单</span></div>` : "";
+    const blocker = deletionBlocked ? `<div class="inline-alert bad"><i></i><div><strong>暂时不能注销账号</strong><div class="blocker-checks"><span>转让企业 Owner</span><span>处理 Creator Owner</span><span>完成未结订单</span></div></div></div>` : "";
     const managementRows = `${owner ? `<div class="settings-row"><span><strong>企业组织管理端</strong><small>成员、目录、企业账单和 Owner 责任</small></span><button class="button" data-action="enterprise-admin">在浏览器打开</button></div>` : ""}${creator ? `<div class="settings-row"><span><strong>创作者工作台</strong><small>${creatorSuspended ? "只读责任处理入口" : "作品、圈子和收入"}</small></span><button class="button" data-action="creator-workbench">在浏览器打开</button></div>` : ""}`;
     const managementSection = managementRows ? section("管理入口", "打开管理工具", managementRows) : "";
     return `${subpageHeader("账号与偏好", "管理账号与客户端偏好", `<span class="status ${creatorSuspended ? "bad" : "good"}">${creatorSuspended ? "部分受限" : "账号正常"}</span>`)}${blocker}<div class="settings-layout"><section class="settings-nav-card"><button class="active">账号概览</button><button>安全</button><button>外观与通知</button><button>本机存储</button><button>授权记录</button></section><div class="settings-content">${section("账号概览", "查看账号与身份", `<div class="permission-summary"><span><b>账号</b>林然 · 138••••8000</span><span><b>账号状态</b>正常</span><span><b>身份摘要</b>${identityStatus}</span><span><b>当前设备</b>这台 Mac · 已验证</span></div>`)}${section("客户端偏好", "设置当前设备", `<div class="settings-row"><span><strong>外观与通知</strong><small>${state.theme === "dark" ? "深色" : "浅色"}主题 · 重要通知已开启</small></span><button class="button" data-action="theme">切换主题</button></div><div class="settings-row"><span><strong>本机存储</strong><small>查看文件索引与下载位置</small></span><button class="button" data-external-flow="local-storage">查看</button></div><div class="settings-row"><span><strong>App 与 Skill 授权记录</strong><small>查看当前空间授权</small></span><button class="button" data-external-flow="authorization-records">查看</button></div>`)}${managementSection}${section("账号操作", "检查注销条件", `<div class="settings-row danger-row"><span><strong>注销账号</strong><small>处理 Owner 与未结责任</small></span><button class="button danger" data-scene-link="deletion-blocked">检查注销条件</button></div>`)}</div></div>`;
@@ -1030,9 +1031,13 @@
   }
 
   function showTargetSwitchFailure(next, kind) {
+    if (kind === "access") {
+      state.unavailableSpaces.add(next);
+      renderChrome();
+    }
     const title = kind === "access" ? `无法进入${spaces[next].name}` : `未能加载${spaces[next].name}`;
     const description = kind === "access" ? "联系管理员恢复访问" : "重试加载目标空间";
-    showModal(dialog(title, description, `<div class="impact-card">${icon("shield")}<span><strong>${kind === "access" ? "访问权验证失败" : "目录与权限加载失败"}</strong><small>${kind === "access" ? `继续使用${currentSpace().name}` : "重试或留在原空间"}</small></span></div>`, `<button class="button" data-cancel-switch>留在${currentSpace().name}</button>${kind === "load" ? `<button class="button primary" data-retry-target-load="${next}">重试加载</button>` : ""}`));
+    showModal(dialog(title, description, `<div class="impact-card">${icon("shield")}<span><strong>${kind === "access" ? "已从切换器移除" : "目录与权限加载失败"}</strong><small>${kind === "access" ? `继续使用${currentSpace().name}` : "重试或留在原空间"}</small></span></div>`, `<button class="button" data-cancel-switch>留在${currentSpace().name}</button>${kind === "load" ? `<button class="button primary" data-retry-target-load="${next}">重试加载</button>` : ""}`));
   }
 
   function commitSpaceSwitch(next, originTab = current().activeTab) {
