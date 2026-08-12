@@ -466,6 +466,80 @@ describe('ProductSpace v1 network contract', () => {
       }, spaceB, catalogForSpaceA, skillArtifactInstanceId, true,
     )).toThrow('ProductSpace')
   })
+
+  test('returns a deep immutable Catalog snapshot after ProductSpace validation', () => {
+    const spaceA = ProductSpaceSummarySchema.parse({
+      ...enterpriseSpace(), id: 'product-space-a', enterpriseId: 'enterprise-a',
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+    })
+    const spaceB = ProductSpaceSummarySchema.parse({
+      ...enterpriseSpace(), id: 'product-space-b', enterpriseId: 'enterprise-b',
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-b' },
+    })
+    const spaceASkill = catalogSkill([{ kind: 'enterprise_import', name: 'Enterprise import A' }])
+    const rawBlockedSkill = {
+      ...catalogSkill([{ kind: 'enterprise_import', name: 'Enterprise import B' }]),
+      availability: 'blocked', unavailableReason: 'version_blocked', enabled: false,
+    }
+    const catalogForSpaceA = trustedCatalog(spaceA, [assistantEntry(), spaceASkill])
+    const catalogForSpaceB = trustedCatalog(spaceB, [assistantEntry(), rawBlockedSkill])
+    const frozenSkill = catalogForSpaceB.entries.find(entry => entry.kind === 'skill')
+    if (!frozenSkill || frozenSkill.kind !== 'skill') throw new Error('test fixture must contain a Skill')
+
+    const assertDeepReadonly = () => {
+      // @ts-expect-error Trusted Catalog entries are readonly.
+      catalogForSpaceB.entries.push(catalogForSpaceA.entries[1]!)
+      // @ts-expect-error Trusted Catalog entry fields are readonly.
+      frozenSkill.artifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-other')
+      // @ts-expect-error Trusted nested version fields are readonly.
+      frozenSkill.version.version = '2.0.0'
+    }
+    void assertDeepReadonly
+
+    expect(Object.isFrozen(catalogForSpaceB)).toBe(true)
+    expect(Object.isFrozen(catalogForSpaceB.entries)).toBe(true)
+    expect(Object.isFrozen(frozenSkill)).toBe(true)
+    expect(Object.isFrozen(frozenSkill.version)).toBe(true)
+    expect(Object.isFrozen(frozenSkill.sources)).toBe(true)
+    expect(Object.isFrozen(frozenSkill.sources[0])).toBe(true)
+    expect(Object.isFrozen(frozenSkill.permissions)).toBe(true)
+    expect(() => {
+      (catalogForSpaceB.entries as unknown as unknown[]).push(catalogForSpaceA.entries[1])
+    }).toThrow()
+    expect(() => {
+      (frozenSkill as unknown as { artifactInstanceId: string }).artifactInstanceId = 'artifact-other'
+    }).toThrow()
+    expect(() => {
+      (frozenSkill as unknown as { availability: string }).availability = 'available'
+    }).toThrow()
+    expect(() => {
+      (frozenSkill as unknown as { enabled: boolean }).enabled = true
+    }).toThrow()
+
+    rawBlockedSkill.availability = 'available'
+    rawBlockedSkill.enabled = true
+    expect(frozenSkill.availability).toBe('blocked')
+    expect(frozenSkill.enabled).toBe(false)
+
+    const skillId = CatalogEntryIdSchema.parse('catalog-skill')
+    const skillArtifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-skill')
+    const launchForSpaceB = {
+      contractVersion: 1, productSpaceId: 'product-space-b', catalogEntryId: 'catalog-skill',
+      resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
+      subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-a', version: '1.0.0' },
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-b' },
+      delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+    }
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      launchForSpaceB, spaceB, catalogForSpaceB, skillId,
+    )).toThrow('catalogEntryId')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      {
+        contractVersion: 1, productSpaceId: 'product-space-b', artifactInstanceId: 'artifact-skill',
+        enabled: true, catalogRevision: 'r1',
+      }, spaceB, catalogForSpaceB, skillArtifactInstanceId, true,
+    )).toThrow('ProductSpace')
+  })
 })
 
 describe('ProductSpace runtime isolation', () => {

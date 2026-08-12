@@ -324,16 +324,50 @@ export type TrustedProductSpaceExecutionScope = z.output<typeof ProductSpaceExec
 
 const trustedProductSpaceCatalogBrand: unique symbol = Symbol('trustedProductSpaceCatalog')
 
+type DeepReadonly<T> = T extends string | number | boolean | bigint | symbol | null | undefined
+  ? T
+  : T extends (...args: never[]) => unknown
+  ? T
+  : T extends readonly (infer Item)[]
+    ? readonly DeepReadonly<Item>[]
+    : T extends object
+      ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
+      : T
+
 /**
  * A Catalog response that has passed the ProductSpace boundary. The brand is
  * internal provenance: it is not serialized and does not change the frozen
  * network DTO.
  */
-export type TrustedProductSpaceCatalog = z.output<typeof ProductSpaceCatalogResponseSchema> & {
+export type TrustedProductSpaceCatalog = DeepReadonly<z.output<typeof ProductSpaceCatalogResponseSchema>> & {
   readonly [trustedProductSpaceCatalogBrand]: true
 }
 
-export type TrustedProductSpaceCatalogEntry = z.output<typeof ProductSpaceCatalogEntrySchema>
+export type TrustedProductSpaceCatalogEntry = DeepReadonly<z.output<typeof ProductSpaceCatalogEntrySchema>>
+
+function deepClone<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(item => deepClone(item)) as T
+  }
+  if (typeof value === 'object' && value !== null) {
+    const clone: Record<PropertyKey, unknown> = {}
+    for (const key of Reflect.ownKeys(value)) {
+      clone[key] = deepClone((value as Record<PropertyKey, unknown>)[key])
+    }
+    return clone as T
+  }
+  return value
+}
+
+function deepFreeze<T>(value: T): DeepReadonly<T> {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    for (const key of Reflect.ownKeys(value)) {
+      deepFreeze((value as Record<PropertyKey, unknown>)[key])
+    }
+    Object.freeze(value)
+  }
+  return value as DeepReadonly<T>
+}
 
 function assertExpectedProductSpace(
   receivedProductSpaceId: ProductSpaceId,
@@ -420,7 +454,7 @@ function getCatalogEntry(
 function getSkillCatalogEntry(
   catalog: TrustedProductSpaceCatalog,
   expectedArtifactInstanceId: ArtifactInstanceId,
-): z.output<typeof SkillCatalogEntrySchema> {
+): DeepReadonly<z.output<typeof SkillCatalogEntrySchema>> {
   const entry = catalog.entries.find(candidate => (
     candidate.kind !== 'built_in_app' && candidate.artifactInstanceId === expectedArtifactInstanceId
   ))
@@ -480,11 +514,12 @@ export function parseProductSpaceCatalogResponseForProductSpace(
   const response = ProductSpaceCatalogResponseSchema.parse(input)
   assertExpectedProductSpace(response.productSpaceId, context.id)
   assertCatalogEntrySourcesMatchProductSpace(response, context)
-  Object.defineProperty(response, trustedProductSpaceCatalogBrand, {
+  const snapshot = deepClone(response)
+  Object.defineProperty(snapshot, trustedProductSpaceCatalogBrand, {
     value: true,
     enumerable: false,
   })
-  return Object.freeze(response) as TrustedProductSpaceCatalog
+  return deepFreeze(snapshot) as TrustedProductSpaceCatalog
 }
 
 export function parseResolveLaunchResponseForProductSpace(
