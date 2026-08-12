@@ -11,6 +11,7 @@ import {
   ProductSpaceExecutionScopeSchema,
   ProductSpaceIdSchema,
   ProductSpaceRefSchema,
+  ProductSpaceSummarySchema,
   ResolveLaunchResponseSchema,
   StopAllExecutionsResultSchema,
   WorkspaceIdSchema,
@@ -41,6 +42,15 @@ function personalSpace() {
     name: '我的空间' as const,
     accessMode: 'active' as const,
     payer: { kind: 'account' as const },
+  }
+}
+
+function enterpriseSpace(accessMode: 'active' | 'read_only' = 'active') {
+  return {
+    id: 'product-space-a', kind: 'enterprise' as const, enterpriseId: 'enterprise-a',
+    name: 'Example enterprise', role: 'member' as const, accessMode,
+    ...(accessMode === 'read_only' ? { restrictionCode: 'billing_restricted' as const } : {}),
+    payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-a' },
   }
 }
 
@@ -109,6 +119,14 @@ describe('ProductSpace v1 network contract', () => {
         contractVersion: 1, personalProductSpaceId: 'product-space-a', productSpaces: [personalSpace(), invalid],
       }).success).toBe(false)
     }
+    expect(ListProductSpacesResponseSchema.safeParse({
+      contractVersion: 1, personalProductSpaceId: 'product-space-a',
+      productSpaces: [
+        personalSpace(),
+        { ...enterpriseSpace(), id: 'product-space-enterprise-a' },
+        { ...enterpriseSpace(), id: 'product-space-enterprise-b' },
+      ],
+    }).success).toBe(false)
   })
 
   test('rejects catalog subject confusion and sensitive delivery fields', () => {
@@ -120,6 +138,16 @@ describe('ProductSpace v1 network contract', () => {
       contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',
       entries: [{ ...assistant, artifactInstanceId: 'must-not-be-on-built-in' }],
     }).success).toBe(false)
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1', entries: [],
+    }).success).toBe(false)
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1', entries: [assistant, { ...assistant, catalogEntryId: 'assistant-duplicate' }],
+    }).success).toBe(false)
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',
+      entries: [{ ...assistant, availability: 'blocked', unavailableReason: 'version_blocked' }],
+    }).success).toBe(true)
 
     const launch = {
       contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'assistant',
@@ -147,7 +175,7 @@ describe('ProductSpace v1 network contract', () => {
       delivery: { kind: 'built_in' },
     }).success).toBe(false)
     expect(() => parseProductSpaceCatalogResponseForProductSpace({
-      contractVersion: 1, productSpaceId: 'product-space-b', catalogRevision: 'r1', entries: [],
+      contractVersion: 1, productSpaceId: 'product-space-b', catalogRevision: 'r1', entries: [assistantEntry()],
     }, ProductSpaceRefSchema.parse({ id: 'product-space-a', kind: 'personal' }))).toThrow('did not match')
   })
 
@@ -157,19 +185,19 @@ describe('ProductSpace v1 network contract', () => {
       id: 'product-space-a', kind: 'enterprise', enterpriseId: 'enterprise-a', role: 'member',
     })
     const response = (entries: unknown[]) => ({
-      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1', entries,
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1', entries: [assistantEntry(), ...entries],
     })
 
     expect(parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
-    ]), personal).entries).toHaveLength(1)
+    ]), personal).entries).toHaveLength(2)
     expect(parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([
         { kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' },
         { kind: 'creator_circle', circleId: 'circle-b', name: 'Circle B' },
       ]),
-    ]), personal).entries).toHaveLength(1)
-    expect(parseProductSpaceCatalogResponseForProductSpace(response([assistantEntry()]), personal).entries).toHaveLength(1)
+    ]), personal).entries).toHaveLength(2)
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([]), personal).entries).toHaveLength(1)
     expect(() => parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([{ kind: 'enterprise_import', name: 'Enterprise import' }]),
     ]), personal)).toThrow('did not match')
@@ -179,19 +207,20 @@ describe('ProductSpace v1 network contract', () => {
         { kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' },
       ]),
     ]), personal)).toThrow('did not match')
-    expect(parseProductSpaceCatalogResponseForProductSpace(response([assistantEntry()]), enterprise).entries).toHaveLength(1)
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([]), enterprise).entries).toHaveLength(1)
     expect(() => parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
     ]), enterprise)).toThrow('did not match')
     expect(parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([{ kind: 'enterprise_import', name: 'Enterprise import' }]),
-    ]), enterprise).entries).toHaveLength(1)
+    ]), enterprise).entries).toHaveLength(2)
   })
 
   test('rejects duplicate artifact instances instead of splitting creator-circle grants', () => {
     expect(ProductSpaceCatalogResponseSchema.safeParse({
       contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',
       entries: [
+        assistantEntry(),
         catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
         {
           ...catalogApp([{ kind: 'creator_circle', circleId: 'circle-b', name: 'Circle B' }]),
@@ -202,12 +231,8 @@ describe('ProductSpace v1 network contract', () => {
   })
 
   test('binds resolve-launch to trusted space payer and Catalog subject', () => {
-    const expectedProductSpaceId = ProductSpaceIdSchema.parse('product-space-a')
-    const expectedArtifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-a')
-    const personal = ProductSpaceRefSchema.parse({ id: 'product-space-a', kind: 'personal' })
-    const enterprise = ProductSpaceRefSchema.parse({
-      id: 'product-space-a', kind: 'enterprise', enterpriseId: 'enterprise-a', role: 'member',
-    })
+    const personal = ProductSpaceSummarySchema.parse(personalSpace())
+    const enterprise = ProductSpaceSummarySchema.parse(enterpriseSpace())
     const assistant = ProductSpaceCatalogEntrySchema.parse(assistantEntry())
     const app = ProductSpaceCatalogEntrySchema.parse(catalogApp([{ kind: 'polo', name: 'Polo' }]))
     const skill = ProductSpaceCatalogEntrySchema.parse(catalogSkill([{ kind: 'polo', name: 'Polo' }]))
@@ -291,18 +316,85 @@ describe('ProductSpace v1 network contract', () => {
     )).toThrow('ProductSpace')
 
     const enablement = {
-      contractVersion: 1, productSpaceId: 'product-space-a', artifactInstanceId: 'artifact-a',
+      contractVersion: 1, productSpaceId: 'product-space-a', artifactInstanceId: 'artifact-skill',
       enabled: true, catalogRevision: 'r1',
     }
     expect(parseUpdateSkillEnablementResponseForProductSpace(
-      enablement, expectedProductSpaceId, expectedArtifactInstanceId,
-    ).artifactInstanceId).toBe(expectedArtifactInstanceId)
+      enablement, personal, skill, true,
+    ).artifactInstanceId).toBe(ArtifactInstanceIdSchema.parse('artifact-skill'))
     expect(() => parseUpdateSkillEnablementResponseForProductSpace(
-      { ...enablement, artifactInstanceId: 'artifact-other' }, expectedProductSpaceId, expectedArtifactInstanceId,
+      { ...enablement, artifactInstanceId: 'artifact-other' }, personal, skill, true,
     )).toThrow('artifactInstanceId')
     expect(() => parseUpdateSkillEnablementResponseForProductSpace(
-      { ...enablement, productSpaceId: 'product-space-other' }, expectedProductSpaceId, expectedArtifactInstanceId,
+      { ...enablement, productSpaceId: 'product-space-other' }, personal, skill, true,
     )).toThrow('ProductSpace')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      { ...enablement, enabled: false }, personal, skill, true,
+    )).toThrow('artifactInstanceId')
+  })
+
+  test('requires active ProductSpace and available Catalog entries before launch', () => {
+    const personal = ProductSpaceSummarySchema.parse(personalSpace())
+    const readOnlyEnterprise = ProductSpaceSummarySchema.parse(enterpriseSpace('read_only'))
+    const assistant = ProductSpaceCatalogEntrySchema.parse(assistantEntry())
+    const availableSkill = ProductSpaceCatalogEntrySchema.parse(catalogSkill([{ kind: 'polo', name: 'Polo' }]))
+    const unavailableApp = ProductSpaceCatalogEntrySchema.parse({
+      ...catalogApp([{ kind: 'polo', name: 'Polo' }]),
+      availability: 'unavailable', unavailableReason: 'authorization_ended',
+    })
+    const blockedAssistant = ProductSpaceCatalogEntrySchema.parse({
+      ...assistantEntry(), availability: 'blocked', unavailableReason: 'version_blocked',
+    })
+    const disabledSkill = ProductSpaceCatalogEntrySchema.parse({ ...catalogSkill([{ kind: 'polo', name: 'Polo' }]), enabled: false })
+    const launch = {
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'assistant',
+      resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
+      subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      payer: { kind: 'account' }, delivery: { kind: 'built_in' },
+    }
+    expect(() => parseResolveLaunchResponseForProductSpace(launch, readOnlyEnterprise, assistant)).toThrow('ProductSpace')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-app',
+        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-a', version: '1.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, unavailableApp,
+    )).toThrow('catalogEntryId')
+    expect(() => parseResolveLaunchResponseForProductSpace(launch, personal, blockedAssistant)).toThrow('catalogEntryId')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-skill',
+        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-skill', version: '1.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, disabledSkill,
+    )).toThrow('catalogEntryId')
+    expect(parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-skill',
+        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, availableSkill,
+    ).subject).toMatchObject({ artifactType: 'skill', version: '2.0.0' })
+  })
+
+  test('binds Skill enablement to the trusted Skill and permits idempotent disable convergence', () => {
+    const personal = ProductSpaceSummarySchema.parse(personalSpace())
+    const readOnlyEnterprise = ProductSpaceSummarySchema.parse(enterpriseSpace('read_only'))
+    const skill = ProductSpaceCatalogEntrySchema.parse(catalogSkill([{ kind: 'polo', name: 'Polo' }]))
+    const unavailableSkill = ProductSpaceCatalogEntrySchema.parse({
+      ...catalogSkill([{ kind: 'polo', name: 'Polo' }]), availability: 'blocked', unavailableReason: 'version_blocked',
+    })
+    const app = ProductSpaceCatalogEntrySchema.parse(catalogApp([{ kind: 'polo', name: 'Polo' }]))
+    const enabled = {
+      contractVersion: 1, productSpaceId: 'product-space-a', artifactInstanceId: 'artifact-skill',
+      enabled: true, catalogRevision: 'r1',
+    }
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(enabled, readOnlyEnterprise, skill, true)).toThrow('ProductSpace')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(enabled, personal, unavailableSkill, true)).toThrow('ProductSpace')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(enabled, personal, app, true)).toThrow('artifactInstanceId')
+    expect(parseUpdateSkillEnablementResponseForProductSpace(
+      { ...enabled, enabled: false }, readOnlyEnterprise, skill, false,
+    ).enabled).toBe(false)
   })
 })
 
@@ -356,24 +448,70 @@ describe('ProductSpace runtime isolation', () => {
     )).toThrow('duplicate executionId')
 
     const stoppedExecution = { ...execution, status: 'stopped' as const }
+    const expectedExecutionScope = ProductSpaceExecutionScopeSchema.parse(execution.scope)
     expect(parseStopAllExecutionsResultForProductSpace(
       { allStopped: true, executions: [stoppedExecution] }, expectedAccountId, expectedProductSpaceId,
+      [expectedExecutionScope],
     ).allStopped).toBe(true)
     expect(() => parseStopAllExecutionsResultForProductSpace(
       { allStopped: true, executions: [{ ...stoppedExecution, scope: { ...stoppedExecution.scope, accountId: 'account-other' } }] },
       expectedAccountId, expectedProductSpaceId,
+      [expectedExecutionScope],
     )).toThrow('accountId')
     expect(() => parseStopAllExecutionsResultForProductSpace(
       { allStopped: true, executions: [{ ...stoppedExecution, scope: { ...stoppedExecution.scope, productSpaceId: 'product-space-other' } }] },
       expectedAccountId, expectedProductSpaceId,
+      [expectedExecutionScope],
     )).toThrow('productSpaceId')
     expect(() => parseStopAllExecutionsResultForProductSpace(
       { allStopped: true, executions: [stoppedExecution, { ...stoppedExecution, name: 'Duplicate' }] },
       expectedAccountId, expectedProductSpaceId,
+      [expectedExecutionScope],
     )).toThrow('duplicate executionId')
     expect(() => parseStopAllExecutionsResultForProductSpace(
       { allStopped: false, executions: [execution] }, expectedAccountId, expectedProductSpaceId,
+      [expectedExecutionScope],
     )).toThrow('non-terminal')
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [] }, expectedAccountId, expectedProductSpaceId,
+      [expectedExecutionScope],
+    )).toThrow('omitted')
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [stoppedExecution] }, expectedAccountId, expectedProductSpaceId,
+      [],
+    )).toThrow('at least one expected')
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      {
+        allStopped: true,
+        executions: [{
+          ...stoppedExecution,
+          scope: { ...stoppedExecution.scope, workspaceId: 'workspace-other' },
+        }],
+      }, expectedAccountId, expectedProductSpaceId, [expectedExecutionScope],
+    )).toThrow('changed an expected execution scope')
+
+    const concurrentStoppedExecution = {
+      ...stoppedExecution,
+      executionId: 'execution-concurrent',
+      scope: { ...stoppedExecution.scope, executionId: 'execution-concurrent' },
+      name: 'Concurrent assistant',
+    }
+    expect(parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [stoppedExecution, concurrentStoppedExecution] },
+      expectedAccountId, expectedProductSpaceId, [expectedExecutionScope],
+    ).executions).toHaveLength(2)
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      {
+        allStopped: true,
+        executions: [
+          stoppedExecution,
+          {
+            ...concurrentStoppedExecution,
+            scope: { ...concurrentStoppedExecution.scope, accountId: 'account-other' },
+          },
+        ],
+      }, expectedAccountId, expectedProductSpaceId, [expectedExecutionScope],
+    )).toThrow('accountId')
   })
 
   test('keeps opaque IDs non-interchangeable at compile time', () => {

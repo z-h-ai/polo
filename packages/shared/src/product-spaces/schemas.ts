@@ -10,11 +10,7 @@ import {
   ProductSpaceIdSchema,
   WorkspaceIdSchema,
 } from './ids.ts'
-import type {
-  ArtifactInstanceId,
-  CatalogEntryId,
-  ProductSpaceId,
-} from './ids.ts'
+import type { CatalogEntryId, ProductSpaceId } from './ids.ts'
 import { PRODUCT_SPACE_ERROR_CODES } from './errors.ts'
 import { PRODUCT_SPACE_CONTRACT_VERSION } from './context-key.ts'
 
@@ -108,9 +104,16 @@ export const ListProductSpacesResponseSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['personalProductSpaceId'], message: 'Exactly one listed personal ProductSpace must match personalProductSpaceId' })
   }
   const ids = new Set<string>()
+  const enterpriseIds = new Set<string>()
   for (const [index, space] of value.productSpaces.entries()) {
     if (ids.has(space.id)) ctx.addIssue({ code: 'custom', path: ['productSpaces', index, 'id'], message: 'ProductSpace IDs must be unique' })
     ids.add(space.id)
+    if (space.kind === 'enterprise') {
+      if (enterpriseIds.has(space.enterpriseId)) {
+        ctx.addIssue({ code: 'custom', path: ['productSpaces', index, 'enterpriseId'], message: 'Enterprise IDs must be unique within ProductSpaces' })
+      }
+      enterpriseIds.add(space.enterpriseId)
+    }
   }
 })
 
@@ -166,6 +169,7 @@ export const ProductSpaceCatalogResponseSchema = z.object({
 }).strict().superRefine((value, ctx) => {
   const catalogEntryIds = new Set<string>()
   const artifactInstanceIds = new Set<string>()
+  let builtInAssistantCount = 0
   for (const [index, entry] of value.entries.entries()) {
     if (catalogEntryIds.has(entry.catalogEntryId)) {
       ctx.addIssue({ code: 'custom', path: ['entries', index, 'catalogEntryId'], message: 'Catalog entry IDs must be unique within the ProductSpace' })
@@ -176,7 +180,12 @@ export const ProductSpaceCatalogResponseSchema = z.object({
         ctx.addIssue({ code: 'custom', path: ['entries', index, 'artifactInstanceId'], message: 'Artifact instance IDs must be unique within the ProductSpace' })
       }
       artifactInstanceIds.add(entry.artifactInstanceId)
+    } else {
+      builtInAssistantCount += 1
     }
+  }
+  if (builtInAssistantCount !== 1) {
+    ctx.addIssue({ code: 'custom', path: ['entries'], message: 'Catalog must contain exactly one Polo assistant entry' })
   }
 })
 
@@ -311,6 +320,8 @@ export type TrustedProductSpaceCatalogContext =
   | z.output<typeof ProductSpaceSummarySchema>
 
 export type TrustedProductSpaceCatalogEntry = z.output<typeof ProductSpaceCatalogEntrySchema>
+export type TrustedProductSpaceSummary = z.output<typeof ProductSpaceSummarySchema>
+export type TrustedProductSpaceExecutionScope = z.output<typeof ProductSpaceExecutionScopeSchema>
 
 function assertExpectedProductSpace(
   receivedProductSpaceId: ProductSpaceId,
@@ -346,7 +357,7 @@ function assertCatalogEntrySourcesMatchProductSpace(
 
 function assertLaunchPayerMatchesProductSpace(
   response: z.output<typeof ResolveLaunchResponseSchema>,
-  context: TrustedProductSpaceCatalogContext,
+  context: TrustedProductSpaceSummary,
 ): void {
   if (context.kind === 'personal' && response.payer.kind !== 'account') {
     throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
@@ -356,6 +367,21 @@ function assertLaunchPayerMatchesProductSpace(
     && (response.payer.kind !== 'enterprise' || response.payer.enterpriseId !== context.enterpriseId)
   ) {
     throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
+  }
+}
+
+function assertLaunchIsAllowedByTrustedState(
+  context: TrustedProductSpaceSummary,
+  entry: TrustedProductSpaceCatalogEntry,
+): void {
+  if (context.accessMode !== 'active') {
+    throw new ProductSpaceResponseScopeError(context.id, context.id)
+  }
+  if (entry.availability !== 'available') {
+    throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, entry.catalogEntryId)
+  }
+  if (entry.kind === 'skill' && !entry.enabled) {
+    throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, entry.catalogEntryId)
   }
 }
 
@@ -414,7 +440,7 @@ export function parseProductSpaceCatalogResponseForProductSpace(
 
 export function parseResolveLaunchResponseForProductSpace(
   input: unknown,
-  context: TrustedProductSpaceCatalogContext,
+  context: TrustedProductSpaceSummary,
   expectedCatalogEntry: TrustedProductSpaceCatalogEntry,
 ) {
   const response = ResolveLaunchResponseSchema.parse(input)
@@ -424,6 +450,7 @@ export function parseResolveLaunchResponseForProductSpace(
       'catalogEntryId', expectedCatalogEntry.catalogEntryId, response.catalogEntryId,
     )
   }
+  assertLaunchIsAllowedByTrustedState(context, expectedCatalogEntry)
   assertLaunchPayerMatchesProductSpace(response, context)
   assertLaunchSubjectMatchesCatalogEntry(response, expectedCatalogEntry)
   return response
@@ -432,15 +459,32 @@ export function parseResolveLaunchResponseForProductSpace(
 /** Parses a Skill enablement response only for its exact PUT route tuple. */
 export function parseUpdateSkillEnablementResponseForProductSpace(
   input: unknown,
-  expectedProductSpaceId: ProductSpaceId,
-  expectedArtifactInstanceId: ArtifactInstanceId,
+  context: TrustedProductSpaceSummary,
+  expectedSkillEntry: TrustedProductSpaceCatalogEntry,
+  expectedEnabled: boolean,
 ) {
   const response = UpdateSkillEnablementResponseSchema.parse(input)
-  assertExpectedProductSpace(response.productSpaceId, expectedProductSpaceId)
-  if (response.artifactInstanceId !== expectedArtifactInstanceId) {
+  assertExpectedProductSpace(response.productSpaceId, context.id)
+  if (expectedSkillEntry.kind !== 'skill') {
     throw new ProductSpaceResponsePathError(
-      'artifactInstanceId', expectedArtifactInstanceId, response.artifactInstanceId,
+      'artifactInstanceId', expectedSkillEntry.catalogEntryId, response.artifactInstanceId,
     )
+  }
+  if (response.artifactInstanceId !== expectedSkillEntry.artifactInstanceId) {
+    throw new ProductSpaceResponsePathError(
+      'artifactInstanceId', expectedSkillEntry.artifactInstanceId, response.artifactInstanceId,
+    )
+  }
+  if (response.enabled !== expectedEnabled) {
+    throw new ProductSpaceResponsePathError(
+      'artifactInstanceId', expectedSkillEntry.artifactInstanceId, response.artifactInstanceId,
+    )
+  }
+  if (
+    expectedEnabled
+    && (context.accessMode !== 'active' || expectedSkillEntry.availability !== 'available')
+  ) {
+    throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
   }
   return response
 }
@@ -461,9 +505,36 @@ export function parseStopAllExecutionsResultForProductSpace(
   input: unknown,
   expectedAccountId: z.output<typeof AccountIdSchema>,
   expectedProductSpaceId: ProductSpaceId,
+  expectedExecutionScopes: readonly TrustedProductSpaceExecutionScope[],
 ) {
   const result = StopAllExecutionsResultSchema.parse(input)
   validateExecutionScopesForProductSpace(result.executions, expectedAccountId, expectedProductSpaceId)
+  if (expectedExecutionScopes.length === 0) {
+    throw new ProductSpaceExecutionScopeError('stop-all requires at least one expected execution')
+  }
+  const expectedById = new Map<z.output<typeof ExecutionIdSchema>, TrustedProductSpaceExecutionScope>()
+  for (const expectedScope of expectedExecutionScopes) {
+    if (expectedScope.accountId !== expectedAccountId || expectedScope.productSpaceId !== expectedProductSpaceId) {
+      throw new ProductSpaceExecutionScopeError('Expected execution scope did not match the requested tuple')
+    }
+    if (expectedById.has(expectedScope.executionId)) {
+      throw new ProductSpaceExecutionScopeError('Expected execution scopes contain duplicate executionId values')
+    }
+    expectedById.set(expectedScope.executionId, expectedScope)
+  }
+  const returnedById = new Map<
+    z.output<typeof ExecutionIdSchema>,
+    z.output<typeof ExecutionSummarySchema>
+  >(result.executions.map(execution => [execution.executionId, execution]))
+  for (const [executionId, expectedScope] of expectedById) {
+    const returned = returnedById.get(executionId)
+    if (!returned) {
+      throw new ProductSpaceExecutionScopeError('stop-all response omitted an expected execution')
+    }
+    if (JSON.stringify(returned.scope) !== JSON.stringify(expectedScope)) {
+      throw new ProductSpaceExecutionScopeError('stop-all response changed an expected execution scope')
+    }
+  }
   if (!result.allStopped || result.executions.some(execution => (
     execution.status !== 'stopped' && execution.status !== 'failed'
   ))) {
