@@ -164,10 +164,19 @@ export const ProductSpaceCatalogResponseSchema = z.object({
   catalogRevision: nonBlankString(512),
   entries: z.array(ProductSpaceCatalogEntrySchema).max(10_000),
 }).strict().superRefine((value, ctx) => {
-  const ids = new Set<string>()
+  const catalogEntryIds = new Set<string>()
+  const artifactInstanceIds = new Set<string>()
   for (const [index, entry] of value.entries.entries()) {
-    if (ids.has(entry.catalogEntryId)) ctx.addIssue({ code: 'custom', path: ['entries', index, 'catalogEntryId'], message: 'Catalog entry IDs must be unique within the ProductSpace' })
-    ids.add(entry.catalogEntryId)
+    if (catalogEntryIds.has(entry.catalogEntryId)) {
+      ctx.addIssue({ code: 'custom', path: ['entries', index, 'catalogEntryId'], message: 'Catalog entry IDs must be unique within the ProductSpace' })
+    }
+    catalogEntryIds.add(entry.catalogEntryId)
+    if (entry.kind !== 'built_in_app') {
+      if (artifactInstanceIds.has(entry.artifactInstanceId)) {
+        ctx.addIssue({ code: 'custom', path: ['entries', index, 'artifactInstanceId'], message: 'Artifact instance IDs must be unique within the ProductSpace' })
+      }
+      artifactInstanceIds.add(entry.artifactInstanceId)
+    }
   }
 })
 
@@ -284,6 +293,14 @@ export class ProductSpaceResponsePathError extends Error {
   }
 }
 
+/** Raised when execution data belongs to a different runtime request tuple. */
+export class ProductSpaceExecutionScopeError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ProductSpaceExecutionScopeError'
+  }
+}
+
 /**
  * A space context obtained from ProductSpace list state and already trusted by
  * the client. Network DTOs deliberately remain context-neutral; callers must
@@ -292,6 +309,8 @@ export class ProductSpaceResponsePathError extends Error {
 export type TrustedProductSpaceCatalogContext =
   | z.output<typeof ProductSpaceRefSchema>
   | z.output<typeof ProductSpaceSummarySchema>
+
+export type TrustedProductSpaceCatalogEntry = z.output<typeof ProductSpaceCatalogEntrySchema>
 
 function assertExpectedProductSpace(
   receivedProductSpaceId: ProductSpaceId,
@@ -307,19 +326,75 @@ function assertCatalogEntrySourcesMatchProductSpace(
   context: TrustedProductSpaceCatalogContext,
 ): void {
   for (const entry of response.entries) {
-    if (context.kind === 'enterprise' && entry.kind === 'built_in_app') {
-      throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
-    }
     if (entry.kind === 'built_in_app') continue
 
-    const hasCreatorCircleSource = entry.sources.some(source => source.kind === 'creator_circle')
-    const hasEnterpriseImportSource = entry.sources.some(source => source.kind === 'enterprise_import')
+    const sourceKinds = new Set(entry.sources.map(source => source.kind))
+    const hasOnlyPersonalSources = [...sourceKinds].every(
+      kind => kind === 'polo' || kind === 'creator_circle',
+    )
+    const hasOnlyEnterpriseImports = sourceKinds.size === 1 && sourceKinds.has('enterprise_import')
+    const hasMixedSources = sourceKinds.size > 1
     if (
-      (context.kind === 'personal' && hasEnterpriseImportSource)
-      || (context.kind === 'enterprise' && hasCreatorCircleSource)
+      hasMixedSources
+      || (context.kind === 'personal' && !hasOnlyPersonalSources)
+      || (context.kind === 'enterprise' && !hasOnlyEnterpriseImports)
     ) {
       throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
     }
+  }
+}
+
+function assertLaunchPayerMatchesProductSpace(
+  response: z.output<typeof ResolveLaunchResponseSchema>,
+  context: TrustedProductSpaceCatalogContext,
+): void {
+  if (context.kind === 'personal' && response.payer.kind !== 'account') {
+    throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
+  }
+  if (
+    context.kind === 'enterprise'
+    && (response.payer.kind !== 'enterprise' || response.payer.enterpriseId !== context.enterpriseId)
+  ) {
+    throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
+  }
+}
+
+function assertLaunchSubjectMatchesCatalogEntry(
+  response: z.output<typeof ResolveLaunchResponseSchema>,
+  entry: TrustedProductSpaceCatalogEntry,
+): void {
+  if (entry.kind === 'built_in_app') {
+    if (
+      response.subject.kind !== 'built_in_app'
+      || response.subject.builtInAppId !== entry.builtInAppId
+    ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
+    return
+  }
+  if (
+    response.subject.kind !== 'artifact_instance'
+    || response.subject.artifactType !== entry.kind
+    || response.subject.artifactInstanceId !== entry.artifactInstanceId
+  ) throw new ProductSpaceResponsePathError('catalogEntryId', entry.catalogEntryId, response.catalogEntryId)
+}
+
+/** Reusable validation for trusted list-active and stop-all runtime responses. */
+export function validateExecutionScopesForProductSpace(
+  executions: readonly z.output<typeof ExecutionSummarySchema>[],
+  expectedAccountId: z.output<typeof AccountIdSchema>,
+  expectedProductSpaceId: ProductSpaceId,
+): void {
+  const executionIds = new Set<string>()
+  for (const execution of executions) {
+    if (execution.scope.accountId !== expectedAccountId) {
+      throw new ProductSpaceExecutionScopeError('Execution response did not match the requested accountId')
+    }
+    if (execution.scope.productSpaceId !== expectedProductSpaceId) {
+      throw new ProductSpaceExecutionScopeError('Execution response did not match the requested productSpaceId')
+    }
+    if (executionIds.has(execution.executionId)) {
+      throw new ProductSpaceExecutionScopeError('Execution response contains duplicate executionId values')
+    }
+    executionIds.add(execution.executionId)
   }
 }
 
@@ -339,16 +414,18 @@ export function parseProductSpaceCatalogResponseForProductSpace(
 
 export function parseResolveLaunchResponseForProductSpace(
   input: unknown,
-  expectedProductSpaceId: ProductSpaceId,
-  expectedCatalogEntryId: CatalogEntryId,
+  context: TrustedProductSpaceCatalogContext,
+  expectedCatalogEntry: TrustedProductSpaceCatalogEntry,
 ) {
   const response = ResolveLaunchResponseSchema.parse(input)
-  assertExpectedProductSpace(response.productSpaceId, expectedProductSpaceId)
-  if (response.catalogEntryId !== expectedCatalogEntryId) {
+  assertExpectedProductSpace(response.productSpaceId, context.id)
+  if (response.catalogEntryId !== expectedCatalogEntry.catalogEntryId) {
     throw new ProductSpaceResponsePathError(
-      'catalogEntryId', expectedCatalogEntryId, response.catalogEntryId,
+      'catalogEntryId', expectedCatalogEntry.catalogEntryId, response.catalogEntryId,
     )
   }
+  assertLaunchPayerMatchesProductSpace(response, context)
+  assertLaunchSubjectMatchesCatalogEntry(response, expectedCatalogEntry)
   return response
 }
 
@@ -366,4 +443,31 @@ export function parseUpdateSkillEnablementResponseForProductSpace(
     )
   }
   return response
+}
+
+/** Parses list-active output only for the requested account/ProductSpace tuple. */
+export function parseActiveExecutionsForProductSpace(
+  input: unknown,
+  expectedAccountId: z.output<typeof AccountIdSchema>,
+  expectedProductSpaceId: ProductSpaceId,
+) {
+  const executions = z.array(ExecutionSummarySchema).parse(input)
+  validateExecutionScopesForProductSpace(executions, expectedAccountId, expectedProductSpaceId)
+  return executions
+}
+
+/** Parses stop-all output only after every requested execution reached a terminal state. */
+export function parseStopAllExecutionsResultForProductSpace(
+  input: unknown,
+  expectedAccountId: z.output<typeof AccountIdSchema>,
+  expectedProductSpaceId: ProductSpaceId,
+) {
+  const result = StopAllExecutionsResultSchema.parse(input)
+  validateExecutionScopesForProductSpace(result.executions, expectedAccountId, expectedProductSpaceId)
+  if (!result.allStopped || result.executions.some(execution => (
+    execution.status !== 'stopped' && execution.status !== 'failed'
+  ))) {
+    throw new ProductSpaceExecutionScopeError('stop-all response contains non-terminal executions')
+  }
+  return result
 }

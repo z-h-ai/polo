@@ -6,6 +6,7 @@ import {
   EnterpriseIdSchema,
   ListProductSpacesResponseSchema,
   ProductSpaceCatalogResponseSchema,
+  ProductSpaceCatalogEntrySchema,
   ProductSpaceErrorResponseSchema,
   ProductSpaceExecutionScopeSchema,
   ProductSpaceIdSchema,
@@ -17,7 +18,9 @@ import {
   createProductSpaceRuntimeKey,
   invalidateLegacyOrganizationState,
   parseProductSpaceCatalogResponseForProductSpace,
+  parseActiveExecutionsForProductSpace,
   parseResolveLaunchResponseForProductSpace,
+  parseStopAllExecutionsResultForProductSpace,
   parseUpdateSkillEnablementResponseForProductSpace,
   type EnterpriseId,
   type ProductSpaceId,
@@ -46,6 +49,21 @@ function catalogApp(sources: unknown[]) {
     catalogEntryId: 'catalog-app', name: 'Example app', description: 'An app',
     availability: 'available', kind: 'app', artifactInstanceId: 'artifact-a',
     version: { versionId: 'version-a', version: '1.0.0' }, sources, permissions: [],
+  }
+}
+
+function catalogSkill(sources: unknown[]) {
+  return {
+    catalogEntryId: 'catalog-skill', name: 'Example skill', description: 'A skill',
+    availability: 'available', kind: 'skill', artifactInstanceId: 'artifact-skill',
+    version: { versionId: 'version-skill', version: '1.0.0' }, sources, permissions: [], enabled: true,
+  }
+}
+
+function assistantEntry() {
+  return {
+    catalogEntryId: 'assistant', name: 'Polo assistant', description: 'Built in',
+    availability: 'available', kind: 'built_in_app' as const, builtInAppId: 'polo_assistant' as const,
   }
 }
 
@@ -94,10 +112,7 @@ describe('ProductSpace v1 network contract', () => {
   })
 
   test('rejects catalog subject confusion and sensitive delivery fields', () => {
-    const assistant = {
-      catalogEntryId: 'assistant', name: 'Polo assistant', description: 'Built in',
-      availability: 'available', kind: 'built_in_app', builtInAppId: 'polo_assistant',
-    }
+    const assistant = assistantEntry()
     expect(ProductSpaceCatalogResponseSchema.safeParse({
       contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1', entries: [assistant],
     }).success).toBe(true)
@@ -148,13 +163,23 @@ describe('ProductSpace v1 network contract', () => {
     expect(parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
     ]), personal).entries).toHaveLength(1)
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([
+      catalogApp([
+        { kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' },
+        { kind: 'creator_circle', circleId: 'circle-b', name: 'Circle B' },
+      ]),
+    ]), personal).entries).toHaveLength(1)
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([assistantEntry()]), personal).entries).toHaveLength(1)
     expect(() => parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([{ kind: 'enterprise_import', name: 'Enterprise import' }]),
     ]), personal)).toThrow('did not match')
-    expect(() => parseProductSpaceCatalogResponseForProductSpace(response([{
-      catalogEntryId: 'assistant', name: 'Polo assistant', description: 'Built in',
-      availability: 'available', kind: 'built_in_app', builtInAppId: 'polo_assistant',
-    }]), enterprise)).toThrow('did not match')
+    expect(() => parseProductSpaceCatalogResponseForProductSpace(response([
+      catalogApp([
+        { kind: 'polo', name: 'Polo' },
+        { kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' },
+      ]),
+    ]), personal)).toThrow('did not match')
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([assistantEntry()]), enterprise).entries).toHaveLength(1)
     expect(() => parseProductSpaceCatalogResponseForProductSpace(response([
       catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
     ]), enterprise)).toThrow('did not match')
@@ -163,24 +188,106 @@ describe('ProductSpace v1 network contract', () => {
     ]), enterprise).entries).toHaveLength(1)
   })
 
-  test('binds resolve-launch and Skill enablement responses to every route ID', () => {
+  test('rejects duplicate artifact instances instead of splitting creator-circle grants', () => {
+    expect(ProductSpaceCatalogResponseSchema.safeParse({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1',
+      entries: [
+        catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
+        {
+          ...catalogApp([{ kind: 'creator_circle', circleId: 'circle-b', name: 'Circle B' }]),
+          catalogEntryId: 'catalog-app-second',
+        },
+      ],
+    }).success).toBe(false)
+  })
+
+  test('binds resolve-launch to trusted space payer and Catalog subject', () => {
     const expectedProductSpaceId = ProductSpaceIdSchema.parse('product-space-a')
-    const expectedCatalogEntryId = CatalogEntryIdSchema.parse('catalog-a')
     const expectedArtifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-a')
+    const personal = ProductSpaceRefSchema.parse({ id: 'product-space-a', kind: 'personal' })
+    const enterprise = ProductSpaceRefSchema.parse({
+      id: 'product-space-a', kind: 'enterprise', enterpriseId: 'enterprise-a', role: 'member',
+    })
+    const assistant = ProductSpaceCatalogEntrySchema.parse(assistantEntry())
+    const app = ProductSpaceCatalogEntrySchema.parse(catalogApp([{ kind: 'polo', name: 'Polo' }]))
+    const skill = ProductSpaceCatalogEntrySchema.parse(catalogSkill([{ kind: 'polo', name: 'Polo' }]))
     const launch = {
-      contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'catalog-a',
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'assistant',
       resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
       subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
       payer: { kind: 'account' }, delivery: { kind: 'built_in' },
     }
     expect(parseResolveLaunchResponseForProductSpace(
-      launch, expectedProductSpaceId, expectedCatalogEntryId,
-    ).catalogEntryId).toBe(expectedCatalogEntryId)
+      launch, personal, assistant,
+    ).catalogEntryId).toBe(assistant.catalogEntryId)
     expect(() => parseResolveLaunchResponseForProductSpace(
-      { ...launch, catalogEntryId: 'catalog-other' }, expectedProductSpaceId, expectedCatalogEntryId,
+      { ...launch, catalogEntryId: 'catalog-other' }, personal, assistant,
     )).toThrow('catalogEntryId')
     expect(() => parseResolveLaunchResponseForProductSpace(
-      { ...launch, productSpaceId: 'product-space-other' }, expectedProductSpaceId, expectedCatalogEntryId,
+      { ...launch, productSpaceId: 'product-space-other' }, personal, assistant,
+    )).toThrow('ProductSpace')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' } }, personal, assistant,
+    )).toThrow('ProductSpace')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, assistant,
+    )).toThrow('catalogEntryId')
+    expect(parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-app',
+        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, app,
+    ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'app' })
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-app',
+        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, app,
+    )).toThrow('catalogEntryId')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      { ...launch, catalogEntryId: 'catalog-app' }, personal, app,
+    )).toThrow('catalogEntryId')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-skill',
+        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-other', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, skill,
+    )).toThrow('catalogEntryId')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-skill',
+        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, skill,
+    )).toThrow('catalogEntryId')
+    expect(parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-skill',
+        subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, personal, skill,
+    ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'skill' })
+    expect(parseResolveLaunchResponseForProductSpace(
+      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' } }, enterprise, assistant,
+    ).payer).toMatchObject({ kind: 'enterprise', enterpriseId: 'enterprise-a' })
+    expect(parseResolveLaunchResponseForProductSpace(
+      {
+        ...launch, catalogEntryId: 'catalog-app', payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+        subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
+        delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+      }, enterprise, app,
+    ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'app' })
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      launch, enterprise, assistant,
+    )).toThrow('ProductSpace')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-other' } }, enterprise, assistant,
     )).toThrow('ProductSpace')
 
     const enablement = {
@@ -219,6 +326,54 @@ describe('ProductSpace runtime isolation', () => {
       allStopped: true,
       executions: [{ executionId: 'execution-a', scope, name: 'App', status: 'stopping' }],
     }).success).toBe(false)
+  })
+
+  test('binds list-active and stop-all results to their requested tuple', () => {
+    const expectedAccountId = AccountIdSchema.parse('account-a')
+    const expectedProductSpaceId = ProductSpaceIdSchema.parse('product-space-a')
+    const execution = {
+      executionId: 'execution-a',
+      scope: {
+        contractVersion: 1, executionId: 'execution-a', accountId: 'account-a',
+        productSpaceId: 'product-space-a', workspaceId: 'workspace-a',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      },
+      name: 'Polo assistant', status: 'running',
+    }
+    expect(parseActiveExecutionsForProductSpace(
+      [execution], expectedAccountId, expectedProductSpaceId,
+    )).toHaveLength(1)
+    expect(() => parseActiveExecutionsForProductSpace(
+      [{ ...execution, scope: { ...execution.scope, accountId: 'account-other' } }],
+      expectedAccountId, expectedProductSpaceId,
+    )).toThrow('accountId')
+    expect(() => parseActiveExecutionsForProductSpace(
+      [{ ...execution, scope: { ...execution.scope, productSpaceId: 'product-space-other' } }],
+      expectedAccountId, expectedProductSpaceId,
+    )).toThrow('productSpaceId')
+    expect(() => parseActiveExecutionsForProductSpace(
+      [execution, { ...execution, name: 'Duplicate' }], expectedAccountId, expectedProductSpaceId,
+    )).toThrow('duplicate executionId')
+
+    const stoppedExecution = { ...execution, status: 'stopped' as const }
+    expect(parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [stoppedExecution] }, expectedAccountId, expectedProductSpaceId,
+    ).allStopped).toBe(true)
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [{ ...stoppedExecution, scope: { ...stoppedExecution.scope, accountId: 'account-other' } }] },
+      expectedAccountId, expectedProductSpaceId,
+    )).toThrow('accountId')
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [{ ...stoppedExecution, scope: { ...stoppedExecution.scope, productSpaceId: 'product-space-other' } }] },
+      expectedAccountId, expectedProductSpaceId,
+    )).toThrow('productSpaceId')
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      { allStopped: true, executions: [stoppedExecution, { ...stoppedExecution, name: 'Duplicate' }] },
+      expectedAccountId, expectedProductSpaceId,
+    )).toThrow('duplicate executionId')
+    expect(() => parseStopAllExecutionsResultForProductSpace(
+      { allStopped: false, executions: [execution] }, expectedAccountId, expectedProductSpaceId,
+    )).toThrow('non-terminal')
   })
 
   test('keeps opaque IDs non-interchangeable at compile time', () => {
