@@ -6,7 +6,6 @@ import {
   EnterpriseIdSchema,
   ListProductSpacesResponseSchema,
   ProductSpaceCatalogResponseSchema,
-  ProductSpaceCatalogEntrySchema,
   ProductSpaceErrorResponseSchema,
   ProductSpaceExecutionScopeSchema,
   ProductSpaceIdSchema,
@@ -25,6 +24,7 @@ import {
   parseUpdateSkillEnablementResponseForProductSpace,
   type EnterpriseId,
   type ProductSpaceId,
+  type TrustedProductSpaceSummary,
   type WorkspaceId,
 } from '../index.ts'
 import {
@@ -75,6 +75,12 @@ function assistantEntry() {
     catalogEntryId: 'assistant', name: 'Polo assistant', description: 'Built in',
     availability: 'available', kind: 'built_in_app' as const, builtInAppId: 'polo_assistant' as const,
   }
+}
+
+function trustedCatalog(context: TrustedProductSpaceSummary, entries: unknown[]) {
+  return parseProductSpaceCatalogResponseForProductSpace({
+    contractVersion: 1, productSpaceId: context.id, catalogRevision: 'r1', entries,
+  }, context)
 }
 
 describe('ProductSpace v1 network contract', () => {
@@ -233,9 +239,19 @@ describe('ProductSpace v1 network contract', () => {
   test('binds resolve-launch to trusted space payer and Catalog subject', () => {
     const personal = ProductSpaceSummarySchema.parse(personalSpace())
     const enterprise = ProductSpaceSummarySchema.parse(enterpriseSpace())
-    const assistant = ProductSpaceCatalogEntrySchema.parse(assistantEntry())
-    const app = ProductSpaceCatalogEntrySchema.parse(catalogApp([{ kind: 'polo', name: 'Polo' }]))
-    const skill = ProductSpaceCatalogEntrySchema.parse(catalogSkill([{ kind: 'polo', name: 'Polo' }]))
+    const assistantId = CatalogEntryIdSchema.parse('assistant')
+    const appId = CatalogEntryIdSchema.parse('catalog-app')
+    const skillId = CatalogEntryIdSchema.parse('catalog-skill')
+    const skillArtifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-skill')
+    const personalCatalog = trustedCatalog(personal, [
+      assistantEntry(),
+      catalogApp([{ kind: 'polo', name: 'Polo' }]),
+      catalogSkill([{ kind: 'polo', name: 'Polo' }]),
+    ])
+    const enterpriseCatalog = trustedCatalog(enterprise, [
+      assistantEntry(),
+      catalogApp([{ kind: 'enterprise_import', name: 'Enterprise import' }]),
+    ])
     const launch = {
       contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'assistant',
       resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
@@ -243,76 +259,76 @@ describe('ProductSpace v1 network contract', () => {
       payer: { kind: 'account' }, delivery: { kind: 'built_in' },
     }
     expect(parseResolveLaunchResponseForProductSpace(
-      launch, personal, assistant,
-    ).catalogEntryId).toBe(assistant.catalogEntryId)
+      launch, personal, personalCatalog, assistantId,
+    ).catalogEntryId).toBe(assistantId)
     expect(() => parseResolveLaunchResponseForProductSpace(
-      { ...launch, catalogEntryId: 'catalog-other' }, personal, assistant,
+      { ...launch, catalogEntryId: 'catalog-other' }, personal, personalCatalog, assistantId,
     )).toThrow('catalogEntryId')
     expect(() => parseResolveLaunchResponseForProductSpace(
-      { ...launch, productSpaceId: 'product-space-other' }, personal, assistant,
+      { ...launch, productSpaceId: 'product-space-other' }, personal, personalCatalog, assistantId,
     )).toThrow('ProductSpace')
     expect(() => parseResolveLaunchResponseForProductSpace(
-      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' } }, personal, assistant,
+      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' } }, personal, personalCatalog, assistantId,
     )).toThrow('ProductSpace')
     expect(() => parseResolveLaunchResponseForProductSpace(
       {
         ...launch, subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, assistant,
+      }, personal, personalCatalog, assistantId,
     )).toThrow('catalogEntryId')
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-app',
         subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, app,
+      }, personal, personalCatalog, appId,
     ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'app' })
     expect(() => parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-app',
         subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, app,
+      }, personal, personalCatalog, appId,
     )).toThrow('catalogEntryId')
     expect(() => parseResolveLaunchResponseForProductSpace(
-      { ...launch, catalogEntryId: 'catalog-app' }, personal, app,
+      { ...launch, catalogEntryId: 'catalog-app' }, personal, personalCatalog, appId,
     )).toThrow('catalogEntryId')
     expect(() => parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-skill',
         subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-other', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, skill,
+      }, personal, personalCatalog, skillId,
     )).toThrow('catalogEntryId')
     expect(() => parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-skill',
         subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, skill,
+      }, personal, personalCatalog, skillId,
     )).toThrow('catalogEntryId')
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-skill',
         subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, skill,
+      }, personal, personalCatalog, skillId,
     ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'skill' })
     expect(parseResolveLaunchResponseForProductSpace(
-      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' } }, enterprise, assistant,
+      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' } }, enterprise, enterpriseCatalog, assistantId,
     ).payer).toMatchObject({ kind: 'enterprise', enterpriseId: 'enterprise-a' })
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-app', payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
         subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, enterprise, app,
+      }, enterprise, enterpriseCatalog, appId,
     ).subject).toMatchObject({ kind: 'artifact_instance', artifactType: 'app' })
     expect(() => parseResolveLaunchResponseForProductSpace(
-      launch, enterprise, assistant,
+      launch, enterprise, enterpriseCatalog, assistantId,
     )).toThrow('ProductSpace')
     expect(() => parseResolveLaunchResponseForProductSpace(
-      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-other' } }, enterprise, assistant,
+      { ...launch, payer: { kind: 'enterprise', enterpriseId: 'enterprise-other' } }, enterprise, enterpriseCatalog, assistantId,
     )).toThrow('ProductSpace')
 
     const enablement = {
@@ -320,81 +336,135 @@ describe('ProductSpace v1 network contract', () => {
       enabled: true, catalogRevision: 'r1',
     }
     expect(parseUpdateSkillEnablementResponseForProductSpace(
-      enablement, personal, skill, true,
-    ).artifactInstanceId).toBe(ArtifactInstanceIdSchema.parse('artifact-skill'))
+      enablement, personal, personalCatalog, skillArtifactInstanceId, true,
+    ).artifactInstanceId).toBe(skillArtifactInstanceId)
     expect(() => parseUpdateSkillEnablementResponseForProductSpace(
-      { ...enablement, artifactInstanceId: 'artifact-other' }, personal, skill, true,
+      { ...enablement, artifactInstanceId: 'artifact-other' }, personal, personalCatalog, skillArtifactInstanceId, true,
     )).toThrow('artifactInstanceId')
     expect(() => parseUpdateSkillEnablementResponseForProductSpace(
-      { ...enablement, productSpaceId: 'product-space-other' }, personal, skill, true,
+      { ...enablement, productSpaceId: 'product-space-other' }, personal, personalCatalog, skillArtifactInstanceId, true,
     )).toThrow('ProductSpace')
     expect(() => parseUpdateSkillEnablementResponseForProductSpace(
-      { ...enablement, enabled: false }, personal, skill, true,
+      { ...enablement, enabled: false }, personal, personalCatalog, skillArtifactInstanceId, true,
     )).toThrow('artifactInstanceId')
   })
 
   test('requires active ProductSpace and available Catalog entries before launch', () => {
     const personal = ProductSpaceSummarySchema.parse(personalSpace())
     const readOnlyEnterprise = ProductSpaceSummarySchema.parse(enterpriseSpace('read_only'))
-    const assistant = ProductSpaceCatalogEntrySchema.parse(assistantEntry())
-    const availableSkill = ProductSpaceCatalogEntrySchema.parse(catalogSkill([{ kind: 'polo', name: 'Polo' }]))
-    const unavailableApp = ProductSpaceCatalogEntrySchema.parse({
+    const assistantId = CatalogEntryIdSchema.parse('assistant')
+    const appId = CatalogEntryIdSchema.parse('catalog-app')
+    const skillId = CatalogEntryIdSchema.parse('catalog-skill')
+    const availableSkill = catalogSkill([{ kind: 'polo', name: 'Polo' }])
+    const unavailableApp = {
       ...catalogApp([{ kind: 'polo', name: 'Polo' }]),
       availability: 'unavailable', unavailableReason: 'authorization_ended',
-    })
-    const blockedAssistant = ProductSpaceCatalogEntrySchema.parse({
+    }
+    const blockedAssistant = {
       ...assistantEntry(), availability: 'blocked', unavailableReason: 'version_blocked',
-    })
-    const disabledSkill = ProductSpaceCatalogEntrySchema.parse({ ...catalogSkill([{ kind: 'polo', name: 'Polo' }]), enabled: false })
+    }
+    const disabledSkill = { ...catalogSkill([{ kind: 'polo', name: 'Polo' }]), enabled: false }
+    const readOnlyCatalog = trustedCatalog(readOnlyEnterprise, [assistantEntry()])
+    const unavailableAppCatalog = trustedCatalog(personal, [assistantEntry(), unavailableApp])
+    const blockedAssistantCatalog = trustedCatalog(personal, [blockedAssistant])
+    const disabledSkillCatalog = trustedCatalog(personal, [assistantEntry(), disabledSkill])
+    const availableSkillCatalog = trustedCatalog(personal, [assistantEntry(), availableSkill])
     const launch = {
       contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'assistant',
       resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
       subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
       payer: { kind: 'account' }, delivery: { kind: 'built_in' },
     }
-    expect(() => parseResolveLaunchResponseForProductSpace(launch, readOnlyEnterprise, assistant)).toThrow('ProductSpace')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      launch, readOnlyEnterprise, readOnlyCatalog, assistantId,
+    )).toThrow('ProductSpace')
     expect(() => parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-app',
         subject: { kind: 'artifact_instance', artifactType: 'app', artifactInstanceId: 'artifact-a', versionId: 'version-a', version: '1.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, unavailableApp,
+      }, personal, unavailableAppCatalog, appId,
     )).toThrow('catalogEntryId')
-    expect(() => parseResolveLaunchResponseForProductSpace(launch, personal, blockedAssistant)).toThrow('catalogEntryId')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      launch, personal, blockedAssistantCatalog, assistantId,
+    )).toThrow('catalogEntryId')
     expect(() => parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-skill',
         subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-skill', version: '1.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, disabledSkill,
+      }, personal, disabledSkillCatalog, skillId,
     )).toThrow('catalogEntryId')
     expect(parseResolveLaunchResponseForProductSpace(
       {
         ...launch, catalogEntryId: 'catalog-skill',
         subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-new', version: '2.0.0' },
         delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
-      }, personal, availableSkill,
+      }, personal, availableSkillCatalog, skillId,
     ).subject).toMatchObject({ artifactType: 'skill', version: '2.0.0' })
   })
 
   test('binds Skill enablement to the trusted Skill and permits idempotent disable convergence', () => {
     const personal = ProductSpaceSummarySchema.parse(personalSpace())
     const readOnlyEnterprise = ProductSpaceSummarySchema.parse(enterpriseSpace('read_only'))
-    const skill = ProductSpaceCatalogEntrySchema.parse(catalogSkill([{ kind: 'polo', name: 'Polo' }]))
-    const unavailableSkill = ProductSpaceCatalogEntrySchema.parse({
+    const skillArtifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-skill')
+    const skill = catalogSkill([{ kind: 'enterprise_import', name: 'Enterprise import' }])
+    const unavailableSkill = {
       ...catalogSkill([{ kind: 'polo', name: 'Polo' }]), availability: 'blocked', unavailableReason: 'version_blocked',
-    })
-    const app = ProductSpaceCatalogEntrySchema.parse(catalogApp([{ kind: 'polo', name: 'Polo' }]))
+    }
+    const app = catalogApp([{ kind: 'polo', name: 'Polo' }])
+    const readOnlyCatalog = trustedCatalog(readOnlyEnterprise, [assistantEntry(), skill])
+    const unavailableSkillCatalog = trustedCatalog(personal, [assistantEntry(), unavailableSkill])
+    const appCatalog = trustedCatalog(personal, [assistantEntry(), app])
     const enabled = {
       contractVersion: 1, productSpaceId: 'product-space-a', artifactInstanceId: 'artifact-skill',
       enabled: true, catalogRevision: 'r1',
     }
-    expect(() => parseUpdateSkillEnablementResponseForProductSpace(enabled, readOnlyEnterprise, skill, true)).toThrow('ProductSpace')
-    expect(() => parseUpdateSkillEnablementResponseForProductSpace(enabled, personal, unavailableSkill, true)).toThrow('ProductSpace')
-    expect(() => parseUpdateSkillEnablementResponseForProductSpace(enabled, personal, app, true)).toThrow('artifactInstanceId')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      enabled, readOnlyEnterprise, readOnlyCatalog, skillArtifactInstanceId, true,
+    )).toThrow('ProductSpace')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      enabled, personal, unavailableSkillCatalog, skillArtifactInstanceId, true,
+    )).toThrow('ProductSpace')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      enabled, personal, appCatalog, ArtifactInstanceIdSchema.parse('artifact-a'), true,
+    )).toThrow('artifactInstanceId')
     expect(parseUpdateSkillEnablementResponseForProductSpace(
-      { ...enabled, enabled: false }, readOnlyEnterprise, skill, false,
+      { ...enabled, enabled: false }, readOnlyEnterprise, readOnlyCatalog, skillArtifactInstanceId, false,
     ).enabled).toBe(false)
+  })
+
+  test('rejects a Catalog entry trusted for ProductSpace A at ProductSpace B boundaries', () => {
+    const spaceA = ProductSpaceSummarySchema.parse({
+      ...enterpriseSpace(), id: 'product-space-a', enterpriseId: 'enterprise-a',
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-a' },
+    })
+    const spaceB = ProductSpaceSummarySchema.parse({
+      ...enterpriseSpace(), id: 'product-space-b', enterpriseId: 'enterprise-b',
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-b' },
+    })
+    const catalogForSpaceA = trustedCatalog(spaceA, [
+      assistantEntry(),
+      catalogSkill([{ kind: 'enterprise_import', name: 'Enterprise import' }]),
+    ])
+    const skillId = CatalogEntryIdSchema.parse('catalog-skill')
+    const skillArtifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-skill')
+    const launchForSpaceB = {
+      contractVersion: 1, productSpaceId: 'product-space-b', catalogEntryId: 'catalog-skill',
+      resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
+      subject: { kind: 'artifact_instance', artifactType: 'skill', artifactInstanceId: 'artifact-skill', versionId: 'version-a', version: '1.0.0' },
+      payer: { kind: 'enterprise', enterpriseId: 'enterprise-b' },
+      delivery: { kind: 'web_url', url: 'https://app.example.test', launchToken: 'token' },
+    }
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      launchForSpaceB, spaceB, catalogForSpaceA, skillId,
+    )).toThrow('ProductSpace')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      {
+        contractVersion: 1, productSpaceId: 'product-space-b', artifactInstanceId: 'artifact-skill',
+        enabled: true, catalogRevision: 'r1',
+      }, spaceB, catalogForSpaceA, skillArtifactInstanceId, true,
+    )).toThrow('ProductSpace')
   })
 })
 

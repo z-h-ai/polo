@@ -10,7 +10,7 @@ import {
   ProductSpaceIdSchema,
   WorkspaceIdSchema,
 } from './ids.ts'
-import type { CatalogEntryId, ProductSpaceId } from './ids.ts'
+import type { ArtifactInstanceId, CatalogEntryId, ProductSpaceId } from './ids.ts'
 import { PRODUCT_SPACE_ERROR_CODES } from './errors.ts'
 import { PRODUCT_SPACE_CONTRACT_VERSION } from './context-key.ts'
 
@@ -319,9 +319,21 @@ export type TrustedProductSpaceCatalogContext =
   | z.output<typeof ProductSpaceRefSchema>
   | z.output<typeof ProductSpaceSummarySchema>
 
-export type TrustedProductSpaceCatalogEntry = z.output<typeof ProductSpaceCatalogEntrySchema>
 export type TrustedProductSpaceSummary = z.output<typeof ProductSpaceSummarySchema>
 export type TrustedProductSpaceExecutionScope = z.output<typeof ProductSpaceExecutionScopeSchema>
+
+const trustedProductSpaceCatalogBrand: unique symbol = Symbol('trustedProductSpaceCatalog')
+
+/**
+ * A Catalog response that has passed the ProductSpace boundary. The brand is
+ * internal provenance: it is not serialized and does not change the frozen
+ * network DTO.
+ */
+export type TrustedProductSpaceCatalog = z.output<typeof ProductSpaceCatalogResponseSchema> & {
+  readonly [trustedProductSpaceCatalogBrand]: true
+}
+
+export type TrustedProductSpaceCatalogEntry = z.output<typeof ProductSpaceCatalogEntrySchema>
 
 function assertExpectedProductSpace(
   receivedProductSpaceId: ProductSpaceId,
@@ -385,6 +397,39 @@ function assertLaunchIsAllowedByTrustedState(
   }
 }
 
+function assertTrustedCatalogMatchesProductSpace(
+  catalog: TrustedProductSpaceCatalog,
+  context: TrustedProductSpaceSummary,
+): void {
+  if (!catalog[trustedProductSpaceCatalogBrand] || catalog.productSpaceId !== context.id) {
+    throw new ProductSpaceResponseScopeError(context.id, catalog.productSpaceId)
+  }
+}
+
+function getCatalogEntry(
+  catalog: TrustedProductSpaceCatalog,
+  expectedCatalogEntryId: CatalogEntryId,
+): TrustedProductSpaceCatalogEntry {
+  const entry = catalog.entries.find(candidate => candidate.catalogEntryId === expectedCatalogEntryId)
+  if (!entry) {
+    throw new ProductSpaceResponsePathError('catalogEntryId', expectedCatalogEntryId, '')
+  }
+  return entry
+}
+
+function getSkillCatalogEntry(
+  catalog: TrustedProductSpaceCatalog,
+  expectedArtifactInstanceId: ArtifactInstanceId,
+): z.output<typeof SkillCatalogEntrySchema> {
+  const entry = catalog.entries.find(candidate => (
+    candidate.kind !== 'built_in_app' && candidate.artifactInstanceId === expectedArtifactInstanceId
+  ))
+  if (!entry || entry.kind !== 'skill') {
+    throw new ProductSpaceResponsePathError('artifactInstanceId', expectedArtifactInstanceId, '')
+  }
+  return entry
+}
+
 function assertLaunchSubjectMatchesCatalogEntry(
   response: z.output<typeof ResolveLaunchResponseSchema>,
   entry: TrustedProductSpaceCatalogEntry,
@@ -431,18 +476,25 @@ export function validateExecutionScopesForProductSpace(
 export function parseProductSpaceCatalogResponseForProductSpace(
   input: unknown,
   context: TrustedProductSpaceCatalogContext,
-) {
+): TrustedProductSpaceCatalog {
   const response = ProductSpaceCatalogResponseSchema.parse(input)
   assertExpectedProductSpace(response.productSpaceId, context.id)
   assertCatalogEntrySourcesMatchProductSpace(response, context)
-  return response
+  Object.defineProperty(response, trustedProductSpaceCatalogBrand, {
+    value: true,
+    enumerable: false,
+  })
+  return Object.freeze(response) as TrustedProductSpaceCatalog
 }
 
 export function parseResolveLaunchResponseForProductSpace(
   input: unknown,
   context: TrustedProductSpaceSummary,
-  expectedCatalogEntry: TrustedProductSpaceCatalogEntry,
+  catalog: TrustedProductSpaceCatalog,
+  expectedCatalogEntryId: CatalogEntryId,
 ) {
+  assertTrustedCatalogMatchesProductSpace(catalog, context)
+  const expectedCatalogEntry = getCatalogEntry(catalog, expectedCatalogEntryId)
   const response = ResolveLaunchResponseSchema.parse(input)
   assertExpectedProductSpace(response.productSpaceId, context.id)
   if (response.catalogEntryId !== expectedCatalogEntry.catalogEntryId) {
@@ -460,16 +512,14 @@ export function parseResolveLaunchResponseForProductSpace(
 export function parseUpdateSkillEnablementResponseForProductSpace(
   input: unknown,
   context: TrustedProductSpaceSummary,
-  expectedSkillEntry: TrustedProductSpaceCatalogEntry,
+  catalog: TrustedProductSpaceCatalog,
+  expectedArtifactInstanceId: ArtifactInstanceId,
   expectedEnabled: boolean,
 ) {
+  assertTrustedCatalogMatchesProductSpace(catalog, context)
+  const expectedSkillEntry = getSkillCatalogEntry(catalog, expectedArtifactInstanceId)
   const response = UpdateSkillEnablementResponseSchema.parse(input)
   assertExpectedProductSpace(response.productSpaceId, context.id)
-  if (expectedSkillEntry.kind !== 'skill') {
-    throw new ProductSpaceResponsePathError(
-      'artifactInstanceId', expectedSkillEntry.catalogEntryId, response.artifactInstanceId,
-    )
-  }
   if (response.artifactInstanceId !== expectedSkillEntry.artifactInstanceId) {
     throw new ProductSpaceResponsePathError(
       'artifactInstanceId', expectedSkillEntry.artifactInstanceId, response.artifactInstanceId,
