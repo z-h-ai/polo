@@ -6,6 +6,7 @@
 export interface LegacyOrganizationStateInvalidator {
   removeLegacyOrganizationAuthorizationCache(): void | Promise<void>
   removeLegacyOrganizationCatalogCache(): void | Promise<void>
+  removeLegacyOrganizationInstallationStateCache(): void | Promise<void>
   removeLegacyOrganizationRuntimeCache(): void | Promise<void>
   removeLegacyOrganizationSkillEnablementCache(): void | Promise<void>
   removeLegacyOrganizationSessionIndex(): void | Promise<void>
@@ -14,6 +15,7 @@ export interface LegacyOrganizationStateInvalidator {
 export const LEGACY_ORGANIZATION_STATE_INVALIDATION_STEPS = [
   'authorization',
   'catalog',
+  'installation-state',
   'runtime',
   'skill-enablement',
   'session-index',
@@ -29,6 +31,7 @@ export async function invalidateLegacyOrganizationState(
 ): Promise<void> {
   await invalidator.removeLegacyOrganizationAuthorizationCache()
   await invalidator.removeLegacyOrganizationCatalogCache()
+  await invalidator.removeLegacyOrganizationInstallationStateCache()
   await invalidator.removeLegacyOrganizationRuntimeCache()
   await invalidator.removeLegacyOrganizationSkillEnablementCache()
   await invalidator.removeLegacyOrganizationSessionIndex()

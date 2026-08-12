@@ -17,6 +17,7 @@ import {
   createProductSpaceCatalogKey,
   createProductSpaceRuntimeKey,
   invalidateLegacyOrganizationState,
+  LEGACY_ORGANIZATION_STATE_INVALIDATION_STEPS,
   parseProductSpaceCatalogResponseForProductSpace,
   parseActiveExecutionsForProductSpace,
   parseResolveLaunchResponseForProductSpace,
@@ -672,14 +673,28 @@ describe('ProductSpace runtime isolation', () => {
 
 test('direct switch cleanup has no Workspace or export deletion capability', async () => {
   const calls: string[] = []
-  await invalidateLegacyOrganizationState({
+  const invalidator = {
     removeLegacyOrganizationAuthorizationCache: () => { calls.push('authorization') },
     removeLegacyOrganizationCatalogCache: () => { calls.push('catalog') },
+    removeLegacyOrganizationInstallationStateCache: () => { calls.push('installation-state') },
     removeLegacyOrganizationRuntimeCache: () => { calls.push('runtime') },
     removeLegacyOrganizationSkillEnablementCache: () => { calls.push('skill-enablement') },
     removeLegacyOrganizationSessionIndex: () => { calls.push('session-index') },
-  })
-  expect(calls).toEqual(['authorization', 'catalog', 'runtime', 'skill-enablement', 'session-index'])
+  }
+  expect(Object.keys(invalidator)).toEqual([
+    'removeLegacyOrganizationAuthorizationCache',
+    'removeLegacyOrganizationCatalogCache',
+    'removeLegacyOrganizationInstallationStateCache',
+    'removeLegacyOrganizationRuntimeCache',
+    'removeLegacyOrganizationSkillEnablementCache',
+    'removeLegacyOrganizationSessionIndex',
+  ])
+  expect(Object.values(invalidator).every(remove => remove.length === 0)).toBe(true)
+  await invalidateLegacyOrganizationState(invalidator)
+  expect(calls).toEqual([
+    'authorization', 'catalog', 'installation-state', 'runtime', 'skill-enablement', 'session-index',
+  ])
+  expect(calls).toEqual([...LEGACY_ORGANIZATION_STATE_INVALIDATION_STEPS])
 })
 
 test('contract IDs are parsed before boundary use', () => {
