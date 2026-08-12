@@ -11,6 +11,7 @@ import type {
 } from './schemas.ts'
 import type {
   ProductSpaceCatalogResponseSchema,
+  ProductSpaceSummarySchema,
   ProductSpaceContextSchema,
   ProductSpaceErrorResponseSchema,
   ProductSpaceExecutionScopeSchema,
@@ -34,6 +35,7 @@ export type CatalogEntryUnavailableReason = z.infer<typeof CatalogEntryUnavailab
 export type ExecutionStatus = z.infer<typeof ExecutionStatusSchema>
 
 export type ProductSpaceRef = z.infer<typeof ProductSpaceRefSchema>
+export type ProductSpaceSummary = z.infer<typeof ProductSpaceSummarySchema>
 export type ProductSpaceContext = z.infer<typeof ProductSpaceContextSchema>
 export type ListProductSpacesResponse = z.infer<typeof ListProductSpacesResponseSchema>
 export type ProductSpaceCatalogResponse = z.infer<typeof ProductSpaceCatalogResponseSchema>

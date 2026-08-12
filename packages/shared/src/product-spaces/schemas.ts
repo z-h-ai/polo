@@ -10,7 +10,11 @@ import {
   ProductSpaceIdSchema,
   WorkspaceIdSchema,
 } from './ids.ts'
-import type { ProductSpaceId } from './ids.ts'
+import type {
+  ArtifactInstanceId,
+  CatalogEntryId,
+  ProductSpaceId,
+} from './ids.ts'
 import { PRODUCT_SPACE_ERROR_CODES } from './errors.ts'
 import { PRODUCT_SPACE_CONTRACT_VERSION } from './context-key.ts'
 
@@ -85,6 +89,9 @@ const EnterpriseProductSpaceSummarySchema = z.object({
 }).strict().superRefine((value, ctx) => {
   if (value.accessMode === 'active' && value.restrictionCode !== undefined) {
     ctx.addIssue({ code: 'custom', path: ['restrictionCode'], message: 'Active spaces cannot include a restriction code' })
+  }
+  if (value.enterpriseId !== value.payer.enterpriseId) {
+    ctx.addIssue({ code: 'custom', path: ['payer', 'enterpriseId'], message: 'Enterprise payer must match the ProductSpace enterprise' })
   }
 })
 export const ProductSpaceSummarySchema = z.discriminatedUnion('kind', [
@@ -265,28 +272,98 @@ export class ProductSpaceResponseScopeError extends Error {
   }
 }
 
+/** Raised when a valid response is replayed for a different route parameter. */
+export class ProductSpaceResponsePathError extends Error {
+  constructor(
+    readonly parameter: 'catalogEntryId' | 'artifactInstanceId',
+    readonly expected: string,
+    readonly received: string,
+  ) {
+    super(`ProductSpace response did not match the requested ${parameter}`)
+    this.name = 'ProductSpaceResponsePathError'
+  }
+}
+
+/**
+ * A space context obtained from ProductSpace list state and already trusted by
+ * the client. Network DTOs deliberately remain context-neutral; callers must
+ * pass this context at the response boundary before entries become usable.
+ */
+export type TrustedProductSpaceCatalogContext =
+  | z.output<typeof ProductSpaceRefSchema>
+  | z.output<typeof ProductSpaceSummarySchema>
+
+function assertExpectedProductSpace(
+  receivedProductSpaceId: ProductSpaceId,
+  expectedProductSpaceId: ProductSpaceId,
+): void {
+  if (receivedProductSpaceId !== expectedProductSpaceId) {
+    throw new ProductSpaceResponseScopeError(expectedProductSpaceId, receivedProductSpaceId)
+  }
+}
+
+function assertCatalogEntrySourcesMatchProductSpace(
+  response: z.output<typeof ProductSpaceCatalogResponseSchema>,
+  context: TrustedProductSpaceCatalogContext,
+): void {
+  for (const entry of response.entries) {
+    if (context.kind === 'enterprise' && entry.kind === 'built_in_app') {
+      throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
+    }
+    if (entry.kind === 'built_in_app') continue
+
+    const hasCreatorCircleSource = entry.sources.some(source => source.kind === 'creator_circle')
+    const hasEnterpriseImportSource = entry.sources.some(source => source.kind === 'enterprise_import')
+    if (
+      (context.kind === 'personal' && hasEnterpriseImportSource)
+      || (context.kind === 'enterprise' && hasCreatorCircleSource)
+    ) {
+      throw new ProductSpaceResponseScopeError(context.id, response.productSpaceId)
+    }
+  }
+}
+
 /**
  * Use this at a client HTTP boundary after parsing the untrusted response.
  * A valid DTO for ProductSpace A must not be accepted for a request to B.
  */
 export function parseProductSpaceCatalogResponseForProductSpace(
   input: unknown,
-  expectedProductSpaceId: ProductSpaceId,
+  context: TrustedProductSpaceCatalogContext,
 ) {
   const response = ProductSpaceCatalogResponseSchema.parse(input)
-  if (response.productSpaceId !== expectedProductSpaceId) {
-    throw new ProductSpaceResponseScopeError(expectedProductSpaceId, response.productSpaceId)
-  }
+  assertExpectedProductSpace(response.productSpaceId, context.id)
+  assertCatalogEntrySourcesMatchProductSpace(response, context)
   return response
 }
 
 export function parseResolveLaunchResponseForProductSpace(
   input: unknown,
   expectedProductSpaceId: ProductSpaceId,
+  expectedCatalogEntryId: CatalogEntryId,
 ) {
   const response = ResolveLaunchResponseSchema.parse(input)
-  if (response.productSpaceId !== expectedProductSpaceId) {
-    throw new ProductSpaceResponseScopeError(expectedProductSpaceId, response.productSpaceId)
+  assertExpectedProductSpace(response.productSpaceId, expectedProductSpaceId)
+  if (response.catalogEntryId !== expectedCatalogEntryId) {
+    throw new ProductSpaceResponsePathError(
+      'catalogEntryId', expectedCatalogEntryId, response.catalogEntryId,
+    )
+  }
+  return response
+}
+
+/** Parses a Skill enablement response only for its exact PUT route tuple. */
+export function parseUpdateSkillEnablementResponseForProductSpace(
+  input: unknown,
+  expectedProductSpaceId: ProductSpaceId,
+  expectedArtifactInstanceId: ArtifactInstanceId,
+) {
+  const response = UpdateSkillEnablementResponseSchema.parse(input)
+  assertExpectedProductSpace(response.productSpaceId, expectedProductSpaceId)
+  if (response.artifactInstanceId !== expectedArtifactInstanceId) {
+    throw new ProductSpaceResponsePathError(
+      'artifactInstanceId', expectedArtifactInstanceId, response.artifactInstanceId,
+    )
   }
   return response
 }

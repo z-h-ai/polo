@@ -9,6 +9,7 @@ import {
   ProductSpaceErrorResponseSchema,
   ProductSpaceExecutionScopeSchema,
   ProductSpaceIdSchema,
+  ProductSpaceRefSchema,
   ResolveLaunchResponseSchema,
   StopAllExecutionsResultSchema,
   WorkspaceIdSchema,
@@ -16,6 +17,8 @@ import {
   createProductSpaceRuntimeKey,
   invalidateLegacyOrganizationState,
   parseProductSpaceCatalogResponseForProductSpace,
+  parseResolveLaunchResponseForProductSpace,
+  parseUpdateSkillEnablementResponseForProductSpace,
   type EnterpriseId,
   type ProductSpaceId,
   type WorkspaceId,
@@ -35,6 +38,14 @@ function personalSpace() {
     name: '我的空间' as const,
     accessMode: 'active' as const,
     payer: { kind: 'account' as const },
+  }
+}
+
+function catalogApp(sources: unknown[]) {
+  return {
+    catalogEntryId: 'catalog-app', name: 'Example app', description: 'An app',
+    availability: 'available', kind: 'app', artifactInstanceId: 'artifact-a',
+    version: { versionId: 'version-a', version: '1.0.0' }, sources, permissions: [],
   }
 }
 
@@ -69,6 +80,11 @@ describe('ProductSpace v1 network contract', () => {
         id: 'product-space-b', kind: 'enterprise', enterpriseId: 'enterprise-b', name: 'Enterprise',
         role: 'member', accessMode: 'active', restrictionCode: 'billing_restricted',
         payer: { kind: 'enterprise', enterpriseId: 'enterprise-b' },
+      },
+      {
+        id: 'product-space-b', kind: 'enterprise', enterpriseId: 'enterprise-b', name: 'Enterprise',
+        role: 'member', accessMode: 'active',
+        payer: { kind: 'enterprise', enterpriseId: 'enterprise-other' },
       },
     ]) {
       expect(ListProductSpacesResponseSchema.safeParse({
@@ -117,7 +133,69 @@ describe('ProductSpace v1 network contract', () => {
     }).success).toBe(false)
     expect(() => parseProductSpaceCatalogResponseForProductSpace({
       contractVersion: 1, productSpaceId: 'product-space-b', catalogRevision: 'r1', entries: [],
-    }, ProductSpaceIdSchema.parse('product-space-a'))).toThrow('did not match')
+    }, ProductSpaceRefSchema.parse({ id: 'product-space-a', kind: 'personal' }))).toThrow('did not match')
+  })
+
+  test('binds catalog entries to the trusted ProductSpace kind', () => {
+    const personal = ProductSpaceRefSchema.parse({ id: 'product-space-a', kind: 'personal' })
+    const enterprise = ProductSpaceRefSchema.parse({
+      id: 'product-space-a', kind: 'enterprise', enterpriseId: 'enterprise-a', role: 'member',
+    })
+    const response = (entries: unknown[]) => ({
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogRevision: 'r1', entries,
+    })
+
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([
+      catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
+    ]), personal).entries).toHaveLength(1)
+    expect(() => parseProductSpaceCatalogResponseForProductSpace(response([
+      catalogApp([{ kind: 'enterprise_import', name: 'Enterprise import' }]),
+    ]), personal)).toThrow('did not match')
+    expect(() => parseProductSpaceCatalogResponseForProductSpace(response([{
+      catalogEntryId: 'assistant', name: 'Polo assistant', description: 'Built in',
+      availability: 'available', kind: 'built_in_app', builtInAppId: 'polo_assistant',
+    }]), enterprise)).toThrow('did not match')
+    expect(() => parseProductSpaceCatalogResponseForProductSpace(response([
+      catalogApp([{ kind: 'creator_circle', circleId: 'circle-a', name: 'Circle A' }]),
+    ]), enterprise)).toThrow('did not match')
+    expect(parseProductSpaceCatalogResponseForProductSpace(response([
+      catalogApp([{ kind: 'enterprise_import', name: 'Enterprise import' }]),
+    ]), enterprise).entries).toHaveLength(1)
+  })
+
+  test('binds resolve-launch and Skill enablement responses to every route ID', () => {
+    const expectedProductSpaceId = ProductSpaceIdSchema.parse('product-space-a')
+    const expectedCatalogEntryId = CatalogEntryIdSchema.parse('catalog-a')
+    const expectedArtifactInstanceId = ArtifactInstanceIdSchema.parse('artifact-a')
+    const launch = {
+      contractVersion: 1, productSpaceId: 'product-space-a', catalogEntryId: 'catalog-a',
+      resolvedAt: '2030-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:05:00.000Z',
+      subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      payer: { kind: 'account' }, delivery: { kind: 'built_in' },
+    }
+    expect(parseResolveLaunchResponseForProductSpace(
+      launch, expectedProductSpaceId, expectedCatalogEntryId,
+    ).catalogEntryId).toBe(expectedCatalogEntryId)
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      { ...launch, catalogEntryId: 'catalog-other' }, expectedProductSpaceId, expectedCatalogEntryId,
+    )).toThrow('catalogEntryId')
+    expect(() => parseResolveLaunchResponseForProductSpace(
+      { ...launch, productSpaceId: 'product-space-other' }, expectedProductSpaceId, expectedCatalogEntryId,
+    )).toThrow('ProductSpace')
+
+    const enablement = {
+      contractVersion: 1, productSpaceId: 'product-space-a', artifactInstanceId: 'artifact-a',
+      enabled: true, catalogRevision: 'r1',
+    }
+    expect(parseUpdateSkillEnablementResponseForProductSpace(
+      enablement, expectedProductSpaceId, expectedArtifactInstanceId,
+    ).artifactInstanceId).toBe(expectedArtifactInstanceId)
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      { ...enablement, artifactInstanceId: 'artifact-other' }, expectedProductSpaceId, expectedArtifactInstanceId,
+    )).toThrow('artifactInstanceId')
+    expect(() => parseUpdateSkillEnablementResponseForProductSpace(
+      { ...enablement, productSpaceId: 'product-space-other' }, expectedProductSpaceId, expectedArtifactInstanceId,
+    )).toThrow('ProductSpace')
   })
 })
 
