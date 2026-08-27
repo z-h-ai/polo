@@ -1,0 +1,7 @@
+{
+  "version": "1.0.4",
+  "source_commit": "0e2ae9e12d0dd75390139bbcf26c828ae01e7e6a",
+  "url": "https://github.com/z-h-ai/test-resource-lifecycle/releases/download/v1.0.4/trl.pyz",
+  "sha256": "5f4f9e24c389f9cbfbfb1823422d850a743be102a7a4277aace1c165b77f6e79",
+  "python_min": "3.10"
+}

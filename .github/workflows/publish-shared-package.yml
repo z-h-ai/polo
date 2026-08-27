@@ -56,11 +56,22 @@ jobs:
         id: package
         run: node -e "const fs=require('node:fs'); const publishManifest=require('./packages/shared/package.publish.json'); const stem=publishManifest.name.replace(/^@/, '').replace('/', '-'); const tarball=process.env.RUNNER_TEMP + '/shared-package-artifact/' + stem + '-' + publishManifest.version + '.tgz'; const artifact=stem + '-' + publishManifest.version + '-proof'; fs.appendFileSync(process.env.GITHUB_ENV, ['SHARED_VERSION=' + publishManifest.version, 'SHARED_TARBALL_PATH=' + tarball, ''].join('\\n')); fs.appendFileSync(process.env.GITHUB_OUTPUT, ['tarball_path=' + tarball, 'artifact_name=' + artifact, ''].join('\\n'))"
 
+      - name: Sweep stale managed test resources
+        run: bash scripts/trl sweep --repo=polo
+
       - name: Verify proof failure lifecycle
-        run: bun run --cwd packages/shared test:creator-skills-package-failures
+        run: bash scripts/trl run --profile=unit-test -- bun run --cwd packages/shared test:creator-skills-package-failures
 
       - name: Build, pack, and run clean-consumer proof
-        run: bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --output-dir "$RUNNER_TEMP/shared-package-artifact"
+        run: bash scripts/trl run --profile=unit-test -- bun run packages/shared/scripts/verify-creator-skills-package-lifecycle.ts --output-dir "$RUNNER_TEMP/shared-package-artifact"
+
+      - name: Upload test resource cleanup report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trl-cleanup-report
+          path: .pipeline/test-resource-runs/**/cleanup-report.json
+          if-no-files-found: ignore
 
       - name: Attest the verified tarball
         if: startsWith(github.ref, 'refs/tags/')

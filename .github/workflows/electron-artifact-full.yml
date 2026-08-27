@@ -172,6 +172,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
+      - name: Sweep stale managed test resources
+        shell: bash
+        run: bash scripts/trl sweep --repo=polo
+
       - name: Prove clean platform runtime preparation contract
         shell: bash
         run: |
@@ -186,7 +190,7 @@ jobs:
             apps/electron/resources/bin/linux-x64 \
             apps/electron/resources/bin/win32-arm64 \
             apps/electron/resources/bin/win32-x64
-          bun test scripts/__tests__/prepare-platform-runtime.test.ts
+          bash scripts/trl run --profile=unit-test -- bun test scripts/__tests__/prepare-platform-runtime.test.ts
           test ! -e apps/electron/vendor/bun
           test -z "$(find apps/electron/resources/bin -maxdepth 2 -type f -name 'uv*' -print -quit)"
 
@@ -379,5 +383,14 @@ jobs:
             ${{ runner.temp }}/full-validation-${{ matrix.platform }}-${{ matrix.arch }}.log
             apps/electron/release/release-signing-audit-*.jsonl
             previous/verified-contract-${{ matrix.platform }}.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload test resource cleanup report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-trl-cleanup-report-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .pipeline/test-resource-runs/**/cleanup-report.json
           if-no-files-found: ignore
           retention-days: 14

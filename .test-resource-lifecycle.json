@@ -1,0 +1,47 @@
+{
+  "policy_version": 1,
+  "repository_id": "polo",
+  "profiles": {
+    "validate": {
+      "timeout_seconds": 2400,
+      "cleanup_timeout_seconds": 300,
+      "resources": {}
+    },
+    "unit-test": {
+      "timeout_seconds": 2400,
+      "cleanup_timeout_seconds": 300,
+      "resources": {}
+    },
+    "doc-tools": {
+      "timeout_seconds": 900,
+      "cleanup_timeout_seconds": 300,
+      "resources": {}
+    },
+    "e2e-phone-auth": {
+      "timeout_seconds": 1800,
+      "cleanup_timeout_seconds": 300,
+      "resources": {
+        "postgresql": [
+          {
+            "name": "e2e-postgres",
+            "image": "postgres:16.9-alpine",
+            "database": "polo_admin_test",
+            "username": "polo_e2e",
+            "password_env": "POLO_E2E_PG_PASSWORD",
+            "inject_url_env": "POL53_E2E_DATABASE_URL"
+          }
+        ]
+      }
+    },
+    "docker-smoke": {
+      "timeout_seconds": 900,
+      "cleanup_timeout_seconds": 120,
+      "resources": {}
+    },
+    "release-dist": {
+      "timeout_seconds": 3600,
+      "cleanup_timeout_seconds": 300,
+      "resources": {}
+    }
+  }
+}

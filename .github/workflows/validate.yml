@@ -41,5 +41,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Sweep stale managed test resources
+        run: bash scripts/trl sweep --repo=polo
+
       - name: Run validation suite
-        run: bun run validate:ci
+        run: bash scripts/trl run --profile=validate -- bun run validate:ci
+
+      - name: Upload test resource cleanup report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trl-cleanup-report
+          path: .pipeline/test-resource-runs/**/cleanup-report.json
+          if-no-files-found: ignore

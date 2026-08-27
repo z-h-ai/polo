@@ -1,0 +1,68 @@
+#!/bin/sh
+set -eu
+
+trl_repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+trl_lock_file="$trl_repo_dir/.test-resource-lifecycle.lock.json"
+
+trl_lock_values=$(python3 - "$trl_lock_file" <<'PY'
+import json, re, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+value = json.loads(path.read_text(encoding="utf-8"))
+required = {"version", "source_commit", "url", "sha256", "python_min"}
+if set(value) != required:
+    raise SystemExit("invalid trl lock fields")
+if not re.fullmatch(r"[0-9a-f]{40}", value["source_commit"]):
+    raise SystemExit("invalid trl source commit")
+if not re.fullmatch(r"[0-9a-f]{64}", value["sha256"]):
+    raise SystemExit("invalid trl sha256")
+if not value["url"].startswith("https://github.com/z-h-ai/test-resource-lifecycle/releases/download/v"):
+    raise SystemExit("trl lock URL must be an immutable z-h-ai release")
+for key in ("version", "url", "sha256", "python_min"):
+    print(value[key])
+PY
+)
+
+trl_version=$(printf '%s\n' "$trl_lock_values" | sed -n '1p')
+trl_url=$(printf '%s\n' "$trl_lock_values" | sed -n '2p')
+trl_sha256=$(printf '%s\n' "$trl_lock_values" | sed -n '3p')
+trl_python_min=$(printf '%s\n' "$trl_lock_values" | sed -n '4p')
+trl_cache_base=${XDG_CACHE_HOME:-"$HOME/.cache"}
+trl_cache_dir="$trl_cache_base/test-resource-lifecycle/$trl_version"
+trl_executable="$trl_cache_dir/trl.pyz"
+
+python3 - "$trl_python_min" <<'PY'
+import sys
+minimum = tuple(map(int, sys.argv[1].split(".")))
+if sys.version_info[:2] < minimum:
+    raise SystemExit(f"trl requires Python {sys.argv[1]}+")
+PY
+
+trl_verify() {
+  trl_actual=$(shasum -a 256 "$1" | awk '{print $1}')
+  [ "$trl_actual" = "$trl_sha256" ]
+}
+
+if [ -f "$trl_executable" ] && ! trl_verify "$trl_executable"; then
+  echo "trl cached artifact hash mismatch: $trl_executable" >&2
+  exit 70
+fi
+
+if [ ! -f "$trl_executable" ]; then
+  mkdir -p "$trl_cache_dir"
+  trl_temporary="$trl_cache_dir/.trl.pyz.$$"
+  trap 'rm -f "$trl_temporary"' EXIT HUP INT TERM
+  if ! curl --fail --location --silent --show-error "$trl_url" --output "$trl_temporary"; then
+    echo "trl download failed and no verified cache exists" >&2
+    exit 70
+  fi
+  if ! trl_verify "$trl_temporary"; then
+    echo "trl downloaded artifact hash mismatch" >&2
+    exit 70
+  fi
+  chmod 755 "$trl_temporary"
+  mv "$trl_temporary" "$trl_executable"
+  trap - EXIT HUP INT TERM
+fi
+
+exec python3 "$trl_executable" "$@"
