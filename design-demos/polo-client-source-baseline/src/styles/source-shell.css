@@ -1,1 +1,80 @@
-.source-shell{width:100%;height:100%;min-height:0;overflow:hidden;background:var(--background);color:var(--foreground)}.source-topbar{position:fixed;top:36px;left:0;right:0;z-index:30;height:48px;display:flex;align-items:center;justify-content:space-between;gap:8px}.source-topbar__left,.source-topbar__right,.source-topbar__workspace{display:flex;min-width:0;align-items:center;gap:2px}.source-topbar__left{flex:1;padding-left:12px}.source-topbar__right{padding-right:12px}.source-topbar__workspace{width:clamp(220px,42vw,640px);gap:4px;margin-left:4px}.source-icon-button{width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex:none;padding:0;border:0;border-radius:6px;background:transparent;color:color-mix(in srgb,var(--foreground) 70%,transparent);transition:background-color 100ms}.source-icon-button:hover{background:color-mix(in srgb,var(--foreground) 5%,transparent)}.source-icon-button:disabled{opacity:.3}.source-icon-button svg{width:18px;height:18px}.source-topbar__left>.source-icon-button:nth-child(2) svg{width:16px;height:16px;color:var(--accent)}.source-workspace-switcher{height:30px;min-width:0;flex:1;display:flex;align-items:center;gap:8px;margin-left:4px;padding:0 12px;border:1px solid color-mix(in srgb,var(--foreground) 6%,transparent);border-radius:8px;background:transparent;color:color-mix(in srgb,var(--foreground) 50%,transparent);font-size:13px;text-align:left}.source-workspace-switcher>span:nth-child(2){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source-workspace-switcher__avatar{width:16px;height:16px;flex:none;border-radius:50%;background:color-mix(in srgb,var(--foreground) 5%,transparent)}.source-panel-stack{position:absolute;inset:84px 0 0;display:flex;gap:6px;min-height:0;padding:0 6px 6px 0}.source-panel-stack--without-sidebar{padding-left:6px}.source-sidebar{width:220px;flex:0 0 220px;min-height:0;display:flex;flex-direction:column}.source-new-session{width:100%;display:flex;align-items:center;gap:8px;margin:0 8px 8px;width:calc(100% - 16px);padding:7px 8px;border:0;border-radius:6px;background:var(--background);color:var(--foreground);box-shadow:var(--shadow-minimal);font-size:13px;text-align:left}.source-new-session svg{width:14px;height:14px}.source-sidebar__nav{display:grid;align-content:start;gap:2px;min-height:0;overflow:auto;padding:4px 8px 16px}.source-sidebar__nav hr{width:calc(100% - 16px);height:1px;margin:4px 8px;border:0;background:color-mix(in srgb,var(--foreground) 5%,transparent)}.source-sidebar__nested{position:relative;display:grid;gap:2px;padding-left:20px}.source-sidebar__nested:before{content:'';position:absolute;top:4px;bottom:4px;left:13px;width:1px;background:color-mix(in srgb,var(--foreground) 10%,transparent)}.source-nav-item{width:100%;display:flex;align-items:center;gap:8px;padding:5px 8px;border:0;border-radius:6px;background:transparent;color:var(--foreground);font-size:13px;text-align:left}.source-nav-item:hover{background:color-mix(in srgb,var(--foreground) 5%,transparent)}.source-nav-item.is-active{background:color-mix(in srgb,var(--foreground) 7%,transparent)}.source-nav-item svg{width:14px;height:14px;flex:none;color:color-mix(in oklch,var(--foreground) 60%,transparent)}.source-navigator,.source-content-panel{min-height:0;height:100%;overflow:hidden;background:var(--background);box-shadow:var(--shadow-middle)}.source-navigator{width:300px;flex:0 0 300px;border-radius:10px}.source-content-panel{min-width:440px;flex:1 1 0;border-radius:10px 14px 14px 10px}.source-navigator__empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}.source-navigator__empty>svg{width:40px;height:40px;margin-bottom:12px;padding:10px;border-radius:10px;color:color-mix(in srgb,var(--foreground) 55%,transparent);background:color-mix(in srgb,var(--foreground) 5%,transparent)}.source-navigator__empty strong{font-size:14px}.source-navigator__empty p{max-width:260px;margin:6px 0 14px;color:color-mix(in srgb,var(--foreground) 55%,transparent);font-size:13px;line-height:1.45}.source-navigator__empty button{height:28px;padding:0 12px;border:0;border-radius:8px;background:var(--background);box-shadow:0 1px 2px rgba(0,0,0,.08);font-size:12px}
+/* Translated from TopBar.tsx, AppShell.tsx, PanelStackContainer.tsx,
+   LeftSidebar.tsx, PanelSlot.tsx and panel-constants.ts. Root font-size is
+   15px, so Tailwind rem values are written verbatim (1rem = 15px). */
+
+.source-shell{width:100%;height:100%;min-height:0;overflow:hidden;background:var(--background);color:var(--foreground)}
+/* TopBar: fixed under the tab bar, z-panel, h-(--topbar-height), px-3. */
+.source-topbar{position:fixed;top:36px;left:0;right:0;z-index:50;height:48px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.source-topbar__left,.source-topbar__right,.source-topbar__workspace{display:flex;min-width:0;align-items:center;gap:2px}
+.source-topbar__left{flex:1;padding-left:11.25px}
+.source-topbar__right{padding-right:11.25px}
+.source-topbar__workspace{width:clamp(220px,42vw,640px);gap:3.75px;margin-left:3.75px}
+/* TopBarButton: 28px square rounded-lg icon buttons, foreground/70 icons that
+   darken on hover with a foreground/3 wash (TopBar.tsx, HeaderIconButton). */
+.source-icon-button{width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex:none;padding:0;border:0;border-radius:7.5px;background:transparent;color:color-mix(in srgb,var(--foreground) 70%,transparent);transition:background-color 100ms}
+.source-icon-button:hover{background:color-mix(in srgb,var(--foreground) 3%,transparent)}
+.source-icon-button:disabled{opacity:.3}
+.source-icon-button svg{width:18px;height:18px}
+/* The Polo AI menu symbol button keeps its accent color at 16px. */
+.source-topbar__left>.source-icon-button:nth-child(2) svg{width:15px;height:15px;color:var(--accent)}
+/* Right cluster: Plus/Help are 26px rounded-lg buttons with 50% icons; the
+   Plus button carries ml-1 (TopBar.tsx:224-247). */
+.source-topbar__right .source-icon-button{width:26px;height:26px;border-radius:7.5px;color:color-mix(in srgb,var(--foreground) 50%,transparent)}
+.source-topbar__right .source-icon-button:first-child{margin-left:3.75px}
+.source-topbar__right .source-icon-button svg{width:16px;height:16px}
+/* WorkspaceSwitcher trigger: h-[30px] px-3 rounded-lg border-foreground/6,
+   gap-0.5 with an avatar mr-1.5 and a 60% chevron. */
+.source-workspace-switcher{height:30px;min-width:0;flex:1;display:flex;align-items:center;gap:2px;margin-left:3.75px;padding:0 11.25px;border:1px solid color-mix(in srgb,var(--foreground) 6%,transparent);border-radius:7.5px;background:transparent;color:color-mix(in srgb,var(--foreground) 50%,transparent);font-size:13px;text-align:left}
+.source-workspace-switcher>span:nth-child(2){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-workspace-switcher__avatar{width:16px;height:16px;flex:none;margin-right:5.625px;border-radius:50%;background:color-mix(in srgb,var(--foreground) 5%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--foreground) 10%,transparent)}
+.source-workspace-switcher svg{opacity:.6}
+/* Panel stack: top 84px (36px tab bar + 48px top bar), 6px gap and inset
+   (panel-constants.ts PANEL_GAP/INSET), sidebar 220px, navigator 300px,
+   content min 440px (AppShell.tsx:546-550). */
+.source-panel-stack{position:absolute;inset:84px 0 0;display:flex;gap:6px;min-height:0;padding:0 6px 6px 0}
+.source-panel-stack--without-sidebar{padding-left:6px}
+.source-sidebar{width:220px;flex:0 0 220px;min-height:0;display:flex;flex-direction:column}
+.source-new-session{width:calc(100% - 16px);display:flex;align-items:center;gap:8px;margin:0 8px 8px;padding:7px 8px;border:0;border-radius:6px;background:var(--background);color:var(--foreground);box-shadow:var(--shadow-minimal);font-size:13px;text-align:left}
+.source-new-session svg{width:14px;height:14px}
+.source-sidebar__nav{display:grid;align-content:start;gap:2px;min-height:0;overflow:auto;padding:4px 8px 16px}
+.source-sidebar__nav hr{width:calc(100% - 16px);height:1px;margin:4px 8px;border:0;background:color-mix(in srgb,var(--foreground) 5%,transparent)}
+.source-sidebar__nested{position:relative;display:grid;gap:2px;padding-left:20px}
+.source-sidebar__nested:before{content:'';position:absolute;top:4px;bottom:4px;left:13px;width:1px;background:color-mix(in srgb,var(--foreground) 10%,transparent)}
+/* Sidebar rows: py-[5px] px-2 rounded-md text-[13px]; hover is sidebar-hover
+   = foreground 2% (index.css:421), active foreground 7%. */
+.source-nav-item{width:100%;display:flex;align-items:center;gap:8px;padding:5px 8px;border:0;border-radius:6px;background:transparent;color:var(--foreground);font-size:13px;text-align:left}
+.source-nav-item:hover{background:color-mix(in srgb,var(--foreground) 2%,transparent)}
+.source-nav-item.is-active{background:color-mix(in srgb,var(--foreground) 7%,transparent)}
+.source-nav-item svg{width:14px;height:14px;flex:none;color:color-mix(in oklch,var(--foreground) 60%,transparent)}
+/* Sidebar footer user row: border-t + 32px gradient avatar + name + chevron
+   (LeftSidebar.tsx:324-392). */
+.source-sidebar__footer{display:flex;align-items:center;gap:8px;margin-top:auto;padding:12px 8px;border-top:1px solid color-mix(in srgb,var(--foreground) 5%,transparent)}
+.source-sidebar__user{display:flex;min-width:0;flex:1;align-items:center;gap:8px;padding:4px;border:0;border-radius:6px;background:transparent;text-align:left}
+.source-sidebar__user:hover{background:color-mix(in srgb,var(--foreground) 2%,transparent)}
+.source-sidebar__user-avatar{width:32px;height:32px;flex:none;border-radius:50%;background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 45%,var(--foreground)));color:var(--background);display:grid;place-items:center;font-size:13px;font-weight:600}
+.source-sidebar__user-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;color:var(--foreground)}
+.source-sidebar__user svg{width:12px;height:12px;flex:none;color:color-mix(in srgb,var(--foreground) 50%,transparent)}
+/* PanelHeader above navigator lists: h-[42px] pl-4 pr-2 gap-1.5 with a
+   text-sm semibold title (PanelHeader.tsx) and a HeaderIconButton (h-7 w-7
+   rounded-[4px], icon h-4 w-4 = 15px). */
+.source-navigator__header{display:flex;height:42px;flex-shrink:0;align-items:center;gap:5.625px;padding-left:15px;padding-right:7.5px;border-bottom:1px solid color-mix(in srgb,var(--foreground) 5%,transparent)}
+.source-navigator__header-title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--foreground);font-size:13.125px;font-weight:600;line-height:1.25}
+.source-navigator__header-button{display:flex;width:26.25px;height:26.25px;flex:none;align-items:center;justify-content:center;padding:0;border:0;border-radius:4px;background:transparent;color:var(--fg-50)}
+.source-navigator__header-button svg{width:15px;height:15px}
+.source-navigator__header-button:hover{background:color-mix(in srgb,var(--foreground) 3%,transparent)}
+/* Panels: navigator bg-background, content panel bg-foreground-2
+   (PanelSlot.tsx:117-122), shadow-middle; radii 10px inner / 14px outer edge
+   (RADIUS_INNER/RADIUS_EDGE). */
+.source-navigator,.source-content-panel{min-height:0;height:100%;overflow:hidden;box-shadow:var(--shadow-middle)}
+.source-navigator{width:300px;flex:0 0 300px;background:var(--background);border-radius:10px;display:flex;flex-direction:column}
+.source-content-panel{min-width:440px;flex:1 1 0;background:var(--fg-2);border-radius:10px 14px 14px 10px}
+.source-panel-stack--without-sidebar .source-navigator{border-radius:10px 10px 14px 10px}
+/* Empty session list: EntityListEmptyScreen — bare 40px Inbox at 50% color,
+   14px/500 title, 12px description, p-6 pb-[20%] (empty.tsx). */
+.source-navigator__list{flex:1;min-height:0;overflow:auto}
+.source-navigator__empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;padding-bottom:20%;text-align:center}
+.source-navigator__empty>svg{width:40px;height:40px;margin-bottom:8px;color:var(--fg-50)}
+.source-navigator__empty strong{font-size:14px;font-weight:500;letter-spacing:-.025em}
+.source-navigator__empty p{max-width:360px;margin:0;color:var(--fg-50);font-size:12px;line-height:1.375}
+.source-navigator__empty button{display:inline-flex;height:28px;align-items:center;padding:0 11.25px;border:0;border-radius:8px;background:var(--background);box-shadow:var(--shadow-minimal);color:var(--foreground);font-size:12px;font-weight:500}
+.source-navigator__empty button:hover{background:color-mix(in srgb,var(--foreground) 3%,var(--background))}

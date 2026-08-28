@@ -30,8 +30,8 @@
     ],
     "sceneCatalog": "scene-catalog.json",
     "screenshots": "screenshots/",
-    "singleFileBytes": 301325,
-    "singleFileSha256": "c0b6c1a467dc463341e6cafa7047526326af35ee967b4a7f76e1eb93d30bb04c",
+    "singleFileBytes": 314530,
+    "singleFileSha256": "5e7a1f35a24f7db01d22978a06d12c9e0714dc5b8362d718e2c17b9213090ba3",
     "moduleBuild": "dist/"
   },
   "protocol": {

@@ -5,7 +5,7 @@ import { SourceFaithfulEmptyChat } from './source/EmptyChat.jsx'
 import { SourceHomeTabFrame } from './source/HomeTabFrame.jsx'
 import { SourcePoloShell } from './source/PoloShell.jsx'
 import { SourceAdminLogin } from './source/AdminLogin.jsx'
-import { SettingsRegion } from './source/SettingsRegion.jsx'
+import { SourceSettingsNavigator, SourceAppSettingsPage } from './source/SettingsRegion.jsx'
 import { SourceLifecycleRegion } from './source/LifecycleRegion.jsx'
 import { SourceResetConfirmation } from './source/ResetDialog.jsx'
 import { SourceBrowserEmptyState } from './source/BrowserEmptyState.jsx'
@@ -22,10 +22,11 @@ function SceneRouter({ query }) {
   if (query.scene === 'workspace-picker') return <SourceWorkspacePicker state={query.state}/>
   if (query.scene === 'organization') return <SourceOrganizationOnboarding state={query.state}/>
   if (query.scene === 'home' || query.scene === 'enterprise-home') return <SourceHomeLauncher poloIconSrc={poloIconSrc} onOpenPolo={() => navigate({ scene: 'chat', state: 'empty' })}/>
-  if (query.scene === 'chat' || query.scene === 'chat-permission') return <SourceFaithfulEmptyChat/>
+  if (query.scene === 'chat') return <SourceFaithfulEmptyChat/>
+  if (query.scene === 'chat-permission') return <SourceFaithfulEmptyChat permission/>
   if (query.scene === 'browser') return <SourceBrowserEmptyState/>
   if (query.scene === 'app-menu') return <SourceDesktopAppMenu/>
-  if (query.scene === 'settings') return <SettingsRegion/>
+  if (query.scene === 'settings') return <SourceAppSettingsPage/>
   if (query.scene === 'shortcuts') return <SourceKeyboardShortcutsDialog/>
   if (query.scene === 'reset') return <SourceResetConfirmation/>
   return <SourceHomeLauncher poloIconSrc={poloIconSrc} onOpenPolo={() => navigate({ scene: 'chat', state: 'empty' })}/>
@@ -43,7 +44,7 @@ export function App() {
   if (['browser', 'app-menu', 'organization', 'shortcuts', 'reset'].includes(query.scene)) return <div className="prototype-root"><SceneRouter query={query}/></div>
   if (query.scene === 'home' || query.scene === 'enterprise-home') return <div className="prototype-root"><SourceHomeTabFrame iconSrc={poloIconSrc}><SceneRouter query={query}/></SourceHomeTabFrame></div>
   if (query.scene === 'chat' || query.scene === 'chat-permission') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc}><SceneRouter query={query}/></SourcePoloShell></div>
-  if (['sources', 'skills', 'automations'].includes(query.scene)) return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceResourceEmptyPanel kind={query.scene}/>}><SourceUnselectedResourceDetail/></SourcePoloShell></div>
-  if (query.scene === 'settings') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={false}><SceneRouter query={query}/></SourcePoloShell></div>
+  if (['sources', 'skills', 'automations'].includes(query.scene)) return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceResourceEmptyPanel kind={query.scene}/>}><SourceUnselectedResourceDetail kind={query.scene}/></SourcePoloShell></div>
+  if (query.scene === 'settings') return <div className="prototype-root"><SourcePoloShell iconSrc={poloIconSrc} navigator={<SourceSettingsNavigator/>}><SourceAppSettingsPage/></SourcePoloShell></div>
   return <div className="prototype-root"><SourceHomeTabFrame iconSrc={poloIconSrc}><SceneRouter query={query}/></SourceHomeTabFrame></div>
 }
