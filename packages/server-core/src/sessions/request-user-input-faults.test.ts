@@ -57,8 +57,13 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }) as never)
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     releaseShouldFail = false
+    // Drop sessions from previous sm instances: their orphaned retry timers
+    // survive the test (plain bun test shares one process) and the identity
+    // guard passes while the old map still holds the session — clearing the
+    // map makes those guards silently drop cross-test ghost firings.
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.clear()
     rmSync(tmpRoot, { recursive: true, force: true })
   })
 
@@ -435,4 +440,153 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     expect((getManaged('f-resume-3') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
   })
+
+  // Round 6, issues #2/#3: the resume path must drive the REAL sendMessage
+  // (mocking getOrCreateAgent, not sendMessage) so pre-chat failures exercise
+  // the processing-reset boundary, the retry drives the real entry again
+  // without duplicating the user message, and the retry timer is owned by the
+  // session lifecycle (cancelled on delete/stop, no ghost turns).
+
+  function makeFakeAgent(): Record<string, unknown> {
+    return {
+      allowRequestUserInput: false,
+      chat: async function* () { yield { type: 'complete' as const } },
+      getModel: () => 'fake-model',
+      getSessionId: () => null,
+      isProcessing: () => false,
+      supportsBranching: true,
+      setAllSources: () => {},
+      setSourceServers: async () => {},
+      getSummarizeCallback: () => undefined,
+      dispose: () => {},
+      interruptForHandoff: () => {},
+      forceAbort: () => {},
+      respondToPermission: () => {},
+    }
+  }
+
+  it('getOrCreateAgent failure resets processing (not stuck) and the retry drives the real entry again without duplicating the answer', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-real-1')
+    seedSession('f-real-1', { pendingQuestion: request })
+
+    let agentInitCalls = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<never> }).getOrCreateAgent = async () => {
+      agentInitCalls++
+      throw new Error(`agent init failed #${agentInitCalls}`)
+    }
+
+    const result = await sm.respondToQuestion('f-real-1', makeAnswerResolution(request))
+    expect(result).toEqual({ status: 'accepted' })
+
+    // Issue #2 core assertion: the pre-chat failure reset processing —
+    // the session is NOT stuck at isProcessing=true.
+    expect((getManaged('f-real-1') as unknown as { isProcessing: boolean }).isProcessing).toBe(false)
+    // User-visible failure event emitted
+    expect(events.filter(e => e.type === 'error').length).toBeGreaterThanOrEqual(1)
+    // Exactly one answer message — the retry must not add another user turn
+    const answerMessages = () => (getManaged('f-real-1').messages as Array<Record<string, unknown>>)
+      .filter(m => (m as { questionResponse?: unknown }).questionResponse)
+    expect(answerMessages()).toHaveLength(1)
+
+    // Retry (backoff 1s) drives the REAL entry (getOrCreateAgent called again)
+    await new Promise(r => setTimeout(r, 1300))
+    expect(agentInitCalls).toBeGreaterThanOrEqual(2)
+    expect((getManaged('f-real-1') as unknown as { isProcessing: boolean }).isProcessing).toBe(false)
+    // Still exactly one answer message
+    expect(answerMessages()).toHaveLength(1)
+  })
+
+  it('fail → delete: the retry timer never fires for a deleted session (no events, no ghost turns)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-real-del')
+    seedSession('f-real-del', { pendingQuestion: request })
+
+    let agentInitCalls = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<never> }).getOrCreateAgent = async () => {
+      agentInitCalls++
+      throw new Error(`agent init failed #${agentInitCalls}`)
+    }
+
+    await sm.respondToQuestion('f-real-del', makeAnswerResolution(request))
+    const errorEventsBefore = events.filter(e => e.type === 'error').length
+    expect(agentInitCalls).toBe(1)
+
+    // Delete the session while the retry timer is pending
+    await sm.deleteSession('f-real-del')
+    const errorEventsAfterDelete = events.filter(e => e.type === 'error').length
+
+    // Advance past the scheduled retry — nothing may fire for the deleted session
+    await new Promise(r => setTimeout(r, 2000))
+    expect(agentInitCalls).toBe(1)
+    expect(events.filter(e => e.type === 'error').length).toBe(errorEventsAfterDelete)
+    void errorEventsBefore
+  })
+
+  it('stop → the armed retry is cancelled and never restarts (immediate, awaited flush)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-real-stop')
+    seedSession('f-real-stop', { pendingQuestion: request })
+
+    let agentInitCalls = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<never> }).getOrCreateAgent = async () => {
+      agentInitCalls++
+      throw new Error(`agent init failed #${agentInitCalls}`)
+    }
+
+    await sm.respondToQuestion('f-real-stop', makeAnswerResolution(request))
+    expect(agentInitCalls).toBe(1)
+
+    // Stop: clears the armed retry with an awaited flush
+    await sm.cancelProcessing('f-real-stop')
+
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-real-stop'), 'utf-8').split('\n')[0])
+    expect(header.pendingAgentResume).toBeUndefined()
+
+    // Advance past the (cancelled) retry schedule — no new agent init calls
+    await new Promise(r => setTimeout(r, 2000))
+    expect(agentInitCalls).toBe(1)
+  })
+
+  it('resume success → awaited flush clears disk state; no restart after completion', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-real-ok')
+    seedSession('f-real-ok', { pendingQuestion: request })
+
+    let agentInitCalls = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      agentInitCalls++
+      if (agentInitCalls === 1) {
+        throw new Error(`agent init failed #${agentInitCalls}`)
+      }
+      return makeFakeAgent()
+    }
+
+    const result = await sm.respondToQuestion('f-real-ok', makeAnswerResolution(request))
+    expect(result).toEqual({ status: 'accepted' })
+
+    // Retry succeeded through the real entry
+    await waitForCondition(() => agentInitCalls >= 2)
+    await waitForCondition(() =>
+      (getManaged('f-real-ok') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume === undefined
+    )
+
+    // Awaited flush: the disk header no longer carries the recovery state —
+    // a crash cannot re-arm the finished recovery.
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-real-ok'), 'utf-8').split('\n')[0])
+    expect(header.pendingAgentResume).toBeUndefined()
+
+    const callsAfterSuccess = agentInitCalls
+    await new Promise(r => setTimeout(r, 1500))
+    expect(agentInitCalls).toBe(callsAfterSuccess)
+  })
+
+  async function waitForCondition(check: () => boolean, timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (check()) return
+      await new Promise(r => setTimeout(r, 50))
+    }
+    throw new Error('waitForCondition timed out')
+  }
 })

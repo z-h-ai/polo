@@ -899,8 +899,12 @@ interface ManagedSession {
   pendingQuestion?: QuestionRequest
   // Recoverable "answer committed, waiting for agent resume" state —
   // retried without duplicating the user message; cleared on success,
-  // supersede (new user message), stop, or archive.
+  // supersede (new user message), stop, or delete.
   pendingAgentResume?: PendingAgentResume
+  // Scheduled retry handle for pendingAgentResume — owned by the session so
+  // delete/stop can cancel it (a stale closure must never fire events or
+  // restart turns for a removed session).
+  resumeRetryTimer?: ReturnType<typeof setTimeout>
   // Invocation source of the most recent turn ('desktop' enables
   // request_user_input; defaults to 'internal' — fail closed).
   invocationSource?: InvocationSource
@@ -4486,10 +4490,7 @@ export class SessionManager implements ISessionManager {
       // A pending question cannot outlive archival — clear memory + disk + renderers.
       await this.clearPendingQuestionForSession(managed)
       // Same for a pending answer→resume retry.
-      if (managed.pendingAgentResume) {
-        managed.pendingAgentResume = undefined
-        sessionLog.info(`Cleared pendingAgentResume for session ${sessionId}: session archived`)
-      }
+      await this.clearPendingAgentResume(managed, 'session archived')
       // Persist in-memory state directly to avoid race with pending queue writes
       this.persistSession(managed)
       await this.flushSession(managed.id)
@@ -5540,6 +5541,10 @@ export class SessionManager implements ISessionManager {
     this.clearPendingPermissionRequestsForSession(sessionId)
     // Pending question dies with the session (memory only — disk is about to be removed)
     managed.pendingQuestion = undefined
+    // Cancel any armed answer→resume retry + its timer BEFORE removal — the
+    // retry closure must never fire events or restart turns for a deleted
+    // session (the disk copy is about to be removed anyway).
+    await this.clearPendingAgentResume(managed, 'session deleted', { flush: false })
 
     // Cancel any pending persistence write (session is being deleted, no need to save)
     this.sessionStorage.persistenceQueue.cancel(sessionId)
@@ -5629,9 +5634,7 @@ export class SessionManager implements ISessionManager {
     // The resume path's OWN call (existingMessageId = the answer message) is
     // exempt — otherwise it would clear its own recovery state.
     if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
-      managed.pendingAgentResume = undefined
-      this.persistSession(managed)
-      sessionLog.info(`Cleared pendingAgentResume for session ${sessionId}: superseded by a new user message`)
+      void this.clearPendingAgentResume(managed, 'superseded by a new user message', { flush: false })
     }
 
     // Per-turn invocation source: only desktop interactive turns expose
@@ -5876,53 +5879,69 @@ export class SessionManager implements ISessionManager {
       ? getSourcesBySlugs(workspaceRootPath, enabledSlugs)
       : []
 
-    if (hasSources && managed.tokenRefreshManager) {
-      const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
-      if (refreshResult.failedSources.length > 0) {
-        sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
-      }
-      if (refreshResult.refreshedCount > 0) {
-        sendSpan.mark('oauth.refreshed')
-      }
-    }
-
-    // Get or create the agent (lazy loading). Its internal cold-session build at
-    // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
-    // ensureFreshToken mirrors the disk write to source.config in-memory).
-    const agent = await this.getOrCreateAgent(managed)
-    sendSpan.mark('agent.ready')
-
-    // Re-apply the per-turn capability flag — a freshly created agent defaults
-    // to false, so desktop turns must set it after creation as well.
-    const allowRequestUserInputNow = (managed.invocationSource ?? 'internal') === 'desktop' && !managed.hidden
-    if (agent.allowRequestUserInput !== allowRequestUserInputNow) {
-      agent.allowRequestUserInput = allowRequestUserInputNow
-    }
-
-    // Always set all sources for context (even if none are enabled), including built-ins
-    const allSources = loadAllSources(workspaceRootPath)
-    agent.setAllSources(allSources)
-    sendSpan.mark('sources.loaded')
-
-    // Apply source servers if any are enabled
-    if (hasSources) {
-      const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
-      // Single fresh build — tokens already refreshed above.
-      const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
-      if (errors.length > 0) {
-        sessionLog.warn(`Source build errors:`, errors)
+    // Pre-chat preparation (credential refresh, agent creation, source
+    // servers). Failures here happen AFTER processing was flagged but BEFORE
+    // any chat started — without this boundary isProcessing would stay true
+    // forever (session stuck "processing", resume retries forever skip).
+    // onProcessingStopped resets processing by the current generation and
+    // notifies the renderer, then the error propagates to the caller.
+    let agent: AgentInstance
+    try {
+      if (hasSources && managed.tokenRefreshManager) {
+        const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
+        if (refreshResult.failedSources.length > 0) {
+          sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
+        }
+        if (refreshResult.refreshedCount > 0) {
+          sendSpan.mark('oauth.refreshed')
+        }
       }
 
-      const mcpCount = Object.keys(mcpServers).length
-      const apiCount = Object.keys(apiServers).length
-      if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
-        const usableSources = sources.filter(isSourceUsable)
-        const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-        await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
-        sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
+      // Get or create the agent (lazy loading). Its internal cold-session build at
+      // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
+      // ensureFreshToken mirrors the disk write to source.config in-memory).
+      agent = await this.getOrCreateAgent(managed)
+      sendSpan.mark('agent.ready')
+
+      // Re-apply the per-turn capability flag — a freshly created agent defaults
+      // to false, so desktop turns must set it after creation as well.
+      const allowRequestUserInputNow = (managed.invocationSource ?? 'internal') === 'desktop' && !managed.hidden
+      if (agent.allowRequestUserInput !== allowRequestUserInputNow) {
+        agent.allowRequestUserInput = allowRequestUserInputNow
       }
-      sendSpan.mark('servers.applied')
+
+      // Always set all sources for context (even if none are enabled), including built-ins
+      const allSources = loadAllSources(workspaceRootPath)
+      agent.setAllSources(allSources)
+      sendSpan.mark('sources.loaded')
+
+      // Apply source servers if any are enabled
+      if (hasSources) {
+        const sessionPath = this.sessionStorage.getSessionPath(workspaceRootPath, sessionId)
+        // Single fresh build — tokens already refreshed above.
+        const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
+        if (errors.length > 0) {
+          sessionLog.warn(`Source build errors:`, errors)
+        }
+
+        const mcpCount = Object.keys(mcpServers).length
+        const apiCount = Object.keys(apiServers).length
+        if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
+          const usableSources = sources.filter(isSourceUsable)
+          const intendedSlugs = usableSources.map(s => s.config.slug)
+          await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+          await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
+          sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
+        }
+        sendSpan.mark('servers.applied')
+      }
+    } catch (prepError) {
+      sendSpan.mark('prep.failed')
+      sessionLog.error(`Pre-chat preparation failed for session ${sessionId}:`, prepError)
+      if (managed.isProcessing && managed.processingGeneration === myGeneration) {
+        await this.onProcessingStopped(sessionId, 'error')
+      }
+      throw prepError
     }
 
     try {
@@ -6176,12 +6195,9 @@ export class SessionManager implements ISessionManager {
     await this.clearPendingQuestionForSession(managed)
 
     // A user stop also cancels any scheduled answer→resume retry — stopping
-    // means "do not start new turns".
-    if (managed.pendingAgentResume) {
-      managed.pendingAgentResume = undefined
-      this.persistSession(managed)
-      sessionLog.info(`Cleared pendingAgentResume for session ${sessionId}: user stopped the session`)
-    }
+    // means "do not start new turns". Awaited flush: a crash must not re-arm
+    // the stopped recovery from disk.
+    await this.clearPendingAgentResume(managed, 'user stopped the session')
 
     if (!managed.isProcessing) {
       return // Not processing, nothing to cancel
@@ -7108,6 +7124,52 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Clear the pendingAgentResume state: cancel the scheduled retry timer,
+   * drop the state, and (by default) await a flush so a crash cannot re-arm
+   * a cleared/finished recovery from disk.
+   */
+  private async clearPendingAgentResume(
+    managed: ManagedSession,
+    reason: string,
+    opts: { flush?: boolean } = {},
+  ): Promise<void> {
+    if (managed.resumeRetryTimer) {
+      clearTimeout(managed.resumeRetryTimer)
+      managed.resumeRetryTimer = undefined
+    }
+    if (!managed.pendingAgentResume) return
+    managed.pendingAgentResume = undefined
+    this.persistSession(managed)
+    if (opts.flush !== false) {
+      await this.flushSession(managed.id)
+    }
+    sessionLog.info(`Cleared pendingAgentResume for session ${managed.id}: ${reason}`)
+  }
+
+  /**
+   * Schedule a resume retry. The handle lives on the ManagedSession so
+   * lifecycle transitions (stop/archive/delete) can cancel it; every fire
+   * re-validates that the session still exists and the state is still armed.
+   */
+  private scheduleResumeRetry(managed: ManagedSession, delayMs: number): void {
+    if (this.sessions.get(managed.id) !== managed) return
+    if (!managed.pendingAgentResume) return
+    if (managed.resumeRetryTimer) {
+      clearTimeout(managed.resumeRetryTimer)
+    }
+    const timer = setTimeout(() => {
+      managed.resumeRetryTimer = undefined
+      // Re-validate at fire time: session may have been deleted/replaced, or
+      // the state cleared/superseded in the meantime.
+      if (this.sessions.get(managed.id) !== managed) return
+      if (!managed.pendingAgentResume) return
+      void this.resumePendingAgentTurn(managed)
+    }, delayMs)
+    timer.unref?.()
+    managed.resumeRetryTimer = timer
+  }
+
+  /**
    * Retryable resume of the agent turn after an answer was committed.
    *
    * Reads the persisted pendingAgentResume state — the answer message is
@@ -7120,10 +7182,22 @@ export class SessionManager implements ISessionManager {
     const resume = managed.pendingAgentResume
     if (!resume) return
 
+    // The closure may outlive the session (deleted mid-retry): drop silently —
+    // no events, no reschedule for a session that no longer exists.
+    if (this.sessions.get(managed.id) !== managed) {
+      if (managed.resumeRetryTimer) {
+        clearTimeout(managed.resumeRetryTimer)
+        managed.resumeRetryTimer = undefined
+      }
+      return
+    }
+
     if (managed.isProcessing) {
       // A turn is already running; the answer message is in history and will
-      // be part of its context. Leave the state for the post-turn sweep —
-      // do not count busy-skips as failed attempts.
+      // be part of its context. Reschedule (without counting a failed
+      // attempt) so the resume happens once the turn finishes — never a
+      // dead-end busy-skip.
+      this.scheduleResumeRetry(managed, 2000)
       return
     }
 
@@ -7131,19 +7205,15 @@ export class SessionManager implements ISessionManager {
     const answerMessage = managed.messages.find(m => m.id === resume.messageId)
     if (!answerMessage) {
       // The answer message is gone (session cleared?) — nothing to resume with.
-      managed.pendingAgentResume = undefined
-      this.persistSession(managed)
-      sessionLog.warn(`Dropped pendingAgentResume for session ${managed.id}: answer message ${resume.messageId} not found`)
+      await this.clearPendingAgentResume(managed, 'answer message missing')
       return
     }
 
     try {
       await this.sendMessage(managed.id, answerMessage.content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
-      managed.pendingAgentResume = undefined
-      this.persistSession(managed)
-      void this.flushSession(managed.id).catch(flushError => {
-        sessionLog.error(`Failed to persist resume completion for session ${managed.id}:`, flushError)
-      })
+      // Terminal success — await the flush so a crash cannot re-arm the
+      // finished recovery from disk.
+      await this.clearPendingAgentResume(managed, 'resume succeeded')
       sessionLog.info(`Agent resumed after answer for session ${managed.id} (attempt ${resume.attempts})`)
     } catch (error) {
       sessionLog.error(
@@ -7157,11 +7227,7 @@ export class SessionManager implements ISessionManager {
         error: 'Your answer was saved, but the assistant could not resume automatically. Retrying…',
       }, managed.workspace.id)
 
-      const retryDelayMs = Math.min(1000 * resume.attempts, 10000)
-      const timer = setTimeout(() => {
-        void this.resumePendingAgentTurn(managed)
-      }, retryDelayMs)
-      timer.unref?.()
+      this.scheduleResumeRetry(managed, Math.min(1000 * resume.attempts, 10000))
     }
   }
 

@@ -24,7 +24,7 @@ type QuestionRequestType = import('../../../../../shared/types').QuestionRequest
 
 // The dynamically-imported component loses precise typing across the import
 // boundary; this cast restores it for createElement.
-const QRC = QuestionRequest as unknown as (props: QuestionRequestProps) => ReactBuiltInElement
+const TypedQuestionRequest = QuestionRequest as unknown as (props: QuestionRequestProps) => ReactBuiltInElement
 type ReactBuiltInElement = ReturnType<typeof createElement>
 
 function makeRequest(overrides: Partial<QuestionRequestType> = {}): QuestionRequestType {
@@ -75,7 +75,7 @@ function renderQuestion(props: Partial<QuestionRequestProps> & { request?: Quest
   // instance, independent of whatever language/module state earlier test
   // files left behind in a shared-process run.
   const view = render(
-    createElement(I18nextProvider, { i18n }, createElement(QRC, merged)),
+    createElement(I18nextProvider, { i18n }, createElement(TypedQuestionRequest, merged)),
   )
   return { view, harness, props: merged }
 }
@@ -184,7 +184,7 @@ describe('QuestionRequest component', () => {
 
     const nextRequest = makeRequest({ requestId: 'q-2' })
     await act(async () => {
-      view.rerender(createElement(QRC, { ...props, request: nextRequest }))
+      view.rerender(createElement(TypedQuestionRequest, { ...props, request: nextRequest }))
     })
 
     expect(option(TRASH).getAttribute('aria-checked')).toBe('false')

@@ -79,19 +79,33 @@ export function applyAuthoritativePendingQuestion(
  * Per-session generation counter guarding snapshot application.
  *
  * Bump whenever a realtime pending-question event mutates local state for a
- * session (question_request / question_resolved / RPC cleanup). A snapshot
- * fetch captures the generation at request time; only apply the response when
- * the generation is unchanged — otherwise the fetch raced a fresher event and
- * its payload is stale.
+ * session (question_request / question_resolved / deletion / RPC cleanup).
+ * A snapshot fetch captures the generation at request time; only apply the
+ * response when the generation is unchanged — otherwise the fetch raced a
+ * fresher event and its payload is stale.
  */
 export class PendingQuestionGenerationTracker {
   private generations = new Map<string, number>()
 
+  /**
+   * Global monotonic counter bumped on EVERY pending-state change (any per-
+   * session bump also bumps this). Captured alongside per-session tokens so a
+   * fetch can detect events for sessions it did not know about at capture
+   * time (they had no card yet).
+   */
+  private globalEpochCounter = 0
+
   /** Bump on every realtime state change for the session. */
   bump(sessionId: string): number {
+    this.globalEpochCounter += 1
     const next = (this.generations.get(sessionId) ?? 0) + 1
     this.generations.set(sessionId, next)
     return next
+  }
+
+  /** Global epoch at capture time — covers sessions not yet tracked locally. */
+  get epoch(): number {
+    return this.globalEpochCounter
   }
 
   /** Capture the generation token at fetch start. */
@@ -102,6 +116,25 @@ export class PendingQuestionGenerationTracker {
   /** True when nothing bumped the session since the token was captured. */
   isCurrent(sessionId: string, token: number): boolean {
     return (this.generations.get(sessionId) ?? 0) === token
+  }
+
+  /**
+   * True when NOTHING changed globally since the epoch was captured — the
+   * snapshot can be applied wholesale.
+   */
+  isEpochCurrent(epoch: number): boolean {
+    return this.globalEpochCounter === epoch
+  }
+
+  /**
+   * True when the session provably did not change since capture: it must have
+   * been locally tracked at capture time (token exists) AND still be current.
+   * A session with no captured token is treated as changed — its state at
+   * capture time is unknown (it may have received its first event mid-fetch).
+   */
+  isUnchangedSince(sessionId: string, tokensBeforeFetch: Map<string, number>): boolean {
+    const token = tokensBeforeFetch.get(sessionId)
+    return token !== undefined && this.isCurrent(sessionId, token)
   }
 }
 
@@ -146,5 +179,49 @@ export function clearPendingQuestionForDeletedSession(
   if (!map.has(sessionId)) return map
   const next = new Map(map)
   next.delete(sessionId)
+  return next
+}
+
+/**
+ * Reconcile the pendingQuestions map against a full-list snapshot
+ * (App-level logic extracted from loadSessionsFromServer /
+ * refreshSessionListMetadataFromServer — see those for the wiring).
+ *
+ * Semantics:
+ * - Epoch unchanged since capture → NO event raced the fetch: the snapshot
+ *   is wholesale-authoritative (add / replace / clear per session).
+ * - Epoch changed (some event raced):
+ *   - sessions provably unchanged since capture (tracked before fetch AND
+ *     token still current) → converge to the snapshot;
+ *   - all other sessions (changed mid-fetch, or first seen mid-fetch) → keep
+ *     the event-driven local state for whatever it holds (a card, or its
+ *     absence after resolve/delete) — a stale snapshot must never resurrect
+ *     or downgrade it.
+ *
+ * `tokensBeforeFetch` must be captured BEFORE the fetch for every session in
+ * `previous` (see App's loadSessionsFromServer).
+ */
+export function reconcilePendingQuestionsFromSnapshot(
+  previous: Map<string, QuestionRequest>,
+  sessions: Array<Pick<QuestionRequestSession, 'id' | 'pendingQuestion'>>,
+  tokensBeforeFetch: Map<string, number>,
+  tracker: PendingQuestionGenerationTracker,
+  epochAtFetch: number,
+): Map<string, QuestionRequest> {
+  if (tracker.isEpochCurrent(epochAtFetch)) {
+    let next = new Map<string, QuestionRequest>()
+    for (const session of sessions) {
+      next = applyAuthoritativePendingQuestion(next, session.id, session.pendingQuestion)
+    }
+    return next
+  }
+
+  let next = new Map(previous)
+  for (const session of sessions) {
+    if (!tracker.isUnchangedSince(session.id, tokensBeforeFetch)) {
+      continue
+    }
+    next = applyAuthoritativePendingQuestion(next, session.id, session.pendingQuestion)
+  }
   return next
 }

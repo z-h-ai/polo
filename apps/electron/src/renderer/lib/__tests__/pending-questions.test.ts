@@ -9,8 +9,11 @@
 
 import { describe, expect, it } from 'bun:test'
 import {
+  PendingQuestionGenerationTracker,
+  applyAuthoritativePendingQuestion,
   clearPendingQuestionForDeletedSession,
   questionResolutionRequestId,
+  reconcilePendingQuestionsFromSnapshot,
   removePendingQuestionForSession,
   setPendingQuestionForSession,
   syncPendingQuestionFromSession,
@@ -164,5 +167,136 @@ describe('clearPendingQuestionForDeletedSession (session_deleted)', () => {
     const same = clearPendingQuestionForDeletedSession(map, 's-1')
     expect(map.has('s-1')).toBe(false)
     expect(same).toBe(map)
+  })
+})
+
+// Round 6, issue #1: full-list snapshot reconciliation must handle sessions
+// that were NOT tracked at fetch start, must keep event-driven state for every
+// session that changed mid-fetch (even when present in the snapshot), and a
+// session deletion must invalidate in-flight snapshots.
+describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', () => {
+  function snapshotSession(id: string, requestId?: string) {
+    return { id, pendingQuestion: requestId ? makeRequest(requestId) : undefined }
+  }
+
+  it('missing → q: a session that received its first event mid-fetch keeps the new card', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    const tokensBefore = new Map<string, number>()
+    const epochAtFetch = tracker.epoch
+
+    let map = new Map<string, QuestionRequest>()
+    // (capture — session s-1 not tracked locally yet)
+
+    // Mid-fetch: question_request arrives for s-1
+    tracker.bump('s-1')
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q-new'))
+
+    // Snapshot (stale for s-1, but contains the session) lacks the card
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-1')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+    )
+
+    // The event-driven card survives — the snapshot must not drop it
+    expect(result.get('s-1')?.requestId).toBe('q-new')
+  })
+
+  it('q1 → q2: a mid-fetch replacement keeps q2 even when the snapshot still has q1', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
+    const tokensBefore = new Map<string, number>()
+    tokensBefore.set('s-1', tracker.capture('s-1'))
+    const epochAtFetch = tracker.epoch
+
+    // Mid-fetch: q2 replaces q1
+    tracker.bump('s-1')
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q2'))
+
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-1', 'q1')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+    )
+
+    expect(result.get('s-1')?.requestId).toBe('q2')
+  })
+
+  it('pending → resolved: a mid-fetch resolution clears the card despite the stale snapshot', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
+    const tokensBefore = new Map<string, number>()
+    tokensBefore.set('s-1', tracker.capture('s-1'))
+    const epochAtFetch = tracker.epoch
+
+    // Mid-fetch: question_resolved clears it
+    tracker.bump('s-1')
+    map = removePendingQuestionForSession(map, 's-1', 'q1')
+
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-1', 'q1')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+    )
+
+    expect(result.has('s-1')).toBe(false)
+  })
+
+  it('delete: a mid-fetch session_deleted bumps and prevents snapshot resurrection', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
+    const tokensBefore = new Map<string, number>()
+    tokensBefore.set('s-1', tracker.capture('s-1'))
+    const epochAtFetch = tracker.epoch
+
+    // Mid-fetch: session_deleted (bump + unconditional clear)
+    tracker.bump('s-1')
+    map = clearPendingQuestionForDeletedSession(map, 's-1')
+
+    // In-flight snapshot still contains the deleted session's card
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-1', 'q1')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+    )
+
+    expect(result.has('s-1')).toBe(false)
+  })
+
+  it('unchanged epoch: the snapshot is wholesale-authoritative (add/replace/clear)', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-keep', makeRequest('q-old'))       // replaced by snapshot
+    map = setPendingQuestionForSession(map, 's-clear', makeRequest('q-gone'))     // cleared by snapshot
+    const tokensBefore = new Map<string, number>()
+    for (const id of map.keys()) tokensBefore.set(id, tracker.capture(id))
+    const epochAtFetch = tracker.epoch
+
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [
+        snapshotSession('s-keep', 'q-new'),
+        snapshotSession('s-add', 'q-added'),
+        snapshotSession('s-clear'),
+      ],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+    )
+
+    expect(result.get('s-keep')?.requestId).toBe('q-new')
+    expect(result.get('s-add')?.requestId).toBe('q-added')
+    expect(result.has('s-clear')).toBe(false)
   })
 })

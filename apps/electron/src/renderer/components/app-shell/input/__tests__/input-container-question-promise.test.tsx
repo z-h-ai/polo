@@ -50,7 +50,7 @@ const { InputContainer } = await import('../InputContainer')
 
 type QuestionRequestType = import('../../../../../shared/types').QuestionRequest
 
-const IC = InputContainer as unknown as (props: Record<string, unknown>) => React.ReactElement
+const TypedInputContainer = InputContainer as unknown as (props: Record<string, unknown>) => React.ReactElement
 
 function makeRequest(): QuestionRequestType {
   return {
@@ -81,7 +81,7 @@ function renderInputContainer(opts: {
     inputValue: '',
     onInputChange: () => {},
   }
-  return render(createElement(I18nextProvider, { i18n }, createElement(IC, props)))
+  return render(createElement(I18nextProvider, { i18n }, createElement(TypedInputContainer, props)))
 }
 
 const TRASH = 'question-option-data-trash'
