@@ -58,6 +58,7 @@ setBedrockProviderModule(bedrockProviderModule);
 // Model resolution (extracted for testability + custom-endpoint precedence)
 import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './model-resolution.ts';
 import { pickProviderAppropriateMiniModel } from './pick-mini-model.ts';
+import { ProxyToolRegistry } from './proxy-tool-registry.ts';
 import {
   buildCustomEndpointModelDef,
   normalizeCustomEndpointModelEntry,
@@ -135,7 +136,7 @@ interface RuntimeConfigUpdateMessage {
 type InboundMessage =
   | InitMessage
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
-  | { type: 'register_tools'; tools: ProxyToolDef[] }
+  | { type: 'register_tools'; tools: ProxyToolDef[]; scope?: 'session' | 'pool' }
   | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
   | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
   | { type: 'abort' }
@@ -257,8 +258,11 @@ const pendingToolExecutions = new Map<string, { resolve: (result: { content: str
 // Pending session MCP tool calls for completion detection
 const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
 
-// Proxy tool definitions from main process
-let proxyToolDefs: ProxyToolDef[] = [];
+// Proxy tool definitions from main process — session tools are REPLACED
+// wholesale per registration (per-turn capability bits like request_user_input
+// must fail closed); pool (MCP/API source) tools merge by name. See
+// proxy-tool-registry.ts for the scope semantics.
+const proxyToolRegistry = new ProxyToolRegistry();
 
 // Speculative prefetch for read-only tools (enables parallel execution despite Pi SDK's sequential loop).
 // When the LLM emits multiple call_llm tool calls in a single message, we fire all requests
@@ -272,8 +276,8 @@ function isPrefetchableTool(toolName: string): boolean {
   return PREFETCHABLE_TOOLS.has(stripped);
 }
 
-// Flag: proxy tools changed since last session creation — session needs recreation
-let toolsChanged = false;
+// Proxy tools changed since last session creation — session needs recreation.
+// Single source of truth: ProxyToolRegistry.toolsChanged.
 
 // Callback server for call_llm
 let callbackServer: http.Server | null = null;
@@ -686,7 +690,7 @@ async function ensureSession(): Promise<AgentSession> {
   const { session } = await createAgentSession(sessionOptions);
   piSession = session;
 
-  toolsChanged = false;
+  proxyToolRegistry.markConsumed();
   debugLog(`Created Pi session: ${session.sessionId} (${wrappedAll.length} tools)`);
 
   // Notify main process of session ID
@@ -842,6 +846,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
 // ============================================================
 
 function buildProxyTools(): ToolDefinition<any, any>[] {
+  const proxyToolDefs = proxyToolRegistry.tools;
   debugLog(`Building proxy tools from ${proxyToolDefs.length} definitions: ${proxyToolDefs.map(t => t.name).join(', ')}`);
 
   return proxyToolDefs.map<ToolDefinition<any, any>>(def => ({
@@ -1325,7 +1330,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // If proxy tools changed since last session creation, dispose and recreate.
     // This avoids calling _buildRuntime() for dynamic tool updates — instead
     // we create a fresh session via continueRecent() with all tools known upfront.
-    if (toolsChanged && piSession) {
+    if (proxyToolRegistry.toolsChanged && piSession) {
       debugLog('Recreating session due to tool changes');
       if (unsubscribeEvents) {
         unsubscribeEvents();
@@ -1379,18 +1384,19 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
 }
 
 function handleRegisterTools(msg: Extract<InboundMessage, { type: 'register_tools' }>): void {
-  // Merge: replace existing tools by name, add new ones
-  const incoming = new Map(msg.tools.map(t => [t.name, t]));
-  proxyToolDefs = [
-    ...proxyToolDefs.filter(t => !incoming.has(t.name)),
-    ...msg.tools,
-  ];
-  debugLog(`Registered ${msg.tools.length} proxy tools (total: ${proxyToolDefs.length}): ${msg.tools.map(t => t.name).join(', ')}`);
+  // Session tools use explicit REPLACE semantics: the main process sends the
+  // complete session-tool set on every registration, so tools omitted from
+  // the list (e.g. request_user_input after a desktop → messaging turn
+  // switch) are removed — the per-turn capability bit fails closed.
+  // Pool tools (MCP/API sources) keep the legacy merge-by-name behavior.
+  const scope = msg.scope ?? 'pool';
+  const total = proxyToolRegistry.register(scope, msg.tools);
+  debugLog(`Registered ${msg.tools.length} ${scope} proxy tools (effective total: ${total}: ${proxyToolRegistry.tools.map(t => t.name).join(', ')})`);
 
   // If session exists, mark for recreation on next prompt.
   // Don't dispose mid-generation — the flag is checked in handlePrompt().
   if (piSession) {
-    toolsChanged = true;
+    // registry marks changed internally on any effective-set mutation
     debugLog('Proxy tools changed — session will be recreated on next prompt');
   }
 }

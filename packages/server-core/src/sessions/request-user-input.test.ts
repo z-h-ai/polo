@@ -308,3 +308,169 @@ describe('request_user_input session contract', () => {
     expect(reloaded?.pendingQuestion?.questions[0]?.id).toBe('data-handling')
   })
 })
+
+// Review fix #3: answer payloads must map 1:1 onto the pending questions and
+// honor per-question cardinality/exclusive rules — any violation returns
+// transient_failure BEFORE any state mutation.
+describe('request_user_input answer payload validation', () => {
+  let tmpRoot: string
+  let sm: SessionManager
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'sm-question-validation-'))
+    sm = new SessionManager()
+  })
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  function buildWorkspace() {
+    return {
+      id: 'ws_test',
+      name: 'Test Workspace',
+      rootPath: tmpRoot,
+      createdAt: Date.now(),
+    } as never
+  }
+
+  function seedPendingSession(sessionId: string) {
+    const request = makeQuestionRequest(sessionId, `q-${sessionId}`)
+    const filePath = getSessionFilePath(tmpRoot, sessionId)
+    mkdirSync(dirname(filePath), { recursive: true })
+    const stored = {
+      id: sessionId,
+      workspaceRootPath: tmpRoot,
+      name: 'validation session',
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, costUsd: 0 },
+      pendingQuestion: request,
+    } as StoredSession
+    writeSessionJsonl(filePath, stored)
+    const managed = createManagedSession(
+      { id: sessionId, name: stored.name, createdAt: stored.createdAt },
+      buildWorkspace(),
+    )
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, managed)
+    return request
+  }
+
+  function answerOf(sessionId: string, answers: Array<{ questionId: string; selectedOptionIds: string[]; otherText?: string }>) {
+    return { action: 'answer' as const, response: { requestId: `q-${sessionId}`, answers } }
+  }
+
+  async function expectInvalid(sessionId: string, answers: Array<{ questionId: string; selectedOptionIds: string[]; otherText?: string }>) {
+    ;(sm as unknown as { sendMessage: () => Promise<void> }).sendMessage = async () => {
+      throw new Error('agent must not resume for invalid answers')
+    }
+    const result = await sm.respondToQuestion(sessionId, answerOf(sessionId, answers))
+    expect(result.status).toBe('transient_failure')
+    // Nothing mutated: pending question still active, no answer message
+    expect(sm.getPendingQuestion(sessionId)?.requestId).toBe(`q-${sessionId}`)
+    return result
+  }
+
+  it('rejects duplicate answers for the same question (q1 twice, q2 missing)', async () => {
+    seedPendingSession('val-1')
+    const result = await expectInvalid('val-1', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'] },
+      { questionId: 'data-handling', selectedOptionIds: ['a', 'b'] },
+    ])
+    expect((result as { message?: string }).message).toContain('Duplicate answer')
+  })
+
+  it('rejects unknown questionIds', async () => {
+    seedPendingSession('val-2')
+    await expectInvalid('val-2', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'] },
+      { questionId: 'nope', selectedOptionIds: ['admins'] },
+    ])
+  })
+
+  it('rejects single-select with two preset options', async () => {
+    seedPendingSession('val-3')
+    await expectInvalid('val-3', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash', 'delete'] },
+      { questionId: 'notify', selectedOptionIds: ['admins'] },
+    ])
+  })
+
+  it('rejects single-select with a preset option AND Other text', async () => {
+    seedPendingSession('val-4')
+    await expectInvalid('val-4', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'], otherText: 'both' },
+      { questionId: 'notify', selectedOptionIds: ['admins'] },
+    ])
+  })
+
+  it('rejects duplicate optionIds within one answer', async () => {
+    seedPendingSession('val-5')
+    await expectInvalid('val-5', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'] },
+      { questionId: 'notify', selectedOptionIds: ['admins', 'admins'] },
+    ])
+  })
+
+  it('rejects multi-select exclusive combined with another preset option', async () => {
+    seedPendingSession('val-6')
+    await expectInvalid('val-6', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'] },
+      { questionId: 'notify', selectedOptionIds: ['none', 'admins'] },
+    ])
+  })
+
+  it('rejects multi-select exclusive combined with Other text', async () => {
+    seedPendingSession('val-7')
+    await expectInvalid('val-7', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'] },
+      { questionId: 'notify', selectedOptionIds: ['none'], otherText: 'also this' },
+    ])
+  })
+
+  it('rejects Other text beyond the 2000 character cap', async () => {
+    seedPendingSession('val-8')
+    await expectInvalid('val-8', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'] },
+      { questionId: 'notify', selectedOptionIds: [], otherText: 'x'.repeat(2001) },
+    ])
+  })
+
+  it('accepts the exact-composition counterpart of each rejected shape', async () => {
+    // multi-select exclusive alone is valid; Other alone is valid
+    const request = seedPendingSession('val-9')
+    ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+    const exclusiveOnly = await sm.respondToQuestion('val-9', answerOf('val-9', [
+      { questionId: 'data-handling', selectedOptionIds: ['trash'] },
+      { questionId: 'notify', selectedOptionIds: ['none'] },
+    ]))
+    expect(exclusiveOnly).toEqual({ status: 'accepted' })
+
+    // Other-only on a multi-select question is valid (new pending question)
+    const request2 = makeQuestionRequest('val-10', 'q-val-10-b')
+    const filePath2 = getSessionFilePath(tmpRoot, 'val-10-b')
+    mkdirSync(dirname(filePath2), { recursive: true })
+    writeSessionJsonl(filePath2, {
+      id: 'val-10-b',
+      workspaceRootPath: tmpRoot,
+      name: 'validation session b',
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      messages: [],
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, costUsd: 0 },
+      pendingQuestion: request2,
+    } as StoredSession)
+    const managed2 = createManagedSession(
+      { id: 'val-10-b', name: 'validation session b', createdAt: Date.now() },
+      buildWorkspace(),
+    )
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set('val-10-b', managed2)
+    const otherOnly = await sm.respondToQuestion('val-10-b', answerOf('val-10-b', [
+      { questionId: 'data-handling', selectedOptionIds: [], otherText: 'compost everything' },
+      { questionId: 'notify', selectedOptionIds: ['admins'] },
+    ]))
+    expect(otherOnly).toEqual({ status: 'accepted' })
+    void request
+  })
+})

@@ -87,29 +87,37 @@ export function QuestionRequest({
   const selectOption = (optionId: string) => {
     if (inactive || submitting) return
     const multiple = question.multiple === true
-    const selected = answers[question.id] ?? []
-    let next: string[]
-    let clearOtherText = false
+    const clickedExclusive = optionId !== OTHER_OPTION_ID
+      && question.options.find(o => o.id === optionId)?.exclusive === true
 
-    if (!multiple) {
-      // Single-select: clicking Other again deselects it (allows going back
-      // to a preset option without leaving an empty Other input behind).
-      next = selected.includes(optionId) && optionId === OTHER_OPTION_ID ? [] : [optionId]
-    } else if (optionId !== OTHER_OPTION_ID && question.options.find(o => o.id === optionId)?.exclusive) {
-      // Exclusive option: mutually exclusive with everything else, both ways.
-      clearOtherText = true
-      next = selected.includes(optionId) ? [] : [optionId]
-    } else {
-      // Normal option / Other: composing is allowed, but any exclusive
-      // selection is dropped when a compatible choice is made.
-      const compatible = selected.filter(id => !question.options.some(o => o.exclusive && o.id === id))
-      next = compatible.includes(optionId)
-        ? compatible.filter(id => id !== optionId)
-        : [...compatible, optionId]
-    }
+    // Compute inside the functional updater so rapid successive selections
+    // (batched clicks) compose instead of overwriting each other with a
+    // stale render-closure snapshot.
+    setAnswers(current => {
+      const selected = current[question.id] ?? []
+      let next: string[]
 
-    setAnswers(current => ({ ...current, [question.id]: next }))
-    if (clearOtherText) {
+      if (!multiple) {
+        // Single-select: clicking Other again deselects it (allows going back
+        // to a preset option without leaving an empty Other input behind).
+        next = selected.includes(optionId) && optionId === OTHER_OPTION_ID ? [] : [optionId]
+      } else if (clickedExclusive) {
+        // Exclusive option: mutually exclusive with everything else, both ways.
+        next = selected.includes(optionId) ? [] : [optionId]
+      } else {
+        // Normal option / Other: composing is allowed, but any exclusive
+        // selection is dropped when a compatible choice is made.
+        const compatible = selected.filter(id => !question.options.some(o => o.exclusive && o.id === id))
+        next = compatible.includes(optionId)
+          ? compatible.filter(id => id !== optionId)
+          : [...compatible, optionId]
+      }
+
+      return { ...current, [question.id]: next }
+    })
+
+    if (clickedExclusive) {
+      // Exclusive selection excludes the Other free text as well.
       setOtherTexts(current => ({ ...current, [question.id]: '' }))
     }
   }

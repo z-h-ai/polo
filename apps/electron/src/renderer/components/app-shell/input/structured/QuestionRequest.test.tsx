@@ -1,34 +1,26 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n/setupI18n'
 import { createElement } from 'react'
-import type { ReactElement, ReactNode } from 'react'
 
+// DOM + i18n first, then component imports (no mock.module — the real Button
+// only pulls Radix Slot + cva, which is happy-dom safe and keeps this file
+// free of global module pollution that destabilizes parallel full-suite runs).
 GlobalRegistrator.register()
 setupI18n()
 
-// Light stubs for the design-system Button so the isolated test doesn't pull
-// the full Radix stack.
-mock.module('@/components/ui/button', () => {
-  const Button = ({ children, onClick, disabled, type = 'button', ...rest }: {
-    children?: ReactNode
-    onClick?: () => void
-    disabled?: boolean
-    type?: 'button' | 'submit'
-  } & Record<string, unknown>) =>
-    createElement('button', { type, onClick, disabled, ...rest }, children)
-  return { Button }
-})
-
-const { cleanup, fireEvent, render, screen, waitFor } = await import('@testing-library/react')
+const { cleanup, render, screen, waitFor, act } = await import('@testing-library/react')
+const userEvent = (await import('@testing-library/user-event')).default
+const { I18nextProvider } = await import('react-i18next')
 const { QuestionRequest } = await import('./QuestionRequest')
+
 type QuestionRequestProps = import('./QuestionRequest').QuestionRequestProps
 type QuestionRequestType = import('../../../../../shared/types').QuestionRequest
-type QuestionResponse = import('../../../../../shared/types').QuestionResponse
 
-// The dynamically-imported component loses precise typing across the mock.module
+// The dynamically-imported component loses precise typing across the import
 // boundary; this cast restores it for createElement.
-const QRC = QuestionRequest as unknown as (props: QuestionRequestProps) => ReactElement
+const QRC = QuestionRequest as unknown as (props: QuestionRequestProps) => ReactBuiltInElement
+type ReactBuiltInElement = ReturnType<typeof createElement>
 
 function makeRequest(overrides: Partial<QuestionRequestType> = {}): QuestionRequestType {
   return {
@@ -45,31 +37,50 @@ function makeRequest(overrides: Partial<QuestionRequestType> = {}): QuestionRequ
           { id: 'delete', label: 'Delete permanently', description: 'Immediate' },
         ],
       },
-      ...overrides.questions ? [] : [],
     ],
     ...overrides,
   }
 }
 
+interface Harness {
+  onSubmitCalls: Array<unknown>
+  onCancelCalls: Array<string>
+  submit: (response: unknown) => Promise<void> | void
+  cancel: (requestId: string) => Promise<void> | void
+}
+
 function renderQuestion(props: Partial<QuestionRequestProps> & { request?: QuestionRequestType } = {}) {
-  const onSubmitCalls: Array<unknown> = []
-  const onCancelCalls: Array<string> = []
-  const merged = {
+  const harness: Harness = {
+    onSubmitCalls: [],
+    onCancelCalls: [],
+    submit: (response: unknown) => {
+      harness.onSubmitCalls.push(response)
+    },
+    cancel: (requestId: string) => {
+      harness.onCancelCalls.push(requestId)
+    },
+  }
+  const merged: QuestionRequestProps = {
     request: makeRequest(),
-    onSubmit: (response: unknown) => {
-      onSubmitCalls.push(response)
-    },
-    onCancel: (requestId: string) => {
-      onCancelCalls.push(requestId)
-    },
+    onSubmit: (response) => harness.submit(response),
+    onCancel: (requestId) => harness.cancel(requestId),
     ...props,
   }
-  const view = render(createElement(QRC, merged))
-  return { view, onSubmitCalls, onCancelCalls, props: merged }
+  // Explicit provider: useTranslation must resolve against this file's i18n
+  // instance, independent of whatever language/module state earlier test
+  // files left behind in a shared-process run.
+  const view = render(
+    createElement(I18nextProvider, { i18n }, createElement(QRC, merged)),
+  )
+  return { view, harness, props: merged }
 }
 
 function option(testId: string) {
   return screen.getByTestId(testId) as HTMLButtonElement
+}
+
+function confirmButton() {
+  return screen.getByTestId('question-confirm') as HTMLButtonElement
 }
 
 const TRASH = 'question-option-data-trash'
@@ -77,6 +88,10 @@ const DELETE = 'question-option-data-delete'
 const OTHER = 'question-option-data-__other__'
 const CONFIRM = 'question-confirm'
 const CANCEL = 'question-cancel'
+
+beforeEach(() => {
+  i18n.changeLanguage?.('en')
+})
 
 afterEach(() => {
   cleanup()
@@ -94,57 +109,85 @@ describe('QuestionRequest component', () => {
     expect(option(OTHER)).toBeDefined()
   })
 
-  it('disables confirm until a selection is made (single-select)', () => {
+  it('disables confirm until a selection is made (single-select)', async () => {
+    const user = userEvent.setup({ document: window.document })
     renderQuestion()
-    expect((screen.getByTestId(CONFIRM) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(option(TRASH))
+    expect(confirmButton().disabled).toBe(true)
+    await act(async () => {
+      await user.click(option(TRASH))
+    })
     expect(option(TRASH).getAttribute('aria-checked')).toBe('true')
-    expect((screen.getByTestId(CONFIRM) as HTMLButtonElement).disabled).toBe(false)
+    await waitFor(() => expect(confirmButton().disabled).toBe(false))
   })
 
-  it('single-select switches selection and submit emits the structured response', () => {
-    const { onSubmitCalls } = renderQuestion()
-    fireEvent.click(option(TRASH))
-    fireEvent.click(option(DELETE))
+  it('single-select switches selection and submit emits the structured response', async () => {
+    const user = userEvent.setup({ document: window.document })
+    const { harness } = renderQuestion()
+    await act(async () => {
+      await user.click(option(TRASH))
+    })
+    await act(async () => {
+      await user.click(option(DELETE))
+    })
     expect(option(TRASH).getAttribute('aria-checked')).toBe('false')
     expect(option(DELETE).getAttribute('aria-checked')).toBe('true')
 
-    fireEvent.click(screen.getByTestId(CONFIRM))
-    expect(onSubmitCalls).toHaveLength(1)
-    expect(onSubmitCalls[0]).toEqual({
+    await waitFor(() => expect(confirmButton().disabled).toBe(false))
+    await act(async () => {
+      await user.click(confirmButton())
+    })
+    await waitFor(() => expect(harness.onSubmitCalls).toHaveLength(1))
+    expect(harness.onSubmitCalls[0]).toEqual({
       requestId: 'q-1',
       answers: [{ questionId: 'data', selectedOptionIds: ['delete'] }],
     })
   })
 
   it('Other expands a focused text input and its text reaches the response', async () => {
-    const { onSubmitCalls } = renderQuestion()
-    fireEvent.click(option(OTHER))
-    const input = screen.getByTestId('question-other-input-data') as HTMLInputElement
-    expect(input).toBeDefined()
-    await waitFor(() => expect(document.activeElement).toBe(input))
+    const user = userEvent.setup({ document: window.document })
+    const { harness } = renderQuestion()
 
-    fireEvent.change(input, { target: { value: 'Archive to cold storage' } })
-    fireEvent.click(screen.getByTestId(CONFIRM))
-    expect(onSubmitCalls[0]).toEqual({
+    await act(async () => {
+      await user.click(option(OTHER))
+    })
+    const input = (await screen.findByTestId('question-other-input-data')) as HTMLInputElement
+    expect(input).toBeDefined()
+
+    await act(async () => {
+      await user.type(input, 'Archive to cold storage')
+    })
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe('Archive to cold storage'))
+    await waitFor(() => expect(confirmButton().disabled).toBe(false))
+
+    await act(async () => {
+      await user.click(confirmButton())
+    })
+    await waitFor(() => expect(harness.onSubmitCalls).toHaveLength(1))
+    expect(harness.onSubmitCalls[0]).toEqual({
       requestId: 'q-1',
       answers: [{ questionId: 'data', selectedOptionIds: [], otherText: 'Archive to cold storage' }],
     })
   })
 
-  it('resets local answers when the requestId changes', () => {
+  it('resets local answers when the requestId changes', async () => {
+    const user = userEvent.setup({ document: window.document })
     const { view, props } = renderQuestion()
-    fireEvent.click(option(TRASH))
+    await act(async () => {
+      await user.click(option(TRASH))
+    })
     expect(option(TRASH).getAttribute('aria-checked')).toBe('true')
 
     const nextRequest = makeRequest({ requestId: 'q-2' })
-    view.rerender(createElement(QRC, { ...props, request: nextRequest }))
+    await act(async () => {
+      view.rerender(createElement(QRC, { ...props, request: nextRequest }))
+    })
 
     expect(option(TRASH).getAttribute('aria-checked')).toBe('false')
-    expect((screen.getByTestId(CONFIRM) as HTMLButtonElement).disabled).toBe(true)
+    expect(confirmButton().disabled).toBe(true)
   })
 
-  it('multi-select composes Other with normal options and emits both', () => {
+  it('multi-select composes Other with normal options and emits both', async () => {
+    const user = userEvent.setup({ document: window.document })
     const request = makeRequest({
       questions: [{
         id: 'notify',
@@ -157,20 +200,31 @@ describe('QuestionRequest component', () => {
         ],
       }],
     })
-    const { onSubmitCalls } = renderQuestion({ request })
+    const { harness } = renderQuestion({ request })
 
-    fireEvent.click(option('question-option-notify-admins'))
-    fireEvent.click(option('question-option-notify-__other__'))
-    fireEvent.change(screen.getByTestId('question-other-input-notify'), { target: { value: 'ops team' } })
+    await act(async () => {
+      await user.click(option('question-option-notify-admins'))
+      await user.click(option('question-option-notify-__other__'))
+    })
+    const input = (await screen.findByTestId('question-other-input-notify')) as HTMLInputElement
+    await act(async () => {
+      await user.type(input, 'ops team')
+    })
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe('ops team'))
+    await waitFor(() => expect(confirmButton().disabled).toBe(false))
 
-    fireEvent.click(screen.getByTestId(CONFIRM))
-    expect(onSubmitCalls[0]).toEqual({
+    await act(async () => {
+      await user.click(confirmButton())
+    })
+    await waitFor(() => expect(harness.onSubmitCalls).toHaveLength(1))
+    expect(harness.onSubmitCalls[0]).toEqual({
       requestId: 'q-1',
       answers: [{ questionId: 'notify', selectedOptionIds: ['admins'], otherText: 'ops team' }],
     })
   })
 
-  it('multi-select exclusive option clears others and Other; choosing a normal option clears the exclusive one', () => {
+  it('multi-select exclusive option clears others and Other; choosing a normal option clears the exclusive one', async () => {
+    const user = userEvent.setup({ document: window.document })
     const request = makeRequest({
       questions: [{
         id: 'notify',
@@ -185,24 +239,31 @@ describe('QuestionRequest component', () => {
     })
     renderQuestion({ request })
 
-    fireEvent.click(option('question-option-notify-admins'))
-    fireEvent.click(option('question-option-notify-__other__'))
+    await act(async () => {
+      await user.click(option('question-option-notify-admins'))
+      await user.click(option('question-option-notify-__other__'))
+    })
     expect(option('question-option-notify-admins').getAttribute('aria-checked')).toBe('true')
     expect(option('question-option-notify-__other__').getAttribute('aria-checked')).toBe('true')
 
     // Exclusive wins: clears admins + Other
-    fireEvent.click(option('question-option-notify-none'))
+    await act(async () => {
+      await user.click(option('question-option-notify-none'))
+    })
     expect(option('question-option-notify-none').getAttribute('aria-checked')).toBe('true')
     expect(option('question-option-notify-admins').getAttribute('aria-checked')).toBe('false')
     expect(option('question-option-notify-__other__').getAttribute('aria-checked')).toBe('false')
 
     // And vice versa: a normal selection clears the exclusive option
-    fireEvent.click(option('question-option-notify-admins'))
+    await act(async () => {
+      await user.click(option('question-option-notify-admins'))
+    })
     expect(option('question-option-notify-none').getAttribute('aria-checked')).toBe('false')
     expect(option('question-option-notify-admins').getAttribute('aria-checked')).toBe('true')
   })
 
-  it('multi-step navigation: next requires completion, back preserves answers, confirm submits all questions', () => {
+  it('multi-step navigation: next requires completion, back preserves answers, confirm submits all questions', async () => {
+    const user = userEvent.setup({ document: window.document })
     const request = makeRequest({
       questions: [
         makeRequest().questions[0]!,
@@ -215,7 +276,7 @@ describe('QuestionRequest component', () => {
         },
       ],
     })
-    const { onSubmitCalls } = renderQuestion({ request })
+    const { harness } = renderQuestion({ request })
 
     const NEXT = 'question-next'
     const BACK = 'question-back'
@@ -223,69 +284,89 @@ describe('QuestionRequest component', () => {
 
     // Next disabled until question 1 is complete
     expect((screen.getByTestId(NEXT) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(option(TRASH))
-    fireEvent.click(screen.getByTestId(NEXT))
+    await act(async () => {
+      await user.click(option(TRASH))
+    })
+    await waitFor(() => expect((screen.getByTestId(NEXT) as HTMLButtonElement).disabled).toBe(false))
+    await act(async () => {
+      await user.click(screen.getByTestId(NEXT))
+    })
     expect(screen.getByTestId('question-step-counter').textContent).toBe('2 / 2')
 
-    // Question 2 incomplete: confirm hidden in favor of next (we're at last question so confirm exists but disabled)
-    expect((screen.getByTestId(CONFIRM) as HTMLButtonElement).disabled).toBe(true)
+    // Question 2 incomplete: confirm visible (last question) but disabled
+    expect(confirmButton().disabled).toBe(true)
 
     // Back preserves question 1 selection
-    fireEvent.click(screen.getByTestId(BACK))
+    await act(async () => {
+      await user.click(screen.getByTestId(BACK))
+    })
     expect(option(TRASH).getAttribute('aria-checked')).toBe('true')
-    fireEvent.click(screen.getByTestId(NEXT))
+    await waitFor(() => expect((screen.getByTestId(NEXT) as HTMLButtonElement).disabled).toBe(false))
+    await act(async () => {
+      await user.click(screen.getByTestId(NEXT))
+    })
 
-    fireEvent.click(option('question-option-notify-admins'))
-    fireEvent.click(screen.getByTestId(CONFIRM))
+    await act(async () => {
+      await user.click(option('question-option-notify-admins'))
+    })
+    await waitFor(() => expect(confirmButton().disabled).toBe(false))
+    await act(async () => {
+      await user.click(confirmButton())
+    })
 
-    expect(onSubmitCalls).toHaveLength(1)
-    expect((onSubmitCalls[0] as { answers: Array<{ questionId: string }> }).answers.map(a => a.questionId))
+    await waitFor(() => expect(harness.onSubmitCalls).toHaveLength(1))
+    expect((harness.onSubmitCalls[0] as { answers: Array<{ questionId: string }> }).answers.map(a => a.questionId))
       .toEqual(['data', 'notify'])
   })
 
-  it('cancel calls onCancel with the requestId', () => {
-    const { onCancelCalls } = renderQuestion()
-    fireEvent.click(screen.getByTestId(CANCEL))
-    expect(onCancelCalls).toEqual(['q-1'])
+  it('cancel calls onCancel with the requestId', async () => {
+    const user = userEvent.setup({ document: window.document })
+    const { harness } = renderQuestion()
+    await act(async () => {
+      await user.click(screen.getByTestId(CANCEL))
+    })
+    await waitFor(() => expect(harness.onCancelCalls).toEqual(['q-1']))
   })
 
-  it('transient_failure rejection keeps selections, Other text, and shows a retryable error', async () => {
+  it('transient_failure rejection keeps selections and shows a retryable error', async () => {
     let attempts = 0
     const failingSubmit = async () => {
       attempts++
       throw new Error('Network hiccup')
     }
-    const { onSubmitCalls: _calls } = renderQuestion({ onSubmit: failingSubmit })
+    const user = userEvent.setup({ document: window.document })
+    renderQuestion({ onSubmit: failingSubmit })
 
-    fireEvent.click(option(TRASH))
-    fireEvent.click(screen.getByTestId(CONFIRM))
+    await act(async () => {
+      await user.click(option(TRASH))
+    })
+    await waitFor(() => expect(confirmButton().disabled).toBe(false))
+    await act(async () => {
+      await user.click(confirmButton())
+    })
 
     // Error surfaces and controls re-enable for retry
     await waitFor(() => expect(screen.getByTestId('question-status').textContent).toContain('Network hiccup'))
     expect(attempts).toBe(1)
     expect(option(TRASH).getAttribute('aria-checked')).toBe('true')
-    expect((screen.getByTestId(CONFIRM) as HTMLButtonElement).disabled).toBe(false)
-
-    // Retry succeeds — same failing stub replaced with a resolving one
-    ;(await import('@testing-library/react')).act(() => {
-      /* state settled above */
-    })
+    expect(confirmButton().disabled).toBe(false)
   })
 
-  it('keyboard interaction: option buttons respond to Enter and Space like clicks', () => {
+  it('keyboard interaction: option buttons respond to Enter and Space like clicks', async () => {
+    const user = userEvent.setup({ document: window.document })
     renderQuestion()
     const trash = option(TRASH)
-    trash.focus()
-    fireEvent.keyDown(trash, { key: 'Enter' })
-    // Buttons handle Enter as click natively in happy-dom via fireEvent.click
-    fireEvent.click(trash)
+    await act(async () => {
+      trash.focus()
+      await user.keyboard('{Enter}')
+    })
     expect(trash.getAttribute('aria-checked')).toBe('true')
   })
 
   it('disabled prop disables every interactive control', () => {
     renderQuestion({ disabled: true })
     expect(option(TRASH).disabled).toBe(true)
-    expect((screen.getByTestId(CONFIRM) as HTMLButtonElement).disabled).toBe(true)
+    expect(confirmButton().disabled).toBe(true)
     expect((screen.getByTestId(CANCEL) as HTMLButtonElement).disabled).toBe(true)
   })
 })

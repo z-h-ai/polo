@@ -6133,14 +6133,21 @@ export class SessionManager implements ISessionManager {
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed?.isProcessing) {
+    if (!managed) {
+      return // Session not found, nothing to cancel
+    }
+
+    // A pending question cannot survive a user stop. This must run BEFORE the
+    // isProcessing early-return: the QuestionRequested handoff already flipped
+    // isProcessing to false, so "stop while a question is pending" would
+    // otherwise never reach any cleanup.
+    await this.clearPendingQuestionForSession(managed)
+
+    if (!managed.isProcessing) {
       return // Not processing, nothing to cancel
     }
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
-
-    // A pending question cannot survive a user stop — clear memory + disk + renderers.
-    await this.clearPendingQuestionForSession(managed)
 
     // Collect queued message text for input restoration before clearing
     const queuedTexts = managed.messageQueue.map(q => q.message)
@@ -6677,79 +6684,107 @@ export class SessionManager implements ISessionManager {
   /**
    * Handle an agent-initiated question request (request_user_input).
    *
-   * Order of operations (P0 contract):
+   * Mandatory order (P0 contract):
    * 1. Polo generates the requestId and re-validates the full schema
    * 2. The new request becomes the authoritative pendingQuestion
    *    (a previously active requestId becomes stale by identity)
-   * 3. The tool activity is marked completed ("Waiting for user input")
-   * 4. Handoff with AbortReason.QuestionRequested stops the turn and
-   *    releases browser/session runtime ownership
-   * 5. Persist + flush — disk becomes authoritative before renderers react
-   * 6. question_request event informs every renderer
+   * 3. Persist + flush — disk is authoritative BEFORE the agent is
+   *    interrupted or renderers are notified; on failure the in-memory
+   *    replacement is rolled back so a later turn can retry the question
+   * 4. The tool activity is marked completed ("Waiting for user input")
+   * 5. question_request event informs every renderer (input-area takeover)
+   * 6. Handoff with AbortReason.QuestionRequested stops the turn and
+   *    releases browser/session runtime ownership, then sends `complete`
    */
   private async handleQuestionRequested(
     managed: ManagedSession,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
   ): Promise<void> {
+    // 1. Re-validate (defense in depth) and generate the Polo-side identity
+    const { parseRequestUserInputArgs } = await import('@polo-ai/session-tools-core')
+    const parsed = parseRequestUserInputArgs({ questions })
+    if (!parsed.ok) {
+      sessionLog.warn(`Ignoring invalid question request for session ${managed.id}: ${parsed.error}`)
+      return
+    }
+
+    await this.ensureMessagesLoaded(managed)
+
+    const request: QuestionRequest = {
+      requestId: `q-${randomUUID()}`,
+      sessionId: managed.id,
+      createdAt: Date.now(),
+      questions: parsed.data.questions,
+    }
+
+    // 2. Authoritative pending state — replaces any active request
+    const previousPending = managed.pendingQuestion
+    managed.pendingQuestion = request
+
+    // 3. Persist + flush before any visible side effect. Failure rolls the
+    //    replacement back: the running turn continues (no handoff happened)
+    //    and the previous authoritative state is restored on disk.
     try {
-      // 1. Re-validate (defense in depth) and generate the Polo-side identity
-      const { parseRequestUserInputArgs } = await import('@polo-ai/session-tools-core')
-      const parsed = parseRequestUserInputArgs({ questions })
-      if (!parsed.ok) {
-        sessionLog.warn(`Ignoring invalid question request for session ${managed.id}: ${parsed.error}`)
-        return
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } catch (error) {
+      managed.pendingQuestion = previousPending
+      try {
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      } catch (rollbackError) {
+        sessionLog.error(`Failed to persist rolled-back question state for session ${managed.id}:`, rollbackError)
       }
+      sessionLog.error(`Failed to persist question request for session ${managed.id}; handoff skipped:`, error)
+      return
+    }
 
-      await this.ensureMessagesLoaded(managed)
+    // 4. Mark the request_user_input tool activity completed so it doesn't
+    //    render as executing forever after the handoff aborts the turn.
+    const toolMsg = [...managed.messages].reverse().find(
+      m => m.toolName?.includes('request_user_input') && m.toolStatus === 'executing'
+    )
+    if (toolMsg) {
+      toolMsg.toolStatus = 'completed'
+      toolMsg.content = 'Waiting for user input'
+      toolMsg.toolResult = 'Waiting for user input'
+    }
 
-      const request: QuestionRequest = {
-        requestId: `q-${randomUUID()}`,
-        sessionId: managed.id,
-        createdAt: Date.now(),
-        questions: parsed.data.questions,
-      }
+    // 5. Notify renderers — the input area is taken over by the question UI
+    this.sendEvent({
+      type: 'question_request',
+      sessionId: managed.id,
+      request,
+    }, managed.workspace.id)
 
-      // 2. Authoritative pending state — replaces any active request
-      managed.pendingQuestion = request
+    // 6. Handoff — the agent pauses until the user answers or skips
+    if (managed.isProcessing && managed.agent) {
+      sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
+      managed.agent.interruptForHandoff(AbortReason.QuestionRequested)
+      this.setProcessing(managed, false)
 
-      // 3. Mark the request_user_input tool activity completed so it doesn't
-      //    render as executing forever after the handoff aborts the turn.
-      const toolMsg = [...managed.messages].reverse().find(
-        m => m.toolName?.includes('request_user_input') && m.toolStatus === 'executing'
-      )
-      if (toolMsg) {
-        toolMsg.toolStatus = 'completed'
-        toolMsg.content = 'Waiting for user input'
-        toolMsg.toolResult = 'Waiting for user input'
-      }
-
-      // 4. Handoff — the agent pauses until the user answers or skips
-      if (managed.isProcessing && managed.agent) {
-        sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
-        managed.agent.interruptForHandoff(AbortReason.QuestionRequested)
-        this.setProcessing(managed, false)
-
-        // Release browser overlay + session binding because the agent is paused.
+      // Release browser overlay + session binding because the agent is paused.
+      // A release failure must not skip the complete event — the turn is
+      // already aborted at this point.
+      try {
         await releaseBrowserOwnershipOnForcedStop(
           (sid) => this.getBrowserPaneManagerForSession(sid),
           managed.id,
         )
-
-        this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+      } catch (releaseError) {
+        sessionLog.error(`Failed to release browser ownership for session ${managed.id} after question handoff:`, releaseError)
       }
 
-      // 5. Persist + flush — disk is authoritative before the UI reacts
+      // Send complete event so renderer knows processing stopped (include tokenUsage for real-time updates)
+      this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+    }
+
+    // 7. Persist again so the completed tool activity is durable (best effort)
+    try {
       this.persistSession(managed)
       await this.flushSession(managed.id)
-
-      // 6. Notify renderers
-      this.sendEvent({
-        type: 'question_request',
-        sessionId: managed.id,
-        request,
-      }, managed.workspace.id)
     } catch (error) {
-      sessionLog.error(`Failed to handle question request for session ${managed.id}:`, error)
+      sessionLog.error(`Post-handoff persist failed for session ${managed.id} (question remains pending):`, error)
     }
   }
 
@@ -6797,10 +6832,86 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Validate an answer payload against the pending request. Returns an error
+   * message when invalid (→ transient_failure before ANY state mutation), or
+   * null when valid.
+   *
+   * Contract:
+   * - every request question is answered exactly once (1:1 questionId mapping)
+   * - option IDs are valid, duplicate-free
+   * - single-select: exactly one choice — one preset option XOR free text
+   * - multi-select: at least one choice; an `exclusive` option excludes every
+   *   other preset option and the Other free text
+   */
+  private validateQuestionAnswerPayload(
+    pending: QuestionRequest,
+    response: import('@polo-ai/shared/protocol').QuestionResponse,
+  ): string | null {
+    if (response.answers.length !== pending.questions.length) {
+      return 'Not all questions were answered'
+    }
+
+    const seenQuestionIds = new Set<string>()
+    for (const answer of response.answers) {
+      if (seenQuestionIds.has(answer.questionId)) {
+        return `Duplicate answer for questionId "${answer.questionId}"`
+      }
+      seenQuestionIds.add(answer.questionId)
+
+      const question = pending.questions.find(q => q.id === answer.questionId)
+      if (!question) {
+        return `Unknown questionId "${answer.questionId}"`
+      }
+
+      const optionIds = answer.selectedOptionIds
+      if (new Set(optionIds).size !== optionIds.length) {
+        return `Duplicate optionId in answer for question "${question.id}"`
+      }
+      const validOptionIds = new Set(question.options.map(o => o.id))
+      for (const optionId of optionIds) {
+        if (!validOptionIds.has(optionId)) {
+          return `Unknown optionId "${optionId}" for question "${question.id}"`
+        }
+      }
+
+      const otherText = answer.otherText?.trim() ?? ''
+      if (otherText.length > 2000) {
+        return 'Other text exceeds 2000 characters'
+      }
+
+      if (!question.multiple) {
+        // Single-select: exactly one choice — one preset option XOR free text
+        if (optionIds.length > 1) {
+          return `Question "${question.id}" allows only one selection`
+        }
+        if (optionIds.length === 1 && otherText) {
+          return `Question "${question.id}" accepts either an option or free text, not both`
+        }
+        if (optionIds.length === 0 && !otherText) {
+          return `Question "${question.id}" requires an answer`
+        }
+      } else {
+        // Multi-select: at least one choice; exclusive excludes everything else
+        const selectedOptions = question.options.filter(o => optionIds.includes(o.id))
+        const hasExclusive = selectedOptions.some(o => o.exclusive)
+        if (hasExclusive && (selectedOptions.length > 1 || otherText)) {
+          return `Question "${question.id}" has an exclusive option that cannot be combined with other selections`
+        }
+        if (optionIds.length === 0 && !otherText) {
+          return `Question "${question.id}" requires an answer`
+        }
+      }
+    }
+    return null
+  }
+
+  /**
    * Resolve a pending question: apply the answer, write ONE readable user
    * message (with structured metadata), clear the pending state atomically,
    * persist, and only then start the next agent turn with that same message.
    *
+   * Atomicity: the in-memory transition is rolled back if persist/flush
+   * fails, so a transient_failure result is genuinely retryable.
    * Cancellation performs the same atomic cleanup but never starts the agent.
    */
   async respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult> {
@@ -6837,12 +6948,21 @@ export class SessionManager implements ISessionManager {
           timestamp: this.monotonic(),
           questionResolution: { action: 'cancel', requestId },
         }
-        managed.messages.push(cancelMessage)
-        managed.lastMessageRole = 'user'
-        managed.pendingQuestion = undefined
+        // Rollback snapshot — a failed persist/flush must leave the session
+        // exactly as before so the skip can be retried.
+        const prevMessages = managed.messages.slice()
+        const prevLastMessageRole = managed.lastMessageRole
+        try {
+          managed.messages.push(cancelMessage)
+          managed.lastMessageRole = 'user'
+          managed.pendingQuestion = undefined
 
-        this.persistSession(managed)
-        await this.flushSession(managed.id)
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+        } catch (error) {
+          this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole }, pending)
+          throw error
+        }
 
         this.sendEvent({
           type: 'user_message',
@@ -6862,30 +6982,12 @@ export class SessionManager implements ISessionManager {
       }
 
       // --- action === 'answer' ---
-      const response = resolution.response
 
       // Validate answers against the pending request before mutating anything.
-      const validQuestionIds = new Set(pending.questions.map(q => q.id))
-      for (const answer of response.answers) {
-        if (!validQuestionIds.has(answer.questionId)) {
-          return { status: 'transient_failure', message: `Unknown questionId "${answer.questionId}"` }
-        }
-        const question = pending.questions.find(q => q.id === answer.questionId)!
-        const validOptionIds = new Set(question.options.map(o => o.id))
-        if (answer.selectedOptionIds.length === 0 && !answer.otherText?.trim()) {
-          return { status: 'transient_failure', message: `Question "${question.id}" requires a selection or free text` }
-        }
-        for (const optionId of answer.selectedOptionIds) {
-          if (!validOptionIds.has(optionId)) {
-            return { status: 'transient_failure', message: `Unknown optionId "${optionId}" for question "${question.id}"` }
-          }
-        }
-        if (answer.otherText && answer.otherText.trim().length > 2000) {
-          return { status: 'transient_failure', message: 'Other text exceeds 2000 characters' }
-        }
-      }
-      if (response.answers.length !== pending.questions.length) {
-        return { status: 'transient_failure', message: 'Not all questions were answered' }
+      const response = resolution.response
+      const validationError = this.validateQuestionAnswerPayload(pending, response)
+      if (validationError) {
+        return { status: 'transient_failure', message: validationError }
       }
 
       // Atomic: write ONE readable answer message with structured metadata,
@@ -6901,13 +7003,23 @@ export class SessionManager implements ISessionManager {
           answers: response.answers,
         },
       }
-      managed.messages.push(answerMessage)
-      managed.lastMessageRole = 'user'
-      managed.lastMessageAt = Date.now()
-      managed.pendingQuestion = undefined
+      // Rollback snapshot — a failed persist/flush must leave the session
+      // exactly as before so the same answer can be retried.
+      const prevMessages = managed.messages.slice()
+      const prevLastMessageRole = managed.lastMessageRole
+      const prevLastMessageAt = managed.lastMessageAt
+      try {
+        managed.messages.push(answerMessage)
+        managed.lastMessageRole = 'user'
+        managed.lastMessageAt = Date.now()
+        managed.pendingQuestion = undefined
 
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      } catch (error) {
+        this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt }, pending)
+        throw error
+      }
 
       this.sendEvent({
         type: 'user_message',
@@ -6925,8 +7037,13 @@ export class SessionManager implements ISessionManager {
       // Resume the agent in the same session with the answer message as the
       // user turn (existingMessageId prevents a duplicate user message).
       // The answer UI lives on desktop, so the resumed turn is a desktop turn
-      // — the agent keeps the ability to ask follow-up questions.
-      await this.sendMessage(sessionId, content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
+      // — the agent keeps the ability to ask follow-up questions. A resume
+      // failure must not un-accept the already-committed resolution.
+      try {
+        await this.sendMessage(sessionId, content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
+      } catch (resumeError) {
+        sessionLog.error(`Failed to resume agent after answering question ${requestId} for session ${sessionId} (resolution committed):`, resumeError)
+      }
 
       sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
       return { status: 'accepted' }
@@ -6936,6 +7053,32 @@ export class SessionManager implements ISessionManager {
         status: 'transient_failure',
         message: error instanceof Error ? error.message : String(error),
       }
+    }
+  }
+
+  /**
+   * Roll back an in-flight answer/cancel transition after a persist/flush
+   * failure, restoring the authoritative pending question and message list.
+   * A best-effort re-persist keeps the queue consistent with memory.
+   */
+  private rollbackQuestionResolution(
+    managed: ManagedSession,
+    snapshot: { messages: Message[]; lastMessageRole?: ManagedSession['lastMessageRole']; lastMessageAt?: number },
+    pending: QuestionRequest,
+  ): void {
+    managed.messages = snapshot.messages
+    managed.lastMessageRole = snapshot.lastMessageRole
+    if (snapshot.lastMessageAt !== undefined) {
+      managed.lastMessageAt = snapshot.lastMessageAt
+    }
+    managed.pendingQuestion = pending
+    try {
+      this.persistSession(managed)
+      void this.flushSession(managed.id).catch(rollbackError => {
+        sessionLog.error(`Failed to re-persist rolled-back question state for session ${managed.id}:`, rollbackError)
+      })
+    } catch (rollbackError) {
+      sessionLog.error(`Failed to re-persist rolled-back question state for session ${managed.id}:`, rollbackError)
     }
   }
 

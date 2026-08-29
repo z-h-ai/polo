@@ -29,6 +29,7 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
+import { questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -1215,11 +1216,7 @@ export default function App() {
           case 'question_request': {
             // A new requestId replaces any previous pending question —
             // the old card's local answers are dropped with it.
-            setPendingQuestions(prev => {
-              const next = new Map(prev)
-              next.set(sessionId, effect.request)
-              return next
-            })
+            setPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request))
             // Native notification (same gating as permission notifications)
             const notifySession = store.get(sessionAtomFamily(sessionId))
             if (notifySession && !notifySession.hidden) {
@@ -1228,12 +1225,9 @@ export default function App() {
             break
           }
           case 'question_resolved': {
-            setPendingQuestions(prev => {
-              if (!prev.has(sessionId)) return prev
-              const next = new Map(prev)
-              next.delete(sessionId)
-              return next
-            })
+            // requestId-conditional: never delete a newer question card that
+            // replaced the one this resolution is about.
+            setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId))
             break
           }
           case 'restore_input': {
@@ -2058,28 +2052,22 @@ export default function App() {
     resolution: QuestionResolution,
   ): Promise<QuestionResolutionResult> => {
     const result = await window.electronAPI.respondToQuestion(sessionId, resolution)
+    // requestId-conditional cleanup: if the agent already fired a follow-up
+    // question (q2) while this resolution (q1) was in flight, the stale
+    // resolution must not delete the newer card.
+    const resolvedRequestId = questionResolutionRequestId(resolution)
 
     switch (result.status) {
       case 'accepted':
       case 'cancelled':
       case 'already_answered':
-        setPendingQuestions(prev => {
-          if (!prev.has(sessionId)) return prev
-          const next = new Map(prev)
-          next.delete(sessionId)
-          return next
-        })
+        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId))
         break
       case 'stale':
       case 'session_missing':
         // One-time readable notice, then drop the stale card
         toast.error(i18n.t('toast.questionNoLongerActive'), { duration: 5000 })
-        setPendingQuestions(prev => {
-          if (!prev.has(sessionId)) return prev
-          const next = new Map(prev)
-          next.delete(sessionId)
-          return next
-        })
+        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId))
         break
       case 'transient_failure':
         throw new Error(result.message)

@@ -642,6 +642,7 @@ export class PiAgent extends BaseAgent {
       this.send({
         type: 'register_tools',
         tools: proxyDefs,
+        scope: 'pool',
       });
       this.debug(`Registered ${proxyDefs.length} MCP source tools from pool with subprocess`);
     }
@@ -681,12 +682,18 @@ export class PiAgent extends BaseAgent {
 
   /**
    * Send the current session tool registration to the subprocess.
+   *
+   * Uses scope 'session' — the subprocess REPLACES its session-tool set with
+   * this exact list, so a tool omitted here (request_user_input on
+   * non-desktop turns) is removed instead of lingering from a previous
+   * desktop registration.
    */
   private sendSessionToolRegistration(): void {
     const sessionToolDefs = this.buildSessionToolDefs();
     this.send({
       type: 'register_tools',
       tools: sessionToolDefs,
+      scope: 'session',
     });
     this._lastRegisteredAllowRequestUserInput = this.allowRequestUserInput;
     this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput})`);
@@ -1725,6 +1732,16 @@ export class PiAgent extends BaseAgent {
     args: Record<string, unknown>,
   ): Promise<{ content: string; isError: boolean }> {
     try {
+      // Server-side capability re-check (defense in depth): the subprocess
+      // tool list is advisory — this gate enforces the per-turn invocation
+      // source even if a stale registration still advertises the tool.
+      if (toolName === 'request_user_input' && !this.allowRequestUserInput) {
+        return {
+          content: 'request_user_input is not available in this session. Ask the user your question as plain text instead.',
+          isError: true,
+        };
+      }
+
       // call_llm uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'call_llm') {
         try {
