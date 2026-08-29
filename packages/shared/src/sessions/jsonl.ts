@@ -73,25 +73,79 @@ function normalizeHeaderPermissionModes<T extends SessionHeader>(header: T): T {
   return header;
 }
 
+// Session JSONL headers carry full metadata (including pendingQuestion, up to
+// 3 questions × 4 options of multi-byte text), so the first line has no fixed
+// upper bound. Read with a growing buffer until the line terminator is found —
+// a fixed buffer truncates legal headers into corrupt JSON.
+const HEADER_INITIAL_BYTES = 16 * 1024;
+const HEADER_MAX_BYTES = 512 * 1024;
+
+/** Decode buffer[0..byteLength) with any trailing incomplete UTF-8 sequence removed. */
+function stripPartialUtf8Tail(buffer: Buffer, byteLength: number): string {
+  if (byteLength <= 0) return '';
+  // Walk back at most 3 bytes to find the start of the last sequence.
+  const maxLookback = Math.min(4, byteLength);
+  for (let i = 1; i < maxLookback; i++) {
+    const byte = buffer[byteLength - i];
+    if (byte === undefined) break;
+    if ((byte & 0xc0) !== 0x80) {
+      // Leading byte found: if it announces a sequence longer than what was
+      // read, the read boundary split a multi-byte character — trim it.
+      const sequenceLength = (byte & 0xe0) === 0xc0 ? 2
+        : (byte & 0xf0) === 0xe0 ? 3
+        : (byte & 0xf8) === 0xf0 ? 4
+        : 1;
+      if (i < sequenceLength) {
+        return buffer.toString('utf8', 0, byteLength - i);
+      }
+      break;
+    }
+  }
+  return buffer.toString('utf8', 0, byteLength);
+}
+
+/** Parse the header line from a decoded chunk, or report that more bytes are needed. */
+function parseHeaderChunk(text: string, sessionFile: string, bytesRead: number, bufferSize: number):
+  { header: SessionHeader | null; needsMore: boolean } {
+  const firstNewline = text.indexOf('\n');
+  if (firstNewline > 0) {
+    const firstLine = text.slice(0, firstNewline);
+    const parsed = safeJsonParse(expandSessionPath(firstLine, dirname(sessionFile))) as SessionHeader;
+    return { header: normalizeHeaderPermissionModes(parsed), needsMore: false };
+  }
+  // No newline: EOF reached (bytesRead < bufferSize) or cap exhausted — parse
+  // what we have (a header line is the first line, so EOF without newline is
+  // still the whole header). A parse failure surfaces as null via the caller.
+  if (bytesRead < bufferSize || bufferSize >= HEADER_MAX_BYTES) {
+    const parsed = safeJsonParse(expandSessionPath(text, dirname(sessionFile))) as SessionHeader;
+    return { header: normalizeHeaderPermissionModes(parsed), needsMore: false };
+  }
+  return { header: null, needsMore: true };
+}
+
 /**
  * Read only the header (first line) from a session.jsonl file.
- * Uses low-level fs to read minimal bytes for fast list loading.
+ * Uses low-level fs with a growing buffer so multi-byte, schema-maximal
+ * pendingQuestion headers are never truncated into corrupt JSON.
  */
 export function readSessionHeader(sessionFile: string): SessionHeader | null {
   try {
     const fd = openSync(sessionFile, 'r');
-    // 16KB: pendingQuestion (up to 3 questions × 4 options) can grow the header
-    // beyond the old 8KB budget; keep list-loading resilient.
-    const buffer = Buffer.alloc(16384);
-    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
-    closeSync(fd);
-
-    const content = buffer.toString('utf-8', 0, bytesRead);
-    const firstNewline = content.indexOf('\n');
-    const firstLine = firstNewline > 0 ? content.slice(0, firstNewline) : content;
-
-    const parsed = safeJsonParse(expandSessionPath(firstLine, dirname(sessionFile))) as SessionHeader;
-    return normalizeHeaderPermissionModes(parsed);
+    let bufferSize = HEADER_INITIAL_BYTES;
+    try {
+      for (;;) {
+        const buffer = Buffer.alloc(bufferSize);
+        const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+        // A read boundary may split a multi-byte UTF-8 character — strip any
+        // trailing partial sequence before decoding, or JSON strings corrupt.
+        const text = stripPartialUtf8Tail(buffer, bytesRead);
+        const { header, needsMore } = parseHeaderChunk(text, sessionFile, bytesRead, bufferSize);
+        if (!needsMore) return header;
+        bufferSize = Math.min(bufferSize * 4, HEADER_MAX_BYTES);
+      }
+    } finally {
+      closeSync(fd);
+    }
   } catch (error) {
     debug('[jsonl] Failed to read session header:', sessionFile, error);
     return null;
@@ -250,13 +304,17 @@ export async function readSessionHeaderAsync(sessionFile: string): Promise<Sessi
   try {
     const handle = await open(sessionFile, 'r');
     try {
-      const buffer = Buffer.alloc(8192);
-      const { bytesRead } = await handle.read(buffer, 0, 8192, 0);
-      const content = buffer.toString('utf-8', 0, bytesRead);
-      const firstNewline = content.indexOf('\n');
-      const firstLine = firstNewline > 0 ? content.slice(0, firstNewline) : content;
-      const parsed = safeJsonParse(expandSessionPath(firstLine, dirname(sessionFile))) as SessionHeader;
-      return normalizeHeaderPermissionModes(parsed);
+      // Same growing-buffer contract as readSessionHeader: never truncate a
+      // legal multi-byte header line into corrupt JSON.
+      let bufferSize = HEADER_INITIAL_BYTES;
+      for (;;) {
+        const buffer = Buffer.alloc(bufferSize);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        const text = stripPartialUtf8Tail(buffer, bytesRead);
+        const { header, needsMore } = parseHeaderChunk(text, sessionFile, bytesRead, bufferSize);
+        if (!needsMore) return header;
+        bufferSize = Math.min(bufferSize * 4, HEADER_MAX_BYTES);
+      }
     } finally {
       await handle.close();
     }

@@ -6,7 +6,12 @@ import { createElement } from 'react'
 // DOM + i18n first, then component imports (no mock.module — the real Button
 // only pulls Radix Slot + cva, which is happy-dom safe and keeps this file
 // free of global module pollution that destabilizes parallel full-suite runs).
-GlobalRegistrator.register()
+// Register only when another test file in the same process hasn't already:
+// plain `bun test` runs files sequentially in one process, and a double
+// GlobalRegistrator.register() throws.
+if (typeof window === 'undefined') {
+  GlobalRegistrator.register()
+}
 setupI18n()
 
 const { cleanup, render, screen, waitFor, act } = await import('@testing-library/react')

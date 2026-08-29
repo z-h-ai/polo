@@ -11,8 +11,9 @@ import { getStructuredInputMaxHeight } from './structured-height'
 interface InputContainerProps extends Omit<FreeFormInputProps, 'inputRef'> {
   /** Structured input state - when present, shows structured UI instead of freeform */
   structuredInput?: StructuredInputState
-  /** Callback when user responds to structured input */
-  onStructuredResponse?: (response: StructuredResponse) => void
+  /** Callback when user responds to structured input. May return a Promise —
+   *  the promise is propagated so question submit/cancel failures surface as retryable errors. */
+  onStructuredResponse?: (response: StructuredResponse) => void | Promise<void>
   /** External ref for the input (for focus control) */
   textareaRef?: React.RefObject<RichTextInputHandle>
   /** Per-frame callback during height animation (for scroll sync) */
@@ -220,8 +221,11 @@ export function InputContainer({
     }
   }, [targetHeight, shouldAnimateHeight, heightMotionValue])
 
-  const handleStructuredResponse = (response: StructuredResponse) => {
-    onStructuredResponse?.(response)
+  // Propagate the promise end-to-end (question submit AND cancel flow through
+  // the same onResponse): QuestionRequest awaits it so a transient RPC failure
+  // surfaces as a retryable error state instead of being silently dropped.
+  const handleStructuredResponse = (response: StructuredResponse): void | Promise<void> => {
+    return onStructuredResponse?.(response)
   }
 
   // Render the current content (measuring div only for structured, freeform uses callback)
