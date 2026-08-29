@@ -7258,11 +7258,16 @@ export class SessionManager implements ISessionManager {
     }
 
     // ---- Boundary 2: durable clear AFTER a fully executed turn ----
-    // The answer turn already ran to completion (sendMessage resolved). A
-    // flush failure here is NOT a resume failure: never emit a fake "could
-    // not resume", never re-execute the turn. Only the durable clear is
-    // retried, with a terminal marker guarding restart re-execution.
+    // The answer turn already ran to completion (sendMessage resolved).
+    // Re-validate BOTH identities before touching durable state: if this old
+    // resume was superseded mid-await (new user message cleared it, then
+    // another answer armed a NEW pendingAgentResume), the old caller must
+    // exit silently — clearing now would drop the NEW recovery state.
     if (this.sessions.get(managed.id) !== managed) return
+    if (managed.pendingAgentResume?.messageId !== resume.messageId) {
+      sessionLog.info(`Skipping durable clear for session ${managed.id}: resume ${resume.messageId} was superseded by ${managed.pendingAgentResume?.messageId ?? 'nothing'}`)
+      return
+    }
     try {
       await this.clearPendingAgentResume(managed, 'resume succeeded')
     } catch (clearError) {

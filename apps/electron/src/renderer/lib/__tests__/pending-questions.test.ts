@@ -356,4 +356,50 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
 
     expect(result.get('s-omitted')?.requestId).toBe('q-old')
   })
+
+  it('epoch-current partial: an omitted card is preserved (removeMissing=false repro, round 8)', () => {
+    // Reviewer repro (exit 42): stale reconnect with removeMissing:false
+    // returns a PARTIAL list, and NO pending event raced the fetch
+    // (epoch-current) — the omitted session's pending card must survive.
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
+    const tokensBefore = new Map<string, number>()
+    tokensBefore.set('s-omitted', tracker.capture('s-omitted'))
+    const epochAtFetch = tracker.epoch
+
+    // Partial snapshot: only s-returned; s-omitted is absent, nothing bumped
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-returned', 'q-returned')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+      'partial',
+    )
+
+    expect(result.get('s-omitted')?.requestId).toBe('q-old')
+    expect(result.get('s-returned')?.requestId).toBe('q-returned')
+  })
+
+  it('epoch-current full: an omitted card is cleared (absence is authoritative)', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
+    const tokensBefore = new Map<string, number>()
+    tokensBefore.set('s-omitted', tracker.capture('s-omitted'))
+    const epochAtFetch = tracker.epoch
+
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-returned', 'q-returned')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+      'full',
+    )
+
+    expect(result.has('s-omitted')).toBe(false)
+    expect(result.get('s-returned')?.requestId).toBe('q-returned')
+  })
 })

@@ -83,6 +83,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       isProcessing?: boolean
       withAgent?: boolean
       executingToolMessage?: boolean
+      messages?: Array<Record<string, unknown>>
     } = {},
   ) {
     const filePath = getSessionFilePath(tmpRoot, sessionId)
@@ -95,7 +96,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       name: 'fault session',
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
-      messages: [],
+      messages: (opts.messages ?? []) as unknown as StoredSession['messages'],
       tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, costUsd: 0 },
       ...(opts.pendingQuestion ? { pendingQuestion: opts.pendingQuestion } : {}),
     } as StoredSession
@@ -581,6 +582,82 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(agentInitCalls).toBe(callsAfterSuccess)
   })
 
+  // Round 8, issue #2: while an OLD answer turn is awaiting its chat, a new
+  // user message supersedes it and ANOTHER answer arms a NEW resume — the old
+  // caller's durable clear (boundary 2) must not wipe the new recovery state.
+  it('old resume superseded mid-await: durable clear skips and the new resume survives', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-supersede')
+    const managed = seedSession('f-supersede', {
+      pendingQuestion: request,
+      messages: [
+        { id: 'msg-old-answer', type: 'user', role: 'user', content: 'old answer', timestamp: Date.now() },
+        { id: 'msg-new-answer', type: 'user', role: 'user', content: 'new answer', timestamp: Date.now() },
+      ],
+    })
+
+    // Two answer messages in history (old answer M1, new answer M2)
+    const M1 = 'msg-old-answer'
+    const M2 = 'msg-new-answer'
+    ;(managed as unknown as { messages: Array<Record<string, unknown>> }).messages.push(
+      { id: M1, type: 'user', role: 'user', content: 'old answer', timestamp: Date.now() },
+      { id: M2, type: 'user', role: 'user', content: 'new answer', timestamp: Date.now() },
+    )
+
+    // Fake agent whose chat blocks until the gate releases — the old turn is
+    // genuinely in flight while we supersede it.
+    let releaseOldTurn: (() => void) | null = null
+    const oldTurnGate = new Promise<void>(resolve => { releaseOldTurn = resolve })
+    let chatInvocations = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      const chatInvocationsForThisAgent = ++chatInvocations
+      return {
+        allowRequestUserInput: false,
+        getModel: () => 'fake-model',
+        getSessionId: () => null,
+        isProcessing: () => false,
+        supportsBranching: true,
+        setAllSources: () => {},
+        setSourceServers: async () => {},
+        getSummarizeCallback: () => undefined,
+        dispose: () => {},
+        chat: async function* (this: unknown, _message?: unknown) {
+          if (chatInvocationsForThisAgent === 1) {
+            await oldTurnGate
+          }
+          yield { type: 'complete' as const }
+        },
+      }
+    }
+
+    // Arm the OLD resume and start its turn (not awaited)
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: M1, attempts: 0 }
+    const oldTurn = (sm as unknown as { resumePendingAgentTurn: (m: unknown) => Promise<void> })
+      .resumePendingAgentTurn(managed)
+
+    // Wait until the old turn is genuinely inside its gated chat
+    await new Promise(r => setTimeout(r, 100))
+    expect(chatInvocations).toBe(1)
+
+    // Mid-await: a new user message supersedes (production clears), then
+    // another answer arms a NEW recovery state with a NEW messageId.
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = undefined
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: M2, attempts: 0 }
+
+    // Release the old turn — it completes, and boundary 2 must exit silently.
+    releaseOldTurn!()
+    await oldTurn
+
+    // The NEW recovery state survived (old caller did not clear it)
+    const stateAfter = (getManaged('f-supersede') as unknown as { pendingAgentResume?: { messageId: string } }).pendingAgentResume
+    expect(stateAfter?.messageId).toBe(M2)
+
+    // The new resume still works end-to-end: run it, turn executes, state clears.
+    await (sm as unknown as { resumePendingAgentTurn: (m: unknown) => Promise<void> }).resumePendingAgentTurn(managed)
+    expect(chatInvocations).toBe(2)
+    expect((getManaged('f-supersede') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
+  })
+
   async function waitForCondition(check: () => boolean, timeoutMs = 5000): Promise<void> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
@@ -610,21 +687,32 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     await sm.respondToQuestion('f-del-window', makeAnswerResolution(request))
     expect(agentInitCalls).toBe(1)
 
-    // Slow external I/O: the share revoke stalls for 400ms inside deleteSession
+    // Slow external I/O: the share revoke stalls for 1400ms inside
+    // deleteSession — the delete promise stays unresolved PAST the 1000ms
+    // retry expiry, so this test genuinely crosses the window in which the
+    // round-7 defect (timer not disarmed until after the revoke) would fire
+    // a ghost turn.
     const realFetch = globalThis.fetch
     globalThis.fetch = (async () => {
-      await new Promise(r => setTimeout(r, 400))
+      await new Promise(r => setTimeout(r, 1400))
       throw new Error('revoke stalled (injected)')
     }) as unknown as typeof fetch
 
     try {
-      await sm.deleteSession('f-del-window')
+      // Start deletion WITHOUT awaiting — the revoke window is in flight.
+      const deletePromise = sm.deleteSession('f-del-window')
 
-      // Advance past the (disarmed) retry schedule — the timer must NOT have
-      // fired during the revoke window: no extra agent init, no error events.
+      // Cross the 1000ms retry expiry while deletion is still pending.
+      await new Promise(r => setTimeout(r, 1200))
+      const errorEventsMidWindow = events.filter(e => e.type === 'error').length
+      expect(agentInitCalls).toBe(1)
+      expect(errorEventsMidWindow).toBe(1)
+
+      // Deletion completes; nothing fired for the deleted session afterwards.
+      await deletePromise
       await new Promise(r => setTimeout(r, 1500))
       expect(agentInitCalls).toBe(1)
-      expect(events.filter(e => e.type === 'error').length).toBe(1)
+      expect(events.filter(e => e.type === 'error').length).toBe(errorEventsMidWindow)
     } finally {
       globalThis.fetch = realFetch
     }
@@ -681,12 +769,33 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // Restart simulation: a fresh SessionManager hydrates the TERMINAL marker
     // and clears it WITHOUT re-executing the answer turn.
+    //
+    // IMPORTANT (round 8, issue #3): sm2 keeps the REAL sendMessage — wrapped
+    // in a counting delegate that calls through to the original. A total stub
+    // would silently swallow a wrongful resume and let the test pass.
     flushFailAtCall = 0
     const sm2 = new SessionManager()
     let sm2AgentInits = 0
     ;(sm2 as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
       sm2AgentInits++
-      return makeFakeAgent()
+      const agent = makeFakeAgent()
+      return {
+        ...agent,
+        chat: async function* (this: unknown) {
+          sm2ChatInvocations++
+          yield { type: 'complete' as const }
+        },
+      }
+    }
+    let sm2RealSendCalls = 0
+    let sm2ChatInvocations = 0
+    const sm2RealSend = (Object.getPrototypeOf(sm2) as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage
+    ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = function (
+      this: unknown,
+      ...args: unknown[]
+    ) {
+      sm2RealSendCalls++
+      return sm2RealSend.apply(this, args)
     }
     const stored = loadSession(tmpRoot, 'f-clear-flush')!
     const managed2 = createManagedSession(
@@ -694,16 +803,17 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       { id: 'ws_test', name: 'T', rootPath: tmpRoot, createdAt: Date.now() } as never,
     )
     ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set('f-clear-flush', managed2)
-    ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage =
-      async () => {}
     await (sm2 as unknown as { ensureMessagesLoaded: (m: unknown) => Promise<void> }).ensureMessagesLoaded(managed2)
     await new Promise(r => setTimeout(r, 100))
     await waitForCondition(() =>
       (managed2 as unknown as { pendingAgentResume?: unknown }).pendingAgentResume === undefined
     )
 
-    // The answer turn was NOT re-executed after restart
+    // The answer turn was NOT re-executed after restart: no real send, no
+    // agent creation, no agent chat.
+    expect(sm2RealSendCalls).toBe(0)
     expect(sm2AgentInits).toBe(0)
+    expect(sm2ChatInvocations).toBe(0)
     // And the terminal record was durably cleared
     expect((managed2 as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
   })

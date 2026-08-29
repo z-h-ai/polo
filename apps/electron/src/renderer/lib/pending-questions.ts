@@ -196,8 +196,9 @@ export function clearPendingQuestionForDeletedSession(
  *   local map missed). Changed or capture-unknown sessions keep their
  *   event-driven state.
  * - `'partial'` — the snapshot may legitimately omit sessions
- *   (metadata refresh with removeMissing=false). Only snapshot-present
- *   sessions are converged; absent sessions are never cleared.
+ *   (metadata refresh with removeMissing=false). **Starts from previous and
+ *   only converges snapshot-present sessions** — omitted sessions are NEVER
+ *   cleared, in the epoch-current normal path and the drifted path alike.
  *
  * `tokensBeforeFetch` must be captured BEFORE the fetch for every session in
  * `previous` (see App's loadSessionsFromServer).
@@ -210,16 +211,21 @@ export function reconcilePendingQuestionsFromSnapshot(
   epochAtFetch: number,
   scope: 'full' | 'partial' = 'full',
 ): Map<string, QuestionRequest> {
+  // Returned-ID set: replaces O(P×S) `sessions.some` scans below.
+  const returnedIds = new Set(sessions.map(s => s.id))
+
   if (tracker.isEpochCurrent(epochAtFetch)) {
-    // No pending event raced the fetch — the snapshot is wholesale-authoritative.
-    let next = new Map<string, QuestionRequest>()
+    // No pending event raced the fetch. Snapshot-present sessions converge;
+    // **partial scope starts from previous** — absent sessions are never
+    // cleared (a removeMissing=false list may legitimately omit sessions).
+    // Full scope treats absence as authoritative and clears omitted cards.
+    let next = new Map(previous)
     for (const session of sessions) {
       next = applyAuthoritativePendingQuestion(next, session.id, session.pendingQuestion)
     }
     if (scope === 'full') {
-      // Snapshot absence clears cards the authoritative list no longer has.
       for (const id of previous.keys()) {
-        if (!sessions.some(s => s.id === id)) {
+        if (!returnedIds.has(id)) {
           next = applyAuthoritativePendingQuestion(next, id, undefined)
         }
       }
@@ -243,7 +249,7 @@ export function reconcilePendingQuestionsFromSnapshot(
     // the complete list no longer contains — clear their cards too.
     for (const id of previous.keys()) {
       if (converged.has(id)) continue
-      if (!sessions.some(s => s.id === id) && tracker.isUnchangedSince(id, tokensBeforeFetch)) {
+      if (!returnedIds.has(id) && tracker.isUnchangedSince(id, tokensBeforeFetch)) {
         next = applyAuthoritativePendingQuestion(next, id, undefined)
       }
     }
