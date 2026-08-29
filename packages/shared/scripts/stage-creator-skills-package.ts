@@ -9,6 +9,7 @@ const distRoot = join(packageRoot, 'dist')
 const stageRoot = join(distRoot, 'publish')
 const stagedDistRoot = join(stageRoot, 'dist', 'creator-skills')
 const stagedAdminDistRoot = join(stageRoot, 'dist', 'admin')
+const stagedProductSpacesDistRoot = join(stageRoot, 'dist', 'product-spaces')
 
 type PackageIdentity = {
   name?: string
@@ -42,7 +43,7 @@ async function main(): Promise<void> {
   }
   const developmentExports = developmentManifest.exports as Record<string, unknown> | undefined
   const publishExports = publishManifest.exports as Record<string, unknown> | undefined
-  for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-skills/metadata', './creator-app-publishing']) {
+  for (const subpath of ['./creator-skills', './creator-skills/fixtures', './creator-skills/metadata', './creator-app-publishing', './product-spaces']) {
     const developmentExport = developmentExports?.[subpath] as Record<string, unknown> | undefined
     const publishExport = publishExports?.[subpath] as Record<string, unknown> | undefined
     for (const condition of ['types', 'browser', 'import', 'default']) {
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
   await rm(stageRoot, { recursive: true, force: true })
   await mkdir(stagedDistRoot, { recursive: true })
   await mkdir(stagedAdminDistRoot, { recursive: true })
+  await mkdir(stagedProductSpacesDistRoot, { recursive: true })
 
   for (const filename of [
     'archive.d.ts',
@@ -81,6 +83,24 @@ async function main(): Promise<void> {
     await copyFile(
       join(distRoot, 'admin', filename),
       join(stagedAdminDistRoot, filename),
+    )
+  }
+
+  for (const filename of [
+    'context-key.d.ts',
+    'direct-switch.d.ts',
+    'errors.d.ts',
+    'ids.d.ts',
+    'index.cjs',
+    'index.d.ts',
+    'index.browser.mjs',
+    'paths.d.ts',
+    'schemas.d.ts',
+    'types.d.ts',
+  ]) {
+    await copyFile(
+      join(distRoot, 'product-spaces', filename),
+      join(stagedProductSpacesDistRoot, filename),
     )
   }
 
