@@ -173,9 +173,9 @@ export function QuestionRequest({
     id: string,
     label: string,
     description: string | undefined,
-    opts: { multiple: boolean; recommended?: boolean; selected: boolean },
+    opts: { multiple: boolean; recommended?: boolean; selected: boolean; controlsId?: string },
   ) => {
-    const { multiple, recommended, selected } = opts
+    const { multiple, recommended, selected, controlsId } = opts
     const optionTestId = `question-option-${question.id}-${id}`
     return (
       <button
@@ -183,6 +183,7 @@ export function QuestionRequest({
         type="button"
         role={multiple ? 'checkbox' : 'radio'}
         aria-checked={selected}
+        {...(controlsId ? { 'aria-controls': controlsId } : {})}
         data-testid={optionTestId}
         disabled={inactive || submitting}
         onClick={() => selectOption(id)}
@@ -219,22 +220,6 @@ export function QuestionRequest({
           </span>
           {description && (
             <span className="mt-0.5 block text-xs leading-[18px] text-muted-foreground">{description}</span>
-          )}
-          {id === OTHER_OPTION_ID && selected && (
-            <input
-              ref={otherInputRef}
-              type="text"
-              value={otherTexts[question.id] ?? ''}
-              onChange={e => setOtherTexts(current => ({ ...current, [question.id]: e.target.value }))}
-              onClick={e => e.stopPropagation()}
-              onKeyDown={e => e.stopPropagation()}
-              maxLength={MAX_OTHER_TEXT}
-              disabled={inactive || submitting}
-              placeholder={t('chat.questionOtherPlaceholder')}
-              aria-label={t('chat.questionOtherPlaceholder')}
-              data-testid={`question-other-input-${question.id}`}
-              className="mt-2.5 block h-9 w-full rounded-md border border-foreground/20 bg-background px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:ring-1 focus:ring-ring/40 disabled:opacity-70"
-            />
           )}
         </span>
       </button>
@@ -287,10 +272,39 @@ export function QuestionRequest({
             </React.Fragment>
           ))}
           <div className="h-px bg-border" />
-          {renderChoice(OTHER_OPTION_ID, t('chat.questionOther'), undefined, {
-            multiple: question.multiple === true,
-            selected: otherSelected,
-          })}
+          <div>
+            {renderChoice(OTHER_OPTION_ID, t('chat.questionOther'), undefined, {
+              multiple: question.multiple === true,
+              selected: otherSelected,
+              controlsId: `question-other-input-${question.id}`,
+            })}
+            {/* Sibling of the option button (never nested inside it): an
+                interactive control inside a radio/checkbox would make Tab,
+                typing, and screen-reader semantics unreliable. Associated with
+                the button via aria-controls + an explicit <label>. */}
+            {otherSelected && (
+              <div className="bg-background px-4 pb-3">
+                <label
+                  htmlFor={`question-other-input-${question.id}`}
+                  className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                >
+                  {t('chat.questionOtherPlaceholder')}
+                </label>
+                <input
+                  ref={otherInputRef}
+                  id={`question-other-input-${question.id}`}
+                  type="text"
+                  value={otherTexts[question.id] ?? ''}
+                  onChange={e => setOtherTexts(current => ({ ...current, [question.id]: e.target.value }))}
+                  maxLength={MAX_OTHER_TEXT}
+                  disabled={inactive || submitting}
+                  placeholder={t('chat.questionOtherPlaceholder')}
+                  data-testid={`question-other-input-${question.id}`}
+                  className="block h-9 w-full rounded-md border border-foreground/20 bg-background px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:ring-1 focus:ring-ring/40 disabled:opacity-70"
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

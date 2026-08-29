@@ -556,6 +556,9 @@ const deepNestedActivities: ActivityItem[] = [
 
 type InputContainerMode = 'freeform' | 'permission' | 'admin_approval' | 'question'
 
+/** Deterministic question submit behaviors for the Playground (P1 review contract). */
+type QuestionSubmitScenario = 'normal' | 'submitting' | 'error'
+
 interface InputContainerPlaygroundProps {
   disabled?: boolean
   isProcessing?: boolean
@@ -564,6 +567,8 @@ interface InputContainerPlaygroundProps {
   permissionMode?: PermissionMode
   workingDirectory?: string
   inputMode?: InputContainerMode
+  /** Only meaningful with inputMode='question': controls onStructuredResponse behavior. */
+  questionScenario?: QuestionSubmitScenario
   compactMode?: boolean
   showOptionBadges?: boolean
   showTasks?: boolean
@@ -589,6 +594,7 @@ function InputContainerPlayground({
   permissionMode = 'ask',
   workingDirectory = '/Users/demo/projects/polo-ai',
   inputMode = 'freeform',
+  questionScenario = 'normal',
   compactMode = false,
   showOptionBadges = true,
   showTasks = true,
@@ -734,6 +740,35 @@ function InputContainerPlayground({
     return () => clearTimeout(timer)
   }, [showAttachments, attachmentSeedKey, attachmentFiles, playgroundSessionId])
 
+  // Deterministic question submit behavior (P1 review contract: the
+  // Playground must be able to reproduce submitting / transient_failure
+  // deterministically for visual + interaction review).
+  const questionSubmitAttempts = React.useRef(0)
+  const handleStructuredResponse = React.useCallback((response: StructuredResponse): void | Promise<void> => {
+    console.log('[Playground] Structured response:', response)
+    if (inputMode !== 'question') return
+
+    if (questionScenario === 'submitting') {
+      // Never resolves — deterministic stuck-submitting state (all controls
+      // disabled, spinner visible).
+      return new Promise<void>(() => {})
+    }
+
+    if (questionScenario === 'error') {
+      // First submit rejects (transient_failure — component keeps selections
+      // and shows a retryable error), retry succeeds.
+      questionSubmitAttempts.current += 1
+      if (questionSubmitAttempts.current === 1) {
+        return new Promise<void>((_, reject) => {
+          setTimeout(() => reject(new Error('Simulated transient failure — retry to succeed')), 300)
+        })
+      }
+      return Promise.resolve()
+    }
+
+    return undefined
+  }, [inputMode, questionScenario])
+
   const structuredInput = React.useMemo(() => {
     if (inputMode === 'permission') {
       return {
@@ -771,7 +806,7 @@ function InputContainerPlayground({
         <div className="flex-1" />
 
         <ChatInputZone
-          key={`input:${inputMode}:${compactMode ? 'compact' : 'full'}:${showAttachments ? attachmentSeedKey : 'none'}:${showFollowUps ? followUpCount : 0}:${seedRecentDirs ? recentDirScenario : 'unseeded'}`}
+          key={`input:${inputMode}:${questionScenario}:${compactMode ? 'compact' : 'full'}:${showAttachments ? attachmentSeedKey : 'none'}:${showFollowUps ? followUpCount : 0}:${seedRecentDirs ? recentDirScenario : 'unseeded'}`}
           compactMode={compactMode}
           showOptionBadges={showOptionBadges}
           permissionMode={mode}
@@ -791,9 +826,7 @@ function InputContainerPlayground({
             disabled,
             isProcessing,
             structuredInput,
-            onStructuredResponse: (response) => {
-              console.log('[Playground] Structured response:', response)
-            },
+            onStructuredResponse: handleStructuredResponse,
             currentModel: model,
             sources: showSources ? sources : [],
             enabledSourceSlugs: showSources ? enabledSourceSlugs : [],
@@ -1298,6 +1331,19 @@ export const chatComponents: ComponentEntry[] = [
         defaultValue: 'freeform',
       },
       {
+        name: 'questionScenario',
+        description: 'Question submit behavior (inputMode=question only): normal resolves, submitting never settles, error rejects once then succeeds',
+        control: {
+          type: 'select',
+          options: [
+            { label: 'Normal', value: 'normal' },
+            { label: 'Submitting (never resolves)', value: 'submitting' },
+            { label: 'Error (reject once, retry succeeds)', value: 'error' },
+          ],
+        },
+        defaultValue: 'normal',
+      },
+      {
         name: 'disabled',
         description: 'Disable all inputs',
         control: { type: 'boolean' },
@@ -1527,6 +1573,24 @@ export const chatComponents: ComponentEntry[] = [
         description: 'Agent question request: single-select + multi-select with exclusive option and Other',
         props: {
           inputMode: 'question',
+          showFollowUps: false,
+        },
+      },
+      {
+        name: 'Question Submitting',
+        description: 'Deterministic stuck-submitting state: all controls disabled with spinner (submit never settles)',
+        props: {
+          inputMode: 'question',
+          questionScenario: 'submitting',
+          showFollowUps: false,
+        },
+      },
+      {
+        name: 'Question Error',
+        description: 'Deterministic transient_failure: first submit rejects (selections + Other text kept, retryable error), retry succeeds',
+        props: {
+          inputMode: 'question',
+          questionScenario: 'error',
           showFollowUps: false,
         },
       },

@@ -374,4 +374,70 @@ describe('QuestionRequest component', () => {
     expect(confirmButton().disabled).toBe(true)
     expect((screen.getByTestId(CANCEL) as HTMLButtonElement).disabled).toBe(true)
   })
+
+  // Round 4, issue #1: the Other textbox must be a SIBLING of the option
+  // button (never nested inside a radio/checkbox), with explicit association.
+  describe('Other input accessibility (sibling of option button)', () => {
+    const OTHER_BTN = 'question-option-data-__other__'
+    const OTHER_INPUT = 'question-other-input-data'
+
+    it('keeps the textbox out of the option button subtree', async () => {
+      const user = userEvent.setup({ document: window.document })
+      renderQuestion()
+      await act(async () => {
+        await user.click(option(OTHER_BTN))
+      })
+      const input = screen.getByTestId(OTHER_INPUT)
+      // Structural guarantee: no interactive-control nesting
+      expect(input.closest('button')).toBeNull()
+      // Explicit label association
+      expect(input.id).toBe('question-other-input-data')
+      expect(document.querySelector(`label[for="${input.id}"]`)).not.toBeNull()
+      // Button references the textbox it controls
+      expect(option(OTHER_BTN).getAttribute('aria-controls')).toBe(input.id)
+    })
+
+    it('Space selects Other, then Tab reaches the textbox (next tab stop after the button)', async () => {
+      const user = userEvent.setup({ document: window.document })
+      renderQuestion()
+      const otherBtn = option(OTHER_BTN)
+      otherBtn.focus()
+      await act(async () => {
+        await user.keyboard(' ')
+      })
+      expect(otherBtn.getAttribute('aria-checked')).toBe('true')
+
+      // Tab-reachability contract: the textbox is enabled, naturally tabbable
+      // (no negative tabIndex), and DOM-ordered directly after the option
+      // button — so Tab from the button lands on it. (happy-dom's user.tab()
+      // walker skips freshly-mounted inputs, so assert the contract directly
+      // and verify focusability via focus().)
+      const input = screen.getByTestId(OTHER_INPUT) as HTMLInputElement
+      expect(input.disabled).toBe(false)
+      expect(input.getAttribute('tabindex')).not.toBe('-1')
+      expect(otherBtn.nextElementSibling?.contains(input)).toBe(true)
+      await act(async () => {
+        input.focus()
+      })
+      expect(document.activeElement).toBe(input)
+    })
+
+    it('typing in the textbox does not re-toggle the Other option', async () => {
+      const user = userEvent.setup({ document: window.document })
+      renderQuestion()
+      await act(async () => {
+        await user.click(option(OTHER_BTN))
+      })
+      const input = screen.getByTestId(OTHER_INPUT) as HTMLInputElement
+      expect(option(OTHER_BTN).getAttribute('aria-checked')).toBe('true')
+
+      await act(async () => {
+        await user.type(input, 'cold storage archive')
+      })
+      await waitFor(() => expect(input.value).toBe('cold storage archive'))
+      // Selection is untouched by typing; empty selection with text stays complete
+      expect(option(OTHER_BTN).getAttribute('aria-checked')).toBe('true')
+      expect(confirmButton().disabled).toBe(false)
+    })
+  })
 })
