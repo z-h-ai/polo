@@ -12,6 +12,7 @@
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@polo-ai/core/types';
+import type { QuestionRequest } from '../protocol/dto.ts';
 
 /**
  * Session fields that persist to disk.
@@ -40,6 +41,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'sharedUrl', 'sharedId', 'sharedWriteToken',
   // Plan execution
   'pendingPlanExecution',
+  // Pending agent question (request_user_input)
+  'pendingQuestion',
   // Archive
   'isArchived', 'archivedAt',
   // Branching
@@ -162,6 +165,15 @@ export interface SessionConfig {
     /** Whether execution has already been dispatched from the UI. */
     executionDispatched?: boolean;
   };
+  /**
+   * Authoritative pending agent question (request_user_input). While set,
+   * the desktop input area is taken over by the question UI and the agent
+   * turn is paused via a QuestionRequested handoff.
+   *
+   * Cleared on: answer accepted, user skips, replaced by a newer request,
+   * session stop/archive/delete, or session missing.
+   */
+  pendingQuestion?: QuestionRequest;
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Host experience that owns this session. */
@@ -284,6 +296,16 @@ export interface SessionHeader {
     /** Whether execution has already been dispatched from the UI. */
     executionDispatched?: boolean;
   };
+  /**
+   * Authoritative pending agent question (request_user_input) — included in
+   * the header so a full read restores it; the list view only consumes the
+   * derived `hasPendingQuestion` / `pendingQuestionRequestId` flags below.
+   */
+  pendingQuestion?: QuestionRequest;
+  /** True when an agent question is awaiting an answer (session list badge without loading messages). */
+  hasPendingQuestion?: boolean;
+  /** requestId of the pending question, when hasPendingQuestion is true. */
+  pendingQuestionRequestId?: string;
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Whether this session is archived */
@@ -374,4 +396,8 @@ export interface SessionMetadata {
   archivedAt?: number;
   /** Message ID that this session was branched from (hard context cutoff marker). */
   branchFromMessageId?: string;
+  /** True when an agent question is awaiting an answer (session list badge). */
+  hasPendingQuestion?: boolean;
+  /** requestId of the pending question, when hasPendingQuestion is true. */
+  pendingQuestionRequestId?: string;
 }

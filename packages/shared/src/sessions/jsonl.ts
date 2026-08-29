@@ -80,8 +80,10 @@ function normalizeHeaderPermissionModes<T extends SessionHeader>(header: T): T {
 export function readSessionHeader(sessionFile: string): SessionHeader | null {
   try {
     const fd = openSync(sessionFile, 'r');
-    const buffer = Buffer.alloc(8192); // 8KB is plenty for metadata header
-    const bytesRead = readSync(fd, buffer, 0, 8192, 0);
+    // 16KB: pendingQuestion (up to 3 questions × 4 options) can grow the header
+    // beyond the old 8KB budget; keep list-loading resilient.
+    const buffer = Buffer.alloc(16384);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
     closeSync(fd);
 
     const content = buffer.toString('utf-8', 0, bytesRead);
@@ -181,6 +183,9 @@ export function createSessionHeader(session: StoredSession): SessionHeader {
     preview: extractPreview(session.messages),
     tokenUsage: session.tokenUsage,
     lastFinalMessageId: extractLastFinalMessageId(session.messages),
+    // Pending question badge (derived so the session list never loads messages)
+    hasPendingQuestion: !!session.pendingQuestion,
+    pendingQuestionRequestId: session.pendingQuestion?.requestId,
   } as SessionHeader;
 }
 

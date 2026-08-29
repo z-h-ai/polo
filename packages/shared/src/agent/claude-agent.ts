@@ -665,6 +665,10 @@ export class ClaudeAgent extends BaseAgent {
         this.onDebug?.(`[ClaudeAgent] onAuthRequest received: ${request.sourceSlug} (type: ${request.type})`);
         this.onAuthRequest?.(request);
       },
+      onQuestionRequested: (questions) => {
+        this.onDebug?.(`[ClaudeAgent] onQuestionRequested received: ${questions.length} question(s)`);
+        this.onQuestionRequested?.(questions);
+      },
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
     });
@@ -955,12 +959,14 @@ export class ClaudeAgent extends BaseAgent {
       // Build full MCP servers set first, then filter for mini agents
       const fullMcpServers: Options['mcpServers'] = {
         // Session-scoped tools (SubmitPlan, source_test, update_user_preferences, transform_data, etc.)
+        // request_user_input only registers for desktop interactive main-session turns.
         session: getSessionScopedTools(
           sessionId,
           this.workspaceRootPath,
           undefined,
           this.sessionStorage,
           this.workingDirectory,
+          { allowRequestUserInput: this.allowRequestUserInput && !miniConfig.enabled },
         ),
         // Polo AI documentation - always available for searching setup guides
         // This is a public Mintlify MCP server, no auth needed

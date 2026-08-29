@@ -45,6 +45,7 @@ import type {
 } from './backend/types.ts';
 import { AbortReason } from './backend/types.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
+import { parseRequestUserInputArgs, type RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import type { Workspace } from '../config/storage.ts';
 
 // Core modules
@@ -252,6 +253,13 @@ export abstract class BaseAgent implements AgentBackend {
   onPermissionRequest: PermissionCallback | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;
+  onQuestionRequested: ((questions: RequestUserInputQuestionArgs[]) => void) | null = null;
+  /**
+   * Per-turn capability flag: whether the request_user_input tool is visible.
+   * Set by the SessionManager before each turn (desktop interactive sessions
+   * only — messaging/automation/headless/internal turns fail closed).
+   */
+  allowRequestUserInput = false;
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
   onConfigValidationError: ((file: string, errors: string[]) => void) | null = null;
@@ -440,6 +448,19 @@ export abstract class BaseAgent implements AgentBackend {
     if (toolName === 'SubmitPlan' && args.planPath) {
       this.debug(`SubmitPlan completed: ${args.planPath}`);
       this.onPlanSubmitted?.(args.planPath as string);
+      return;
+    }
+
+    // request_user_input — surface structured questions to the desktop UI.
+    // Args are re-validated here so the canonical schema stays the single gate.
+    if (toolName === 'request_user_input' && this.onQuestionRequested) {
+      const parsed = parseRequestUserInputArgs(args);
+      if (parsed.ok) {
+        this.debug(`request_user_input completed: ${parsed.data.questions.length} question(s)`);
+        this.onQuestionRequested(parsed.data.questions);
+      } else {
+        this.debug(`request_user_input rejected invalid args: ${parsed.error}`);
+      }
       return;
     }
 

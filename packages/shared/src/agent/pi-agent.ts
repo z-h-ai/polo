@@ -128,7 +128,7 @@ import {
 import { attachSessionSelfManagementBindings } from './session-self-management-bindings.ts';
 
 // Session tool proxy definitions (for registering with subprocess)
-import { getSessionToolProxyDefs, SESSION_TOOL_NAMES } from './backend/pi/session-tool-defs.ts';
+import { getSessionToolProxyDefs, SESSION_TOOL_NAMES, type SessionToolProxyDef } from './backend/pi/session-tool-defs.ts';
 
 // Session tool registry (for executing proxy tool calls)
 import {
@@ -353,6 +353,10 @@ export class PiAgent extends BaseAgent {
 
   // Cached session tool context (lazy-created on first session tool call)
   private _sessionToolContext: SessionToolContext | null = null;
+
+  // Last allowRequestUserInput value sent to the subprocess — used to detect
+  // capability drift between turns (desktop ↔ messaging switches).
+  private _lastRegisteredAllowRequestUserInput: boolean = false;
 
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
@@ -622,29 +626,7 @@ export class PiAgent extends BaseAgent {
     // These tools (SubmitPlan, config_validate, source auth, call_llm, etc.)
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
-    let sessionToolDefs = getSessionToolProxyDefs();
-
-    // Mirror Claude's gate: hide `browser_tool` when the user has disabled
-    // the built-in browser tool. Without this filter, Pi would still advertise
-    // `mcp__session__browser_tool` while Claude doesn't — sessions would behave
-    // inconsistently depending on backend.
-    if (!getBrowserToolEnabled()) {
-      sessionToolDefs = sessionToolDefs.filter(d => d.name !== 'mcp__session__browser_tool');
-    }
-
-    // Patch call_llm description with provider-specific model hint
-    if (this.config.miniModel) {
-      const callLlmDef = sessionToolDefs.find(d => d.name === 'mcp__session__call_llm');
-      if (callLlmDef) {
-        callLlmDef.description += `\n\nDefault fast model for this session: ${this.config.miniModel}. Omit the model parameter to use it automatically.`;
-      }
-    }
-
-    this.send({
-      type: 'register_tools',
-      tools: sessionToolDefs,
-    });
-    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess`);
+    this.sendSessionToolRegistration();
 
     // If pool has source tools, register them with the subprocess.
     this.registerPoolToolsWithSubprocess();
@@ -663,6 +645,64 @@ export class PiAgent extends BaseAgent {
       });
       this.debug(`Registered ${proxyDefs.length} MCP source tools from pool with subprocess`);
     }
+  }
+
+  /**
+   * Build the session-scoped proxy tool defs for the subprocess.
+   *
+   * Visibility mirrors the Claude adapter:
+   * - `request_user_input` only registers when allowRequestUserInput is set
+   *   (desktop interactive main-session turns).
+   * - `browser_tool` is hidden when the built-in browser tool is disabled.
+   */
+  private buildSessionToolDefs(): SessionToolProxyDef[] {
+    let sessionToolDefs = getSessionToolProxyDefs({
+      allowRequestUserInput: this.allowRequestUserInput,
+    });
+
+    // Mirror Claude's gate: hide `browser_tool` when the user has disabled
+    // the built-in browser tool. Without this filter, Pi would still advertise
+    // `mcp__session__browser_tool` while Claude doesn't — sessions would behave
+    // inconsistently depending on backend.
+    if (!getBrowserToolEnabled()) {
+      sessionToolDefs = sessionToolDefs.filter(d => d.name !== 'mcp__session__browser_tool');
+    }
+
+    // Patch call_llm description with provider-specific model hint
+    if (this.config.miniModel) {
+      const callLlmDef = sessionToolDefs.find(d => d.name === 'mcp__session__call_llm');
+      if (callLlmDef) {
+        callLlmDef.description += `\n\nDefault fast model for this session: ${this.config.miniModel}. Omit the model parameter to use it automatically.`;
+      }
+    }
+
+    return sessionToolDefs;
+  }
+
+  /**
+   * Send the current session tool registration to the subprocess.
+   */
+  private sendSessionToolRegistration(): void {
+    const sessionToolDefs = this.buildSessionToolDefs();
+    this.send({
+      type: 'register_tools',
+      tools: sessionToolDefs,
+    });
+    this._lastRegisteredAllowRequestUserInput = this.allowRequestUserInput;
+    this.debug(`Registered ${sessionToolDefs.length} session tools with subprocess (allowRequestUserInput=${this.allowRequestUserInput})`);
+  }
+
+  /**
+   * Re-register proxy tools only when the request_user_input capability flag
+   * drifted from what the subprocess currently knows. The subprocess sets
+   * toolsChanged and recreates its session on the next prompt.
+   */
+  private syncSessionToolRegistration(): void {
+    if (this._lastRegisteredAllowRequestUserInput === this.allowRequestUserInput) {
+      return;
+    }
+    this.debug(`request_user_input visibility changed to ${this.allowRequestUserInput} — re-registering session tools`);
+    this.sendSessionToolRegistration();
   }
 
   /**
@@ -1665,6 +1705,9 @@ export class PiAgent extends BaseAgent {
       onAuthRequest: (request: unknown) => {
         this.onAuthRequest?.(request as any);
       },
+      onQuestionRequested: (questions) => {
+        this.onQuestionRequested?.(questions);
+      },
     });
 
     // Attach session self-management bindings (lazy getters from callback registry)
@@ -2150,6 +2193,7 @@ export class PiAgent extends BaseAgent {
       mergeSessionScopedToolCallbacks(sessionId, {
         onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
         onAuthRequest: (request) => this.onAuthRequest?.(request),
+        onQuestionRequested: (questions) => this.onQuestionRequested?.(questions),
         queryFn: (request) => this.queryLlm(request),
       });
     }
@@ -2179,6 +2223,13 @@ export class PiAgent extends BaseAgent {
           throw subprocessError;
         }
       }
+
+      // Re-register proxy tools when the request_user_input capability flag
+      // changed since the last registration (desktop ↔ messaging turn switch).
+      // The subprocess marks toolsChanged and recreates its session on next
+      // prompt. Must run after ensureSubprocess — `send` drops silently while
+      // the subprocess is down (a cold start registers at startup instead).
+      this.syncSessionToolRegistration();
 
       const trimmedMessage = message.trim();
       const compactMatch = trimmedMessage.match(/^\/compact(?:\s+([\s\S]+))?$/i);

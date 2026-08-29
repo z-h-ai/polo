@@ -30,6 +30,7 @@ const FALLBACK_HEIGHTS: Record<InputMode | string, number> = {
   permission: 200,
   credential: 240,  // Taller for form fields + hint
   admin_approval: 220,
+  question: 320,  // Question UI: header + options list + footer actions
 }
 
 /**
@@ -66,8 +67,14 @@ export function InputContainer({
   const [isFocused, setIsFocused] = React.useState(false)
   const hasInitializedRef = React.useRef(false)
 
-  // Create a stable key for the current content
-  const contentKey = mode === 'freeform' ? 'freeform' : `structured-${structuredInput?.type}`
+  // Create a stable key for the current content.
+  // For questions the requestId is part of the key: a new request must reset
+  // the component (and its measured height), never reuse the previous answer state.
+  const contentKey = mode === 'freeform'
+    ? 'freeform'
+    : structuredInput?.type === 'question'
+      ? `structured-question-${(structuredInput.data as { requestId?: string }).requestId ?? 'unknown'}`
+      : `structured-${structuredInput?.type}`
 
   // Track mode transitions - animate height for a short period after mode change
   const [isAnimating, setIsAnimating] = React.useState(false)

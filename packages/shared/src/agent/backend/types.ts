@@ -96,6 +96,14 @@ export type PlanCallback = (planPath: string) => void;
 export type AuthCallback = (request: AuthRequest) => void;
 
 /**
+ * Question request callback signature.
+ * Called when the agent requests structured user input (request_user_input).
+ */
+export type QuestionRequestedCallback = (
+  questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]
+) => void;
+
+/**
  * Source change callback signature.
  * Called when a source is activated, deactivated, or modified.
  */
@@ -610,6 +618,16 @@ export interface AgentBackend {
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;
+
+  /** Called when the agent requests structured user input (request_user_input) */
+  onQuestionRequested: QuestionRequestedCallback | null;
+
+  /**
+   * Per-turn capability flag: whether the request_user_input tool is visible.
+   * Set by the session layer before each turn (desktop interactive sessions
+   * only); backends read it when building/registering their toolset.
+   */
+  allowRequestUserInput: boolean;
 
   /** Called when a source config changes */
   onSourceChange: SourceChangeCallback | null;

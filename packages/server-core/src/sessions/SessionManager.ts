@@ -74,7 +74,7 @@ import { isParentTaskTool } from '@polo-ai/shared/utils/toolNames'
 import { restoreFiles } from '@polo-ai/shared/utils/bundle-files'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { PoloMcpClient, McpClientPool, McpPoolServer } from '@polo-ai/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@polo-ai/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type QuestionRequest, type QuestionResolution, type QuestionResolutionResult, type InvocationSource, RPC_CHANNELS, generateMessageId } from '@polo-ai/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@polo-ai/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@polo-ai/shared/utils'
 import { loadAllSkills, invalidateSkillsCache, type LoadedSkill } from '@polo-ai/shared/skills'
@@ -893,6 +893,12 @@ interface ManagedSession {
   // Pending auth request tracking (for unified auth flow)
   pendingAuthRequestId?: string
   pendingAuthRequest?: AuthRequest
+  // Authoritative pending agent question (request_user_input).
+  // Persisted via SESSION_PERSISTENT_FIELDS; survives restarts.
+  pendingQuestion?: QuestionRequest
+  // Invocation source of the most recent turn ('desktop' enables
+  // request_user_input; defaults to 'internal' — fail closed).
+  invocationSource?: InvocationSource
   // Auth retry tracking (for mid-session token expiry)
   // Store last sent message/attachments to enable retry after token refresh
   lastSentMessage?: string
@@ -1103,6 +1109,9 @@ function managedToSession(
     tokenUsage: m.tokenUsage,
     messageCount: m.messageCount,
     lastFinalMessageId: m.lastFinalMessageId,
+    // Pending question badge + payload (hydrates renderer after restart/switch)
+    hasPendingQuestion: !!m.pendingQuestion,
+    pendingQuestionRequestId: m.pendingQuestion?.requestId,
     // Runtime-only fields
     workspaceId: m.workspace.id,
     workspaceName: m.workspace.name,
@@ -2482,6 +2491,19 @@ export class SessionManager implements ISessionManager {
       // Sync transferred session summary state from disk
       managed.transferredSessionSummary = storedSession.transferredSessionSummary
       managed.transferredSessionSummaryApplied = storedSession.transferredSessionSummaryApplied
+      // Restore the authoritative pending question (survives restarts).
+      // A stale request that was resolved while the server was down is pruned:
+      // if a resolution record already exists on disk, the pending copy is dropped.
+      if (storedSession.pendingQuestion) {
+        if (this.hasPersistedQuestionResolution(managed, storedSession.pendingQuestion.requestId)) {
+          sessionLog.info(`Pruning resolved pending question ${storedSession.pendingQuestion.requestId} for session ${managed.id}`)
+          managed.pendingQuestion = undefined
+        } else {
+          managed.pendingQuestion = storedSession.pendingQuestion
+        }
+      } else {
+        managed.pendingQuestion = undefined
+      }
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
 
       // Queue recovery: find orphaned queued messages from crash/restart and re-queue them
@@ -4084,6 +4106,12 @@ export class SessionManager implements ISessionManager {
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
       }
 
+      // Wire up onQuestionRequested: persist the pending question, notify renderers,
+      // then handoff so the agent turn stops while the user answers.
+      managed.agent.onQuestionRequested = (questions) => {
+        void this.handleQuestionRequested(managed, questions)
+      }
+
       // Wire up onSpawnSession to create independent sessions from agent tool calls
       managed.agent.onSpawnSession = async (request) => {
         sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
@@ -4438,6 +4466,8 @@ export class SessionManager implements ISessionManager {
     if (managed) {
       managed.isArchived = true
       managed.archivedAt = Date.now()
+      // A pending question cannot outlive archival — clear memory + disk + renderers.
+      await this.clearPendingQuestionForSession(managed)
       // Persist in-memory state directly to avoid race with pending queue writes
       this.persistSession(managed)
       await this.flushSession(managed.id)
@@ -5486,6 +5516,8 @@ export class SessionManager implements ISessionManager {
     this.pendingDeltas.delete(sessionId)
     this.clearAdminRememberApprovalsForSession(sessionId)
     this.clearPendingPermissionRequestsForSession(sessionId)
+    // Pending question dies with the session (memory only — disk is about to be removed)
+    managed.pendingQuestion = undefined
 
     // Cancel any pending persistence write (session is being deleted, no need to save)
     this.sessionStorage.persistenceQueue.cancel(sessionId)
@@ -5569,6 +5601,16 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found`)
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
+
+    // Per-turn invocation source: only desktop interactive turns expose
+    // request_user_input; every other source (and the implicit default)
+    // fails closed. Hidden sessions never ask questions.
+    const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
+    managed.invocationSource = invocationSource
+    const allowRequestUserInput = invocationSource === 'desktop' && !managed.hidden
+    if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
+      managed.agent.allowRequestUserInput = allowRequestUserInput
+    }
 
     // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
@@ -5817,6 +5859,13 @@ export class SessionManager implements ISessionManager {
     // ensureFreshToken mirrors the disk write to source.config in-memory).
     const agent = await this.getOrCreateAgent(managed)
     sendSpan.mark('agent.ready')
+
+    // Re-apply the per-turn capability flag — a freshly created agent defaults
+    // to false, so desktop turns must set it after creation as well.
+    const allowRequestUserInputNow = (managed.invocationSource ?? 'internal') === 'desktop' && !managed.hidden
+    if (agent.allowRequestUserInput !== allowRequestUserInputNow) {
+      agent.allowRequestUserInput = allowRequestUserInputNow
+    }
 
     // Always set all sources for context (even if none are enabled), including built-ins
     const allSources = loadAllSources(workspaceRootPath)
@@ -6089,6 +6138,9 @@ export class SessionManager implements ISessionManager {
     }
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
+
+    // A pending question cannot survive a user stop — clear memory + disk + renderers.
+    await this.clearPendingQuestionForSession(managed)
 
     // Collect queued message text for input restoration before clearing
     const queuedTexts = managed.messageQueue.map(q => q.message)
@@ -6616,6 +6668,295 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Cannot respond to credential - no pending request for ${requestId}`)
       return false
     }
+  }
+
+  // ============================================================
+  // Question requests (request_user_input)
+  // ============================================================
+
+  /**
+   * Handle an agent-initiated question request (request_user_input).
+   *
+   * Order of operations (P0 contract):
+   * 1. Polo generates the requestId and re-validates the full schema
+   * 2. The new request becomes the authoritative pendingQuestion
+   *    (a previously active requestId becomes stale by identity)
+   * 3. The tool activity is marked completed ("Waiting for user input")
+   * 4. Handoff with AbortReason.QuestionRequested stops the turn and
+   *    releases browser/session runtime ownership
+   * 5. Persist + flush — disk becomes authoritative before renderers react
+   * 6. question_request event informs every renderer
+   */
+  private async handleQuestionRequested(
+    managed: ManagedSession,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+  ): Promise<void> {
+    try {
+      // 1. Re-validate (defense in depth) and generate the Polo-side identity
+      const { parseRequestUserInputArgs } = await import('@polo-ai/session-tools-core')
+      const parsed = parseRequestUserInputArgs({ questions })
+      if (!parsed.ok) {
+        sessionLog.warn(`Ignoring invalid question request for session ${managed.id}: ${parsed.error}`)
+        return
+      }
+
+      await this.ensureMessagesLoaded(managed)
+
+      const request: QuestionRequest = {
+        requestId: `q-${randomUUID()}`,
+        sessionId: managed.id,
+        createdAt: Date.now(),
+        questions: parsed.data.questions,
+      }
+
+      // 2. Authoritative pending state — replaces any active request
+      managed.pendingQuestion = request
+
+      // 3. Mark the request_user_input tool activity completed so it doesn't
+      //    render as executing forever after the handoff aborts the turn.
+      const toolMsg = [...managed.messages].reverse().find(
+        m => m.toolName?.includes('request_user_input') && m.toolStatus === 'executing'
+      )
+      if (toolMsg) {
+        toolMsg.toolStatus = 'completed'
+        toolMsg.content = 'Waiting for user input'
+        toolMsg.toolResult = 'Waiting for user input'
+      }
+
+      // 4. Handoff — the agent pauses until the user answers or skips
+      if (managed.isProcessing && managed.agent) {
+        sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
+        managed.agent.interruptForHandoff(AbortReason.QuestionRequested)
+        this.setProcessing(managed, false)
+
+        // Release browser overlay + session binding because the agent is paused.
+        await releaseBrowserOwnershipOnForcedStop(
+          (sid) => this.getBrowserPaneManagerForSession(sid),
+          managed.id,
+        )
+
+        this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+      }
+
+      // 5. Persist + flush — disk is authoritative before the UI reacts
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+
+      // 6. Notify renderers
+      this.sendEvent({
+        type: 'question_request',
+        sessionId: managed.id,
+        request,
+      }, managed.workspace.id)
+    } catch (error) {
+      sessionLog.error(`Failed to handle question request for session ${managed.id}:`, error)
+    }
+  }
+
+  /**
+   * Get the current pending question for a session (null when none).
+   * Used by renderers to restore the question UI after refresh/switch/restart.
+   */
+  getPendingQuestion(sessionId: string): QuestionRequest | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return null
+    return managed.pendingQuestion ?? null
+  }
+
+  /**
+   * Whether a persisted resolution (answer or cancel) already exists for the
+   * given requestId. Backs the already_answered idempotency result.
+   */
+  private hasPersistedQuestionResolution(managed: ManagedSession, requestId: string): boolean {
+    return managed.messages.some(m =>
+      m.questionResponse?.requestId === requestId
+      || m.questionResolution?.requestId === requestId
+    )
+  }
+
+  /**
+   * Build the readable content for a user message that answers a question request.
+   * The same text is used as the resuming agent input, so it carries full context.
+   */
+  private formatQuestionAnswerContent(request: QuestionRequest, response: import('@polo-ai/shared/protocol').QuestionResponse): string {
+    const lines: string[] = []
+    for (const answer of response.answers) {
+      const question = request.questions.find(q => q.id === answer.questionId)
+      const header = question?.header ?? answer.questionId
+      const questionText = question?.question ?? ''
+      const selectedLabels = answer.selectedOptionIds
+        .map(id => question?.options.find(o => o.id === id)?.label ?? id)
+      if (answer.otherText?.trim()) {
+        selectedLabels.push(`Other: "${answer.otherText.trim()}"`)
+      }
+      lines.push(`${header}: ${questionText}`)
+      lines.push(`Answer: ${selectedLabels.join(', ')}`)
+      lines.push('')
+    }
+    return lines.join('\n').trim()
+  }
+
+  /**
+   * Resolve a pending question: apply the answer, write ONE readable user
+   * message (with structured metadata), clear the pending state atomically,
+   * persist, and only then start the next agent turn with that same message.
+   *
+   * Cancellation performs the same atomic cleanup but never starts the agent.
+   */
+  async respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`Cannot respond to question - session ${sessionId} not found`)
+      return { status: 'session_missing' }
+    }
+
+    const requestId = resolution.action === 'answer' ? resolution.response.requestId : resolution.requestId
+
+    try {
+      await this.ensureMessagesLoaded(managed)
+
+      const pending = managed.pendingQuestion
+
+      if (!pending || pending.requestId !== requestId) {
+        // Idempotency: an answer for an already-resolved request succeeds quietly;
+        // anything else is stale (replaced, stopped, or from a previous run).
+        if (this.hasPersistedQuestionResolution(managed, requestId)) {
+          sessionLog.info(`Question ${requestId} already resolved for session ${sessionId}`)
+          return { status: 'already_answered' }
+        }
+        sessionLog.warn(`Stale question resolution ${requestId} for session ${sessionId} (active: ${pending?.requestId ?? 'none'})`)
+        return { status: 'stale' }
+      }
+
+      if (resolution.action === 'cancel') {
+        // Atomic cleanup: write the readable cancel record, clear pending, persist.
+        const cancelMessage: Message = {
+          id: generateMessageId(),
+          role: 'user',
+          content: i18n.t('chat.questionSkippedRecord'),
+          timestamp: this.monotonic(),
+          questionResolution: { action: 'cancel', requestId },
+        }
+        managed.messages.push(cancelMessage)
+        managed.lastMessageRole = 'user'
+        managed.pendingQuestion = undefined
+
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+
+        this.sendEvent({
+          type: 'user_message',
+          sessionId,
+          message: cancelMessage,
+          status: 'accepted',
+        }, managed.workspace.id)
+        this.sendEvent({
+          type: 'question_resolved',
+          sessionId,
+          requestId,
+          action: 'cancel',
+        }, managed.workspace.id)
+
+        sessionLog.info(`Question ${requestId} cancelled for session ${sessionId} (agent not resumed)`)
+        return { status: 'cancelled' }
+      }
+
+      // --- action === 'answer' ---
+      const response = resolution.response
+
+      // Validate answers against the pending request before mutating anything.
+      const validQuestionIds = new Set(pending.questions.map(q => q.id))
+      for (const answer of response.answers) {
+        if (!validQuestionIds.has(answer.questionId)) {
+          return { status: 'transient_failure', message: `Unknown questionId "${answer.questionId}"` }
+        }
+        const question = pending.questions.find(q => q.id === answer.questionId)!
+        const validOptionIds = new Set(question.options.map(o => o.id))
+        if (answer.selectedOptionIds.length === 0 && !answer.otherText?.trim()) {
+          return { status: 'transient_failure', message: `Question "${question.id}" requires a selection or free text` }
+        }
+        for (const optionId of answer.selectedOptionIds) {
+          if (!validOptionIds.has(optionId)) {
+            return { status: 'transient_failure', message: `Unknown optionId "${optionId}" for question "${question.id}"` }
+          }
+        }
+        if (answer.otherText && answer.otherText.trim().length > 2000) {
+          return { status: 'transient_failure', message: 'Other text exceeds 2000 characters' }
+        }
+      }
+      if (response.answers.length !== pending.questions.length) {
+        return { status: 'transient_failure', message: 'Not all questions were answered' }
+      }
+
+      // Atomic: write ONE readable answer message with structured metadata,
+      // clear pending, persist + flush — all before starting the agent.
+      const content = this.formatQuestionAnswerContent(pending, response)
+      const answerMessage: Message = {
+        id: generateMessageId(),
+        role: 'user',
+        content,
+        timestamp: this.monotonic(),
+        questionResponse: {
+          requestId,
+          answers: response.answers,
+        },
+      }
+      managed.messages.push(answerMessage)
+      managed.lastMessageRole = 'user'
+      managed.lastMessageAt = Date.now()
+      managed.pendingQuestion = undefined
+
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+
+      this.sendEvent({
+        type: 'user_message',
+        sessionId,
+        message: answerMessage,
+        status: 'accepted',
+      }, managed.workspace.id)
+      this.sendEvent({
+        type: 'question_resolved',
+        sessionId,
+        requestId,
+        action: 'answer',
+      }, managed.workspace.id)
+
+      // Resume the agent in the same session with the answer message as the
+      // user turn (existingMessageId prevents a duplicate user message).
+      // The answer UI lives on desktop, so the resumed turn is a desktop turn
+      // — the agent keeps the ability to ask follow-up questions.
+      await this.sendMessage(sessionId, content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
+
+      sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
+      return { status: 'accepted' }
+    } catch (error) {
+      sessionLog.error(`Failed to resolve question ${requestId} for session ${sessionId}:`, error)
+      return {
+        status: 'transient_failure',
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  /**
+   * Clear any pending question for a session and notify renderers.
+   * Used by session stop / archive / delete lifecycle transitions.
+   * Answers the "who cleared it" question on the wire via question_resolved.
+   */
+  private async clearPendingQuestionForSession(managed: ManagedSession): Promise<void> {
+    const pending = managed.pendingQuestion
+    if (!pending) return
+    managed.pendingQuestion = undefined
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    this.sendEvent({
+      type: 'question_resolved',
+      sessionId: managed.id,
+      requestId: pending.requestId,
+      action: 'cancel',
+    }, managed.workspace.id)
+    sessionLog.info(`Cleared pending question ${pending.requestId} for session ${managed.id}`)
   }
 
   /**
@@ -7716,6 +8057,7 @@ export class SessionManager implements ISessionManager {
     // Send the prompt
     await this.sendMessage(session.id, prompt, undefined, undefined, {
       skillSlugs: resolved?.skillSlugs,
+      invocationSource: 'automation', // automation turns never ask structured questions
     })
 
     return { sessionId: session.id }

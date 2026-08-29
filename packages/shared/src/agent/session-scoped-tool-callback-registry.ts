@@ -13,7 +13,7 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
-import type { AuthRequest } from '@polo-ai/session-tools-core';
+import type { AuthRequest, RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import { debug } from '../utils/debug.ts';
 
 /**
@@ -31,6 +31,12 @@ export interface SessionScopedToolCallbacks {
    * The auth UI should be shown and execution paused.
    */
   onAuthRequest?: (request: AuthRequest) => void;
+
+  /**
+   * Called when the agent requests structured user input via
+   * request_user_input. The question UI should be shown and the turn paused.
+   */
+  onQuestionRequested?: (questions: RequestUserInputQuestionArgs[]) => void;
 
   /**
    * Agent-native LLM query callback for call_llm tool (OAuth path).

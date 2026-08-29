@@ -16,6 +16,7 @@ import type {
   MicrosoftService,
   McpSourceConfig,
 } from './types.ts';
+import type { RequestUserInputQuestionArgs } from './question-types.ts';
 
 // ============================================================
 // Source Credential Types
@@ -56,6 +57,15 @@ export interface SessionToolCallbacks {
    * Codex: sends __CALLBACK__ message to stderr
    */
   onAuthRequest(request: AuthRequest): void;
+
+  /**
+   * Called when the agent requests structured user input via request_user_input.
+   * Only invoked when the tool is registered (desktop interactive turns).
+   * Implementations pause the current turn and wait for the user's answers.
+   * Optional — backends without question support leave it undefined and the
+   * handler degrades to a plain-text error.
+   */
+  onQuestionRequested?(questions: RequestUserInputQuestionArgs[]): void;
 }
 
 // ============================================================

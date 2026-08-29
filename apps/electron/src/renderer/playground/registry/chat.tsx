@@ -14,7 +14,7 @@ import { motion } from 'motion/react'
 import { ArrowUp, Paperclip, ChevronDown, Circle, Sparkles } from 'lucide-react'
 import type { LabelConfig } from '@polo-ai/shared/labels'
 import type { SessionStatus } from '@/config/session-status-config'
-import type { FileAttachment, PermissionRequest, PermissionMode } from '../../../shared/types'
+import type { FileAttachment, PermissionRequest, PermissionMode, QuestionRequest } from '../../../shared/types'
 import { cn } from '@/lib/utils'
 import { AppShellProvider } from '@/context/AppShellContext'
 import { ModalProvider } from '@/context/ModalContext'
@@ -76,6 +76,35 @@ docker push registry.example.com/myapp:latest
 # Deploy to kubernetes
 kubectl apply -f k8s/deployment.yaml
 kubectl rollout status deployment/myapp`,
+}
+
+// Sample agent question request (single-select + multi-select with exclusive)
+const sampleQuestionRequest: QuestionRequest = {
+  requestId: 'question-1',
+  sessionId: 'playground-session',
+  createdAt: Date.now(),
+  questions: [
+    {
+      id: 'data-handling',
+      header: 'Data',
+      question: 'What should happen to related data when the project is deleted?',
+      options: [
+        { id: 'trash', label: 'Move to Trash', description: 'Recommended — recoverable for 30 days', recommended: true },
+        { id: 'delete', label: 'Delete permanently', description: 'Remove immediately with no recovery' },
+      ],
+    },
+    {
+      id: 'notify',
+      header: 'Notifications',
+      question: 'Who should be notified about this deletion?',
+      multiple: true,
+      options: [
+        { id: 'admins', label: 'Project admins', description: 'Workspace owners and maintainers' },
+        { id: 'members', label: 'All project members', description: 'Everyone assigned to the project' },
+        { id: 'none', label: 'Do not notify anyone', description: 'Skip all notifications', exclusive: true },
+      ],
+    },
+  ],
 }
 
 // Sample background tasks
@@ -177,6 +206,7 @@ const playgroundAppShellContext = {
   refreshLlmConnections: async () => {},
   pendingPermissions: new Map(),
   pendingCredentials: new Map(),
+  pendingQuestions: new Map(),
   getDraft: () => '',
   sessionOptions: new Map(),
   onCreateSession: async () => ({
@@ -524,7 +554,7 @@ const deepNestedActivities: ActivityItem[] = [
   },
 ]
 
-type InputContainerMode = 'freeform' | 'permission' | 'admin_approval'
+type InputContainerMode = 'freeform' | 'permission' | 'admin_approval' | 'question'
 
 interface InputContainerPlaygroundProps {
   disabled?: boolean
@@ -721,6 +751,13 @@ function InputContainerPlayground({
           impact: 'May install files in /Applications and system-managed directories.',
           command: 'brew install --cask docker',
         }),
+      }
+    }
+
+    if (inputMode === 'question') {
+      return {
+        type: 'question' as const,
+        data: sampleQuestionRequest,
       }
     }
 
@@ -1255,6 +1292,7 @@ export const chatComponents: ComponentEntry[] = [
             { label: 'Freeform', value: 'freeform' },
             { label: 'Permission', value: 'permission' },
             { label: 'Admin Approval', value: 'admin_approval' },
+            { label: 'Question', value: 'question' },
           ],
         },
         defaultValue: 'freeform',
@@ -1481,6 +1519,14 @@ export const chatComponents: ComponentEntry[] = [
         description: 'Structured admin approval request state',
         props: {
           inputMode: 'admin_approval',
+          showFollowUps: false,
+        },
+      },
+      {
+        name: 'Question UI',
+        description: 'Agent question request: single-select + multi-select with exclusive option and Other',
+        props: {
+          inputMode: 'question',
           showFollowUps: false,
         },
       },

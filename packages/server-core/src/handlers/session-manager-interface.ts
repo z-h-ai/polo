@@ -22,6 +22,9 @@ import type {
   PermissionModeState,
   UnreadSummary,
   ShareResult,
+  QuestionRequest,
+  QuestionResolution,
+  QuestionResolutionResult,
 } from '@polo-ai/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@polo-ai/shared/sessions'
 import type { EventSink } from '../transport'
@@ -115,6 +118,13 @@ export interface ISessionManager {
   ): boolean
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
   getSessionPermissionModeState(sessionId: string): PermissionModeState | null
+
+  // ---------------------------------------------------------------------------
+  // Questions (request_user_input)
+  // ---------------------------------------------------------------------------
+
+  getPendingQuestion(sessionId: string): QuestionRequest | null
+  respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
 
   // ---------------------------------------------------------------------------
   // Plans

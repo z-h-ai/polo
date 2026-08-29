@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { i18n } from '@polo-ai/shared/i18n'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, AdminStatusResult, QuestionRequest, QuestionResolution, QuestionResolutionResult } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@polo-ai/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -412,6 +413,10 @@ export default function App() {
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
   // Credential requests per session (queue to handle multiple concurrent requests)
   const [pendingCredentials, setPendingCredentials] = useState<Map<string, CredentialRequest[]>>(new Map())
+  // Pending agent questions per session (request_user_input).
+  // At most one per session — a new requestId replaces the previous entry.
+  // Survives refresh/restart via Session.pendingQuestion hydration.
+  const [pendingQuestions, setPendingQuestions] = useState<Map<string, QuestionRequest>>(new Map())
   // Draft composer state per session (text + attachment refs), preserved across mode
   // switches, conversation changes, and app restarts. Using a ref avoids re-renders
   // during typing; attachments are stored as lightweight refs (path + name) and
@@ -578,6 +583,18 @@ export default function App() {
       // Initialize per-session atoms and metadata map
       // NOTE: No sessionsAtom used - sessions are only in per-session atoms
       initializeSessions(loadedSessions)
+
+      // Hydrate pending agent questions — the authoritative copies live on the
+      // Session payloads, so a fresh load always mirrors the server exactly.
+      setPendingQuestions(() => {
+        const next = new Map<string, QuestionRequest>()
+        for (const s of loadedSessions) {
+          if (s.pendingQuestion) {
+            next.set(s.id, s.pendingQuestion)
+          }
+        }
+        return next
+      })
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
@@ -1195,6 +1212,30 @@ export default function App() {
             })
             break
           }
+          case 'question_request': {
+            // A new requestId replaces any previous pending question —
+            // the old card's local answers are dropped with it.
+            setPendingQuestions(prev => {
+              const next = new Map(prev)
+              next.set(sessionId, effect.request)
+              return next
+            })
+            // Native notification (same gating as permission notifications)
+            const notifySession = store.get(sessionAtomFamily(sessionId))
+            if (notifySession && !notifySession.hidden) {
+              showSessionNotification(notifySession, i18n.t('chat.questionNotification'))
+            }
+            break
+          }
+          case 'question_resolved': {
+            setPendingQuestions(prev => {
+              if (!prev.has(sessionId)) return prev
+              const next = new Map(prev)
+              next.delete(sessionId)
+              return next
+            })
+            break
+          }
           case 'restore_input': {
             // Queued messages were removed from chat on abort — restore their text to the input field.
             // Append to existing draft (user may have started typing) rather than overwrite.
@@ -1746,11 +1787,14 @@ export default function App() {
         lastMessageAt: Date.now()
       }))
 
-      // Step 6: Send to Claude with processed attachments + stored attachments for persistence
+      // Step 6: Send to Claude with processed attachments + stored attachments for persistence.
+      // Desktop interactive turns explicitly declare their invocation source so
+      // request_user_input is registered for this turn (P0 entry-eligibility contract).
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        invocationSource: 'desktop',
       })
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -2004,6 +2048,44 @@ export default function App() {
         return next
       })
     }
+  }, [])
+
+  // Resolve a pending agent question (answer or "skip for now").
+  // Terminal results clear the card; transient_failure rejects so the
+  // QuestionRequest component keeps its state and allows retry.
+  const handleRespondToQuestion = useCallback(async (
+    sessionId: string,
+    resolution: QuestionResolution,
+  ): Promise<QuestionResolutionResult> => {
+    const result = await window.electronAPI.respondToQuestion(sessionId, resolution)
+
+    switch (result.status) {
+      case 'accepted':
+      case 'cancelled':
+      case 'already_answered':
+        setPendingQuestions(prev => {
+          if (!prev.has(sessionId)) return prev
+          const next = new Map(prev)
+          next.delete(sessionId)
+          return next
+        })
+        break
+      case 'stale':
+      case 'session_missing':
+        // One-time readable notice, then drop the stale card
+        toast.error(i18n.t('toast.questionNoLongerActive'), { duration: 5000 })
+        setPendingQuestions(prev => {
+          if (!prev.has(sessionId)) return prev
+          const next = new Map(prev)
+          next.delete(sessionId)
+          return next
+        })
+        break
+      case 'transient_failure':
+        throw new Error(result.message)
+    }
+
+    return result
   }, [])
 
   // Centralized link interceptor: classifies file types and decides whether to
@@ -2265,6 +2347,7 @@ export default function App() {
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
+    pendingQuestions,
     getDraft,
     getDraftAttachmentRefs,
     hydrateDraftAttachments,
@@ -2284,6 +2367,7 @@ export default function App() {
     onDeleteSession: handleDeleteSession,
     onRespondToPermission: handleRespondToPermission,
     onRespondToCredential: handleRespondToCredential,
+    onRespondToQuestion: handleRespondToQuestion,
     // File/URL handlers
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
@@ -2314,6 +2398,7 @@ export default function App() {
     refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
+    pendingQuestions,
     getDraft,
     getDraftAttachmentRefs,
     hydrateDraftAttachments,
@@ -2332,6 +2417,7 @@ export default function App() {
     handleDeleteSession,
     handleRespondToPermission,
     handleRespondToCredential,
+    handleRespondToQuestion,
     handleOpenFile,
     handleOpenUrl,
     handleSelectWorkspace,
@@ -2612,7 +2698,7 @@ export default function App() {
                   isSessionsReady={sessionsLoaded}
                   remoteWorkspaceId={windowRemoteWorkspaceId}
                 >
-                  <div className="flex h-full min-h-0 flex-col text-foreground">
+                  <div className="flex h-full min-h-0 flex-col text-foreground" data-testid="polo-app-root">
                     {showTransportConnectionBanner && connectionState && (
                       <TransportConnectionBanner
                         state={connectionState}
