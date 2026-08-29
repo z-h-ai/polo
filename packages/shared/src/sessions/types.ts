@@ -15,6 +15,16 @@ import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthSt
 import type { QuestionRequest } from '../protocol/dto.ts';
 
 /**
+ * Recoverable "answer committed, waiting for agent resume" state.
+ * `messageId` is the persisted answer message that must become the next turn
+ * (resume reuses it via existingMessageId — never a duplicate user message).
+ */
+export interface PendingAgentResume {
+  messageId: string;
+  attempts: number;
+}
+
+/**
  * Session fields that persist to disk.
  * Add new fields here - they automatically propagate to JSONL read/write
  * via pickSessionFields() utility.
@@ -43,6 +53,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'pendingPlanExecution',
   // Pending agent question (request_user_input)
   'pendingQuestion',
+  // Recoverable "answer committed, waiting for agent resume" state
+  'pendingAgentResume',
   // Archive
   'isArchived', 'archivedAt',
   // Branching
@@ -174,6 +186,14 @@ export interface SessionConfig {
    * session stop/archive/delete, or session missing.
    */
   pendingQuestion?: QuestionRequest;
+  /**
+   * Recoverable resume state: the user's answer was committed and persisted,
+   * but starting the next agent turn failed (backend init, credential refresh,
+   * source build — failures before the internal chat try/catch). The resume
+   * retries WITHOUT writing a second user message; a new user message
+   * supersedes it. Cleared on successful resume / supersede.
+   */
+  pendingAgentResume?: PendingAgentResume;
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Host experience that owns this session. */

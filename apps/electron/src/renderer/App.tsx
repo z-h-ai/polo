@@ -29,7 +29,7 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
-import { questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession, clearPendingQuestionForDeletedSession } from './lib/pending-questions'
+import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -418,6 +418,26 @@ export default function App() {
   // At most one per session — a new requestId replaces the previous entry.
   // Survives refresh/restart via Session.pendingQuestion hydration.
   const [pendingQuestions, setPendingQuestions] = useState<Map<string, QuestionRequest>>(new Map())
+  // Generation guard for authoritative snapshot application: realtime events
+  // (question_request/question_resolved) bump the per-session generation; a
+  // session fetch captures the token at request time and its response is only
+  // applied while still current — a stale fetch can never overwrite a fresher
+  // event (server snapshot remains the single source of truth).
+  const pendingQuestionGenerationsRef = useRef(new PendingQuestionGenerationTracker())
+
+  // Render-time mirror so pre-fetch generation capture can see the latest map
+  // without wiring it through every setter (same pattern as inputValueRef).
+  const pendingQuestionsRef = useRef(pendingQuestions)
+  pendingQuestionsRef.current = pendingQuestions
+
+  /** Apply an authoritative pending-question snapshot if its fetch generation is still current. */
+  const applyPendingQuestionSnapshotIfCurrent = useCallback((sessionId: string, generationToken: number, payload: QuestionRequest | undefined) => {
+    if (!pendingQuestionGenerationsRef.current.isCurrent(sessionId, generationToken)) {
+      console.info(`[App] Skipped stale pending-question snapshot for ${sessionId} (generation drifted)`)
+      return
+    }
+    setPendingQuestions(prev => applyAuthoritativePendingQuestion(prev, sessionId, payload))
+  }, [])
   // Draft composer state per session (text + attachment refs), preserved across mode
   // switches, conversation changes, and app restarts. Using a ref avoids re-renders
   // during typing; attachments are stored as lightweight refs (path + name) and
@@ -555,6 +575,9 @@ export default function App() {
 
   const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
     try {
+      // Capture the generation BEFORE fetching: events arriving while the
+      // fetch is in flight bump it, making the response's snapshot stale.
+      const generationToken = pendingQuestionGenerationsRef.current.capture(sessionId)
       const fresh = await window.electronAPI.getSessionMessages(sessionId)
       if (!fresh) return 'failed'
 
@@ -567,21 +590,29 @@ export default function App() {
       clearStreamingState(sessionId)
       replaceLoadedSession(nextSession)
       syncSessionOptionsFromSession(nextSession)
-      // Opening/refreshing a session restores its pending question card when
-      // the map has no fresher entry (never downgrades event-driven state).
-      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession))
+      // Opening/refreshing a session converges its pending question to the
+      // authoritative snapshot — unless events bumped the generation while the
+      // fetch was in flight (stale fetch must not overwrite fresher state).
+      applyPendingQuestionSnapshotIfCurrent(sessionId, generationToken, nextSession.pendingQuestion)
       void reconcilePermissionModeState(sessionId)
       return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
     } catch (err) {
       console.error(`[App] Failed to refresh session ${sessionId}:`, err)
       return 'failed'
     }
-  }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, store])
+  }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, applyPendingQuestionSnapshotIfCurrent, store])
 
   const loadSessionsFromServer = useCallback(async () => {
     setSessionLoadError(null)
 
     try {
+      // Full-list hydration is authoritative for every session whose pending
+      // state didn't change while the fetch was in flight. Capture tokens for
+      // all locally-tracked sessions BEFORE fetching.
+      const tokensBeforeFetch = new Map<string, number>()
+      for (const id of pendingQuestionsRef.current.keys()) {
+        tokensBeforeFetch.set(id, pendingQuestionGenerationsRef.current.capture(id))
+      }
       const loadedSessions = await window.electronAPI.getSessions()
 
       // Initialize per-session atoms and metadata map
@@ -589,12 +620,24 @@ export default function App() {
       initializeSessions(loadedSessions)
 
       // Hydrate pending agent questions — the authoritative copies live on the
-      // Session payloads, so a fresh load always mirrors the server exactly.
-      setPendingQuestions(() => {
-        const next = new Map<string, QuestionRequest>()
+      // Session payloads. Sessions that raced a fresher event mid-fetch keep
+      // their event-driven state (already newer than the snapshot).
+      setPendingQuestions(prev => {
+        let next = new Map<string, QuestionRequest>()
         for (const s of loadedSessions) {
-          if (s.pendingQuestion) {
-            next.set(s.id, s.pendingQuestion)
+          const token = tokensBeforeFetch.get(s.id)
+          if (token !== undefined && !pendingQuestionGenerationsRef.current.isCurrent(s.id, token)) {
+            continue
+          }
+          next = applyAuthoritativePendingQuestion(next, s.id, s.pendingQuestion)
+        }
+        // A session that changed mid-fetch and is absent from the snapshot
+        // keeps its local (fresher) entry.
+        for (const [id, entry] of prev) {
+          const token = tokensBeforeFetch.get(id)
+          const changedMidFetch = token !== undefined && !pendingQuestionGenerationsRef.current.isCurrent(id, token)
+          if (changedMidFetch && !loadedSessions.some(s => s.id === id)) {
+            next = applyAuthoritativePendingQuestion(next, id, entry)
           }
         }
         return next
@@ -650,6 +693,12 @@ export default function App() {
     } = options
     const beforeMetaMap = store.get(sessionMetaMapAtom)
     const beforeIds = new Set(beforeMetaMap.keys())
+    // Capture pending-question generation tokens for locally-tracked sessions
+    // BEFORE fetching — events during the fetch make the snapshot stale.
+    const tokensBeforeFetch = new Map<string, number>()
+    for (const id of pendingQuestionsRef.current.keys()) {
+      tokensBeforeFetch.set(id, pendingQuestionGenerationsRef.current.capture(id))
+    }
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
     try {
@@ -689,6 +738,14 @@ export default function App() {
       // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
       for (const session of sessions) {
         syncSessionOptionsFromSession(session)
+        // Reconnect metadata refresh carries the authoritative pending state —
+        // converge any drift missed while the transport was down (events are
+        // not replayed after stale reconnects). Stale-fetch guard: sessions
+        // that bumped mid-fetch keep their event-driven state.
+        const token = tokensBeforeFetch.get(session.id)
+        if (token === undefined || pendingQuestionGenerationsRef.current.isCurrent(session.id, token)) {
+          applyPendingQuestionSnapshotIfCurrent(session.id, token ?? pendingQuestionGenerationsRef.current.capture(session.id), session.pendingQuestion)
+        }
       }
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
@@ -703,12 +760,12 @@ export default function App() {
         beforeCount: beforeIds.size,
         beforeIds: summarizeIds(beforeIds),
         beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
-        transportState,
-        error: err,
+      transportState,
+      error: err,
       })
       return null
     }
-  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, windowWorkspaceId, windowRemoteWorkspaceId])
+  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, applyPendingQuestionSnapshotIfCurrent, windowWorkspaceId, windowRemoteWorkspaceId])
 
   // Stale session watchdog — catches stuck sessions that the reconnect protocol misses
   const { trackSessionActivity } = useStaleSessionRecovery({
@@ -1219,6 +1276,7 @@ export default function App() {
           case 'question_request': {
             // A new requestId replaces any previous pending question —
             // the old card's local answers are dropped with it.
+            pendingQuestionGenerationsRef.current.bump(sessionId)
             setPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request))
             // Native notification (same gating as permission notifications)
             const notifySession = store.get(sessionAtomFamily(sessionId))
@@ -1230,6 +1288,7 @@ export default function App() {
           case 'question_resolved': {
             // requestId-conditional: never delete a newer question card that
             // replaced the one this resolution is about.
+            pendingQuestionGenerationsRef.current.bump(sessionId)
             setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId))
             break
           }
@@ -1286,6 +1345,7 @@ export default function App() {
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
       if (event.type === 'session_created') {
+        const generationToken = pendingQuestionGenerationsRef.current.capture(sessionId)
         window.electronAPI.getSessionMessages(sessionId)
           .then((createdSession: Session | null) => {
             if (createdSession) {
@@ -1296,7 +1356,7 @@ export default function App() {
                 addSession(createdSession)
               }
               syncSessionOptionsFromSession(createdSession)
-              setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession))
+              applyPendingQuestionSnapshotIfCurrent(sessionId, generationToken, createdSession.pendingQuestion)
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
@@ -2064,6 +2124,7 @@ export default function App() {
     // question (q2) while this resolution (q1) was in flight, the stale
     // resolution must not delete the newer card.
     const resolvedRequestId = questionResolutionRequestId(resolution)
+    pendingQuestionGenerationsRef.current.bump(sessionId)
 
     switch (result.status) {
       case 'accepted':

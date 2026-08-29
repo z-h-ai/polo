@@ -28,6 +28,7 @@ import {
 } from '../mock-utils'
 import { mockAdminApprovalRequest } from '../adapters/input-adapters'
 import { getRecentDirsForScenario, type RecentDirScenario } from '../recent-working-dirs'
+import { QuestionSubmitScenarioRunner } from '../lib/question-submit-scenario'
 
 const sampleCodeAttachment: FileAttachment = {
   type: 'text',
@@ -743,31 +744,22 @@ function InputContainerPlayground({
   // Deterministic question submit behavior (P1 review contract: the
   // Playground must be able to reproduce submitting / transient_failure
   // deterministically for visual + interaction review).
-  const questionSubmitAttempts = React.useRef(0)
+  // The runner is recreated whenever the scenario or input mode changes —
+  // its attempt counter resets with it, so a NEW error scenario always
+  // rejects on the first submit (error → normal → error works repeatedly).
+  const questionSubmitRunnerRef = React.useRef<{ runner: QuestionSubmitScenarioRunner; key: string } | null>(null)
+  const runnerKey = `${inputMode}:${questionScenario}`
+  if (!questionSubmitRunnerRef.current || questionSubmitRunnerRef.current.key !== runnerKey) {
+    questionSubmitRunnerRef.current = {
+      runner: new QuestionSubmitScenarioRunner(inputMode === 'question' ? questionScenario : 'normal'),
+      key: runnerKey,
+    }
+  }
   const handleStructuredResponse = React.useCallback((response: StructuredResponse): void | Promise<void> => {
     console.log('[Playground] Structured response:', response)
     if (inputMode !== 'question') return
-
-    if (questionScenario === 'submitting') {
-      // Never resolves — deterministic stuck-submitting state (all controls
-      // disabled, spinner visible).
-      return new Promise<void>(() => {})
-    }
-
-    if (questionScenario === 'error') {
-      // First submit rejects (transient_failure — component keeps selections
-      // and shows a retryable error), retry succeeds.
-      questionSubmitAttempts.current += 1
-      if (questionSubmitAttempts.current === 1) {
-        return new Promise<void>((_, reject) => {
-          setTimeout(() => reject(new Error('Simulated transient failure — retry to succeed')), 300)
-        })
-      }
-      return Promise.resolve()
-    }
-
-    return undefined
-  }, [inputMode, questionScenario])
+    return questionSubmitRunnerRef.current?.runner.handle(response)
+  }, [inputMode])
 
   const structuredInput = React.useMemo(() => {
     if (inputMode === 'permission') {

@@ -61,6 +61,7 @@ import {
   type SessionMetadata,
   type SessionStatus,
   type SessionHeader,
+  type PendingAgentResume,
   pickSessionFields,
   WorkspaceSessionStorage,
   type SessionStorage,
@@ -896,6 +897,10 @@ interface ManagedSession {
   // Authoritative pending agent question (request_user_input).
   // Persisted via SESSION_PERSISTENT_FIELDS; survives restarts.
   pendingQuestion?: QuestionRequest
+  // Recoverable "answer committed, waiting for agent resume" state —
+  // retried without duplicating the user message; cleared on success,
+  // supersede (new user message), stop, or archive.
+  pendingAgentResume?: PendingAgentResume
   // Invocation source of the most recent turn ('desktop' enables
   // request_user_input; defaults to 'internal' — fail closed).
   invocationSource?: InvocationSource
@@ -2503,6 +2508,17 @@ export class SessionManager implements ISessionManager {
         }
       } else {
         managed.pendingQuestion = undefined
+      }
+      // Re-arm a recoverable answer→resume that never completed (crash/failure).
+      // The retry reuses the persisted answer message — no duplicate user turn.
+      if (storedSession.pendingAgentResume) {
+        managed.pendingAgentResume = storedSession.pendingAgentResume
+        sessionLog.info(`Restoring pendingAgentResume for session ${managed.id} (message ${storedSession.pendingAgentResume.messageId}, attempts ${storedSession.pendingAgentResume.attempts})`)
+        setImmediate(() => {
+          void this.resumePendingAgentTurn(managed)
+        })
+      } else {
+        managed.pendingAgentResume = undefined
       }
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
 
@@ -4469,6 +4485,11 @@ export class SessionManager implements ISessionManager {
       managed.archivedAt = Date.now()
       // A pending question cannot outlive archival — clear memory + disk + renderers.
       await this.clearPendingQuestionForSession(managed)
+      // Same for a pending answer→resume retry.
+      if (managed.pendingAgentResume) {
+        managed.pendingAgentResume = undefined
+        sessionLog.info(`Cleared pendingAgentResume for session ${sessionId}: session archived`)
+      }
       // Persist in-memory state directly to avoid race with pending queue writes
       this.persistSession(managed)
       await this.flushSession(managed.id)
@@ -5603,6 +5624,16 @@ export class SessionManager implements ISessionManager {
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
+    // A new user message supersedes a pending answer→resume: the answer is
+    // already in history as context, so the retry would double-start a turn.
+    // The resume path's OWN call (existingMessageId = the answer message) is
+    // exempt — otherwise it would clear its own recovery state.
+    if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
+      managed.pendingAgentResume = undefined
+      this.persistSession(managed)
+      sessionLog.info(`Cleared pendingAgentResume for session ${sessionId}: superseded by a new user message`)
+    }
+
     // Per-turn invocation source: only desktop interactive turns expose
     // request_user_input; every other source (and the implicit default)
     // fails closed. Hidden sessions never ask questions.
@@ -6143,6 +6174,14 @@ export class SessionManager implements ISessionManager {
     // isProcessing to false, so "stop while a question is pending" would
     // otherwise never reach any cleanup.
     await this.clearPendingQuestionForSession(managed)
+
+    // A user stop also cancels any scheduled answer→resume retry — stopping
+    // means "do not start new turns".
+    if (managed.pendingAgentResume) {
+      managed.pendingAgentResume = undefined
+      this.persistSession(managed)
+      sessionLog.info(`Cleared pendingAgentResume for session ${sessionId}: user stopped the session`)
+    }
 
     if (!managed.isProcessing) {
       return // Not processing, nothing to cancel
@@ -6998,7 +7037,9 @@ export class SessionManager implements ISessionManager {
       }
 
       // Atomic: write ONE readable answer message with structured metadata,
-      // clear pending, persist + flush — all before starting the agent.
+      // clear pending, arm the recoverable resume state, persist + flush —
+      // all before starting the agent. "Answer committed + awaiting resume"
+      // is itself persisted so a resume failure is never silently lost.
       const content = this.formatQuestionAnswerContent(pending, response)
       const answerMessage: Message = {
         id: generateMessageId(),
@@ -7015,16 +7056,22 @@ export class SessionManager implements ISessionManager {
       const prevMessages = managed.messages.slice()
       const prevLastMessageRole = managed.lastMessageRole
       const prevLastMessageAt = managed.lastMessageAt
+      const prevPendingAgentResume = managed.pendingAgentResume
       try {
         managed.messages.push(answerMessage)
         managed.lastMessageRole = 'user'
         managed.lastMessageAt = Date.now()
         managed.pendingQuestion = undefined
+        managed.pendingAgentResume = { messageId: answerMessage.id, attempts: 0 }
 
         this.persistSession(managed)
         await this.flushSession(managed.id)
       } catch (error) {
-        this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt }, pending)
+        this.rollbackQuestionResolution(
+          managed,
+          { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
+          pending,
+        )
         throw error
       }
 
@@ -7044,13 +7091,10 @@ export class SessionManager implements ISessionManager {
       // Resume the agent in the same session with the answer message as the
       // user turn (existingMessageId prevents a duplicate user message).
       // The answer UI lives on desktop, so the resumed turn is a desktop turn
-      // — the agent keeps the ability to ask follow-up questions. A resume
-      // failure must not un-accept the already-committed resolution.
-      try {
-        await this.sendMessage(sessionId, content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
-      } catch (resumeError) {
-        sessionLog.error(`Failed to resume agent after answering question ${requestId} for session ${sessionId} (resolution committed):`, resumeError)
-      }
+      // — the agent keeps the ability to ask follow-up questions.
+      // resumePendingAgentTurn never rejects: a failure is user-visible
+      // (error event), persisted in pendingAgentResume, and retried.
+      await this.resumePendingAgentTurn(managed)
 
       sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
       return { status: 'accepted' }
@@ -7064,13 +7108,76 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Retryable resume of the agent turn after an answer was committed.
+   *
+   * Reads the persisted pendingAgentResume state — the answer message is
+   * reused via existingMessageId, never duplicated. Failures emit a
+   * user-visible error event and schedule a backoff retry; a restart
+   * re-arms the retry from disk (loadMessagesFromDisk). The state is also
+   * cleared when the user sends any new message (supersede).
+   */
+  private async resumePendingAgentTurn(managed: ManagedSession): Promise<void> {
+    const resume = managed.pendingAgentResume
+    if (!resume) return
+
+    if (managed.isProcessing) {
+      // A turn is already running; the answer message is in history and will
+      // be part of its context. Leave the state for the post-turn sweep —
+      // do not count busy-skips as failed attempts.
+      return
+    }
+
+    resume.attempts += 1
+    const answerMessage = managed.messages.find(m => m.id === resume.messageId)
+    if (!answerMessage) {
+      // The answer message is gone (session cleared?) — nothing to resume with.
+      managed.pendingAgentResume = undefined
+      this.persistSession(managed)
+      sessionLog.warn(`Dropped pendingAgentResume for session ${managed.id}: answer message ${resume.messageId} not found`)
+      return
+    }
+
+    try {
+      await this.sendMessage(managed.id, answerMessage.content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
+      managed.pendingAgentResume = undefined
+      this.persistSession(managed)
+      void this.flushSession(managed.id).catch(flushError => {
+        sessionLog.error(`Failed to persist resume completion for session ${managed.id}:`, flushError)
+      })
+      sessionLog.info(`Agent resumed after answer for session ${managed.id} (attempt ${resume.attempts})`)
+    } catch (error) {
+      sessionLog.error(
+        `Failed to resume agent turn for session ${managed.id} (attempt ${resume.attempts}, answer message preserved):`,
+        error,
+      )
+      // User-visible failure — the answer is saved but the agent did not start.
+      this.sendEvent({
+        type: 'error',
+        sessionId: managed.id,
+        error: 'Your answer was saved, but the assistant could not resume automatically. Retrying…',
+      }, managed.workspace.id)
+
+      const retryDelayMs = Math.min(1000 * resume.attempts, 10000)
+      const timer = setTimeout(() => {
+        void this.resumePendingAgentTurn(managed)
+      }, retryDelayMs)
+      timer.unref?.()
+    }
+  }
+
+  /**
    * Roll back an in-flight answer/cancel transition after a persist/flush
    * failure, restoring the authoritative pending question and message list.
    * A best-effort re-persist keeps the queue consistent with memory.
    */
   private rollbackQuestionResolution(
     managed: ManagedSession,
-    snapshot: { messages: Message[]; lastMessageRole?: ManagedSession['lastMessageRole']; lastMessageAt?: number },
+    snapshot: {
+      messages: Message[]
+      lastMessageRole?: ManagedSession['lastMessageRole']
+      lastMessageAt?: number
+      pendingAgentResume?: ManagedSession['pendingAgentResume']
+    },
     pending: QuestionRequest,
   ): void {
     managed.messages = snapshot.messages
@@ -7079,6 +7186,7 @@ export class SessionManager implements ISessionManager {
       managed.lastMessageAt = snapshot.lastMessageAt
     }
     managed.pendingQuestion = pending
+    managed.pendingAgentResume = snapshot.pendingAgentResume
     try {
       this.persistSession(managed)
       void this.flushSession(managed.id).catch(rollbackError => {

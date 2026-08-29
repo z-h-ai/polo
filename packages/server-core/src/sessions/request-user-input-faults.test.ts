@@ -353,4 +353,86 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     expect(events.filter(e => String(e.type).startsWith('question_'))).toEqual([])
   })
+
+  it('answer committed but sendMessage rejects before agent init: error surfaced, state recoverable, retry succeeds (never silent-accepted-stranded)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-resume-1')
+    seedSession('f-resume-1', { pendingQuestion: request })
+
+    // The first resume attempt fails pre-chat (backend init / credential
+    // refresh / source build); the retry succeeds.
+    let sendMessageCalls = 0
+    ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async (...args: unknown[]) => {
+      sendMessageCalls++
+      if (sendMessageCalls === 1) {
+        throw new Error('backend init failed (injected)')
+      }
+      void args
+    }
+
+    const result = await sm.respondToQuestion('f-resume-1', makeAnswerResolution(request))
+
+    // The resolution itself is committed — RPC returns accepted
+    expect(result).toEqual({ status: 'accepted' })
+    // NOT silent: a user-visible error event was emitted for the failed resume
+    const errorEvents = events.filter(e => e.type === 'error')
+    expect(errorEvents.length).toBeGreaterThanOrEqual(1)
+    expect(String((errorEvents[0] as { error?: string }).error)).toContain('could not resume')
+
+    // The recovery state is armed and persisted (survives restarts)
+    const managed = getManaged('f-resume-1')
+    const resumeState = (managed as unknown as { pendingAgentResume?: { messageId: string; attempts: number } }).pendingAgentResume
+    expect(resumeState).toBeDefined()
+    expect(resumeState?.attempts).toBe(1)
+    expect(resumeState?.messageId).toBeTruthy()
+
+    // The stable recovery path retries automatically (backoff 1s for attempt 1)
+    await new Promise(r => setTimeout(r, 1600))
+    expect(sendMessageCalls).toBeGreaterThanOrEqual(2)
+    expect((getManaged('f-resume-1') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
+  })
+
+  it('a new user message supersedes a pending answer→resume (no duplicate turn on retry)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-resume-2')
+    seedSession('f-resume-2', { pendingQuestion: request })
+
+    // First call = the failed resume; later calls = user messages, which run
+    // the production supersede guard (a message that is NOT the resume's
+    // answer message clears the recovery state).
+    let sendMessageCalls = 0
+    ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async (...args: unknown[]) => {
+      sendMessageCalls++
+      const managed = getManaged('f-resume-2') as unknown as { pendingAgentResume?: { messageId: string } }
+      if (sendMessageCalls === 1) {
+        throw new Error('backend init failed (injected)')
+      }
+      const existingMessageId = args[5] as string | undefined
+      if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
+        managed.pendingAgentResume = undefined
+      }
+    }
+    void sm.respondToQuestion('f-resume-2', makeAnswerResolution(request))
+    await new Promise(r => setTimeout(r, 30))
+    // Recovery state armed after the failed first resume
+    expect((getManaged('f-resume-2') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeDefined()
+
+    // A user's new message (existingMessageId undefined ≠ resume messageId)
+    // supersedes the recovery state.
+    await sm.sendMessage('f-resume-2', 'a new user message')
+    expect((getManaged('f-resume-2') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
+  })
+
+  it('stop clears an armed answer→resume retry (user stop means no new turns)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-resume-3')
+    const managed = seedSession('f-resume-3', { pendingQuestion: request, isProcessing: false, withAgent: true })
+
+    // Arm the recovery state, then stop
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'm-1', attempts: 2 }
+
+    await sm.cancelProcessing('f-resume-3')
+
+    expect((getManaged('f-resume-3') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
+  })
 })
