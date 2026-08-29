@@ -596,12 +596,12 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       ],
     })
 
-    // Two answer messages in history (old answer M1, new answer M2)
-    const M1 = 'msg-old-answer'
-    const M2 = 'msg-new-answer'
+    // Old and new answer message ids — names carry the identity semantics
+    const oldAnswerMessageId = 'msg-old-answer'
+    const newAnswerMessageId = 'msg-new-answer'
     ;(managed as unknown as { messages: Array<Record<string, unknown>> }).messages.push(
-      { id: M1, type: 'user', role: 'user', content: 'old answer', timestamp: Date.now() },
-      { id: M2, type: 'user', role: 'user', content: 'new answer', timestamp: Date.now() },
+      { id: oldAnswerMessageId, type: 'user', role: 'user', content: 'old answer', timestamp: Date.now() },
+      { id: newAnswerMessageId, type: 'user', role: 'user', content: 'new answer', timestamp: Date.now() },
     )
 
     // Fake agent whose chat blocks until the gate releases — the old turn is
@@ -631,7 +631,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
 
     // Arm the OLD resume and start its turn (not awaited)
-    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: M1, attempts: 0 }
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: oldAnswerMessageId, attempts: 0 }
     const oldTurn = (sm as unknown as { resumePendingAgentTurn: (m: unknown) => Promise<void> })
       .resumePendingAgentTurn(managed)
 
@@ -642,7 +642,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // Mid-await: a new user message supersedes (production clears), then
     // another answer arms a NEW recovery state with a NEW messageId.
     ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = undefined
-    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: M2, attempts: 0 }
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: newAnswerMessageId, attempts: 0 }
 
     // Release the old turn — it completes, and boundary 2 must exit silently.
     releaseOldTurn!()
@@ -650,7 +650,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // The NEW recovery state survived (old caller did not clear it)
     const stateAfter = (getManaged('f-supersede') as unknown as { pendingAgentResume?: { messageId: string } }).pendingAgentResume
-    expect(stateAfter?.messageId).toBe(M2)
+    expect(stateAfter?.messageId).toBe(newAnswerMessageId)
 
     // The new resume still works end-to-end: run it, turn executes, state clears.
     await (sm as unknown as { resumePendingAgentTurn: (m: unknown) => Promise<void> }).resumePendingAgentTurn(managed)

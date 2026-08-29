@@ -607,14 +607,12 @@ export default function App() {
 
     try {
       // Full-list hydration is authoritative for every session whose pending
-      // state didn't change while the fetch was in flight. Capture tokens for
-      // all locally-tracked sessions AND the global epoch BEFORE fetching —
-      // the epoch also covers sessions that had no card at capture time but
-      // received their first event mid-fetch.
-      const tokensBeforeFetch = new Map<string, number>()
-      for (const id of pendingQuestionsRef.current.keys()) {
-        tokensBeforeFetch.set(id, pendingQuestionGenerationsRef.current.capture(id))
-      }
+      // state didn't change while the fetch was in flight. Capture the full
+      // generation snapshot AND the global epoch BEFORE fetching — the
+      // snapshot records fetch-start generations for every session the
+      // tracker knows about (others implicitly 0), so even newly-returned
+      // sessions can be classified.
+      const generationsAtFetch = pendingQuestionGenerationsRef.current.captureAll()
       const epochAtFetch = pendingQuestionGenerationsRef.current.epoch
       const loadedSessions = await window.electronAPI.getSessions()
 
@@ -626,9 +624,10 @@ export default function App() {
       setPendingQuestions(prev => reconcilePendingQuestionsFromSnapshot(
         prev,
         loadedSessions,
-        tokensBeforeFetch,
+        generationsAtFetch,
         pendingQuestionGenerationsRef.current,
         epochAtFetch,
+        'full',
       ))
 
       // Initialize unified sessionOptions from session data
@@ -681,14 +680,11 @@ export default function App() {
     } = options
     const beforeMetaMap = store.get(sessionMetaMapAtom)
     const beforeIds = new Set(beforeMetaMap.keys())
-    // Capture pending-question generation tokens for locally-tracked sessions
-    // AND the global epoch BEFORE fetching — same contract as
-    // loadSessionsFromServer (events during the fetch make the snapshot stale;
-    // sessions not tracked at capture time are treated as changed).
-    const tokensBeforeFetch = new Map<string, number>()
-    for (const id of pendingQuestionsRef.current.keys()) {
-      tokensBeforeFetch.set(id, pendingQuestionGenerationsRef.current.capture(id))
-    }
+    // Capture the full generation snapshot AND global epoch BEFORE fetching —
+    // same contract as loadSessionsFromServer (events during the fetch make
+    // the snapshot stale; newly-returned stable sessions are classified via
+    // their fetch-start generation).
+    const generationsAtFetch = pendingQuestionGenerationsRef.current.captureAll()
     const epochAtFetch = pendingQuestionGenerationsRef.current.epoch
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
@@ -738,7 +734,7 @@ export default function App() {
       setPendingQuestions(prev => reconcilePendingQuestionsFromSnapshot(
         prev,
         sessions,
-        tokensBeforeFetch,
+        generationsAtFetch,
         pendingQuestionGenerationsRef.current,
         epochAtFetch,
         removeMissing ? 'full' : 'partial',

@@ -113,9 +113,34 @@ export class PendingQuestionGenerationTracker {
     return this.generations.get(sessionId) ?? 0
   }
 
+  /**
+   * Capture generation tokens for EVERY session the tracker knows about.
+   * Sessions absent from the returned map implicitly had generation 0 at
+   * capture time (they never received a pending-state event) — pairing the
+   * snapshot with {@link isSessionUnchangedSince} lets a full-list fetch
+   * validate even sessions it did not know existed at capture time.
+   */
+  captureAll(): Map<string, number> {
+    return new Map(this.generations)
+  }
+
+  /** Current generation for a session (0 = never received a pending event). */
+  generationOf(sessionId: string): number {
+    return this.generations.get(sessionId) ?? 0
+  }
+
   /** True when nothing bumped the session since the token was captured. */
   isCurrent(sessionId: string, token: number): boolean {
     return (this.generations.get(sessionId) ?? 0) === token
+  }
+
+  /**
+   * True when the session provably did not change since a full-generation
+   * snapshot was captured: its generation must equal the captured value
+   * (sessions absent from the snapshot had generation 0 at capture time).
+   */
+  isSessionUnchangedSince(sessionId: string, snapshot: Map<string, number>): boolean {
+    return this.generationOf(sessionId) === (snapshot.get(sessionId) ?? 0)
   }
 
   /**
@@ -124,17 +149,6 @@ export class PendingQuestionGenerationTracker {
    */
   isEpochCurrent(epoch: number): boolean {
     return this.globalEpochCounter === epoch
-  }
-
-  /**
-   * True when the session provably did not change since capture: it must have
-   * been locally tracked at capture time (token exists) AND still be current.
-   * A session with no captured token is treated as changed — its state at
-   * capture time is unknown (it may have received its first event mid-fetch).
-   */
-  isUnchangedSince(sessionId: string, tokensBeforeFetch: Map<string, number>): boolean {
-    const token = tokensBeforeFetch.get(sessionId)
-    return token !== undefined && this.isCurrent(sessionId, token)
   }
 }
 
@@ -200,18 +214,20 @@ export function clearPendingQuestionForDeletedSession(
  *   only converges snapshot-present sessions** — omitted sessions are NEVER
  *   cleared, in the epoch-current normal path and the drifted path alike.
  *
- * `tokensBeforeFetch` must be captured BEFORE the fetch for every session in
- * `previous` (see App's loadSessionsFromServer).
+ * `generationsAtFetch` must be captured BEFORE the fetch via
+ * `tracker.captureAll()` — it records the fetch-start generation of every
+ * session, so even newly-returned sessions (no local card at capture time)
+ * can be classified: unchanged (generation 0 at capture, still 0) → converge
+ * to the snapshot; changed mid-fetch → keep the event-driven state.
  */
 export function reconcilePendingQuestionsFromSnapshot(
   previous: Map<string, QuestionRequest>,
   sessions: Array<Pick<QuestionRequestSession, 'id' | 'pendingQuestion'>>,
-  tokensBeforeFetch: Map<string, number>,
+  generationsAtFetch: Map<string, number>,
   tracker: PendingQuestionGenerationTracker,
   epochAtFetch: number,
   scope: 'full' | 'partial' = 'full',
 ): Map<string, QuestionRequest> {
-  // Returned-ID set: replaces O(P×S) `sessions.some` scans below.
   const returnedIds = new Set(sessions.map(s => s.id))
 
   if (tracker.isEpochCurrent(epochAtFetch)) {
@@ -234,11 +250,13 @@ export function reconcilePendingQuestionsFromSnapshot(
   }
 
   // Epoch drifted: some event raced the fetch. Converge only provably-
-  // unchanged sessions; keep event-driven state for everything else.
+  // unchanged sessions (fetch-start generation equals the current one — this
+  // includes newly-returned sessions that never received an event); keep
+  // event-driven state for everything that actually changed.
   let next = new Map(previous)
   const converged = new Set<string>()
   for (const session of sessions) {
-    if (!tracker.isUnchangedSince(session.id, tokensBeforeFetch)) {
+    if (!tracker.isSessionUnchangedSince(session.id, generationsAtFetch)) {
       continue
     }
     next = applyAuthoritativePendingQuestion(next, session.id, session.pendingQuestion)
@@ -249,7 +267,7 @@ export function reconcilePendingQuestionsFromSnapshot(
     // the complete list no longer contains — clear their cards too.
     for (const id of previous.keys()) {
       if (converged.has(id)) continue
-      if (!returnedIds.has(id) && tracker.isUnchangedSince(id, tokensBeforeFetch)) {
+      if (!returnedIds.has(id) && tracker.isSessionUnchangedSince(id, generationsAtFetch)) {
         next = applyAuthoritativePendingQuestion(next, id, undefined)
       }
     }

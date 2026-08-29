@@ -181,7 +181,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
 
   it('missing → q: a session that received its first event mid-fetch keeps the new card', () => {
     const tracker = new PendingQuestionGenerationTracker()
-    const tokensBefore = new Map<string, number>()
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     let map = new Map<string, QuestionRequest>()
@@ -195,7 +195,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-1')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
     )
@@ -208,8 +208,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const tracker = new PendingQuestionGenerationTracker()
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
-    const tokensBefore = new Map<string, number>()
-    tokensBefore.set('s-1', tracker.capture('s-1'))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     // Mid-fetch: q2 replaces q1
@@ -219,7 +218,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-1', 'q1')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
     )
@@ -231,8 +230,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const tracker = new PendingQuestionGenerationTracker()
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
-    const tokensBefore = new Map<string, number>()
-    tokensBefore.set('s-1', tracker.capture('s-1'))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     // Mid-fetch: question_resolved clears it
@@ -242,7 +240,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-1', 'q1')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
     )
@@ -254,8 +252,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const tracker = new PendingQuestionGenerationTracker()
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
-    const tokensBefore = new Map<string, number>()
-    tokensBefore.set('s-1', tracker.capture('s-1'))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     // Mid-fetch: session_deleted (bump + unconditional clear)
@@ -266,7 +263,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-1', 'q1')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
     )
@@ -279,8 +276,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-keep', makeRequest('q-old'))       // replaced by snapshot
     map = setPendingQuestionForSession(map, 's-clear', makeRequest('q-gone'))     // cleared by snapshot
-    const tokensBefore = new Map<string, number>()
-    for (const id of map.keys()) tokensBefore.set(id, tracker.capture(id))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     const result = reconcilePendingQuestionsFromSnapshot(
@@ -290,7 +286,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
         snapshotSession('s-add', 'q-added'),
         snapshotSession('s-clear'),
       ],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
     )
@@ -308,8 +304,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
     map = setPendingQuestionForSession(map, 's-other', makeRequest('q-other-old'))
-    const tokensBefore = new Map<string, number>()
-    for (const id of map.keys()) tokensBefore.set(id, tracker.capture(id))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     // Mid-fetch: an UNRELATED session receives a question (bump epoch)
@@ -321,7 +316,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-other', 'q-other-new')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
       'full',
@@ -337,8 +332,7 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const tracker = new PendingQuestionGenerationTracker()
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
-    const tokensBefore = new Map<string, number>()
-    tokensBefore.set('s-omitted', tracker.capture('s-omitted'))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     // Unrelated mid-fetch bump drifts the epoch
@@ -348,13 +342,66 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-other', 'q-x')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
       'partial',
     )
 
     expect(result.get('s-omitted')?.requestId).toBe('q-old')
+  })
+
+  // Round 9, issue #1 (reviewer exit-42 repro): fetch starts with an EMPTY
+  // map, an unrelated session bumps mid-fetch, and the full snapshot returns
+  // a STABLE newly-returned pending session — its generation was 0 at capture
+  // and is still 0, so the snapshot is authoritative and the card hydrates.
+  it('drifted full scope: unrelated bump does not skip a stable newly-returned pending session', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    const generationsAtFetch = tracker.captureAll()
+    const epochAtFetch = tracker.epoch
+
+    // Mid-fetch: only s-event receives an event (q1 arrived then resolved —
+    // no card kept)
+    tracker.bump('s-event')
+    map = setPendingQuestionForSession(map, 's-event', makeRequest('q1'))
+    map = removePendingQuestionForSession(map, 's-event', 'q1')
+
+    // Full snapshot: s-stable newly returns WITH a pending question;
+    // s-event has none (authoritative).
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-stable', 'q-stable'), snapshotSession('s-event')],
+      generationsAtFetch,
+      tracker,
+      epochAtFetch,
+      'full',
+    )
+
+    // The stable session's card MUST hydrate despite the unrelated bump
+    expect(result.get('s-stable')?.requestId).toBe('q-stable')
+    // The event session's authoritative cleared state holds
+    expect(result.has('s-event')).toBe(false)
+  })
+
+  it('drifted partial scope: a stable newly-returned pending session still hydrates', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    const map = new Map<string, QuestionRequest>()
+    const generationsAtFetch = tracker.captureAll()
+    const epochAtFetch = tracker.epoch
+
+    tracker.bump('s-event')
+
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-stable', 'q-stable')],
+      generationsAtFetch,
+      tracker,
+      epochAtFetch,
+      'partial',
+    )
+
+    expect(result.get('s-stable')?.requestId).toBe('q-stable')
   })
 
   it('epoch-current partial: an omitted card is preserved (removeMissing=false repro, round 8)', () => {
@@ -364,15 +411,14 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const tracker = new PendingQuestionGenerationTracker()
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
-    const tokensBefore = new Map<string, number>()
-    tokensBefore.set('s-omitted', tracker.capture('s-omitted'))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     // Partial snapshot: only s-returned; s-omitted is absent, nothing bumped
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-returned', 'q-returned')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
       'partial',
@@ -386,14 +432,13 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     const tracker = new PendingQuestionGenerationTracker()
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
-    const tokensBefore = new Map<string, number>()
-    tokensBefore.set('s-omitted', tracker.capture('s-omitted'))
+    const generationsAtFetch = tracker.captureAll()
     const epochAtFetch = tracker.epoch
 
     const result = reconcilePendingQuestionsFromSnapshot(
       map,
       [snapshotSession('s-returned', 'q-returned')],
-      tokensBefore,
+      generationsAtFetch,
       tracker,
       epochAtFetch,
       'full',
