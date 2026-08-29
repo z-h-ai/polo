@@ -41,6 +41,7 @@
     "./config": "./src/config/index.ts",
     "./config/home-recent": "./src/config/home-recent.ts",
     "./config/organization-context": "./src/config/organization-context.ts",
+    "./config/product-space-context": "./src/config/product-space-context.ts",
     "./docs": "./src/docs/index.ts",
     "./docs/doc-links": "./src/docs/doc-links.ts",
     "./config/types": "./src/config/types.ts",

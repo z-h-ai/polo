@@ -33,6 +33,9 @@ type AdminPreloadApi = Pick<
   | 'organizationRevokeJoinLink'
   | 'organizationUpdateMember'
   | 'organizationRemoveMember'
+  | 'productSpaceList'
+  | 'productSpaceListActiveExecutions'
+  | 'productSpaceStopAllExecutions'
 >
 
 export function buildAdminPreloadApi(
@@ -96,5 +99,21 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER, organizationId, memberId, input),
     organizationRemoveMember: (organizationId, memberId, reason) =>
       client.invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER, organizationId, memberId, reason),
+    productSpaceList: () => {
+      const fallback = client.invoke(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES)
+      return fallback.then(result => {
+        if (result.success) return result
+        return {
+          success: false,
+          errorCode: result.errorCode ?? 'SERVER_ERROR',
+          message: result.message ?? 'ProductSpace list request failed',
+          contractUnsupported: result.errorCode === 'product_space_contract_unsupported',
+        }
+      })
+    },
+    productSpaceListActiveExecutions: (accountId, productSpaceId) =>
+      client.invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, accountId, productSpaceId),
+    productSpaceStopAllExecutions: (accountId, productSpaceId) =>
+      client.invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, accountId, productSpaceId),
   }
 }

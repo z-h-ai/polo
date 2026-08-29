@@ -242,6 +242,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
   RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
+  RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -276,6 +277,14 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.preferences.SET_HOME_RECENT_APPS,
   RPC_CHANNELS.preferences.GET_ORGANIZATION_CONTEXT_STORAGE,
   RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+  RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
+
+  // productSpace — device-local space selection state and the local runtime
+  // execution gate (active executions live on the local session runtime)
+  RPC_CHANNELS.productSpace.LIST,
+  RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+  RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
 ])
 
 // ---------------------------------------------------------------------------

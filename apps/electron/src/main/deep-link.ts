@@ -60,6 +60,8 @@ export interface DeepLinkTarget {
   rightSidebar?: string
   /** Opaque organization invitation/public-join token. */
   joinToken?: string
+  /** Ask the client to refresh its ProductSpace list (no selection change). */
+  productSpaceRefresh?: true
 }
 
 export interface DeepLinkResult {
@@ -79,6 +81,8 @@ export interface DeepLinkNavigation {
   actionParams?: Record<string, string>
   callbackId?: string
   joinToken?: string
+  /** Ask the client to refresh its ProductSpace list (no selection change). */
+  productSpaceRefresh?: true
 }
 
 /**
@@ -142,6 +146,17 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
       return {
         workspaceId: undefined,
         joinToken,
+        windowMode,
+      }
+    }
+
+    // poloai://product-spaces/refresh — enterprise creation or invite
+    // completion asks the client to refresh the space list. It never changes
+    // the current ProductSpace selection.
+    if (host === 'product-spaces' && pathParts[0] === 'refresh') {
+      return {
+        workspaceId: undefined,
+        productSpaceRefresh: true,
         windowMode,
       }
     }
@@ -372,13 +387,14 @@ export async function handleDeepLink(
   await waitForWindowReady(window)
 
   // 3. Send navigation command to renderer
-  if (target.view || target.action || target.joinToken) {
+  if (target.view || target.action || target.joinToken || target.productSpaceRefresh) {
     const navigation: DeepLinkNavigation = {
       view: target.view,
       action: target.action,
       actionParams: target.actionParams,
       callbackId: target.callbackId,
       joinToken: target.joinToken,
+      productSpaceRefresh: target.productSpaceRefresh,
     }
     const wsId = target.workspaceId ?? windowManager.getWorkspaceForWindow(window.webContents.id)
     const resolvedClientId = resolveClientId?.(window.webContents.id)

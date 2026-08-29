@@ -167,6 +167,9 @@ export const CHANNEL_MAP = {
   organizationRevokeJoinLink: invoke(RPC_CHANNELS.admin.REVOKE_ORGANIZATION_JOIN_LINK),
   organizationUpdateMember: invoke(RPC_CHANNELS.admin.UPDATE_ORGANIZATION_MEMBER),
   organizationRemoveMember: invoke(RPC_CHANNELS.admin.REMOVE_ORGANIZATION_MEMBER),
+  productSpaceList: invoke(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES),
+  productSpaceListActiveExecutions: invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS),
+  productSpaceStopAllExecutions: invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS),
   creatorArtifactGetCapabilities: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT_CAPABILITIES),
   creatorArtifactList: invoke(RPC_CHANNELS.admin.LIST_CREATOR_ARTIFACTS),
   creatorArtifactGet: invoke(RPC_CHANNELS.admin.GET_CREATOR_ARTIFACT),
@@ -257,6 +260,12 @@ export const CHANNEL_MAP = {
   ),
   updateOrganizationContextStorage: invoke(
     RPC_CHANNELS.preferences.UPDATE_ORGANIZATION_CONTEXT_STORAGE,
+  ),
+  getProductSpaceContextStorage: invoke(
+    RPC_CHANNELS.preferences.GET_PRODUCT_SPACE_CONTEXT_STORAGE,
+  ),
+  updateProductSpaceContextStorage: invoke(
+    RPC_CHANNELS.preferences.UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE,
   ),
 
   // Session Drafts

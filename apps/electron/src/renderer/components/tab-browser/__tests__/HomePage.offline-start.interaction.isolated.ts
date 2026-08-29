@@ -13,9 +13,9 @@ import { I18nextProvider } from 'react-i18next'
 import { i18n, setupI18n } from '@polo-ai/shared/i18n'
 import type { CatalogLocalAppScope } from '@polo-ai/shared/protocol'
 import type {
-  OrganizationContextStorage,
-  OrganizationContextStoragePatch,
-} from '@polo-ai/shared/config/organization-context'
+  ProductSpaceContextStorage,
+  ProductSpaceContextStoragePatch,
+} from '@polo-ai/shared/config/product-space-context'
 import { BUILTIN_APP_DEFINITIONS } from '../../../../shared/tab-browser-types'
 
 GlobalRegistrator.register()
@@ -34,30 +34,20 @@ mock.module('@/context/TabShellContext', () => ({
 const { cleanup, fireEvent, render, screen, waitFor } = await import(
   '@testing-library/react'
 )
-const { OrganizationProvider } = await import('@/context/OrganizationContext')
-const { useOrganizationContextState } = await import('@/hooks/useOrganizationContext')
+const { ProductSpaceProvider } = await import('@/context/ProductSpaceContext')
+const { useProductSpaceContextState } = await import('@/hooks/useProductSpaceContext')
 const {
-  resetOrganizationStorageMemoryForTests,
-  setVerifiedOrganizationContext,
-} = await import('@/lib/organization-storage')
+  resetProductSpaceStorageMemoryForTests,
+  setVerifiedProductSpaceContext,
+} = await import('@/lib/product-space-storage')
 const { HomePage } = await import('../HomePage')
 
 const accountId = 'account-offline'
-const organization = {
-  id: '11111111-1111-4111-8111-111111111111',
-  type: 'creator_space' as const,
-  name: 'Offline Studio',
-  purpose: 'Offline apps',
-  membership: {
-    id: '21111111-1111-4111-8111-111111111111',
-    role: 'member' as const,
-    status: 'active' as const,
-  },
-  memberCount: 1,
-}
+const personalSpaceId = 'space-personal-offline'
+const enterpriseSpaceId = '11111111-1111-4111-8111-111111111111'
 const catalogApp = {
   id: 'offline-app',
-  organizationId: organization.id,
+  organizationId: enterpriseSpaceId,
   name: 'Offline App',
   description: 'Prepared locally',
   deliveryMode: 'local_bundle' as const,
@@ -78,82 +68,94 @@ const start = jest.fn(async (scope: CatalogLocalAppScope) => ({
   url: 'http://127.0.0.1:9876',
   port: 9876,
 }))
-let organizationContextStorage: OrganizationContextStorage | null = null
+let productSpaceContextStorage: ProductSpaceContextStorage | null = null
 
 function AppHomeHarness() {
-  const context = useOrganizationContextState()
+  const context = useProductSpaceContextState()
   useEffect(() => {
     void context.bootstrap(accountId)
   }, [context.bootstrap])
 
   const contextValue = (
-    context.activeOrganizationId
-    && context.organizationMembershipRole
-    && context.organizationContextKey
+    context.activeProductSpaceId
+    && context.activeProductSpace
+    && context.personalProductSpaceId
+    && context.productSpaceContextKey
   ) ? {
       accountId,
-      activeOrganizationId: context.activeOrganizationId,
-      organizationSummaries: context.organizationSummaries,
-      organizationMembershipRole: context.organizationMembershipRole,
-      organizationContextKey: context.organizationContextKey,
+      activeProductSpaceId: context.activeProductSpaceId,
+      activeProductSpace: context.activeProductSpace,
+      productSpaces: context.productSpaces,
+      allProductSpaces: context.allProductSpaces,
+      personalProductSpaceId: context.personalProductSpaceId,
+      productSpaceContextKey: context.productSpaceContextKey,
       contextVersion: context.contextVersion,
-      onSelectOrganization: context.selectOrganization,
-      onManageOrganization: () => {},
-      onCreateOrganization: context.showCreate,
+      pendingSwitch: context.pendingSwitch,
+      onSelectProductSpace: (productSpaceId: string) => {
+        void context.requestSwitch(productSpaceId)
+      },
+      onRefreshProductSpaces: () => {},
+      onConfirmStopAndSwitch: () => {},
+      onRetryFailedStops: () => {},
+      onRetryTargetLoad: () => {},
+      onCancelSwitch: () => {},
+      onDismissTargetAccessLost: () => {},
     } : null
 
   return contextValue
     ? createElement(
-        OrganizationProvider,
+        ProductSpaceProvider,
         {
           value: contextValue,
           children: createElement(HomePage, { onAddApp: () => {} }),
         },
       )
-    : createElement('div', { 'data-testid': 'organization-flow' }, context.flowState)
+    : createElement('div', { 'data-testid': 'product-space-flow' }, context.flowState)
 }
 
 beforeEach(async () => {
   localStorage.clear()
   sessionStorage.clear()
-  resetOrganizationStorageMemoryForTests()
+  resetProductSpaceStorageMemoryForTests()
   openApp.mockClear()
   start.mockClear()
   await i18n.changeLanguage('en')
-  organizationContextStorage = null
+  productSpaceContextStorage = null
 
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      organizationList: async () => ({
+      productSpaceList: async () => ({
         success: false as const,
         errorCode: 'NETWORK_ERROR',
-        status: 503,
         message: 'offline',
       }),
-      getOrganizationContextStorage: async () => organizationContextStorage,
-      updateOrganizationContextStorage: async (
+      productSpaceListActiveExecutions: async () => ({
+        success: true as const,
+        executions: [],
+      }),
+      productSpaceStopAllExecutions: async () => ({
+        success: true as const,
+        result: { allStopped: true, executions: [] },
+      }),
+      getProductSpaceContextStorage: async () => productSpaceContextStorage,
+      updateProductSpaceContextStorage: async (
         _accountId: string,
-        patch: OrganizationContextStoragePatch,
+        patch: ProductSpaceContextStoragePatch,
       ) => {
-        const next = { ...(organizationContextStorage ?? {}) }
+        const next = { ...(productSpaceContextStorage ?? {}) }
         if (patch.verifiedContext === null) delete next.verifiedContext
         else if (patch.verifiedContext) {
           next.verifiedContext = patch.verifiedContext
         }
-        if (patch.unavailableTombstone === null) {
-          delete next.unavailableTombstone
-        } else if (patch.unavailableTombstone) {
-          next.unavailableTombstone = patch.unavailableTombstone
-        }
-        organizationContextStorage = next
+        productSpaceContextStorage = next
         return next
       },
       adminSyncAppCatalog: async () => ({
         success: true as const,
         catalog: {
           accountId,
-          organizationId: organization.id,
+          organizationId: enterpriseSpaceId,
           authorizationStatus: 'authorized' as const,
           appConfigVersion: 'v1',
           syncedAt: 1,
@@ -177,10 +179,31 @@ beforeEach(async () => {
       },
     },
   })
-  await setVerifiedOrganizationContext(
+  await setVerifiedProductSpaceContext(
     accountId,
-    [organization],
-    organization.id,
+    {
+      contractVersion: 1,
+      personalProductSpaceId: personalSpaceId,
+      productSpaces: [
+        {
+          id: personalSpaceId,
+          kind: 'personal',
+          name: '我的空间',
+          accessMode: 'active',
+          payer: { kind: 'account' },
+        },
+        {
+          id: enterpriseSpaceId,
+          kind: 'enterprise',
+          enterpriseId: 'enterprise-offline',
+          name: 'Offline Studio',
+          role: 'member',
+          accessMode: 'active',
+          payer: { kind: 'enterprise', enterpriseId: 'enterprise-offline' },
+        },
+      ],
+    },
+    enterpriseSpaceId,
   )
 })
 
@@ -189,7 +212,7 @@ afterEach(() => {
 })
 
 describe('restricted offline App to HomePage start flow', () => {
-  it('restores the verified organization and starts a prepared local app', async () => {
+  it('restores the verified ProductSpace and starts a prepared local app', async () => {
     render(createElement(
       I18nextProvider,
       { i18n },

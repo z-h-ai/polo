@@ -89,6 +89,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.SYNC_CONNECTIONS,
   RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
+  RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -1551,6 +1552,13 @@ export function registerAdminHandlers(
           denyCatalogScope(accountId, organizationId)
         }
       },
+    )
+  })
+
+  server.handle(RPC_CHANNELS.admin.LIST_PRODUCT_SPACES, async () => {
+    return callOrganization(
+      'listProductSpaces',
+      (client, accessToken) => client.listProductSpaces(accessToken),
     )
   })
 

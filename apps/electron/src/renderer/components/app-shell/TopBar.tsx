@@ -29,7 +29,7 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
 import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
 import { getDocUrl } from "@polo-ai/shared/docs/doc-links"
 import { AppMenu } from "../AppMenu"
-import { OrganizationSwitcher } from "@/components/organization/OrganizationSwitcher"
+import { ProductSpaceSwitcher } from "@/components/product-space/ProductSpaceSwitcher"
 
 const RIGHT_SLOT_FULL_BADGES_THRESHOLD = 420
 const RIGHT_SLOT_TWO_BADGES_THRESHOLD = 300
@@ -125,6 +125,7 @@ export function TopBar({
 
   return (
     <div
+      data-testid="workbench-topbar"
       className="fixed left-0 right-0 z-panel titlebar-drag-region"
       style={{ top: 'var(--tabbar-height)', height: 'var(--topbar-height)' }}
     >
@@ -159,7 +160,7 @@ export function TopBar({
           onToggleSidebar={onToggleSidebar}
           onToggleFocusMode={onToggleFocusMode}
         />
-        <OrganizationSwitcher compact={isCompact} />
+        <ProductSpaceSwitcher compact={isCompact} />
         </div>
 
         {/* Back / Forward / Workspace selector (moved from center).

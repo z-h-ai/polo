@@ -206,6 +206,7 @@ export const RPC_CHANNELS = {
     SYNC_CONNECTIONS: 'admin:syncConnections',
     SYNC_APP_CATALOG: 'admin:syncAppCatalog',
     LIST_ORGANIZATIONS: 'admin:listOrganizations',
+    LIST_PRODUCT_SPACES: 'admin:listProductSpaces',
     CREATE_ORGANIZATION: 'admin:createOrganization',
     PREVIEW_ORGANIZATION_JOIN: 'admin:previewOrganizationJoin',
     ACCEPT_ORGANIZATION_JOIN: 'admin:acceptOrganizationJoin',
@@ -286,6 +287,13 @@ export const RPC_CHANNELS = {
     SET_HOME_RECENT_APPS: 'preferences:setHomeRecentApps',
     GET_ORGANIZATION_CONTEXT_STORAGE: 'preferences:getOrganizationContextStorage',
     UPDATE_ORGANIZATION_CONTEXT_STORAGE: 'preferences:updateOrganizationContextStorage',
+    GET_PRODUCT_SPACE_CONTEXT_STORAGE: 'preferences:getProductSpaceContextStorage',
+    UPDATE_PRODUCT_SPACE_CONTEXT_STORAGE: 'preferences:updateProductSpaceContextStorage',
+  },
+  productSpace: {
+    LIST: 'product-space:list',
+    LIST_ACTIVE_EXECUTIONS: 'product-space:listActiveExecutions',
+    STOP_ALL_EXECUTIONS: 'product-space:stopAllExecutions',
   },
   drafts: {
     GET: 'drafts:get',

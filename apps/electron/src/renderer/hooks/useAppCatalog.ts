@@ -21,7 +21,7 @@ import {
   type LocalAppRuntimeStatus,
   type LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
-import { useOptionalOrganizationContext } from '@/context/OrganizationContext'
+import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
   emitAdminCatalogSessionAuthFailure,
 } from '@/lib/admin-auth-failure'
@@ -231,11 +231,11 @@ interface ContextSnapshot {
 }
 
 export function useAppCatalog() {
-  const organization = useOptionalOrganizationContext()
-  const organizationContextKey = organization?.organizationContextKey ?? null
+  const productSpace = useOptionalProductSpaceContext()
+  const catalogContextKey = productSpace?.productSpaceContextKey ?? null
   const [state, setState] = useState<AppCatalogState>({
     catalog: null,
-    loading: Boolean(organization),
+    loading: Boolean(productSpace),
     refreshing: false,
     warningCode: null,
     errorCode: null,
@@ -247,8 +247,8 @@ export function useAppCatalog() {
     host: null,
   })
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
-  const contextKeyRef = useRef<string | null>(organizationContextKey)
-  contextKeyRef.current = organizationContextKey
+  const contextKeyRef = useRef<string | null>(catalogContextKey)
+  contextKeyRef.current = catalogContextKey
   // Context generation invalidates lifecycle results only when account/org
   // authorization changes. Sync generation is intentionally separate so an
   // ordinary same-context Catalog refresh cannot discard a successful start.
@@ -274,19 +274,19 @@ export function useAppCatalog() {
   const currentSnapshotForApp = useCallback((app: CatalogApp): ContextSnapshot => {
     const catalog = catalogRef.current
     if (
-      !organizationContextKey
+      !catalogContextKey
       || !catalog
-      || catalog.accountId !== organization?.accountId
+      || catalog.accountId !== productSpace?.accountId
       || app.organizationId !== catalog.organizationId
     ) {
       throw new Error(i18n.t('homeApps.errors.staleContext'))
     }
     return {
-      contextKey: organizationContextKey,
+      contextKey: catalogContextKey,
       contextGeneration: contextGenerationRef.current,
       catalog,
     }
-  }, [organization?.accountId, organizationContextKey])
+  }, [productSpace?.accountId, catalogContextKey])
 
   const scopeForApp = useCallback((app: CatalogApp): CatalogLocalAppScope => (
     scopeForCatalogApp(currentSnapshotForApp(app).catalog, app)
@@ -462,9 +462,9 @@ export function useAppCatalog() {
 
   const sync = useCallback(async (force = false) => {
     if (
-      !organization
-      || !organizationContextKey
-      || !organization.activeOrganizationId
+      !productSpace
+      || !catalogContextKey
+      || !productSpace.activeProductSpaceId
     ) {
       catalogRef.current = null
       setState(current => ({
@@ -484,7 +484,7 @@ export function useAppCatalog() {
     }
     const syncGeneration = ++syncGenerationRef.current
     const contextGeneration = contextGenerationRef.current
-    const contextKey = organizationContextKey
+    const contextKey = catalogContextKey
     setState(current => ({
       ...current,
       loading: !current.catalog,
@@ -493,7 +493,7 @@ export function useAppCatalog() {
     }))
     try {
       let result = await window.electronAPI.adminSyncAppCatalog(
-        organization.activeOrganizationId,
+        productSpace.activeProductSpaceId,
         { force },
       )
       for (
@@ -509,7 +509,7 @@ export function useAppCatalog() {
           || contextKeyRef.current !== contextKey
         ) return
         result = await window.electronAPI.adminSyncAppCatalog(
-          organization.activeOrganizationId,
+          productSpace.activeProductSpaceId,
           { force },
         )
       }
@@ -522,9 +522,9 @@ export function useAppCatalog() {
         emitAdminCatalogSessionAuthFailure(result)
         const returnedCatalog = result.catalog
         const matchingReturnedCatalog = returnedCatalog
-          && returnedCatalog.accountId === organization.accountId
+          && returnedCatalog.accountId === productSpace.accountId
           && returnedCatalog.organizationId
-            === organization.activeOrganizationId
+            === productSpace.activeProductSpaceId
           ? returnedCatalog
           : null
         // A persisted denied snapshot can accompany a temporary network error
@@ -666,8 +666,8 @@ export function useAppCatalog() {
       }
     }
   }, [
-    organization,
-    organizationContextKey,
+    productSpace,
+    catalogContextKey,
     refreshRuntimeStatuses,
   ])
 
@@ -694,7 +694,7 @@ export function useAppCatalog() {
     setState(current => ({
       ...current,
       catalog: null,
-      loading: Boolean(organizationContextKey),
+      loading: Boolean(catalogContextKey),
       refreshing: false,
       warningCode: null,
       errorCode: null,
@@ -709,7 +709,7 @@ export function useAppCatalog() {
       contextGenerationRef.current += 1
       syncGenerationRef.current += 1
     }
-  }, [organizationContextKey, sync])
+  }, [catalogContextKey, sync])
 
   const busyScopes = useMemo(() => Object.entries(state.statuses)
     .filter(([, status]) => (
@@ -1067,7 +1067,7 @@ export function useAppCatalog() {
   }, [scopeKeyForApp, state.statuses])
 
   return {
-    organization,
+    productSpace,
     state,
     sync,
     install,

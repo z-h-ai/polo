@@ -890,6 +890,41 @@ export interface ElectronAPI {
     import('@polo-ai/shared/config/organization-context').OrganizationContextStorage
     | null
   >
+  getProductSpaceContextStorage(
+    accountId: string,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+  updateProductSpaceContextStorage(
+    accountId: string,
+    patch: import(
+      '@polo-ai/shared/config/product-space-context'
+    ).ProductSpaceContextStoragePatch,
+  ): Promise<
+    import('@polo-ai/shared/config/product-space-context').ProductSpaceContextStorage
+    | null
+  >
+
+  // ProductSpace consumption (member spaces and the local runtime gate)
+  productSpaceList(): Promise<
+    | { success: true; contractVersion: number; personalProductSpaceId: string; productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[] }
+    | { success: false; errorCode: string; message: string; contractUnsupported?: boolean }
+  >
+  productSpaceListActiveExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; executions: import('@polo-ai/shared/product-spaces').ExecutionSummary[] }
+    | { success: false; errorCode: string; message: string }
+  >
+  productSpaceStopAllExecutions(
+    accountId: string,
+    productSpaceId: string,
+  ): Promise<
+    | { success: true; result: import('@polo-ai/shared/product-spaces').StopAllExecutionsResult }
+    | { success: false; errorCode: string; message: string }
+  >
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>

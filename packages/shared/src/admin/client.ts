@@ -82,6 +82,11 @@ import {
   AdminPlatformReleaseSchema,
   AdminPlatformReleaseCreatedResponseSchema,
 } from './schemas.ts';
+import {
+  ListProductSpacesResponseSchema,
+  PRODUCT_SPACE_CONTRACT_VERSION,
+} from '../product-spaces/index.ts';
+import type { ListProductSpacesResponse } from '../product-spaces/types.ts';
 
 const ADMIN_ERROR_CODES = new Set<AdminErrorCode>([
   'INVALID_CREDENTIALS',
@@ -153,6 +158,7 @@ const ADMIN_ERROR_CODE_ALIASES: Record<string, AdminErrorCode> = {
 };
 
 const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
+  product_space_contract_unsupported: 'ProductSpace contract is not supported by this client',
   INVALID_CREDENTIALS: 'Invalid username or password',
   ACCOUNT_DISABLED: 'Admin account is disabled',
   TOKEN_REVOKED: 'Admin session is no longer valid',
@@ -361,6 +367,35 @@ export class AdminClient {
       accessToken,
     });
     return this.readSuccessResponse(response, ListOrganizationsResponseSchema);
+  }
+
+  /**
+   * Reads the ProductSpace v1 contract list. A response written for a
+   * different contractVersion fails closed with a dedicated error code so the
+   * client can block business surfaces instead of guessing.
+   */
+  async listProductSpaces(accessToken: string): Promise<ListProductSpacesResponse> {
+    const response = await this.request<unknown>(
+      '/api/me/product-spaces',
+      { method: 'GET', accessToken },
+    );
+    const parsed = ListProductSpacesResponseSchema.safeParse(response);
+    if (parsed.success) return parsed.data;
+    const rawVersion = response
+      && typeof response === 'object'
+      && !Array.isArray(response)
+      ? (response as Record<string, unknown>).contractVersion
+      : undefined;
+    if (
+      rawVersion !== undefined
+      && rawVersion !== PRODUCT_SPACE_CONTRACT_VERSION
+    ) {
+      throw new AdminError(
+        'Polo Admin speaks a ProductSpace contract this client cannot safely understand',
+        'product_space_contract_unsupported',
+      );
+    }
+    throw new AdminError('ProductSpace list response is invalid', 'SERVER_ERROR');
   }
 
   async getAppCatalog(

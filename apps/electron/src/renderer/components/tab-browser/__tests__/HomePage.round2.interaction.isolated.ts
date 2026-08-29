@@ -16,7 +16,7 @@ import {
   KEYS,
   set as setLocalStorage,
 } from '@/lib/local-storage'
-import { createOrganizationContextKey } from '@/lib/organization-storage'
+import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 
 GlobalRegistrator.register()
 setupI18n()
@@ -45,7 +45,7 @@ function createDeferred<T>() {
 
 function signedOutCatalogHook() {
   return {
-    organization: null,
+    productSpace: null,
     state: {
       catalog: null,
       loading: false,
@@ -324,16 +324,16 @@ describe('HomePage round-two regressions', () => {
     })
     appCatalogHook = {
       ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
+      productSpace: {
+          accountId: 'account-a',
+          activeProductSpaceId: 'organization-a',
+          productSpaceContextKey: 'account-a:organization-a',
+          activeProductSpace: {
+            id: 'organization-a',
+            kind: 'enterprise',
+            name: 'Organization A',
+          },
+        },
       state: {
         ...signedOutCatalogHook().state,
         catalog,
@@ -388,16 +388,16 @@ describe('HomePage round-two regressions', () => {
     const refreshRuntimeStatuses = jest.fn(async () => {})
     appCatalogHook = {
       ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
+      productSpace: {
+          accountId: 'account-a',
+          activeProductSpaceId: 'organization-a',
+          productSpaceContextKey: 'account-a:organization-a',
+          activeProductSpace: {
+            id: 'organization-a',
+            kind: 'enterprise',
+            name: 'Organization A',
+          },
+        },
       state: {
         ...signedOutCatalogHook().state,
         catalog,
@@ -449,24 +449,16 @@ describe('HomePage round-two regressions', () => {
     })
     appCatalogHook = {
       ...signedOutCatalogHook(),
-      organization: {
-        accountId: catalog.accountId,
-        activeOrganizationId: catalog.organizationId,
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: catalog.organizationId,
-          type: 'enterprise_workspace',
-          name: 'Organization A',
-          purpose: '',
-          status: 'suspended',
-          membership: {
-            id: 'membership-denied',
-            role: 'member',
-            status: 'removed',
+      productSpace: {
+          accountId: catalog.accountId,
+          activeProductSpaceId: catalog.organizationId,
+          productSpaceContextKey: 'account-a:organization-a',
+          activeProductSpace: {
+            id: catalog.organizationId,
+            kind: 'enterprise',
+            name: 'Organization A',
           },
-          memberCount: 1,
-        }],
-      },
+        },
       state: {
         ...signedOutCatalogHook().state,
         catalog,
@@ -514,16 +506,16 @@ describe('HomePage round-two regressions', () => {
     })
     appCatalogHook = {
       ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
+      productSpace: {
+          accountId: 'account-a',
+          activeProductSpaceId: 'organization-a',
+          productSpaceContextKey: 'account-a:organization-a',
+          activeProductSpace: {
+            id: 'organization-a',
+            kind: 'enterprise',
+            name: 'Organization A',
+          },
+        },
       state: {
         ...signedOutCatalogHook().state,
         catalog,
@@ -597,16 +589,16 @@ describe('HomePage round-two regressions', () => {
     const getLogs = jest.fn(async () => 'retained log output')
     appCatalogHook = {
       ...signedOutCatalogHook(),
-      organization: {
-        accountId: catalog.accountId,
-        activeOrganizationId: catalog.organizationId,
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: catalog.organizationId,
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
+      productSpace: {
+          accountId: catalog.accountId,
+          activeProductSpaceId: catalog.organizationId,
+          productSpaceContextKey: 'account-a:organization-a',
+          activeProductSpace: {
+            id: catalog.organizationId,
+            kind: 'enterprise',
+            name: 'Organization A',
+          },
+        },
       state: {
         ...signedOutCatalogHook().state,
         catalog,
@@ -699,18 +691,18 @@ describe('HomePage round-two regressions', () => {
         const scopeKey = createLocalAppScopeKey(status.scope)
         appCatalogHook = {
           ...signedOutCatalogHook(),
-          organization: {
-            accountId: catalog.accountId,
-            activeOrganizationId: catalog.organizationId,
-            organizationContextKey: createOrganizationContextKey(
-              catalog.accountId,
-              catalog.organizationId,
-            ),
-            organizationSummaries: [{
-              id: catalog.organizationId,
-              type: 'enterprise',
-              name: 'Organization A',
-            }],
+          productSpace: {
+              accountId: catalog.accountId,
+              activeProductSpaceId: catalog.organizationId,
+              productSpaceContextKey: createProductSpaceContextKey(
+                catalog.accountId,
+                catalog.organizationId,
+              ),
+              activeProductSpace: {
+                id: catalog.organizationId,
+                kind: 'enterprise',
+                name: 'Organization A',
+              },
           },
           state: {
             ...signedOutCatalogHook().state,
@@ -795,16 +787,16 @@ describe('HomePage round-two regressions', () => {
     ))
     appCatalogHook = {
       ...signedOutCatalogHook(),
-      organization: {
-        accountId: catalog.accountId,
-        activeOrganizationId: catalog.organizationId,
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: catalog.organizationId,
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
+      productSpace: {
+          accountId: catalog.accountId,
+          activeProductSpaceId: catalog.organizationId,
+          productSpaceContextKey: 'account-a:organization-a',
+          activeProductSpace: {
+            id: catalog.organizationId,
+            kind: 'enterprise',
+            name: 'Organization A',
+          },
+        },
       state: {
         ...signedOutCatalogHook().state,
         catalog,
@@ -921,18 +913,18 @@ describe('HomePage round-two regressions', () => {
         app,
         hook: {
           ...signedOutCatalogHook(),
-          organization: {
+          productSpace: {
             accountId,
-            activeOrganizationId: organizationId,
-            organizationContextKey: createOrganizationContextKey(
+            activeProductSpaceId: organizationId,
+            productSpaceContextKey: createProductSpaceContextKey(
               accountId,
               organizationId,
             ),
-            organizationSummaries: [{
+            activeProductSpace: {
               id: organizationId,
-              type: 'enterprise',
+              kind: 'enterprise',
               name: organizationId,
-            }],
+            },
           },
           state: {
             ...signedOutCatalogHook().state,
@@ -948,8 +940,8 @@ describe('HomePage round-two regressions', () => {
     }
     const contextA = brokenApp(accountA, organizationAId)
     const contextB = brokenApp(accountB, organizationBId)
-    expect(contextA.hook.organization.organizationContextKey)
-      .not.toBe(contextB.hook.organization.organizationContextKey)
+    expect(contextA.hook.productSpace.productSpaceContextKey)
+      .not.toBe(contextB.hook.productSpace.productSpaceContextKey)
 
     appCatalogHook = contextA.hook
     const view = render(createElement(
@@ -1051,16 +1043,16 @@ describe('HomePage round-two regressions', () => {
     })
     appCatalogHook = {
       ...signedOutCatalogHook(),
-      organization: {
-        accountId: 'account-a',
-        activeOrganizationId: 'organization-a',
-        organizationContextKey: 'account-a:organization-a',
-        organizationSummaries: [{
-          id: 'organization-a',
-          type: 'enterprise',
-          name: 'Organization A',
-        }],
-      },
+      productSpace: {
+          accountId: 'account-a',
+          activeProductSpaceId: 'organization-a',
+          productSpaceContextKey: 'account-a:organization-a',
+          activeProductSpace: {
+            id: 'organization-a',
+            kind: 'enterprise',
+            name: 'Organization A',
+          },
+        },
       state: {
         ...signedOutCatalogHook().state,
         catalog,

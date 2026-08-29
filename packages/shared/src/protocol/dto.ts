@@ -598,6 +598,8 @@ export interface DeepLinkNavigation {
   callbackId?: string
   /** Opaque organization invitation/public-join token from poloai://join/<token>. */
   joinToken?: string
+  /** ProductSpace list refresh signal from poloai://product-spaces/refresh. */
+  productSpaceRefresh?: true
 }
 
 // ---------------------------------------------------------------------------

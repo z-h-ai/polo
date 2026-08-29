@@ -20,7 +20,7 @@ import type {
   LocalAppStartResult,
 } from '@polo-ai/shared/protocol'
 import { createLocalAppScopeKey } from '@polo-ai/shared/protocol'
-import { createOrganizationContextKey } from '@/lib/organization-storage'
+import { createProductSpaceContextKey } from '@/lib/product-space-storage'
 
 GlobalRegistrator.register()
 
@@ -93,7 +93,7 @@ function syncResult(
   }
 }
 
-let organizationContext = organization('organization-a')
+let productSpaceContextState = productSpaceContext('organization-a')
 let syncCatalog = mock(async (
   organizationId: string,
   _options?: { force?: boolean },
@@ -143,31 +143,24 @@ let setAvailableRelease = mock(async (
   status: 'not_installed',
 }))
 
-function organization(organizationId: string, accountId = 'account-a') {
+function productSpaceContext(organizationId: string, accountId = 'account-a') {
   return {
     accountId,
-    activeOrganizationId: organizationId,
-    organizationContextKey: createOrganizationContextKey(
+    activeProductSpaceId: organizationId,
+    productSpaceContextKey: createProductSpaceContextKey(
       accountId,
       organizationId,
     ),
-    organizationSummaries: [{
+    activeProductSpace: {
       id: organizationId,
-      type: 'creator_space' as const,
+      kind: 'enterprise' as const,
       name: organizationId,
-      purpose: '',
-      membership: {
-        id: `membership-${organizationId}`,
-        role: 'member' as const,
-        status: 'active' as const,
-      },
-      memberCount: 1,
-    }],
+    },
   }
 }
 
-mock.module('@/context/OrganizationContext', () => ({
-  useOptionalOrganizationContext: () => organizationContext,
+mock.module('@/context/ProductSpaceContext', () => ({
+  useOptionalProductSpaceContext: () => productSpaceContextState,
 }))
 
 const {
@@ -180,7 +173,7 @@ const { useAppCatalog } = await import('../useAppCatalog')
 const { subscribeToAdminAuthFailures } = await import('@/lib/admin-auth-failure')
 
 beforeEach(() => {
-  organizationContext = organization('organization-a')
+  productSpaceContextState = productSpaceContext('organization-a')
   syncCatalog = mock(async (
     organizationId: string,
     _options?: { force?: boolean },
@@ -664,7 +657,7 @@ describe('useAppCatalog scoped async state', () => {
     ))
     const { result, rerender } = renderHook(() => useAppCatalog())
 
-    organizationContext = organization('organization-b')
+    productSpaceContextState = productSpaceContext('organization-b')
     rerender()
     await act(async () => {
       organizationB.resolve(syncResult('organization-b', 'newer'))
@@ -717,10 +710,10 @@ describe('useAppCatalog scoped async state', () => {
       status: 'installed',
       currentVersion: '1.0.0',
     })))
-    organizationContext = organization(organizationAId, accountA)
+    productSpaceContextState = productSpaceContext(organizationAId, accountA)
     const { result, rerender } = renderHook(() => useAppCatalog())
 
-    organizationContext = organization(organizationBId, accountB)
+    productSpaceContextState = productSpaceContext(organizationBId, accountB)
     rerender()
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -792,7 +785,7 @@ describe('useAppCatalog scoped async state', () => {
             currentVersion: '1.0.0',
           })))
     ))
-    organizationContext = organization(organizationAId, accountA)
+    productSpaceContextState = productSpaceContext(organizationAId, accountA)
     const { result, rerender } = renderHook(() => useAppCatalog())
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -802,7 +795,7 @@ describe('useAppCatalog scoped async state', () => {
       expect(getRuntimeStatuses).toHaveBeenCalledTimes(1)
     })
 
-    organizationContext = organization(organizationBId, accountB)
+    productSpaceContextState = productSpaceContext(organizationBId, accountB)
     rerender()
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -870,7 +863,7 @@ describe('useAppCatalog scoped async state', () => {
       undefined,
       organizationId === organizationAId ? accountA : accountB,
     ))
-    organizationContext = organization(organizationAId, accountA)
+    productSpaceContextState = productSpaceContext(organizationAId, accountA)
     const { result, rerender } = renderHook(() => useAppCatalog())
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({
@@ -884,7 +877,7 @@ describe('useAppCatalog scoped async state', () => {
       promiseA = result.current.start(result.current.state.catalog!.apps[0]!)
     })
 
-    organizationContext = organization(organizationBId, accountB)
+    productSpaceContextState = productSpaceContext(organizationBId, accountB)
     rerender()
     await waitFor(() => {
       expect(result.current.state.catalog).toMatchObject({

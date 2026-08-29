@@ -17,11 +17,13 @@ mock.module('@polo-ai/shared/config', () => ({
   getWorkspaceByNameOrId: () => null,
   getHomeRecentApps: () => [],
   getOrganizationContextStorage: () => null,
+  getProductSpaceContextStorage: () => null,
   loadPreferences: () => ({}),
   getDefaultThinkingLevel: getDefaultThinkingLevelMock,
   setDefaultThinkingLevel: setDefaultThinkingLevelMock,
   setHomeRecentApps: () => {},
   updateOrganizationContextStorage: () => null,
+  updateProductSpaceContextStorage: () => null,
 }))
 
 describe('settings default thinking RPC handlers', () => {

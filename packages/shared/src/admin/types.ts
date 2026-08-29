@@ -453,6 +453,7 @@ export type AdminErrorCode =
   | 'last_owner_required'
   | 'duplicate_request'
   | 'creator_skill_feature_disabled'
+  | 'product_space_contract_unsupported'
   | 'creator_skill_upload_cancelled'
   | 'artifact_type_not_allowed'
   | 'artifact_not_found'

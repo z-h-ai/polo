@@ -185,7 +185,7 @@ export function HomePage({ onAddApp }: HomePageProps) {
   useEffect(() => {
     setOrganizationAppLimit(ORGANIZATION_APP_PAGE_SIZE)
   }, [
-    catalog.organization?.organizationContextKey,
+    catalog.productSpace?.productSpaceContextKey,
     catalog.state.catalog?.appConfigVersion,
   ])
   useEffect(() => {
@@ -197,12 +197,10 @@ export function HomePage({ onAddApp }: HomePageProps) {
     setLogsTarget(null)
     setLogs('')
     setLogsLoading(false)
-  }, [catalog.organization?.organizationContextKey])
-  const activeOrganization = catalog.organization?.organizationSummaries.find(
-    item => item.id === catalog.organization?.activeOrganizationId,
-  )
+  }, [catalog.productSpace?.productSpaceContextKey])
+  const activeProductSpace = catalog.productSpace?.activeProductSpace
   const recentContextKey = createHomeRecentContextKey(
-    catalog.organization?.organizationContextKey,
+    catalog.productSpace?.productSpaceContextKey,
   )
 
   useEffect(() => {
@@ -485,19 +483,19 @@ export function HomePage({ onAddApp }: HomePageProps) {
           )}
         </section>
 
-        {catalog.organization && (
+        {catalog.productSpace && (
           <section aria-labelledby="organization-apps-heading" data-testid="organization-apps-section">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
                 <h2 id="organization-apps-heading" className="text-base font-semibold">
                   {t('homeApps.organization.title', {
-                    name: activeOrganization?.name || t('homeApps.organization.current'),
+                    name: activeProductSpace?.name || t('homeApps.organization.current'),
                   })}
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {activeOrganization?.type === 'creator_space'
-                    ? t('homeApps.organization.creatorDescription')
-                    : t('homeApps.organization.enterpriseDescription')}
+                  {activeProductSpace?.kind === 'enterprise'
+                    ? t('homeApps.organization.enterpriseDescription')
+                    : t('homeApps.organization.creatorDescription')}
                 </p>
               </div>
               <Button
@@ -566,9 +564,9 @@ export function HomePage({ onAddApp }: HomePageProps) {
                   {t('homeApps.organization.empty')}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {activeOrganization?.type === 'creator_space'
-                    ? t('homeApps.organization.emptyCreator')
-                    : t('homeApps.organization.emptyEnterprise')}
+                  {activeProductSpace?.kind === 'enterprise'
+                    ? t('homeApps.organization.emptyEnterprise')
+                    : t('homeApps.organization.emptyCreator')}
                 </p>
               </div>
             ) : (

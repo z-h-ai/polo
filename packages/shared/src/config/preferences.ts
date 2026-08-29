@@ -22,6 +22,17 @@ import {
   AdminEntityIdSchema,
   ListOrganizationsResponseSchema,
 } from '../admin/schemas.ts';
+import {
+  ListProductSpacesResponseSchema,
+} from '../product-spaces/schemas.ts';
+import type { ProductSpaceSummary } from '../product-spaces/types.ts';
+import {
+  type ProductSpaceContextStorage,
+  type ProductSpaceContextStorageByAccount,
+  type ProductSpaceContextStoragePatch,
+  type ProductSpaceSessionIndexPreference,
+  type VerifiedProductSpaceContextPreference,
+} from './product-space-context.ts';
 export type {
   HomeRecentAppKind,
   HomeRecentAppPreference,
@@ -34,6 +45,13 @@ export type {
   UnavailableOrganizationTombstonePreference,
   VerifiedOrganizationContextPreference,
 } from './organization-context.ts';
+export type {
+  ProductSpaceContextStorage,
+  ProductSpaceContextStorageByAccount,
+  ProductSpaceContextStoragePatch,
+  ProductSpaceSessionIndexPreference,
+  VerifiedProductSpaceContextPreference,
+} from './product-space-context.ts';
 
 export interface UserLocation {
   city?: string;
@@ -65,6 +83,8 @@ export interface UserPreferences {
   homeRecentApps?: HomeRecentAppsByContext;
   // Device-local, last verified Admin organization state, isolated by account.
   organizationContextStorage?: OrganizationContextStorageByAccount;
+  // Device-local, last verified ProductSpace contract state, isolated by account.
+  productSpaceContextStorage?: ProductSpaceContextStorageByAccount;
   // Whether to include Co-Authored-By trailer on git commits (default: true)
   includeCoAuthoredBy?: boolean;
   // When the preferences were last updated
@@ -317,6 +337,159 @@ export function updateOrganizationContextStorage(
     organizationContextStorage: byAccount,
   });
   return next.verifiedContext || next.unavailableTombstone ? next : null;
+}
+
+const MAX_PRODUCT_SPACE_SESSION_INDEX_ENTRIES = 20_000;
+
+function sanitizeVerifiedProductSpaceContext(
+  value: unknown,
+): VerifiedProductSpaceContextPreference | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Partial<VerifiedProductSpaceContextPreference>;
+  const list = ListProductSpacesResponseSchema.safeParse(candidate.list);
+  if (
+    !list.success
+    || (candidate.activeProductSpaceId !== null
+      && typeof candidate.activeProductSpaceId !== 'string')
+    || !Number.isSafeInteger(candidate.verifiedAt)
+    || (candidate.verifiedAt ?? -1) < 0
+  ) {
+    return undefined;
+  }
+  const activeProductSpaceId = candidate.activeProductSpaceId ?? null;
+  const activeIsListed = activeProductSpaceId
+    && list.data.productSpaces.some(
+      (space: ProductSpaceSummary) => space.id === activeProductSpaceId,
+    );
+  if (activeProductSpaceId && !activeIsListed) return undefined;
+  return {
+    list: list.data,
+    activeProductSpaceId: activeProductSpaceId ?? null,
+    verifiedAt: candidate.verifiedAt!,
+  };
+}
+
+function sanitizeProductSpaceSessionIndex(
+  value: unknown,
+): ProductSpaceSessionIndexPreference | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, string] =>
+      typeof entry[0] === 'string'
+      && entry[0].length > 0
+      && typeof entry[1] === 'string'
+      && entry[1].length > 0,
+    );
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(
+    entries.slice(0, MAX_PRODUCT_SPACE_SESSION_INDEX_ENTRIES),
+  );
+}
+
+function sanitizeProductSpaceContextStorage(
+  value: unknown,
+): ProductSpaceContextStorage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = value as ProductSpaceContextStorage;
+  const verifiedContext = sanitizeVerifiedProductSpaceContext(
+    candidate.verifiedContext,
+  );
+  const sessionSpaceIndex = sanitizeProductSpaceSessionIndex(
+    candidate.sessionSpaceIndex,
+  );
+  return verifiedContext || sessionSpaceIndex
+    ? {
+        ...(verifiedContext ? { verifiedContext } : {}),
+        ...(sessionSpaceIndex ? { sessionSpaceIndex } : {}),
+      }
+    : null;
+}
+
+function assertProductSpaceContextAccountId(accountId: string): void {
+  if (!AdminEntityIdSchema.safeParse(accountId).success) {
+    throw new Error('ProductSpace context account is invalid');
+  }
+}
+
+function getStoredProductSpaceContext(
+  preferences: UserPreferences,
+  accountId: string,
+): unknown {
+  const byAccount = preferences.productSpaceContextStorage;
+  return byAccount && Object.prototype.hasOwnProperty.call(byAccount, accountId)
+    ? byAccount[accountId]
+    : undefined;
+}
+
+export function getProductSpaceContextStorage(
+  accountId: string,
+): ProductSpaceContextStorage | null {
+  assertProductSpaceContextAccountId(accountId);
+  return sanitizeProductSpaceContextStorage(
+    getStoredProductSpaceContext(loadPreferences(), accountId),
+  );
+}
+
+export function updateProductSpaceContextStorage(
+  accountId: string,
+  patch: ProductSpaceContextStoragePatch,
+): ProductSpaceContextStorage | null {
+  assertProductSpaceContextAccountId(accountId);
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new Error('ProductSpace context patch is invalid');
+  }
+
+  const currentPreferences = loadPreferences();
+  const current = sanitizeProductSpaceContextStorage(
+    getStoredProductSpaceContext(currentPreferences, accountId),
+  ) ?? {};
+  const next: ProductSpaceContextStorage = { ...current };
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'verifiedContext')) {
+    if (patch.verifiedContext === null) {
+      delete next.verifiedContext;
+    } else {
+      const verified = sanitizeVerifiedProductSpaceContext(
+        patch.verifiedContext,
+      );
+      if (!verified) throw new Error('Verified ProductSpace context is invalid');
+      next.verifiedContext = verified;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'sessionSpaceIndex')) {
+    if (patch.sessionSpaceIndex === null) {
+      delete next.sessionSpaceIndex;
+    } else {
+      const index = sanitizeProductSpaceSessionIndex(patch.sessionSpaceIndex);
+      if (!index) throw new Error('ProductSpace session index is invalid');
+      next.sessionSpaceIndex = index;
+    }
+  }
+
+  const byAccount = {
+    ...(currentPreferences.productSpaceContextStorage ?? {}),
+  };
+  if (next.verifiedContext || next.sessionSpaceIndex) {
+    Object.defineProperty(byAccount, accountId, {
+      configurable: true,
+      enumerable: true,
+      value: next,
+      writable: true,
+    });
+  } else {
+    delete byAccount[accountId];
+  }
+  savePreferences({
+    ...currentPreferences,
+    productSpaceContextStorage: byAccount,
+  });
+  return next.verifiedContext || next.sessionSpaceIndex ? next : null;
 }
 
 export function getPreferencesPath(): string {
