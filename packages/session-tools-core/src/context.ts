@@ -62,10 +62,14 @@ export interface SessionToolCallbacks {
    * Called when the agent requests structured user input via request_user_input.
    * Only invoked when the tool is registered (desktop interactive turns).
    * Implementations pause the current turn and wait for the user's answers.
+   *
+   * MAY return a Promise: the handler awaits it so the tool only reports
+   * success ("waiting for user input") after the durable handoff has actually
+   * completed — a rejection surfaces as a tool error instead.
    * Optional — backends without question support leave it undefined and the
    * handler degrades to a plain-text error.
    */
-  onQuestionRequested?(questions: RequestUserInputQuestionArgs[]): void;
+  onQuestionRequested?(questions: RequestUserInputQuestionArgs[]): void | Promise<void>;
 }
 
 // ============================================================

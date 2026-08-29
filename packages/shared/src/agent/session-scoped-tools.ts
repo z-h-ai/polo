@@ -267,8 +267,10 @@ export function getSessionScopedTools(
         callbacks?.onAuthRequest?.(request as AuthRequest);
       },
       onQuestionRequested: (questions) => {
+        // Propagate the promise: the tool handler awaits the durable handoff
+        // (persist+flush+question_request) before reporting success.
         const callbacks = getSessionScopedToolCallbacks(sessionId);
-        callbacks?.onQuestionRequested?.(questions);
+        return callbacks?.onQuestionRequested?.(questions);
       },
     });
 

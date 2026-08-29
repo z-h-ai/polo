@@ -150,14 +150,41 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
   }
 
-  it('question-request flush failure rolls back the pending replacement and skips the handoff', async () => {
+  function makeToolContext(onQuestionRequested: (questions: unknown[]) => Promise<void>) {
+    return {
+      sessionId: 'ctx',
+      workspacePath: tmpRoot,
+      get sourcesPath() { return join(tmpRoot, 'sources'); },
+      get skillsPath() { return join(tmpRoot, 'skills'); },
+      plansFolderPath: join(tmpRoot, 'plans'),
+      fs: {
+        exists: () => false,
+        readFile: () => '',
+        readFileBuffer: () => Buffer.alloc(0),
+        writeFile: () => {},
+        isDirectory: () => false,
+        readdir: () => [],
+        stat: () => ({ size: 0, isDirectory: () => false }),
+      },
+      loadSourceConfig: () => null,
+      callbacks: {
+        onPlanSubmitted: () => {},
+        onAuthRequest: () => {},
+        onQuestionRequested,
+      },
+    }
+  }
+
+  it('question-request flush failure rolls back the pending replacement and REJECTS (no handoff, no fake success)', async () => {
     patchPrivateFlush()
     failFlush = true
     const managed = seedSession('f-req-1', { isProcessing: true, withAgent: true, executingToolMessage: true })
     const questions = makeQuestionRequest('f-req-1').questions
 
-    await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
-      .handleQuestionRequested(managed, questions)
+    // The callback promise must REJECT on durable-persist failure — the tool
+    // handler converts this into an isError result instead of "Waiting".
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
+      .handleQuestionRequested(managed, questions)).rejects.toThrow(/NOT paused/)
 
     // Rolled back: the seeded pending question (already on disk) is restored,
     // and no NEW question became active
@@ -167,6 +194,64 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(getManaged('f-req-1').agent?.interruptedCount ?? 0).toBe(0)
     // No renderer notifications
     expect(events.filter(e => e.type === 'question_request' || e.type === 'complete')).toEqual([])
+  })
+
+  it('real handler entry: flush failure surfaces as a tool error (isError), not a waiting success', async () => {
+    patchPrivateFlush()
+    failFlush = true
+    const managed = seedSession('f-handler-1', { isProcessing: true, withAgent: true })
+    const request = makeQuestionRequest('f-handler-1')
+    const questions = request.questions
+
+    // Wire the REAL session-tools-core handler through the same callback
+    // shape production uses (agent callback → SessionManager handoff).
+    const { handleRequestUserInput } = await import('@polo-ai/session-tools-core')
+    const ctx = makeToolContext((qs: unknown[]) =>
+      (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
+        .handleQuestionRequested(managed, qs),
+    )
+
+    const result = await handleRequestUserInput(ctx, { questions })
+
+    expect(result.isError).toBe(true)
+    expect(String((result.content[0] as { text?: string })?.text)).toContain('NOT paused')
+    // No fake success state anywhere: no renderer event, no handoff
+    expect(events.filter(e => e.type === 'question_request' || e.type === 'complete')).toEqual([])
+    expect(getManaged('f-handler-1').isProcessing).toBe(true)
+  })
+
+  it('real handler entry: delayed callback blocks the tool result until the handoff completes', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-handler-2', { isProcessing: true, withAgent: true })
+    const request = makeQuestionRequest('f-handler-2')
+    const questions = request.questions
+
+    const { handleRequestUserInput } = await import('@polo-ai/session-tools-core')
+
+    let releaseCallback: (() => void) | null = null
+    const gate = new Promise<void>(resolve => { releaseCallback = resolve })
+    let handoffDone = false
+    const ctx = makeToolContext(async (qs: unknown[]) => {
+      await gate
+      await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
+        .handleQuestionRequested(managed, qs)
+      handoffDone = true
+    })
+
+    const handlerPromise = handleRequestUserInput(ctx, { questions })
+    let settled = false
+    void handlerPromise.then(() => { settled = true })
+    await new Promise(r => setTimeout(r, 50))
+    // The tool must still be blocked while the durable handoff is in flight
+    expect(settled).toBe(false)
+    expect(handoffDone).toBe(false)
+
+    releaseCallback!()
+    const result = await handlerPromise
+    expect(handoffDone).toBe(true)
+    expect(result.isError).toBeFalsy()
+    expect(String((result.content[0] as { text?: string })?.text)).toContain('Waiting for user input')
+    expect(sm.getPendingQuestion('f-handler-2')).not.toBeNull()
   })
 
   it('browser-ownership release failure does not skip the handoff completion', async () => {

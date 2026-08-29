@@ -29,7 +29,7 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
-import { questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession } from './lib/pending-questions'
+import { questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession, clearPendingQuestionForDeletedSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -567,6 +567,9 @@ export default function App() {
       clearStreamingState(sessionId)
       replaceLoadedSession(nextSession)
       syncSessionOptionsFromSession(nextSession)
+      // Opening/refreshing a session restores its pending question card when
+      // the map has no fresher entry (never downgrades event-driven state).
+      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession))
       void reconcilePermissionModeState(sessionId)
       return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
     } catch (err) {
@@ -1293,6 +1296,7 @@ export default function App() {
                 addSession(createdSession)
               }
               syncSessionOptionsFromSession(createdSession)
+              setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession))
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
@@ -1302,6 +1306,10 @@ export default function App() {
       }
 
       if (event.type === 'session_deleted') {
+        // Deletion is a terminal state: the pending question (if any) expires —
+        // clear unconditionally so no stale card survives in any window
+        // (repeated events are idempotent).
+        setPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId))
         removeSession(sessionId)
         return
       }

@@ -400,4 +400,9 @@ export interface SessionMetadata {
   hasPendingQuestion?: boolean;
   /** requestId of the pending question, when hasPendingQuestion is true. */
   pendingQuestionRequestId?: string;
+  /**
+   * Full pending agent question payload — kept in metadata so a cold-start
+   * getSessions can restore the renderer card without loading messages.
+   */
+  pendingQuestion?: QuestionRequest;
 }

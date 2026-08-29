@@ -98,10 +98,12 @@ export type AuthCallback = (request: AuthRequest) => void;
 /**
  * Question request callback signature.
  * Called when the agent requests structured user input (request_user_input).
+ * May return a Promise — the session layer's durable handoff is awaited by
+ * the tool handler so failures surface as tool errors.
  */
 export type QuestionRequestedCallback = (
   questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]
-) => void;
+) => void | Promise<void>;
 
 /**
  * Source change callback signature.

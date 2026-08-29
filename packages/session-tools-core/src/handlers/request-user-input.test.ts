@@ -265,6 +265,39 @@ describe('handleRequestUserInput', () => {
     expect(result.content[0]?.text).toContain('Waiting');
   });
 
+  it('awaits a delayed callback — the tool result settles only after the durable handoff', async () => {
+    let releaseCallback: (() => void) | null = null;
+    const gate = new Promise<void>(resolve => { releaseCallback = resolve; });
+    let callbackDone = false;
+    const ctx = makeCtx({
+      onQuestionRequested: () => gate.then(() => { callbackDone = true; }),
+    });
+
+    const handlerPromise = handleRequestUserInput(ctx, { questions: [makeQuestion()] });
+    let settled = false;
+    void handlerPromise.then(() => { settled = true; });
+    await new Promise(r => setTimeout(r, 30));
+    expect(settled).toBe(false);
+    expect(callbackDone).toBe(false);
+
+    releaseCallback!();
+    const result = await handlerPromise;
+    expect(callbackDone).toBe(true);
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toContain('Waiting');
+  });
+
+  it('converts a rejected callback into an error response (never a fake paused success)', async () => {
+    const ctx = makeCtx({
+      onQuestionRequested: () => Promise.reject(new Error('disk full')),
+    });
+
+    const result = await handleRequestUserInput(ctx, { questions: [makeQuestion()] });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('disk full');
+    expect(result.content[0]?.text).toContain('NOT paused');
+  });
+
   it('returns an error response when the callback is unavailable', async () => {
     const ctx = makeCtx({});
     const result = await handleRequestUserInput(ctx, { questions: [makeQuestion()] });

@@ -1713,7 +1713,8 @@ export class PiAgent extends BaseAgent {
         this.onAuthRequest?.(request as any);
       },
       onQuestionRequested: (questions) => {
-        this.onQuestionRequested?.(questions);
+        this.onDebug?.(`[PiAgent] onQuestionRequested received: ${questions.length} question(s)`);
+        return this.onQuestionRequested?.(questions);
       },
     });
 
@@ -2214,7 +2215,6 @@ export class PiAgent extends BaseAgent {
         queryFn: (request) => this.queryLlm(request),
       });
     }
-
     try {
       // Ensure subprocess is spawned and ready
       try {

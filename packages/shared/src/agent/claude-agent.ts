@@ -667,7 +667,7 @@ export class ClaudeAgent extends BaseAgent {
       },
       onQuestionRequested: (questions) => {
         this.onDebug?.(`[ClaudeAgent] onQuestionRequested received: ${questions.length} question(s)`);
-        this.onQuestionRequested?.(questions);
+        return this.onQuestionRequested?.(questions);
       },
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),

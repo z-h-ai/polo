@@ -4108,9 +4108,10 @@ export class SessionManager implements ISessionManager {
 
       // Wire up onQuestionRequested: persist the pending question, notify renderers,
       // then handoff so the agent turn stops while the user answers.
-      managed.agent.onQuestionRequested = (questions) => {
-        void this.handleQuestionRequested(managed, questions)
-      }
+      // The returned promise is AWAITED by the tool handler — the request_user_input
+      // tool only reports "waiting" success once the durable handoff completed;
+      // a rejection surfaces to the model as a tool error instead.
+      managed.agent.onQuestionRequested = (questions) => this.handleQuestionRequested(managed, questions)
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls
       managed.agent.onSpawnSession = async (request) => {
@@ -6690,11 +6691,15 @@ export class SessionManager implements ISessionManager {
    *    (a previously active requestId becomes stale by identity)
    * 3. Persist + flush — disk is authoritative BEFORE the agent is
    *    interrupted or renderers are notified; on failure the in-memory
-   *    replacement is rolled back so a later turn can retry the question
+   *    replacement is rolled back and this method REJECTS so the tool
+   *    returns an error (never a fake "paused" success)
    * 4. The tool activity is marked completed ("Waiting for user input")
    * 5. question_request event informs every renderer (input-area takeover)
    * 6. Handoff with AbortReason.QuestionRequested stops the turn and
    *    releases browser/session runtime ownership, then sends `complete`
+   *
+   * @throws when validation or the durable persist fails — the request_user_input
+   * tool converts this into an isError result so the model can retry.
    */
   private async handleQuestionRequested(
     managed: ManagedSession,
@@ -6704,8 +6709,7 @@ export class SessionManager implements ISessionManager {
     const { parseRequestUserInputArgs } = await import('@polo-ai/session-tools-core')
     const parsed = parseRequestUserInputArgs({ questions })
     if (!parsed.ok) {
-      sessionLog.warn(`Ignoring invalid question request for session ${managed.id}: ${parsed.error}`)
-      return
+      throw new Error(`Invalid question request: ${parsed.error}`)
     }
 
     await this.ensureMessagesLoaded(managed)
@@ -6722,8 +6726,8 @@ export class SessionManager implements ISessionManager {
     managed.pendingQuestion = request
 
     // 3. Persist + flush before any visible side effect. Failure rolls the
-    //    replacement back: the running turn continues (no handoff happened)
-    //    and the previous authoritative state is restored on disk.
+    //    replacement back and rejects: the running turn continues (no handoff
+    //    happened) and the previous authoritative state is restored on disk.
     try {
       this.persistSession(managed)
       await this.flushSession(managed.id)
@@ -6736,7 +6740,9 @@ export class SessionManager implements ISessionManager {
         sessionLog.error(`Failed to persist rolled-back question state for session ${managed.id}:`, rollbackError)
       }
       sessionLog.error(`Failed to persist question request for session ${managed.id}; handoff skipped:`, error)
-      return
+      throw new Error(
+        `Failed to persist the question request (execution NOT paused): ${error instanceof Error ? error.message : String(error)}`
+      )
     }
 
     // 4. Mark the request_user_input tool activity completed so it doesn't
@@ -6779,7 +6785,8 @@ export class SessionManager implements ISessionManager {
       this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
     }
 
-    // 7. Persist again so the completed tool activity is durable (best effort)
+    // 7. Persist again so the completed tool activity is durable (best effort —
+    //    the pending question itself is already authoritative from step 3)
     try {
       this.persistSession(managed)
       await this.flushSession(managed.id)

@@ -35,8 +35,9 @@ export interface SessionScopedToolCallbacks {
   /**
    * Called when the agent requests structured user input via
    * request_user_input. The question UI should be shown and the turn paused.
+   * May return a Promise — the tool handler awaits the durable handoff.
    */
-  onQuestionRequested?: (questions: RequestUserInputQuestionArgs[]) => void;
+  onQuestionRequested?: (questions: RequestUserInputQuestionArgs[]) => void | Promise<void>;
 
   /**
    * Agent-native LLM query callback for call_llm tool (OAuth path).

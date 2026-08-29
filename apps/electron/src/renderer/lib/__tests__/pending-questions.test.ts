@@ -9,9 +9,11 @@
 
 import { describe, expect, it } from 'bun:test'
 import {
+  clearPendingQuestionForDeletedSession,
   questionResolutionRequestId,
   removePendingQuestionForSession,
   setPendingQuestionForSession,
+  syncPendingQuestionFromSession,
 } from '../pending-questions'
 import type { QuestionRequest, QuestionResolution } from '../../../shared/types'
 
@@ -89,5 +91,78 @@ describe('pendingQuestions map helpers', () => {
     const cancel: QuestionResolution = { action: 'cancel', requestId: 'q1' }
     expect(questionResolutionRequestId(answer)).toBe('q1')
     expect(questionResolutionRequestId(cancel)).toBe('q1')
+  })
+})
+
+describe('syncPendingQuestionFromSession (restart/open hydration)', () => {
+  it('fills a missing entry from the session payload (same requestId survives open)', () => {
+    let map = new Map<string, QuestionRequest>()
+    const payload = makeRequest('q-open')
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: payload })
+
+    expect(map.get('s-1')?.requestId).toBe('q-open')
+    // Re-syncing the same payload is a no-op
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q-open') })
+    expect(map.get('s-1')?.requestId).toBe('q-open')
+  })
+
+  it('hydrates a session without an existing entry (restart → open)', () => {
+    let map = new Map<string, QuestionRequest>()
+    // The map may already carry the entry from getSessions startup hydration —
+    // opening the same session must not duplicate or change it
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q-startup'))
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q-startup') })
+    expect(map.get('s-1')?.requestId).toBe('q-startup')
+
+    // A DIFFERENT session opened later fills only its own entry
+    map = syncPendingQuestionFromSession(map, { id: 's-2', pendingQuestion: makeRequest('q-other') })
+    expect(map.get('s-1')?.requestId).toBe('q-startup')
+    expect(map.get('s-2')?.requestId).toBe('q-other')
+  })
+
+  it('never downgrades a fresher event-driven entry with a stale fetch', () => {
+    let map = new Map<string, QuestionRequest>()
+    // q2 arrived via question_request while a fetch for the session (q1 era) is in flight
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q2'))
+
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') })
+    expect(map.get('s-1')?.requestId).toBe('q2')
+  })
+
+  it('sessions without a pending payload leave the map untouched', () => {
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
+    map = syncPendingQuestionFromSession(map, { id: 's-2', pendingQuestion: undefined })
+    expect(map.size).toBe(1)
+    expect(map.get('s-1')?.requestId).toBe('q1')
+  })
+})
+
+describe('clearPendingQuestionForDeletedSession (session_deleted)', () => {
+  it('deleting the session with the active question clears its card unconditionally', () => {
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
+    map = clearPendingQuestionForDeletedSession(map, 's-1')
+    expect(map.has('s-1')).toBe(false)
+  })
+
+  it('deleting a non-current session leaves other cards intact', () => {
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
+    map = setPendingQuestionForSession(map, 's-2', makeRequest('q2'))
+
+    map = clearPendingQuestionForDeletedSession(map, 's-2')
+    expect(map.has('s-2')).toBe(false)
+    expect(map.get('s-1')?.requestId).toBe('q1')
+  })
+
+  it('repeated deletion events (multi-window fan-out) are idempotent', () => {
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
+
+    map = clearPendingQuestionForDeletedSession(map, 's-1')
+    const same = clearPendingQuestionForDeletedSession(map, 's-1')
+    expect(map.has('s-1')).toBe(false)
+    expect(same).toBe(map)
   })
 })

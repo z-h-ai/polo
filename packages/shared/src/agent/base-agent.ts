@@ -253,7 +253,7 @@ export abstract class BaseAgent implements AgentBackend {
   onPermissionRequest: PermissionCallback | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;
-  onQuestionRequested: ((questions: RequestUserInputQuestionArgs[]) => void) | null = null;
+  onQuestionRequested: ((questions: RequestUserInputQuestionArgs[]) => void | Promise<void>) | null = null;
   /**
    * Per-turn capability flag: whether the request_user_input tool is visible.
    * Set by the SessionManager before each turn (desktop interactive sessions
@@ -457,7 +457,9 @@ export abstract class BaseAgent implements AgentBackend {
       const parsed = parseRequestUserInputArgs(args);
       if (parsed.ok) {
         this.debug(`request_user_input completed: ${parsed.data.questions.length} question(s)`);
-        this.onQuestionRequested(parsed.data.questions);
+        // Legacy event-stream completion path (fire-and-forget); the primary
+        // awaited path is the SessionToolContext callback chain.
+        void this.onQuestionRequested(parsed.data.questions);
       } else {
         this.debug(`request_user_input rejected invalid args: ${parsed.error}`);
       }

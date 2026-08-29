@@ -4,9 +4,11 @@
  * Pauses agent execution by surfacing a structured question request to the
  * desktop UI via the SessionToolCallbacks.onQuestionRequested hook.
  *
- * The SessionManager owns requestId generation, persistence, and the handoff
- * that stops the current turn; this handler only validates the protocol and
- * forwards the normalized questions.
+ * The callback is AWAITED end-to-end: the SessionManager's durable
+ * persist+flush+handoff must complete before this handler reports success.
+ * Any failure (validation, persistence, handoff) rejects/throws and is
+ * converted into a tool error — the model never sees a "paused" success
+ * while the pending question is not yet authoritative on disk.
  */
 
 import type { SessionToolContext, ToolResult } from '../index.ts';
@@ -26,7 +28,18 @@ export async function handleRequestUserInput(ctx: SessionToolContext, args: unkn
   }
 
   const questions: RequestUserInputQuestionArgs[] = parsed.data.questions;
-  ctx.callbacks.onQuestionRequested(questions);
+
+  try {
+    // Await the durable handoff — a slow or failed callback blocks the tool
+    // result; a rejection becomes an error response (never a fake "paused").
+    await ctx.callbacks.onQuestionRequested(questions);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse(
+      `request_user_input failed: ${message}. The question was NOT shown to the user and execution was NOT paused. `
+      + 'You may retry the tool or continue with a plain-text question.'
+    );
+  }
 
   return successResponse(
     'Waiting for user input. The question has been shown to the user and execution is paused. '

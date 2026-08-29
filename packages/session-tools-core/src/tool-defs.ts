@@ -589,9 +589,9 @@ export interface SessionToolFilterOptions {
   /** Include the experimental send_developer_feedback tool. */
   includeDeveloperFeedback?: boolean;
   /**
-   * Register the request_user_input tool. Only desktop interactive turns
-   * (messaging, automation, headless/CLI, internal, and hidden/mini turns)
-   * should enable it; every other invocation source fails closed. Defaults
+   * Only desktop interactive main-session turns enable request_user_input.
+   * Messaging, automation, headless/CLI, internal, and hidden/mini turns
+   * MUST NOT enable it — every non-desktop source fails closed. Defaults
    * to false so backends must opt in explicitly.
    */
   allowRequestUserInput?: boolean;

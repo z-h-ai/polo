@@ -79,7 +79,7 @@ export interface ClaudeContextOptions {
   workspaceId: string;
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
-  onQuestionRequested?: (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]) => void;
+  onQuestionRequested?: (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]) => void | Promise<void>;
   sessionStorage?: SessionStorage;
   workingDirectory?: string;
 }
