@@ -299,4 +299,61 @@ describe('reconcilePendingQuestionsFromSnapshot (deferred getSessions races)', (
     expect(result.get('s-add')?.requestId).toBe('q-added')
     expect(result.has('s-clear')).toBe(false)
   })
+
+  it('drifted full scope: unrelated bump + omitted unchanged session still clears its card', () => {
+    // The round-7 defect: an UNRELATED session bumping the epoch mid-fetch
+    // made the drifted path keep prev wholesale — an unchanged session that
+    // the authoritative snapshot omitted was never cleared.
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
+    map = setPendingQuestionForSession(map, 's-other', makeRequest('q-other-old'))
+    const tokensBefore = new Map<string, number>()
+    for (const id of map.keys()) tokensBefore.set(id, tracker.capture(id))
+    const epochAtFetch = tracker.epoch
+
+    // Mid-fetch: an UNRELATED session receives a question (bump epoch)
+    tracker.bump('s-other')
+    map = setPendingQuestionForSession(map, 's-other', makeRequest('q-other-new'))
+
+    // The authoritative snapshot OMITS s-omitted (no longer pending server-side)
+    // and carries s-other's new state.
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-other', 'q-other-new')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+      'full',
+    )
+
+    // Unchanged + omitted → cleared by the full-scope snapshot
+    expect(result.has('s-omitted')).toBe(false)
+    // Changed mid-fetch → event-driven state kept
+    expect(result.get('s-other')?.requestId).toBe('q-other-new')
+  })
+
+  it('drifted partial scope: omitted sessions are preserved (removeMissing=false lists)', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-omitted', makeRequest('q-old'))
+    const tokensBefore = new Map<string, number>()
+    tokensBefore.set('s-omitted', tracker.capture('s-omitted'))
+    const epochAtFetch = tracker.epoch
+
+    // Unrelated mid-fetch bump drifts the epoch
+    tracker.bump('s-other')
+
+    // Partial snapshot omits s-omitted — it must be preserved
+    const result = reconcilePendingQuestionsFromSnapshot(
+      map,
+      [snapshotSession('s-other', 'q-x')],
+      tokensBefore,
+      tracker,
+      epochAtFetch,
+      'partial',
+    )
+
+    expect(result.get('s-omitted')?.requestId).toBe('q-old')
+  })
 })

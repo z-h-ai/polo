@@ -729,18 +729,20 @@ export default function App() {
       // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
       for (const session of sessions) {
         syncSessionOptionsFromSession(session)
-        // Reconnect metadata refresh carries the authoritative pending state —
-        // converge any drift missed while the transport was down (events are
-        // not replayed after stale reconnects). Stale-fetch guard: sessions
-        // that changed mid-fetch keep their event-driven state.
-        if (pendingQuestionGenerationsRef.current.isUnchangedSince(session.id, tokensBeforeFetch) || pendingQuestionGenerationsRef.current.isEpochCurrent(epochAtFetch)) {
-          applyPendingQuestionSnapshotIfCurrent(
-            session.id,
-            tokensBeforeFetch.get(session.id) ?? pendingQuestionGenerationsRef.current.capture(session.id),
-            session.pendingQuestion,
-          )
-        }
       }
+      // Reconnect metadata refresh carries the authoritative pending state —
+      // converge any drift missed while the transport was down (events are
+      // not replayed after stale reconnects). Shared reconciler with the
+      // full-load path; removeMissing=false lists may legitimately omit
+      // sessions, so absent entries never clear cards in that mode.
+      setPendingQuestions(prev => reconcilePendingQuestionsFromSnapshot(
+        prev,
+        sessions,
+        tokensBeforeFetch,
+        pendingQuestionGenerationsRef.current,
+        epochAtFetch,
+        removeMissing ? 'full' : 'partial',
+      ))
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
       return nextMetaMap

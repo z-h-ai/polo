@@ -183,20 +183,21 @@ export function clearPendingQuestionForDeletedSession(
 }
 
 /**
- * Reconcile the pendingQuestions map against a full-list snapshot
+ * Reconcile the pendingQuestions map against a list snapshot
  * (App-level logic extracted from loadSessionsFromServer /
  * refreshSessionListMetadataFromServer — see those for the wiring).
  *
- * Semantics:
- * - Epoch unchanged since capture → NO event raced the fetch: the snapshot
- *   is wholesale-authoritative (add / replace / clear per session).
- * - Epoch changed (some event raced):
- *   - sessions provably unchanged since capture (tracked before fetch AND
- *     token still current) → converge to the snapshot;
- *   - all other sessions (changed mid-fetch, or first seen mid-fetch) → keep
- *     the event-driven local state for whatever it holds (a card, or its
- *     absence after resolve/delete) — a stale snapshot must never resurrect
- *     or downgrade it.
+ * `scope`:
+ * - `'full'` — the snapshot is the COMPLETE authoritative set
+ *   (loadSessionsFromServer; metadata refresh with removeMissing=true).
+ *   Processes the UNION of snapshot IDs and previously-tracked IDs: sessions
+ *   provably unchanged since capture are converged to the snapshot — including
+ *   a snapshot ABSENCE, which clears the card (deletion / resolution that the
+ *   local map missed). Changed or capture-unknown sessions keep their
+ *   event-driven state.
+ * - `'partial'` — the snapshot may legitimately omit sessions
+ *   (metadata refresh with removeMissing=false). Only snapshot-present
+ *   sessions are converged; absent sessions are never cleared.
  *
  * `tokensBeforeFetch` must be captured BEFORE the fetch for every session in
  * `previous` (see App's loadSessionsFromServer).
@@ -207,21 +208,45 @@ export function reconcilePendingQuestionsFromSnapshot(
   tokensBeforeFetch: Map<string, number>,
   tracker: PendingQuestionGenerationTracker,
   epochAtFetch: number,
+  scope: 'full' | 'partial' = 'full',
 ): Map<string, QuestionRequest> {
   if (tracker.isEpochCurrent(epochAtFetch)) {
+    // No pending event raced the fetch — the snapshot is wholesale-authoritative.
     let next = new Map<string, QuestionRequest>()
     for (const session of sessions) {
       next = applyAuthoritativePendingQuestion(next, session.id, session.pendingQuestion)
     }
+    if (scope === 'full') {
+      // Snapshot absence clears cards the authoritative list no longer has.
+      for (const id of previous.keys()) {
+        if (!sessions.some(s => s.id === id)) {
+          next = applyAuthoritativePendingQuestion(next, id, undefined)
+        }
+      }
+    }
     return next
   }
 
+  // Epoch drifted: some event raced the fetch. Converge only provably-
+  // unchanged sessions; keep event-driven state for everything else.
   let next = new Map(previous)
+  const converged = new Set<string>()
   for (const session of sessions) {
     if (!tracker.isUnchangedSince(session.id, tokensBeforeFetch)) {
       continue
     }
     next = applyAuthoritativePendingQuestion(next, session.id, session.pendingQuestion)
+    converged.add(session.id)
+  }
+  if (scope === 'full') {
+    // Snapshot absence is authoritative for provably-unchanged sessions that
+    // the complete list no longer contains — clear their cards too.
+    for (const id of previous.keys()) {
+      if (converged.has(id)) continue
+      if (!sessions.some(s => s.id === id) && tracker.isUnchangedSince(id, tokensBeforeFetch)) {
+        next = applyAuthoritativePendingQuestion(next, id, undefined)
+      }
+    }
   }
   return next
 }

@@ -24,7 +24,7 @@ mock.module('@polo-ai/server-core/domain', () => ({
 }))
 
 const { SessionManager, createManagedSession } = await import('./SessionManager.ts')
-const { getSessionFilePath, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
+const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 
@@ -589,4 +589,122 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
     throw new Error('waitForCondition timed out')
   }
+
+  // Round 7, issue #2: deleteSession must disarm the retry timer BEFORE the
+  // abort wait / share-revoke window — a live timer during that window can
+  // start a ghost turn (identity guard still holds until removal).
+  it('armed retry + delayed shared revoke + delete: no ghost turns during the deletion window', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-del-window')
+    const managed = seedSession('f-del-window', { pendingQuestion: request })
+    // Shared session → deleteSession awaits the (stubbed, slow) revoke
+    ;(managed as unknown as { sharedId?: string; sharedUrl?: string }).sharedId = 'share-123'
+    ;(managed as unknown as { sharedUrl?: string }).sharedUrl = 'https://viewer.example.com/s/share-123'
+
+    let agentInitCalls = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<never> }).getOrCreateAgent = async () => {
+      agentInitCalls++
+      throw new Error(`agent init failed #${agentInitCalls}`)
+    }
+
+    await sm.respondToQuestion('f-del-window', makeAnswerResolution(request))
+    expect(agentInitCalls).toBe(1)
+
+    // Slow external I/O: the share revoke stalls for 400ms inside deleteSession
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async () => {
+      await new Promise(r => setTimeout(r, 400))
+      throw new Error('revoke stalled (injected)')
+    }) as unknown as typeof fetch
+
+    try {
+      await sm.deleteSession('f-del-window')
+
+      // Advance past the (disarmed) retry schedule — the timer must NOT have
+      // fired during the revoke window: no extra agent init, no error events.
+      await new Promise(r => setTimeout(r, 1500))
+      expect(agentInitCalls).toBe(1)
+      expect(events.filter(e => e.type === 'error').length).toBe(1)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+
+  // Round 7, issue #3: a failed durable clear AFTER a fully executed turn is
+  // NOT a resume failure — no fake "could not resume", no turn re-execution;
+  // the terminal marker keeps a restart from re-running the answer.
+  it('success → clear flush failure: turn executes once, no fake resume error, terminal marker persists, restart does not re-run', async () => {
+    // Fail exactly the SECOND flush call (the first is the answer commit,
+    // the second is the post-success durable clear).
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-clear-flush')
+    seedSession('f-clear-flush', { pendingQuestion: request })
+    let flushFailAtCall = 2
+
+    let flushCalls = 0
+    const real = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      flushCalls++
+      if (flushCalls === flushFailAtCall) {
+        return Promise.reject(new Error('clear flush failed (injected)'))
+      }
+      return real.call(sm, id)
+    }
+
+    let agentInitCalls = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      agentInitCalls++
+      return makeFakeAgent()
+    }
+
+    const result = await sm.respondToQuestion('f-clear-flush', makeAnswerResolution(request))
+    expect(result).toEqual({ status: 'accepted' })
+
+    // NO fake resume-failure error event (the turn fully executed)
+    expect(events.filter(e => e.type === 'error').length).toBe(0)
+    // The agent turn ran exactly once
+    expect(agentInitCalls).toBe(1)
+
+    // The terminal marker (completed) was persisted by the internal retry
+    await waitForCondition(() => {
+      const diskState = loadSession(tmpRoot, 'f-clear-flush')
+      return diskState?.pendingAgentResume?.completed === true
+    })
+    // In-memory: the record remains as a TERMINAL marker (never re-executed)
+    const memoryState = (getManaged('f-clear-flush') as unknown as { pendingAgentResume?: { completed?: boolean } }).pendingAgentResume
+    expect(memoryState?.completed).toBe(true)
+
+    // No retry scheduled — the turn never re-executes
+    const callsAfterClear = agentInitCalls
+    await new Promise(r => setTimeout(r, 1500))
+    expect(agentInitCalls).toBe(callsAfterClear)
+
+    // Restart simulation: a fresh SessionManager hydrates the TERMINAL marker
+    // and clears it WITHOUT re-executing the answer turn.
+    flushFailAtCall = 0
+    const sm2 = new SessionManager()
+    let sm2AgentInits = 0
+    ;(sm2 as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      sm2AgentInits++
+      return makeFakeAgent()
+    }
+    const stored = loadSession(tmpRoot, 'f-clear-flush')!
+    const managed2 = createManagedSession(
+      { id: stored.id, name: stored.name, createdAt: stored.createdAt },
+      { id: 'ws_test', name: 'T', rootPath: tmpRoot, createdAt: Date.now() } as never,
+    )
+    ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set('f-clear-flush', managed2)
+    ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage =
+      async () => {}
+    await (sm2 as unknown as { ensureMessagesLoaded: (m: unknown) => Promise<void> }).ensureMessagesLoaded(managed2)
+    await new Promise(r => setTimeout(r, 100))
+    await waitForCondition(() =>
+      (managed2 as unknown as { pendingAgentResume?: unknown }).pendingAgentResume === undefined
+    )
+
+    // The answer turn was NOT re-executed after restart
+    expect(sm2AgentInits).toBe(0)
+    // And the terminal record was durably cleared
+    expect((managed2 as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
+  })
 })

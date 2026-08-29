@@ -2515,12 +2515,22 @@ export class SessionManager implements ISessionManager {
       }
       // Re-arm a recoverable answer→resume that never completed (crash/failure).
       // The retry reuses the persisted answer message — no duplicate user turn.
+      // A TERMINAL completed record only clears durably — it must never
+      // re-execute an already-completed answer turn.
       if (storedSession.pendingAgentResume) {
-        managed.pendingAgentResume = storedSession.pendingAgentResume
-        sessionLog.info(`Restoring pendingAgentResume for session ${managed.id} (message ${storedSession.pendingAgentResume.messageId}, attempts ${storedSession.pendingAgentResume.attempts})`)
-        setImmediate(() => {
-          void this.resumePendingAgentTurn(managed)
-        })
+        if (storedSession.pendingAgentResume.completed) {
+          managed.pendingAgentResume = storedSession.pendingAgentResume
+          sessionLog.info(`Restoring TERMINAL pendingAgentResume for session ${managed.id} — clearing without resuming`)
+          setImmediate(() => {
+            void this.resumePendingAgentTurn(managed)
+          })
+        } else {
+          managed.pendingAgentResume = storedSession.pendingAgentResume
+          sessionLog.info(`Restoring pendingAgentResume for session ${managed.id} (message ${storedSession.pendingAgentResume.messageId}, attempts ${storedSession.pendingAgentResume.attempts})`)
+          setImmediate(() => {
+            void this.resumePendingAgentTurn(managed)
+          })
+        }
       } else {
         managed.pendingAgentResume = undefined
       }
@@ -5495,6 +5505,17 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    // Immediately disarm any answer→resume retry — synchronously, BEFORE the
+    // abort wait / share-revoke window. Until removal the identity guard
+    // (`sessions.get(id) === managed`) still holds, so a live timer could
+    // start a ghost turn during deletion's external I/O. The disk copy is
+    // removed below, so no flush is needed.
+    if (managed.resumeRetryTimer) {
+      clearTimeout(managed.resumeRetryTimer)
+      managed.resumeRetryTimer = undefined
+    }
+    managed.pendingAgentResume = undefined
+
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
@@ -5541,10 +5562,8 @@ export class SessionManager implements ISessionManager {
     this.clearPendingPermissionRequestsForSession(sessionId)
     // Pending question dies with the session (memory only — disk is about to be removed)
     managed.pendingQuestion = undefined
-    // Cancel any armed answer→resume retry + its timer BEFORE removal — the
-    // retry closure must never fire events or restart turns for a deleted
-    // session (the disk copy is about to be removed anyway).
-    await this.clearPendingAgentResume(managed, 'session deleted', { flush: false })
+    // (answer→resume retry + timer were disarmed synchronously at the top of
+    // this method — before the abort wait and share-revoke window.)
 
     // Cancel any pending persistence write (session is being deleted, no need to save)
     this.sessionStorage.persistenceQueue.cancel(sessionId)
@@ -7182,6 +7201,13 @@ export class SessionManager implements ISessionManager {
     const resume = managed.pendingAgentResume
     if (!resume) return
 
+    // TERMINAL record: the answer turn already executed in a previous
+    // process/attempt and only the durable clear remains — never re-run it.
+    if (resume.completed) {
+      await this.clearPendingAgentResume(managed, 'terminal marker (answer turn already executed)')
+      return
+    }
+
     // The closure may outlive the session (deleted mid-retry): drop silently —
     // no events, no reschedule for a session that no longer exists.
     if (this.sessions.get(managed.id) !== managed) {
@@ -7209,13 +7235,14 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    // ---- Boundary 1: Agent turn execution ----
     try {
       await this.sendMessage(managed.id, answerMessage.content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
-      // Terminal success — await the flush so a crash cannot re-arm the
-      // finished recovery from disk.
-      await this.clearPendingAgentResume(managed, 'resume succeeded')
-      sessionLog.info(`Agent resumed after answer for session ${managed.id} (attempt ${resume.attempts})`)
     } catch (error) {
+      // Re-validate after the await: the session may have been deleted while
+      // the turn ran (identity or resume identity changed) — drop silently.
+      if (this.sessions.get(managed.id) !== managed) return
+      if (managed.pendingAgentResume?.messageId !== resume.messageId) return
       sessionLog.error(
         `Failed to resume agent turn for session ${managed.id} (attempt ${resume.attempts}, answer message preserved):`,
         error,
@@ -7226,9 +7253,43 @@ export class SessionManager implements ISessionManager {
         sessionId: managed.id,
         error: 'Your answer was saved, but the assistant could not resume automatically. Retrying…',
       }, managed.workspace.id)
-
       this.scheduleResumeRetry(managed, Math.min(1000 * resume.attempts, 10000))
+      return
     }
+
+    // ---- Boundary 2: durable clear AFTER a fully executed turn ----
+    // The answer turn already ran to completion (sendMessage resolved). A
+    // flush failure here is NOT a resume failure: never emit a fake "could
+    // not resume", never re-execute the turn. Only the durable clear is
+    // retried, with a terminal marker guarding restart re-execution.
+    if (this.sessions.get(managed.id) !== managed) return
+    try {
+      await this.clearPendingAgentResume(managed, 'resume succeeded')
+    } catch (clearError) {
+      sessionLog.error(
+        `Agent turn completed but the durable resume clear failed for session ${managed.id} — marking terminal and retrying persistence:`,
+        clearError,
+      )
+      // In-memory state is already clean (timer cancelled inside
+      // clearPendingAgentResume). Mark the persisted recovery TERMINAL so a
+      // restart cannot re-execute the completed answer turn, then retry the
+      // persistence a few times.
+      managed.pendingAgentResume = { ...resume, completed: true }
+      for (let persistRetry = 0; persistRetry < 3; persistRetry++) {
+        try {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          sessionLog.info(`Terminal resume marker persisted for session ${managed.id} (retry ${persistRetry + 1})`)
+          return
+        } catch {
+          await new Promise(resolve => setTimeout(resolve, 200))
+        }
+      }
+      sessionLog.error(
+        `Terminal resume marker could not be persisted for session ${managed.id}; in-memory guard remains active for this process`,
+      )
+    }
+    sessionLog.info(`Agent resumed after answer for session ${managed.id} (attempt ${resume.attempts})`)
   }
 
   /**

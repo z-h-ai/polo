@@ -18,10 +18,14 @@ import type { QuestionRequest } from '../protocol/dto.ts';
  * Recoverable "answer committed, waiting for agent resume" state.
  * `messageId` is the persisted answer message that must become the next turn
  * (resume reuses it via existingMessageId — never a duplicate user message).
+ * `completed: true` marks a TERMINAL record: the agent turn already executed
+ * but its durable clear could not be persisted — a restart must clear this
+ * record WITHOUT re-executing the answer turn.
  */
 export interface PendingAgentResume {
   messageId: string;
   attempts: number;
+  completed?: boolean;
 }
 
 /**
