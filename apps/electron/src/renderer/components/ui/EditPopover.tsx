@@ -762,7 +762,7 @@ export function EditPopover({
   }
 
   // Use App context for session management (same code path as main chat)
-  const { onCreateSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToQuestion } = useAppShellContext()
+  const { onCreateSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToQuestion, onGetEditPopoverPendingQuestion } = useAppShellContext()
 
   // Session ID for inline execution (created on first message)
   const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
@@ -800,11 +800,6 @@ export function EditPopover({
   // Use existing escape interrupt context for double-ESC flow
   // This shows the "Press Esc again to interrupt" overlay in the input field
   const { handleEscapePress } = useEscapeInterrupt()
-
-  // Reset inline session when popover closes
-  const resetInlineSession = useCallback(() => {
-    setInlineSessionId(null)
-  }, [])
 
   // Stop/cancel generation for the inline session
   const handleStopGeneration = useCallback(() => {
@@ -948,13 +943,34 @@ export function EditPopover({
     }
   }, [isResizing])
 
-  // Reset state when popover opens
+  // Reset state when popover opens.
+  // Reachability contract (round-10 adjudication): the inline session is
+  // hidden — it never appears in the session list, so clearing the local id
+  // on reopen would orphan a persisted pendingQuestion forever. Instead of a
+  // blind reset, ask the server for the popover session that still owns an
+  // active pending question (server-verified 'edit-popover' origin) and
+  // re-adopt it. The association ends exactly when the lifecycle ends —
+  // answer, skip, replacement, stop/archive/delete — never on time.
   useEffect(() => {
-    if (open) {
-      setCurrentModel(model || 'haiku')
-      resetInlineSession()
+    if (!open) return
+    setCurrentModel(model || 'haiku')
+    setInlineSessionId(null)
+    let cancelled = false
+    void onGetEditPopoverPendingQuestion()
+      .then(result => {
+        if (!cancelled && result) {
+          setInlineSessionId(result.sessionId)
+        }
+      })
+      .catch(error => {
+        // Adoption is best-effort: without a reachable pending question the
+        // popover falls back to creating a fresh session on the first send.
+        console.warn('[EditPopover] failed to restore pending question session:', error)
+      })
+    return () => {
+      cancelled = true
     }
-  }, [open, model, resetInlineSession])
+  }, [open, model, onGetEditPopoverPendingQuestion])
 
   // Handle sending message from ChatDisplay (inline mode)
   // Creates hidden session on first message, then uses App context for sending
@@ -970,6 +986,13 @@ export function EditPopover({
         permissionMode,
         workingDirectory,
         hidden: true, // Hidden sessions use same App code path but don't appear in list
+        // Round-10 adjudication (request_id 83c0c3ce-r10-d1): the server
+        // records this trusted experience origin at creation. It is the ONLY
+        // thing that unlocks request_user_input for this hidden+mini session
+        // (ordinary hidden/mini turns and every non-desktop entry fail
+        // closed) and it persists — resumed turns keep the capability without
+        // any per-turn marker.
+        origin: 'edit-popover',
       }
       const newSession = await onCreateSession(workspace.id, createOptions)
       sessionId = newSession.id
@@ -979,11 +1002,7 @@ export function EditPopover({
     // Send message via App context (includes optimistic user message update)
     // Pass badges to hide the <edit_request> XML metadata in the user message bubble
     if (sessionId) {
-      // Round-10 adjudication (request_id 83c0c3ce-r10-d1): the Edit Popover is
-      // the ONLY caller allowed to set `editPopoverTurn` — it unlocks
-      // request_user_input for this single hidden+mini session turn. The
-      // session creation options above are unchanged.
-      onSendMessage(sessionId, prompt, undefined, undefined, badges, { editPopoverTurn: true })
+      onSendMessage(sessionId, prompt, undefined, undefined, badges)
     }
   }, [context, displayLabel, inlineSessionId, workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, onCreateSession, onSendMessage])
 

@@ -192,7 +192,8 @@ export interface CreateSessionOptions {
     model?: string;
     llmConnection?: string;
     hidden?: boolean;
-    origin?: 'cli-run' | 'cli-exec';
+    origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
+    systemPromptPreset?: string;
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
     isFlagged?: boolean;
@@ -240,6 +241,7 @@ export async function createSessionWithStorage(
     llmConnection: options?.llmConnection,
     hidden: options?.hidden,
     origin: options?.origin,
+    systemPromptPreset: options?.systemPromptPreset,
     sessionStatus: options?.sessionStatus,
     labels: options?.labels,
     isFlagged: options?.isFlagged,

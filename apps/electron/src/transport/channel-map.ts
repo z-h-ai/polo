@@ -31,6 +31,7 @@ export const CHANNEL_MAP = {
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
   respondToQuestion: invoke(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION),
+  getEditPopoverPendingQuestion: invoke(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),
   exportSession: invoke(RPC_CHANNELS.sessions.EXPORT),
   importSession: invoke(RPC_CHANNELS.sessions.IMPORT),

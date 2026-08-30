@@ -400,25 +400,28 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => String(e.type).startsWith('question_'))).toEqual([])
   })
 
-  // Round 10, issue #1: the adjudicated Edit Popover exception (request_id
-  // 83c0c3ce-r10-d1) — a hidden+mini session gets request_user_input ONLY for
-  // the turn that carries the explicit `editPopoverTurn` marker from the
-  // renderer EditPopover; every other hidden/mini turn and every non-desktop
-  // source stays fail-closed.
-  describe('Edit Popover eligibility exception (round-10 adjudication)', () => {
+  // Round 10 + review round 1 fixes: the adjudicated Edit Popover exception
+  // (request_id 83c0c3ce-r10-d1) is bound to a SERVER-VERIFIABLE session
+  // origin, not a per-turn marker. Only a session created with origin
+  // 'edit-popover', hidden AND mini, on a desktop turn gets
+  // request_user_input; the generic send API cannot elevate any session.
+  describe('Edit Popover eligibility exception (server-verified origin)', () => {
     function compute(
       invocationSource: 'desktop' | 'messaging' | 'automation' | 'headless' | 'internal' | undefined,
       hidden: boolean | undefined,
       isMini: boolean | undefined,
-      editPopoverTurn: boolean | undefined,
+      origin: 'cli-run' | 'cli-exec' | 'edit-popover' | undefined,
     ): boolean {
-      return computeRequestUserInputEligibility(invocationSource, hidden, isMini, editPopoverTurn)
+      return computeRequestUserInputEligibility(invocationSource, hidden, isMini, origin)
     }
 
-    function seedHiddenMini(sessionId: string, request: ReturnType<typeof makeQuestionRequest>) {
+    function seedHiddenMini(sessionId: string, request: ReturnType<typeof makeQuestionRequest>, origin?: 'edit-popover') {
       const m = seedSession(sessionId, { pendingQuestion: request })
       ;(m as unknown as { hidden: boolean }).hidden = true
       ;(m as unknown as { systemPromptPreset: string }).systemPromptPreset = 'mini'
+      if (origin) {
+        ;(m as unknown as { origin?: string }).origin = origin
+      }
       return m
     }
 
@@ -434,57 +437,258 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       }
     }
 
-    it('eligibility matrix: exception honored only for desktop Edit Popover turns', () => {
+    it('eligibility matrix: only the trusted edit-popover origin unlocks hidden+mini, on desktop turns', () => {
       // Ordinary desktop, visible session → visible
       expect(compute('desktop', false, false, undefined)).toBe(true)
-      // Ordinary hidden/mini (no marker) → fail closed
+      // Ordinary hidden/mini sessions (no origin) → fail closed
       expect(compute('desktop', true, false, undefined)).toBe(false)
       expect(compute('desktop', true, true, undefined)).toBe(false)
       expect(compute('desktop', false, true, undefined)).toBe(false)
-      // Edit Popover exception: hidden+mini desktop turn WITH the marker → visible
-      expect(compute('desktop', true, true, true)).toBe(true)
-      expect(compute('desktop', true, false, true)).toBe(true)
-      // Non-desktop entries ignore the marker entirely → fail closed
-      expect(compute('messaging', true, false, true)).toBe(false)
-      expect(compute('automation', true, true, true)).toBe(false)
-      expect(compute('headless', true, true, true)).toBe(false)
-      expect(compute('internal', true, true, true)).toBe(false)
-      // Missing source defaults to internal → fail closed even with the marker
-      expect(compute(undefined, true, true, true)).toBe(false)
+      // The Edit Popover exception: trusted origin + hidden + mini + desktop
+      expect(compute('desktop', true, true, 'edit-popover')).toBe(true)
+      // Origin alone is NOT sufficient: hidden non-mini and visible mini
+      // popover sessions stay closed
+      expect(compute('desktop', true, false, 'edit-popover')).toBe(false)
+      expect(compute('desktop', false, true, 'edit-popover')).toBe(false)
+      // Other host experiences never unlock hidden/mini sessions
+      expect(compute('desktop', true, true, 'cli-run')).toBe(false)
+      expect(compute('desktop', true, true, 'cli-exec')).toBe(false)
+      // Non-desktop entries fail closed regardless of origin
+      expect(compute('messaging', true, true, 'edit-popover')).toBe(false)
+      expect(compute('automation', true, true, 'edit-popover')).toBe(false)
+      expect(compute('headless', true, true, 'edit-popover')).toBe(false)
+      expect(compute('internal', true, true, 'edit-popover')).toBe(false)
+      // Missing source defaults to internal → fail closed
+      expect(compute(undefined, true, true, 'edit-popover')).toBe(false)
     })
 
-    it('real entry: hidden Edit Popover turn with the marker exposes the tool; without it, fail closed', async () => {
+    it('real entry: only the popover-origin hidden+mini session exposes the tool; the generic send API cannot elevate any session', async () => {
       patchPrivateFlush()
       const request = makeQuestionRequest('f-ep-1')
       stubAgentCaptureFlag()
 
-      // Hidden+mini session WITHOUT the marker → tool invisible
+      // Hidden+mini session WITHOUT the trusted origin → tool invisible
       seedHiddenMini('f-ep-closed', request)
-      await sm.sendMessage('f-ep-closed', 'ordinary edit turn', [], [], { invocationSource: 'desktop' })
+      await sm.sendMessage('f-ep-closed', 'ordinary hidden turn', [], [], { invocationSource: 'desktop' })
       expect(flagCapture.last).toBe(false)
 
-      // Hidden+mini session WITH the Edit Popover marker → tool visible
-      seedHiddenMini('f-ep-open', request)
-      await sm.sendMessage('f-ep-open', 'edit popover turn', [], [], {
-        invocationSource: 'desktop',
-        editPopoverTurn: true,
-      })
+      // A forged per-turn marker in the options bag must be ignored: the
+      // SendMessageOptions contract no longer carries any grant, and an
+      // unknown property cannot elevate eligibility.
+      const forgedOptions = { invocationSource: 'desktop' } as Record<string, unknown>
+      forgedOptions.editPopoverTurn = true
+      await sm.sendMessage('f-ep-closed', 'forged marker turn', [], [], forgedOptions as never)
+      expect(flagCapture.last).toBe(false)
+
+      // The REAL Edit Popover session (origin recorded at creation) → visible
+      seedHiddenMini('f-ep-open', request, 'edit-popover')
+      await sm.sendMessage('f-ep-open', 'edit popover turn', [], [], { invocationSource: 'desktop' })
       expect(flagCapture.last).toBe(true)
     })
 
-    it('real entry: a non-desktop source with the marker stays fail closed', async () => {
+    it('real entry: hidden non-mini and visible mini popover sessions stay fail closed', async () => {
       patchPrivateFlush()
-      const request = makeQuestionRequest('f-ep-msg')
       stubAgentCaptureFlag()
-      seedHiddenMini('f-ep-msg', request)
 
-      // Messaging gateway code never sets the marker; even if present in the
-      // options bag, a non-desktop invocation source must fail closed.
-      await sm.sendMessage('f-ep-msg', 'messaging turn', [], [], {
-        invocationSource: 'messaging',
-        editPopoverTurn: true,
-      })
+      // Hidden but NOT mini, with the trusted origin → closed
+      const hiddenNotMini = seedSession('f-ep-hnm', { pendingQuestion: makeQuestionRequest('f-ep-hnm') })
+      ;(hiddenNotMini as unknown as { hidden: boolean }).hidden = true
+      ;(hiddenNotMini as unknown as { origin?: string }).origin = 'edit-popover'
+      await sm.sendMessage('f-ep-hnm', 'hidden non-mini turn', [], [], { invocationSource: 'desktop' })
       expect(flagCapture.last).toBe(false)
+
+      // Mini but visible, with the trusted origin → closed
+      const visibleMini = seedSession('f-ep-vm', { pendingQuestion: makeQuestionRequest('f-ep-vm') })
+      ;(visibleMini as unknown as { systemPromptPreset: string }).systemPromptPreset = 'mini'
+      ;(visibleMini as unknown as { origin?: string }).origin = 'edit-popover'
+      await sm.sendMessage('f-ep-vm', 'visible mini turn', [], [], { invocationSource: 'desktop' })
+      expect(flagCapture.last).toBe(false)
+    })
+
+    it('real entry: a non-desktop source on a popover session stays fail closed', async () => {
+      patchPrivateFlush()
+      stubAgentCaptureFlag()
+      seedHiddenMini('f-ep-msg', makeQuestionRequest('f-ep-msg'), 'edit-popover')
+
+      // The messaging gateway can never turn a session into the desktop
+      // popover experience — non-desktop sources fail closed even with the
+      // trusted origin present.
+      await sm.sendMessage('f-ep-msg', 'messaging turn', [], [], { invocationSource: 'messaging' })
+      expect(flagCapture.last).toBe(false)
+    })
+
+    // Review round 1, issue #2: the answer→resume path must preserve the
+    // trusted entry capability — the Edit Popover's hidden+mini session keeps
+    // request_user_input on the resumed turn (and its retries), instead of
+    // being re-inferred as an ordinary desktop turn.
+    it('answering a popover question resumes with the capability intact so the agent can ask again', async () => {
+      patchPrivateFlush()
+      const request = makeQuestionRequest('f-ep-resume')
+      const popoverRequest: typeof request = {
+        ...request,
+        invocationSource: 'desktop',
+      }
+      seedHiddenMini('f-ep-resume', popoverRequest, 'edit-popover')
+
+      let resumedOptions: { invocationSource?: string } | undefined
+      let flagAfterResume: boolean | undefined
+      ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async (...args: unknown[]) => {
+        resumedOptions = args[4] as { invocationSource?: string }
+        // Reproduce the REAL sendMessage eligibility computation against the
+        // managed session to prove the resumed turn stays eligible.
+        const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-ep-resume') as unknown as {
+          hidden: boolean
+          systemPromptPreset: string
+          origin?: 'edit-popover'
+        }
+        flagAfterResume = computeRequestUserInputEligibility(
+          resumedOptions?.invocationSource as 'desktop' | undefined,
+          managed.hidden,
+          managed.systemPromptPreset === 'mini',
+          managed.origin,
+        )
+      }
+
+      const result = await sm.respondToQuestion('f-ep-resume', makeAnswerResolution(popoverRequest))
+      expect(result).toEqual({ status: 'accepted' })
+
+      // The resume carried the trusted entry source, not a re-inferred value
+      expect(resumedOptions?.invocationSource).toBe('desktop')
+      // …and the resumed turn kept the tool visible for the popover session
+      expect(flagAfterResume).toBe(true)
+    })
+
+    it('pendingAgentResume persists the trusted entry source and restart recovery reuses it', async () => {
+      patchPrivateFlush()
+      const request = makeQuestionRequest('f-ep-restart')
+      seedHiddenMini('f-ep-restart', { ...request, invocationSource: 'desktop' }, 'edit-popover')
+
+      // The FIRST resume attempt fails pre-chat — the armed recovery state
+      // (with the trusted entry source) is persisted for the retry/restart.
+      let sendCalls = 0
+      ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {
+        sendCalls++
+        throw new Error('backend init failed (injected)')
+      }
+      await sm.respondToQuestion('f-ep-restart', makeAnswerResolution(request))
+      const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-ep-restart'), 'utf-8').split('\n')[0])
+      expect(header.pendingAgentResume?.invocationSource).toBe('desktop')
+      expect(header.pendingAgentResume?.completed).toBeUndefined()
+      void sendCalls
+
+      // Restart: a fresh SessionManager hydrates the armed recovery and the
+      // popover origin; the retry drives the real entry with the same trusted
+      // source instead of re-inferring an ordinary desktop turn.
+      const sm2 = new SessionManager()
+      try {
+        let resumedOptions: { invocationSource?: string } | undefined
+        ;(sm2 as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
+        const sm2RealSend = (Object.getPrototypeOf(sm2) as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage
+        ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async function (this: unknown, ...args: unknown[]) {
+          resumedOptions = args[4] as { invocationSource?: string }
+          return sm2RealSend.apply(this, args)
+        }
+        const stored = loadSession(tmpRoot, 'f-ep-restart')!
+        const managed2 = createManagedSession(
+          { id: stored.id, name: stored.name, createdAt: stored.createdAt, hidden: true, systemPromptPreset: 'mini', origin: 'edit-popover' },
+          buildWorkspace(),
+        )
+        ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set('f-ep-restart', managed2)
+        await (sm2 as unknown as { ensureMessagesLoaded: (m: unknown) => Promise<void> }).ensureMessagesLoaded(managed2)
+        await waitForCondition(() => resumedOptions !== undefined)
+        expect(resumedOptions?.invocationSource).toBe('desktop')
+      } finally {
+        ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+      }
+    })
+
+    // Review round 1, issue #1: the popover's hidden session must stay
+    // reachable while a question is pending — across reopen (in-memory
+    // lookup) and restart (on-disk header scan) — and the association must
+    // end exactly with the lifecycle (answer/cancel clears it).
+    describe('pending question reachability (getEditPopoverPendingSession)', () => {
+      function seedStoredPopover(sessionId: string, request: ReturnType<typeof makeQuestionRequest>) {
+        const filePath = getSessionFilePath(tmpRoot, sessionId)
+        mkdirSync(dirname(filePath), { recursive: true })
+        const stored = {
+          id: sessionId,
+          workspaceRootPath: tmpRoot,
+          name: 'popover session',
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          hidden: true,
+          systemPromptPreset: 'mini',
+          origin: 'edit-popover',
+          messages: [] as unknown as StoredSession['messages'],
+          tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+          pendingQuestion: request,
+        } as StoredSession
+        writeSessionJsonl(filePath, stored)
+        seededSessionIds.add(sessionId)
+      }
+
+      it('in-memory: finds the popover session with a pending question; newest wins; non-popover sessions are ignored', async () => {
+        patchPrivateFlush()
+        const older = { ...makeQuestionRequest('f-reach-1'), createdAt: 1000 }
+        const m1 = seedHiddenMini('f-reach-1', older, 'edit-popover')
+        ;(m1 as unknown as { pendingQuestion: unknown }).pendingQuestion = older
+
+        // Hidden+mini WITHOUT the popover origin → not adoptable
+        const other = { ...makeQuestionRequest('f-reach-other'), createdAt: 2000 }
+        seedHiddenMini('f-reach-other', other)
+        ;(other as unknown as { createdAt: number }).createdAt = 2000
+        const mOther = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-reach-other') as unknown as { pendingQuestion: unknown }
+        mOther.pendingQuestion = other
+
+        const found = await sm.getEditPopoverPendingSession()
+        expect(found?.sessionId).toBe('f-reach-1')
+        expect(found?.request.requestId).toBe(older.requestId)
+
+        // A NEWER popover question supersedes the adoption target
+        const newer = { ...makeQuestionRequest('f-reach-2'), createdAt: 3000 }
+        seedHiddenMini('f-reach-2', newer, 'edit-popover')
+        ;(newer as unknown as { createdAt: number }).createdAt = 3000
+        const m2 = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-reach-2') as unknown as { pendingQuestion: unknown }
+        m2.pendingQuestion = newer
+        const found2 = await sm.getEditPopoverPendingSession()
+        expect(found2?.sessionId).toBe('f-reach-2')
+        expect(found2?.request.requestId).toBe(newer.requestId)
+      })
+
+      it('restart: rediscovers a pending popover question from the on-disk header and hydrates the same session', async () => {
+        patchPrivateFlush()
+        const request = makeQuestionRequest('f-reach-disk')
+        seedStoredPopover('f-reach-disk', request)
+
+        // Fresh manager = restart simulation; the session is NOT in memory.
+        const sm2 = new SessionManager({ workspace: buildWorkspace() })
+        try {
+          const found = await sm2.getEditPopoverPendingSession()
+          expect(found?.sessionId).toBe('f-reach-disk')
+          expect(found?.request.requestId).toBe(request.requestId)
+
+          // Hydration prunes nothing here (no resolution on disk), and the
+          // session is now managed with the same authoritative request.
+          const managed = (sm2 as unknown as { sessions: Map<string, unknown> }).sessions.get('f-reach-disk') as unknown as {
+            pendingQuestion?: { requestId: string }
+          }
+          expect(managed?.pendingQuestion?.requestId).toBe(request.requestId)
+        } finally {
+          ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
+      })
+
+      it('lifecycle end: answering or skipping clears the association (null, no orphan)', async () => {
+        patchPrivateFlush()
+        const request = makeQuestionRequest('f-reach-clear')
+        seedHiddenMini('f-reach-clear', request, 'edit-popover')
+        expect((await sm.getEditPopoverPendingSession())?.sessionId).toBe('f-reach-clear')
+
+        // Skip ("暂不回答") ends the association — no popover adoption anymore
+        ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+        await sm.respondToQuestion('f-reach-clear', { action: 'cancel', requestId: request.requestId })
+        expect(await sm.getEditPopoverPendingSession()).toBeNull()
+      })
     })
   })
 

@@ -116,6 +116,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION,
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
   RPC_CHANNELS.sessions.RESPOND_TO_QUESTION,
+  RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
   RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE,
@@ -295,6 +296,14 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Returns the QuestionResolutionResult contract that drives the UI cleanup.
   server.handle(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION, async (_ctx, sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution) => {
     return sessionManager.respondToQuestion(sessionId, resolution)
+  })
+
+  // Locate the Edit Popover session that still owns an active pending
+  // question (hidden session — not reachable through the session list).
+  // Lets the popover re-adopt the same hidden session after a reopen,
+  // renderer reload, or app restart instead of orphaning the request.
+  server.handle(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION, async () => {
+    return sessionManager.getEditPopoverPendingSession()
   })
 
   // ==========================================================================

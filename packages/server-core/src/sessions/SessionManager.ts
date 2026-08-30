@@ -774,7 +774,8 @@ type AgentInstance = AgentBackend
 
 interface ManagedSession {
   id: string
-  origin?: 'cli-run' | 'cli-exec'
+  /** Host experience that owns this session (e.g. 'edit-popover' Edit Popover sessions). */
+  origin?: 'cli-run' | 'cli-exec' | 'edit-popover'
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
@@ -1017,33 +1018,38 @@ export function claimAutoRetryPending(
 }
 
 /**
- * Create a ManagedSession from any session-like source (SessionMetadata, SessionConfig, StoredSession).
- * Spreads all matching fields from the source so new persistent fields automatically propagate.
- * Runtime-only fields get sensible defaults.
- */
-/**
  * Per-turn eligibility for the request_user_input tool (fail-closed matrix).
  *
+ * The Edit Popover exception (round-10 adjudication, request_id 83c0c3ce-r10-d1)
+ * is bound to a SERVER-VERIFIABLE session origin, not a per-turn marker:
  * - Non-desktop invocation sources (messaging / automation / headless /
- *   internal) NEVER get the tool — even with the Edit Popover marker.
+ *   internal) NEVER get the tool.
  * - Ordinary desktop turns get it unless the session is hidden or mini.
- * - Round-10 adjudication (request_id 83c0c3ce-r10-d1): the renderer Edit
- *   Popover's hidden+mini session is granted the tool for the single turn
- *   that carries the explicit `editPopoverTurn` marker. Ordinary hidden/mini
- *   turns without the marker stay closed.
+ * - ONLY a session created with the trusted `edit-popover` origin, hidden AND
+ *   mini, on a desktop turn gets the tool. The origin is recorded at session
+ *   creation, persisted with the session, and cannot be granted retroactively
+ *   through the generic send API — a hidden non-mini or visible mini session
+ *   with the origin stays closed, and every other hidden/mini turn fails shut.
  */
 export function computeRequestUserInputEligibility(
   invocationSource: InvocationSource | undefined,
   hidden: boolean | undefined,
   isMini: boolean | undefined,
-  editPopoverTurn: boolean | undefined,
+  origin: 'cli-run' | 'cli-exec' | 'edit-popover' | undefined,
 ): boolean {
   if (invocationSource !== 'desktop') return false
-  if (hidden) return editPopoverTurn === true
-  if (isMini) return editPopoverTurn === true
-  return true
+  if (origin === 'edit-popover') {
+    return hidden === true && isMini === true
+  }
+  return !hidden && !isMini
 }
 
+/**
+ * Create a ManagedSession for a workspace. `source` can be a StoredSession,
+ * SessionMetadata, or a partial record; it spreads all matching fields from
+ * the source so new persistent fields automatically propagate. Runtime-only
+ * fields get sensible defaults.
+ */
 export function createManagedSession(
   source: { id: string } & Partial<ManagedSession>,
   workspace: Workspace,
@@ -2867,6 +2873,9 @@ export class SessionManager implements ISessionManager {
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
       origin: options?.origin,
+      // Persisted so a restart re-derives the mini-agent identity (the
+      // request_user_input eligibility matrix re-checks isMini from it).
+      systemPromptPreset: options?.systemPromptPreset,
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
@@ -5681,15 +5690,16 @@ export class SessionManager implements ISessionManager {
 
     // Per-turn invocation source: only desktop interactive turns expose
     // request_user_input; every other source (and the implicit default)
-    // fails closed. Hidden sessions never ask questions — except the
-    // renderer Edit Popover's explicitly marked turns (round-10 adjudication).
+    // fails closed. Hidden/mini sessions never ask questions — except the
+    // Edit Popover's own session (round-10 adjudication), which carries the
+    // server-verified 'edit-popover' origin recorded at creation.
     const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
     managed.invocationSource = invocationSource
     const allowRequestUserInput = computeRequestUserInputEligibility(
       invocationSource,
       managed.hidden,
       managed.systemPromptPreset === 'mini',
-      options?.editPopoverTurn,
+      managed.origin,
     )
     if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
       managed.agent.allowRequestUserInput = allowRequestUserInput
@@ -5957,7 +5967,7 @@ export class SessionManager implements ISessionManager {
         managed.invocationSource,
         managed.hidden,
         managed.systemPromptPreset === 'mini',
-        options?.editPopoverTurn,
+        managed.origin,
       )
       if (agent.allowRequestUserInput !== allowRequestUserInputNow) {
         agent.allowRequestUserInput = allowRequestUserInputNow
@@ -6827,6 +6837,13 @@ export class SessionManager implements ISessionManager {
       sessionId: managed.id,
       createdAt: Date.now(),
       questions: parsed.data.questions,
+      // Persist the trusted entry capability of the turn that asked the
+      // question (managed.invocationSource was set by the sendMessage that
+      // started this turn). The post-answer resume, its retries, and restart
+      // recovery re-derive tool visibility from this instead of re-inferring
+      // an ordinary desktop turn — the Edit Popover's hidden+mini session
+      // keeps asking follow-up questions after an answer.
+      invocationSource: managed.invocationSource ?? 'desktop',
     }
 
     // 2. Authoritative pending state — replaces any active request
@@ -6911,6 +6928,85 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) return null
     return managed.pendingQuestion ?? null
+  }
+
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question (round-10 adjudication reachability contract).
+   *
+   * The Edit Popover's session is hidden — it never appears in the session
+   * list, and the popover component clears its local inlineSessionId on every
+   * reopen. Without this lookup the persisted pendingQuestion would become an
+   * orphan the user can never answer after a popover reopen, renderer reload,
+   * or app restart. The association is intentionally derived from the
+   * server-verified `edit-popover` origin plus the authoritative
+   * pendingQuestion: it disappears exactly when the lifecycle ends (answer
+   * accepted, skip, replaced, stop/archive/delete) and never on time.
+   *
+   * Returns the most recently asked question across the in-memory sessions
+   * and (after a restart) the on-disk session headers, hydrated through
+   * getSession so a resolution that landed while the server was down is
+   * pruned before it is surfaced.
+   */
+  async getEditPopoverPendingSession(): Promise<{ sessionId: string; request: QuestionRequest } | null> {
+    let best: { sessionId: string; createdAt: number; request: QuestionRequest } | null = null
+    let bestWorkspace: Workspace | null = null
+
+    // In-memory first: live sessions (popover may still be mounted, or was
+    // already touched this process).
+    for (const managed of this.sessions.values()) {
+      if (managed.origin !== 'edit-popover' || managed.isArchived) continue
+      const pending = managed.pendingQuestion
+      if (pending && (!best || pending.createdAt > best.createdAt)) {
+        best = { sessionId: managed.id, createdAt: pending.createdAt, request: pending }
+        bestWorkspace = managed.workspace
+      }
+    }
+
+    // Cold path: scan on-disk headers (origin + pendingQuestion are persisted
+    // header fields) across every runtime workspace.
+    if (!best) {
+      for (const workspace of this.getWorkspaces()) {
+        let metas: SessionMetadata[] = []
+        try {
+          metas = this.sessionStorage.list(workspace.rootPath)
+        } catch (error) {
+          sessionLog.warn(`getEditPopoverPendingSession: failed to list sessions for workspace ${workspace.id}:`, error)
+          continue
+        }
+        for (const meta of metas) {
+          if (meta.origin !== 'edit-popover' || meta.isArchived || meta.hidden !== true) continue
+          const pending = meta.pendingQuestion
+          if (pending && (!best || pending.createdAt > best.createdAt)) {
+            best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending }
+            bestWorkspace = workspace
+          }
+        }
+      }
+      if (!best || !bestWorkspace) return null
+
+      // Hydrate the cold session the same way startup does (register managed
+      // from header + lazy-load messages) so loadMessagesFromDisk restores the
+      // authoritative pending state and prunes a request that was already
+      // resolved (answer/cancel recorded) before this lookup.
+      if (!this.sessions.has(best.sessionId)) {
+        this.sessions.set(best.sessionId, createManagedSession(
+          { id: best.sessionId, createdAt: best.createdAt },
+          bestWorkspace,
+        ))
+      }
+      await this.getSession(best.sessionId)
+      const hydrated = this.sessions.get(best.sessionId)
+      const pending = hydrated?.pendingQuestion
+      if (!pending) {
+        // Resolved while the server was down — the association is over.
+        return null
+      }
+      return { sessionId: best.sessionId, request: pending }
+    }
+
+    // Warm path: the in-memory pending state is already authoritative.
+    return { sessionId: best.sessionId, request: best.request }
   }
 
   /**
@@ -7131,7 +7227,14 @@ export class SessionManager implements ISessionManager {
         managed.lastMessageRole = 'user'
         managed.lastMessageAt = Date.now()
         managed.pendingQuestion = undefined
-        managed.pendingAgentResume = { messageId: answerMessage.id, attempts: 0 }
+        // Carry the trusted entry capability of the question-producing turn
+        // into the recoverable resume state — first resume, failure retries,
+        // and restart recovery all pass it back to sendMessage.
+        managed.pendingAgentResume = {
+          messageId: answerMessage.id,
+          attempts: 0,
+          invocationSource: pending.invocationSource ?? 'desktop',
+        }
 
         this.persistSession(managed)
         await this.flushSession(managed.id)
@@ -7271,7 +7374,19 @@ export class SessionManager implements ISessionManager {
 
     // ---- Boundary 1: Agent turn execution ----
     try {
-      await this.sendMessage(managed.id, answerMessage.content, [], [], { invocationSource: 'desktop' }, answerMessage.id)
+      // The resumed turn reuses the trusted entry capability captured from the
+      // question-producing turn (persisted on the resume state, so restart
+      // recovery keeps it too). It must NOT be re-inferred as an ordinary
+      // desktop turn — the Edit Popover's hidden+mini session would lose
+      // request_user_input visibility for the resumed turn.
+      await this.sendMessage(
+        managed.id,
+        answerMessage.content,
+        [],
+        [],
+        { invocationSource: resume.invocationSource ?? 'desktop' },
+        answerMessage.id,
+      )
     } catch (error) {
       // Re-validate after the await: the session may have been deleted while
       // the turn ran (identity or resume identity changed) — drop silently.

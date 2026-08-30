@@ -1688,14 +1688,7 @@ export default function App() {
     runtimeChatAccessIssue,
   ])
 
-  const handleSendMessage = useCallback(async (
-    sessionId: string,
-    message: string,
-    attachments?: FileAttachment[],
-    skillSlugs?: string[],
-    externalBadges?: ContentBadge[],
-    sendOptions?: { editPopoverTurn?: boolean },
-  ) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
     try {
       if (chatAccessStatus) {
         return
@@ -1853,15 +1846,13 @@ export default function App() {
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence.
       // Desktop interactive turns explicitly declare their invocation source so
       // request_user_input is registered for this turn (P0 entry-eligibility contract).
-      // `editPopoverTurn` is the round-10 adjudicated exception: ONLY the
-      // renderer EditPopover sets it, unlocking the tool for its single
-      // hidden+mini turn.
+      // The Edit Popover exception is server-side: its session carries the
+      // 'edit-popover' origin recorded at creation — no per-turn marker exists.
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
-        ...(sendOptions?.editPopoverTurn === true ? { editPopoverTurn: true as const } : {}),
       })
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -2150,6 +2141,26 @@ export default function App() {
     return result
   }, [])
 
+  // Locate the Edit Popover session that still owns an active pending
+  // question and seed it into the shared pendingQuestions map. The popover's
+  // hidden session is not reachable through the session list, so a reopen /
+  // renderer reload / app restart would otherwise orphan the persisted
+  // request. The server derives the association from the session's
+  // 'edit-popover' origin plus the authoritative pendingQuestion, so it
+  // clears exactly when the lifecycle ends (answered, skipped, replaced,
+  // stopped, archived, deleted).
+  const handleGetEditPopoverPendingQuestion = useCallback(async (): Promise<{ sessionId: string; request: QuestionRequest } | null> => {
+    const result = await window.electronAPI.getEditPopoverPendingQuestion()
+    if (!result) return null
+
+    // Seed the authoritative request the same way the question_request event
+    // path does, so usePendingQuestion(inlineSessionId) resolves and every
+    // existing event-driven cleanup keeps working.
+    pendingQuestionGenerationsRef.current.bump(result.sessionId)
+    setPendingQuestions(prev => setPendingQuestionForSession(prev, result.sessionId, result.request))
+    return result
+  }, [])
+
   // Centralized link interceptor: classifies file types and decides whether to
   // show an in-app preview overlay or open externally. Replaces the old
   // handleOpenFile/handleOpenUrl that always opened in external apps.
@@ -2430,6 +2441,7 @@ export default function App() {
     onRespondToPermission: handleRespondToPermission,
     onRespondToCredential: handleRespondToCredential,
     onRespondToQuestion: handleRespondToQuestion,
+    onGetEditPopoverPendingQuestion: handleGetEditPopoverPendingQuestion,
     // File/URL handlers
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
@@ -2480,6 +2492,7 @@ export default function App() {
     handleRespondToPermission,
     handleRespondToCredential,
     handleRespondToQuestion,
+    handleGetEditPopoverPendingQuestion,
     handleOpenFile,
     handleOpenUrl,
     handleSelectWorkspace,

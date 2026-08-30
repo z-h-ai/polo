@@ -428,6 +428,12 @@ export interface ElectronAPI {
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
   respondToQuestion(sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution): Promise<import('@polo-ai/shared/protocol').QuestionResolutionResult>
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question (hidden session, not reachable via the session list). Returns
+   * null when no popover-origin session is waiting for an answer.
+   */
+  getEditPopoverPendingQuestion(): Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
 
   // Consolidated session command handler
   sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number }>

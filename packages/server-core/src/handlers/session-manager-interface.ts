@@ -125,6 +125,12 @@ export interface ISessionManager {
 
   getPendingQuestion(sessionId: string): QuestionRequest | null
   respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question (hidden session — not reachable through the session list).
+   * Returns null when no popover-origin session is waiting for an answer.
+   */
+  getEditPopoverPendingSession(): Promise<{ sessionId: string; request: QuestionRequest } | null>
 
   // ---------------------------------------------------------------------------
   // Plans

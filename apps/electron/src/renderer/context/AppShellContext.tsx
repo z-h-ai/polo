@@ -94,20 +94,14 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
-  onSendMessage: (
-    sessionId: string,
-    message: string,
-    attachments?: FileAttachment[],
-    skillSlugs?: string[],
-    badges?: import('@polo-ai/core').ContentBadge[],
-    /**
-     * Turn-level send options. ONLY the renderer EditPopover component may set
-     * `editPopoverTurn: true` (round-10 adjudication) — it grants
-     * request_user_input visibility for that single hidden+mini Edit Popover
-     * turn. All other callers must leave it undefined (fail closed).
-     */
-    sendOptions?: { editPopoverTurn?: boolean }
-  ) => void
+  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@polo-ai/core').ContentBadge[]) => void
+  /**
+   * Locate the Edit Popover session that still owns an active pending
+   * question (hidden session, not reachable via the session list). Seeded
+   * into the pendingQuestions map so the popover can re-adopt the same
+   * hidden session after a reopen, renderer reload, or app restart.
+   */
+  onGetEditPopoverPendingQuestion: () => Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void

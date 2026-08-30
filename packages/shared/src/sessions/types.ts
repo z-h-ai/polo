@@ -26,6 +26,13 @@ export interface PendingAgentResume {
   messageId: string;
   attempts: number;
   completed?: boolean;
+  /**
+   * Trusted entry source captured from the pendingQuestion that produced the
+   * answer (the turn that asked the question). The resume, its retries, and
+   * restart recovery pass it back so the resumed turn keeps the same tool
+   * visibility instead of re-inferring it as an ordinary desktop turn.
+   */
+  invocationSource?: import('../protocol/dto').InvocationSource;
 }
 
 /**
@@ -51,6 +58,9 @@ export const SESSION_PERSISTENT_FIELDS = [
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
+  // System prompt preset ('mini' edit-popover sessions must survive restarts
+  // — the request_user_input eligibility matrix re-derives isMini from it)
+  'systemPromptPreset',
   // Sharing
   'sharedUrl', 'sharedId', 'sharedWriteToken',
   // Plan execution
@@ -166,6 +176,8 @@ export interface SessionConfig {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** System prompt preset for this session ('default' | 'mini' or custom) */
+  systemPromptPreset?: string;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -201,7 +213,7 @@ export interface SessionConfig {
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Host experience that owns this session. */
-  origin?: 'cli-run' | 'cli-exec';
+  origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */
@@ -262,7 +274,7 @@ export interface SessionHeader {
   /** Optional user-defined name */
   name?: string;
   /** Host experience that owns this session. */
-  origin?: 'cli-run' | 'cli-exec';
+  origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
   createdAt: number;
   lastUsedAt: number;
   /** Timestamp of last meaningful message — persisted separately from lastUsedAt for stable date grouping across restarts. */
@@ -305,6 +317,8 @@ export interface SessionHeader {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** System prompt preset for this session ('default' | 'mini' or custom) */
+  systemPromptPreset?: string;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -400,6 +414,8 @@ export interface SessionMetadata {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** System prompt preset for this session ('default' | 'mini' or custom) */
+  systemPromptPreset?: string;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;
   /** ID of the last final (non-intermediate) assistant message - for unread detection */
@@ -414,6 +430,8 @@ export interface SessionMetadata {
   tokenUsage?: SessionTokenUsage;
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
+  /** Host experience that owns this session (from the JSONL header). */
+  origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */
