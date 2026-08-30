@@ -491,6 +491,163 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
   })
 
+  // ---- Review fix round 3, issue B: the archive clear + archive flags commit
+  // in ONE staged flush. A flush failure can therefore NEVER leave a
+  // "cancel already broadcast + active question lost" half-commit — the
+  // pre-round-3 two-phase shape could do exactly that when the first phase
+  // (clear) succeeded and the second (archive state) failed.
+
+  it('archive unified commit: a flush failure keeps the ACTIVE question and the resume retry, broadcasts nothing, and the retry converges once', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-arch-2')
+    const managed = seedSession('f-arch-2', { pendingQuestion: request }) as unknown as {
+      pendingAgentResume?: { messageId: string; attempts: number }
+      resumeRetryTimer?: unknown
+    }
+    // An armed answer→resume retry also dies with the archive — and must be
+    // restored (timer re-armed) when the unified commit rolls back.
+    managed.pendingAgentResume = { messageId: 'msg-resume-arch', attempts: 1 }
+
+    failFlush = true
+    await expect(sm.archiveSession('f-arch-2')).rejects.toThrow('disk full')
+
+    // NOTHING was broadcast and NOTHING was lost: the active question AND the
+    // recovery state survive a failed archive intact.
+    expect(sm.getPendingQuestion('f-arch-2')?.requestId).toBe(request.requestId)
+    expect(managed.pendingAgentResume?.messageId).toBe('msg-resume-arch')
+    expect(managed.resumeRetryTimer).toBeTruthy() // pre-archive retry re-armed
+    expect(events.filter(e => e.type === 'question_resolved' || e.type === 'session_archived')).toHaveLength(0)
+    const headerDuringFault = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-arch-2'), 'utf-8').split('\n')[0])
+    expect(headerDuringFault.pendingQuestion?.requestId).toBe(request.requestId)
+    expect(headerDuringFault.isArchived).toBeFalsy()
+
+    failFlush = false
+    await sm.archiveSession('f-arch-2')
+
+    // ONE durable convergence: question cancelled + archived, each exactly once.
+    expect(sm.getPendingQuestion('f-arch-2')).toBeNull()
+    expect(managed.pendingAgentResume).toBeUndefined()
+    expect(managed.resumeRetryTimer).toBeUndefined() // cleared with the archive
+    const resolved = events.filter(e => e.type === 'question_resolved')
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toMatchObject({ sessionId: 'f-arch-2', requestId: request.requestId, action: 'cancel' })
+    expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
+  })
+
+  // ---- Review fix round 3, issue A: lifecycle tombstone + generation gate ----
+  // After a durable stop/archive, a LATE onQuestionRequested callback of the
+  // stopped agent must be rejected: no pending rebuild, no question_request.
+
+  it('a late question callback after a durable stop is rejected by the tombstone (no rebuild, no re-broadcast)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-tomb-1')
+    const managed = seedSession('f-tomb-1', { pendingQuestion: request, isProcessing: false })
+    const generation = (managed as unknown as { processingGeneration: number }).processingGeneration
+
+    // Stop completes: durable clear + cancel broadcast + tombstone.
+    await sm.cancelProcessing('f-tomb-1')
+    expect(sm.getPendingQuestion('f-tomb-1')).toBeNull()
+    const cancelsBefore = events.filter(e => e.type === 'question_resolved').length
+    expect(cancelsBefore).toBe(1)
+
+    // The OLD agent's callback arrives late — dispatch-time generation
+    // snapshot equals the active one (stop does not bump it); the TOMBSTONE
+    // must reject it.
+    const questions = makeQuestionRequest('f-tomb-1-late').questions
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, questions, generation)).rejects.toThrow(/terminally stopped/)
+
+    // No pending resurrection, no second terminal broadcast, no new card.
+    expect(sm.getPendingQuestion('f-tomb-1')).toBeNull()
+    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(cancelsBefore)
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-tomb-1'), 'utf-8').split('\n')[0])
+    expect(header.pendingQuestion).toBeUndefined()
+    expect(header.hasPendingQuestion).toBe(false)
+  })
+
+  it('a stale-generation callback is rejected even on a live session; the CURRENT generation may ask again', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-tomb-2', {}) as unknown as { processingGeneration: number; questionLifecycleTombstone?: unknown }
+    const staleGeneration = managed.processingGeneration
+    // Simulate a NEW turn having started (generation bump + tombstone clear —
+    // exactly what the turn-start boundary does after a prior stop).
+    managed.processingGeneration = staleGeneration + 1
+    managed.questionLifecycleTombstone = undefined
+
+    // The OLD turn's callback is stale even though the tombstone is gone.
+    const questions = makeQuestionRequest('f-tomb-2-old').questions
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, questions, staleGeneration)).rejects.toThrow(/no longer active/)
+    expect(sm.getPendingQuestion('f-tomb-2')).toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
+
+    // The CURRENT turn may legitimately ask — the gate is generation-scoped.
+    const current = makeQuestionRequest('f-tomb-2-new').questions
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, current, managed.processingGeneration)).resolves.toBeUndefined()
+    expect(sm.getPendingQuestion('f-tomb-2')).not.toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+  })
+
+  // ---- Review fix round 3, issue C: the completed tool activity and the
+  // pending question commit in the SAME durable flush — a visible question
+  // can never hydrate with an activity still stuck on 'executing'.
+
+  it('a failed question commit rolls the tool activity back to executing; a successful commit hydrates completed + pending together', async () => {
+    patchPrivateFlush()
+    // The executing activity lives on DISK (the production shape) — hydration
+    // inside the callback reloads messages from the stored session.
+    const toolMessage = {
+      id: 'tool-act-1',
+      role: 'tool',
+      type: 'tool',
+      toolName: 'mcp__session__request_user_input',
+      toolStatus: 'executing',
+      content: '',
+      timestamp: Date.now(),
+    }
+    const managed = seedSession('f-toolact-1', { messages: [toolMessage] }) as unknown as {
+      messages: Array<{ toolName?: string; toolStatus?: string; content?: string }>
+    }
+
+    // FIRST attempt: the single durable commit fails.
+    failFlush = true
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
+      .handleQuestionRequested(managed, makeQuestionRequest('f-toolact-1').questions)).rejects.toThrow(/NOT paused/)
+
+    // FULL rollback: the activity is executing again, no pending, no events,
+    // and the disk is consistent (no visible question, activity not completed).
+    const toolMsg = managed.messages.find(m => m.toolName?.includes('request_user_input'))
+    expect(toolMsg?.toolStatus).toBe('executing')
+    expect(toolMsg?.content).toBe('')
+    expect(sm.getPendingQuestion('f-toolact-1')).toBeNull()
+    expect(events.filter(e => e.type === 'question_request' || e.type === 'complete')).toHaveLength(0)
+    const headerDuringFault = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-toolact-1'), 'utf-8').split('\n')[0])
+    expect(headerDuringFault.pendingQuestion).toBeUndefined()
+    const storedDuringFault = loadSession(tmpRoot, 'f-toolact-1')
+    const storedToolDuringFault = (storedDuringFault?.messages ?? []).find(m => (m as { toolName?: string }).toolName?.includes('request_user_input'))
+    expect((storedToolDuringFault as { toolStatus?: string } | undefined)?.toolStatus).toBe('executing')
+
+    // Retry with a healthy flush: ONE commit makes BOTH durable.
+    failFlush = false
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
+      .handleQuestionRequested(managed, makeQuestionRequest('f-toolact-1-retry').questions)).resolves.toBeUndefined()
+
+    expect(toolMsg?.toolStatus).toBe('completed')
+    expect(toolMsg?.content).toBe('Waiting for user input')
+    expect(sm.getPendingQuestion('f-toolact-1')).not.toBeNull()
+
+    // Restart hydration reads exactly this state: pending badge + COMPLETED
+    // activity — never 'executing' under a visible question.
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-toolact-1'), 'utf-8').split('\n')[0])
+    expect(header.hasPendingQuestion).toBe(true)
+    const stored = loadSession(tmpRoot, 'f-toolact-1')
+    const storedTool = (stored?.messages ?? []).find(m => (m as { toolName?: string }).toolName?.includes('request_user_input'))
+    expect((storedTool as { toolStatus?: string } | undefined)?.toolStatus).toBe('completed')
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+  })
+
   it('answer committed but sendMessage rejects before agent init: error surfaced, state recoverable, retry succeeds (never silent-accepted-stranded)', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-resume-1')

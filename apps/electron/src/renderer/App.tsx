@@ -753,8 +753,8 @@ export default function App() {
         beforeCount: beforeIds.size,
         beforeIds: summarizeIds(beforeIds),
         beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
-      transportState,
-      error: err,
+        transportState,
+        error: err,
       })
       return null
     }

@@ -923,7 +923,18 @@ interface ManagedSession {
    * are queued behind it. handleQuestionRequested reads THIS, never the
    * last-send session field.
    */
-  activeTurnSource?: InvocationSource
+   activeTurnSource?: InvocationSource
+  /**
+   * Question-lifecycle TOMBSTONE (review fix round 3, issue A). Set AFTER a
+   * durable stop/archive clear of the pending question; cleared when a NEW
+   * turn starts (generation bump). A late onQuestionRequested callback from
+   * an aborted/stopped agent must find this tombstone and be REJECTED —
+   * a terminated lifecycle can never resurrect an active question or
+   * re-broadcast question_request. In-memory by design: a stale callback can
+   * only originate from a live agent object in this process; after a restart
+   * hydration re-derives authority from the (cleared) persisted state.
+   */
+  questionLifecycleTombstone?: { reason: 'stopped' | 'archived'; at: number }
   /**
    * Synchronous turn-start reservation (review round 5, issue 2). Set at
    * sendMessage entry — BEFORE any await — by the caller that claimed the
@@ -4305,7 +4316,10 @@ export class SessionManager implements ISessionManager {
       // The returned promise is AWAITED by the tool handler — the request_user_input
       // tool only reports "waiting" success once the durable handoff completed;
       // a rejection surfaces to the model as a tool error instead.
-      managed.agent.onQuestionRequested = (questions) => this.handleQuestionRequested(managed, questions)
+      // The dispatch-time generation snapshot lets the locked commit reject a
+      // callback whose turn was stopped/superseded while it waited (review fix
+      // round 3, issue A).
+      managed.agent.onQuestionRequested = (questions) => this.handleQuestionRequested(managed, questions, managed.processingGeneration)
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls
       managed.agent.onSpawnSession = async (request) => {
@@ -4663,41 +4677,45 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
 
-    // LIFECYCLE-ATOMIC archive (review fix round 2, issue 1): the archive
+    // LIFECYCLE-ATOMIC archive (review fix rounds 2+3, issue B): the archive
     // flags, the pending-question clear and the answer→resume clear commit as
-    // ONE critical section on the session's question-state lock, with a full
-    // snapshot rollback on any flush failure — a failed archive must never
-    // leave a half-committed lifecycle (archived memory + live pending, or a
-    // pending that was already broadcast as resolved).
+    // ONE staged snapshot in ONE flush on the session's question-state lock.
+    // The clear is no longer a separate committed phase: a first-phase
+    // success + second-phase failure could previously broadcast
+    // question_resolved(cancel) and then roll the archive back — losing an
+    // ACTIVE question on a FAILED archive. Now any flush failure rolls back
+    // the whole lifecycle snapshot with ZERO broadcasts, and the terminal
+    // events fire only after the unified commit is durable.
     const prevIsArchived = managed.isArchived
     const prevArchivedAt = managed.archivedAt
-    const prevPendingQuestion = managed.pendingQuestion
+    const pendingAtStart = managed.pendingQuestion
     const prevPendingAgentResume = managed.pendingAgentResume
-    // A pending question durably cleared + broadcast BEFORE a later failure in
-    // this section must never be resurrected by the rollback.
-    let pendingDurablyResolved = false
 
     await this.withQuestionStateLock(sessionId, async () => {
       managed.isArchived = true
       managed.archivedAt = Date.now()
+      // The answer→resume retry dies with the archive (same single commit).
+      if (managed.resumeRetryTimer) {
+        clearTimeout(managed.resumeRetryTimer)
+        managed.resumeRetryTimer = undefined
+      }
+      managed.pendingAgentResume = undefined
       try {
-        // A pending question cannot outlive archival — staged clear + broadcast.
-        await this.clearPendingQuestionForSessionLocked(managed)
-        pendingDurablyResolved = true
-        // Same for a pending answer→resume retry.
-        await this.clearPendingAgentResume(managed, 'session archived')
-        // Persist in-memory state directly to avoid race with pending queue writes
-        this.persistSession(managed)
+        // ONE staged commit: archived flags + no pending question + no resume.
+        // Live memory keeps the pending question visible until this flush
+        // succeeds.
+        this.persistSession(managed, { pendingQuestion: undefined })
         await this.flushSession(managed.id)
       } catch (error) {
-        // Roll back the WHOLE lifecycle snapshot (archive flags + resume);
-        // the pending question is restored only if the clear itself had not
-        // already committed durably.
+        // Roll back the WHOLE lifecycle snapshot. The pending question was
+        // never mutated (staged) and nothing was broadcast.
         managed.isArchived = prevIsArchived
         managed.archivedAt = prevArchivedAt
         managed.pendingAgentResume = prevPendingAgentResume
-        if (!pendingDurablyResolved) {
-          managed.pendingQuestion = prevPendingQuestion
+        if (prevPendingAgentResume) {
+          // The pre-archive retry timer was cancelled above — re-arm so the
+          // restored recovery still fires.
+          this.scheduleResumeRetry(managed, 1000)
         }
         // Best-effort re-persist so the queue matches the rolled-back memory.
         try {
@@ -4710,6 +4728,20 @@ export class SessionManager implements ISessionManager {
         }
         throw error
       }
+      // Durable: publish the memory terminal state and broadcast ONCE.
+      managed.pendingQuestion = undefined
+      if (pendingAtStart) {
+        this.sendEvent({
+          type: 'question_resolved',
+          sessionId,
+          requestId: pendingAtStart.requestId,
+          action: 'cancel',
+        }, managed.workspace.id)
+      }
+      // Lifecycle TOMBSTONE (review fix round 3, issue A): late question
+      // callbacks of the archived session's turn are rejected; a NEW turn
+      // clears it at the generation bump.
+      managed.questionLifecycleTombstone = { reason: 'archived', at: Date.now() }
       // Notify all windows for this workspace
       this.sendEvent({ type: 'session_archived', sessionId }, managed.workspace.id)
       this.emitUnreadSummaryChanged()
@@ -6128,6 +6160,10 @@ export class SessionManager implements ISessionManager {
         this.setProcessing(managed, true)
         managed.streamingText = ''
         managed.processingGeneration++
+        // A new turn starts a NEW question lifecycle — a prior stop/archive
+        // tombstone no longer applies to this generation (review fix round 3,
+        // issue A).
+        managed.questionLifecycleTombstone = undefined
         managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
       // The turn has claimed its processing generation — the reservation is
       // consumed; isProcessing now gates subsequent callers.
@@ -7130,19 +7166,51 @@ export class SessionManager implements ISessionManager {
   private async handleQuestionRequested(
     managed: ManagedSession,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest?: number,
   ): Promise<void> {
     // Serialized behind the session's question-state lock (review fix round 2,
     // issue 1): a tool-requested replacement must never interleave with a
     // lifecycle clear's staged commit — otherwise a stop clear that already
     // enqueued its cleared snapshot could later flush it OVER a question that
     // legitimately replaced the pending state.
-    await this.withQuestionStateLock(managed.id, () => this.handleQuestionRequestedLocked(managed, questions))
+    //
+    // GENERATION SNAPSHOT (review fix round 3, issue A): the asking turn's
+    // processing generation is captured at DISPATCH — a callback that queues
+    // behind the lock is validated against this snapshot once the lock is
+    // held, so a request whose turn was stopped/superseded while waiting is
+    // rejected instead of resurrecting a question.
+    await this.withQuestionStateLock(managed.id, () =>
+      this.handleQuestionRequestedLocked(managed, questions, generationAtRequest ?? managed.processingGeneration),
+    )
   }
 
   private async handleQuestionRequestedLocked(
     managed: ManagedSession,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest: number,
   ): Promise<void> {
+    // 0. STALE-CALLBACK GATE (review fix round 3, issue A): a late callback
+    //    from an aborted/stopped agent must never rebuild a pending question
+    //    or re-broadcast question_request on a terminated lifecycle. All
+    //    three checks reject BEFORE any state mutation or I/O:
+    //    - session identity: the managed object was deleted/replaced;
+    //    - lifecycle tombstone: stop/archive durably cleared this session's
+    //      question (cleared again when a NEW turn starts a new lifecycle);
+    //    - generation: the turn that dispatched this callback is no longer
+    //      the active turn (superseded or drained).
+    if (this.sessions.get(managed.id) !== managed) {
+      sessionLog.warn(`Question request for session ${managed.id} rejected: session no longer active in this runtime`)
+      throw new Error('Question request rejected: the session is no longer active')
+    }
+    if (managed.questionLifecycleTombstone) {
+      sessionLog.warn(`Question request for session ${managed.id} rejected: lifecycle was terminally ${managed.questionLifecycleTombstone.reason} at ${new Date(managed.questionLifecycleTombstone.at).toISOString()}`)
+      throw new Error(`Question request rejected: the session's question lifecycle was terminally ${managed.questionLifecycleTombstone.reason}`)
+    }
+    if (managed.processingGeneration !== generationAtRequest) {
+      sessionLog.warn(`Question request for session ${managed.id} rejected: dispatching turn generation ${generationAtRequest} is stale (active: ${managed.processingGeneration})`)
+      throw new Error('Question request rejected: the asking turn is no longer active')
+    }
+
     // 1. Re-validate (defense in depth) and generate the Polo-side identity
     const { parseRequestUserInputArgs } = await import('@polo-ai/session-tools-core')
     const parsed = parseRequestUserInputArgs({ questions })
@@ -7170,17 +7238,38 @@ export class SessionManager implements ISessionManager {
       invocationSource: managed.activeTurnSource ?? 'internal',
     }
 
-    // 2. Authoritative pending state — replaces any active request
+    // 2. SINGLE DURABLE COMMIT (review fix round 3, issue C): the completed
+    //    tool activity AND the new pending question land in the SAME staged
+    //    persist+flush. The old two-phase shape (pending first, tool-activity
+    //    "best effort" later) could leave a VISIBLE question whose activity
+    //    was still 'executing' on disk — rendering as running forever after a
+    //    restart. Now either both are durable, or neither is and the tool
+    //    call fails without any handoff.
     const previousPending = managed.pendingQuestion
+    const toolMsg = [...managed.messages].reverse().find(
+      m => m.toolName?.includes('request_user_input') && m.toolStatus === 'executing'
+    )
+    const toolMsgSnapshot = toolMsg
+      ? { toolStatus: toolMsg.toolStatus, content: toolMsg.content, toolResult: toolMsg.toolResult }
+      : undefined
+    if (toolMsg) {
+      toolMsg.toolStatus = 'completed'
+      toolMsg.content = 'Waiting for user input'
+      toolMsg.toolResult = 'Waiting for user input'
+    }
     managed.pendingQuestion = request
 
-    // 3. Persist + flush before any visible side effect. Failure rolls the
-    //    replacement back and rejects: the running turn continues (no handoff
-    //    happened) and the previous authoritative state is restored on disk.
     try {
       this.persistSession(managed)
       await this.flushSession(managed.id)
     } catch (error) {
+      // Roll back BOTH mutations — the turn continues (no handoff happened),
+      // the activity stays executing, and any previous pending is restored.
+      if (toolMsg && toolMsgSnapshot) {
+        toolMsg.toolStatus = toolMsgSnapshot.toolStatus
+        toolMsg.content = toolMsgSnapshot.content
+        toolMsg.toolResult = toolMsgSnapshot.toolResult
+      }
       managed.pendingQuestion = previousPending
       try {
         this.persistSession(managed)
@@ -7194,25 +7283,14 @@ export class SessionManager implements ISessionManager {
       )
     }
 
-    // 4. Mark the request_user_input tool activity completed so it doesn't
-    //    render as executing forever after the handoff aborts the turn.
-    const toolMsg = [...managed.messages].reverse().find(
-      m => m.toolName?.includes('request_user_input') && m.toolStatus === 'executing'
-    )
-    if (toolMsg) {
-      toolMsg.toolStatus = 'completed'
-      toolMsg.content = 'Waiting for user input'
-      toolMsg.toolResult = 'Waiting for user input'
-    }
-
-    // 5. Notify renderers — the input area is taken over by the question UI
+    // 3. Notify renderers — the input area is taken over by the question UI
     this.sendEvent({
       type: 'question_request',
       sessionId: managed.id,
       request,
     }, managed.workspace.id)
 
-    // 6. Handoff — the agent pauses until the user answers or skips
+    // 4. Handoff — the agent pauses until the user answers or skips
     if (managed.isProcessing && managed.agent) {
       sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
       managed.agent.interruptForHandoff(AbortReason.QuestionRequested)
@@ -7232,25 +7310,6 @@ export class SessionManager implements ISessionManager {
 
       // Send complete event so renderer knows processing stopped (include tokenUsage for real-time updates)
       this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
-    }
-
-    // 7. Persist again so the completed tool activity is durable (best effort —
-    //    the pending question itself is already authoritative from step 3).
-    //    BOUNDED RETRY (review round 2 minor): if this persist fails the disk
-    //    keeps toolStatus 'executing' while memory says 'completed' — a
-    //    restart would render the activity as running forever. Retry a few
-    //    times before giving up; the in-memory state stays authoritative for
-    //    this process either way.
-    for (let persistRetry = 0; persistRetry < 3; persistRetry++) {
-      try {
-        this.persistSession(managed)
-        await this.flushSession(managed.id)
-        break
-      } catch (error) {
-        sessionLog.error(`Post-handoff persist failed for session ${managed.id} (attempt ${persistRetry + 1}/3, question remains pending):`, error)
-        if (persistRetry === 2) break
-        await new Promise(resolve => setTimeout(resolve, 200))
-      }
     }
   }
 
@@ -7966,6 +8025,10 @@ export class SessionManager implements ISessionManager {
       throw error
     }
     managed.pendingQuestion = undefined
+    // Lifecycle TOMBSTONE (review fix round 3, issue A): from this point a
+    // late onQuestionRequested callback of the stopped turn must be rejected;
+    // a NEW turn clears it when it bumps the processing generation.
+    managed.questionLifecycleTombstone = { reason: 'stopped', at: Date.now() }
     this.sendEvent({
       type: 'question_resolved',
       sessionId: managed.id,
