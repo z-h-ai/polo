@@ -775,7 +775,12 @@ type AgentInstance = AgentBackend
 interface ManagedSession {
   id: string
   /** Host experience that owns this session (e.g. 'edit-popover' Edit Popover sessions). */
-  origin?: 'cli-run' | 'cli-exec' | 'edit-popover'
+  origin?: import('@polo-ai/shared/protocol').SessionOrigin
+  /**
+   * Stable Edit Popover owner identity (label::filePath). Scoped pending-
+   * question recovery matches on it — never on a global newest-wins scan.
+   */
+  popoverOwner?: string
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
@@ -1035,7 +1040,7 @@ export function computeRequestUserInputEligibility(
   invocationSource: InvocationSource | undefined,
   hidden: boolean | undefined,
   isMini: boolean | undefined,
-  origin: 'cli-run' | 'cli-exec' | 'edit-popover' | undefined,
+  origin: import('@polo-ai/shared/protocol').SessionOrigin | undefined,
 ): boolean {
   if (invocationSource !== 'desktop') return false
   if (origin === 'edit-popover') {
@@ -2612,6 +2617,16 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
 
+    // Fail closed (review round 2, issue 1): the generic creation path can
+    // NEVER grant the Edit Popover origin. The type system already excludes
+    // it, but the RPC boundary is untyped JSON — a forged value must be
+    // stripped before anything is persisted. Only createEditPopoverSession
+    // stamps the origin server-side.
+    if (options && (options.origin as import('@polo-ai/shared/protocol').SessionOrigin | undefined) === 'edit-popover') {
+      sessionLog.warn(`Stripped forged 'edit-popover' origin from a generic createSession call for workspace ${workspaceId}`)
+      options = { ...options, origin: undefined }
+    }
+
     // Get new session defaults from workspace config (with global fallback)
     // Options.permissionMode overrides the workspace default (used by EditPopover for auto-execute)
     const workspaceRootPath = workspace.rootPath
@@ -3046,6 +3061,45 @@ export class SessionManager implements ISessionManager {
       this.sessionStorage,
       isBranch ? { messages: managed.messages } : undefined,
     )
+  }
+
+  /**
+   * Dedicated, trusted creation path for the renderer Edit Popover session
+   * (round-10 adjudication; review round 2, issue 1).
+   *
+   * The generic sessions:CREATE RPC can never grant the 'edit-popover' origin
+   * — the caller-asserted value is stripped by createSession. THIS method is
+   * the only place the origin is stamped, server-side, together with the
+   * stable popover owner identity that scopes pending-question recovery
+   * (review round 2, issue 2). Both are persisted immediately so restart
+   * hydration keeps the capability and the recovery scope.
+   */
+  async createEditPopoverSession(
+    workspaceId: string,
+    options?: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner?: string },
+  ): Promise<Session> {
+    // Never trust a caller-provided origin/owner routing — destructured off
+    // and replaced by the server-side stamp below.
+    const { popoverOwner, ...createOptions } = options ?? {}
+    const session = await this.createSession(workspaceId, createOptions)
+    const managed = this.sessions.get(session.id)
+    if (!managed) {
+      // createSession always registers the managed session; this is pure
+      // defense in depth.
+      return session
+    }
+    managed.origin = 'edit-popover'
+    managed.popoverOwner = popoverOwner
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } catch (error) {
+      // A persistence failure does not roll back creation (the session exists
+      // and works); the popover simply runs WITHOUT the question capability
+      // after a restart in this rare window. Fail closed, never privileged.
+      sessionLog.error(`Failed to persist Edit Popover origin for session ${managed.id}:`, error)
+    }
+    return managedToSession(managed, this.sessionStorage)
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
@@ -4189,7 +4243,10 @@ export class SessionManager implements ISessionManager {
           labels: request.labels ?? managed.labels,
           workingDirectory: request.workingDirectory,
           hidden: managed.hidden,
-          origin: managed.origin,
+          // Spawned sessions NEVER inherit the Edit Popover grant — the
+          // origin is scoped to the exact popover session that earned it
+          // (fail closed).
+          origin: managed.origin === 'edit-popover' ? undefined : managed.origin,
         })
 
         // Build FileAttachment[] from paths (if any)
@@ -6932,81 +6989,93 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Locate the Edit Popover session that still owns an active pending
-   * question (round-10 adjudication reachability contract).
+   * question for a SPECIFIC workspace + popover owner (round-10 adjudication
+   * reachability contract; review round 2, issue 2).
    *
    * The Edit Popover's session is hidden — it never appears in the session
    * list, and the popover component clears its local inlineSessionId on every
    * reopen. Without this lookup the persisted pendingQuestion would become an
    * orphan the user can never answer after a popover reopen, renderer reload,
-   * or app restart. The association is intentionally derived from the
-   * server-verified `edit-popover` origin plus the authoritative
-   * pendingQuestion: it disappears exactly when the lifecycle ends (answer
-   * accepted, skip, replaced, stop/archive/delete) and never on time.
+   * or app restart.
    *
-   * Returns the most recently asked question across the in-memory sessions
-   * and (after a restart) the on-disk session headers, hydrated through
-   * getSession so a resolution that landed while the server was down is
-   * pruned before it is surfaced.
+   * Scoping contract: the caller must identify itself with the current
+   * workspaceId AND its stable popover owner identity (label::filePath). Only
+   * an exact match (origin 'edit-popover' + same workspace + same owner + an
+   * active pendingQuestion) is ever returned — there is deliberately NO
+   * global newest-wins fallback, so concurrent popovers (or the same popover
+   * across workspaces) can never adopt each other's session, and an unknown
+   * owner gets null.
+   *
+   * The association ends exactly when the lifecycle ends (answer accepted,
+   * skip, replaced, stop/archive/delete) and never on time.
    */
-  async getEditPopoverPendingSession(): Promise<{ sessionId: string; request: QuestionRequest } | null> {
-    let best: { sessionId: string; createdAt: number; request: QuestionRequest } | null = null
-    let bestWorkspace: Workspace | null = null
+  async getEditPopoverPendingSession(
+    workspaceId: string,
+    popoverOwner: string,
+  ): Promise<{ sessionId: string; request: QuestionRequest } | null> {
+    const matches: Array<{ sessionId: string; createdAt: number; request: QuestionRequest }> = []
 
     // In-memory first: live sessions (popover may still be mounted, or was
-    // already touched this process).
+    // already touched this process). Exact workspace + owner match only.
     for (const managed of this.sessions.values()) {
       if (managed.origin !== 'edit-popover' || managed.isArchived) continue
+      if (managed.workspace.id !== workspaceId) continue
+      if ((managed.popoverOwner ?? '') !== popoverOwner) continue
       const pending = managed.pendingQuestion
+      if (pending) {
+        matches.push({ sessionId: managed.id, createdAt: pending.createdAt, request: pending })
+      }
+    }
+
+    if (matches.length > 0) {
+      // Defensive: one owner normally owns at most one popover session — if
+      // several exist, the most recently asked question wins within THIS
+      // owner's scope (never across owners/workspaces).
+      matches.sort((a, b) => b.createdAt - a.createdAt)
+      return { sessionId: matches[0].sessionId, request: matches[0].request }
+    }
+
+    // Cold path: scan the requested workspace's on-disk headers (origin,
+    // popoverOwner and pendingQuestion are persisted header fields). A
+    // workspace that cannot be resolved has no sessions to scan.
+    const workspace = this.resolveRuntimeWorkspace(workspaceId)
+    if (!workspace) return null
+    let metas: SessionMetadata[] = []
+    try {
+      metas = this.sessionStorage.list(workspace.rootPath)
+    } catch (error) {
+      sessionLog.warn(`getEditPopoverPendingSession: failed to list sessions for workspace ${workspace.id}:`, error)
+      return null
+    }
+    let best: { sessionId: string; createdAt: number; request: QuestionRequest } | null = null
+    for (const meta of metas) {
+      if (meta.origin !== 'edit-popover' || meta.isArchived || meta.hidden !== true) continue
+      if ((meta.popoverOwner ?? '') !== popoverOwner) continue
+      const pending = meta.pendingQuestion
       if (pending && (!best || pending.createdAt > best.createdAt)) {
-        best = { sessionId: managed.id, createdAt: pending.createdAt, request: pending }
-        bestWorkspace = managed.workspace
+        best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending }
       }
     }
+    if (!best) return null
 
-    // Cold path: scan on-disk headers (origin + pendingQuestion are persisted
-    // header fields) across every runtime workspace.
-    if (!best) {
-      for (const workspace of this.getWorkspaces()) {
-        let metas: SessionMetadata[] = []
-        try {
-          metas = this.sessionStorage.list(workspace.rootPath)
-        } catch (error) {
-          sessionLog.warn(`getEditPopoverPendingSession: failed to list sessions for workspace ${workspace.id}:`, error)
-          continue
-        }
-        for (const meta of metas) {
-          if (meta.origin !== 'edit-popover' || meta.isArchived || meta.hidden !== true) continue
-          const pending = meta.pendingQuestion
-          if (pending && (!best || pending.createdAt > best.createdAt)) {
-            best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending }
-            bestWorkspace = workspace
-          }
-        }
-      }
-      if (!best || !bestWorkspace) return null
-
-      // Hydrate the cold session the same way startup does (register managed
-      // from header + lazy-load messages) so loadMessagesFromDisk restores the
-      // authoritative pending state and prunes a request that was already
-      // resolved (answer/cancel recorded) before this lookup.
-      if (!this.sessions.has(best.sessionId)) {
-        this.sessions.set(best.sessionId, createManagedSession(
-          { id: best.sessionId, createdAt: best.createdAt },
-          bestWorkspace,
-        ))
-      }
-      await this.getSession(best.sessionId)
-      const hydrated = this.sessions.get(best.sessionId)
-      const pending = hydrated?.pendingQuestion
-      if (!pending) {
-        // Resolved while the server was down — the association is over.
-        return null
-      }
-      return { sessionId: best.sessionId, request: pending }
+    // Hydrate the cold session the same way startup does (register managed
+    // from header + lazy-load messages) so loadMessagesFromDisk restores the
+    // authoritative pending state and prunes a request that was already
+    // resolved (answer/cancel recorded) before this lookup.
+    if (!this.sessions.has(best.sessionId)) {
+      this.sessions.set(best.sessionId, createManagedSession(
+        { id: best.sessionId, createdAt: best.createdAt },
+        workspace,
+      ))
     }
-
-    // Warm path: the in-memory pending state is already authoritative.
-    return { sessionId: best.sessionId, request: best.request }
+    await this.getSession(best.sessionId)
+    const hydrated = this.sessions.get(best.sessionId)
+    const pending = hydrated?.pendingQuestion
+    if (!pending) {
+      // Resolved while the server was down — the association is over.
+      return null
+    }
+    return { sessionId: best.sessionId, request: pending }
   }
 
   /**

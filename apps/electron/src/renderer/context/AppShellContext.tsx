@@ -94,14 +94,24 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
+  /**
+   * Dedicated, trusted creation path for the Edit Popover session: the server
+   * stamps the 'edit-popover' origin + owner identity. The generic
+   * onCreateSession can never grant that origin (review round 2).
+   */
+  onCreateEditPopoverSession: (
+    workspaceId: string,
+    options?: Omit<import('../../shared/types').CreateSessionOptions, 'origin'> & { popoverOwner?: string },
+  ) => Promise<Session>
   onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@polo-ai/core').ContentBadge[]) => void
   /**
    * Locate the Edit Popover session that still owns an active pending
-   * question (hidden session, not reachable via the session list). Seeded
-   * into the pendingQuestions map so the popover can re-adopt the same
-   * hidden session after a reopen, renderer reload, or app restart.
+   * question for the given workspace + popover owner (hidden session, not
+   * reachable via the session list). Exact match only; seeded into the
+   * pendingQuestions map so the popover can re-adopt the same hidden session
+   * after a reopen, renderer reload, or app restart.
    */
-  onGetEditPopoverPendingQuestion: () => Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
+  onGetEditPopoverPendingQuestion: (workspaceId: string, popoverOwner: string) => Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void

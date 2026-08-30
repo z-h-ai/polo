@@ -107,6 +107,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.GET_UNREAD_SUMMARY,
   RPC_CHANNELS.sessions.MARK_ALL_READ,
   RPC_CHANNELS.sessions.CREATE,
+  RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION,
   RPC_CHANNELS.sessions.DELETE,
   RPC_CHANNELS.sessions.GET_MESSAGES,
   RPC_CHANNELS.sessions.SEND_MESSAGE,
@@ -191,6 +192,16 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions) => {
     const end = perf.start('rpc.createSession', { workspaceId })
     const session = await sessionManager.createSession(workspaceId, options)
+    end()
+    return session
+  })
+
+  // Dedicated, trusted creation path for the renderer Edit Popover session.
+  // The server stamps the 'edit-popover' origin + owner identity here — the
+  // generic CREATE above strips any caller-provided value (review round 2).
+  server.handle(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION, async (_ctx, workspaceId: string, options?: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner?: string }) => {
+    const end = perf.start('rpc.createEditPopoverSession', { workspaceId })
+    const session = await sessionManager.createEditPopoverSession(workspaceId, options)
     end()
     return session
   })
@@ -299,11 +310,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Locate the Edit Popover session that still owns an active pending
-  // question (hidden session — not reachable through the session list).
-  // Lets the popover re-adopt the same hidden session after a reopen,
-  // renderer reload, or app restart instead of orphaning the request.
-  server.handle(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION, async () => {
-    return sessionManager.getEditPopoverPendingSession()
+  // question for the given workspace + popover owner (hidden session — not
+  // reachable through the session list). Exact workspace + owner match only,
+  // so concurrent popovers can never adopt each other's session (review
+  // round 2). Lets the popover re-adopt the same hidden session after a
+  // reopen, renderer reload, or app restart instead of orphaning the request.
+  server.handle(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION, async (_ctx, workspaceId: string, popoverOwner: string) => {
+    return sessionManager.getEditPopoverPendingSession(workspaceId, popoverOwner)
   })
 
   // ==========================================================================

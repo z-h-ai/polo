@@ -420,6 +420,15 @@ export interface ElectronAPI {
   markAllSessionsRead(workspaceId: string): Promise<void>
   getSessionMessages(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
+  /**
+   * Dedicated, trusted creation path for the Edit Popover session. The server
+   * stamps the 'edit-popover' origin + owner identity here — the generic
+   * createSession can never grant that origin.
+   */
+  createEditPopoverSession(
+    workspaceId: string,
+    options?: Omit<CreateSessionOptions, 'origin'> & { popoverOwner?: string },
+  ): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
@@ -430,10 +439,11 @@ export interface ElectronAPI {
   respondToQuestion(sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution): Promise<import('@polo-ai/shared/protocol').QuestionResolutionResult>
   /**
    * Locate the Edit Popover session that still owns an active pending
-   * question (hidden session, not reachable via the session list). Returns
-   * null when no popover-origin session is waiting for an answer.
+   * question for the given workspace + popover owner (hidden session, not
+   * reachable via the session list). Exact match only; returns null when no
+   * scoped popover session is waiting for an answer.
    */
-  getEditPopoverPendingQuestion(): Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
+  getEditPopoverPendingQuestion(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
 
   // Consolidated session command handler
   sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number }>

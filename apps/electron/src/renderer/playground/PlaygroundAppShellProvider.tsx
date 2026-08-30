@@ -45,9 +45,12 @@ const playgroundValue: AppShellContextType = {
   onCreateSession: (async () => {
     throw new Error('[Playground] onCreateSession is not available')
   }) as AppShellContextType['onCreateSession'],
+  // No real server session exists in the playground — creation/ownership is
+  // unavailable and there is never a popover-origin pending question.
+  onCreateEditPopoverSession: (async () => {
+    throw new Error('[Playground] onCreateEditPopoverSession is not available')
+  }) as AppShellContextType['onCreateEditPopoverSession'],
   onSendMessage: logCall('onSendMessage'),
-  // No real server session exists in the playground — there is never a
-  // popover-origin pending question to adopt.
   onGetEditPopoverPendingQuestion: async () => null,
   onRenameSession: logCall('onRenameSession'),
   onFlagSession: logCall('onFlagSession'),

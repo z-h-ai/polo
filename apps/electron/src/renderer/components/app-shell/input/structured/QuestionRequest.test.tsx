@@ -8,9 +8,22 @@ import { createElement } from 'react'
 // free of global module pollution that destabilizes parallel full-suite runs).
 // Register only when another test file in the same process hasn't already:
 // plain `bun test` runs files sequentially in one process, and a double
-// GlobalRegistrator.register() throws.
+// register() throws.
+//
+// The userAgent MUST be an explicit macOS UA: happy-dom defaults to a Windows
+// one, so `navigator.platform` would report Win32 and flip
+// `isWindows`/`PATH_SEP` in @/lib/platform for EVERY test file that runs
+// after this one in the shared bun process — silently breaking
+// path-basename assertions elsewhere.
 if (typeof window === 'undefined') {
-  GlobalRegistrator.register()
+  GlobalRegistrator.register({
+    settings: {
+      navigator: {
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      },
+    },
+  })
 }
 setupI18n()
 

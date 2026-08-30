@@ -20,6 +20,7 @@ import { usePlatform } from '@polo-ai/ui'
 import type { ContentBadge, Session, CreateSessionOptions } from '../../../shared/types'
 import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential, usePendingQuestion } from '@/context/AppShellContext'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
+import { useEditPopoverSessionRestore } from './useEditPopoverSessionRestore'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
 
 /** Rotating placeholder keys for compact mode input - short, action-oriented */
@@ -762,10 +763,49 @@ export function EditPopover({
   }
 
   // Use App context for session management (same code path as main chat)
-  const { onCreateSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToQuestion, onGetEditPopoverPendingQuestion } = useAppShellContext()
+  const { onCreateSession, onCreateEditPopoverSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToQuestion, onGetEditPopoverPendingQuestion } = useAppShellContext()
 
-  // Session ID for inline execution (created on first message)
-  const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
+  // Stable owner identity for scoped pending-question recovery (review round
+  // 2, issue 2): label alone can repeat across files, filePath alone repeats
+  // across edit surfaces — the pair is the unique, reopen-stable editor id.
+  const popoverOwnerId = useMemo(
+    () => `${context.label}::${context.filePath}`,
+    [context.label, context.filePath],
+  )
+
+  const createPopoverSession = useCallback(async (): Promise<string> => {
+    if (!workspace?.id) {
+      throw new Error('[EditPopover] cannot create a session without a workspace')
+    }
+    // Trusted creation path (review round 2, issue 1): the server stamps the
+    // 'edit-popover' origin + owner identity here. The generic
+    // onCreateSession can never grant that origin, and no per-turn marker
+    // exists — ordinary hidden/mini turns and every non-desktop entry fail
+    // closed.
+    const newSession = await onCreateEditPopoverSession(workspace.id, {
+      model: model || 'fast',
+      systemPromptPreset: systemPromptPreset || 'mini',
+      permissionMode,
+      workingDirectory,
+      hidden: true, // Hidden sessions use same App code path but don't appear in list
+      popoverOwner: popoverOwnerId,
+    })
+    return newSession.id
+  }, [workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, popoverOwnerId, onCreateEditPopoverSession])
+
+  // Hidden inline session lifecycle (adopt on open / create on first send),
+  // with the restoring gate + CAS adoption that closes the "delayed restore
+  // vs quick send" race.
+  const { inlineSessionId, restoring, ensureSessionForSend } = useEditPopoverSessionRestore({
+    open,
+    workspaceId: workspace?.id,
+    popoverOwnerId,
+    restorePendingSession: useCallback(
+      () => onGetEditPopoverPendingQuestion(workspace?.id ?? '', popoverOwnerId),
+      [onGetEditPopoverPendingQuestion, workspace?.id, popoverOwnerId],
+    ),
+    createPopoverSession,
+  })
 
   // Get session data from Jotai atom (same as main chat - includes optimistic updates)
   // Pass empty string when no session yet - atom returns null for unknown IDs
@@ -943,68 +983,29 @@ export function EditPopover({
     }
   }, [isResizing])
 
-  // Reset state when popover opens.
-  // Reachability contract (round-10 adjudication): the inline session is
-  // hidden — it never appears in the session list, so clearing the local id
-  // on reopen would orphan a persisted pendingQuestion forever. Instead of a
-  // blind reset, ask the server for the popover session that still owns an
-  // active pending question (server-verified 'edit-popover' origin) and
-  // re-adopt it. The association ends exactly when the lifecycle ends —
-  // answer, skip, replacement, stop/archive/delete — never on time.
+  // Reset model when popover opens. The inline session lifecycle (reset +
+  // scoped adoption, restoring gate, CAS) is owned by
+  // useEditPopoverSessionRestore above — the reachability contract stays:
+  // reopening adopts the same hidden session that still owns an active
+  // pending question, and the association ends only with the lifecycle.
   useEffect(() => {
     if (!open) return
     setCurrentModel(model || 'haiku')
-    setInlineSessionId(null)
-    let cancelled = false
-    void onGetEditPopoverPendingQuestion()
-      .then(result => {
-        if (!cancelled && result) {
-          setInlineSessionId(result.sessionId)
-        }
-      })
-      .catch(error => {
-        // Adoption is best-effort: without a reachable pending question the
-        // popover falls back to creating a fresh session on the first send.
-        console.warn('[EditPopover] failed to restore pending question session:', error)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, model, onGetEditPopoverPendingQuestion])
+  }, [open, model])
 
   // Handle sending message from ChatDisplay (inline mode)
-  // Creates hidden session on first message, then uses App context for sending
+  // Reuses the adopted inline session or creates one via the trusted path.
   const handleInlineSendMessage = useCallback(async (message: string) => {
     const { prompt, badges } = buildEditPrompt(context, message, displayLabel)
 
-    // Create session on first message
-    let sessionId = inlineSessionId
-    if (!sessionId && workspace?.id) {
-      const createOptions: CreateSessionOptions = {
-        model: model || 'fast',
-        systemPromptPreset: systemPromptPreset || 'mini',
-        permissionMode,
-        workingDirectory,
-        hidden: true, // Hidden sessions use same App code path but don't appear in list
-        // Round-10 adjudication (request_id 83c0c3ce-r10-d1): the server
-        // records this trusted experience origin at creation. It is the ONLY
-        // thing that unlocks request_user_input for this hidden+mini session
-        // (ordinary hidden/mini turns and every non-desktop entry fail
-        // closed) and it persists — resumed turns keep the capability without
-        // any per-turn marker.
-        origin: 'edit-popover',
-      }
-      const newSession = await onCreateSession(workspace.id, createOptions)
-      sessionId = newSession.id
-      setInlineSessionId(sessionId)
-    }
+    const sessionId = await ensureSessionForSend()
 
     // Send message via App context (includes optimistic user message update)
     // Pass badges to hide the <edit_request> XML metadata in the user message bubble
     if (sessionId) {
       onSendMessage(sessionId, prompt, undefined, undefined, badges)
     }
-  }, [context, displayLabel, inlineSessionId, workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, onCreateSession, onSendMessage])
+  }, [context, displayLabel, ensureSessionForSend, onSendMessage])
 
   // Legacy mode: navigates to chat in the same window
   const handleLegacySendMessage = useCallback((message: string) => {
@@ -1094,6 +1095,11 @@ export function EditPopover({
                   compactMode={true}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
+                  // Restoring gate (review round 2, issue 3): the send entry
+                  // stays disabled while the adoption query is in flight, so
+                  // a quick send cannot create a throw-away session that a
+                  // late restore result would then strand.
+                  disabled={restoring}
                 />
               </div>
             </div>

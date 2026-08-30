@@ -99,6 +99,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       withAgent?: boolean
       executingToolMessage?: boolean
       messages?: Array<Record<string, unknown>>
+      workspace?: { id: string; rootPath: string }
     } = {},
   ) {
     const filePath = getSessionFilePath(tmpRoot, sessionId)
@@ -117,7 +118,9 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     const managed = createManagedSession(
       { id: sessionId, name: stored.name, createdAt: stored.createdAt },
-      buildWorkspace(),
+      opts.workspace
+        ? ({ id: opts.workspace.id, name: 'WS', rootPath: opts.workspace.rootPath, createdAt: Date.now() } as never)
+        : buildWorkspace(),
     )
     ;(managed as unknown as { isProcessing: boolean }).isProcessing = opts.isProcessing ?? false
     if (opts.withAgent) {
@@ -415,19 +418,28 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       return computeRequestUserInputEligibility(invocationSource, hidden, isMini, origin)
     }
 
-    function seedHiddenMini(sessionId: string, request: ReturnType<typeof makeQuestionRequest>, origin?: 'edit-popover') {
-      const m = seedSession(sessionId, { pendingQuestion: request })
+    function seedHiddenMini(
+      sessionId: string,
+      request: ReturnType<typeof makeQuestionRequest>,
+      origin?: 'edit-popover',
+      popoverOwner?: string,
+      workspace?: { id: string; rootPath: string },
+    ) {
+      const m = seedSession(sessionId, { pendingQuestion: request, workspace })
       ;(m as unknown as { hidden: boolean }).hidden = true
       ;(m as unknown as { systemPromptPreset: string }).systemPromptPreset = 'mini'
       if (origin) {
         ;(m as unknown as { origin?: string }).origin = origin
       }
+      if (popoverOwner !== undefined) {
+        ;(m as unknown as { popoverOwner?: string }).popoverOwner = popoverOwner
+      }
       return m
     }
 
     const flagCapture: { last: boolean | undefined } = { last: undefined }
-    function stubAgentCaptureFlag(): void {
-      ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+    function stubAgentCaptureFlag(manager: unknown = sm): void {
+      ;(manager as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
         const agent = makeFakeAgent()
         Object.defineProperty(agent, 'allowRequestUserInput', {
           get: () => flagCapture.last,
@@ -602,23 +614,33 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       }
     })
 
-    // Review round 1, issue #1: the popover's hidden session must stay
-    // reachable while a question is pending — across reopen (in-memory
-    // lookup) and restart (on-disk header scan) — and the association must
-    // end exactly with the lifecycle (answer/cancel clears it).
-    describe('pending question reachability (getEditPopoverPendingSession)', () => {
-      function seedStoredPopover(sessionId: string, request: ReturnType<typeof makeQuestionRequest>) {
-        const filePath = getSessionFilePath(tmpRoot, sessionId)
+    // Review round 1, issue #1 + round 2, issue #2: the popover's hidden
+    // session must stay reachable while a question is pending — across reopen
+    // (in-memory lookup) and restart (on-disk header scan) — and the lookup
+    // must be SCOPED to the requesting workspace + popover owner so
+    // concurrent popovers/workspaces can never adopt each other's session.
+    describe('pending question reachability (scoped getEditPopoverPendingSession)', () => {
+      const OWNER_A = 'Permissions::/ws/a/config.json'
+      const OWNER_B = 'Automations::/ws/a/automations.json'
+
+      function seedStoredPopover(
+        sessionId: string,
+        request: ReturnType<typeof makeQuestionRequest>,
+        opts: { popoverOwner?: string; workspaceRoot?: string } = {},
+      ) {
+        const root = opts.workspaceRoot ?? tmpRoot
+        const filePath = getSessionFilePath(root, sessionId)
         mkdirSync(dirname(filePath), { recursive: true })
         const stored = {
           id: sessionId,
-          workspaceRootPath: tmpRoot,
+          workspaceRootPath: root,
           name: 'popover session',
           createdAt: Date.now(),
           lastUsedAt: Date.now(),
           hidden: true,
           systemPromptPreset: 'mini',
           origin: 'edit-popover',
+          popoverOwner: opts.popoverOwner,
           messages: [] as unknown as StoredSession['messages'],
           tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
           pendingQuestion: request,
@@ -627,43 +649,54 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         seededSessionIds.add(sessionId)
       }
 
-      it('in-memory: finds the popover session with a pending question; newest wins; non-popover sessions are ignored', async () => {
+      it('in-memory: exact workspace + owner match only — concurrent popovers never adopt each other, unknown owner gets null', async () => {
         patchPrivateFlush()
-        const older = { ...makeQuestionRequest('f-reach-1'), createdAt: 1000 }
-        const m1 = seedHiddenMini('f-reach-1', older, 'edit-popover')
-        ;(m1 as unknown as { pendingQuestion: unknown }).pendingQuestion = older
+        const wsA = { id: 'ws-a', rootPath: tmpRoot }
+        const older = { ...makeQuestionRequest('f-reach-a'), createdAt: 1000 }
+        seedHiddenMini('f-reach-a', older, 'edit-popover', OWNER_A, wsA)
 
-        // Hidden+mini WITHOUT the popover origin → not adoptable
-        const other = { ...makeQuestionRequest('f-reach-other'), createdAt: 2000 }
-        seedHiddenMini('f-reach-other', other)
-        ;(other as unknown as { createdAt: number }).createdAt = 2000
-        const mOther = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-reach-other') as unknown as { pendingQuestion: unknown }
-        mOther.pendingQuestion = other
+        const newer = { ...makeQuestionRequest('f-reach-b'), createdAt: 2000 }
+        seedHiddenMini('f-reach-b', newer, 'edit-popover', OWNER_B, wsA)
 
-        const found = await sm.getEditPopoverPendingSession()
-        expect(found?.sessionId).toBe('f-reach-1')
-        expect(found?.request.requestId).toBe(older.requestId)
-
-        // A NEWER popover question supersedes the adoption target
-        const newer = { ...makeQuestionRequest('f-reach-2'), createdAt: 3000 }
-        seedHiddenMini('f-reach-2', newer, 'edit-popover')
-        ;(newer as unknown as { createdAt: number }).createdAt = 3000
-        const m2 = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-reach-2') as unknown as { pendingQuestion: unknown }
-        m2.pendingQuestion = newer
-        const found2 = await sm.getEditPopoverPendingSession()
-        expect(found2?.sessionId).toBe('f-reach-2')
-        expect(found2?.request.requestId).toBe(newer.requestId)
+        // Owner A gets ITS session — even though B's request is newer
+        const foundA = await sm.getEditPopoverPendingSession('ws-a', OWNER_A)
+        expect(foundA?.sessionId).toBe('f-reach-a')
+        expect(foundA?.request.requestId).toBe(older.requestId)
+        // Owner B gets its own
+        const foundB = await sm.getEditPopoverPendingSession('ws-a', OWNER_B)
+        expect(foundB?.sessionId).toBe('f-reach-b')
+        // An unknown owner (or wrong workspace) never adopts anything
+        expect(await sm.getEditPopoverPendingSession('ws-a', 'Unknown::/x')).toBeNull()
+        expect(await sm.getEditPopoverPendingSession('ws-other', OWNER_A)).toBeNull()
       })
 
-      it('restart: rediscovers a pending popover question from the on-disk header and hydrates the same session', async () => {
+      it('in-memory: a different workspace can never adopt a popover session from another workspace', async () => {
+        patchPrivateFlush()
+        const requestA = { ...makeQuestionRequest('f-reach-wsA'), createdAt: 1000 }
+        seedHiddenMini('f-reach-wsA', requestA, 'edit-popover', OWNER_A, { id: 'ws-a', rootPath: tmpRoot })
+        const requestB = { ...makeQuestionRequest('f-reach-wsB'), createdAt: 5000 }
+        seedHiddenMini('f-reach-wsB', requestB, 'edit-popover', OWNER_A, { id: 'ws-b', rootPath: tmpRoot })
+
+        // Same owner id in BOTH workspaces (same edit surface opened on two
+        // workspaces): each workspace resolves to its own session only.
+        const foundA = await sm.getEditPopoverPendingSession('ws-a', OWNER_A)
+        expect(foundA?.sessionId).toBe('f-reach-wsA')
+        const foundB = await sm.getEditPopoverPendingSession('ws-b', OWNER_A)
+        expect(foundB?.sessionId).toBe('f-reach-wsB')
+      })
+
+      it('restart: rediscovers a pending popover question from the on-disk header, scoped to workspace + owner', async () => {
         patchPrivateFlush()
         const request = makeQuestionRequest('f-reach-disk')
-        seedStoredPopover('f-reach-disk', request)
+        seedStoredPopover('f-reach-disk', request, { popoverOwner: OWNER_A })
 
         // Fresh manager = restart simulation; the session is NOT in memory.
         const sm2 = new SessionManager({ workspace: buildWorkspace() })
         try {
-          const found = await sm2.getEditPopoverPendingSession()
+          // Exact owner match recovers; any other scope returns null WITHOUT
+          // adopting the session (no global newest-wins fallback).
+          expect(await sm2.getEditPopoverPendingSession('ws_test', OWNER_B)).toBeNull()
+          const found = await sm2.getEditPopoverPendingSession('ws_test', OWNER_A)
           expect(found?.sessionId).toBe('f-reach-disk')
           expect(found?.request.requestId).toBe(request.requestId)
 
@@ -681,13 +714,76 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       it('lifecycle end: answering or skipping clears the association (null, no orphan)', async () => {
         patchPrivateFlush()
         const request = makeQuestionRequest('f-reach-clear')
-        seedHiddenMini('f-reach-clear', request, 'edit-popover')
-        expect((await sm.getEditPopoverPendingSession())?.sessionId).toBe('f-reach-clear')
+        seedHiddenMini('f-reach-clear', request, 'edit-popover', OWNER_A)
+        expect((await sm.getEditPopoverPendingSession('ws_test', OWNER_A))?.sessionId).toBe('f-reach-clear')
 
         // Skip ("暂不回答") ends the association — no popover adoption anymore
         ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
         await sm.respondToQuestion('f-reach-clear', { action: 'cancel', requestId: request.requestId })
-        expect(await sm.getEditPopoverPendingSession()).toBeNull()
+        expect(await sm.getEditPopoverPendingSession('ws_test', OWNER_A)).toBeNull()
+      })
+    })
+
+    // Review round 2, issue #1: the generic creation path can never grant the
+    // 'edit-popover' origin — a forged value is stripped (fail closed), and
+    // only the dedicated createEditPopoverSession stamps it server-side.
+    describe('trusted origin stamping (generic forge stripped)', () => {
+      const OWNER_ID = 'Permissions::/ws/a/config.json'
+      const flagOf = () => flagCapture.last
+
+      it('generic createSession strips a forged edit-popover origin; the session stays fail closed', async () => {
+        const smS = new SessionManager({ workspace: buildWorkspace() })
+        stubAgentCaptureFlag(smS)
+        try {
+          const session = await (smS as unknown as {
+            createSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
+          }).createSession('ws_test', {
+            model: 'fast',
+            systemPromptPreset: 'mini',
+            permissionMode: 'allow-all',
+            hidden: true,
+            origin: 'edit-popover', // forged through the generic options bag
+          })
+          seededSessionIds.add(session.id)
+
+          // The persisted header must NOT carry the privileged origin
+          const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, session.id), 'utf-8').split('\n')[0])
+          expect(header.origin).not.toBe('edit-popover')
+
+          // And a desktop turn on that hidden+mini session stays fail closed
+          await smS.sendMessage(session.id, 'turn on forged session', [], [], { invocationSource: 'desktop' })
+          expect(flagOf()).toBe(false)
+        } finally {
+          ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
+      })
+
+      it('createEditPopoverSession stamps the origin + owner server-side; the session becomes eligible', async () => {
+        const smS = new SessionManager({ workspace: buildWorkspace() })
+        stubAgentCaptureFlag(smS)
+        try {
+          const session = await (smS as unknown as {
+            createEditPopoverSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
+          }).createEditPopoverSession('ws_test', {
+            model: 'fast',
+            systemPromptPreset: 'mini',
+            permissionMode: 'allow-all',
+            hidden: true,
+            popoverOwner: OWNER_ID,
+          })
+          seededSessionIds.add(session.id)
+
+          // The dedicated path persisted the trusted origin + owner identity
+          const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, session.id), 'utf-8').split('\n')[0])
+          expect(header.origin).toBe('edit-popover')
+          expect(header.popoverOwner).toBe(OWNER_ID)
+
+          // A desktop turn on the hidden+mini popover session is eligible
+          await smS.sendMessage(session.id, 'turn on real popover session', [], [], { invocationSource: 'desktop' })
+          expect(flagOf()).toBe(true)
+        } finally {
+          ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
       })
     })
   })

@@ -1559,6 +1559,21 @@ export default function App() {
     return session
   }, [addSession, syncSessionOptionsFromSession])
 
+  // Dedicated, trusted creation path for the Edit Popover session: the server
+  // stamps the 'edit-popover' origin + owner identity. The generic
+  // handleCreateSession above can never grant that origin (review round 2).
+  const handleCreateEditPopoverSession = useCallback(async (
+    workspaceId: string,
+    options?: Omit<import('../shared/types').CreateSessionOptions, 'origin'> & { popoverOwner?: string },
+  ): Promise<Session> => {
+    const session = await window.electronAPI.createEditPopoverSession(workspaceId, options)
+    // Add to per-session atom and metadata map (no sessionsAtom)
+    addSession(session)
+    syncSessionOptionsFromSession(session)
+
+    return session
+  }, [addSession, syncSessionOptionsFromSession])
+
   // Deep link navigation is initialized later after handleInputChange is defined
 
   const handleDeleteSession = useCallback(async (sessionId: string, skipConfirmation = false): Promise<boolean> => {
@@ -2142,15 +2157,16 @@ export default function App() {
   }, [])
 
   // Locate the Edit Popover session that still owns an active pending
-  // question and seed it into the shared pendingQuestions map. The popover's
-  // hidden session is not reachable through the session list, so a reopen /
-  // renderer reload / app restart would otherwise orphan the persisted
-  // request. The server derives the association from the session's
-  // 'edit-popover' origin plus the authoritative pendingQuestion, so it
-  // clears exactly when the lifecycle ends (answered, skipped, replaced,
-  // stopped, archived, deleted).
-  const handleGetEditPopoverPendingQuestion = useCallback(async (): Promise<{ sessionId: string; request: QuestionRequest } | null> => {
-    const result = await window.electronAPI.getEditPopoverPendingQuestion()
+  // question for the given workspace + popover owner and seed it into the
+  // shared pendingQuestions map. The popover's hidden session is not reachable
+  // through the session list, so a reopen / renderer reload / app restart
+  // would otherwise orphan the persisted request. The server derives the
+  // association from the session's 'edit-popover' origin + the authoritative
+  // pendingQuestion + an exact workspace/owner match, so it clears exactly
+  // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
+  // deleted) and can never cross workspaces or popover owners.
+  const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null> => {
+    const result = await window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner)
     if (!result) return null
 
     // Seed the authoritative request the same way the question_request event
@@ -2427,6 +2443,7 @@ export default function App() {
     sessionOptions,
     // Session callbacks
     onCreateSession: handleCreateSession,
+    onCreateEditPopoverSession: handleCreateEditPopoverSession,
     onSendMessage: handleSendMessage,
     onRenameSession: handleRenameSession,
     onFlagSession: handleFlagSession,
@@ -2478,6 +2495,7 @@ export default function App() {
     hydrateDraftAttachments,
     sessionOptions,
     handleCreateSession,
+    handleCreateEditPopoverSession,
     handleSendMessage,
     handleRenameSession,
     handleFlagSession,

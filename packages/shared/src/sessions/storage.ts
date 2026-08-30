@@ -192,7 +192,8 @@ export interface CreateSessionOptions {
     model?: string;
     llmConnection?: string;
     hidden?: boolean;
-    origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
+    origin?: 'cli-run' | 'cli-exec';
+    popoverOwner?: string;
     systemPromptPreset?: string;
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];

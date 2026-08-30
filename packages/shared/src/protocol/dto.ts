@@ -98,8 +98,10 @@ export interface Session {
   }
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
-  /** Host experience that owns the session. */
-  origin?: 'cli-run' | 'cli-exec'
+  /** Host experience that owns this session. */
+  origin?: SessionOrigin
+  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  popoverOwner?: string
   isArchived?: boolean
   archivedAt?: number
   supportsBranching?: boolean
@@ -114,6 +116,20 @@ export interface Session {
    */
   pendingQuestion?: QuestionRequest
 }
+
+/**
+ * Host experiences that can own a session (persisted origin identity).
+ * `edit-popover` marks the renderer Edit Popover's hidden+mini session. It is
+ * stamped SERVER-SIDE by the dedicated trusted creation path and can NEVER be
+ * requested through the generic creation API (review round 2).
+ */
+export type SessionOrigin = 'cli-run' | 'cli-exec' | 'edit-popover'
+
+/**
+ * Origins a generic caller may request at session-creation time. The
+ * privilege-granting `edit-popover` origin is deliberately excluded.
+ */
+export type CreatableSessionOrigin = Exclude<SessionOrigin, 'edit-popover'>
 
 export interface CreateSessionOptions {
   name?: string
@@ -137,13 +153,12 @@ export interface CreateSessionOptions {
   systemPromptPreset?: 'default' | 'mini' | string
   hidden?: boolean
   /**
-   * Host experience that owns the session. Recorded server-side at creation
-   * and persisted with the session; it cannot be granted retroactively through
-   * the generic send API. `edit-popover` marks the renderer Edit Popover's
-   * hidden+mini session (round-10 adjudication) and is the only trusted origin
-   * that unlocks request_user_input for hidden/mini sessions.
+   * Host experience that owns the session. Only the non-privileged values are
+   * requestable here; the server-verified `edit-popover` origin is stamped
+   * exclusively by the dedicated Edit Popover creation path — a value passed
+   * through this generic field is stripped (fail closed).
    */
-  origin?: 'cli-run' | 'cli-exec' | 'edit-popover'
+  origin?: CreatableSessionOrigin
   sessionStatus?: SessionStatus
   labels?: string[]
   isFlagged?: boolean

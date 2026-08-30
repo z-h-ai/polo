@@ -12,7 +12,7 @@
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@polo-ai/core/types';
-import type { QuestionRequest } from '../protocol/dto.ts';
+import type { QuestionRequest, SessionOrigin } from '../protocol/dto.ts';
 
 /**
  * Recoverable "answer committed, waiting for agent resume" state.
@@ -52,6 +52,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
   'name', 'isFlagged', 'sessionStatus', 'labels', 'hidden', 'origin',
+  // Edit Popover ownership (scoped pending-question recovery)
+  'popoverOwner',
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
@@ -213,7 +215,9 @@ export interface SessionConfig {
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Host experience that owns this session. */
-  origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
+  origin?: SessionOrigin;
+  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  popoverOwner?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */
@@ -274,7 +278,9 @@ export interface SessionHeader {
   /** Optional user-defined name */
   name?: string;
   /** Host experience that owns this session. */
-  origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
+  origin?: SessionOrigin;
+  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  popoverOwner?: string;
   createdAt: number;
   lastUsedAt: number;
   /** Timestamp of last meaningful message — persisted separately from lastUsedAt for stable date grouping across restarts. */
@@ -431,7 +437,9 @@ export interface SessionMetadata {
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean;
   /** Host experience that owns this session (from the JSONL header). */
-  origin?: 'cli-run' | 'cli-exec' | 'edit-popover';
+  origin?: SessionOrigin;
+  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  popoverOwner?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
   /** Timestamp when session was archived (for retention policy) */

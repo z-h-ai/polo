@@ -280,6 +280,7 @@ const EXPECTED_CHANNELS: string[] = [
   'sessions:cancel',
   'sessions:command',
   'sessions:create',
+  'sessions:createEditPopoverSession',
   'sessions:delete',
   'sessions:export',
   'sessions:exportRemoteTransfer',

@@ -127,10 +127,17 @@ export interface ISessionManager {
   respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
   /**
    * Locate the Edit Popover session that still owns an active pending
-   * question (hidden session — not reachable through the session list).
-   * Returns null when no popover-origin session is waiting for an answer.
+   * question for the given workspace + popover owner (hidden session — not
+   * reachable through the session list). Exact match only; returns null when
+   * no scoped popover session is waiting for an answer.
    */
-  getEditPopoverPendingSession(): Promise<{ sessionId: string; request: QuestionRequest } | null>
+  getEditPopoverPendingSession(workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null>
+  /**
+   * Dedicated, trusted creation path for the renderer Edit Popover session:
+   * stamps the server-verified 'edit-popover' origin + owner identity. The
+   * generic createSession path strips any caller-provided 'edit-popover'.
+   */
+  createEditPopoverSession(workspaceId: string, options?: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner?: string }): Promise<import('@polo-ai/shared/protocol').Session>
 
   // ---------------------------------------------------------------------------
   // Plans
