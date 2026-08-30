@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
@@ -1038,6 +1038,74 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     } finally {
       server.stop(true)
     }
+  })
+
+  // ---- Review fix round 11, issue B: the PRODUCTION host — a listening
+  // localhost callback server + per-turn server spawns driven from the
+  // sendMessage capability boundary. desktop→messaging→desktop capability
+  // switching is expressed in the spawned args; ONE tool call produces ONE
+  // durable handoff (the stderr delivery mirror is gone).
+
+  it('session MCP host: desktop→messaging→desktop spawn switching and single-delivery durable handoff', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-host-1', {}) as unknown as { processingGeneration: number }
+    let chats = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      chats++
+      return makeFakeAgent()
+    }
+
+    // Stub server entry + start the production host.
+    const entry = join(tmpRoot, 'session-mcp-stub.js')
+    writeFileSync(entry, 'process.exit(0)\n')
+    const hostPort = sm.startSessionMcpHost({ serverEntryPath: entry })
+    expect(hostPort).toBeGreaterThan(0)
+
+    // TURN 1 — desktop: capability ON.
+    await sm.sendMessage('f-host-1', 'turn one', [], [], { invocationSource: 'desktop' })
+    await waitForCondition(() => chats === 1)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spec1 = (sm as unknown as { sessionMcpHost: { lastSpawnSpec: { args: string[] } | null } }).sessionMcpHost!.lastSpawnSpec!
+    expect(spec1.args).toContain('--allow-request-user-input')
+    expect(spec1.args[spec1.args.indexOf('--turn-generation') + 1]!).toBe(String(managed.processingGeneration))
+    expect(spec1.args[spec1.args.indexOf('--callback-port') + 1]!).toBe(String(hostPort))
+
+    // TURN 2 — messaging: capability OFF (fail closed, args switched).
+    await sm.sendMessage('f-host-1', 'turn two', [], [], { invocationSource: 'messaging' })
+    await waitForCondition(() => chats === 2)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spec2 = (sm as unknown as { sessionMcpHost: { lastSpawnSpec: { args: string[] } | null } }).sessionMcpHost!.lastSpawnSpec!
+    expect(spec2.args).not.toContain('--allow-request-user-input')
+    expect(spec2.args[spec2.args.indexOf('--turn-generation') + 1]!).toBe(String(managed.processingGeneration))
+
+    // TURN 3 — desktop again: capability back ON.
+    await sm.sendMessage('f-host-1', 'turn three', [], [], { invocationSource: 'desktop' })
+    await waitForCondition(() => chats === 3)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spec3 = (sm as unknown as { sessionMcpHost: { lastSpawnSpec: { args: string[] } | null } }).sessionMcpHost!.lastSpawnSpec!
+    expect(spec3.args).toContain('--allow-request-user-input')
+
+    // SINGLE DELIVERY: one tool call (one POST to the host route) → exactly
+    // one durable handoff: one pending requestId, one question_request event.
+    const request = makeQuestionRequest('f-host-1-q')
+    const response = await fetch(`http://127.0.0.1:${hostPort}/request-user-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'f-host-1',
+        questions: request.questions,
+        generationAtRequest: managed.processingGeneration,
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'accepted' })
+
+    const pending = sm.getPendingQuestion('f-host-1')
+    expect(pending).not.toBeNull()
+    // Exactly ONE durable handoff for the single tool call.
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+
+    sm.stopSessionMcpHost()
   })
 
   // ---- Review fix round 5, issue A: the generation is bound to the callback

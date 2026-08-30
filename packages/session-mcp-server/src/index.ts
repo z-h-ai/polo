@@ -199,23 +199,17 @@ export function createCodexContext(config: SessionConfig): SessionToolContext {
         ...request,
       });
     },
-    // Question handoff parity with Claude/Pi (review fix rounds 7-9, issue B):
-    // 1. stderr mirror — hosts that integrate via the lifecycle line protocol
-    //    observe `question_requested` (parsed by
-    //    `parseSessionMcpCallbackLine` and routed into the agent's durable
-    //    handoff chain);
-    // 2. AWAITABLE ACK — with a callback host, the tool result does NOT
-    //    resolve until the host has performed the durable handoff and the
-    //    user's answer/cancel reached a terminal state (mirroring the
-    //    call_llm / spawn-session HTTP callback contract). Without a callback
-    //    host the tool fails honestly — never a fake "waiting" success.
+    // Question handoff parity with Claude/Pi (review fix rounds 7-11, issue
+    // B): the HTTP POST to the host callback server is the SINGLE
+    // AUTHORITATIVE delivery channel — the tool result does NOT resolve until
+    // the host has performed the durable handoff and the user's
+    // answer/cancel reached a terminal state. stderr carries a PURE
+    // DIAGNOSTIC line (no __CALLBACK__ delivery semantics) so a single tool
+    // call can never produce two durable handoffs.
     onQuestionRequested: async (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[], generationAtRequest: number) => {
-      sendCallback({
-        __callback__: 'question_requested',
-        sessionId,
-        questions,
-        generationAtRequest,
-      });
+      console.error(
+        `[session-mcp] request_user_input dispatched for session ${sessionId} (turn generation ${generationAtRequest}, ${questions.length} question(s))`
+      );
       if (!config.callbackPort) {
         throw new Error(
           'request_user_input requires a callback host (--callback-port / POLO_AI_LLM_CALLBACK_PORT). Ask your question as plain text instead.'

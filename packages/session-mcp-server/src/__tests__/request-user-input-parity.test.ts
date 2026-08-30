@@ -67,22 +67,21 @@ describe('session MCP / Codex request_user_input parity', () => {
     const originalError = console.error
     console.error = (message: string) => { errors.push(message) }
     try {
-      // The awaitable POST to the unreachable host fails — but the stderr
-      // mirror fires FIRST, which is what this test asserts.
-      await ctx.callbacks.onQuestionRequested?.(validQuestions() as never, 12).catch(() => {})
+      // SINGLE DELIVERY (review fix round 11): stderr carries NO delivery —
+      // no __CALLBACK__ question_requested line may be emitted. Only a pure
+      // diagnostic line is allowed. The awaitable POST to the unreachable
+      // host fails honestly.
+      await Promise.resolve(
+        ctx.callbacks.onQuestionRequested?.(validQuestions() as never, 12),
+      ).catch(() => {})
     } finally {
       console.error = originalError
     }
 
-    expect(errors).toHaveLength(1)
-    const firstError = errors[0] ?? ''
-    expect(firstError.startsWith('__CALLBACK__')).toBe(true)
-    const message = JSON.parse(firstError.slice('__CALLBACK__'.length))
-    expect(message.__callback__).toBe('question_requested')
-    expect(message.sessionId).toBe('codex-bind')
-    // The initiation-time snapshot travels with the callback.
-    expect(message.generationAtRequest).toBe(12)
-    expect(message.questions).toHaveLength(1)
+    // No delivery semantics on stderr — zero __CALLBACK__ question_requested.
+    expect(errors.some(e => e.includes('__CALLBACK__') && e.includes('question_requested'))).toBe(false)
+    // A pure diagnostic line (no callback protocol) is fine.
+    expect(errors.some(e => e.includes('[session-mcp] request_user_input dispatched'))).toBe(true)
     // The context's generation reader serves the per-spawn turn value.
     expect(ctx.getTurnGeneration!()).toBe(12)
   })
@@ -179,8 +178,8 @@ describe('session MCP / Codex request_user_input parity', () => {
         ctx.callbacks.onQuestionRequested!(validQuestions() as never, 21),
       ).resolves.toBeUndefined()
       expect(received).toHaveLength(1)
-      expect(received[0].generationAtRequest).toBe(21)
-      expect(received[0].sessionId).toBe('ack-1')
+      expect(received[0]?.generationAtRequest).toBe(21)
+      expect(received[0]?.sessionId).toBe('ack-1')
 
       // session_missing: the host rejected the handoff — the tool errors
       // (never a fake "waiting" success).
@@ -214,8 +213,9 @@ describe('session MCP / Codex request_user_input parity', () => {
     } finally {
       console.error = originalError
     }
-    // The stderr mirror still fired (notification channel), but the tool
-    // result is an honest failure.
-    expect(errors.some(e => e.includes('question_requested'))).toBe(true)
+    // SINGLE DELIVERY (review fix round 11): no __CALLBACK__ delivery on
+    // stderr — only the pure diagnostic line.
+    expect(errors.some(e => e.includes('__CALLBACK__'))).toBe(false)
+    expect(errors.some(e => e.includes('[session-mcp] request_user_input dispatched'))).toBe(true)
   })
 })

@@ -9,7 +9,7 @@ import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { createSessionMcpCallbackHandler } from './session-mcp-callback-router.ts'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@polo-ai/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, buildSessionMcpServerArgs } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -1272,6 +1272,23 @@ export class SessionManager implements ISessionManager {
    * settles, so deleted sessions do not leak.
    */
   private questionStateLocks: Map<string, Promise<unknown>> = new Map()
+  /**
+   * Session MCP host (review fix round 11, issue B — PRODUCTION wiring).
+   * Started per runtime: mounts the ONLY ack route (POST /request-user-input
+   * → SessionManager durable handoff) on a listening localhost server and
+   * carries the per-turn spawn parameters. When null, the session MCP
+   * production path is dormant and zero behavior changes for Claude/Pi.
+   */
+  private sessionMcpHost: {
+    callbackPort: number
+    serverEntryPath: string
+    nodeRuntimePath?: string
+    server: { stop(force?: boolean): void }
+    /** One live server subprocess per session, stopped at turn end. */
+    children: Map<string, { kill(): void; exited?: Promise<unknown> }>
+    /** Last spawn spec built (diagnostics + tests). */
+    lastSpawnSpec: { command: string; args: string[] } | null
+  } | null = null
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -5792,6 +5809,9 @@ export class SessionManager implements ISessionManager {
    */
   private async cleanupDeletedSession(managed: ManagedSession): Promise<void> {
     const sessionId = managed.id
+    // SESSION MCP HOST (review fix round 11, issue B): a deletion kills the
+    // session's per-turn server subprocess (if any) immediately.
+    this.stopSessionMcpServerForTurn(sessionId)
 
     // Immediately disarm any answer→resume retry — synchronously, BEFORE the
     // abort wait / share-revoke window. The identity guard
@@ -6346,6 +6366,15 @@ export class SessionManager implements ISessionManager {
         agent.allowRequestUserInput = allowRequestUserInputNow
       }
 
+      // SESSION MCP HOST — per-turn consumption (review fix round 11, issue
+      // B): when a host is running, spawn THIS turn's session MCP server with
+      // the current sessionId, the host callback port, the capability DERIVED
+      // FROM THE INVOCATION SOURCE (desktop→messaging→desktop switching is
+      // expressed in the spawned args) and the IMMUTABLE processing
+      // generation. Stopped at turn end; dormant (zero behavior) when no
+      // host was started.
+      this.spawnSessionMcpServerForTurn(sessionId, invocationSource, managed.processingGeneration)
+
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = loadAllSources(workspaceRootPath)
       agent.setAllSources(allSources)
@@ -6836,6 +6865,9 @@ export class SessionManager implements ISessionManager {
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
+    // SESSION MCP HOST (review fix round 11, issue B): this turn's server
+    // subprocess is stopped at turn end — one live server per session.
+    this.stopSessionMcpServerForTurn(sessionId)
 
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
@@ -7295,6 +7327,129 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found (session_missing)`)
     }
     return this.handleQuestionRequested(managed, questions, generationAtRequest)
+  }
+
+  // ===========================================================================
+  // Session MCP host — production wiring (review fix round 11, issue B)
+  // ===========================================================================
+
+  /**
+   * Start the session MCP host: mounts the ONLY ack route
+   * (POST /request-user-input → {@link handleSessionMcpCallbackRequest} →
+   * durable handoff) on a listening localhost server and records the spawn
+   * parameters. Per-turn servers are then spawned by {@link
+   * spawnSessionMcpServerForTurn} from the sendMessage turn-start path.
+   */
+  startSessionMcpHost(options: { serverEntryPath: string; nodeRuntimePath?: string; callbackPort?: number }): number {
+    if (this.sessionMcpHost) return this.sessionMcpHost.callbackPort
+    const handler = createSessionMcpCallbackHandler(this)
+    const server = Bun.serve({
+      port: options.callbackPort ?? 0,
+      hostname: '127.0.0.1',
+      fetch: req => handler(req),
+    })
+    const callbackPort: number = (server as { port: number }).port
+    this.sessionMcpHost = {
+      callbackPort,
+      serverEntryPath: options.serverEntryPath,
+      nodeRuntimePath: options.nodeRuntimePath,
+      server,
+      children: new Map(),
+      lastSpawnSpec: null,
+    }
+    sessionLog.info(`Session MCP host started on 127.0.0.1:${callbackPort} (entry: ${options.serverEntryPath})`)
+    return callbackPort
+  }
+
+  /** Stop the host: kills every per-turn server subprocess and the listener. */
+  stopSessionMcpHost(): void {
+    const host = this.sessionMcpHost
+    if (!host) return
+    for (const child of host.children.values()) {
+      try { child.kill() } catch { /* already exited */ }
+    }
+    host.children.clear()
+    host.server.stop(true)
+    this.sessionMcpHost = null
+    sessionLog.info('Session MCP host stopped')
+  }
+
+  /**
+   * Build THIS turn's session MCP server spawn spec. PRODUCTION consumption
+   * of the shared spawn-spec builder with the reviewer-mandated parameters:
+   * the current sessionId, the host's callback port, the capability DERIVED
+   * FROM THE INVOCATION SOURCE (desktop-only eligibility matrix) and the
+   * caller's IMMUTABLE processingGeneration snapshot.
+   */
+  buildSessionMcpServerForTurnArgs(
+    sessionId: string,
+    invocationSource: InvocationSource,
+    processingGeneration: number,
+  ): { spec: { command: string; args: string[] }; allowRequestUserInput: boolean } | null {
+    const host = this.sessionMcpHost
+    if (!host) return null
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return null
+    const allowRequestUserInput = computeRequestUserInputEligibility(
+      invocationSource,
+      managed.hidden,
+      managed.systemPromptPreset === 'mini',
+      managed.origin,
+    )
+    const spec = {
+      command: host.nodeRuntimePath ?? process.execPath,
+      args: [
+        host.serverEntryPath,
+        ...buildSessionMcpServerArgs({
+          sessionId,
+          workspaceRootPath: managed.workspace.rootPath,
+          plansFolderPath: this.sessionStorage.getPlansPath(managed.workspace.rootPath, sessionId),
+          callbackPort: String(host.callbackPort),
+          allowRequestUserInput,
+          turnGeneration: processingGeneration,
+        }),
+      ],
+    }
+    return { spec, allowRequestUserInput }
+  }
+
+  /**
+   * Spawn THIS turn's session MCP server (per-turn consumption from the
+   * sendMessage capability boundary). One live server per session; it is
+   * stopped at turn end (onProcessingStopped) and by deleteSession cleanup.
+   */
+  spawnSessionMcpServerForTurn(sessionId: string, invocationSource: InvocationSource, processingGeneration: number): void {
+    const host = this.sessionMcpHost
+    if (!host) return
+    const built = this.buildSessionMcpServerForTurnArgs(sessionId, invocationSource, processingGeneration)
+    if (!built) return
+    // Stop any previous turn's server first — one live server per session.
+    this.stopSessionMcpServerForTurn(sessionId)
+    const child = Bun.spawn([built.spec.command, ...built.spec.args], {
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    })
+    host.children.set(sessionId, child)
+    host.lastSpawnSpec = built.spec
+    sessionLog.info(`Spawned session MCP server for session ${sessionId} (pid ${child.pid}, capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
+    const exited: Promise<unknown> | undefined = child.exited
+    if (exited) {
+      void exited.then(() => {
+        if (host.children.get(sessionId) === child) host.children.delete(sessionId)
+      }).catch(() => {})
+    }
+  }
+
+  /** Stop THIS session's per-turn server subprocess (turn end / deletion). */
+  stopSessionMcpServerForTurn(sessionId: string): void {
+    const host = this.sessionMcpHost
+    if (!host) return
+    const child = host.children.get(sessionId)
+    if (child) {
+      try { child.kill() } catch { /* already exited */ }
+      host.children.delete(sessionId)
+    }
   }
 
   private async handleQuestionRequested(
