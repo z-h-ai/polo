@@ -3127,26 +3127,36 @@ export class SessionManager implements ISessionManager {
       return session
     }
     // Stamp server-side, then make it durable. ONLY a successful persist+flush
-    // leaves the session privileged: a transient disk failure rolls the stamp
-    // back (in memory AND on disk) so this process can never treat the
-    // session as an eligible Edit Popover session without a complete,
-    // restart-safe header (origin + owner). Fail closed, never
-    // "privileged but not persisted".
+    // leaves the session privileged: a transient disk failure must never hand
+    // the renderer a "created" session that silently lacks its eligibility —
+    // such a session loses request_user_input on desktop turns and stays
+    // invisible to owner-scoped recovery forever. The just-created hidden
+    // orphan is torn down (runtime + memory + disk, best-effort) and the RPC
+    // REJECTS as transient so the restore/send entry can retry cleanly
+    // (review fix round 1, issue 2).
     managed.origin = 'edit-popover'
     managed.popoverOwner = popoverOwner
     try {
       this.persistSession(managed)
       await this.flushSession(managed.id)
     } catch (error) {
-      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; rolling back to unprivileged:`, error)
-      managed.origin = undefined
-      managed.popoverOwner = undefined
-      try {
-        this.persistSession(managed)
-        await this.flushSession(managed.id)
-      } catch (rollbackError) {
-        sessionLog.error(`Failed to persist the rolled-back (unprivileged) state for session ${managed.id}:`, rollbackError)
-      }
+      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; removing the orphan session:`, error)
+      await rollbackFailedBranchCreation({
+        managed,
+        workspaceRootPath: managed.workspace.rootPath,
+        sessionId: managed.id,
+        deleteFromRuntimeSessions: (id) => {
+          const m = this.sessions.get(id)
+          if (m?.autoRetryTimer) {
+            clearTimeout(m.autoRetryTimer)
+            m.autoRetryTimer = undefined
+          }
+          if (m) m.autoRetryPending = undefined
+          this.sessions.delete(id)
+        },
+        deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
+      })
+      throw new Error(`Edit Popover session creation is temporarily unavailable (durable origin stamp failed): ${error instanceof Error ? error.message : String(error)}`)
     }
     return managedToSession(managed, this.sessionStorage)
   }
@@ -7793,13 +7803,37 @@ export class SessionManager implements ISessionManager {
    * Clear any pending question for a session and notify renderers.
    * Used by session stop / archive / delete lifecycle transitions.
    * Answers the "who cleared it" question on the wire via question_resolved.
+   *
+   * FAILURE-ATOMIC (review fix round 1, issue 1): the memory clear only
+   * becomes final after the flush succeeds. On a persist/flush failure the
+   * authoritative pending question is restored in memory (and re-enqueued
+   * best-effort, mirroring {@link rollbackQuestionResolution}) and the error
+   * propagates, so the lifecycle transition stays retryable: a one-way
+   * memory clear would turn the NEXT stop/archive into a no-op while the
+   * disk still holds the question and renderers still show the card.
+   * question_resolved is broadcast ONLY after a durable clear — exactly one
+   * terminal notification per request.
    */
   private async clearPendingQuestionForSession(managed: ManagedSession): Promise<void> {
     const pending = managed.pendingQuestion
     if (!pending) return
     managed.pendingQuestion = undefined
-    this.persistSession(managed)
-    await this.flushSession(managed.id)
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } catch (error) {
+      managed.pendingQuestion = pending
+      sessionLog.error(`Failed to durably clear pending question ${pending.requestId} for session ${managed.id}; state restored for retry:`, error)
+      try {
+        this.persistSession(managed)
+        void this.flushSession(managed.id).catch(requeueError => {
+          sessionLog.error(`Failed to re-persist restored pending question for session ${managed.id}:`, requeueError)
+        })
+      } catch (requeueError) {
+        sessionLog.error(`Failed to re-persist restored pending question for session ${managed.id}:`, requeueError)
+      }
+      throw error
+    }
     this.sendEvent({
       type: 'question_resolved',
       sessionId: managed.id,

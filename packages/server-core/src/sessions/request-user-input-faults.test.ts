@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
@@ -35,7 +35,8 @@ const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts
 // - answer/cancel flush failures must leave the pending question intact so
 //   the SAME resolution can be retried (transient_failure is truthful)
 // - stop while a question is pending must clear + broadcast; repeated stop is
-//   a no-op
+//   a no-op; a stop whose durable clear FAILS restores the pending (retryable)
+//   and never broadcasts — only the converged second stop broadcasts ONCE
 // - getOrCreateAgent failures reset processing and the retry drives the REAL
 //   entry again without duplicating the user message
 // - the round-10 adjudicated Edit Popover eligibility exception (hidden+mini
@@ -314,6 +315,42 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // Repeated stop: no error, no duplicate broadcast
     await sm.cancelProcessing('f-stop-1')
     expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(1)
+  })
+
+  // Review fix round 1, issue 1: the lifecycle clear is FAILURE-ATOMIC — a
+  // failed flush must restore the pending (the next stop stays a real retry,
+  // not a no-op) and must NOT broadcast question_resolved. Only the durable
+  // clear converges memory + disk + renderers, exactly once.
+  it('a failed stop flush restores the pending; the next stop converges memory + JSONL + renderers with ONE terminal event', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-stop-2')
+    seedSession('f-stop-2', { pendingQuestion: request, isProcessing: false })
+
+    // FIRST stop: the durable clear fails (transient disk fault) and the
+    // failure is surfaced — not a silent "stopped" with a stranded card.
+    failFlush = true
+    await expect(sm.cancelProcessing('f-stop-2')).rejects.toThrow('disk full')
+
+    // Memory: the authoritative pending is RESTORED (retryable state).
+    expect(sm.getPendingQuestion('f-stop-2')?.requestId).toBe(request.requestId)
+    // Disk: the JSONL header still holds the pending question.
+    const headerDuringFault = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-stop-2'), 'utf-8').split('\n')[0])
+    expect(headerDuringFault.pendingQuestion?.requestId).toBe(request.requestId)
+    expect(headerDuringFault.hasPendingQuestion).toBe(true)
+    // Renderers: no terminal broadcast while the clear is not durable.
+    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(0)
+
+    // Fault clears: the SECOND stop converges everything and broadcasts ONCE.
+    failFlush = false
+    await sm.cancelProcessing('f-stop-2')
+
+    expect(sm.getPendingQuestion('f-stop-2')).toBeNull()
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-stop-2'), 'utf-8').split('\n')[0])
+    expect(header.pendingQuestion).toBeUndefined()
+    expect(header.hasPendingQuestion).toBe(false)
+    const resolved = events.filter(e => e.type === 'question_resolved')
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toMatchObject({ sessionId: 'f-stop-2', requestId: request.requestId, action: 'cancel' })
   })
 
   it('answer committed but sendMessage rejects before agent init: error surfaced, state recoverable, retry succeeds (never silent-accepted-stranded)', async () => {
@@ -974,12 +1011,17 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         }
       })
 
-      it('a failed durable stamp rolls back to unprivileged (memory + disk); the turn stays fail closed', async () => {
+      // Review fix round 1, issue 2: a failed durable stamp (or a failed
+      // rollback) must REJECT the creation — never hand back a silently
+      // unprivileged session. The just-created hidden orphan is removed from
+      // memory AND disk, and a retry with the fault cleared succeeds and is
+      // fully eligible.
+      it('a failed durable stamp rejects the creation and removes the orphan (memory + disk); a retry succeeds eligible', async () => {
         const smS = new SessionManager({ workspace: buildWorkspace() })
         stubAgentCaptureFlag(smS)
         try {
           // Fail exactly the FIRST flushSession call (the stamp flush); the
-          // rollback flush and everything after succeeds.
+          // retry creation's flushes succeed.
           const realFlush = (Object.getPrototypeOf(smS) as { flushSession: (id: string) => Promise<void> }).flushSession
           let flushCalls = 0
           ;(smS as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
@@ -990,6 +1032,27 @@ describe('request_user_input fault injection + stop lifecycle', () => {
             return realFlush.call(smS, id)
           }
 
+          // The RPC REJECTS as transient — no silent "created" session.
+          await expect((smS as unknown as {
+            createEditPopoverSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
+          }).createEditPopoverSession('ws_test', {
+            model: 'fast',
+            systemPromptPreset: 'mini',
+            permissionMode: 'allow-all',
+            hidden: true,
+            popoverOwner: OWNER_ID,
+          })).rejects.toThrow(/temporarily unavailable/)
+
+          // MEMORY: no orphan runtime session remains registered.
+          expect((smS as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(0)
+
+          // DISK: the stored orphan was removed (no session directories left).
+          const sessionsDir = join(tmpRoot, 'sessions')
+          const leftovers = existsSync(sessionsDir) ? readdirSync(sessionsDir) : []
+          expect(leftovers).toEqual([])
+
+          // RETRY: with the fault cleared, the same call succeeds, stamps the
+          // trusted origin + owner durably, and the session is eligible.
           const session = await (smS as unknown as {
             createEditPopoverSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
           }).createEditPopoverSession('ws_test', {
@@ -1001,22 +1064,12 @@ describe('request_user_input fault injection + stop lifecycle', () => {
           })
           seededSessionIds.add(session.id)
 
-          // In-memory: the stamp was rolled back
-          const managed = (smS as unknown as { sessions: Map<string, unknown> }).sessions.get(session.id) as unknown as {
-            origin?: string
-            popoverOwner?: string
-          }
-          expect(managed.origin).toBeUndefined()
-          expect(managed.popoverOwner).toBeUndefined()
-
-          // Disk: the rolled-back (unprivileged) state was persisted
           const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, session.id), 'utf-8').split('\n')[0])
-          expect(header.origin).not.toBe('edit-popover')
-          expect(header.popoverOwner).toBeUndefined()
+          expect(header.origin).toBe('edit-popover')
+          expect(header.popoverOwner).toBe(OWNER_ID)
 
-          // The hidden+mini session stays fail closed on a desktop turn
-          await smS.sendMessage(session.id, 'turn on unprivileged session', [], [], { invocationSource: 'desktop' })
-          expect(flagOf()).toBe(false)
+          await smS.sendMessage(session.id, 'turn on retried popover session', [], [], { invocationSource: 'desktop' })
+          expect(flagOf()).toBe(true)
         } finally {
           ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
         }
