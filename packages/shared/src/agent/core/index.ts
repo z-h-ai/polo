@@ -101,6 +101,11 @@ export {
   SessionLifecycleManager,
   createSessionLifecycleManager,
 } from './session-lifecycle.ts';
+export {
+  parseSessionMcpCallbackLine,
+  isQuestionRequestedCallback,
+} from './session-lifecycle.ts';
+export type { SessionMcpCallbackMessage } from './session-lifecycle.ts';
 
 // Usage Tracker
 export {

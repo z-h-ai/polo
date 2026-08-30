@@ -8,8 +8,9 @@
  * generation snapshot.
  */
 import { describe, expect, it } from 'bun:test'
-import { createSessionTools, createCodexContext } from '../index.ts'
+import { createSessionTools, createCodexContext, buildSessionMcpServerArgs } from '../index.ts'
 import { getSessionToolRegistry } from '@polo-ai/session-tools-core'
+import { parseSessionMcpCallbackLine, isQuestionRequestedCallback } from '@polo-ai/shared/agent'
 
 const RUI = 'request_user_input'
 
@@ -65,14 +66,15 @@ describe('session MCP / Codex request_user_input parity', () => {
     const originalError = console.error
     console.error = (message: string) => { errors.push(message) }
     try {
-      ctx.callbacks.onQuestionRequested!(validQuestions() as never, 12)
+      ctx.callbacks.onQuestionRequested?.(validQuestions() as never, 12)
     } finally {
       console.error = originalError
     }
 
     expect(errors).toHaveLength(1)
-    expect(errors[0].startsWith('__CALLBACK__')).toBe(true)
-    const message = JSON.parse(errors[0].slice('__CALLBACK__'.length))
+    const firstError = errors[0] ?? ''
+    expect(firstError.startsWith('__CALLBACK__')).toBe(true)
+    const message = JSON.parse(firstError.slice('__CALLBACK__'.length))
     expect(message.__callback__).toBe('question_requested')
     expect(message.sessionId).toBe('codex-bind')
     // The initiation-time snapshot travels with the callback.
@@ -80,5 +82,64 @@ describe('session MCP / Codex request_user_input parity', () => {
     expect(message.questions).toHaveLength(1)
     // The context's generation reader serves the per-spawn turn value.
     expect(ctx.getTurnGeneration!()).toBe(12)
+  })
+
+  // ---- Review fix round 8, issue B: production launch wiring ----
+
+  it('launcher: a desktop turn spawn carries the capability flag and the turn generation', () => {
+    const args = buildSessionMcpServerArgs({
+      sessionId: 's1',
+      workspaceRootPath: '/ws',
+      plansFolderPath: '/ws/plans',
+      allowRequestUserInput: true,
+      turnGeneration: 7,
+    })
+    expect(args).toContain('--allow-request-user-input')
+    expect(args.indexOf('--turn-generation')).toBeGreaterThanOrEqual(0)
+    expect(args[args.indexOf('--turn-generation') + 1]).toBe('7')
+    expect(args).toContain('--session-id')
+    expect(args[args.indexOf('--session-id') + 1]).toBe('s1')
+  })
+
+  it('launcher: a non-desktop turn spawn omits both (fail closed)', () => {
+    const args = buildSessionMcpServerArgs({
+      sessionId: 's2',
+      workspaceRootPath: '/ws',
+      plansFolderPath: '/ws/plans',
+    })
+    expect(args).not.toContain('--allow-request-user-input')
+    expect(args).not.toContain('--turn-generation')
+  })
+
+  it('launcher: callback port is passed through when provided', () => {
+    const args = buildSessionMcpServerArgs({
+      sessionId: 's3',
+      workspaceRootPath: '/ws',
+      plansFolderPath: '/ws/plans',
+      callbackPort: '9377',
+    })
+    expect(args).toContain('--callback-port')
+    expect(args[args.indexOf('--callback-port') + 1]).toBe('9377')
+  })
+
+  it('callback parser: a question_requested stderr line parses into the durable-handoff payload; garbage lines are skipped', () => {
+    const payload = {
+      __callback__: 'question_requested',
+      sessionId: 's4',
+      questions: validQuestions(),
+      generationAtRequest: 7,
+    }
+    const parsed = parseSessionMcpCallbackLine(`__CALLBACK__${JSON.stringify(payload)}`)
+    expect(parsed).not.toBeNull()
+    expect(isQuestionRequestedCallback(parsed!)).toBe(true)
+    if (isQuestionRequestedCallback(parsed!)) {
+      expect(parsed.generationAtRequest).toBe(7)
+      expect(parsed.questions).toHaveLength(1)
+      expect(parsed.sessionId).toBe('s4')
+    }
+
+    // Non-callback log lines and corrupt payloads are skipped, never thrown.
+    expect(parseSessionMcpCallbackLine('[session] some regular log')).toBeNull()
+    expect(parseSessionMcpCallbackLine('__CALLBACK__not-json')).toBeNull()
   })
 })

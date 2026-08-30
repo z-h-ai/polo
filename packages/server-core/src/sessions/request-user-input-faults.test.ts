@@ -23,6 +23,34 @@ mock.module('@polo-ai/server-core/domain', () => ({
   },
 }))
 
+// Optional park point for the sendMessage OWNER path (review fix round 8,
+// issue A): the owner's pre-section plan-state clear. Lets a test hold the
+// turn-start reservation while the question-state lock stays FREE — so an
+// answer/cancel can still commit (the round-8 critical section serialized
+// those behind the owner section). Only set per-test; null = pass-through.
+// bun's mock.module retargets the module globally, so the factory must
+// provide a WORKING implementation (same semantics as
+// clearPendingPlanExecution) built from the pass-through storage helpers.
+const actualSessions = await import('@polo-ai/shared/sessions')
+let planClearGate: Promise<void> | null = null
+mock.module('@polo-ai/shared/sessions', () => ({
+  ...actualSessions,
+  clearPendingPlanExecution: async (
+    workspaceRootPath: string,
+    sessionId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    storage: any = actualSessions.defaultWorkspaceSessionStorage,
+  ): Promise<void> => {
+    if (planClearGate) await planClearGate
+    // Same semantics as the original clearPendingPlanExecution, via the
+    // index-passed-through default-storage helpers.
+    const session = actualSessions.loadSession(workspaceRootPath, sessionId)
+    if (!session) return
+    delete session.pendingPlanExecution
+    await actualSessions.saveSession(session)
+  },
+}))
+
 const { SessionManager, createManagedSession, computeRequestUserInputEligibility } = await import('./SessionManager.ts')
 const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
@@ -891,6 +919,90 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     await deletePromise
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv'))).toBe(false)
+  })
+
+  // ---- Review fix round 8, issue A: the reservation→commit gap is CLOSED —
+  // deletion re-validation, user-message persistence and the turn-start
+  // commit are ONE lock-held transaction. A delete inserted before the
+  // section's persistence aborts the send BEFORE any persistence or
+  // broadcast.
+
+  it('a delete inserted before the user-message persistence: no persist, no accepted broadcast, no resurrection', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-del-gap', {}) as unknown as {
+      questionLifecycleTombstone?: { reason: string }
+      turnStartReserved?: boolean
+      isProcessing: boolean
+      messages: Array<Record<string, unknown>>
+    }
+
+    // Hold the lock: the send claims its reservation synchronously, then
+    // parks at the critical-section entry — BEFORE any persistence.
+    let releaseLock!: () => void
+    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
+    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
+      .withQuestionStateLock('f-del-gap', () => hungLock)
+
+    let acked = false
+    const sendPromise = sm.sendMessage(
+      'f-del-gap', 'racing message', [], [],
+      { invocationSource: 'desktop' },
+      undefined,
+      undefined,
+      () => { acked = true },
+    )
+    await new Promise(r => setTimeout(r, 30))
+    expect(managed.turnStartReserved).toBe(true)
+
+    // The delete is inserted NOW — before the user-message persist.
+    const deletePromise = sm.deleteSession('f-del-gap')
+    await new Promise(r => setTimeout(r, 30))
+
+    releaseLock()
+    await expect(sendPromise).rejects.toThrow(/session_missing/)
+
+    // Nothing was persisted or broadcast for the dying session.
+    expect(acked).toBe(false)
+    expect(managed.messages.filter(m => m.role === 'user')).toHaveLength(0)
+    expect(events.filter(e => e.type === 'user_message')).toHaveLength(0)
+    // The tombstone was NOT cleared by a generation bump; reservation released.
+    expect(managed.questionLifecycleTombstone?.reason).toBe('deleted')
+    expect(managed.turnStartReserved).toBe(false)
+    expect(managed.isProcessing).toBe(false)
+
+    await deletePromise
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-gap'))).toBe(false)
+  })
+
+  // ---- Review fix round 8, issue B: the session MCP/Codex callback chain
+  // lands in the SAME durable handoff — a parsed question_requested stderr
+  // message drives handleQuestionRequested (persist + broadcast + handoff).
+
+  it('a session MCP question_requested callback drives the durable handoff (persist + question_request)', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-mcp-cb', { isProcessing: true, withAgent: true }) as unknown as { processingGeneration: number }
+    const { parseSessionMcpCallbackLine, isQuestionRequestedCallback } = await import('@polo-ai/shared/agent')
+
+    // Simulate the session MCP server's stderr line for THIS turn's tool call.
+    const payload = {
+      __callback__: 'question_requested',
+      sessionId: 'f-mcp-cb',
+      questions: makeQuestionRequest('f-mcp-cb').questions,
+      generationAtRequest: managed.processingGeneration,
+    }
+    const parsed = parseSessionMcpCallbackLine(`__CALLBACK__${JSON.stringify(payload)}`)
+    expect(isQuestionRequestedCallback(parsed!)).toBe(true)
+    if (!isQuestionRequestedCallback(parsed!)) return
+
+    // The host routes the parsed callback into the durable handoff.
+    await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void> })
+      .handleQuestionRequested(managed, parsed.questions as never, parsed.generationAtRequest)
+
+    // Durable: pending question authoritative + renderer notified.
+    expect(sm.getPendingQuestion('f-mcp-cb')).not.toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-mcp-cb'), 'utf-8').split('\n')[0])
+    expect(header.hasPendingQuestion).toBe(true)
   })
 
   // ---- Review fix round 5, issue A: the generation is bound to the callback
@@ -1778,19 +1890,13 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         const request = makeQuestionRequest('f-res-resv')
         seedSession('f-res-resv', { pendingQuestion: { ...request, invocationSource: 'desktop' } })
 
-        // Owner claims the turn start, then stalls at its pre-start flush.
-        let releaseFlush: (() => void) | null = null
-        const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
-        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
-        let flushCalls = 0
-        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
-          flushCalls++
-          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
-          return realFlush.call(sm, id)
-        }
+        // Owner claims the turn start, then stalls BEFORE the round-8
+        // critical section (plan-state clear) — the question-state lock stays
+        // FREE so the answer can commit while the reservation is held.
+        let releaseOwner!: () => void
+        planClearGate = new Promise<void>(resolve => { releaseOwner = resolve })
         const ownerSend = sm.sendMessage('f-res-resv', 'owner message', [], [], { invocationSource: 'desktop' })
-        await waitForCondition(() => flushCalls === 1)
-        expect(getManaged('f-res-resv').turnStartReserved).toBe(true)
+        await waitForCondition(() => getManaged('f-res-resv').turnStartReserved === true)
 
         // The answer commits while the reservation is held.
         const result = await sm.respondToQuestion('f-res-resv', makeAnswerResolution(request))
@@ -1806,7 +1912,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         // claims its generation the (round-8) durable supersede clears the
         // recovery: the owner turn's context already includes the answer
         // message, and a separate resume turn would double-run it.
-        releaseFlush!()
+        releaseOwner!()
+        planClearGate = null
         await ownerSend
 
         await waitForCondition(() => getManaged('f-res-resv').pendingAgentResume === undefined, 8000)
@@ -1836,18 +1943,27 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         const request = makeQuestionRequest('f-res-owner-fail')
         seedSession('f-res-owner-fail', { pendingQuestion: { ...request, invocationSource: 'desktop' } })
 
-        // Owner claims, then its pre-start flush FAILS.
+        // Owner claims, then stalls BEFORE the round-8 critical section.
+        let releaseOwner!: () => void
+        planClearGate = new Promise<void>(resolve => { releaseOwner = resolve })
+
+        // The OWNER's user-message flush fails (pre-start failure). Call #1
+        // is the ANSWER's commit flush (must succeed); call #2 is the
+        // owner's — gated to fail.
         let rejectFlush: ((e: Error) => void) | null = null
         const flushGate = new Promise<void>((_resolve, reject) => { rejectFlush = reject })
+        // The gate may be rejected slightly before the owner's flush awaits
+        // it — swallow the raw rejection so bun doesn't flag it unhandled.
+        flushGate.catch(() => {})
         const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
         let flushCalls = 0
         ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
           flushCalls++
-          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          if (flushCalls === 2) return flushGate.then(() => { throw new Error('pre-start flush failed (injected)') })
           return realFlush.call(sm, id)
         }
         const ownerSend = sm.sendMessage('f-res-owner-fail', 'owner message', [], [], { invocationSource: 'desktop' })
-        await waitForCondition(() => flushCalls === 1)
+        await waitForCondition(() => getManaged('f-res-owner-fail').turnStartReserved === true)
 
         // The answer commits while the reservation is held; the resume defers.
         const result = await sm.respondToQuestion('f-res-owner-fail', makeAnswerResolution(request))
@@ -1857,6 +1973,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect(factory.chats()).toBe(0)
 
         // The owner turn never starts (pre-start failure).
+        releaseOwner!()
+        planClearGate = null
         rejectFlush!(new Error('pre-start flush failed (injected)'))
         await expect(ownerSend).rejects.toThrow('pre-start flush failed (injected)')
 

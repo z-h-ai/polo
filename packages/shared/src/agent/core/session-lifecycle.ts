@@ -254,3 +254,49 @@ export function createSessionLifecycleManager(
 ): SessionLifecycleManager {
   return new SessionLifecycleManager(config);
 }
+
+// ============================================================
+// Session MCP Server stderr Callback Protocol (review fix round 8, issue B)
+// ============================================================
+
+/**
+ * Parsed `__CALLBACK__` message emitted by the session MCP server subprocess
+ * on stderr. `question_requested` carries the issuing turn's generation
+ * snapshot so the host can route it into the SAME durable handoff the
+ * Claude/Pi paths use (pendingQuestion persist + question_request event +
+ * handoff), with stale-callback rejection intact.
+ */
+export type SessionMcpCallbackMessage =
+  | { __callback__: 'plan_submitted'; sessionId: string; planPath: string }
+  | { __callback__: 'auth_request'; sessionId: string; request: unknown }
+  | {
+      __callback__: 'question_requested';
+      sessionId: string;
+      questions: Array<Record<string, unknown>>;
+      generationAtRequest: number;
+    };
+
+/**
+ * Parse one stderr line emitted by the session MCP server subprocess.
+ * Returns null for non-callback lines (regular logs) and for corrupt
+ * payloads — the caller skips those silently.
+ */
+export function parseSessionMcpCallbackLine(line: string): SessionMcpCallbackMessage | null {
+  if (!line.startsWith('__CALLBACK__')) return null;
+  try {
+    const parsed = JSON.parse(line.slice('__CALLBACK__'.length)) as SessionMcpCallbackMessage;
+    if (!parsed || typeof parsed.__callback__ !== 'string' || !parsed.sessionId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a parsed session MCP callback is a durable question handoff.
+ */
+export function isQuestionRequestedCallback(
+  message: SessionMcpCallbackMessage
+): message is Extract<SessionMcpCallbackMessage, { __callback__: 'question_requested' }> {
+  return message.__callback__ === 'question_requested';
+}

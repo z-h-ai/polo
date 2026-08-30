@@ -286,6 +286,9 @@ export function createCodexContext(config: SessionConfig): SessionToolContext {
   };
 }
 
+export { buildSessionMcpServerArgs } from './launcher.ts';
+export type { SessionMcpSpawnOptions } from './launcher.ts';
+
 // ============================================================
 // Tool Definitions (from canonical registry)
 // ============================================================
@@ -512,6 +515,7 @@ export async function main() {
   let plansFolderPath: string | undefined;
   let callbackPort: string | undefined;
   let allowRequestUserInputFlag = false;
+  let turnGenerationFlag: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--session-id' && args[i + 1]) {
@@ -525,6 +529,9 @@ export async function main() {
       i++;
     } else if (args[i] === '--allow-request-user-input') {
       allowRequestUserInputFlag = true;
+    } else if (args[i] === '--turn-generation' && args[i + 1] != null) {
+      turnGenerationFlag = Number.parseInt(args[i + 1] as string, 10) || 0;
+      i++;
     } else if (args[i] === '--callback-port' && args[i + 1]) {
       callbackPort = args[i + 1];
       i++;
@@ -545,7 +552,9 @@ export async function main() {
     // Per-turn request_user_input capability (review fix round 7, issue B):
     // fail closed — only an explicit opt-in (desktop turn spawn) enables it.
     allowRequestUserInput: allowRequestUserInputFlag || process.env.POLO_AI_ALLOW_REQUEST_USER_INPUT === '1',
-    turnGeneration: Number.parseInt(process.env.POLO_AI_TURN_GENERATION ?? '0', 10) || 0,
+    // Explicit per-turn spawn argument (the launcher's channel) takes
+    // priority over the env fallback.
+    turnGeneration: turnGenerationFlag ?? (Number.parseInt(process.env.POLO_AI_TURN_GENERATION ?? '0', 10) || 0),
   };
   // Create the Codex context
   const ctx = createCodexContext(config);
