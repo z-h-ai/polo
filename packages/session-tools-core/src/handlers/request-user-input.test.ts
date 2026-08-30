@@ -265,6 +265,24 @@ describe('handleRequestUserInput', () => {
     expect(result.content[0]?.text).toContain('Waiting');
   });
 
+  it('success copy distinguishes the two terminal outcomes (answer resumes, skip does not)', async () => {
+    const ctx = makeCtx({
+      onQuestionRequested: () => {},
+    });
+
+    const result = await handleRequestUserInput(ctx, { questions: [makeQuestion()] });
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0]?.text ?? '';
+    // Answer path resumes automatically
+    expect(text).toContain('if the user answers, the conversation resumes automatically with those answers');
+    // Skip path is a terminal turn end — must NOT promise an automatic resume
+    expect(text).toContain('if the user chooses to skip, the skip is recorded and this turn ends');
+    expect(text).toContain('no automatic resume in that case');
+    // Regression guard: the old copy promised auto-resume for both outcomes
+    expect(text.includes("their decision to skip")).toBe(false);
+    expect(/skip[^.]*resume automatically/i.test(text)).toBe(false);
+  });
+
   it('awaits a delayed callback — the tool result settles only after the durable handoff', async () => {
     let releaseCallback: (() => void) | null = null;
     const gate = new Promise<void>(resolve => { releaseCallback = resolve; });

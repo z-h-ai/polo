@@ -1688,7 +1688,14 @@ export default function App() {
     runtimeChatAccessIssue,
   ])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (
+    sessionId: string,
+    message: string,
+    attachments?: FileAttachment[],
+    skillSlugs?: string[],
+    externalBadges?: ContentBadge[],
+    sendOptions?: { editPopoverTurn?: boolean },
+  ) => {
     try {
       if (chatAccessStatus) {
         return
@@ -1846,11 +1853,15 @@ export default function App() {
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence.
       // Desktop interactive turns explicitly declare their invocation source so
       // request_user_input is registered for this turn (P0 entry-eligibility contract).
+      // `editPopoverTurn` is the round-10 adjudicated exception: ONLY the
+      // renderer EditPopover sets it, unlocking the tool for its single
+      // hidden+mini turn.
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
         invocationSource: 'desktop',
+        ...(sendOptions?.editPopoverTurn === true ? { editPopoverTurn: true as const } : {}),
       })
     } catch (error) {
       console.error('Failed to send message:', error)

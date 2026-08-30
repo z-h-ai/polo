@@ -979,7 +979,11 @@ export function EditPopover({
     // Send message via App context (includes optimistic user message update)
     // Pass badges to hide the <edit_request> XML metadata in the user message bubble
     if (sessionId) {
-      onSendMessage(sessionId, prompt, undefined, undefined, badges)
+      // Round-10 adjudication (request_id 83c0c3ce-r10-d1): the Edit Popover is
+      // the ONLY caller allowed to set `editPopoverTurn` — it unlocks
+      // request_user_input for this single hidden+mini session turn. The
+      // session creation options above are unchanged.
+      onSendMessage(sessionId, prompt, undefined, undefined, badges, { editPopoverTurn: true })
     }
   }, [context, displayLabel, inlineSessionId, workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, onCreateSession, onSendMessage])
 

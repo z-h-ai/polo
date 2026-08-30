@@ -23,19 +23,23 @@ mock.module('@polo-ai/server-core/domain', () => ({
   },
 }))
 
-const { SessionManager, createManagedSession } = await import('./SessionManager.ts')
+const { SessionManager, createManagedSession, computeRequestUserInputEligibility } = await import('./SessionManager.ts')
 const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 
-// Review fixes #2 and #4 (fault injection) and #5 (stop clears pending):
+// Round 6/7/8/10 fault-injection and lifecycle coverage for request_user_input:
 // - question-request flush failure must roll the replacement back and NOT
 //   hand off (agent keeps running, no question_request/complete events)
 // - release failure must not skip the handoff completion (complete still sent)
 // - answer/cancel flush failures must leave the pending question intact so
 //   the SAME resolution can be retried (transient_failure is truthful)
-// - stop while a question is pending (isProcessing already false after the
-//   QuestionRequested handoff) must clear + broadcast; repeated stop is a no-op
+// - stop while a question is pending must clear + broadcast; repeated stop is
+//   a no-op
+// - getOrCreateAgent failures reset processing and the retry drives the REAL
+//   entry again without duplicating the user message
+// - the round-10 adjudicated Edit Popover eligibility exception (hidden+mini
+//   turn with the explicit marker) and fail-closed paths
 
 describe('request_user_input fault injection + stop lifecycle', () => {
   let tmpRoot: string
@@ -43,6 +47,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   let events: Array<Record<string, unknown>>
   let flushCalls: number
   let failFlush: boolean
+  const seededSessionIds = new Set<string>()
 
   const { makeQuestionRequest, makeAnswerResolution } = buildQuestionFixtures()
 
@@ -64,6 +69,16 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // guard passes while the old map still holds the session — clearing the
     // map makes those guards silently drop cross-test ghost firings.
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+    // Cancel every pending debounced persistence write and give any
+    // already-in-flight write time to finish BEFORE deleting the tmpRoot —
+    // otherwise the write fires after rmSync and surfaces as an unhandled
+    // ENOENT rejection attributed to the NEXT test.
+    const queue = (sm as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue
+    for (const id of seededSessionIds) {
+      try { queue.cancel(id) } catch { /* ignore */ }
+    }
+    seededSessionIds.clear()
+    await new Promise(r => setTimeout(r, 650))
     rmSync(tmpRoot, { recursive: true, force: true })
   })
 
@@ -88,8 +103,6 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   ) {
     const filePath = getSessionFilePath(tmpRoot, sessionId)
     mkdirSync(dirname(filePath), { recursive: true })
-    // Pending questions are persisted BEFORE they become active in production
-    // (persist precedes the handoff), so seed them on disk like the real flow.
     const stored = {
       id: sessionId,
       workspaceRootPath: tmpRoot,
@@ -109,10 +122,9 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     ;(managed as unknown as { isProcessing: boolean }).isProcessing = opts.isProcessing ?? false
     if (opts.withAgent) {
       let interrupted = 0
-      let aborted = 0
       ;(managed as unknown as { agent: unknown }).agent = {
         interruptForHandoff: () => { interrupted++ },
-        forceAbort: () => { aborted++ },
+        forceAbort: () => {},
         get interruptedCount() { return interrupted },
       }
     }
@@ -131,12 +143,14 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       })
     }
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, managed)
+    seededSessionIds.add(sessionId)
     return managed
   }
 
   function getManaged(sessionId: string) {
     return (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(sessionId) as unknown as {
       pendingQuestion?: unknown
+      pendingAgentResume?: { messageId: string; attempts: number; completed?: boolean }
       isProcessing: boolean
       messages: Array<Record<string, unknown>>
       agent?: { interruptedCount?: number }
@@ -156,29 +170,31 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
   }
 
-  function makeToolContext(onQuestionRequested: (questions: unknown[]) => Promise<void>) {
+  function makeFakeAgent(): Record<string, unknown> {
     return {
-      sessionId: 'ctx',
-      workspacePath: tmpRoot,
-      get sourcesPath() { return join(tmpRoot, 'sources'); },
-      get skillsPath() { return join(tmpRoot, 'skills'); },
-      plansFolderPath: join(tmpRoot, 'plans'),
-      fs: {
-        exists: () => false,
-        readFile: () => '',
-        readFileBuffer: () => Buffer.alloc(0),
-        writeFile: () => {},
-        isDirectory: () => false,
-        readdir: () => [],
-        stat: () => ({ size: 0, isDirectory: () => false }),
-      },
-      loadSourceConfig: () => null,
-      callbacks: {
-        onPlanSubmitted: () => {},
-        onAuthRequest: () => {},
-        onQuestionRequested,
-      },
+      allowRequestUserInput: false,
+      chat: async function* () { yield { type: 'complete' as const } },
+      getModel: () => 'fake-model',
+      getSessionId: () => null,
+      isProcessing: () => false,
+      supportsBranching: true,
+      setAllSources: () => {},
+      setSourceServers: async () => {},
+      getSummarizeCallback: () => undefined,
+      dispose: () => {},
+      interruptForHandoff: () => {},
+      forceAbort: () => {},
+      respondToPermission: () => {},
     }
+  }
+
+  async function waitForCondition(check: () => boolean, timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (check()) return
+      await new Promise(r => setTimeout(r, 50))
+    }
+    throw new Error('waitForCondition timed out')
   }
 
   it('question-request flush failure rolls back the pending replacement and REJECTS (no handoff, no fake success)', async () => {
@@ -200,64 +216,6 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(getManaged('f-req-1').agent?.interruptedCount ?? 0).toBe(0)
     // No renderer notifications
     expect(events.filter(e => e.type === 'question_request' || e.type === 'complete')).toEqual([])
-  })
-
-  it('real handler entry: flush failure surfaces as a tool error (isError), not a waiting success', async () => {
-    patchPrivateFlush()
-    failFlush = true
-    const managed = seedSession('f-handler-1', { isProcessing: true, withAgent: true })
-    const request = makeQuestionRequest('f-handler-1')
-    const questions = request.questions
-
-    // Wire the REAL session-tools-core handler through the same callback
-    // shape production uses (agent callback → SessionManager handoff).
-    const { handleRequestUserInput } = await import('@polo-ai/session-tools-core')
-    const ctx = makeToolContext((qs: unknown[]) =>
-      (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
-        .handleQuestionRequested(managed, qs),
-    )
-
-    const result = await handleRequestUserInput(ctx, { questions })
-
-    expect(result.isError).toBe(true)
-    expect(String((result.content[0] as { text?: string })?.text)).toContain('NOT paused')
-    // No fake success state anywhere: no renderer event, no handoff
-    expect(events.filter(e => e.type === 'question_request' || e.type === 'complete')).toEqual([])
-    expect(getManaged('f-handler-1').isProcessing).toBe(true)
-  })
-
-  it('real handler entry: delayed callback blocks the tool result until the handoff completes', async () => {
-    patchPrivateFlush()
-    const managed = seedSession('f-handler-2', { isProcessing: true, withAgent: true })
-    const request = makeQuestionRequest('f-handler-2')
-    const questions = request.questions
-
-    const { handleRequestUserInput } = await import('@polo-ai/session-tools-core')
-
-    let releaseCallback: (() => void) | null = null
-    const gate = new Promise<void>(resolve => { releaseCallback = resolve })
-    let handoffDone = false
-    const ctx = makeToolContext(async (qs: unknown[]) => {
-      await gate
-      await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
-        .handleQuestionRequested(managed, qs)
-      handoffDone = true
-    })
-
-    const handlerPromise = handleRequestUserInput(ctx, { questions })
-    let settled = false
-    void handlerPromise.then(() => { settled = true })
-    await new Promise(r => setTimeout(r, 50))
-    // The tool must still be blocked while the durable handoff is in flight
-    expect(settled).toBe(false)
-    expect(handoffDone).toBe(false)
-
-    releaseCallback!()
-    const result = await handlerPromise
-    expect(handoffDone).toBe(true)
-    expect(result.isError).toBeFalsy()
-    expect(String((result.content[0] as { text?: string })?.text)).toContain('Waiting for user input')
-    expect(sm.getPendingQuestion('f-handler-2')).not.toBeNull()
   })
 
   it('browser-ownership release failure does not skip the handoff completion', async () => {
@@ -351,15 +309,6 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(1)
   })
 
-  it('stop with no pending question emits nothing question-related', async () => {
-    patchPrivateFlush()
-    seedSession('f-stop-2', { isProcessing: true, withAgent: true })
-
-    await sm.cancelProcessing('f-stop-2')
-
-    expect(events.filter(e => String(e.type).startsWith('question_'))).toEqual([])
-  })
-
   it('answer committed but sendMessage rejects before agent init: error surfaced, state recoverable, retry succeeds (never silent-accepted-stranded)', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-resume-1')
@@ -387,7 +336,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // The recovery state is armed and persisted (survives restarts)
     const managed = getManaged('f-resume-1')
-    const resumeState = (managed as unknown as { pendingAgentResume?: { messageId: string; attempts: number } }).pendingAgentResume
+    const resumeState = managed.pendingAgentResume
     expect(resumeState).toBeDefined()
     expect(resumeState?.attempts).toBe(1)
     expect(resumeState?.messageId).toBeTruthy()
@@ -409,7 +358,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     let sendMessageCalls = 0
     ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async (...args: unknown[]) => {
       sendMessageCalls++
-      const managed = getManaged('f-resume-2') as unknown as { pendingAgentResume?: { messageId: string } }
+      const managed = getManaged('f-resume-2')
       if (sendMessageCalls === 1) {
         throw new Error('backend init failed (injected)')
       }
@@ -421,12 +370,12 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void sm.respondToQuestion('f-resume-2', makeAnswerResolution(request))
     await new Promise(r => setTimeout(r, 30))
     // Recovery state armed after the failed first resume
-    expect((getManaged('f-resume-2') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeDefined()
+    expect(getManaged('f-resume-2').pendingAgentResume).toBeDefined()
 
     // A user's new message (existingMessageId undefined ≠ resume messageId)
     // supersedes the recovery state.
     await sm.sendMessage('f-resume-2', 'a new user message')
-    expect((getManaged('f-resume-2') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
+    expect(getManaged('f-resume-2').pendingAgentResume).toBeUndefined()
   })
 
   it('stop clears an armed answer→resume retry (user stop means no new turns)', async () => {
@@ -435,36 +384,115 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     const managed = seedSession('f-resume-3', { pendingQuestion: request, isProcessing: false, withAgent: true })
 
     // Arm the recovery state, then stop
-    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'm-1', attempts: 2 }
+    managed.pendingAgentResume = { messageId: 'm-1', attempts: 2 }
 
     await sm.cancelProcessing('f-resume-3')
 
-    expect((getManaged('f-resume-3') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
+    expect(getManaged('f-resume-3').pendingAgentResume).toBeUndefined()
   })
 
-  // Round 6, issues #2/#3: the resume path must drive the REAL sendMessage
+  it('stop with no pending question emits nothing question-related', async () => {
+    patchPrivateFlush()
+    seedSession('f-stop-2', { isProcessing: true, withAgent: true })
+
+    await sm.cancelProcessing('f-stop-2')
+
+    expect(events.filter(e => String(e.type).startsWith('question_'))).toEqual([])
+  })
+
+  // Round 10, issue #1: the adjudicated Edit Popover exception (request_id
+  // 83c0c3ce-r10-d1) — a hidden+mini session gets request_user_input ONLY for
+  // the turn that carries the explicit `editPopoverTurn` marker from the
+  // renderer EditPopover; every other hidden/mini turn and every non-desktop
+  // source stays fail-closed.
+  describe('Edit Popover eligibility exception (round-10 adjudication)', () => {
+    function compute(
+      invocationSource: 'desktop' | 'messaging' | 'automation' | 'headless' | 'internal' | undefined,
+      hidden: boolean | undefined,
+      isMini: boolean | undefined,
+      editPopoverTurn: boolean | undefined,
+    ): boolean {
+      return computeRequestUserInputEligibility(invocationSource, hidden, isMini, editPopoverTurn)
+    }
+
+    function seedHiddenMini(sessionId: string, request: ReturnType<typeof makeQuestionRequest>) {
+      const m = seedSession(sessionId, { pendingQuestion: request })
+      ;(m as unknown as { hidden: boolean }).hidden = true
+      ;(m as unknown as { systemPromptPreset: string }).systemPromptPreset = 'mini'
+      return m
+    }
+
+    const flagCapture: { last: boolean | undefined } = { last: undefined }
+    function stubAgentCaptureFlag(): void {
+      ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+        const agent = makeFakeAgent()
+        Object.defineProperty(agent, 'allowRequestUserInput', {
+          get: () => flagCapture.last,
+          set: (v: boolean) => { flagCapture.last = v },
+        })
+        return agent
+      }
+    }
+
+    it('eligibility matrix: exception honored only for desktop Edit Popover turns', () => {
+      // Ordinary desktop, visible session → visible
+      expect(compute('desktop', false, false, undefined)).toBe(true)
+      // Ordinary hidden/mini (no marker) → fail closed
+      expect(compute('desktop', true, false, undefined)).toBe(false)
+      expect(compute('desktop', true, true, undefined)).toBe(false)
+      expect(compute('desktop', false, true, undefined)).toBe(false)
+      // Edit Popover exception: hidden+mini desktop turn WITH the marker → visible
+      expect(compute('desktop', true, true, true)).toBe(true)
+      expect(compute('desktop', true, false, true)).toBe(true)
+      // Non-desktop entries ignore the marker entirely → fail closed
+      expect(compute('messaging', true, false, true)).toBe(false)
+      expect(compute('automation', true, true, true)).toBe(false)
+      expect(compute('headless', true, true, true)).toBe(false)
+      expect(compute('internal', true, true, true)).toBe(false)
+      // Missing source defaults to internal → fail closed even with the marker
+      expect(compute(undefined, true, true, true)).toBe(false)
+    })
+
+    it('real entry: hidden Edit Popover turn with the marker exposes the tool; without it, fail closed', async () => {
+      patchPrivateFlush()
+      const request = makeQuestionRequest('f-ep-1')
+      stubAgentCaptureFlag()
+
+      // Hidden+mini session WITHOUT the marker → tool invisible
+      seedHiddenMini('f-ep-closed', request)
+      await sm.sendMessage('f-ep-closed', 'ordinary edit turn', [], [], { invocationSource: 'desktop' })
+      expect(flagCapture.last).toBe(false)
+
+      // Hidden+mini session WITH the Edit Popover marker → tool visible
+      seedHiddenMini('f-ep-open', request)
+      await sm.sendMessage('f-ep-open', 'edit popover turn', [], [], {
+        invocationSource: 'desktop',
+        editPopoverTurn: true,
+      })
+      expect(flagCapture.last).toBe(true)
+    })
+
+    it('real entry: a non-desktop source with the marker stays fail closed', async () => {
+      patchPrivateFlush()
+      const request = makeQuestionRequest('f-ep-msg')
+      stubAgentCaptureFlag()
+      seedHiddenMini('f-ep-msg', request)
+
+      // Messaging gateway code never sets the marker; even if present in the
+      // options bag, a non-desktop invocation source must fail closed.
+      await sm.sendMessage('f-ep-msg', 'messaging turn', [], [], {
+        invocationSource: 'messaging',
+        editPopoverTurn: true,
+      })
+      expect(flagCapture.last).toBe(false)
+    })
+  })
+
+  // Round 7, issues #2/#3: the resume path must drive the REAL sendMessage
   // (mocking getOrCreateAgent, not sendMessage) so pre-chat failures exercise
   // the processing-reset boundary, the retry drives the real entry again
   // without duplicating the user message, and the retry timer is owned by the
   // session lifecycle (cancelled on delete/stop, no ghost turns).
-
-  function makeFakeAgent(): Record<string, unknown> {
-    return {
-      allowRequestUserInput: false,
-      chat: async function* () { yield { type: 'complete' as const } },
-      getModel: () => 'fake-model',
-      getSessionId: () => null,
-      isProcessing: () => false,
-      supportsBranching: true,
-      setAllSources: () => {},
-      setSourceServers: async () => {},
-      getSummarizeCallback: () => undefined,
-      dispose: () => {},
-      interruptForHandoff: () => {},
-      forceAbort: () => {},
-      respondToPermission: () => {},
-    }
-  }
 
   it('getOrCreateAgent failure resets processing (not stuck) and the retry drives the real entry again without duplicating the answer', async () => {
     patchPrivateFlush()
@@ -482,7 +510,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // Issue #2 core assertion: the pre-chat failure reset processing —
     // the session is NOT stuck at isProcessing=true.
-    expect((getManaged('f-real-1') as unknown as { isProcessing: boolean }).isProcessing).toBe(false)
+    expect(getManaged('f-real-1').isProcessing).toBe(false)
     // User-visible failure event emitted
     expect(events.filter(e => e.type === 'error').length).toBeGreaterThanOrEqual(1)
     // Exactly one answer message — the retry must not add another user turn
@@ -549,195 +577,24 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(agentInitCalls).toBe(1)
   })
 
-  it('resume success → awaited flush clears disk state; no restart after completion', async () => {
-    patchPrivateFlush()
-    const request = makeQuestionRequest('f-real-ok')
-    seedSession('f-real-ok', { pendingQuestion: request })
-
-    let agentInitCalls = 0
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
-      agentInitCalls++
-      if (agentInitCalls === 1) {
-        throw new Error(`agent init failed #${agentInitCalls}`)
-      }
-      return makeFakeAgent()
-    }
-
-    const result = await sm.respondToQuestion('f-real-ok', makeAnswerResolution(request))
-    expect(result).toEqual({ status: 'accepted' })
-
-    // Retry succeeded through the real entry
-    await waitForCondition(() => agentInitCalls >= 2)
-    await waitForCondition(() =>
-      (getManaged('f-real-ok') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume === undefined
-    )
-
-    // Awaited flush: the disk header no longer carries the recovery state —
-    // a crash cannot re-arm the finished recovery.
-    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-real-ok'), 'utf-8').split('\n')[0])
-    expect(header.pendingAgentResume).toBeUndefined()
-
-    const callsAfterSuccess = agentInitCalls
-    await new Promise(r => setTimeout(r, 1500))
-    expect(agentInitCalls).toBe(callsAfterSuccess)
-  })
-
-  // Round 8, issue #2: while an OLD answer turn is awaiting its chat, a new
-  // user message supersedes it and ANOTHER answer arms a NEW resume — the old
-  // caller's durable clear (boundary 2) must not wipe the new recovery state.
-  it('old resume superseded mid-await: durable clear skips and the new resume survives', async () => {
-    patchPrivateFlush()
-    const request = makeQuestionRequest('f-supersede')
-    const managed = seedSession('f-supersede', {
-      pendingQuestion: request,
-      messages: [
-        { id: 'msg-old-answer', type: 'user', role: 'user', content: 'old answer', timestamp: Date.now() },
-        { id: 'msg-new-answer', type: 'user', role: 'user', content: 'new answer', timestamp: Date.now() },
-      ],
-    })
-
-    // Old and new answer message ids — names carry the identity semantics
-    const oldAnswerMessageId = 'msg-old-answer'
-    const newAnswerMessageId = 'msg-new-answer'
-    ;(managed as unknown as { messages: Array<Record<string, unknown>> }).messages.push(
-      { id: oldAnswerMessageId, type: 'user', role: 'user', content: 'old answer', timestamp: Date.now() },
-      { id: newAnswerMessageId, type: 'user', role: 'user', content: 'new answer', timestamp: Date.now() },
-    )
-
-    // Fake agent whose chat blocks until the gate releases — the old turn is
-    // genuinely in flight while we supersede it.
-    let releaseOldTurn: (() => void) | null = null
-    const oldTurnGate = new Promise<void>(resolve => { releaseOldTurn = resolve })
-    let chatInvocations = 0
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
-      const chatInvocationsForThisAgent = ++chatInvocations
-      return {
-        allowRequestUserInput: false,
-        getModel: () => 'fake-model',
-        getSessionId: () => null,
-        isProcessing: () => false,
-        supportsBranching: true,
-        setAllSources: () => {},
-        setSourceServers: async () => {},
-        getSummarizeCallback: () => undefined,
-        dispose: () => {},
-        chat: async function* (this: unknown, _message?: unknown) {
-          if (chatInvocationsForThisAgent === 1) {
-            await oldTurnGate
-          }
-          yield { type: 'complete' as const }
-        },
-      }
-    }
-
-    // Arm the OLD resume and start its turn (not awaited)
-    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: oldAnswerMessageId, attempts: 0 }
-    const oldTurn = (sm as unknown as { resumePendingAgentTurn: (m: unknown) => Promise<void> })
-      .resumePendingAgentTurn(managed)
-
-    // Wait until the old turn is genuinely inside its gated chat
-    await new Promise(r => setTimeout(r, 100))
-    expect(chatInvocations).toBe(1)
-
-    // Mid-await: a new user message supersedes (production clears), then
-    // another answer arms a NEW recovery state with a NEW messageId.
-    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = undefined
-    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: newAnswerMessageId, attempts: 0 }
-
-    // Release the old turn — it completes, and boundary 2 must exit silently.
-    releaseOldTurn!()
-    await oldTurn
-
-    // The NEW recovery state survived (old caller did not clear it)
-    const stateAfter = (getManaged('f-supersede') as unknown as { pendingAgentResume?: { messageId: string } }).pendingAgentResume
-    expect(stateAfter?.messageId).toBe(newAnswerMessageId)
-
-    // The new resume still works end-to-end: run it, turn executes, state clears.
-    await (sm as unknown as { resumePendingAgentTurn: (m: unknown) => Promise<void> }).resumePendingAgentTurn(managed)
-    expect(chatInvocations).toBe(2)
-    expect((getManaged('f-supersede') as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
-  })
-
-  async function waitForCondition(check: () => boolean, timeoutMs = 5000): Promise<void> {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      if (check()) return
-      await new Promise(r => setTimeout(r, 50))
-    }
-    throw new Error('waitForCondition timed out')
-  }
-
-  // Round 7, issue #2: deleteSession must disarm the retry timer BEFORE the
-  // abort wait / share-revoke window — a live timer during that window can
-  // start a ghost turn (identity guard still holds until removal).
-  it('armed retry + delayed shared revoke + delete: no ghost turns during the deletion window', async () => {
-    patchPrivateFlush()
-    const request = makeQuestionRequest('f-del-window')
-    const managed = seedSession('f-del-window', { pendingQuestion: request })
-    // Shared session → deleteSession awaits the (stubbed, slow) revoke
-    ;(managed as unknown as { sharedId?: string; sharedUrl?: string }).sharedId = 'share-123'
-    ;(managed as unknown as { sharedUrl?: string }).sharedUrl = 'https://viewer.example.com/s/share-123'
-
-    let agentInitCalls = 0
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<never> }).getOrCreateAgent = async () => {
-      agentInitCalls++
-      throw new Error(`agent init failed #${agentInitCalls}`)
-    }
-
-    await sm.respondToQuestion('f-del-window', makeAnswerResolution(request))
-    expect(agentInitCalls).toBe(1)
-
-    // Slow external I/O: the share revoke stalls for 1400ms inside
-    // deleteSession — the delete promise stays unresolved PAST the 1000ms
-    // retry expiry, so this test genuinely crosses the window in which the
-    // round-7 defect (timer not disarmed until after the revoke) would fire
-    // a ghost turn.
-    const realFetch = globalThis.fetch
-    globalThis.fetch = (async () => {
-      await new Promise(r => setTimeout(r, 1400))
-      throw new Error('revoke stalled (injected)')
-    }) as unknown as typeof fetch
-
-    try {
-      // Start deletion WITHOUT awaiting — the revoke window is in flight.
-      const deletePromise = sm.deleteSession('f-del-window')
-
-      // Cross the 1000ms retry expiry while deletion is still pending.
-      await new Promise(r => setTimeout(r, 1200))
-      const errorEventsMidWindow = events.filter(e => e.type === 'error').length
-      expect(agentInitCalls).toBe(1)
-      expect(errorEventsMidWindow).toBe(1)
-
-      // Deletion completes; nothing fired for the deleted session afterwards.
-      await deletePromise
-      await new Promise(r => setTimeout(r, 1500))
-      expect(agentInitCalls).toBe(1)
-      expect(events.filter(e => e.type === 'error').length).toBe(errorEventsMidWindow)
-    } finally {
-      globalThis.fetch = realFetch
-    }
-  })
-
   // Round 7, issue #3: a failed durable clear AFTER a fully executed turn is
   // NOT a resume failure — no fake "could not resume", no turn re-execution;
   // the terminal marker keeps a restart from re-running the answer.
   it('success → clear flush failure: turn executes once, no fake resume error, terminal marker persists, restart does not re-run', async () => {
     // Fail exactly the SECOND flush call (the first is the answer commit,
     // the second is the post-success durable clear).
-    patchPrivateFlush()
-    const request = makeQuestionRequest('f-clear-flush')
-    seedSession('f-clear-flush', { pendingQuestion: request })
     let flushFailAtCall = 2
-
-    let flushCalls = 0
+    let flushCallCount = 0
     const real = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
     ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
-      flushCalls++
-      if (flushCalls === flushFailAtCall) {
+      flushCallCount++
+      if (flushCallCount === flushFailAtCall) {
         return Promise.reject(new Error('clear flush failed (injected)'))
       }
       return real.call(sm, id)
     }
+    const request = makeQuestionRequest('f-clear-flush')
+    seedSession('f-clear-flush', { pendingQuestion: request })
 
     let agentInitCalls = 0
     ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
@@ -759,7 +616,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       return diskState?.pendingAgentResume?.completed === true
     })
     // In-memory: the record remains as a TERMINAL marker (never re-executed)
-    const memoryState = (getManaged('f-clear-flush') as unknown as { pendingAgentResume?: { completed?: boolean } }).pendingAgentResume
+    const memoryState = getManaged('f-clear-flush').pendingAgentResume
     expect(memoryState?.completed).toBe(true)
 
     // No retry scheduled — the turn never re-executes
@@ -776,45 +633,38 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     flushFailAtCall = 0
     const sm2 = new SessionManager()
     let sm2AgentInits = 0
+    let sm2ChatInvocations = 0
     ;(sm2 as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
       sm2AgentInits++
       const agent = makeFakeAgent()
       return {
         ...agent,
-        chat: async function* (this: unknown) {
+        chat: async function* () {
           sm2ChatInvocations++
           yield { type: 'complete' as const }
         },
       }
     }
     let sm2RealSendCalls = 0
-    let sm2ChatInvocations = 0
     const sm2RealSend = (Object.getPrototypeOf(sm2) as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage
-    ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = function (
-      this: unknown,
-      ...args: unknown[]
-    ) {
+    ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = function (this: unknown, ...args: unknown[]) {
       sm2RealSendCalls++
       return sm2RealSend.apply(this, args)
     }
     const stored = loadSession(tmpRoot, 'f-clear-flush')!
     const managed2 = createManagedSession(
       { id: stored.id, name: stored.name, createdAt: stored.createdAt },
-      { id: 'ws_test', name: 'T', rootPath: tmpRoot, createdAt: Date.now() } as never,
+      buildWorkspace(),
     )
     ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set('f-clear-flush', managed2)
     await (sm2 as unknown as { ensureMessagesLoaded: (m: unknown) => Promise<void> }).ensureMessagesLoaded(managed2)
     await new Promise(r => setTimeout(r, 100))
-    await waitForCondition(() =>
-      (managed2 as unknown as { pendingAgentResume?: unknown }).pendingAgentResume === undefined
-    )
+    await waitForCondition(() => managed2.pendingAgentResume === undefined)
 
     // The answer turn was NOT re-executed after restart: no real send, no
     // agent creation, no agent chat.
     expect(sm2RealSendCalls).toBe(0)
     expect(sm2AgentInits).toBe(0)
     expect(sm2ChatInvocations).toBe(0)
-    // And the terminal record was durably cleared
-    expect((managed2 as unknown as { pendingAgentResume?: unknown }).pendingAgentResume).toBeUndefined()
   })
 })

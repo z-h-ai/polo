@@ -43,7 +43,8 @@ export async function handleRequestUserInput(ctx: SessionToolContext, args: unkn
 
   return successResponse(
     'Waiting for user input. The question has been shown to the user and execution is paused. '
-    + 'The conversation will resume automatically with the user\'s answers (or their decision to skip). '
-    + 'Do not output any further content — wait for the next turn.'
+    + 'Two outcomes are possible: if the user answers, the conversation resumes automatically with those answers; '
+    + 'if the user chooses to skip, the skip is recorded and this turn ends — there is no automatic resume in that case, '
+    + 'wait for the user to start a new message. Do not output any further content — wait for the next turn.'
   );
 }

@@ -1021,6 +1021,29 @@ export function claimAutoRetryPending(
  * Spreads all matching fields from the source so new persistent fields automatically propagate.
  * Runtime-only fields get sensible defaults.
  */
+/**
+ * Per-turn eligibility for the request_user_input tool (fail-closed matrix).
+ *
+ * - Non-desktop invocation sources (messaging / automation / headless /
+ *   internal) NEVER get the tool — even with the Edit Popover marker.
+ * - Ordinary desktop turns get it unless the session is hidden or mini.
+ * - Round-10 adjudication (request_id 83c0c3ce-r10-d1): the renderer Edit
+ *   Popover's hidden+mini session is granted the tool for the single turn
+ *   that carries the explicit `editPopoverTurn` marker. Ordinary hidden/mini
+ *   turns without the marker stay closed.
+ */
+export function computeRequestUserInputEligibility(
+  invocationSource: InvocationSource | undefined,
+  hidden: boolean | undefined,
+  isMini: boolean | undefined,
+  editPopoverTurn: boolean | undefined,
+): boolean {
+  if (invocationSource !== 'desktop') return false
+  if (hidden) return editPopoverTurn === true
+  if (isMini) return editPopoverTurn === true
+  return true
+}
+
 export function createManagedSession(
   source: { id: string } & Partial<ManagedSession>,
   workspace: Workspace,
@@ -5658,10 +5681,16 @@ export class SessionManager implements ISessionManager {
 
     // Per-turn invocation source: only desktop interactive turns expose
     // request_user_input; every other source (and the implicit default)
-    // fails closed. Hidden sessions never ask questions.
+    // fails closed. Hidden sessions never ask questions — except the
+    // renderer Edit Popover's explicitly marked turns (round-10 adjudication).
     const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
     managed.invocationSource = invocationSource
-    const allowRequestUserInput = invocationSource === 'desktop' && !managed.hidden
+    const allowRequestUserInput = computeRequestUserInputEligibility(
+      invocationSource,
+      managed.hidden,
+      managed.systemPromptPreset === 'mini',
+      options?.editPopoverTurn,
+    )
     if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
       managed.agent.allowRequestUserInput = allowRequestUserInput
     }
@@ -5924,7 +5953,12 @@ export class SessionManager implements ISessionManager {
 
       // Re-apply the per-turn capability flag — a freshly created agent defaults
       // to false, so desktop turns must set it after creation as well.
-      const allowRequestUserInputNow = (managed.invocationSource ?? 'internal') === 'desktop' && !managed.hidden
+      const allowRequestUserInputNow = computeRequestUserInputEligibility(
+        managed.invocationSource,
+        managed.hidden,
+        managed.systemPromptPreset === 'mini',
+        options?.editPopoverTurn,
+      )
       if (agent.allowRequestUserInput !== allowRequestUserInputNow) {
         agent.allowRequestUserInput = allowRequestUserInputNow
       }

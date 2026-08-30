@@ -959,14 +959,17 @@ export class ClaudeAgent extends BaseAgent {
       // Build full MCP servers set first, then filter for mini agents
       const fullMcpServers: Options['mcpServers'] = {
         // Session-scoped tools (SubmitPlan, source_test, update_user_preferences, transform_data, etc.)
-        // request_user_input only registers for desktop interactive main-session turns.
+        // request_user_input visibility is computed per-turn by the session layer
+        // (desktop turns + the explicit Edit Popover exception); mini sessions
+        // are only reachable with that exception, so the flag is authoritative
+        // here — no additional mini gate.
         session: getSessionScopedTools(
           sessionId,
           this.workspaceRootPath,
           undefined,
           this.sessionStorage,
           this.workingDirectory,
-          { allowRequestUserInput: this.allowRequestUserInput && !miniConfig.enabled },
+          { allowRequestUserInput: this.allowRequestUserInput },
         ),
         // Polo AI documentation - always available for searching setup guides
         // This is a public Mintlify MCP server, no auth needed

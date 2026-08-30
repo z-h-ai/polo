@@ -314,6 +314,16 @@ export interface SendMessageOptions {
    * (fail closed).
    */
   invocationSource?: InvocationSource
+  /**
+   * Explicit Edit Popover turn marker (round-10 adjudication,
+   * request_id 83c0c3ce-r10-d1). ONLY the renderer EditPopover component may
+   * set this: it grants request_user_input visibility for that single turn of
+   * the Edit Popover's hidden+mini session. Every other caller must leave it
+   * undefined — the session layer fail-closes hidden/mini turns without it,
+   * non-desktop invocation sources ignore it entirely, and ordinary
+   * hidden/mini turns stay closed.
+   */
+  editPopoverTurn?: boolean
 }
 
 // ---------------------------------------------------------------------------
