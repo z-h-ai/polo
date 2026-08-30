@@ -8,6 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
+import { createSessionMcpCallbackHandler } from './session-mcp-callback-router.ts'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
@@ -7269,6 +7270,21 @@ export class SessionManager implements ISessionManager {
    * persist + question_request event + handoff, awaited by the caller so the
    * remote tool result settles only at the durable boundary.
    */
+  /**
+   * PRODUCTION HTTP surface for the session MCP callback protocol (review
+   * fix round 10, issues B+C): wraps `createSessionMcpCallbackHandler` so a
+   * host callback server mounts the route with one call. Enforces the
+   * POST-only method gate (405 otherwise) and routes valid payloads into the
+   * durable handoff.
+   */
+  handleSessionMcpCallbackRequest(request: {
+    method?: string;
+    url?: string;
+    json(): Promise<unknown>;
+  }): Promise<Response> {
+    return createSessionMcpCallbackHandler(this)(request)
+  }
+
   async handleExternalQuestionRequested(
     sessionId: string,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],

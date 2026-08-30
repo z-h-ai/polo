@@ -28,6 +28,19 @@ export interface ResolvedBackendRuntimePaths {
    */
   interceptorBundlePath?: string;
   sessionServerPath?: string;
+  /**
+   * PRODUCTION per-turn spawn-spec builder for the packaged session MCP
+   * server (review fix rounds 9-10, issue B): hosts/drivers call this with
+   * the TURN's capability + generation to get the complete spawn spec
+   * (command + args) for the resolved packaged server. Built via
+   * `buildSessionMcpServerInvocation`. Null when the packaged server is not
+   * available in this runtime.
+   */
+  buildSessionMcpServerInvocation?:
+    | ((options: import('../../core/session-lifecycle.ts').SessionMcpSpawnOptions) => {
+        command: string;
+        args: string[];
+      } | null);
   bridgeServerPath?: string;
   piServerPath?: string;
   nodeRuntimePath?: string;
@@ -232,6 +245,12 @@ export function resolveBackendRuntimePaths(hostRuntime: BackendHostRuntimeContex
     claudeCliPath: resolveClaudeBinaryPath(hostRuntime),
     interceptorBundlePath: resolveInterceptorBundlePath(hostRuntime),
     sessionServerPath: resolveServerPath(hostRuntime, 'session-mcp-server'),
+    // PRODUCTION consumption of the per-turn invocation builder (review fix
+    // rounds 9-10, issue B): the resolved runtime carries the spawn-spec
+    // builder bound to THIS runtime's packaged server + node binary; hosts
+    // and drivers spawn the session MCP server through it.
+    buildSessionMcpServerInvocation: (options) =>
+      buildSessionMcpServerInvocation(hostRuntime, options),
     bridgeServerPath: resolveServerPath(hostRuntime, 'bridge-mcp-server'),
     piServerPath: resolveServerPath(hostRuntime, 'pi-agent-server'),
     nodeRuntimePath: hostRuntime.nodeRuntimePath || bundledRuntimePath || process.execPath,

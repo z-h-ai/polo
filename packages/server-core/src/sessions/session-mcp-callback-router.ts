@@ -68,6 +68,15 @@ export async function handleSessionMcpRequestUserInputCallback(
 export function createSessionMcpCallbackHandler(sessionManager: ISessionManager) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (request: any): Promise<Response> => {
+    // METHOD GATE (review fix round 10, issue C): only the declared POST is
+    // allowed on the callback endpoint — any other method is rejected with
+    // 405 + Allow BEFORE touching the SessionManager.
+    if (request.method !== 'POST') {
+      return new Response('Method not allowed', {
+        status: 405,
+        headers: { Allow: 'POST' },
+      });
+    }
     const url = typeof request.url === 'string' ? request.url : '';
     if (new URL(url, 'http://localhost').pathname !== '/request-user-input') {
       return new Response('Not found', { status: 404 });

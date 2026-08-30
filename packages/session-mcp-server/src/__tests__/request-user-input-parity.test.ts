@@ -99,9 +99,9 @@ describe('session MCP / Codex request_user_input parity', () => {
     })
     expect(args).toContain('--allow-request-user-input')
     expect(args.indexOf('--turn-generation')).toBeGreaterThanOrEqual(0)
-    expect(args[args.indexOf('--turn-generation') + 1]).toBe('7')
+    expect(args[args.indexOf('--turn-generation') + 1]!).toBe('7')
     expect(args).toContain('--session-id')
-    expect(args[args.indexOf('--session-id') + 1]).toBe('s1')
+    expect(args[args.indexOf('--session-id') + 1]!).toBe('s1')
   })
 
   it('launcher: a non-desktop turn spawn omits both (fail closed)', () => {
@@ -122,7 +122,7 @@ describe('session MCP / Codex request_user_input parity', () => {
       callbackPort: '9377',
     })
     expect(args).toContain('--callback-port')
-    expect(args[args.indexOf('--callback-port') + 1]).toBe('9377')
+    expect(args[args.indexOf('--callback-port') + 1]!).toBe('9377')
   })
 
   it('callback parser: a question_requested stderr line parses into the durable-handoff payload; garbage lines are skipped', () => {
