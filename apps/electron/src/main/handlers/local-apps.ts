@@ -34,6 +34,12 @@ import {
   MAX_CATALOG_STATUS_SCOPES,
   validateCatalogLocalAppScope,
 } from '../local-app-runtime'
+import {
+  registerProductSpaceExecution,
+  unregisterProductSpaceExecution,
+  type RegisteredProductSpaceExecution,
+} from '@polo-ai/server-core/runtime/product-space-executions'
+import { resolveTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
 
 function requireRendererCatalogScope(reference: unknown): CatalogLocalAppScope {
   if (
@@ -503,6 +509,50 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     ),
   )
 
+  const registerLocalAppExecution = async (
+    scope: CatalogLocalAppScope,
+    name: string,
+  ): Promise<void> => {
+    const accountId = await resolveTrustedProductSpaceAccountId()
+    if (!accountId) return
+    const registry = getScopedLocalAppRuntimeRegistry()
+    const execution: RegisteredProductSpaceExecution = {
+      scope: {
+        contractVersion: 1,
+        executionId: `local-app:${scope.organizationId}:${scope.catalogAppId}`,
+        accountId,
+        productSpaceId: scope.organizationId,
+        workspaceId: 'local-app-runtime',
+        subject: {
+          kind: 'artifact_instance',
+          artifactType: 'app',
+          artifactInstanceId: scope.catalogAppId,
+          versionId: scope.catalogAppId,
+          version: name,
+        },
+      } as unknown as RegisteredProductSpaceExecution['scope'],
+      kind: 'local_app',
+      name,
+      ref: `${scope.organizationId}:${scope.catalogAppId}`,
+      isActive: async () => {
+        try {
+          return (await registry.getRuntimeStatus(scope)).status === 'running'
+        } catch {
+          return false
+        }
+      },
+      stop: async () => {
+        try {
+          await registry.stop(scope)
+          return 'stopped'
+        } catch {
+          return 'failed'
+        }
+      },
+    }
+    registerProductSpaceExecution(execution)
+  }
+
   const startCatalogApp = async (scope: CatalogLocalAppScope) => {
     const { accessMode } = await requireAuthorizedCatalogApp(scope)
     const registry = getScopedLocalAppRuntimeRegistry()
@@ -512,7 +562,9 @@ export function registerLocalAppHandlers(server: RpcServer): void {
         'Only installed and prepared organization apps can start while offline',
       )
     }
-    return registry.start(scope)
+    const result = await registry.start(scope)
+    await registerLocalAppExecution(scope, result.version)
+    return result
   }
 
   server.handle(RPC_CHANNELS.localApps.START, (_ctx, reference: unknown) =>
@@ -524,12 +576,17 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   server.handle(RPC_CHANNELS.localApps.STOP, (_ctx, reference: unknown) =>
     withCatalogManagementScope(
       reference,
-      async (scope, catalogReference) =>
-        projectLocalAppStatusForCatalogAccess(
-          await getScopedLocalAppRuntimeRegistry().stop(scope),
+      async (scope, catalogReference) => {
+        const status = await getScopedLocalAppRuntimeRegistry().stop(scope)
+        unregisterProductSpaceExecution(
+          `local-app:${scope.organizationId}:${scope.catalogAppId}`,
+        )
+        return projectLocalAppStatusForCatalogAccess(
+          status,
           catalogReference.canAccessDeliveryMetadata
             && canAccessCatalogDeliveryMetadata(scope),
-        ),
+        )
+      },
     ))
 
   server.handle(RPC_CHANNELS.localApps.RESTART, (_ctx, reference: unknown) =>

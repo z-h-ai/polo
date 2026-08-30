@@ -196,6 +196,8 @@ export interface CreateSessionOptions {
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
     isFlagged?: boolean;
+    /** Immutable ProductSpace binding assigned at creation time */
+    productSpaceId?: string;
 }
 
 export async function createSessionWithStorage(
@@ -243,6 +245,7 @@ export async function createSessionWithStorage(
     sessionStatus: options?.sessionStatus,
     labels: options?.labels,
     isFlagged: options?.isFlagged,
+    productSpaceId: options?.productSpaceId,
   };
 
   // Save empty session

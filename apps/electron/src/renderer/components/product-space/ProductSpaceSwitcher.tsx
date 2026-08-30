@@ -40,12 +40,12 @@ export function ProductSpaceSwitcher({ compact = false }: { compact?: boolean })
             type="button"
             data-testid="product-space-switcher"
             aria-label={t('productSpace.switcher.label')}
-            className="titlebar-no-drag flex h-[26px] w-[26px] items-center justify-center rounded-[8px] hover:bg-foreground/5"
+            className="titlebar-no-drag flex size-7 items-center justify-center rounded-[8px] hover:bg-foreground/5"
           >
             <span
               className={cn(
-                'flex size-4 items-center justify-center rounded-full text-[9px] font-semibold text-primary-foreground',
-                active.kind === 'personal' ? 'bg-teal-600' : 'bg-indigo-500',
+                'flex size-5 items-center justify-center rounded-full text-[11px] font-semibold text-primary-foreground',
+                active.kind === 'personal' ? 'bg-success' : 'bg-accent',
               )}
             >
               {activeInitial}
@@ -60,8 +60,8 @@ export function ProductSpaceSwitcher({ compact = false }: { compact?: boolean })
           >
             <span
               className={cn(
-                'flex size-4 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-primary-foreground',
-                active.kind === 'personal' ? 'bg-teal-600' : 'bg-indigo-500',
+                'flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-primary-foreground',
+                active.kind === 'personal' ? 'bg-success' : 'bg-accent',
               )}
             >
               {activeInitial}
@@ -94,8 +94,8 @@ export function ProductSpaceSwitcher({ compact = false }: { compact?: boolean })
             >
               <span
                 className={cn(
-                  'flex size-4 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-primary-foreground',
-                  item.kind === 'personal' ? 'bg-teal-600' : 'bg-indigo-500',
+                  'flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-primary-foreground',
+                  item.kind === 'personal' ? 'bg-success' : 'bg-accent',
                 )}
               >
                 {spaceInitial(item.name, item.kind)}

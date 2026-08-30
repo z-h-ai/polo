@@ -62,6 +62,10 @@ let stopAllResult: {
 } | { success: false; errorCode: string; message: string }
 let productSpaceContextStorage: ProductSpaceContextStorage | null = null
 
+let cleanupResult: { success: boolean; results: Record<string, boolean> }
+let catalogResult: { success: boolean; errorCode?: string }
+let declaredActiveSpace: string | null | undefined
+
 function configureIpc(): void {
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
@@ -69,6 +73,12 @@ function configureIpc(): void {
       productSpaceList: async () => listResult,
       productSpaceListActiveExecutions: async () => executionsResult,
       productSpaceStopAllExecutions: async () => stopAllResult,
+      productSpaceGetCatalog: async () => catalogResult,
+      productSpaceSetActiveSpace: async (productSpaceId: string | null) => {
+        declaredActiveSpace = productSpaceId
+        return { success: true }
+      },
+      productSpaceCleanupLegacyState: async () => cleanupResult,
       getProductSpaceContextStorage: async () => productSpaceContextStorage,
       updateProductSpaceContextStorage: async (
         _accountId: string,
@@ -109,6 +119,9 @@ beforeEach(() => {
   listResult = bothSpaces()
   executionsResult = { success: true, executions: [] }
   stopAllResult = { success: true, result: { allStopped: true, executions: [] } }
+  cleanupResult = { success: true, results: {} }
+  catalogResult = { success: true }
+  declaredActiveSpace = undefined
   configureIpc()
 })
 
@@ -371,6 +384,99 @@ describe('useProductSpaceContextState switching', () => {
       result.current.dismissTargetAccessLost()
     })
     expect(result.current.pendingSwitch).toBeNull()
+  })
+})
+
+describe('useProductSpaceContextState switch staging (round 1)', () => {
+  it('does not commit while the target catalog fails to load, then commits on retry', async () => {
+    catalogResult = { success: false, errorCode: 'service_unavailable' }
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    await waitFor(() => {
+      expect(result.current.pendingSwitch?.phase).toBe('target-failed')
+    })
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+
+    catalogResult = { success: true }
+    await act(async () => {
+      await result.current.retryTargetLoad()
+    })
+    await waitFor(() => {
+      expect(result.current.pendingSwitch).toBeNull()
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+    expect(declaredActiveSpace).toBe('space-ent')
+  })
+
+  it('fails closed when the one-shot legacy cleanup fails', async () => {
+    cleanupResult = { success: false, results: { legacyCatalogCacheRemoved: false } }
+    const { result } = renderHook(useHarness)
+    expect(await boot(result)).toBe('error')
+    expect(result.current.flowState).toBe('error')
+  })
+
+  it('runs the stop-all fence before returning to personal space on access loss', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+
+    executionsResult = {
+      success: true,
+      executions: [{ executionId: 'exec-1', name: '企业任务', status: 'running' }],
+    }
+    let stopAllCalls = 0
+    Object.defineProperty(window.electronAPI, 'productSpaceStopAllExecutions', {
+      configurable: true,
+      value: async () => {
+        stopAllCalls += 1
+        return stopAllResult
+      },
+    })
+    stopAllResult = {
+      success: true,
+      result: {
+        allStopped: true,
+        executions: [{ executionId: 'exec-1', name: '企业任务', status: 'stopped' }],
+      },
+    }
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [personalSpace],
+    }
+    await act(async () => {
+      await result.current.refreshProductSpaces()
+    })
+    expect(stopAllCalls).toBe(1)
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+  })
+
+  it('keeps the lost space when its executions cannot be stopped', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    stopAllResult = {
+      success: true,
+      result: {
+        allStopped: true,
+        executions: [{ executionId: 'exec-1', name: '企业任务', status: 'failed' }],
+      },
+    }
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [personalSpace],
+    }
+    await act(async () => {
+      await result.current.refreshProductSpaces()
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+    expect(result.current.flowState).toBe('error')
   })
 })
 

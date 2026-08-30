@@ -90,10 +90,6 @@ import {
   subscribeToAdminAuthFailures,
   type AdminErrorLike,
 } from '@/lib/admin-auth-failure'
-import {
-  readSessionSpaceIndex,
-  recordSessionProductSpace,
-} from '@/lib/product-space-storage'
 import { Button } from '@/components/ui/button'
 
 /** App-level states for the ProductSpace-first client shell. */
@@ -591,30 +587,17 @@ export default function App() {
     setSessionLoadError(null)
 
     try {
+      // The runtime enforces the committed ProductSpace: sessions bound to
+      // other spaces never cross the sessions:list boundary.
       const loadedSessions = await window.electronAPI.getSessions()
-
-      // Assistant history is scoped to the ProductSpace in which each session
-      // was created. Sessions without recorded provenance stay visible only in
-      // the personal space so enterprise surfaces can never leak another
-      // space's conversations.
-      let spaceVisibleSessions = loadedSessions
-      const scope = productSpaceScopeRef.current
-      if (scope.accountId && scope.activeId && scope.personalId) {
-        const index = await readSessionSpaceIndex(scope.accountId)
-        spaceVisibleSessions = loadedSessions.filter(session => (
-          index[session.id]
-            ? index[session.id] === scope.activeId
-            : scope.activeId === scope.personalId
-        ))
-      }
 
       // Initialize per-session atoms and metadata map
       // NOTE: No sessionsAtom used - sessions are only in per-session atoms
-      initializeSessions(spaceVisibleSessions)
+      initializeSessions(loadedSessions)
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
-      for (const s of spaceVisibleSessions) {
+      for (const s of loadedSessions) {
         const hasNonDefaultMode = s.permissionMode && s.permissionMode !== 'ask'
         const hasNonDefaultThinking = s.thinkingLevel && s.thinkingLevel !== DEFAULT_THINKING_LEVEL
         if (hasNonDefaultMode || hasNonDefaultThinking) {
@@ -627,14 +610,13 @@ export default function App() {
       setSessionOptions(optionsMap)
 
       await Promise.allSettled(
-        spaceVisibleSessions.map((s) => reconcilePermissionModeState(s.id))
+        loadedSessions.map((s) => reconcilePermissionModeState(s.id))
       )
 
       setSessionsLoaded(true)
 
       if (initialSessionId && windowWorkspaceId) {
-        const session = spaceVisibleSessions.find(s => s.id === initialSessionId)
-          ?? loadedSessions.find(s => s.id === initialSessionId)
+        const session = loadedSessions.find(s => s.id === initialSessionId)
         if (session) {
           navigate(routes.view.allSessions(session.id))
         }
@@ -1275,10 +1257,6 @@ export default function App() {
       if (event.type === 'session_created') {
         window.electronAPI.getSessionMessages(sessionId)
           .then((createdSession: Session | null) => {
-            const scope = productSpaceScopeRef.current
-            if (scope.accountId && scope.activeId) {
-              void recordSessionProductSpace(scope.accountId, sessionId, scope.activeId)
-            }
             if (createdSession) {
               const existingMeta = store.get(sessionMetaMapAtom).has(sessionId)
               if (existingMeta) {
@@ -1483,15 +1461,16 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
+    // The runtime binds the session to the committed ProductSpace at creation
+    // time; the renderer cannot reclassify it later.
+    const scope = productSpaceScopeRef.current
+    const session = await window.electronAPI.createSession(workspaceId, {
+      ...options,
+      productSpaceId: scope.activeId ?? options?.productSpaceId,
+    })
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
-
-    const scope = productSpaceScopeRef.current
-    if (scope.accountId && scope.activeId) {
-      void recordSessionProductSpace(scope.accountId, session.id, scope.activeId)
-    }
 
     return session
   }, [addSession, syncSessionOptionsFromSession])
@@ -2467,14 +2446,14 @@ export default function App() {
   useEffect(() => {
     if (!startupCatalogSpaceId) return
     let cancelled = false
-    void window.electronAPI.adminSyncAppCatalog(
+    void window.electronAPI.productSpaceGetCatalog(
       startupCatalogSpaceId,
     ).then((result) => {
       if (!cancelled && !result.success) {
         emitAdminCatalogSessionAuthFailure(result)
       }
     }).catch(() => {
-      // Home surfaces refresh failures and the server retains the last confirmed cache.
+      // Home surfaces refresh failures; the unified Catalog has no legacy fallback.
     })
     return () => {
       cancelled = true

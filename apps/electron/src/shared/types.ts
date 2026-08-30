@@ -925,6 +925,34 @@ export interface ElectronAPI {
     | { success: true; result: import('@polo-ai/shared/product-spaces').StopAllExecutionsResult }
     | { success: false; errorCode: string; message: string }
   >
+  productSpaceGetCatalog(
+    productSpaceId: string,
+    knownRevision?: string,
+  ): Promise<
+    | {
+      success: true
+      notModified: boolean
+      contractVersion?: number
+      productSpaceId?: string
+      catalogRevision?: string
+      accessMode?: 'online' | 'offline'
+      warningCode?: string | null
+      entries: ReadonlyArray<Record<string, unknown>>
+    }
+    | {
+      success: false
+      errorCode: string
+      message: string
+      status?: number
+      accessMode?: 'denied'
+      catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
+    }
+  >
+  productSpaceSetActiveSpace(productSpaceId: string | null): Promise<{ success: boolean }>
+  productSpaceCleanupLegacyState(): Promise<{
+    success: boolean
+    results: Record<string, boolean>
+  }>
 
   // Session Drafts (persisted composer state — text + attachment refs)
   getDraft(sessionId: string): Promise<import('@polo-ai/shared/config').SessionDraft | null>

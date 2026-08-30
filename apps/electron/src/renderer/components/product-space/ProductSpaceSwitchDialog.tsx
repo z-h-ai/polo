@@ -143,8 +143,8 @@ export function ProductSpaceSwitchDialog() {
                         status === 'failed'
                           ? 'text-xs font-medium text-destructive'
                           : status === 'stopped'
-                            ? 'text-xs font-medium text-emerald-600'
-                            : 'text-xs font-medium text-amber-600'
+                            ? 'text-xs font-medium text-success'
+                            : 'text-xs font-medium text-info'
                       }
                     >
                       {status === 'failed'

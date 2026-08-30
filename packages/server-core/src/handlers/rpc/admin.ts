@@ -71,6 +71,7 @@ import {
   type LlmConnection,
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
+import { setTrustedProductSpaceAccountProvider } from './trusted-product-space-account'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -90,6 +91,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.admin.SYNC_APP_CATALOG,
   RPC_CHANNELS.admin.LIST_ORGANIZATIONS,
   RPC_CHANNELS.admin.LIST_PRODUCT_SPACES,
+  RPC_CHANNELS.productSpace.CATALOG,
   RPC_CHANNELS.admin.CREATE_ORGANIZATION,
   RPC_CHANNELS.admin.PREVIEW_ORGANIZATION_JOIN,
   RPC_CHANNELS.admin.ACCEPT_ORGANIZATION_JOIN,
@@ -566,6 +568,25 @@ export function registerAdminHandlers(
   const sessions = new AdminSessionCoordinator(
     closeCatalogAuthorizationForAccount,
   )
+
+  // The ProductSpace runtime derives the account from this trusted session
+  // snapshot instead of trusting RPC arguments. Registered by the admin
+  // handler module because only it owns the session coordinator.
+  setTrustedProductSpaceAccountProvider(async (): Promise<string | null> => {
+    try {
+      const adminUrl = requireAdminUrl()
+      const manager = getCredentialManager()
+      const snapshot = await sessions.capture(manager)
+      if (!snapshot) {
+        void adminUrl
+        return null
+      }
+      return snapshot.tokens.userId
+    } catch {
+      return null
+    }
+  })
+
   const callOrganization = async <T extends object>(
     operation: string,
     callback: (
@@ -1561,6 +1582,51 @@ export function registerAdminHandlers(
       (client, accessToken) => client.listProductSpaces(accessToken),
     )
   })
+
+  // Unified ProductSpace Catalog (S01). The requested space is validated
+  // against a freshly fetched trusted list before the catalog is read, and
+  // the response passes the shared ProductSpace boundary parser — a catalog
+  // for another space can never be hydrated.
+  server.handle(
+    RPC_CHANNELS.productSpace.CATALOG,
+    async (_ctx, productSpaceId: unknown, knownRevision: unknown) => {
+      if (typeof productSpaceId !== 'string' || !productSpaceId) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Catalog request is invalid' }
+      }
+      return callOrganization(
+        'getProductSpaceCatalog',
+        async (client, accessToken) => {
+          const list = await client.listProductSpaces(accessToken)
+          const context = list.productSpaces.find(
+            space => space.id === (productSpaceId as never),
+          )
+          if (!context) {
+            throw new AdminError(
+              'The requested ProductSpace is not available for this account',
+              'FORBIDDEN',
+            )
+          }
+          const result = await client.getProductSpaceCatalog(
+            accessToken,
+            context,
+            typeof knownRevision === 'string' && knownRevision
+              ? knownRevision
+              : undefined,
+          )
+          if ('notModified' in result) {
+            return { notModified: true as const, catalogRevision: knownRevision as string }
+          }
+          return {
+            notModified: false as const,
+            contractVersion: result.contractVersion,
+            productSpaceId: result.productSpaceId,
+            catalogRevision: result.catalogRevision,
+            entries: result.entries,
+          }
+        },
+      )
+    },
+  )
 
   server.handle(RPC_CHANNELS.admin.CREATE_ORGANIZATION, async (_ctx, rawInput: unknown) => {
     const input = CreateOrganizationRpcInputSchema.safeParse(rawInput)

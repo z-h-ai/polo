@@ -151,20 +151,33 @@ beforeEach(async () => {
         productSpaceContextStorage = next
         return next
       },
-      adminSyncAppCatalog: async () => ({
+      productSpaceSetActiveSpace: async () => ({ success: true }),
+      productSpaceCleanupLegacyState: async () => ({
+        success: true,
+        results: {},
+      }),
+      productSpaceGetCatalog: async () => ({
         success: true as const,
-        catalog: {
-          accountId,
-          organizationId: enterpriseSpaceId,
-          authorizationStatus: 'authorized' as const,
-          appConfigVersion: 'v1',
-          syncedAt: 1,
-          apps: [catalogApp],
-        },
-        source: 'cache' as const,
-        refreshed: false,
+        notModified: false as const,
+        catalogRevision: 'v1',
+        productSpaceId: enterpriseSpaceId,
         accessMode: 'offline' as const,
         warningCode: 'NETWORK_ERROR',
+        entries: [{
+          kind: 'app',
+          catalogEntryId: 'offline-app',
+          name: 'Offline App',
+          description: 'Prepared locally',
+          availability: 'available',
+          deliveryMode: 'local_bundle',
+          currentRelease: {
+            version: '1.0.0',
+            runtime: 'static' as const,
+            downloadUrl: 'https://example.com/offline-app.zip',
+            checksum: 'a'.repeat(64),
+            sizeBytes: 1,
+          },
+        }],
       }),
       localApps: {
         getHostInfo: async () => ({ platform: 'darwin' as const, arch: 'arm64' as const }),

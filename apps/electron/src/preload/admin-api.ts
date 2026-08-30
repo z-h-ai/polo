@@ -36,6 +36,9 @@ type AdminPreloadApi = Pick<
   | 'productSpaceList'
   | 'productSpaceListActiveExecutions'
   | 'productSpaceStopAllExecutions'
+  | 'productSpaceGetCatalog'
+  | 'productSpaceSetActiveSpace'
+  | 'productSpaceCleanupLegacyState'
 >
 
 export function buildAdminPreloadApi(
@@ -115,5 +118,11 @@ export function buildAdminPreloadApi(
       client.invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, accountId, productSpaceId),
     productSpaceStopAllExecutions: (accountId, productSpaceId) =>
       client.invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, accountId, productSpaceId),
+    productSpaceGetCatalog: (productSpaceId, knownRevision) =>
+      client.invoke(RPC_CHANNELS.productSpace.CATALOG, productSpaceId, knownRevision),
+    productSpaceSetActiveSpace: productSpaceId =>
+      client.invoke(RPC_CHANNELS.productSpace.SET_ACTIVE_CONTEXT, productSpaceId),
+    productSpaceCleanupLegacyState: () =>
+      client.invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE),
   }
 }

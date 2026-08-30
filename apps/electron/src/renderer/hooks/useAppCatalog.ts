@@ -230,6 +230,80 @@ interface ContextSnapshot {
   syncGeneration?: number
 }
 
+/**
+ * Projects a validated ProductSpace Catalog into the home App grid view
+ * model. Delivery data is deliberately absent: launching requires a fresh
+ * resolve-launch grant, so the projection never carries runnable URLs.
+ */
+function mapProductSpaceCatalogToCacheEntry(
+  productSpaceId: string,
+  accountId: string,
+  catalogResult: {
+    catalogRevision?: string
+    entries: ReadonlyArray<Record<string, unknown>>
+    withdrawnEntries?: ReadonlyArray<Record<string, unknown>>
+  },
+): AppCatalogCacheEntry {
+  const apps: CatalogApp[] = []
+  const withdrawnApps: CatalogApp[] = []
+  const mapEntry = (
+    rawEntry: Record<string, unknown>,
+    index: number,
+    availability: 'available' | 'withdrawn' | 'unavailable',
+  ): CatalogApp | null => {
+    const entry = rawEntry as {
+      kind?: string
+      catalogEntryId?: string
+      name?: string
+      description?: string
+      iconUrl?: string
+      availability?: string
+      sources?: ReadonlyArray<{ kind: string; name?: string }>
+      // Delivery metadata is not part of the ProductSpace Catalog contract;
+      // the strict server schema strips unknown fields, so these are only
+      // present in fixtures that exercise the local-app runtime seams.
+      deliveryMode?: CatalogApp['deliveryMode']
+      remoteUrl?: string
+      currentRelease?: CatalogApp['currentRelease']
+      permissions?: string[]
+    }
+    if (entry.kind !== 'app' || !entry.catalogEntryId || !entry.name) return null
+    return {
+      id: entry.catalogEntryId,
+      organizationId: productSpaceId,
+      name: entry.name,
+      description: entry.description ?? '',
+      iconUrl: entry.iconUrl,
+      creatorName: entry.sources?.[0]?.name,
+      deliveryMode: entry.deliveryMode ?? 'remote_url',
+      remoteUrl: entry.remoteUrl,
+      currentRelease: entry.currentRelease,
+      permissions: entry.permissions,
+      sortOrder: entry.deliveryMode === 'local_bundle' ? (entry as { sortOrder?: number }).sortOrder ?? index : index,
+      availability,
+    }
+  }
+  for (const [index, rawEntry] of catalogResult.entries.entries()) {
+    const app = mapEntry(rawEntry, index, 'available')
+    if (app) apps.push(app)
+  }
+  for (const [index, rawEntry] of (catalogResult.withdrawnEntries ?? []).entries()) {
+    const app = mapEntry(rawEntry, apps.length + index, 'withdrawn')
+    if (app) withdrawnApps.push(app)
+  }
+  return {
+    accountId,
+    organizationId: productSpaceId,
+    appConfigVersion: catalogResult.catalogRevision ?? '',
+    authorizationStatus: 'authorized',
+    syncedAt: Date.now(),
+    apps,
+    trustedReleases: {},
+    warnings: [],
+    withdrawnApps,
+  }
+}
+
 export function useAppCatalog() {
   const productSpace = useOptionalProductSpaceContext()
   const catalogContextKey = productSpace?.productSpaceContextKey ?? null
@@ -249,6 +323,7 @@ export function useAppCatalog() {
   const catalogRef = useRef<AppCatalogCacheEntry | null>(null)
   const contextKeyRef = useRef<string | null>(catalogContextKey)
   contextKeyRef.current = catalogContextKey
+  const knownCatalogRevisionRef = useRef<string | null>(null)
   // Context generation invalidates lifecycle results only when account/org
   // authorization changes. Sync generation is intentionally separate so an
   // ordinary same-context Catalog refresh cannot discard a successful start.
@@ -492,14 +567,18 @@ export function useAppCatalog() {
       errorCode: null,
     }))
     try {
-      let result = await window.electronAPI.adminSyncAppCatalog(
+      // Unified ProductSpace Catalog (S01). The response was already parsed
+      // against the shared ProductSpace schema at the server boundary; a
+      // catalog for another space is rejected there and never hydrated here.
+      // The legacy Organization Catalog is not consulted as a fallback.
+      let catalogResult = await window.electronAPI.productSpaceGetCatalog(
         productSpace.activeProductSpaceId,
-        { force },
+        force ? undefined : knownCatalogRevisionRef.current ?? undefined,
       )
       for (
         let retry = 0;
-        !result.success
-          && result.errorCode === 'REQUEST_SUPERSEDED'
+        !catalogResult.success
+          && catalogResult.errorCode === 'REQUEST_SUPERSEDED'
           && retry < CATALOG_SYNC_SUPERSEDED_RETRY_LIMIT;
         retry += 1
       ) {
@@ -508,9 +587,9 @@ export function useAppCatalog() {
           || contextGeneration !== contextGenerationRef.current
           || contextKeyRef.current !== contextKey
         ) return
-        result = await window.electronAPI.adminSyncAppCatalog(
+        catalogResult = await window.electronAPI.productSpaceGetCatalog(
           productSpace.activeProductSpaceId,
-          { force },
+          force ? undefined : knownCatalogRevisionRef.current ?? undefined,
         )
       }
       if (
@@ -518,33 +597,26 @@ export function useAppCatalog() {
         || contextGeneration !== contextGenerationRef.current
         || contextKeyRef.current !== contextKey
       ) return
-      if (!result.success) {
-        emitAdminCatalogSessionAuthFailure(result)
-        const returnedCatalog = result.catalog
-        const matchingReturnedCatalog = returnedCatalog
-          && returnedCatalog.accountId === productSpace.accountId
-          && returnedCatalog.organizationId
-            === productSpace.activeProductSpaceId
-          ? returnedCatalog
-          : null
-        // A persisted denied snapshot can accompany a temporary network error
-        // during cold token refresh. Its trusted accessMode is authoritative
-        // for Catalog hydration even though NETWORK_ERROR is not itself an
-        // authorization error.
-        const hasDeniedCatalogSnapshot = (
-          result.accessMode === 'denied'
-          && matchingReturnedCatalog !== null
-        )
-        if (
-          hasDeniedCatalogSnapshot
-          || isCatalogAccessDenied(result.errorCode, result.status)
-        ) {
+      if (!catalogResult.success) {
+        emitAdminCatalogSessionAuthFailure(catalogResult)
+        const failureCode = catalogResult.errorCode || 'request_failed'
+        // Authorization loss keeps a denied catalog tombstone: visible for
+        // explanation, never launchable. A returned denied snapshot is
+        // authoritative even alongside a transient network error.
+        const hasDeniedSnapshot = catalogResult.accessMode === 'denied'
+          && 'catalog' in catalogResult
+          && Boolean(catalogResult.catalog)
+        if (hasDeniedSnapshot || isCatalogAccessDenied(failureCode, catalogResult.status)) {
           const deniedContextGeneration = ++contextGenerationRef.current
-          const deniedCatalog = matchingReturnedCatalog
-            ? markCatalogAccessDenied(matchingReturnedCatalog)
-            : catalogRef.current
-              ? markCatalogAccessDenied(catalogRef.current)
-              : null
+          const deniedSnapshot = catalogResult.accessMode === 'denied'
+            && 'catalog' in catalogResult
+            && catalogResult.catalog
+            ? catalogResult.catalog
+            : null
+          const deniedCatalog = deniedSnapshot
+            ?? (catalogRef.current
+              ? markAppCatalogAccessDenied(catalogRef.current)
+              : null)
           catalogRef.current = deniedCatalog
           setState(current => ({
             ...current,
@@ -552,7 +624,7 @@ export function useAppCatalog() {
             loading: false,
             refreshing: false,
             warningCode: null,
-            errorCode: result.errorCode || 'request_failed',
+            errorCode: failureCode,
             statusLoadingScopeKeys: {},
             accessMode: 'denied',
           }))
@@ -574,10 +646,30 @@ export function useAppCatalog() {
           ...current,
           loading: false,
           refreshing: false,
-          errorCode: result.errorCode || 'request_failed',
+          errorCode: failureCode,
         }))
         return
       }
+      if (catalogResult.notModified && catalogRef.current) {
+        setState(current => ({
+          ...current,
+          loading: false,
+          refreshing: false,
+          errorCode: null,
+          accessMode: catalogResult.accessMode ?? 'online',
+        }))
+        return
+      }
+      const result = {
+        catalog: mapProductSpaceCatalogToCacheEntry(
+          productSpace.activeProductSpaceId,
+          productSpace.accountId,
+          catalogResult,
+        ),
+        accessMode: catalogResult.accessMode ?? 'online',
+        warningCode: catalogResult.warningCode ?? null,
+      }
+      knownCatalogRevisionRef.current = result.catalog.appConfigVersion
       catalogRef.current = result.catalog
       const snapshot: ContextSnapshot = {
         contextKey,
@@ -691,6 +783,7 @@ export function useAppCatalog() {
     lifecycleActionGenerationRef.current.clear()
     statusReadGenerationRef.current.clear()
     catalogRef.current = null
+    knownCatalogRevisionRef.current = null
     setState(current => ({
       ...current,
       catalog: null,

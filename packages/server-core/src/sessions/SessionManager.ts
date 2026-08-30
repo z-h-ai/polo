@@ -23,6 +23,7 @@ import {
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
+import { getRuntimeActiveProductSpace } from '../runtime/product-space-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
@@ -775,6 +776,8 @@ interface ManagedSession {
   id: string
   origin?: 'cli-run' | 'cli-exec'
   workspace: Workspace
+  /** Immutable ProductSpace binding assigned at creation time. */
+  productSpaceId?: string
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
@@ -1108,6 +1111,7 @@ function managedToSession(
     workspaceName: m.workspace.name,
     messages: [],
     isProcessing: m.isProcessing,
+    productSpaceId: m.productSpaceId,
     sessionFolderPath: storage.getSessionPath(m.workspace.rootPath, m.id),
     supportsBranching: resolveSupportsBranching(m),
     ...overrides,
@@ -2795,6 +2799,7 @@ export class SessionManager implements ISessionManager {
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
+      productSpaceId: options?.productSpaceId ?? getRuntimeActiveProductSpace() ?? undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -2877,6 +2882,7 @@ export class SessionManager implements ISessionManager {
       workingDirectory: resolvedWorkingDir,
       model: resolvedModel,
       llmConnection: options?.llmConnection,
+      productSpaceId: options?.productSpaceId ?? getRuntimeActiveProductSpace() ?? undefined,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,

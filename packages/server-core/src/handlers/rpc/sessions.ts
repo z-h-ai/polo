@@ -11,6 +11,9 @@ import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession } from './client-active-session'
+import { getRuntimeActiveProductSpace } from '../../runtime/product-space-executions'
+import { unregisterProductSpaceExecution } from '../../runtime/product-space-executions'
+import { registerAssistantSessionExecution } from './product-space'
 
 interface ClientSessionWatchState {
   watcher: SessionFileWatcher
@@ -30,6 +33,24 @@ function summarizeIds(ids: Iterable<string>, limit = SESSION_GET_LOG_ID_LIMIT) {
     ids: all.slice(0, limit),
     truncated: all.length > limit,
   }
+}
+
+/**
+ * Space fence: while a ProductSpace is committed on this device, session
+ * operations may only touch sessions bound to that space. Sessions without a
+ * binding are invisible too — fail closed, never default to personal.
+ */
+function sessionOutsideActiveSpace(
+  sessionManager: HandlerDeps['sessionManager'],
+  sessionId: string,
+): boolean {
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  if (!activeProductSpaceId) return false
+  const session = sessionManager
+    .getSessions()
+    .find(candidate => candidate.id === sessionId)
+  if (!session) return false
+  return session.productSpaceId !== activeProductSpaceId
 }
 
 function sessionWorkspaceDistribution(sessions: Array<{ workspaceId?: string }>): Record<string, number> {
@@ -147,7 +168,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       ? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId)
       : undefined
     const workspaceId = ctx.workspaceId ?? windowWorkspaceId
-    const sessions = sessionManager.getSessions(workspaceId ?? undefined)
+    const activeProductSpaceId = getRuntimeActiveProductSpace()
+    const allSessions = sessionManager.getSessions(workspaceId ?? undefined)
+    // While a ProductSpace is committed on this device, sessions bound to any
+    // other space (or never bound) never cross the IPC boundary.
+    const sessions = activeProductSpaceId
+      ? allSessions.filter(session => session.productSpaceId === activeProductSpaceId)
+      : allSessions
     end()
 
     log.info('[sessions:get] result', {
@@ -179,6 +206,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Get a single session with messages (for lazy loading)
   server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (_ctx, sessionId: string) => {
+    if (sessionOutsideActiveSpace(sessionManager, sessionId)) return null
     const end = perf.start('rpc.getSessionMessages')
     const session = await sessionManager.getSession(sessionId)
     end()
@@ -190,11 +218,21 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const end = perf.start('rpc.createSession', { workspaceId })
     const session = await sessionManager.createSession(workspaceId, options)
     end()
+    if (session.productSpaceId) {
+      await registerAssistantSessionExecution({
+        sessionManager,
+        sessionId: session.id,
+        workspaceId: session.workspaceId,
+        productSpaceId: session.productSpaceId,
+        name: session.name || session.id,
+      })
+    }
     return session
   })
 
   // Delete a session
   server.handle(RPC_CHANNELS.sessions.DELETE, async (_ctx, sessionId: string) => {
+    unregisterProductSpaceExecution(sessionId)
     return sessionManager.deleteSession(sessionId)
   })
 
@@ -214,6 +252,10 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.SEND_MESSAGE, async (ctx, sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions) => {
     // Capture the caller's clientId for error routing
     const callerClientId = ctx.clientId
+
+    if (sessionOutsideActiveSpace(sessionManager, sessionId)) {
+      throw new Error('SESSION_SPACE_MISMATCH')
+    }
 
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {
       let acked = false
@@ -259,6 +301,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Cancel processing
   server.handle(RPC_CHANNELS.sessions.CANCEL, async (_ctx, sessionId: string, silent?: boolean) => {
+    if (sessionOutsideActiveSpace(sessionManager, sessionId)) {
+      throw new Error('SESSION_SPACE_MISMATCH')
+    }
     return sessionManager.cancelProcessing(sessionId, silent)
   })
 

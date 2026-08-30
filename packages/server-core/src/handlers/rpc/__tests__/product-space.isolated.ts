@@ -1,119 +1,210 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
+import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../../handler-deps'
 import {
-  listProductSpaceActiveExecutions,
-  stopAllProductSpaceExecutions,
+  registerProductSpaceExecution,
+  resetProductSpaceExecutionRegistryForTests,
+  type RegisteredProductSpaceExecution,
+} from '../../../runtime/product-space-executions'
+import {
+  registerProductSpaceHandlers,
 } from '../product-space'
+import {
+  setTrustedProductSpaceAccountProvider,
+} from '../trusted-product-space-account'
 
-const accountId = 'account-a'
-const productSpaceId = 'space-a'
+const trustedAccountId = 'account-trusted'
+const spaceA = 'space-a'
+const spaceB = 'space-b'
 
-function createMockSessionManager(
-  sessions: Array<{
-    id: string
-    name?: string
-    workspaceId: string
-    isProcessing: boolean
-    stopLatencyMs?: number
-    refuseStop?: boolean
-  }>,
-) {
-  const state = sessions.map(session => ({ ...session }))
-  const sessionManager = {
-    getSessions: () => state.map(session => ({
-      id: session.id,
-      name: session.name,
-      workspaceId: session.workspaceId,
-      isProcessing: session.isProcessing,
-    })),
-    cancelProcessing: async (sessionId: string) => {
-      const session = state.find(candidate => candidate.id === sessionId)
-      if (!session) return
-      if (session.refuseStop) throw new Error('cancel channel broken')
-      if (!session.isProcessing) return
-      if (session.stopLatencyMs) {
-        await new Promise(resolve => setTimeout(resolve, session.stopLatencyMs))
-      }
-      session.isProcessing = false
+function executionScope(input: {
+  executionId: string
+  accountId: string
+  productSpaceId: string
+}): RegisteredProductSpaceExecution['scope'] {
+  return ({
+    contractVersion: 1 as const,
+    executionId: input.executionId,
+    accountId: input.accountId,
+    productSpaceId: input.productSpaceId,
+    workspaceId: `ws-${input.executionId}`,
+    subject: {
+      kind: 'built_in_app' as const,
+      builtInAppId: 'polo_assistant' as const,
     },
-  }
+  }) as unknown as RegisteredProductSpaceExecution['scope']
+}
+
+function fakeExecution(input: {
+  executionId: string
+  accountId: string
+  productSpaceId: string
+  active?: boolean
+  refuseStop?: boolean
+}): RegisteredProductSpaceExecution {
+  let active = input.active ?? true
   return {
-    sessionManager: sessionManager as unknown as HandlerDeps['sessionManager'],
-    state,
+    scope: executionScope(input),
+    kind: 'assistant_session',
+    name: input.executionId,
+    ref: input.executionId,
+    isActive: () => active,
+    stop: async () => {
+      if (input.refuseStop) return 'failed'
+      active = false
+      return 'stopped'
+    },
   }
 }
 
-beforeEach(() => {})
+function createHarness() {
+  const handlers = new Map<string, HandlerFn>()
+  const server: RpcServer = {
+    handle(channel: string, handler: HandlerFn) {
+      handlers.set(channel, handler)
+    },
+    push() {},
+    async invokeClient() {
+      return null
+    },
+  } as unknown as RpcServer
+  registerProductSpaceHandlers(server, {
+    sessionManager: {
+      cancelAllProcessing: async () => {},
+    },
+  } as unknown as HandlerDeps)
+  const invoke = async (channel: string, ...args: unknown[]) => {
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`missing handler for ${channel}`)
+    return handler({} as never, ...args)
+  }
+  return { invoke }
+}
 
-describe('listProductSpaceActiveExecutions', () => {
-  it('lists only in-flight executions with the requested account/space tuple', () => {
-    const { sessionManager } = createMockSessionManager([
-      { id: 'exec-1', name: '访谈整理', workspaceId: 'ws-1', isProcessing: true },
-      { id: 'exec-2', name: '已停止', workspaceId: 'ws-1', isProcessing: false },
-      { id: 'exec-3', workspaceId: 'ws-2', isProcessing: true },
-    ])
-    const executions = listProductSpaceActiveExecutions({
-      sessionManager,
-      accountId,
-      productSpaceId,
-    })
-    expect(executions.map(execution => execution.executionId as string))
-      .toEqual(['exec-1', 'exec-3'])
-    for (const execution of executions) {
-      expect(execution.scope.accountId as string).toBe(accountId)
-      expect(execution.scope.productSpaceId as string).toBe(productSpaceId)
-      expect(execution.scope.workspaceId as string).not.toBe(productSpaceId)
-      expect(execution.scope.subject).toEqual({
-        kind: 'built_in_app',
-        builtInAppId: 'polo_assistant',
-      })
+beforeEach(() => {
+  resetProductSpaceExecutionRegistryForTests()
+  setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
+})
+
+describe('trusted execution enumeration', () => {
+  it('derives the account from the trusted session and filters by real scope', async () => {
+    registerProductSpaceExecution(fakeExecution({
+      executionId: 'exec-a1', accountId: trustedAccountId, productSpaceId: spaceA,
+    }))
+    registerProductSpaceExecution(fakeExecution({
+      executionId: 'exec-a2', accountId: trustedAccountId, productSpaceId: spaceA, active: false,
+    }))
+    registerProductSpaceExecution(fakeExecution({
+      executionId: 'exec-b1', accountId: trustedAccountId, productSpaceId: spaceB,
+    }))
+
+    const { invoke } = createHarness()
+    const result = await invoke(
+      RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      spaceA,
+    )
+    expect(result.success).toBe(true)
+    expect(result.executions.map((execution: { executionId: string }) => execution.executionId))
+      .toEqual(['exec-a1'])
+    for (const execution of result.executions) {
+      expect(execution.scope.accountId).toBe(trustedAccountId)
+      expect(execution.scope.productSpaceId).toBe(spaceA)
     }
   })
 
-  it('returns no executions for a quiet runtime', () => {
-    const { sessionManager } = createMockSessionManager([])
-    const executions = listProductSpaceActiveExecutions({
-      sessionManager,
-      accountId,
-      productSpaceId,
-    })
-    expect(executions).toEqual([])
+  it('rejects requests whose account argument disagrees with the trusted identity', async () => {
+    registerProductSpaceExecution(fakeExecution({
+      executionId: 'exec-a1', accountId: trustedAccountId, productSpaceId: spaceA,
+    }))
+    const { invoke } = createHarness()
+    const result = await invoke(
+      RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      spaceA,
+      'account-forged',
+    )
+    expect(result.success).toBe(false)
+    expect(result.errorCode).toBe('FORBIDDEN')
+  })
+
+  it('rejects execution operations without a trusted Admin session', async () => {
+    setTrustedProductSpaceAccountProvider(async () => null)
+    const { invoke } = createHarness()
+    const listed = await invoke(
+      RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      spaceA,
+    )
+    expect(listed.success).toBe(false)
+    expect(listed.errorCode).toBe('UNAUTHORIZED')
+    const stopped = await invoke(
+      RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+      spaceA,
+    )
+    expect(stopped.success).toBe(false)
+    expect(stopped.errorCode).toBe('UNAUTHORIZED')
   })
 })
 
-describe('stopAllProductSpaceExecutions', () => {
-  it('stops multiple concurrent executions and reports each as stopped', async () => {
-    const { sessionManager } = createMockSessionManager([
-      { id: 'exec-1', name: 'A', workspaceId: 'ws-1', isProcessing: true, stopLatencyMs: 60 },
-      { id: 'exec-2', name: 'B', workspaceId: 'ws-1', isProcessing: true },
-      { id: 'exec-3', name: 'C', workspaceId: 'ws-2', isProcessing: true },
-    ])
-    const result = await stopAllProductSpaceExecutions({
-      sessionManager,
-      accountId,
-      productSpaceId,
+describe('cross-scope stop fence', () => {
+  it('never stops executions of another ProductSpace', async () => {
+    const otherSpace = fakeExecution({
+      executionId: 'exec-b1', accountId: trustedAccountId, productSpaceId: spaceB,
     })
-    expect(result.allStopped).toBe(true)
-    expect(result.executions.map(execution => execution.status))
-      .toEqual(['stopped', 'stopped', 'stopped'])
-    expect(sessionManager.getSessions().every(session => !session.isProcessing)).toBe(true)
+    registerProductSpaceExecution(otherSpace)
+    registerProductSpaceExecution(fakeExecution({
+      executionId: 'exec-a1', accountId: trustedAccountId, productSpaceId: spaceA,
+    }))
+
+    const { invoke } = createHarness()
+    const result = await invoke(
+      RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+      spaceA,
+    )
+    expect(result.success).toBe(true)
+    expect(result.result.executions.map((execution: { executionId: string }) => execution.executionId))
+      .toEqual(['exec-a1'])
+    expect(await otherSpace.isActive()).toBe(true)
   })
 
-  it('reports a failure and keeps the execution non-terminal when a stop fails', async () => {
-    const { sessionManager } = createMockSessionManager([
-      { id: 'exec-1', name: 'A', workspaceId: 'ws-1', isProcessing: true },
-      { id: 'exec-2', name: 'Stuck', workspaceId: 'ws-1', isProcessing: true, refuseStop: true },
-    ])
-    const result = await stopAllProductSpaceExecutions({
-      sessionManager,
-      accountId,
-      productSpaceId,
+  it('reports failed stops and keeps the execution non-terminal', async () => {
+    registerProductSpaceExecution(fakeExecution({
+      executionId: 'exec-a1', accountId: trustedAccountId, productSpaceId: spaceA,
+    }))
+    const stuck = fakeExecution({
+      executionId: 'exec-a2', accountId: trustedAccountId, productSpaceId: spaceA,
+      refuseStop: true,
     })
-    expect(result.allStopped).toBe(true)
-    const stuck = result.executions.find(execution => execution.executionId === 'exec-2')
-    expect(stuck?.status).toBe('failed')
-    expect(stuck?.errorCode).toBe('runtime_stop_failed')
-    expect(result.executions.find(execution => execution.executionId === 'exec-1')?.status)
-      .toBe('stopped')
+    registerProductSpaceExecution(stuck)
+
+    const { invoke } = createHarness()
+    const result = await invoke(
+      RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+      spaceA,
+    )
+    expect(result.success).toBe(true)
+    const byId = new Map(
+      (result.result.executions as Array<Record<string, unknown>>).map(
+        execution => [execution.executionId, execution],
+      ),
+    )
+    expect(byId.get('exec-a1')?.status).toBe('stopped')
+    expect(byId.get('exec-a2')?.status).toBe('failed')
+    expect(byId.get('exec-a2')?.errorCode).toBe('runtime_stop_failed')
+    expect(await stuck.isActive()).toBe(true)
+  })
+})
+
+describe('legacy direct-switch cleanup', () => {
+  it('stops registered executions and reports every step result', async () => {
+    const legacy = fakeExecution({
+      executionId: 'exec-legacy', accountId: trustedAccountId, productSpaceId: spaceA,
+    })
+    registerProductSpaceExecution(legacy)
+    const { invoke } = createHarness()
+    const result = await invoke(RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE)
+    expect(result.results.legacyRuntimeStopped).toBe(true)
+    expect(result.results.legacyCatalogCacheRemoved).toBe(true)
+    expect(result.results.legacyAuthorizationCacheRemoved).toBe(true)
+    expect(await legacy.isActive()).toBe(false)
   })
 })

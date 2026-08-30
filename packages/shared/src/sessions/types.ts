@@ -25,7 +25,7 @@ import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthSt
  */
 export const SESSION_PERSISTENT_FIELDS = [
   // Identity
-  'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd',
+  'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd', 'productSpaceId',
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
@@ -102,6 +102,8 @@ export interface SessionConfig {
   sdkSessionId?: string;
   /** Workspace root path this session belongs to */
   workspaceRootPath: string;
+  /** Immutable ProductSpace binding assigned at creation time */
+  productSpaceId?: string;
   /** Optional user-defined name */
   name?: string;
   createdAt: number;

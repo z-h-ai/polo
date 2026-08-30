@@ -11,21 +11,12 @@ export interface VerifiedProductSpaceContextPreference {
   verifiedAt: number
 }
 
-/**
- * Device-local session-to-space provenance so assistant history never leaks
- * across a ProductSpace switch. Keys are session IDs, values are the
- * ProductSpace the session was created in.
- */
-export type ProductSpaceSessionIndexPreference = Record<string, string>
-
 export interface ProductSpaceContextStorage {
   verifiedContext?: VerifiedProductSpaceContextPreference
-  sessionSpaceIndex?: ProductSpaceSessionIndexPreference
 }
 
 export interface ProductSpaceContextStoragePatch {
   verifiedContext?: VerifiedProductSpaceContextPreference | null
-  sessionSpaceIndex?: ProductSpaceSessionIndexPreference | null
 }
 
 export type ProductSpaceContextStorageByAccount = Record<

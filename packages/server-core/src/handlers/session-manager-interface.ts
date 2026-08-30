@@ -91,6 +91,7 @@ export interface ISessionManager {
     rpcContext?: { callerClientId?: string },
   ): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
+  cancelAllProcessing(): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
   addMessageAnnotation(sessionId: string, messageId: string, annotation: AnnotationV1): void

@@ -62,7 +62,9 @@ const legacyStateInvalidator = {
   removeLegacyOrganizationAuthorizationCache: () => {
     try {
       const staleKeys: string[] = []
+      // eslint-disable-next-line polo-ai/no-localstorage -- one-time legacy invalidation only
       for (let index = 0; index < localStorage.length; index += 1) {
+        // eslint-disable-next-line polo-ai/no-localstorage -- one-time legacy invalidation only
         const key = localStorage.key(index)
         if (
           key
@@ -73,7 +75,10 @@ const legacyStateInvalidator = {
           staleKeys.push(key)
         }
       }
-      for (const key of staleKeys) localStorage.removeItem(key)
+      for (const key of staleKeys) {
+        // eslint-disable-next-line polo-ai/no-localstorage -- one-time legacy invalidation only
+        localStorage.removeItem(key)
+      }
     } catch {
       // Hardened renderers without localStorage simply keep nothing.
     }
@@ -140,6 +145,9 @@ export function useProductSpaceContextState() {
     setContextVersion(version => version + 1)
     setFlowState('ready')
     setError(null)
+    // The runtime now fences sessions and executions to this space.
+    void window.electronAPI.productSpaceSetActiveSpace(productSpaceId)
+      .catch(() => {})
 
     window.dispatchEvent(new CustomEvent('polo:product-space-changed', {
       detail: {
@@ -212,11 +220,17 @@ export function useProductSpaceContextState() {
       const fetched = await fetchProductSpaces(scope)
       if (!fetched || !isCurrentAccountScope(scope)) return null
 
-      // Direct switch: clear legacy Organization state once. The legacy state
-      // is never a fallback for the ProductSpace list.
+      // Direct switch: clear legacy Organization state once, executed by the
+      // runtime with verifiable per-step results. A failed cleanup fails
+      // closed instead of mixing legacy and ProductSpace state.
       if (!hadPersistedContext && !legacyInvalidatedAccountsRef.current.has(accountId)) {
+        const cleanup = await window.electronAPI.productSpaceCleanupLegacyState()
+        if (!cleanup.success) {
+          legacyInvalidatedAccountsRef.current.add(accountId)
+          throw { code: 'legacy_cleanup_failed' }
+        }
         legacyInvalidatedAccountsRef.current.add(accountId)
-        await invalidateLegacyOrganizationState(legacyStateInvalidator)
+        legacyStateInvalidator.removeLegacyOrganizationAuthorizationCache()
       }
 
       const availableById = new Map<string, ProductSpaceSummary>(fetched.list.map(space => [space.id as string, space]))
@@ -264,6 +278,23 @@ export function useProductSpaceContextState() {
     }
   }, [applyListResponse, applySpaceSelection, fetchProductSpaces, isCurrentAccountScope])
 
+  const stopAllExecutions = useCallback(async (scope: AccountScope) => {
+    const accountId = accountIdRef.current
+    const activeId = activeProductSpaceIdRef.current
+    if (!accountId || !activeId) {
+      throw { code: 'product_space_context_unavailable' }
+    }
+    const result = await window.electronAPI.productSpaceStopAllExecutions(
+      accountId,
+      activeId,
+    )
+    if (!isCurrentAccountScope(scope)) return null
+    if (!result.success) {
+      throw { code: result.errorCode, message: result.message }
+    }
+    return result.result
+  }, [isCurrentAccountScope])
+
   const refreshProductSpaces = useCallback(async (): Promise<ProductSpaceSummary[] | null> => {
     const accountId = accountIdRef.current
     if (!accountId) return null
@@ -293,9 +324,23 @@ export function useProductSpaceContextState() {
 
       // A removed membership makes the space disappear from the server list;
       // membership loss returns the account to personal space without
-      // confirmation, per the shared operation contract. A read-only space
-      // stays entered so its restriction reason remains visible.
+      // confirmation, per the shared operation contract. The same atomic
+      // stop-all fence guards this path: if any execution cannot be
+      // terminated, the account stays on the old space (safe degraded state)
+      // instead of half-switching. A read-only space stays entered so its
+      // restriction reason remains visible.
       if (!active && activeId !== fetched.personalId) {
+        try {
+          const stopped = await stopAllExecutions(scope)
+          if (stopped && !stopped.executions.every(
+            execution => execution.status === 'stopped',
+          )) {
+            throw { code: 'runtime_stop_failed' }
+          }
+        } catch {
+          setFlowState('error')
+          return fetched.list
+        }
         switchGenerationRef.current += 1
         pendingTargetRef.current = null
         setPendingSwitch(null)
@@ -316,7 +361,7 @@ export function useProductSpaceContextState() {
       // Refresh failures keep the current space and its member relationships.
       return null
     }
-  }, [applySpaceSelection, fetchProductSpaces, persistVerifiedContext])
+  }, [applySpaceSelection, fetchProductSpaces, persistVerifiedContext, stopAllExecutions])
 
   const listActiveExecutions = useCallback(async (): Promise<ExecutionSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -331,23 +376,6 @@ export function useProductSpaceContextState() {
     }
     return result.executions
   }, [])
-
-  const stopAllExecutions = useCallback(async (scope: AccountScope) => {
-    const accountId = accountIdRef.current
-    const activeId = activeProductSpaceIdRef.current
-    if (!accountId || !activeId) {
-      throw { code: 'product_space_context_unavailable' }
-    }
-    const result = await window.electronAPI.productSpaceStopAllExecutions(
-      accountId,
-      activeId,
-    )
-    if (!isCurrentAccountScope(scope)) return null
-    if (!result.success) {
-      throw { code: result.errorCode, message: result.message }
-    }
-    return result.result
-  }, [isCurrentAccountScope])
 
   const verifyTargetStillAccessible = useCallback(async (
     scope: AccountScope,
@@ -413,6 +441,29 @@ export function useProductSpaceContextState() {
       setPendingSwitch(previous => (
         previous && previous.targetId === targetId
           ? { ...previous, phase: 'target-failed', errorCode: 'service_unavailable' }
+          : previous
+      ))
+      return
+    }
+    // Staging gate: the target unified Catalog must load and pass the space
+    // boundary before the selection is committed. Nothing from the target
+    // space enters the UI until this succeeds.
+    try {
+      const catalog = await window.electronAPI.productSpaceGetCatalog(targetId)
+      if (!catalog.success) {
+        throw { code: catalog.errorCode }
+      }
+    } catch (caught) {
+      const record = (caught ?? {}) as Record<string, unknown>
+      const errorCode = typeof record.code === 'string' ? record.code : 'catalog_load_failed'
+      if (errorCode === 'product_space_contract_unsupported') {
+        setFlowState('contract-blocked')
+        setPendingSwitch(null)
+        return
+      }
+      setPendingSwitch(previous => (
+        previous && previous.targetId === targetId
+          ? { ...previous, phase: 'target-failed', errorCode }
           : previous
       ))
       return

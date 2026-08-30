@@ -48,6 +48,12 @@ export interface Session {
   workspaceId: string
   workspaceName: string
   name?: string
+  /**
+   * Immutable ProductSpace binding recorded when the session was created.
+   * Assigned once by the runtime from the trusted account context; renderer
+   * values can never reclassify an existing session.
+   */
+  productSpaceId?: string
   /** Preview of first user message (from JSONL header, for lazy-loaded sessions) */
   preview?: string
   lastMessageAt: number
@@ -108,6 +114,11 @@ export interface Session {
 export interface CreateSessionOptions {
   name?: string
   permissionMode?: PermissionMode
+  /**
+   * ProductSpace the session is created in. Bound once at creation into the
+   * session's immutable execution scope; later requests cannot change it.
+   */
+  productSpaceId?: string
   /**
    * Reasoning/thinking level override. When set, takes precedence over workspace
    * and global defaults. Silently ignored by the underlying SDK on non-reasoning

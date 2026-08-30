@@ -9,8 +9,6 @@ import type {
 } from '@polo-ai/shared/product-spaces'
 import type {
   ProductSpaceContextStorage,
-  ProductSpaceContextStoragePatch,
-  ProductSpaceSessionIndexPreference,
   VerifiedProductSpaceContextPreference,
 } from '@polo-ai/shared/config/product-space-context'
 
@@ -156,42 +154,3 @@ export function createProductSpaceScopedStorageKey(
   }:${namespace}`
 }
 
-/**
- * Records which ProductSpace a session was created in so assistant history
- * stays inside its own space after a switch.
- */
-export async function recordSessionProductSpace(
-  accountId: string,
-  sessionId: string,
-  productSpaceId: string,
-): Promise<void> {
-  let index: ProductSpaceSessionIndexPreference = {}
-  try {
-    const stored = await window.electronAPI.getProductSpaceContextStorage(accountId)
-    index = stored?.sessionSpaceIndex ?? {}
-  } catch {
-    index = {}
-  }
-  index[sessionId] = productSpaceId
-  try {
-    await window.electronAPI.updateProductSpaceContextStorage(accountId, {
-      sessionSpaceIndex: index,
-    })
-  } catch {
-    // The session list stays readable; provenance is rebuilt as sessions are
-    // opened inside their space.
-  }
-}
-
-export async function readSessionSpaceIndex(
-  accountId: string,
-): Promise<ProductSpaceSessionIndexPreference> {
-  try {
-    const stored = await window.electronAPI.getProductSpaceContextStorage(accountId)
-    return stored?.sessionSpaceIndex ?? {}
-  } catch {
-    return {}
-  }
-}
-
-export type ProductSpaceContextStoragePatchType = ProductSpaceContextStoragePatch

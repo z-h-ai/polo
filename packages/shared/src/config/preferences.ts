@@ -30,7 +30,6 @@ import {
   type ProductSpaceContextStorage,
   type ProductSpaceContextStorageByAccount,
   type ProductSpaceContextStoragePatch,
-  type ProductSpaceSessionIndexPreference,
   type VerifiedProductSpaceContextPreference,
 } from './product-space-context.ts';
 export type {
@@ -49,7 +48,6 @@ export type {
   ProductSpaceContextStorage,
   ProductSpaceContextStorageByAccount,
   ProductSpaceContextStoragePatch,
-  ProductSpaceSessionIndexPreference,
   VerifiedProductSpaceContextPreference,
 } from './product-space-context.ts';
 
@@ -282,8 +280,7 @@ export function getOrganizationContextStorage(
 export function updateOrganizationContextStorage(
   accountId: string,
   patch: OrganizationContextStoragePatch,
-): OrganizationContextStorage | null {
-  assertOrganizationContextAccountId(accountId);
+): OrganizationContextStorage | null {  assertOrganizationContextAccountId(accountId);
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new Error('Organization context patch is invalid');
   }
@@ -339,7 +336,24 @@ export function updateOrganizationContextStorage(
   return next.verifiedContext || next.unavailableTombstone ? next : null;
 }
 
-const MAX_PRODUCT_SPACE_SESSION_INDEX_ENTRIES = 20_000;
+/**
+ * One-shot direct-switch cleanup: drops the entire device-local legacy
+ * Organization authorization context for every account. Workspace metadata
+ * and user exports are structurally out of reach for this function.
+ */
+export function clearAllOrganizationContextStorage(): boolean {
+  try {
+    const currentPreferences = loadPreferences();
+    if (!currentPreferences.organizationContextStorage) return true;
+    savePreferences({
+      ...currentPreferences,
+      organizationContextStorage: {},
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function sanitizeVerifiedProductSpaceContext(
   value: unknown,
@@ -371,25 +385,6 @@ function sanitizeVerifiedProductSpaceContext(
   };
 }
 
-function sanitizeProductSpaceSessionIndex(
-  value: unknown,
-): ProductSpaceSessionIndexPreference | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter((entry): entry is [string, string] =>
-      typeof entry[0] === 'string'
-      && entry[0].length > 0
-      && typeof entry[1] === 'string'
-      && entry[1].length > 0,
-    );
-  if (entries.length === 0) return undefined;
-  return Object.fromEntries(
-    entries.slice(0, MAX_PRODUCT_SPACE_SESSION_INDEX_ENTRIES),
-  );
-}
-
 function sanitizeProductSpaceContextStorage(
   value: unknown,
 ): ProductSpaceContextStorage | null {
@@ -400,14 +395,8 @@ function sanitizeProductSpaceContextStorage(
   const verifiedContext = sanitizeVerifiedProductSpaceContext(
     candidate.verifiedContext,
   );
-  const sessionSpaceIndex = sanitizeProductSpaceSessionIndex(
-    candidate.sessionSpaceIndex,
-  );
-  return verifiedContext || sessionSpaceIndex
-    ? {
-        ...(verifiedContext ? { verifiedContext } : {}),
-        ...(sessionSpaceIndex ? { sessionSpaceIndex } : {}),
-      }
+  return verifiedContext
+    ? { verifiedContext }
     : null;
 }
 
@@ -462,20 +451,10 @@ export function updateProductSpaceContextStorage(
       next.verifiedContext = verified;
     }
   }
-  if (Object.prototype.hasOwnProperty.call(patch, 'sessionSpaceIndex')) {
-    if (patch.sessionSpaceIndex === null) {
-      delete next.sessionSpaceIndex;
-    } else {
-      const index = sanitizeProductSpaceSessionIndex(patch.sessionSpaceIndex);
-      if (!index) throw new Error('ProductSpace session index is invalid');
-      next.sessionSpaceIndex = index;
-    }
-  }
-
   const byAccount = {
     ...(currentPreferences.productSpaceContextStorage ?? {}),
   };
-  if (next.verifiedContext || next.sessionSpaceIndex) {
+  if (next.verifiedContext) {
     Object.defineProperty(byAccount, accountId, {
       configurable: true,
       enumerable: true,
@@ -489,7 +468,7 @@ export function updateProductSpaceContextStorage(
     ...currentPreferences,
     productSpaceContextStorage: byAccount,
   });
-  return next.verifiedContext || next.sessionSpaceIndex ? next : null;
+  return next.verifiedContext ? next : null;
 }
 
 export function getPreferencesPath(): string {

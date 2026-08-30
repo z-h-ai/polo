@@ -283,8 +283,11 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // productSpace — device-local space selection state and the local runtime
   // execution gate (active executions live on the local session runtime)
   RPC_CHANNELS.productSpace.LIST,
+  RPC_CHANNELS.productSpace.CATALOG,
   RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+  RPC_CHANNELS.productSpace.SET_ACTIVE_CONTEXT,
+  RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE,
 ])
 
 // ---------------------------------------------------------------------------

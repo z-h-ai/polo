@@ -225,10 +225,54 @@ beforeEach(() => {
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      adminSyncAppCatalog: (
-        organizationId: string,
-        options?: { force?: boolean },
-      ) => syncCatalog(organizationId, options),
+      productSpaceGetCatalog: (
+        productSpaceId: string,
+        _knownRevision?: string,
+      ) => syncCatalog(productSpaceId).then((result: AppCatalogSyncResult) => {
+        if (!result.success) {
+          return {
+            success: false as const,
+            errorCode: result.errorCode ?? 'request_failed',
+            message: result.message ?? 'catalog unavailable',
+            status: result.status,
+            ...(result.accessMode === 'denied' && result.catalog
+              ? { accessMode: 'denied' as const, catalog: result.catalog }
+              : {}),
+          }
+        }
+        return {
+          success: true as const,
+          notModified: false as const,
+          catalogRevision: result.catalog.appConfigVersion,
+          productSpaceId,
+          accessMode: result.accessMode,
+          warningCode: result.warningCode,
+          entries: result.catalog.apps.map(app => ({
+            kind: 'app',
+            catalogEntryId: app.id,
+            name: app.name,
+            description: app.description,
+            availability: app.availability === 'available' ? 'available' : 'unavailable',
+            deliveryMode: app.deliveryMode,
+            remoteUrl: app.remoteUrl,
+            currentRelease: app.currentRelease,
+            permissions: app.permissions,
+            sortOrder: app.sortOrder,
+          })),
+          withdrawnEntries: (result.catalog.withdrawnApps ?? []).map(app => ({
+            kind: 'app',
+            catalogEntryId: app.id,
+            name: app.name,
+            description: app.description,
+            availability: 'withdrawn',
+            deliveryMode: app.deliveryMode,
+            remoteUrl: app.remoteUrl,
+            currentRelease: app.currentRelease,
+            permissions: app.permissions,
+            sortOrder: app.sortOrder,
+          })),
+        }
+      }),
       localApps: {
         getHostInfo: async () => ({ platform: 'darwin', arch: 'arm64' }),
         getRuntimeStatuses: (
