@@ -727,6 +727,45 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect(await sm.getEditPopoverPendingSession('ws_test', OWNER_A)).toBeNull()
       })
 
+      // Round 8, issue 1: a session-list I/O failure or a hydration failure
+      // is TRANSIENT — the lookup must REJECT (RPC error → renderer retries)
+      // instead of returning an authoritative null that would release the
+      // restore gate and orphan the still-persisted pending question.
+      it('storage.list I/O failure rejects as transient (never an authoritative empty)', async () => {
+        const request = makeQuestionRequest('f-reach-io')
+        seedStoredPopover('f-reach-io', request, { popoverOwner: OWNER_A })
+
+        // Cold-path manager (runtime workspace present, session not in memory).
+        const smC = new SessionManager({ workspace: buildWorkspace() })
+        const storage = (smC as unknown as { sessionStorage: { list: (root: string) => unknown } }).sessionStorage
+        const realList = storage.list.bind(storage)
+        storage.list = () => {
+          throw new Error('session listing failed (injected)')
+        }
+        try {
+          await expect(smC.getEditPopoverPendingSession('ws_test', OWNER_A))
+            .rejects.toThrow('temporarily unavailable')
+        } finally {
+          storage.list = realList
+        }
+
+        // After the transient failure clears, the SAME lookup is authoritative.
+        const found = await smC.getEditPopoverPendingSession('ws_test', OWNER_A)
+        expect(found?.sessionId).toBe('f-reach-io')
+      })
+
+      it('cold-session hydration failure rejects as transient (never an authoritative empty)', async () => {
+        const request = makeQuestionRequest('f-reach-hyd')
+        seedStoredPopover('f-reach-hyd', request, { popoverOwner: OWNER_A })
+
+        const smC = new SessionManager({ workspace: buildWorkspace() })
+        ;(smC as unknown as { getSession: () => Promise<unknown> }).getSession = async () => {
+          throw new Error('hydration failed (injected)')
+        }
+        await expect(smC.getEditPopoverPendingSession('ws_test', OWNER_A))
+          .rejects.toThrow('temporarily unavailable')
+      })
+
       // Round 3, issue 3: cold recovery must hydrate the FULL identity from
       // the header (hidden/origin/owner/preset), answering must not degrade
       // the persisted header, and a follow-up question must be recoverable by
@@ -1113,7 +1152,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         (getManaged(sessionId).messages as Array<Record<string, unknown>>)
           .filter(m => (m as { questionResponse?: unknown }).questionResponse).length
 
-      it('reservation in flight while the answer commits: ONE answer message, resume deferred, exactly one answer turn eventually', async () => {
+      it('reservation in flight while the answer commits: ONE answer message, resume deferred, and the durable owner turn supersedes the recovery (the agent sees the answer in its context)', async () => {
         const factory = makeCountingAgentFactory()
         ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = factory.getOrCreateAgent
         const request = makeQuestionRequest('f-res-resv')
@@ -1142,14 +1181,17 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         // The resume was deferred: no agent turn has started for it.
         expect(factory.chats()).toBe(0)
 
-        // Owner turn proceeds and completes.
+        // Owner turn proceeds and completes. The owner message was durably
+        // persisted BEFORE the answer was committed, so when the owner turn
+        // claims its generation the (round-8) durable supersede clears the
+        // recovery: the owner turn's context already includes the answer
+        // message, and a separate resume turn would double-run it.
         releaseFlush!()
         await ownerSend
 
-        // The scheduled retry eventually runs the answer turn EXACTLY once.
         await waitForCondition(() => getManaged('f-res-resv').pendingAgentResume === undefined, 8000)
         expect(answerMessageCount('f-res-resv')).toBe(1)
-        expect(factory.chats()).toBe(2) // owner turn + one answer turn
+        expect(factory.chats()).toBe(1) // the owner turn consumed the answer context
         expect(getManaged('f-res-resv').isProcessing).toBe(false)
       })
 
@@ -1360,6 +1402,218 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect((getManaged('f-atomic-1') as unknown as { activeTurnSource?: string }).activeTurnSource).toBe('messaging')
         expect(flagCapture.last).toBe(false)
       })
+    })
+
+    // Round 8, issue 2: the pending answer→resume supersede is applied only
+    // AFTER the replacement message is durably persisted — a pre-start
+    // failure (pending-plan cleanup, lazy load, user-message flush) must
+    // preserve the armed recovery so the deferred retry can still complete
+    // the answer turn. A successful takeover clears it exactly once.
+    describe('supersede recovery consistency (pre-start failures preserve the recovery)', () => {
+      const answerMessageCount = (sessionId: string) =>
+        (getManaged(sessionId).messages as Array<Record<string, unknown>>)
+          .filter(m => (m as { questionResponse?: unknown }).questionResponse).length
+
+      function setupResumeFailureScenario(sessionId: string): { request: ReturnType<typeof makeQuestionRequest> } {
+        const request = makeQuestionRequest(sessionId)
+        seedSession(sessionId, { pendingQuestion: { ...request, invocationSource: 'desktop' } })
+
+        // The FIRST automatic resume fails pre-chat (agent init) — the
+        // recovery is armed and its retry scheduled.
+        let agentInits = 0
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+          agentInits++
+          if (agentInits === 1) throw new Error('first resume init failed (injected)')
+          return makeFakeAgent()
+        }
+        void sm.respondToQuestion(sessionId, makeAnswerResolution(request))
+        return { request }
+      }
+
+      for (const [label, inject] of [
+        ['pending-plan load', 'plan'],
+        ['lazy message load', 'lazy'],
+        ['user-message flush', 'flush'],
+      ] as const) {
+        it(`a failed new message at the ${label} stage preserves the armed recovery; the retry completes the answer turn`, async () => {
+          patchPrivateFlush()
+          const sessionId = `f-sups-${inject}`
+          const { request } = setupResumeFailureScenario(sessionId)
+          await waitForCondition(() => getManaged(sessionId).pendingAgentResume !== undefined)
+
+          // Failure injection is ARMED right before the superseding send so
+          // it hits exactly that call (earlier resume attempts already
+          // consumed their own load/flush calls).
+          let failArmed = false
+          if (inject === 'plan') {
+            // clearPendingPlanExecution loads the session JSONL directly via
+            // getSessionFilePath → readSessionJsonl — the storage PATH lookup
+            // is the injectable seam (review round 8, issue 2 scenario).
+            const storage = (sm as unknown as { sessionStorage: { getSessionFilePath: (root: string, id: string) => string } }).sessionStorage
+            const realPath = storage.getSessionFilePath.bind(storage)
+            storage.getSessionFilePath = (root: string, id: string) => {
+              if (failArmed && id === sessionId) {
+                failArmed = false
+                throw new Error('plan-state load failed (injected)')
+              }
+              return realPath(root, id)
+            }
+          } else if (inject === 'lazy') {
+            ;(sm as unknown as { ensureMessagesLoaded: () => Promise<void> }).ensureMessagesLoaded = async () => {
+              if (failArmed) {
+                failArmed = false
+                throw new Error('lazy load failed (injected)')
+              }
+            }
+          } else {
+            const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+            ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+              if (failArmed) {
+                failArmed = false
+                return Promise.reject(new Error('flush failed (injected)'))
+              }
+              return realFlush.call(sm, id)
+            }
+          }
+
+          // The superseding send FAILS pre-start…
+          failArmed = true
+          await expect(sm.sendMessage(sessionId, 'a new user message', [], [], { invocationSource: 'desktop' }))
+            .rejects.toThrow(/injected/)
+
+          // …and the armed recovery SURVIVES (supersede never ran).
+          expect(getManaged(sessionId).pendingAgentResume).toBeDefined()
+          expect(answerMessageCount(sessionId)).toBe(1)
+
+          // The recovery retry eventually completes the answer turn exactly
+          // once, and only then clears the recovery.
+          await waitForCondition(() => getManaged(sessionId).pendingAgentResume === undefined, 8000)
+          expect(answerMessageCount(sessionId)).toBe(1)
+          expect(getManaged(sessionId).isProcessing).toBe(false)
+        })
+      }
+
+      it('a successful takeover supersedes the recovery exactly once (no duplicate answer turn)', async () => {
+        patchPrivateFlush()
+        const sessionId = 'f-sups-ok'
+        setupResumeFailureScenario(sessionId)
+        await waitForCondition(() => getManaged(sessionId).pendingAgentResume !== undefined)
+
+        // The user's new message succeeds: it supersedes the recovery…
+        await sm.sendMessage(sessionId, 'a new user message', [], [], { invocationSource: 'desktop' })
+
+        // …and the recovery is cleared WITHOUT starting the answer turn: the
+        // queued answer retry must find nothing to do.
+        await waitForCondition(() => getManaged(sessionId).pendingAgentResume === undefined, 5000)
+        expect(answerMessageCount(sessionId)).toBe(1)
+        const settledChats = (getManaged(sessionId).messages as Array<Record<string, unknown>>).length
+        void settledChats
+        await new Promise(r => setTimeout(r, 2500))
+        expect(answerMessageCount(sessionId)).toBe(1)
+        expect(getManaged(sessionId).pendingAgentResume).toBeUndefined()
+      })
+    })
+
+    // Round 8, issue 3: concurrent resolutions of the SAME sessionId+requestId
+    // single-flight on the first durable commit — followers never derive
+    // idempotency from rollback-able in-memory state.
+    describe('resolution single-flight', () => {
+      it('concurrent duplicate answers await the first durable commit: both accepted, ONE answer message', async () => {
+        patchPrivateFlush()
+        const request = makeQuestionRequest('f-flight-1')
+        seedSession('f-flight-1', { pendingQuestion: request })
+
+        // Gate the FIRST flush (the owner's commit) so the follower must
+        // single-flight on the in-flight promise.
+        let releaseFlush: (() => void) | null = null
+        const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
+        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+        let flushCalls = 0
+        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+          flushCalls++
+          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          return realFlush.call(sm, id)
+        }
+        ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+
+        const p1 = sm.respondToQuestion('f-flight-1', makeAnswerResolution(request))
+        const p2 = sm.respondToQuestion('f-flight-1', makeAnswerResolution(request))
+
+        releaseFlush!()
+        const [r1, r2] = await Promise.all([p1, p2])
+        expect(r1).toEqual({ status: 'accepted' })
+        expect(r2).toEqual({ status: 'accepted' })
+        expect(answerMessageCountByFixture('f-flight-1')).toBe(1)
+        expect(sm.getPendingQuestion('f-flight-1')).toBeNull()
+      })
+
+      it('first submission fails → the follower receives the SAME transient_failure; the pending stays intact and a later retry succeeds', async () => {
+        patchPrivateFlush()
+        const request = makeQuestionRequest('f-flight-2')
+        seedSession('f-flight-2', { pendingQuestion: request })
+        ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+
+        let releaseFlush: (() => void) | null = null
+        let rejectFlush: ((e: Error) => void) | null = null
+        const flushGate = new Promise<void>((resolve, reject) => { releaseFlush = resolve; rejectFlush = reject })
+        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+        let flushCalls = 0
+        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+          flushCalls++
+          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          return realFlush.call(sm, id)
+        }
+
+        const p1 = sm.respondToQuestion('f-flight-2', makeAnswerResolution(request))
+        const p2 = sm.respondToQuestion('f-flight-2', makeAnswerResolution(request))
+
+        rejectFlush!(new Error('disk full (injected)'))
+        const [r1, r2] = await Promise.all([p1, p2])
+        // The follower shares the owner's transient failure — the pending
+        // question stays intact for a retry.
+        expect(r1).toEqual({ status: 'transient_failure', message: 'disk full (injected)' })
+        expect(r2).toEqual({ status: 'transient_failure', message: 'disk full (injected)' })
+        expect(sm.getPendingQuestion('f-flight-2')?.requestId).toBe(request.requestId)
+
+        // A LATER submission (flight released) is a NEW owner and succeeds.
+        const retry = await sm.respondToQuestion('f-flight-2', makeAnswerResolution(request))
+        expect(retry).toEqual({ status: 'accepted' })
+        expect(sm.getPendingQuestion('f-flight-2')).toBeNull()
+      })
+
+      it('concurrent duplicate cancels single-flight too: both cancelled, one cancel record, agent not resumed', async () => {
+        patchPrivateFlush()
+        const request = makeQuestionRequest('f-flight-3')
+        seedSession('f-flight-3', { pendingQuestion: request })
+        ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+
+        let releaseFlush: (() => void) | null = null
+        const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
+        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+        let flushCalls = 0
+        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+          flushCalls++
+          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          return realFlush.call(sm, id)
+        }
+
+        const p1 = sm.respondToQuestion('f-flight-3', { action: 'cancel', requestId: request.requestId })
+        const p2 = sm.respondToQuestion('f-flight-3', { action: 'cancel', requestId: request.requestId })
+
+        releaseFlush!()
+        const [r1, r2] = await Promise.all([p1, p2])
+        expect(r1).toEqual({ status: 'cancelled' })
+        expect(r2).toEqual({ status: 'cancelled' })
+        const cancelRecords = (getManaged('f-flight-3').messages as Array<Record<string, unknown>>)
+          .filter(m => (m as { questionResolution?: unknown }).questionResolution)
+        expect(cancelRecords).toHaveLength(1)
+        expect(sm.getPendingQuestion('f-flight-3')).toBeNull()
+      })
+
+      function answerMessageCountByFixture(sessionId: string): number {
+        return (getManaged(sessionId).messages as Array<Record<string, unknown>>)
+          .filter(m => (m as { questionResponse?: unknown }).questionResponse).length
+      }
     })
 
     // Round 3, issue 5: every invocationSource DEFAULT is internal (fail

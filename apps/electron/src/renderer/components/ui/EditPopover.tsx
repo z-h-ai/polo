@@ -799,7 +799,7 @@ export function EditPopover({
   // Hidden inline session lifecycle (adopt on open / create on first send),
   // with the restoring gate + CAS adoption that closes the "delayed restore
   // vs quick send" race.
-  const { inlineSessionId, restoring, ensureSessionForSend } = useEditPopoverSessionRestore({
+  const { inlineSessionId, restoring, restoreNote, ensureSessionForSend } = useEditPopoverSessionRestore({
     open,
     workspaceId: workspace?.id,
     popoverOwnerId,
@@ -1080,6 +1080,18 @@ export function EditPopover({
                 <GripHorizontal className="w-4 h-4 text-muted-foreground/30" />
               </div>
 
+              {/* Readable transient-restore state (review round 8, issue 1):
+                  while the scoped pending-question lookup is retrying, the
+                  send entry stays disabled and the user sees why. */}
+              {restoring && restoreNote && (
+                <div
+                  data-testid="edit-popover-restoring"
+                  role="status"
+                  className="px-3 py-1.5 text-xs text-foreground-3"
+                >
+                  {restoreNote}
+                </div>
+              )}
               {/* Content area - always uses compact ChatDisplay */}
               <div className="flex-1 flex flex-col bg-foreground-2" style={{ height: '100%' }}>
                 <ChatDisplay

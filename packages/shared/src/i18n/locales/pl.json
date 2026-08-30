@@ -231,6 +231,7 @@
   "chat.questionOther": "Inne",
   "chat.questionOtherPlaceholder": "Wpisz własną odpowiedź",
   "chat.questionRecommended": "Zalecane",
+  "chat.questionRestoreRetrying": "Przywracanie oczekującego pytania…",
   "chat.questionRetry": "Ponów",
   "chat.questionSkip": "Pomiń na razie",
   "chat.questionSkippedRecord": "Pominięto pytanie asystenta bez odpowiedzi.",

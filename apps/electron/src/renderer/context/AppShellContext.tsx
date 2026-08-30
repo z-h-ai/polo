@@ -111,7 +111,7 @@ export interface AppShellContextType {
    * pendingQuestions map so the popover can re-adopt the same hidden session
    * after a reopen, renderer reload, or app restart.
    */
-  onGetEditPopoverPendingQuestion: (workspaceId: string, popoverOwner: string) => Promise<{ sessionId: string; request: import('@polo-ai/shared/protocol').QuestionRequest } | null>
+  onGetEditPopoverPendingQuestion: (workspaceId: string, popoverOwner: string) => Promise<import('../components/ui/useEditPopoverSessionRestore').EditPopoverRestoreOutcome>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void

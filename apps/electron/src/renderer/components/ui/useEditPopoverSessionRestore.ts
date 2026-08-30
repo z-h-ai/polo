@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { i18n } from '@polo-ai/shared/i18n'
+
+/**
+ * Outcome of ONE scoped restore query (review round 8, issue 1). Only
+ * `empty` is authoritative — `transient` (I/O / IPC / hydration failure)
+ * must keep the restore gate engaged so a valid pending question is never
+ * orphaned behind a brand-new session.
+ */
+export type EditPopoverRestoreOutcome =
+  | { outcome: 'found'; sessionId: string }
+  | { outcome: 'empty' }
+  | { outcome: 'transient'; message?: string }
 
 /**
  * Restore/ownership state machine for the Edit Popover's hidden inline
- * session (review round 2 issues 1–3; round 3 issue 4).
+ * session (review round 2 issues 1–3; round 3 issue 4; rounds 5–8).
  *
  * The popover's session is hidden and its id only lives in component state,
  * so on every open/scope change this hook:
@@ -12,10 +24,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  *  3. asks the server for the popover-origin session that still owns an
  *     active pending question for this workspace + owner, and adopts it.
  *
+ * Transient failures (RPC rejection, `transient` outcome) NEVER release the
+ * gate: the hook retries with bounded backoff and exposes a readable
+ * `restoreNote` while doing so (review round 8, issue 1). Only an
+ * authoritative `found`/`empty` settles the restore.
+ *
  * Concurrency contract:
  * - CAS adoption: a late restore result is adopted ONLY when the scope is
  *   unchanged and no session exists / no creation is in flight.
- * - Generation binding (round 3): every create captures the generation of
+ * - Generation binding (round 3/4): every create captures the generation of
  *   its scope; when the scope changes (workspace A → B, popover reopen) the
  *   stale creation commits nothing — the created A session is never adopted
  *   into B's scope and B's messages can never land in it.
@@ -27,33 +44,39 @@ export interface EditPopoverSessionRestoreParams {
   open: boolean
   /** Current workspace id (adopt + create are scoped to it). */
   workspaceId: string | undefined
-  /** Stable owner identity for this popover (fixed-length editor-identity hash). */
+  /** Stable owner identity for this popover (fixed-length editor hash). */
   popoverOwnerId: string
-  /** Server lookup for the scoped pending-question session. */
-  restorePendingSession: () => Promise<{ sessionId: string } | null>
+  /** Server lookup for the scoped pending-question session (one attempt). */
+  restorePendingSession: () => Promise<EditPopoverRestoreOutcome>
   /** Trusted popover session creation (server stamps the edit-popover origin). */
   createPopoverSession: () => Promise<string>
+  /** Backoff between transient retries (ms); injectable for tests. */
+  backoffMs?: (attempt: number) => number
 }
 
 export interface EditPopoverSessionRestoreState {
   /** The inline session id (adopted or newly created), null until one exists. */
   inlineSessionId: string | null
-  /** True while the adoption query is in flight — the send entry stays disabled. */
+  /**
+   * True while the restore loop is running — the send entry stays disabled.
+   * Released ONLY by an authoritative found/empty outcome.
+   */
   restoring: boolean
+  /** Readable retry state while transient failures keep the gate closed. */
+  restoreNote: string | null
   /**
    * Reuse the current inline session or create one. The creation is marked
-   * synchronously so an in-flight restore can never overwrite it, and it is
-   * bound to the current scope generation: a create that finishes after the
-   * scope changed commits nothing and hands back null.
+   * synchronously so an in-flight restore can never overwrite it.
    */
   ensureSessionForSend: () => Promise<string | null>
 }
 
 export function useEditPopoverSessionRestore(params: EditPopoverSessionRestoreParams): EditPopoverSessionRestoreState {
-  const { open, workspaceId, popoverOwnerId, restorePendingSession, createPopoverSession } = params
+  const { open, workspaceId, popoverOwnerId, restorePendingSession, createPopoverSession, backoffMs: backoffMsParam } = params
 
   const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
   const [restoring, setRestoring] = useState(false)
+  const [restoreNote, setRestoreNote] = useState<string | null>(null)
   // Synchronous mirror of inlineSessionId for CAS checks inside async flows
   // (state updates are not observable within the same tick).
   const inlineSessionIdRef = useRef<string | null>(null)
@@ -77,45 +100,67 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
   // in-flight work from the previous scope; the CAS guards the "delayed
   // restore + quick send" race; the generation check guards the "scope
   // switched mid-restore" race.
+  //
+  // TRANSIENT failures (review round 8, issue 1): an RPC rejection or a
+  // `transient` outcome (session-list I/O, hydration, IPC) does NOT release
+  // the restore gate — the hook retries with bounded backoff and surfaces a
+  // readable note. Only an authoritative found/empty settles the restore.
   useEffect(() => {
     scopeGenerationRef.current += 1
     setSessionId(null)
     if (!open || !workspaceId) {
       setRestoring(false)
+      setRestoreNote(null)
       return
     }
     const generation = scopeGenerationRef.current
+    const backoffMs = backoffMsParam ?? ((attempt: number) => Math.min(250 * 2 ** attempt, 2000))
     let cancelled = false
-    setRestoring(true)
-    void restorePendingSession()
-      .then(result => {
-        if (cancelled || !result) return
-        // CAS + scope guard: only adopt when the scope is unchanged, no
-        // session exists, and no creation for THIS scope is in flight. An
-        // in-flight creation from an OLD scope does not block this scope's
-        // adoption (review round 4, issue 1).
-        if (scopeGenerationRef.current !== generation) return
-        if (inlineSessionIdRef.current === null && creatingRef.current?.generation !== generation) {
-          setSessionId(result.sessionId)
+    const run = async (): Promise<void> => {
+      setRestoring(true)
+      for (let attempt = 0; ; attempt++) {
+        let outcome: EditPopoverRestoreOutcome
+        try {
+          outcome = await restorePendingSession()
+        } catch (error) {
+          // Defensive: restorePendingSession implementations absorb RPC
+          // rejections; treat any escape as transient.
+          outcome = { outcome: 'transient', message: error instanceof Error ? error.message : String(error) }
         }
-      })
-      .catch(error => {
-        // Adoption is best-effort: without a reachable pending question the
-        // popover falls back to creating a fresh session on the first send.
-        console.warn('[EditPopover] failed to restore pending question session:', error)
-      })
-      .finally(() => {
-        if (!cancelled && scopeGenerationRef.current === generation) {
+        if (cancelled || scopeGenerationRef.current !== generation) return
+
+        if (outcome.outcome === 'found') {
+          // CAS: a send that already created/adopted (or is creating) a
+          // session keeps priority over this adoption.
+          if (inlineSessionIdRef.current === null && creatingRef.current?.generation !== generation) {
+            setSessionId(outcome.sessionId)
+          }
+          setRestoreNote(null)
           setRestoring(false)
+          return
         }
-      })
+        if (outcome.outcome === 'empty') {
+          // Authoritative: no pending question for this scope — creating a
+          // fresh session on the next send is safe.
+          setRestoreNote(null)
+          setRestoring(false)
+          return
+        }
+        // transient → keep the gate closed, show a readable retry state,
+        // back off, and re-query the same scope.
+        setRestoreNote(i18n.t('chat.questionRestoreRetrying'))
+        await new Promise(resolve => setTimeout(resolve, backoffMs(attempt)))
+        if (cancelled || scopeGenerationRef.current !== generation) return
+      }
+    }
+    void run()
     return () => {
       cancelled = true
     }
     // restorePendingSession/createPopoverSession are stable callbacks owned by
     // the caller; re-running on their identity churn would restart adoption.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, workspaceId, popoverOwnerId, setSessionId])
+  }, [open, workspaceId, popoverOwnerId, setSessionId, backoffMsParam])
 
   const ensureSessionForSend = useCallback(async (): Promise<string | null> => {
     const existing = inlineSessionIdRef.current
@@ -154,5 +199,5 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
     return promise
   }, [workspaceId, createPopoverSession, setSessionId])
 
-  return { inlineSessionId, restoring, ensureSessionForSend }
+  return { inlineSessionId, restoring, restoreNote, ensureSessionForSend }
 }

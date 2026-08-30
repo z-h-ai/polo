@@ -25,8 +25,12 @@ const { useEditPopoverSessionRestore } = await import('./useEditPopoverSessionRe
 
 type HookParams = import('./useEditPopoverSessionRestore').EditPopoverSessionRestoreParams
 type HookState = import('./useEditPopoverSessionRestore').EditPopoverSessionRestoreState
+type RestoreOutcome = import('./useEditPopoverSessionRestore').EditPopoverRestoreOutcome
 /** renderHook's return, re-typed across the dynamic-import boundary. */
 type HookRender = { result: { current: HookState }; rerender: (props: HookParams) => void }
+
+const emptyOutcome: RestoreOutcome = { outcome: 'empty' }
+const found = (sessionId: string): RestoreOutcome => ({ outcome: 'found', sessionId })
 
 function makeDeferred<T>() {
   let resolve!: (value: T) => void
@@ -43,7 +47,7 @@ function baseParams(overrides: Partial<HookParams> = {}): HookParams {
     open: true,
     workspaceId: 'ws-1',
     popoverOwnerId: 'Permissions::/ws/a/config.json',
-    restorePendingSession: async () => null,
+    restorePendingSession: async () => emptyOutcome,
     createPopoverSession: async () => 'session-created',
     ...overrides,
   }
@@ -51,16 +55,16 @@ function baseParams(overrides: Partial<HookParams> = {}): HookParams {
 
 describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
   it('restoring gate: true while the adoption query is in flight, false once it settles', async () => {
-    const deferred = makeDeferred<{ sessionId: string } | null>()
+    const deferred = makeDeferred<RestoreOutcome>()
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
-      initialProps: baseParams({ restorePendingSession: () => deferred.promise }),
+      initialProps: baseParams({ restorePendingSession: () => deferred.promise as Promise<RestoreOutcome> }),
     }) as unknown as HookRender
 
     expect(result.current.restoring).toBe(true)
     expect(result.current.inlineSessionId).toBeNull()
 
     await act(async () => {
-      deferred.resolve(null)
+      deferred.resolve(emptyOutcome)
     })
 
     await waitFor(() => expect(result.current.restoring).toBe(false))
@@ -69,7 +73,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
 
   it('adopts the scoped pending-question session when the restore resolves with a result', async () => {
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
-      initialProps: baseParams({ restorePendingSession: async () => ({ sessionId: 'session-pending' }) }),
+      initialProps: baseParams({ restorePendingSession: async () => found('session-pending') }),
     }) as unknown as HookRender
 
     await waitFor(() => expect(result.current.inlineSessionId).toBe('session-pending'))
@@ -77,7 +81,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
   })
 
   it('THE RACE: a quick send during the restore window wins — a late restore result is discarded (CAS), the created session is not stranded', async () => {
-    const restoreDeferred = makeDeferred<{ sessionId: string } | null>()
+    const restoreDeferred = makeDeferred<RestoreOutcome>()
     let createCalls = 0
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
@@ -96,7 +100,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
         sendResult.sessionId = id
       })
       // Reserve happens synchronously; the restore now resolves LATE.
-      restoreDeferred.resolve({ sessionId: 'session-stale-pending' })
+      restoreDeferred.resolve(found('session-stale-pending'))
       await sendPromise
     })
 
@@ -116,7 +120,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     let createCalls = 0
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
-        restorePendingSession: async () => ({ sessionId: 'session-adopted' }),
+        restorePendingSession: async () => found('session-adopted'),
         createPopoverSession: async () => {
           createCalls++
           return 'session-created'
@@ -138,7 +142,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     let createCalls = 0
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
-        restorePendingSession: async () => null,
+        restorePendingSession: async () => emptyOutcome,
         createPopoverSession: () => {
           createCalls++
           throw new Error('backend init failed (injected)')
@@ -165,7 +169,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
         workspaceId: 'ws-a',
-        restorePendingSession: async () => null,
+        restorePendingSession: async () => emptyOutcome,
         createPopoverSession: () => {
           createCalls++
           createdFor.push(`ws-${createCalls}`)
@@ -187,7 +191,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     // resolves (separate act scope guarantees the passive effect has flushed).
     rerender(baseParams({
       workspaceId: 'ws-b',
-      restorePendingSession: async () => null,
+      restorePendingSession: async () => emptyOutcome,
       createPopoverSession: async () => {
         createCalls++
         createdFor.push(`ws-${createCalls}`)
@@ -220,7 +224,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     let createCalls = 0
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
-        restorePendingSession: async () => null,
+        restorePendingSession: async () => emptyOutcome,
         createPopoverSession: () => {
           createCalls++
           return createDeferred.promise
@@ -249,10 +253,66 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(result.current.inlineSessionId).toBe('session-single')
   })
 
+  // Round 8, issue 1: an RPC rejection is TRANSIENT — the restore gate stays
+  // closed (restoring true), a readable note appears, and the bounded-backoff
+  // retry adopts once a later attempt finds the pending session.
+  it('RPC rejection keeps the gate closed, surfaces the retry note, and recovers on a later attempt', async () => {
+    let attempts = 0
+    const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        restorePendingSession: async () => {
+          attempts++
+          if (attempts <= 2) throw new Error('IPC temporarily unavailable (injected)')
+          return found('session-recovered')
+        },
+        backoffMs: () => 5,
+      }),
+    }) as unknown as HookRender
+
+    // Gate stays closed through the transient failure.
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 10))
+    })
+    expect(result.current.restoring).toBe(true)
+    expect(result.current.inlineSessionId).toBeNull()
+    expect(result.current.restoreNote).not.toBeNull()
+
+    // The retry adopts; the note clears and the gate releases.
+    await waitFor(() => expect(result.current.inlineSessionId).toBe('session-recovered'))
+    expect(result.current.restoreNote).toBeNull()
+    expect(result.current.restoring).toBe(false)
+    expect(attempts).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a transient outcome never releases the gate; only the authoritative empty does', async () => {
+    let attempts = 0
+    const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        restorePendingSession: async () => {
+          attempts++
+          if (attempts <= 2) return { outcome: 'transient' as const, message: 'session listing failed' }
+          return emptyOutcome
+        },
+        backoffMs: () => 5,
+      }),
+    }) as unknown as HookRender
+
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 10))
+    })
+    expect(result.current.restoring).toBe(true)
+    expect(result.current.restoreNote).not.toBeNull()
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+    expect(attempts).toBeGreaterThanOrEqual(3)
+    expect(result.current.restoreNote).toBeNull()
+    expect(result.current.inlineSessionId).toBeNull()
+  })
+
   // Round 3, issue 4: the adoption path is also generation-bound — a restore
   // result for the OLD scope must not adopt after the scope changed.
   it('late restore for a superseded scope does not adopt into the new scope', async () => {
-    const restoreDeferred = makeDeferred<{ sessionId: string } | null>()
+    const restoreDeferred = makeDeferred<RestoreOutcome>()
     const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
         workspaceId: 'ws-a',
@@ -267,10 +327,10 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     rerender(baseParams({
       workspaceId: 'ws-b',
       popoverOwnerId: 'owner-b',
-      restorePendingSession: async () => null,
+      restorePendingSession: async () => emptyOutcome,
     }))
     await act(async () => {
-      restoreDeferred.resolve({ sessionId: 'session-old-scope' })
+      restoreDeferred.resolve(found('session-old-scope'))
       await new Promise(r => setTimeout(r, 20))
     })
 
@@ -288,7 +348,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
         workspaceId: 'ws-a',
-        restorePendingSession: async () => null,
+        restorePendingSession: async () => emptyOutcome,
         createPopoverSession: () => {
           createdFor.push('a')
           return createADeferred.promise
@@ -309,7 +369,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     // Switch to scope B and send IMMEDIATELY (A still unsettled).
     rerender(baseParams({
       workspaceId: 'ws-b',
-      restorePendingSession: async () => null,
+      restorePendingSession: async () => emptyOutcome,
       createPopoverSession: async () => {
         createdFor.push('b')
         return 'session-b'
@@ -344,7 +404,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
         workspaceId: 'ws-a',
-        restorePendingSession: async () => null,
+        restorePendingSession: async () => emptyOutcome,
         createPopoverSession: () => createADeferred.promise,
       }),
     }) as unknown as HookRender
@@ -359,7 +419,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     // Switch to scope B whose restore has a pending session.
     rerender(baseParams({
       workspaceId: 'ws-b',
-      restorePendingSession: async () => ({ sessionId: 'session-b-pending' }),
+      restorePendingSession: async () => found('session-b-pending'),
       createPopoverSession: async () => 'session-b-created',
     }))
     await act(async () => {

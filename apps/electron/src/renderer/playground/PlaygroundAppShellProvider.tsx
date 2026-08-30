@@ -51,7 +51,7 @@ const playgroundValue: AppShellContextType = {
     throw new Error('[Playground] onCreateEditPopoverSession is not available')
   }) as AppShellContextType['onCreateEditPopoverSession'],
   onSendMessage: logCall('onSendMessage'),
-  onGetEditPopoverPendingQuestion: async () => null,
+  onGetEditPopoverPendingQuestion: async () => ({ outcome: 'empty' }),
   onRenameSession: logCall('onRenameSession'),
   onFlagSession: logCall('onFlagSession'),
   onUnflagSession: logCall('onUnflagSession'),

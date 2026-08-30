@@ -231,6 +231,7 @@
   "chat.questionOther": "Other",
   "chat.questionOtherPlaceholder": "Enter your own answer",
   "chat.questionRecommended": "Recommended",
+  "chat.questionRestoreRetrying": "Restoring the pending question…",
   "chat.questionRetry": "Retry",
   "chat.questionSkip": "Don't answer now",
   "chat.questionSkippedRecord": "Skipped the assistant's question without answering.",

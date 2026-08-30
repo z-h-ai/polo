@@ -1242,6 +1242,13 @@ export class SessionManager implements ISessionManager {
    * subprocess can race the resulting `chat` against the still-pending update.
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
+  /**
+   * Resolution single-flight (review round 8, issue 3): in-flight
+   * respondToQuestion promises keyed by `sessionId::requestId`. Followers
+   * await the first durable commit instead of deriving idempotency from
+   * rollback-able in-memory state.
+   */
+  private resolutionInFlight: Map<string, Promise<QuestionResolutionResult>> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -5779,13 +5786,15 @@ export class SessionManager implements ISessionManager {
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
-    // A new user message supersedes a pending answer→resume: the answer is
-    // already in history as context, so the retry would double-start a turn.
-    // The resume path's OWN call (existingMessageId = the answer message) is
-    // exempt — otherwise it would clear its own recovery state.
-    if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
-      void this.clearPendingAgentResume(managed, 'superseded by a new user message', { flush: false })
-    }
+    // NOTE (review round 8, issue 2): the pending answer→resume supersede is
+    // NOT performed here. Firing it at entry — before the replacement message
+    // is durable — permanently destroys the recovery when this send later
+    // fails pre-start (pending-plan cleanup, lazy load, flush): the answer
+    // turn would never run AND its recovery would be gone. The supersede is
+    // applied right AFTER the replacement message is durably persisted (see
+    // the user-message flush below), where it is semantically correct: the
+    // answer content is already part of history and a resume retry would
+    // double-start the turn.
 
     // Per-turn invocation source: only desktop interactive turns expose
     // request_user_input; every other source (and the implicit default)
@@ -5875,11 +5884,7 @@ export class SessionManager implements ISessionManager {
         // message (review round 7, issue 2).
         let userMessage: Message
         if (existingMessageId) {
-          const existing = managed.messages.find(m => m.id === existingMessageId)
-          if (!existing) {
-            throw new Error(`Existing message ${existingMessageId} not found`)
-          }
-          userMessage = existing
+          userMessage = this.requireExistingMessage(managed, existingMessageId)
         } else {
           userMessage = {
             id: generateMessageId(),
@@ -5937,10 +5942,13 @@ export class SessionManager implements ISessionManager {
         // Skip if existingMessageId is provided (message was already created when queued)
         let userMessage: Message
         if (existingMessageId) {
-          // Find existing message (already added when queued)
-          userMessage = managed.messages.find(m => m.id === existingMessageId)!
-          if (!userMessage) {
-            throw new Error(`Existing message ${existingMessageId} not found`)
+          userMessage = this.requireExistingMessage(managed, existingMessageId)
+          // A replayed QUEUED message (not the answer's own resume call)
+          // supersedes a pending recovery (review round 8, issue 2): the
+          // answer content is already in history as part of the context, so
+          // the recovery retry would double-start the answer turn.
+          if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
+            void this.clearPendingAgentResume(managed, 'superseded by a replayed queued message', { flush: false })
           }
         } else {
           // Create new message
@@ -5972,6 +5980,20 @@ export class SessionManager implements ISessionManager {
             status: 'accepted',
             optimisticMessageId: options?.optimisticMessageId
           }, managed.workspace.id)
+
+          // Supersede a pending answer→resume NOW (review round 8, issue 2):
+          // the replacement message is durably persisted, so clearing the
+          // recovery is semantically final — the answer content is already in
+          // history and a resume retry would double-start the turn. Applied
+          // here instead of at method entry so a pre-start failure (plan
+          // cleanup, lazy load, this very flush) preserves the recovery and
+          // the deferred retry can still complete the answer turn.
+          // The resume path's OWN call (existingMessageId = the answer
+          // message) is exempt — otherwise it would clear its own recovery
+          // state.
+          if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
+            void this.clearPendingAgentResume(managed, 'superseded by a new user message', { flush: false })
+          }
 
           // If this is the first user message and no title exists, set one immediately
           // AI generation will enhance it later, but we always have a title from the start
@@ -6971,6 +6993,19 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Shared existing-message resolution for the follower (queue-reuse) and
+   * owner (replay) branches (review round 8 suggestion): one missing-message
+   * error and one identity check.
+   */
+  private requireExistingMessage(managed: ManagedSession, existingMessageId: string): Message {
+    const existing = managed.messages.find(m => m.id === existingMessageId)
+    if (!existing) {
+      throw new Error(`Existing message ${existingMessageId} not found`)
+    }
+    return existing
+  }
+
+  /**
    * Single named cleanup boundary for the turn-start reservation (review
    * round 6, issues 1+3): the finally around sendMessage's pre-start section
    * funnels EVERY exit through here.
@@ -7197,8 +7232,13 @@ export class SessionManager implements ISessionManager {
     try {
       metas = this.sessionStorage.list(workspace.rootPath)
     } catch (error) {
+      // TRANSIENT (review round 8, issue 1): an I/O failure here must NOT be
+      // reported as an authoritative "no pending question" — that would let
+      // the renderer release its restore gate and orphan the still-persisted
+      // pendingQuestion behind a brand-new session. Re-throw so the RPC
+      // rejects and the client retries with backoff.
       sessionLog.warn(`getEditPopoverPendingSession: failed to list sessions for workspace ${workspace.id}:`, error)
-      return null
+      throw new Error(`Edit Popover pending-question lookup is temporarily unavailable (session listing failed): ${error instanceof Error ? error.message : String(error)}`)
     }
     let best: { sessionId: string; createdAt: number; request: QuestionRequest; meta: SessionMetadata } | null = null
     for (const meta of metas) {
@@ -7221,7 +7261,15 @@ export class SessionManager implements ISessionManager {
     if (!this.sessions.has(best.sessionId)) {
       this.sessions.set(best.sessionId, createManagedSession(best.meta, workspace))
     }
-    await this.getSession(best.sessionId)
+    try {
+      await this.getSession(best.sessionId)
+    } catch (error) {
+      // TRANSIENT (review round 8, issue 1): a hydration failure (disk I/O)
+      // is not an authoritative "no pending question" — re-throw so the RPC
+      // rejects and the client retries with backoff.
+      sessionLog.warn(`getEditPopoverPendingSession: failed to hydrate session ${best.sessionId}:`, error)
+      throw new Error(`Edit Popover pending-question lookup is temporarily unavailable (hydration failed): ${error instanceof Error ? error.message : String(error)}`)
+    }
     const hydrated = this.sessions.get(best.sessionId)
     const pending = hydrated?.pendingQuestion
     // Re-validate the scope on the hydrated session (defense in depth): the
@@ -7363,6 +7411,35 @@ export class SessionManager implements ISessionManager {
 
     const requestId = resolution.action === 'answer' ? resolution.response.requestId : resolution.requestId
 
+    // Resolution single-flight (review round 8, issue 3): concurrent
+    // submissions of the SAME sessionId+requestId must wait for the FIRST
+    // durable commit's outcome. The commit path mutates memory (push answer,
+    // clear pending) BEFORE the flush; a second window reading that
+    // not-yet-durable state would derive a fake already_answered — if the
+    // first flush then rolls back, the server restores the pending question
+    // while the second window already cleared its card. Followers therefore
+    // share the owner's promise: first success → both accepted; first
+    // failure → both transient_failure (pending intact, retry possible).
+    const flightKey = `${sessionId}::${requestId}`
+    const inFlight = this.resolutionInFlight.get(flightKey)
+    if (inFlight) {
+      sessionLog.info(`Question resolution ${requestId} for session ${sessionId} is in flight — follower awaits the first durable commit`)
+      return inFlight
+    }
+    const flight = this.respondToQuestionInner(managed, sessionId, resolution, requestId)
+      .finally(() => {
+        this.resolutionInFlight.delete(flightKey)
+      })
+    this.resolutionInFlight.set(flightKey, flight)
+    return flight
+  }
+
+  private async respondToQuestionInner(
+    managed: ManagedSession,
+    sessionId: string,
+    resolution: QuestionResolution,
+    requestId: string,
+  ): Promise<QuestionResolutionResult> {
     try {
       await this.ensureMessagesLoaded(managed)
 

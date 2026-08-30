@@ -29,7 +29,8 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
-import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, restorePendingQuestionUntilAuthoritative, setPendingQuestionForSession } from './lib/pending-questions'
+import type { EditPopoverRestoreOutcome } from './components/ui/useEditPopoverSessionRestore'
+import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, restorePendingQuestionWithRealtimeGate, setPendingQuestionForSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -2165,31 +2166,28 @@ export default function App() {
   // pendingQuestion + an exact workspace/owner match, so it clears exactly
   // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
   // deleted) and can never cross workspaces or popover owners.
-  const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null> => {
-    // Authoritative realtime-gated restore (review round 5, issue 1 +
-    // round 6, issue 2 + round 7, issue 1): the global pending-state epoch is
-    // captured before every RPC attempt. Drifted attempts are never seeded
-    // and never reported as authoritative empty — the loop re-queries the
-    // same scope with bounded backoff until a fresh pending or an undrifted
-    // empty lands, so the restore gate (send disabled) stays engaged and a
-    // valid pending question can never be orphaned behind a new session.
-    const outcome = await restorePendingQuestionUntilAuthoritative(
+  const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<EditPopoverRestoreOutcome> => {
+    // Bounded realtime-gated restore query (review round 5, issue 1 +
+    // round 6, issue 2 + round 7/8): the global pending-state epoch is
+    // captured before every RPC attempt; drifted results are never seeded;
+    // RPC rejections (I/O / IPC / hydration) are absorbed as transient.
+    // Retry ownership (backoff loop + readable state) lives in
+    // useEditPopoverSessionRestore — ONLY an authoritative empty releases
+    // the restore gate and allows a fresh session.
+    const outcome = await restorePendingQuestionWithRealtimeGate(
       pendingQuestionGenerationsRef.current,
       () => window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner),
     )
-    if (outcome.outcome === 'inconclusive') {
-      // Defensive: unreachable with the default unbounded rounds — treat as
-      // "nothing adopted" rather than fabricating an authoritative empty.
-      return null
+    if (outcome.outcome === 'fresh') {
+      // Seed the authoritative request the same way the question_request event
+      // path does, so usePendingQuestion(inlineSessionId) resolves and every
+      // existing event-driven cleanup keeps working.
+      pendingQuestionGenerationsRef.current.bump(outcome.result.sessionId)
+      setPendingQuestions(prev => setPendingQuestionForSession(prev, outcome.result.sessionId, outcome.result.request))
+      return { outcome: 'found', sessionId: outcome.result.sessionId }
     }
-    if (outcome.outcome === 'empty') return null
-
-    // Seed the authoritative request the same way the question_request event
-    // path does, so usePendingQuestion(inlineSessionId) resolves and every
-    // existing event-driven cleanup keeps working.
-    pendingQuestionGenerationsRef.current.bump(outcome.result.sessionId)
-    setPendingQuestions(prev => setPendingQuestionForSession(prev, outcome.result.sessionId, outcome.result.request))
-    return outcome.result
+    if (outcome.outcome === 'empty') return { outcome: 'empty' }
+    return { outcome: 'transient' }
   }, [])
 
   // Centralized link interceptor: classifies file types and decides whether to

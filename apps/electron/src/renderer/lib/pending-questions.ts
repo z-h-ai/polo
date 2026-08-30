@@ -85,7 +85,7 @@ export function gateRestoredPendingQuestion<T extends { sessionId: string; reque
 
 /**
  * Bounded scoped re-query around the restore RPC (review round 6, issue 2;
- * round 7, issue 1).
+ * round 7, issue 1; round 8, issue 1).
  *
  * Captures the epoch before every attempt; `fresh` returns the result,
  * `empty` (authoritative, undrifted) ends the restore, and `drifted` retries
@@ -93,7 +93,12 @@ export function gateRestoredPendingQuestion<T extends { sessionId: string; reque
  * `{ outcome: 'inconclusive' }` — NEVER a null that could be mistaken for
  * the authoritative empty: a drifted world still knows nothing about the
  * scope, so the caller must keep blocking fresh-session creation and
- * re-query (see {@link restorePendingQuestionUntilAuthoritative}).
+ * re-query (see {@link restorePendingQuestionWithRealtimeGate} consumers).
+ *
+ * RPC REJECTIONS (review round 8, issue 1): an I/O / IPC / hydration failure
+ * rejects the RPC and says NOTHING about whether a pending question exists —
+ * it is treated like a drifted attempt (transient, retryable), never as an
+ * authoritative empty that would release the restore gate.
  */
 export type RestoredPendingQuestionOutcome<T> =
   | { outcome: 'fresh'; result: T }
@@ -107,7 +112,13 @@ export async function restorePendingQuestionWithRealtimeGate<T extends { session
 ): Promise<RestoredPendingQuestionOutcome<T>> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const epochAtFetch = tracker.epoch
-    const result = await fetchResult()
+    let result: T | null
+    try {
+      result = await fetchResult()
+    } catch {
+      // Transient RPC failure — same handling as drift: retry, never empty.
+      continue
+    }
     const gate = gateRestoredPendingQuestion<T>(tracker, epochAtFetch, result)
     if (gate.outcome === 'fresh') return { outcome: 'fresh', result: gate.result }
     if (gate.outcome === 'empty') return { outcome: 'empty' }
@@ -116,29 +127,7 @@ export async function restorePendingQuestionWithRealtimeGate<T extends { session
   return { outcome: 'inconclusive' }
 }
 
-/**
- * Authoritative restore loop (review round 7, issue 1): wraps
- * {@link restorePendingQuestionWithRealtimeGate} with bounded backoff and
- * re-queries the SAME workspace+owner scope until the answer is
- * authoritative — a fresh pending, or an undrifted empty. Budget exhaustion
- * (`inconclusive`) must never terminate the restore: that would let the
- * popover create a brand-new session while a valid pending question is
- * still held by the old hidden session (an unreachable orphan). Callers
- * keep the restore gate engaged (send disabled) until this resolves.
- */
-export async function restorePendingQuestionUntilAuthoritative<T extends { sessionId: string; request: QuestionRequest }>(
-  tracker: PendingQuestionGenerationTracker,
-  fetchResult: () => Promise<T | null>,
-  opts: { backoffMs?: (round: number) => number; maxRounds?: number } = {},
-): Promise<RestoredPendingQuestionOutcome<T>> {
-  const backoffMs = opts.backoffMs ?? ((round: number) => Math.min(250 * 2 ** round, 2000))
-  for (let round = 0; ; round++) {
-    const outcome = await restorePendingQuestionWithRealtimeGate(tracker, fetchResult)
-    if (outcome.outcome !== 'inconclusive') return outcome
-    if (opts.maxRounds !== undefined && round + 1 >= opts.maxRounds) return outcome
-    await new Promise(resolve => setTimeout(resolve, backoffMs(round)))
-  }
-}
+
 
 /**
  * Apply an authoritative pending-question snapshot for one session.
