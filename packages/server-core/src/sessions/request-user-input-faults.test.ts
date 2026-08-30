@@ -989,6 +989,112 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // while a desktop turn is running gets queued — it must never overwrite
     // the running turn's source, so a question asked during that turn still
     // stamps desktop (and the agent flag stays untouched).
+    // Round 6, issue 1: EVERYTHING between the synchronous turn-start claim
+    // and setProcessing(true) sits inside one cleanup boundary — a
+    // pending-plan load failure, a lazy message load failure, or a user
+    // message flush failure must release the reservation (and the bound
+    // active-turn state), never strand a phantom reservation, and drain any
+    // follower that already queued behind it.
+    describe('turn-start reservation cleanup boundary', () => {
+      it('a pending-plan load failure releases the reservation; the next send claims a fresh turn', async () => {
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
+        seedSession('f-clean-1', {})
+
+        // sessionStorage.load throws ONCE — the first caller inside the
+        // pre-start section is clearPendingPlanExecution's session load.
+        const storage = (sm as unknown as { sessionStorage: { load: (...args: unknown[]) => unknown } }).sessionStorage
+        const realLoad = storage.load.bind(storage)
+        let loadCalls = 0
+        storage.load = (...args: unknown[]) => {
+          loadCalls++
+          if (loadCalls === 1) throw new Error('plan-state load failed (injected)')
+          return realLoad(...args)
+        }
+
+        await expect(sm.sendMessage('f-clean-1', 'first message', [], [], { invocationSource: 'desktop' }))
+          .rejects.toThrow('plan-state load failed (injected)')
+
+        // Atomic release: no phantom reservation, no leaked active-turn state.
+        const m = getManaged('f-clean-1') as unknown as {
+          turnStartReserved?: boolean
+          activeTurnSource?: string
+          invocationSource?: string
+          isProcessing: boolean
+        }
+        expect(m.turnStartReserved).toBe(false)
+        expect(m.activeTurnSource).toBeUndefined()
+        expect(m.invocationSource).toBeUndefined()
+        expect(m.isProcessing).toBe(false)
+
+        // Recoverable: the next send claims a fresh turn normally.
+        await sm.sendMessage('f-clean-1', 'second message', [], [], { invocationSource: 'desktop' })
+        await waitForCondition(() => getManaged('f-clean-1').isProcessing === false)
+        expect(m.turnStartReserved).toBe(false)
+        expect(m.activeTurnSource).toBe('desktop')
+      })
+
+      it('a lazy message load failure releases the reservation (no phantom claim)', async () => {
+        seedSession('f-clean-2', {})
+        ;(sm as unknown as { ensureMessagesLoaded: () => Promise<void> }).ensureMessagesLoaded = async () => {
+          throw new Error('lazy load failed (injected)')
+        }
+
+        await expect(sm.sendMessage('f-clean-2', 'first message', [], [], { invocationSource: 'desktop' }))
+          .rejects.toThrow('lazy load failed (injected)')
+
+        const m = getManaged('f-clean-2') as unknown as {
+          turnStartReserved?: boolean
+          activeTurnSource?: string
+          isProcessing: boolean
+        }
+        expect(m.turnStartReserved).toBe(false)
+        expect(m.activeTurnSource).toBeUndefined()
+        expect(m.isProcessing).toBe(false)
+      })
+
+      it('followers queued behind a failed turn start are drained (no stranded queue)', async () => {
+        let chatInvocations = 0
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+          chatInvocations++
+          return makeFakeAgent()
+        }
+        seedSession('f-clean-3', {})
+
+        // Stall the OWNER at its user-message flush (inside the pre-start
+        // boundary) so a follower can queue behind the held reservation…
+        let rejectFlush: ((e: Error) => void) | null = null
+        const flushGate = new Promise<void>((_resolve, reject) => { rejectFlush = reject })
+        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+        let flushCalls = 0
+        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+          flushCalls++
+          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          return realFlush.call(sm, id)
+        }
+
+        const ownerSend = sm.sendMessage('f-clean-3', 'owner message', [], [], { invocationSource: 'desktop' })
+        await waitForCondition(() => flushCalls === 1)
+        expect(getManaged('f-clean-3').turnStartReserved).toBe(true)
+
+        // …then the follower arrives and must queue (its own flush = call #2
+        // goes through immediately).
+        await sm.sendMessage('f-clean-3', 'follower message', [], [], { invocationSource: 'messaging' })
+        expect(getManaged('f-clean-3').messageQueue.length).toBe(1)
+
+        // The owner's flush fails — the reserved turn never starts. The
+        // boundary must release the reservation AND drain the follower.
+        rejectFlush!(new Error('pre-start flush failed (injected)'))
+        await expect(ownerSend).rejects.toThrow('pre-start flush failed (injected)')
+        expect(getManaged('f-clean-3').turnStartReserved).toBe(false)
+        expect(getManaged('f-clean-3').activeTurnSource).toBeUndefined()
+
+        // The follower replays as its own turn and completes.
+        await waitForCondition(() => getManaged('f-clean-3').messageQueue.length === 0)
+        await waitForCondition(() => chatInvocations >= 1)
+        expect((getManaged('f-clean-3') as unknown as { activeTurnSource?: string }).activeTurnSource).toBe('messaging')
+      })
+    })
+
     describe('turn source isolation (queued messages never overwrite the active turn)', () => {
       it('a question asked during a desktop turn that has queued messaging messages stamps desktop, not messaging', async () => {
         stubAgentCaptureFlag()

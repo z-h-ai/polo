@@ -48,24 +48,64 @@ export function questionResolutionRequestId(
 
 /**
  * Realtime gate for the Edit Popover pending-question restore RPC (review
- * round 5, issue 1).
+ * round 5, issue 1 + round 6, issue 2).
  *
  * The lookup does not know the sessionId up front, so it can only capture the
  * tracker's GLOBAL epoch before the RPC starts. While the RPC is in flight,
  * any pending-state event — a question_resolved committed from another
- * window, or a brand-new question_request — bumps the epoch. A late result
- * for a drifted epoch must be DROPPED: seeding it would resurrect a card
- * that was already resolved, violating the "question_resolved is terminal"
- * contract.
+ * window, or a brand-new question_request — bumps the epoch.
+ *
+ * The gate DISTINGUISHES the outcomes instead of folding them into null:
+ * - fresh:   epoch unchanged AND a result came back → safe to seed.
+ * - empty:   epoch unchanged AND the server authoritatively has no pending
+ *            question for this scope → restoring may end; a new session may
+ *            be created.
+ * - drifted: the epoch moved while the RPC was in flight → the result must
+ *            NOT be seeded (it may resurrect a resolved card), but this is
+ *            NOT an authoritative "no pending" either — the caller must
+ *            re-query (bounded) before giving up. Treating drift as empty
+ *            would strand a still-pending question behind a new session.
  */
-export function gateRestoredPendingQuestion(
+export type RestoredPendingQuestionGate<T> =
+  | { outcome: 'fresh'; result: T }
+  | { outcome: 'drifted' }
+  | { outcome: 'empty' }
+
+export function gateRestoredPendingQuestion<T extends { sessionId: string; request: QuestionRequest }>(
   tracker: PendingQuestionGenerationTracker,
   epochAtFetch: number,
-  result: { sessionId: string; request: QuestionRequest } | null,
-): { sessionId: string; request: QuestionRequest } | null {
-  if (!result) return null
-  if (tracker.epoch !== epochAtFetch) return null
-  return result
+  result: T | null,
+): RestoredPendingQuestionGate<T> {
+  const drifted = tracker.epoch !== epochAtFetch
+  if (!result) {
+    return drifted ? { outcome: 'drifted' } : { outcome: 'empty' }
+  }
+  return drifted ? { outcome: 'drifted' } : { outcome: 'fresh', result }
+}
+
+/**
+ * Bounded scoped re-query around the restore RPC (review round 6, issue 2).
+ *
+ * Captures the epoch before every attempt; `fresh` returns the result,
+ * `empty` (authoritative, undrifted) returns null, and `drifted` retries —
+ * the retry re-captures the epoch, so a quiet window yields an
+ * authoritative fresh/empty answer. Giving up after `maxAttempts` keeps the
+ * retry bounded; callers fall back to their normal fresh-session path.
+ */
+export async function restorePendingQuestionWithRealtimeGate<T extends { sessionId: string; request: QuestionRequest }>(
+  tracker: PendingQuestionGenerationTracker,
+  fetchResult: () => Promise<T | null>,
+  maxAttempts = 2,
+): Promise<T | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const epochAtFetch = tracker.epoch
+    const result = await fetchResult()
+    const gate = gateRestoredPendingQuestion<T>(tracker, epochAtFetch, result)
+    if (gate.outcome === 'fresh') return gate.result
+    if (gate.outcome === 'empty') return null
+    // drifted → bounded retry
+  }
+  return null
 }
 
 /**

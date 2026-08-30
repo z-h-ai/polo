@@ -5802,246 +5802,238 @@ export class SessionManager implements ISessionManager {
     // branch below and keeps its own options for its own future turn.
     const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
     const isTurnStartOwner = !managed.isProcessing && !managed.turnStartReserved
+    let turnStarted = false
     if (isTurnStartOwner) {
       managed.turnStartReserved = true
       this.applyTurnInvocationSource(managed, invocationSource)
     }
 
-    // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
-    // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
-    // duplicate that arrives from a legacy renderer still running the client-side
-    // auto_retry. The first matching caller wins (server timer or legacy RPC,
-    // whichever arrives first), subsequent matching calls within the deadline drop.
-    if (claimAutoRetryPending(managed, message) === 'drop') {
-      sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
-      if (isTurnStartOwner) {
-        // The reserved turn will not start — release the claim.
-        managed.turnStartReserved = false
-      }
-      return
-    }
-
-    // Clear any pending plan execution state when a new user message is sent.
-    // This acts as a safety valve - if the user moves on, we don't want to
-    // auto-execute an old plan later.
-    await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
-
-    // Ensure messages are loaded before we try to add new ones
-    await this.ensureMessagesLoaded(managed)
-
-    // If currently processing — or another caller holds the turn-start
-    // reservation (its pre-chat work is in flight) — this message must not
-    // start a second turn. Steer into the live turn when possible, otherwise
-    // queue for FIFO replay WITH ITS OWN OPTIONS (review round 4, issue 2):
-    // a queued message's source is applied when the replay becomes a new
-    // turn, never by overwriting the reserved/active turn's source.
-    //
-    // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
-    //   Claude emulates via PreToolUse hook. If `redirect()` returns false
-    //   (Claude with no live query, or backend can't steer), the backend has
-    //   already called forceAbort(Redirect) and we queue for replay.
-    // - 'queue': hold the message untouched; the current turn keeps running
-    //   to natural completion; replay as a new turn afterwards. NO call to
-    //   `agent.redirect()`, NO forceAbort, NO interruption.
-    if (managed.isProcessing || !isTurnStartOwner) {
-      const connection = resolveSessionConnection(managed.llmConnection, undefined)
-      // Fallback to 'steer' when no connection is resolvable — preserves
-      // today's exact behavior (call redirect, take whatever it returns).
-      const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
-
-      const agent = managed.agent
-      let steered = false
-      if (behavior === 'steer') {
-        steered = agent?.redirect(message) ?? false
-      }
-      // For 'queue': skip redirect entirely. The current turn is undisturbed.
-
-      sessionLog.info('mid-stream send', {
-        sessionId,
-        behavior,
-        steered,
-        queueLengthBefore: managed.messageQueue.length,
-        backend: agent ? agent.constructor.name : 'none',
-        connectionSlug: connection?.slug,
-      })
-
-      // Create user message for UI
-      const userMessage: Message = {
-        id: generateMessageId(),
-        role: 'user',
-        content: message,
-        timestamp: this.monotonic(),
-        attachments: storedAttachments,
-        badges: options?.badges,
-      }
-      managed.messages.push(userMessage)
-
-      // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
-      // (covers both queue-direct and queue-after-abort paths).
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: userMessage,
-        status: steered ? 'accepted' : 'queued',
-        optimisticMessageId: options?.optimisticMessageId
-      }, managed.workspace.id)
-
-      if (!steered) {
-        // Push for FIFO replay on next onProcessingStopped tick. Same shape
-        // for both queue-direct (current turn still running) and
-        // queue-after-abort (backend already aborted) — the replay path in
-        // processNextQueuedMessage is identical. The interrupted-response
-        // reminder only applies when a turn was actually running or was
-        // aborted — a reservation-queued message (turn not started yet) is
-        // a fresh message, not a continuation.
-        managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
-        if (managed.isProcessing) {
-          managed.wasInterrupted = true
-        }
-      }
-
-      this.persistSession(managed)
-      // Force a synchronous flush so the user message is genuinely on disk
-      // before we tell the renderer "accepted" — `persistSession` only
-      // enqueues with a 500ms debounce. (#616 reliability fix.)
-      await this.flushSession(managed.id)
-      onAck?.(userMessage.id)
-      return
-    }
-
-    // The turn-start reservation was already bound at entry (before any
-    // await). Re-assert here defensively: between the entry bind and this
-    // point nothing else may have claimed the generation, and question
-    // requests from this turn stamp THIS source — messages that arrive
-    // mid-turn and get queued keep their own options for their own future
-    // turn (review round 4, issue 2 / round 5, issue 2).
-    this.applyTurnInvocationSource(managed, invocationSource)
-
-    // Pre-start failure safety (review round 5, issue 2): if anything in this
-    // section throws (persist/flush/plan-state/message lookup), the reserved
-    // turn never reaches setProcessing(true) — release the reservation so
-    // future senders can claim a new turn instead of queueing forever. On
-    // success the claim is consumed below (isProcessing now gates callers).
+    // Single cleanup boundary (review round 5, issue 2 + round 6, issues
+    // 1+3): EVERYTHING between the synchronous claim and the actual
+    // setProcessing(true) is inside this try — including the pending-plan
+    // cleanup and lazy message load awaits — so a pre-start failure can
+    // never strand a phantom reservation (followers would queue forever
+    // behind a turn that never starts).
     try {
-      // Add user message with stored attachments for persistence
-      // Skip if existingMessageId is provided (message was already created when queued)
-      let userMessage: Message
-      if (existingMessageId) {
-        // Find existing message (already added when queued)
-        userMessage = managed.messages.find(m => m.id === existingMessageId)!
-        if (!userMessage) {
-          throw new Error(`Existing message ${existingMessageId} not found`)
+      // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
+      // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
+      // duplicate that arrives from a legacy renderer still running the client-side
+      // auto_retry. The first matching caller wins (server timer or legacy RPC,
+      // whichever arrives first), subsequent matching calls within the deadline drop.
+      if (claimAutoRetryPending(managed, message) === 'drop') {
+        sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
+        return
+      }
+
+      // Clear any pending plan execution state when a new user message is sent.
+      // This acts as a safety valve - if the user moves on, we don't want to
+      // auto-execute an old plan later.
+      await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
+
+      // Ensure messages are loaded before we try to add new ones
+      await this.ensureMessagesLoaded(managed)
+
+      // If currently processing — or another caller holds the turn-start
+      // reservation (its pre-chat work is in flight) — this message must not
+      // start a second turn. Steer into the live turn when possible, otherwise
+      // queue for FIFO replay WITH ITS OWN OPTIONS (review round 4, issue 2):
+      // a queued message's source is applied when the replay becomes a new
+      // turn, never by overwriting the reserved/active turn's source.
+      //
+      // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
+      //   Claude emulates via PreToolUse hook. If `redirect()` returns false
+      //   (Claude with no live query, or backend can't steer), the backend has
+      //   already called forceAbort(Redirect) and we queue for replay.
+      // - 'queue': hold the message untouched; the current turn keeps running
+      //   to natural completion; replay as a new turn afterwards. NO call to
+      //   `agent.redirect()`, NO forceAbort, NO interruption.
+      if (managed.isProcessing || !isTurnStartOwner) {
+        const connection = resolveSessionConnection(managed.llmConnection, undefined)
+        // Fallback to 'steer' when no connection is resolvable — preserves
+        // today's exact behavior (call redirect, take whatever it returns).
+        const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
+
+        const agent = managed.agent
+        let steered = false
+        if (behavior === 'steer') {
+          steered = agent?.redirect(message) ?? false
         }
-      } else {
-        // Create new message
-        userMessage = {
+        // For 'queue': skip redirect entirely. The current turn is undisturbed.
+
+        sessionLog.info('mid-stream send', {
+          sessionId,
+          behavior,
+          steered,
+          queueLengthBefore: managed.messageQueue.length,
+          backend: agent ? agent.constructor.name : 'none',
+          connectionSlug: connection?.slug,
+        })
+
+        // Create user message for UI
+        const userMessage: Message = {
           id: generateMessageId(),
           role: 'user',
           content: message,
           timestamp: this.monotonic(),
-          attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
-          badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
+          attachments: storedAttachments,
+          badges: options?.badges,
         }
         managed.messages.push(userMessage)
 
-        // Update lastMessageRole for badge display
-        managed.lastMessageRole = 'user'
-
-        // Persist + flush before announcing — the user message must be
-        // genuinely on disk before we tell the renderer "accepted", and
-        // `persistSession` is debounced (500ms). #616.
-        this.persistSession(managed)
-        await this.flushSession(managed.id)
-        onAck?.(userMessage.id)
-
-        // Emit user_message event so UI can confirm the optimistic message
+        // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
+        // (covers both queue-direct and queue-after-abort paths).
         this.sendEvent({
           type: 'user_message',
           sessionId,
           message: userMessage,
-          status: 'accepted',
+          status: steered ? 'accepted' : 'queued',
           optimisticMessageId: options?.optimisticMessageId
         }, managed.workspace.id)
 
-        // If this is the first user message and no title exists, set one immediately
-        // AI generation will enhance it later, but we always have a title from the start
-        // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
-        const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-        if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
-          // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
-          // so titles show human-readable names instead of raw IDs
-          let titleSource = message
-          if (options?.badges) {
-            for (const badge of options.badges) {
-              if (badge.rawText && badge.label) {
-                titleSource = titleSource.replace(badge.rawText, badge.label)
-              }
-            }
+        if (!steered) {
+          // Push for FIFO replay on next onProcessingStopped tick. Same shape
+          // for both queue-direct (current turn still running) and
+          // queue-after-abort (backend already aborted) — the replay path in
+          // processNextQueuedMessage is identical. The interrupted-response
+          // reminder only applies when a turn was actually running or was
+          // aborted — a reservation-queued message (turn not started yet) is
+          // a fresh message, not a continuation.
+          managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
+          if (managed.isProcessing) {
+            managed.wasInterrupted = true
           }
-          // Sanitize: strip any remaining bracket mentions, XML blocks, tags
-          const sanitized = sanitizeForTitle(titleSource)
-          const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
-          managed.name = initialTitle
+        }
+
+        this.persistSession(managed)
+        // Force a synchronous flush so the user message is genuinely on disk
+        // before we tell the renderer "accepted" — `persistSession` only
+        // enqueues with a 500ms debounce. (#616 reliability fix.)
+        await this.flushSession(managed.id)
+        onAck?.(userMessage.id)
+        return
+      }
+
+      // The turn-start reservation was already bound at entry (before any
+      // await). Re-assert here defensively: between the entry bind and this
+      // point nothing else may have claimed the generation, and question
+      // requests from this turn stamp THIS source — messages that arrive
+      // mid-turn and get queued keep their own options for their own future
+      // turn (review round 4, issue 2 / round 5, issue 2).
+      this.applyTurnInvocationSource(managed, invocationSource)
+
+        // Add user message with stored attachments for persistence
+        // Skip if existingMessageId is provided (message was already created when queued)
+        let userMessage: Message
+        if (existingMessageId) {
+          // Find existing message (already added when queued)
+          userMessage = managed.messages.find(m => m.id === existingMessageId)!
+          if (!userMessage) {
+            throw new Error(`Existing message ${existingMessageId} not found`)
+          }
+        } else {
+          // Create new message
+          userMessage = {
+            id: generateMessageId(),
+            role: 'user',
+            content: message,
+            timestamp: this.monotonic(),
+            attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
+            badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
+          }
+          managed.messages.push(userMessage)
+
+          // Update lastMessageRole for badge display
+          managed.lastMessageRole = 'user'
+
+          // Persist + flush before announcing — the user message must be
+          // genuinely on disk before we tell the renderer "accepted", and
+          // `persistSession` is debounced (500ms). #616.
           this.persistSession(managed)
-          // Flush immediately so disk is authoritative before notifying renderer
           await this.flushSession(managed.id)
+          onAck?.(userMessage.id)
+
+          // Emit user_message event so UI can confirm the optimistic message
           this.sendEvent({
-            type: 'title_generated',
+            type: 'user_message',
             sessionId,
-            title: initialTitle,
+            message: userMessage,
+            status: 'accepted',
+            optimisticMessageId: options?.optimisticMessageId
           }, managed.workspace.id)
 
-          // Generate AI title asynchronously using agent's SDK
-          // (waits briefly for agent creation if needed)
-          this.generateTitle(managed, message)
-        }
-      }
-
-      // Evaluate auto-label rules against the user message (common path for both
-      // fresh and queued messages). Scans regex patterns configured on labels,
-      // then merges any new matches into the session's label array.
-      try {
-        const labelTree = listLabels(managed.workspace.rootPath)
-        const autoMatches = evaluateAutoLabels(message, labelTree)
-
-        if (autoMatches.length > 0) {
-          const existingLabels = managed.labels ?? []
-          const newEntries = autoMatches
-            .map(m => `${m.labelId}::${m.value}`)
-            .filter(entry => !existingLabels.includes(entry))
-
-          if (newEntries.length > 0) {
-            managed.labels = [...existingLabels, ...newEntries]
+          // If this is the first user message and no title exists, set one immediately
+          // AI generation will enhance it later, but we always have a title from the start
+          // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
+          const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
+          if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
+            // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
+            // so titles show human-readable names instead of raw IDs
+            let titleSource = message
+            if (options?.badges) {
+              for (const badge of options.badges) {
+                if (badge.rawText && badge.label) {
+                  titleSource = titleSource.replace(badge.rawText, badge.label)
+                }
+              }
+            }
+            // Sanitize: strip any remaining bracket mentions, XML blocks, tags
+            const sanitized = sanitizeForTitle(titleSource)
+            const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
+            managed.name = initialTitle
             this.persistSession(managed)
+            // Flush immediately so disk is authoritative before notifying renderer
+            await this.flushSession(managed.id)
             this.sendEvent({
-              type: 'labels_changed',
+              type: 'title_generated',
               sessionId,
-              labels: managed.labels,
+              title: initialTitle,
             }, managed.workspace.id)
+
+            // Generate AI title asynchronously using agent's SDK
+            // (waits briefly for agent creation if needed)
+            this.generateTitle(managed, message)
           }
         }
-      } catch (e) {
-        sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
-      }
 
-      managed.lastMessageAt = Date.now()
-      this.setProcessing(managed, true)
-      managed.streamingText = ''
-      managed.processingGeneration++
-      managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
-    } finally {
-      if (isTurnStartOwner) {
-        // The turn has claimed its processing generation (setProcessing(true)
-        // above) — the reservation is consumed; isProcessing now gates
-        // subsequent callers. On a pre-start throw this releases the claim
-        // instead of bricking the session behind a phantom reservation.
-        managed.turnStartReserved = false
-      }
-    }
-    if (isTurnStartOwner) {
+        // Evaluate auto-label rules against the user message (common path for both
+        // fresh and queued messages). Scans regex patterns configured on labels,
+        // then merges any new matches into the session's label array.
+        try {
+          const labelTree = listLabels(managed.workspace.rootPath)
+          const autoMatches = evaluateAutoLabels(message, labelTree)
+
+          if (autoMatches.length > 0) {
+            const existingLabels = managed.labels ?? []
+            const newEntries = autoMatches
+              .map(m => `${m.labelId}::${m.value}`)
+              .filter(entry => !existingLabels.includes(entry))
+
+            if (newEntries.length > 0) {
+              managed.labels = [...existingLabels, ...newEntries]
+              this.persistSession(managed)
+              this.sendEvent({
+                type: 'labels_changed',
+                sessionId,
+                labels: managed.labels,
+              }, managed.workspace.id)
+            }
+          }
+        } catch (e) {
+          sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
+        }
+
+        managed.lastMessageAt = Date.now()
+        this.setProcessing(managed, true)
+        managed.streamingText = ''
+        managed.processingGeneration++
+        managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
       // The turn has claimed its processing generation — the reservation is
       // consumed; isProcessing now gates subsequent callers.
-      managed.turnStartReserved = false
+      turnStarted = true
+    } finally {
+      if (isTurnStartOwner) {
+        this.releaseTurnStartReservation(managed, sessionId, turnStarted)
+      }
     }
 
     // Reset auth retry flag for this new message (allows one retry per message)
@@ -6963,6 +6955,41 @@ export class SessionManager implements ISessionManager {
     )
     if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
       managed.agent.allowRequestUserInput = allowRequestUserInput
+    }
+  }
+
+  /**
+   * Single named cleanup boundary for the turn-start reservation (review
+   * round 6, issues 1+3): the finally around sendMessage's pre-start section
+   * funnels EVERY exit through here.
+   *
+   * - turnStarted: the claim is consumed — isProcessing now gates callers,
+   *   so only the reservation flag is cleared.
+   * - Pre-start failure/early return: the reserved turn never runs. Release
+   *   the reservation AND the bound active-turn state (fail closed — a
+   *   source bound to a turn that never started must not leak into a later
+   *   question), then kick the queue once if followers already persisted
+   *   behind the reservation so confirmed queued messages are not stranded
+   *   forever without an onProcessingStopped to drain them.
+   */
+  private releaseTurnStartReservation(managed: ManagedSession, sessionId: string, turnStarted: boolean): void {
+    if (turnStarted) {
+      managed.turnStartReserved = false
+      return
+    }
+    const hadFollowers = managed.messageQueue.length > 0
+    managed.turnStartReserved = false
+    managed.activeTurnSource = undefined
+    managed.invocationSource = undefined
+    if (hadFollowers) {
+      sessionLog.warn(`Turn start failed for session ${sessionId} with ${managed.messageQueue.length} queued follower(s) — draining`)
+      setImmediate(() => {
+        try {
+          this.processNextQueuedMessage(sessionId)
+        } catch (error) {
+          sessionLog.error(`Failed to drain queued followers for session ${sessionId} after a failed turn start:`, error)
+        }
+      })
     }
   }
 

@@ -29,7 +29,7 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
-import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, gateRestoredPendingQuestion, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, setPendingQuestionForSession } from './lib/pending-questions'
+import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, restorePendingQuestionWithRealtimeGate, setPendingQuestionForSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -2166,15 +2166,17 @@ export default function App() {
   // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
   // deleted) and can never cross workspaces or popover owners.
   const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null> => {
-    // Capture the GLOBAL pending-state epoch BEFORE the RPC (review round 5,
-    // issue 1): the lookup cannot know the sessionId up front, so the global
-    // counter is the only comparable token. If any question_resolved (e.g.
-    // answered from another window) or new question_request lands while the
-    // RPC is in flight, the epoch drifts and the late result is dropped —
-    // seeding it would resurrect an already-resolved card.
-    const epochAtFetch = pendingQuestionGenerationsRef.current.epoch
-    const result = await window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner)
-    const gated = gateRestoredPendingQuestion(pendingQuestionGenerationsRef.current, epochAtFetch, result)
+    // Bounded realtime-gated restore (review round 5, issue 1 + round 6,
+    // issue 2): the global pending-state epoch is captured before every RPC
+    // attempt. Drifted attempts (question_resolved from another window, new
+    // question_request anywhere) are never seeded and trigger a bounded
+    // scoped re-query; only an authoritative fresh result seeds the card and
+    // only an authoritative fresh empty ends the restore — a drifted lookup
+    // must not strand a still-pending question behind a brand-new session.
+    const gated = await restorePendingQuestionWithRealtimeGate(
+      pendingQuestionGenerationsRef.current,
+      () => window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner),
+    )
     if (!gated) return null
 
     // Seed the authoritative request the same way the question_request event

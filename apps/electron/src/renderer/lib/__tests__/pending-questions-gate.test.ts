@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { QuestionRequest } from '../../../shared/types'
 
 // Pure renderer lib — no DOM needed.
-const { PendingQuestionGenerationTracker, gateRestoredPendingQuestion } = await import('../pending-questions')
+const { PendingQuestionGenerationTracker, gateRestoredPendingQuestion, restorePendingQuestionWithRealtimeGate } = await import('../pending-questions')
 
 type RestoreResult = { sessionId: string; request: QuestionRequest } | null
 
@@ -25,50 +25,95 @@ function makeRequest(sessionId: string, requestId: string): QuestionRequest {
   }
 }
 
-describe('gateRestoredPendingQuestion (Edit Popover restore realtime CAS)', () => {
-  it('a late restore result is DROPPED when a question_resolved bumped the epoch while the RPC was in flight', async () => {
+describe('gateRestoredPendingQuestion (discriminated outcomes)', () => {
+  it('fresh: epoch unchanged with a result', () => {
     const tracker = new PendingQuestionGenerationTracker()
-    let resolveRpc!: (value: RestoreResult) => void
-    const rpc = new Promise<RestoreResult>(resolve => { resolveRpc = resolve })
-
-    // Renderer starts the restore RPC: capture the epoch BEFORE it resolves.
     const epochAtFetch = tracker.epoch
+    const result = { sessionId: 'session-1', request: makeRequest('session-1', 'q-1') }
+    expect(gateRestoredPendingQuestion(tracker, epochAtFetch, result)).toEqual({ outcome: 'fresh', result })
+  })
 
-    // While the RPC is in flight, another window commits the answer — the
-    // realtime question_resolved event arrives here and bumps the epoch.
-    tracker.bump('session-1')
+  it('drifted: a result whose epoch moved is flagged, never seeded directly', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    const epochAtFetch = tracker.epoch
+    tracker.bump('session-other') // question_resolved / new request elsewhere
+    const result = { sessionId: 'session-1', request: makeRequest('session-1', 'q-1') }
+    expect(gateRestoredPendingQuestion(tracker, epochAtFetch, result)).toEqual({ outcome: 'drifted' })
+  })
 
-    // The late RPC result finally lands.
-    const lateResult: RestoreResult = { sessionId: 'session-1', request: makeRequest('session-1', 'q-1') }
-    const rpcPromise = rpc.then(r => {
-      void r
-      return gateRestoredPendingQuestion(tracker, epochAtFetch, lateResult)
+  it('empty: undrifted authoritative null', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    const epochAtFetch = tracker.epoch
+    expect(gateRestoredPendingQuestion(tracker, epochAtFetch, null)).toEqual({ outcome: 'empty' })
+  })
+
+  it('drifted: even a null result is not authoritative when the epoch moved', () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    const epochAtFetch = tracker.epoch
+    tracker.bump('session-other')
+    expect(gateRestoredPendingQuestion(tracker, epochAtFetch, null)).toEqual({ outcome: 'drifted' })
+  })
+})
+
+describe('restorePendingQuestionWithRealtimeGate (bounded drift revalidation)', () => {
+  it('unrelated session\u2019s new question_request drifts the epoch — the restore RE-QUERIES and recovers the original pending instead of terminating', async () => {
+    const tracker = new PendingQuestionGenerationTracker()
+    const request = makeRequest('session-1', 'q-1')
+    let fetches = 0
+    const restored = await restorePendingQuestionWithRealtimeGate(tracker, async () => {
+      fetches++
+      if (fetches === 1) {
+        // While the first lookup is in flight, an UNRELATED session receives
+        // a brand-new question_request — the global epoch drifts.
+        tracker.bump('session-unrelated')
+        return { sessionId: 'session-1', request } // the server answer for OUR scope is still valid…
+      }
+      // Bounded re-query: quiet window, the same authoritative pending.
+      return { sessionId: 'session-1', request }
     })
-    resolveRpc(lateResult)
-    const gated = await rpcPromise
-
-    // The resolved card must NOT be resurrected.
-    expect(gated).toBeNull()
+    expect(fetches).toBe(2)
+    expect(restored).toEqual({ sessionId: 'session-1', request })
   })
 
-  it('a restore result whose epoch is unchanged (fresh lookup) passes the gate', () => {
+  it('own session resolved during the request: the re-query yields an authoritative empty — the resolved card is NOT resurrected', async () => {
     const tracker = new PendingQuestionGenerationTracker()
-    const epochAtFetch = tracker.epoch
-    const result: RestoreResult = { sessionId: 'session-1', request: makeRequest('session-1', 'q-1') }
-    expect(gateRestoredPendingQuestion(tracker, epochAtFetch, result)).toEqual(result)
+    const request = makeRequest('session-1', 'q-1')
+    let fetches = 0
+    const restored = await restorePendingQuestionWithRealtimeGate(tracker, async () => {
+      fetches++
+      if (fetches === 1) {
+        // Another window committed the answer while this lookup was in
+        // flight — question_resolved bumps the epoch…
+        tracker.bump('session-1')
+        return { sessionId: 'session-1', request } // …and the stale snapshot still carries Q1.
+      }
+      // Re-query: the server authoritatively has NO pending question now.
+      return null
+    })
+    expect(fetches).toBe(2)
+    expect(restored).toBeNull()
   })
 
-  it('an empty restore result stays null through the gate', () => {
+  it('persistent drift gives up after the bounded attempt budget (no unbounded loop)', async () => {
     const tracker = new PendingQuestionGenerationTracker()
-    const epochAtFetch = tracker.epoch
-    expect(gateRestoredPendingQuestion(tracker, epochAtFetch, null)).toBeNull()
+    let fetches = 0
+    const restored = await restorePendingQuestionWithRealtimeGate(tracker, async () => {
+      fetches++
+      tracker.bump('session-noisy')
+      return { sessionId: 'session-1', request: makeRequest('session-1', `q-${fetches}`) }
+    }, 2)
+    expect(fetches).toBe(2)
+    expect(restored).toBeNull()
   })
 
-  it('a new question_request from another session also drifts the epoch and drops the late restore', () => {
+  it('authoritative empty on the first (undrifted) attempt ends the restore immediately', async () => {
     const tracker = new PendingQuestionGenerationTracker()
-    const epochAtFetch = tracker.epoch
-    tracker.bump('session-other') // new question_request elsewhere
-    const result: RestoreResult = { sessionId: 'session-1', request: makeRequest('session-1', 'q-1') }
-    expect(gateRestoredPendingQuestion(tracker, epochAtFetch, result)).toBeNull()
+    let fetches = 0
+    const restored = await restorePendingQuestionWithRealtimeGate(tracker, async () => {
+      fetches++
+      return null
+    })
+    expect(fetches).toBe(1)
+    expect(restored).toBeNull()
   })
 })
