@@ -29,10 +29,16 @@ export async function handleRequestUserInput(ctx: SessionToolContext, args: unkn
 
   const questions: RequestUserInputQuestionArgs[] = parsed.data.questions;
 
+  // GENERATION SNAPSHOT (review fix round 6, issue A): bound at TOOL-CALL
+  // INITIATION — this is the first line of the handler, before any await —
+  // and carried immutably through the callback chain. The host-provided
+  // reader may be re-stamped by newer turns later; this local never changes.
+  const generationAtRequest = ctx.getTurnGeneration ? ctx.getTurnGeneration() : 0;
+
   try {
     // Await the durable handoff — a slow or failed callback blocks the tool
     // result; a rejection becomes an error response (never a fake "paused").
-    await ctx.callbacks.onQuestionRequested(questions);
+    await ctx.callbacks.onQuestionRequested(questions, generationAtRequest);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return errorResponse(

@@ -5914,6 +5914,15 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    // DELETE TURN-START GATE (review fix round 6, issue B): deletion sets its
+    // terminal tombstone synchronously at deleteSession entry. A send that
+    // arrives during the deletion window must never start a new turn — the
+    // turn-start boundary below would bump the generation and CLEAR the
+    // tombstone, resurrecting a deleted session's question lifecycle. Fail
+    // closed with the protocol's terminal status.
+    if (managed.questionLifecycleTombstone?.reason === 'deleted') {
+      throw new Error(`Session ${sessionId} is being deleted (session_missing): new turns are rejected during the deletion window`)
+    }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
     // NOTE (review round 8, issue 2): the pending answer→resume supersede is

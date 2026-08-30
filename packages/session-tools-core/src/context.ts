@@ -63,13 +63,19 @@ export interface SessionToolCallbacks {
    * Only invoked when the tool is registered (desktop interactive turns).
    * Implementations pause the current turn and wait for the user's answers.
    *
+   * `generationAtRequest` is the processing generation of the turn that
+   * issued the tool call — snapshotted by the tool handler AT TOOL-CALL
+   * INITIATION (via {@link SessionToolContext.getTurnGeneration}) and carried
+   * immutably through the chain, so the host can reject a late callback whose
+   * turn was stopped/superseded before it executed.
+   *
    * MAY return a Promise: the handler awaits it so the tool only reports
    * success ("waiting for user input") after the durable handoff has actually
    * completed — a rejection surfaces as a tool error instead.
    * Optional — backends without question support leave it undefined and the
    * handler degrades to a plain-text error.
    */
-  onQuestionRequested?(questions: RequestUserInputQuestionArgs[]): void | Promise<void>;
+  onQuestionRequested?(questions: RequestUserInputQuestionArgs[], generationAtRequest: number): void | Promise<void>;
 }
 
 // ============================================================
@@ -172,6 +178,15 @@ export interface SessionToolContext {
 
   /** Absolute path to workspace folder (~/.polo-ai/workspaces/{id}) */
   workspacePath: string;
+
+  /**
+   * The processing generation of the turn currently executing tools in this
+   * context. Read by tool handlers AT TOOL-CALL INITIATION (synchronously,
+   * before any await) so the value can be bound immutably into callbacks —
+   * never re-read from mutable state after a delay (review fix round 6,
+   * issue A). Optional: hosts without generation tracking default to 0.
+   */
+  getTurnGeneration?: () => number;
 
   /** Path to sources folder within workspace */
   get sourcesPath(): string;

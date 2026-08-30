@@ -665,14 +665,15 @@ export class ClaudeAgent extends BaseAgent {
         this.onDebug?.(`[ClaudeAgent] onAuthRequest received: ${request.sourceSlug} (type: ${request.type})`);
         this.onAuthRequest?.(request);
       },
-      onQuestionRequested: (questions) => {
+      // GENERATION BINDING (review fix rounds 5+6, issue A): the generation
+      // is snapshotted at TOOL-CALL INITIATION by the handler via
+      // getTurnGeneration below, and this registration only FORWARDS that
+      // immutable value — it never re-reads the mutable field at execution.
+      onQuestionRequested: (questions, generationAtRequest) => {
         this.onDebug?.(`[ClaudeAgent] onQuestionRequested received: ${questions.length} question(s)`);
-        // GENERATION SNAPSHOT (review fix round 5, issue A): this arrow runs
-        // synchronously within the issuing turn's tool-handler chain — stamp
-        // the generation HERE so the value travels with the callback and is
-        // never re-read at late execution time.
-        return this.onQuestionRequested?.(questions, this.sessionTurnGeneration);
+        return this.onQuestionRequested?.(questions, generationAtRequest);
       },
+      getTurnGeneration: () => this.sessionTurnGeneration,
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
     });

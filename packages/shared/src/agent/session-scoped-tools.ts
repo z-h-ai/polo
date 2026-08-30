@@ -257,6 +257,10 @@ export function getSessionScopedTools(
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
       sessionStorage: storage,
       workingDirectory,
+      // Tool-call-time generation reader (review fix rounds 5+6, issue A):
+      // the handler invokes this SYNCHRONOUSLY at initiation and binds the
+      // returned value immutably into the callback chain.
+      getTurnGeneration: () => getSessionScopedToolCallbacks(sessionId)?.getTurnGeneration?.() ?? 0,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         const callbacks = getSessionScopedToolCallbacks(sessionId);
@@ -266,13 +270,13 @@ export function getSessionScopedTools(
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         callbacks?.onAuthRequest?.(request as AuthRequest);
       },
-      onQuestionRequested: (questions) => {
+      onQuestionRequested: (questions, generationAtRequest) => {
         // Propagate the promise: the tool handler awaits the durable handoff
-        // (persist+flush+question_request) before reporting success. The
-        // issuing turn's generation is stamped by the agent's registry
-        // registration (tool-call time), not here.
+        // (persist+flush+question_request) before reporting success.
+        // `generationAtRequest` was snapshotted at tool-call initiation by
+        // the handler (review fix rounds 5+6, issue A) — forward it as-is.
         const callbacks = getSessionScopedToolCallbacks(sessionId);
-        return callbacks?.onQuestionRequested?.(questions);
+        return callbacks?.onQuestionRequested?.(questions, generationAtRequest);
       },
     });
 

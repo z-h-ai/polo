@@ -1705,6 +1705,13 @@ export class PiAgent extends BaseAgent {
       workspaceId,
       sessionStorage: this.sessionStorage,
       workingDirectory: this.workingDirectory,
+      // Tool-call-time generation reader (review fix rounds 5+6, issue A):
+      // the handler invokes this SYNCHRONOUSLY at initiation and binds the
+      // returned value immutably into the callback chain. The ctx itself is
+      // cached across turns — the reader always reflects the CURRENT turn,
+      // which is correct because the read happens at initiation of THAT
+      // turn's tool call.
+      getTurnGeneration: () => this.sessionTurnGeneration,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         this.onPlanSubmitted?.(planPath);
@@ -1712,12 +1719,10 @@ export class PiAgent extends BaseAgent {
       onAuthRequest: (request: unknown) => {
         this.onAuthRequest?.(request as any);
       },
-      onQuestionRequested: (questions) => {
+      onQuestionRequested: (questions, generationAtRequest) => {
         this.onDebug?.(`[PiAgent] onQuestionRequested received: ${questions.length} question(s)`);
-        // GENERATION SNAPSHOT (review fix round 5, issue A): stamp the
-        // issuing turn's generation here — synchronously with the tool
-        // handler chain — never re-read at late execution time.
-        return this.onQuestionRequested?.(questions, this.sessionTurnGeneration);
+        // FORWARD the immutable handler snapshot — never re-read the field.
+        return this.onQuestionRequested?.(questions, generationAtRequest);
       },
     });
 
@@ -2211,10 +2216,17 @@ export class PiAgent extends BaseAgent {
     // survives across turns.
     const sessionId = this.config.session?.id;
     if (sessionId) {
+      // GENERATION BINDING (review fix rounds 5+6, issue A): this merge runs
+      // PER TURN — capture THIS turn's generation into the closure now. Any
+      // proxy-forwarded question callback of this turn carries the captured
+      // value immutably, even if a newer turn re-stamps the field before the
+      // callback executes.
+      const generationAtRegistration = this.sessionTurnGeneration
       mergeSessionScopedToolCallbacks(sessionId, {
         onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
         onAuthRequest: (request) => this.onAuthRequest?.(request),
-        onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, this.sessionTurnGeneration),
+        onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, generationAtRegistration),
+        getTurnGeneration: () => this.sessionTurnGeneration,
         queryFn: (request) => this.queryLlm(request),
       });
     }

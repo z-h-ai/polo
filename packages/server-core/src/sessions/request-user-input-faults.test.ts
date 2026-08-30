@@ -814,6 +814,43 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_resolved' || e.type === 'user_message')).toHaveLength(0)
   })
 
+  // ---- Review fix round 6, issue B: the deletion gate covers the NEW TURN
+  // entry. A sendMessage during the deletion window must be rejected BEFORE
+  // the turn-start boundary — otherwise the generation bump would CLEAR the
+  // deleted tombstone and resurrect the dying session's lifecycle.
+
+  it('a sendMessage during the deletion window is rejected; the deleted tombstone survives and deletion completes', async () => {
+    patchPrivateFlush()
+    seedSession('f-del-turn', {})
+
+    // Hold the question lock so the delete's cleanup queues behind it —
+    // a genuine deletion window with the session still registered.
+    let releaseLock!: () => void
+    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
+    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
+      .withQuestionStateLock('f-del-turn', () => hungLock)
+
+    const deletePromise = sm.deleteSession('f-del-turn')
+    await new Promise(r => setTimeout(r, 30))
+    // Deletion has STARTED: the tombstone was set synchronously at entry.
+    expect((getManaged('f-del-turn') as unknown as { questionLifecycleTombstone?: { reason: string } })
+      .questionLifecycleTombstone?.reason).toBe('deleted')
+
+    // A new turn attempts to start inside the window — fail closed.
+    await expect(sm.sendMessage('f-del-turn', 'late message', [], [], { invocationSource: 'desktop' }))
+      .rejects.toThrow(/session_missing/)
+
+    // The rejected send never reached the turn-start boundary: the tombstone
+    // is NOT cleared and the session stays terminally deleted.
+    expect((getManaged('f-del-turn') as unknown as { questionLifecycleTombstone?: { reason: string } })
+      .questionLifecycleTombstone?.reason).toBe('deleted')
+    expect(getManaged('f-del-turn').isProcessing).toBe(false)
+
+    releaseLock()
+    await deletePromise
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-turn'))).toBe(false)
+  })
+
   // ---- Review fix round 5, issue A: the generation is bound to the callback
   // CLOSURE at the issuing turn (agent-stamped at tool-call time). A late
   // callback carrying its ISSUING generation is rejected once a newer turn
