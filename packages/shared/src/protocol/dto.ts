@@ -172,6 +172,13 @@ export interface CreateSessionOptions {
   branchFromSessionId?: string
 }
 
+/**
+ * Dedicated creation options for the renderer Edit Popover session. The
+ * server stamps the 'edit-popover' origin here — this path is the ONLY way
+ * that origin can be granted, and the popover owner identity is REQUIRED.
+ */
+export type CreateEditPopoverSessionOptions = Omit<CreateSessionOptions, 'origin'> & { popoverOwner: string }
+
 export interface RemoteSessionTransferPayload {
   sourceSessionId: string
   name?: string

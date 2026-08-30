@@ -157,6 +157,9 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       isProcessing: boolean
       messages: Array<Record<string, unknown>>
       messageQueue: Array<Record<string, unknown>>
+      activeTurnSource?: string
+      invocationSource?: string
+      turnStartReserved?: boolean
       agent?: { interruptedCount?: number }
     }
   }
@@ -1042,6 +1045,96 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         await desktopTurn
         await waitForCondition(() => (getManaged('f-turn-iso').messageQueue.length ?? 0) === 0)
         await waitForCondition(() => chatInvocations >= 2)
+        expect(flagCapture.last).toBe(false)
+      })
+
+      // Round 5, issue 2: the turn-start claim + source binding must be
+      // ATOMIC with respect to the pre-processing awaits. While the desktop
+      // FIRST message's pre-processing flush is stalled, a concurrent
+      // messaging send must NOT claim a second turn or overwrite the
+      // reserved source — it queues, and the desktop turn keeps asking.
+      it('concurrent sends during a stalled pre-processing flush: reservation holds desktop, messaging queues, replay applies its own source', async () => {
+        // Gated agent factory with flag capture (invocation 1 blocks until
+        // the desktop turn's question is stamped).
+        let releaseTurn: (() => void) | null = null
+        const turnGate = new Promise<void>(resolve => { releaseTurn = resolve })
+        let chatInvocations = 0
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+          const n = ++chatInvocations
+          const agent: Record<string, unknown> = {
+            ...makeFakeAgent(),
+            redirect: () => false,
+            chat: async function* () {
+              if (n === 1) await turnGate
+              yield { type: 'complete' as const }
+            },
+          }
+          Object.defineProperty(agent, 'allowRequestUserInput', {
+            get: () => flagCapture.last,
+            set: (v: boolean) => { flagCapture.last = v },
+          })
+          return agent
+        }
+
+        // Stall the FIRST flushSession call: the desktop sender hangs in its
+        // pre-processing flush (before setProcessing(true)) — the exact
+        // window where two concurrent senders could both see
+        // isProcessing=false.
+        let releaseFlush: (() => void) | null = null
+        const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
+        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+        let flushCalls = 0
+        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+          flushCalls++
+          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          return realFlush.call(sm, id)
+        }
+
+        seedSession('f-atomic-1', {})
+
+        // Desktop sender claims the turn start synchronously, then blocks in
+        // the flush await.
+        const desktopTurn = sm.sendMessage('f-atomic-1', 'desktop task', [], [], { invocationSource: 'desktop' })
+        await waitForCondition(() => flushCalls === 1)
+
+        const reserved = getManaged('f-atomic-1') as unknown as {
+          isProcessing: boolean
+          turnStartReserved?: boolean
+          activeTurnSource?: string
+          invocationSource?: string
+          messageQueue: Array<Record<string, unknown>>
+        }
+        expect(reserved.isProcessing).toBe(false)
+        expect(reserved.turnStartReserved).toBe(true)
+        expect(reserved.activeTurnSource).toBe('desktop')
+        expect(reserved.invocationSource).toBe('desktop')
+
+        // Concurrent messaging send while the reservation is held: it must
+        // take the steer/queue branch — queued with its own options, never
+        // claiming a second turn or overwriting the reserved source.
+        await sm.sendMessage('f-atomic-1', 'messaging reply', [], [], { invocationSource: 'messaging' })
+        expect(getManaged('f-atomic-1').messageQueue.length).toBe(1)
+        expect(getManaged('f-atomic-1').activeTurnSource).toBe('desktop')
+        expect(getManaged('f-atomic-1').invocationSource).toBe('desktop')
+        expect(getManaged('f-atomic-1').isProcessing).toBe(false)
+        expect(getManaged('f-atomic-1').turnStartReserved).toBe(true)
+
+        // Release the flush — the desktop turn proceeds and asks a question.
+        releaseFlush!()
+        await waitForCondition(() => chatInvocations === 1)
+        const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-atomic-1')
+        const questions = makeQuestionRequest('f-atomic-1').questions
+        await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
+          .handleQuestionRequested(managed, questions)
+        expect(sm.getPendingQuestion('f-atomic-1')?.invocationSource).toBe('desktop')
+
+        // Release the chat — the desktop turn completes and the queued
+        // messaging message replays as its own turn with ITS source.
+        releaseTurn!()
+        await desktopTurn
+        await waitForCondition(() => getManaged('f-atomic-1').messageQueue.length === 0)
+        await waitForCondition(() => chatInvocations >= 2)
+        expect((getManaged('f-atomic-1') as unknown as { activeTurnSource?: string }).activeTurnSource).toBe('messaging')
         expect(flagCapture.last).toBe(false)
       })
     })

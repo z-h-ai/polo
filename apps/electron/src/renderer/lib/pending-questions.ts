@@ -47,6 +47,28 @@ export function questionResolutionRequestId(
 }
 
 /**
+ * Realtime gate for the Edit Popover pending-question restore RPC (review
+ * round 5, issue 1).
+ *
+ * The lookup does not know the sessionId up front, so it can only capture the
+ * tracker's GLOBAL epoch before the RPC starts. While the RPC is in flight,
+ * any pending-state event — a question_resolved committed from another
+ * window, or a brand-new question_request — bumps the epoch. A late result
+ * for a drifted epoch must be DROPPED: seeding it would resurrect a card
+ * that was already resolved, violating the "question_resolved is terminal"
+ * contract.
+ */
+export function gateRestoredPendingQuestion(
+  tracker: PendingQuestionGenerationTracker,
+  epochAtFetch: number,
+  result: { sessionId: string; request: QuestionRequest } | null,
+): { sessionId: string; request: QuestionRequest } | null {
+  if (!result) return null
+  if (tracker.epoch !== epochAtFetch) return null
+  return result
+}
+
+/**
  * Apply an authoritative pending-question snapshot for one session.
  *
  * The server (StoredSession) is the single source of truth — a COMPLETE

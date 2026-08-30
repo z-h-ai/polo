@@ -101,7 +101,7 @@ export interface AppShellContextType {
    */
   onCreateEditPopoverSession: (
     workspaceId: string,
-    options: Omit<import('../../shared/types').CreateSessionOptions, 'origin'> & { popoverOwner: string },
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
   ) => Promise<Session>
   onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@polo-ai/core').ContentBadge[]) => void
   /**

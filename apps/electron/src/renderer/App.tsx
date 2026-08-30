@@ -29,7 +29,7 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
-import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, setPendingQuestionForSession } from './lib/pending-questions'
+import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, gateRestoredPendingQuestion, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, setPendingQuestionForSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -1564,7 +1564,7 @@ export default function App() {
   // handleCreateSession above can never grant that origin (review round 2).
   const handleCreateEditPopoverSession = useCallback(async (
     workspaceId: string,
-    options: Omit<import('../shared/types').CreateSessionOptions, 'origin'> & { popoverOwner: string },
+    options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
   ): Promise<Session> => {
     const session = await window.electronAPI.createEditPopoverSession(workspaceId, options)
     // Add to per-session atom and metadata map (no sessionsAtom)
@@ -2166,15 +2166,23 @@ export default function App() {
   // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
   // deleted) and can never cross workspaces or popover owners.
   const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null> => {
+    // Capture the GLOBAL pending-state epoch BEFORE the RPC (review round 5,
+    // issue 1): the lookup cannot know the sessionId up front, so the global
+    // counter is the only comparable token. If any question_resolved (e.g.
+    // answered from another window) or new question_request lands while the
+    // RPC is in flight, the epoch drifts and the late result is dropped —
+    // seeding it would resurrect an already-resolved card.
+    const epochAtFetch = pendingQuestionGenerationsRef.current.epoch
     const result = await window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner)
-    if (!result) return null
+    const gated = gateRestoredPendingQuestion(pendingQuestionGenerationsRef.current, epochAtFetch, result)
+    if (!gated) return null
 
     // Seed the authoritative request the same way the question_request event
     // path does, so usePendingQuestion(inlineSessionId) resolves and every
     // existing event-driven cleanup keeps working.
-    pendingQuestionGenerationsRef.current.bump(result.sessionId)
-    setPendingQuestions(prev => setPendingQuestionForSession(prev, result.sessionId, result.request))
-    return result
+    pendingQuestionGenerationsRef.current.bump(gated.sessionId)
+    setPendingQuestions(prev => setPendingQuestionForSession(prev, gated.sessionId, gated.request))
+    return gated
   }, [])
 
   // Centralized link interceptor: classifies file types and decides whether to
