@@ -648,6 +648,130 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
   })
 
+  // ---- Review fix round 4, issue A: the tombstone does not depend on a
+  // pending question existing. A stop with NO active question still terminates
+  // the question scope (the callback may not have arrived yet).
+
+  it('a stop with NO active question still tombstones the lifecycle; the late callback is rejected', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-tomb-3', { isProcessing: false }) as unknown as { processingGeneration: number }
+    const generation = managed.processingGeneration
+
+    // Stop with nothing pending: no clear, no cancel broadcast — but the
+    // lifecycle still terminates the question scope.
+    await sm.cancelProcessing('f-tomb-3')
+    expect(sm.getPendingQuestion('f-tomb-3')).toBeNull()
+    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(0)
+
+    // The old agent's callback arrives late — the tombstone must reject it.
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, makeQuestionRequest('f-tomb-3-late').questions, generation)).rejects.toThrow(/terminally stopped/)
+
+    expect(sm.getPendingQuestion('f-tomb-3')).toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
+    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(0)
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-tomb-3'), 'utf-8').split('\n')[0])
+    expect(header.pendingQuestion).toBeUndefined()
+    expect(header.hasPendingQuestion).toBe(false)
+  })
+
+  // ---- Review fix round 4, issue B: the archive lifecycle snapshot is read
+  // INSIDE the lock. While the archive waits, an in-flight answer can fail and
+  // roll the pending question back — a pre-lock snapshot would clobber that
+  // restored pending with a stale value on the archive's own rollback.
+
+  it('archive queued behind a failing answer: rollback restores the answer\u2019s restored pending (no stale-snapshot clobber); the retry converges', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-arch-race')
+    const managed = seedSession('f-arch-race', { pendingQuestion: request }) as unknown as {
+      pendingAgentResume?: { messageId: string; attempts: number } | undefined
+    }
+    ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+
+    // Flush injection: call #1 (the answer commit) HANGS; call #2 (the
+    // archive's unified commit) FAILS; everything after is healthy.
+    const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+    let flushCalls = 0
+    let settleAnswerFlush!: (err?: Error) => void
+    const hungAnswerFlush = new Promise<void>((resolve, reject) => {
+      settleAnswerFlush = (err?: Error) => (err ? reject(err) : resolve())
+    })
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      flushCalls++
+      if (flushCalls === 1) return hungAnswerFlush
+      // #2 = the answer rollback's best-effort re-persist, #3 = the archive's
+      // unified commit — both fail; everything after is healthy.
+      if (flushCalls === 2 || flushCalls === 3) return Promise.reject(new Error('disk full (injected)'))
+      return realFlush.call(sm, id)
+    }
+
+    // The answer holds the lock with its flush hung; memory already shows the
+    // intermediate state (pending cleared, resume armed).
+    const answerPromise = sm.respondToQuestion('f-arch-race', makeAnswerResolution(request))
+    await new Promise(r => setTimeout(r, 30))
+
+    // The archive is called NOW — a pre-lock snapshot would read the
+    // intermediate state (pending=undefined, resume=armed) as "prev".
+    const archivePromise = sm.archiveSession('f-arch-race')
+    await new Promise(r => setTimeout(r, 30))
+
+    // The answer's flush FAILS: the resolution rolls back — pending is
+    // RESTORED and the resume state disarmed — then releases the lock.
+    settleAnswerFlush(new Error('disk full (injected)'))
+    expect(await answerPromise).toMatchObject({ status: 'transient_failure' })
+    expect(sm.getPendingQuestion('f-arch-race')?.requestId).toBe(request.requestId)
+    expect(managed.pendingAgentResume).toBeUndefined()
+
+    // The archive then runs on the SETTLED world: its own flush fails too, and
+    // its rollback must reflect the lock-observed state — the restored pending
+    // survives, nothing stale is written back, nothing is broadcast.
+    await expect(archivePromise).rejects.toThrow('disk full')
+    expect(sm.getPendingQuestion('f-arch-race')?.requestId).toBe(request.requestId)
+    expect(managed.pendingAgentResume).toBeUndefined()
+    expect(events.filter(e => e.type === 'question_resolved' || e.type === 'session_archived')).toHaveLength(0)
+    const headerDuringFault = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-arch-race'), 'utf-8').split('\n')[0])
+    expect(headerDuringFault.pendingQuestion?.requestId).toBe(request.requestId)
+
+    // Retry with a healthy flush: one durable convergence.
+    failFlush = false
+    await sm.archiveSession('f-arch-race')
+    expect(sm.getPendingQuestion('f-arch-race')).toBeNull()
+    const resolved = events.filter(e => e.type === 'question_resolved')
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toMatchObject({ sessionId: 'f-arch-race', requestId: request.requestId, action: 'cancel' })
+    expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
+  })
+
+  // ---- Review fix round 4, issue C: a resolution that waited for the lock
+  // past a delete/replace returns session_missing — no persistence, no events.
+
+  it('a resolution whose session is deleted while it waits for the lock returns session_missing (no persistence, no events)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-del-1')
+    seedSession('f-del-1', { pendingQuestion: request })
+
+    // Hold the question-state lock so the resolution must queue.
+    let releaseLock!: () => void
+    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
+    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
+      .withQuestionStateLock('f-del-1', () => hungLock)
+
+    const answerPromise = sm.respondToQuestion('f-del-1', makeAnswerResolution(request))
+    await new Promise(r => setTimeout(r, 30))
+
+    // The session is deleted while the resolution waits.
+    await sm.deleteSession('f-del-1')
+    releaseLock()
+
+    expect(await answerPromise).toEqual({ status: 'session_missing' })
+
+    // Nothing was persisted back (the storage file stays deleted) and no
+    // resolution events were broadcast for the dead session.
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-1'))).toBe(false)
+    expect(loadSession(tmpRoot, 'f-del-1')).toBeNull()
+    expect(events.filter(e => e.type === 'question_resolved' || e.type === 'user_message')).toHaveLength(0)
+  })
+
   it('answer committed but sendMessage rejects before agent init: error surfaced, state recoverable, retry succeeds (never silent-accepted-stranded)', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-resume-1')

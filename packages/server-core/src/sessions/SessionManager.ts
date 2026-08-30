@@ -4677,7 +4677,7 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
 
-    // LIFECYCLE-ATOMIC archive (review fix rounds 2+3, issue B): the archive
+    // LIFECYCLE-ATOMIC archive (review fix rounds 2+3+4, issue B): the archive
     // flags, the pending-question clear and the answer→resume clear commit as
     // ONE staged snapshot in ONE flush on the session's question-state lock.
     // The clear is no longer a separate committed phase: a first-phase
@@ -4686,12 +4686,20 @@ export class SessionManager implements ISessionManager {
     // ACTIVE question on a FAILED archive. Now any flush failure rolls back
     // the whole lifecycle snapshot with ZERO broadcasts, and the terminal
     // events fire only after the unified commit is durable.
-    const prevIsArchived = managed.isArchived
-    const prevArchivedAt = managed.archivedAt
-    const pendingAtStart = managed.pendingQuestion
-    const prevPendingAgentResume = managed.pendingAgentResume
-
+    //
+    // The lifecycle snapshot is taken INSIDE the lock (review fix round 4,
+    // issue B): while the archive waits for the lock, an answer/cancel/new
+    // question can legitimately change the state — rollback must only ever
+    // restore lock-observed values, never values captured in a stale
+    // pre-lock world (the old out-of-lock read could clobber a freshly
+    // restored pending or resurrect a dead resume on the failure path, and
+    // broadcast a cancel for the WRONG requestId on the success path).
     await this.withQuestionStateLock(sessionId, async () => {
+      const prevIsArchived = managed.isArchived
+      const prevArchivedAt = managed.archivedAt
+      const pendingAtStart = managed.pendingQuestion
+      const prevPendingAgentResume = managed.pendingAgentResume
+
       managed.isArchived = true
       managed.archivedAt = Date.now()
       // The answer→resume retry dies with the archive (same single commit).
@@ -7633,6 +7641,16 @@ export class SessionManager implements ISessionManager {
     resolution: QuestionResolution,
     requestId: string,
   ): Promise<{ result: QuestionResolutionResult; resume: boolean }> {
+    // SESSION IDENTITY RE-VALIDATION (review fix round 4, issue C): the
+    // resolution may have waited for the lock past a delete/replace — the
+    // managed object held by this closure can be an orphaned leftover. A
+    // stale resolution must return session_missing without persisting or
+    // broadcasting anything.
+    if (this.sessions.get(sessionId) !== managed) {
+      sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} rejected: the session was deleted or replaced while the resolution waited`)
+      return { result: { status: 'session_missing' }, resume: false }
+    }
+
     const pending = managed.pendingQuestion
 
     if (!pending || pending.requestId !== requestId) {
@@ -8013,29 +8031,34 @@ export class SessionManager implements ISessionManager {
    * leaves nothing to roll back: the pending simply stays authoritative and
    * the lifecycle transition stays retryable. Exactly one terminal
    * question_resolved is broadcast per request.
+   *
+   * UNCONDITIONAL TOMBSTONE (review fix round 4, issue A): the stop lifecycle
+   * terminates the session's question scope EVEN WHEN no question was active —
+   * the tool callback may simply not have arrived yet. The tombstone is
+   * therefore set on every durable stop clear, pending or not, so a late
+   * onQuestionRequested callback is always rejected. A NEW turn clears it at
+   * the generation bump.
    */
   private async clearPendingQuestionForSessionLocked(managed: ManagedSession): Promise<void> {
     const pending = managed.pendingQuestion
-    if (!pending) return
-    try {
-      this.persistSession(managed, { pendingQuestion: undefined })
-      await this.flushSession(managed.id)
-    } catch (error) {
-      sessionLog.error(`Failed to durably clear pending question ${pending.requestId} for session ${managed.id}; pending kept for retry:`, error)
-      throw error
+    if (pending) {
+      try {
+        this.persistSession(managed, { pendingQuestion: undefined })
+        await this.flushSession(managed.id)
+      } catch (error) {
+        sessionLog.error(`Failed to durably clear pending question ${pending.requestId} for session ${managed.id}; pending kept for retry:`, error)
+        throw error
+      }
+      managed.pendingQuestion = undefined
+      this.sendEvent({
+        type: 'question_resolved',
+        sessionId: managed.id,
+        requestId: pending.requestId,
+        action: 'cancel',
+      }, managed.workspace.id)
+      sessionLog.info(`Cleared pending question ${pending.requestId} for session ${managed.id}`)
     }
-    managed.pendingQuestion = undefined
-    // Lifecycle TOMBSTONE (review fix round 3, issue A): from this point a
-    // late onQuestionRequested callback of the stopped turn must be rejected;
-    // a NEW turn clears it when it bumps the processing generation.
     managed.questionLifecycleTombstone = { reason: 'stopped', at: Date.now() }
-    this.sendEvent({
-      type: 'question_resolved',
-      sessionId: managed.id,
-      requestId: pending.requestId,
-      action: 'cancel',
-    }, managed.workspace.id)
-    sessionLog.info(`Cleared pending question ${pending.requestId} for session ${managed.id}`)
   }
 
   /**
