@@ -20,6 +20,7 @@ import { usePlatform } from '@polo-ai/ui'
 import type { ContentBadge, Session, CreateSessionOptions } from '../../../shared/types'
 import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential, usePendingQuestion } from '@/context/AppShellContext'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
+import { editorIdentityId } from '@/lib/editor-identity'
 import { useEditPopoverSessionRestore } from './useEditPopoverSessionRestore'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
 
@@ -766,10 +767,12 @@ export function EditPopover({
   const { onCreateSession, onCreateEditPopoverSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToQuestion, onGetEditPopoverPendingQuestion } = useAppShellContext()
 
   // Stable owner identity for scoped pending-question recovery (review round
-  // 2, issue 2): label alone can repeat across files, filePath alone repeats
-  // across edit surfaces — the pair is the unique, reopen-stable editor id.
+  // 2, issue 2; round 4, issue 3): a fixed-length collision-safe hash of the
+  // structured editor identity (label + filePath). The raw pair can exceed
+  // any sane field bound for deeply nested projects, so it is hashed —
+  // deterministic across reopen/reload/restart.
   const popoverOwnerId = useMemo(
-    () => `${context.label}::${context.filePath}`,
+    () => editorIdentityId(context.label, context.filePath),
     [context.label, context.filePath],
   )
 

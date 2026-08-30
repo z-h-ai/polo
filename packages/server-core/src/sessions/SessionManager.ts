@@ -777,8 +777,9 @@ interface ManagedSession {
   /** Host experience that owns this session (e.g. 'edit-popover' Edit Popover sessions). */
   origin?: import('@polo-ai/shared/protocol').SessionOrigin
   /**
-   * Stable Edit Popover owner identity (label::filePath). Scoped pending-
-   * question recovery matches on it — never on a global newest-wins scan.
+   * Stable Edit Popover owner identity (renderer-generated fixed-length
+   * editor-identity hash). Scoped pending-question recovery matches on it —
+   * never on a global newest-wins scan.
    */
   popoverOwner?: string
   workspace: Workspace
@@ -914,6 +915,15 @@ interface ManagedSession {
   // Invocation source of the most recent turn ('desktop' enables
   // request_user_input; defaults to 'internal' — fail closed).
   invocationSource?: InvocationSource
+  /**
+   * Invocation source bound to the CURRENT processing generation (review
+   * round 4, issue 2). Set only when a new turn actually starts — queued or
+   * steered messages never touch it, so a mid-flight desktop turn keeps its
+   * request_user_input capability even when messaging/automation messages
+   * are queued behind it. handleQuestionRequested reads THIS, never the
+   * last-send session field.
+   */
+  activeTurnSource?: InvocationSource
   // Auth retry tracking (for mid-session token expiry)
   // Store last sent message/attachments to enable retry after token refresh
   lastSentMessage?: string
@@ -3082,10 +3092,13 @@ export class SessionManager implements ISessionManager {
     // server-validated non-empty stable identity. A missing/blank owner
     // rejects the creation outright — the session must never exist in a
     // state where the privileged origin is granted but the scoped recovery
-    // identity is missing.
+    // identity is missing. The renderer sends a fixed-length hash id
+    // (editor-identity), but the bound accepts any legal identity up to the
+    // platform path range — no arbitrary truncation (review round 4,
+    // issue 3).
     const popoverOwner = typeof options?.popoverOwner === 'string' ? options.popoverOwner.trim() : ''
-    if (!popoverOwner || popoverOwner.length > 200) {
-      throw new Error('createEditPopoverSession requires a non-empty popoverOwner (max 200 chars)')
+    if (!popoverOwner || popoverOwner.length > 4096) {
+      throw new Error('createEditPopoverSession requires a non-empty popoverOwner (max 4096 chars)')
     }
     // Never trust a caller-provided origin routing — destructured off and
     // replaced by the server-side stamp below.
@@ -5770,17 +5783,14 @@ export class SessionManager implements ISessionManager {
     // fails closed. Hidden/mini sessions never ask questions — except the
     // Edit Popover's own session (round-10 adjudication), which carries the
     // server-verified 'edit-popover' origin recorded at creation.
+    //
+    // NOTE (review round 4, issue 2): the source is NOT applied to the
+    // session here. A message that will be queued/steered into an in-flight
+    // turn (messaging/automation arriving while a desktop turn runs) must
+    // never overwrite the ACTIVE turn's source — the flag and the
+    // pendingQuestion stamp below are applied when a new processing
+    // generation actually starts (applyTurnInvocationSource).
     const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
-    managed.invocationSource = invocationSource
-    const allowRequestUserInput = computeRequestUserInputEligibility(
-      invocationSource,
-      managed.hidden,
-      managed.systemPromptPreset === 'mini',
-      managed.origin,
-    )
-    if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
-      managed.agent.allowRequestUserInput = allowRequestUserInput
-    }
 
     // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
@@ -5871,6 +5881,13 @@ export class SessionManager implements ISessionManager {
       onAck?.(userMessage.id)
       return
     }
+
+    // A NEW processing generation is starting (the queued/steered early-return
+    // above did not fire): bind this turn's invocation source now. From here
+    // until the turn ends, question requests stamp THIS source — messages
+    // that arrive mid-turn and get queued keep their own options for their
+    // own future turn (review round 4, issue 2).
+    this.applyTurnInvocationSource(managed, invocationSource)
 
     // Add user message with stored attachments for persistence
     // Skip if existingMessageId is provided (message was already created when queued)
@@ -6039,9 +6056,11 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('agent.ready')
 
       // Re-apply the per-turn capability flag — a freshly created agent defaults
-      // to false, so desktop turns must set it after creation as well.
+      // to false, so desktop turns must set it after creation as well. The
+      // source is the one bound to THIS turn (captured at the new-generation
+      // boundary), never a message that was queued behind it.
       const allowRequestUserInputNow = computeRequestUserInputEligibility(
-        managed.invocationSource,
+        invocationSource,
         managed.hidden,
         managed.systemPromptPreset === 'mini',
         managed.origin,
@@ -6878,6 +6897,28 @@ export class SessionManager implements ISessionManager {
   // ============================================================
 
   /**
+   * Bind an invocation source to the turn that is actually starting (review
+   * round 4, issue 2): stores it as the session's last-applied source AND as
+   * the ACTIVE turn's source, and applies the request_user_input eligibility
+   * flag to the agent. Must only be called on a new processing generation —
+   * queued/steered messages keep their own options for their own future turn
+   * and never overwrite an in-flight turn's source.
+   */
+  private applyTurnInvocationSource(managed: ManagedSession, invocationSource: InvocationSource): void {
+    managed.invocationSource = invocationSource
+    managed.activeTurnSource = invocationSource
+    const allowRequestUserInput = computeRequestUserInputEligibility(
+      invocationSource,
+      managed.hidden,
+      managed.systemPromptPreset === 'mini',
+      managed.origin,
+    )
+    if (managed.agent && managed.agent.allowRequestUserInput !== allowRequestUserInput) {
+      managed.agent.allowRequestUserInput = allowRequestUserInput
+    }
+  }
+
+  /**
    * Handle an agent-initiated question request (request_user_input).
    *
    * Mandatory order (P0 contract):
@@ -6915,16 +6956,16 @@ export class SessionManager implements ISessionManager {
       createdAt: Date.now(),
       questions: parsed.data.questions,
       // Persist the trusted entry capability of the turn that asked the
-      // question (managed.invocationSource was set by the sendMessage that
-      // started this turn). The post-answer resume, its retries, and restart
-      // recovery re-derive tool visibility from this instead of re-inferring
-      // an ordinary desktop turn — the Edit Popover's hidden+mini session
-      // keeps asking follow-up questions after an answer.
+      // question. This is the ACTIVE turn's source (bound at the
+      // new-generation boundary) — NOT the most recent sendMessage call,
+      // which may be a messaging/automation message queued behind a running
+      // desktop turn (review round 4, issue 2). The post-answer resume, its
+      // retries, and restart recovery re-derive tool visibility from this.
       // DEFAULT IS INTERNAL (review round 3, issue 5): the protocol's
       // fail-closed contract — a missing source (legacy/malformed persisted
       // state) must never upgrade to desktop; only an explicit value is
       // persisted and restored.
-      invocationSource: managed.invocationSource ?? 'internal',
+      invocationSource: managed.activeTurnSource ?? 'internal',
     }
 
     // 2. Authoritative pending state — replaces any active request
@@ -7023,7 +7064,8 @@ export class SessionManager implements ISessionManager {
    * or app restart.
    *
    * Scoping contract: the caller must identify itself with the current
-   * workspaceId AND its stable popover owner identity (label::filePath). Only
+   * workspaceId AND its stable popover owner identity (renderer-generated
+   * fixed-length editor-identity hash). Only
    * an exact match (origin 'edit-popover' + same workspace + same owner + an
    * active pendingQuestion) is ever returned — there is deliberately NO
    * global newest-wins fallback, so concurrent popovers (or the same popover

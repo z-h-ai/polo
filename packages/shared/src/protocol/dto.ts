@@ -100,7 +100,7 @@ export interface Session {
   hidden?: boolean
   /** Host experience that owns this session. */
   origin?: SessionOrigin
-  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
   popoverOwner?: string
   isArchived?: boolean
   archivedAt?: number

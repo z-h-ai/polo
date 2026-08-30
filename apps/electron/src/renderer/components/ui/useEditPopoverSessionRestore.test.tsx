@@ -278,4 +278,103 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     // restoring belongs to the NEW scope's query now (it resolved null).
     await waitFor(() => expect(result.current.restoring).toBe(false))
   })
+
+  // Round 4, issue 1: while A's create is still in flight, a send from scope
+  // B must NOT reuse A's promise — B starts its own creation and gets its own
+  // session; A's late settlement commits nothing.
+  it('overlapping window: B sends while A\u2019s create is unsettled — B builds its own session, A\u2019s late result is discarded', async () => {
+    const createADeferred = makeDeferred<string>()
+    const createdFor: string[] = []
+    const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        workspaceId: 'ws-a',
+        restorePendingSession: async () => null,
+        createPopoverSession: () => {
+          createdFor.push('a')
+          return createADeferred.promise
+        },
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    // Scope A send — creation in flight.
+    const aResult: { id: string | null } = { id: null }
+    await act(async () => {
+      void result.current.ensureSessionForSend().then(id => {
+        aResult.id = id
+      })
+    })
+
+    // Switch to scope B and send IMMEDIATELY (A still unsettled).
+    rerender(baseParams({
+      workspaceId: 'ws-b',
+      restorePendingSession: async () => null,
+      createPopoverSession: async () => {
+        createdFor.push('b')
+        return 'session-b'
+      },
+    }))
+    await act(async () => {})
+
+    const bResult: { id: string | null } = { id: null }
+    await act(async () => {
+      bResult.id = await result.current.ensureSessionForSend()
+    })
+
+    // B must have started its OWN creation — not inherited A's promise.
+    expect(createdFor).toEqual(['a', 'b'])
+    expect(bResult.id).toBe('session-b')
+    expect(result.current.inlineSessionId).toBe('session-b')
+
+    // A settles late: hands back nothing, commits nothing into B's scope.
+    await act(async () => {
+      createADeferred.resolve('session-a')
+      await new Promise(r => setTimeout(r, 20))
+    })
+    expect(aResult.id).toBeNull()
+    expect(result.current.inlineSessionId).toBe('session-b')
+  })
+
+  // Round 4, issue 1: while A's create is unsettled and the scope switched
+  // to B, B's pending-question restore must NOT be blocked by A's in-flight
+  // creation — B adopts its pending session.
+  it('overlapping window: B adopts its pending session while A\u2019s create is still unsettled', async () => {
+    const createADeferred = makeDeferred<string>()
+    const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        workspaceId: 'ws-a',
+        restorePendingSession: async () => null,
+        createPopoverSession: () => createADeferred.promise,
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    // Scope A send — creation in flight.
+    await act(async () => {
+      void result.current.ensureSessionForSend()
+    })
+
+    // Switch to scope B whose restore has a pending session.
+    rerender(baseParams({
+      workspaceId: 'ws-b',
+      restorePendingSession: async () => ({ sessionId: 'session-b-pending' }),
+      createPopoverSession: async () => 'session-b-created',
+    }))
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 20))
+    })
+
+    // B's restore won the adoption race (B has not sent yet) — A's stale
+    // in-flight creation did not block it.
+    expect(result.current.inlineSessionId).toBe('session-b-pending')
+
+    // A settles late: commits nothing into B's scope.
+    await act(async () => {
+      createADeferred.resolve('session-a')
+      await new Promise(r => setTimeout(r, 20))
+    })
+    expect(result.current.inlineSessionId).toBe('session-b-pending')
+  })
 })

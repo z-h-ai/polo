@@ -156,6 +156,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       pendingAgentResume?: { messageId: string; attempts: number; completed?: boolean }
       isProcessing: boolean
       messages: Array<Record<string, unknown>>
+      messageQueue: Array<Record<string, unknown>>
       agent?: { interruptedCount?: number }
     }
   }
@@ -842,6 +843,59 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         }
       })
 
+      // Round 4, issue 3: a legal owner built from a deep project path (far
+      // beyond the old 200-char bound) must create, stamp, and remain
+      // recoverable across a restart — no arbitrary truncation.
+      it('a deep-path owner beyond 200 chars creates, stamps, and recovers on reopen/restart', async () => {
+        stubAgentCaptureFlag()
+        const deepOwner = `Permissions::/Users/alice/${'deep/'.repeat(45)}config.json`
+        expect(deepOwner.length).toBeGreaterThan(200)
+
+        const smS = new SessionManager({ workspace: buildWorkspace() })
+        stubAgentCaptureFlag(smS)
+        try {
+          const session = await (smS as unknown as {
+            createEditPopoverSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
+          }).createEditPopoverSession('ws_test', {
+            model: 'fast',
+            systemPromptPreset: 'mini',
+            permissionMode: 'allow-all',
+            hidden: true,
+            popoverOwner: deepOwner,
+          })
+          seededSessionIds.add(session.id)
+
+          // Stamped durably with the FULL deep-path owner
+          const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, session.id), 'utf-8').split('\n')[0])
+          expect(header.origin).toBe('edit-popover')
+          expect(header.popoverOwner).toBe(deepOwner)
+
+          // In-memory scoped recovery with the same deep owner
+          const found = await smS.getEditPopoverPendingSession('ws_test', deepOwner)
+          expect(found).toBeNull() // no pending question yet — but no rejection either
+
+          // Reopen/restart: cold recovery matches the exact deep owner
+          const request = makeQuestionRequest('f-deep-owner')
+          const stored = loadSession(tmpRoot, session.id)!
+          writeSessionJsonl(getSessionFilePath(tmpRoot, session.id), {
+            ...stored,
+            pendingQuestion: request,
+          } as StoredSession)
+          const sm2 = new SessionManager({ workspace: buildWorkspace() })
+          try {
+            const found2 = await sm2.getEditPopoverPendingSession('ws_test', deepOwner)
+            expect(found2?.sessionId).toBe(session.id)
+            expect(found2?.request.requestId).toBe(request.requestId)
+            // A different (short) owner never adopts it
+            expect(await sm2.getEditPopoverPendingSession('ws_test', 'Permissions::/a/config.json')).toBeNull()
+          } finally {
+            ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+          }
+        } finally {
+          ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
+      })
+
       // Round 3, issues 1+2: the owner is a REQUIRED, server-validated
       // identity — a blank/missing owner rejects the creation outright, and a
       // failed durable stamp rolls back to unprivileged (memory + disk). The
@@ -924,6 +978,71 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         } finally {
           ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
         }
+      })
+    })
+
+    // Round 4, issue 2: the invocation source is bound to the ACTIVE
+    // processing generation. A messaging/automation message that arrives
+    // while a desktop turn is running gets queued — it must never overwrite
+    // the running turn's source, so a question asked during that turn still
+    // stamps desktop (and the agent flag stays untouched).
+    describe('turn source isolation (queued messages never overwrite the active turn)', () => {
+      it('a question asked during a desktop turn that has queued messaging messages stamps desktop, not messaging', async () => {
+        stubAgentCaptureFlag()
+        // Gated fake agent: the desktop turn stays genuinely in flight until
+        // the gate releases. redirect() returns false so the mid-stream
+        // messaging send falls into the FIFO queue (the isolation hazard).
+        let releaseTurn: (() => void) | null = null
+        const turnGate = new Promise<void>(resolve => { releaseTurn = resolve })
+        let chatInvocations = 0
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+          const n = ++chatInvocations
+          const agent: Record<string, unknown> = {
+            ...makeFakeAgent(),
+            redirect: () => false,
+            chat: async function* () {
+              if (n === 1) await turnGate
+              yield { type: 'complete' as const }
+            },
+          }
+          // Same flag-capture surface as stubAgentCaptureFlag — this factory
+          // replaces that stub for the gated turn.
+          Object.defineProperty(agent, 'allowRequestUserInput', {
+            get: () => flagCapture.last,
+            set: (v: boolean) => { flagCapture.last = v },
+          })
+          return agent
+        }
+
+        // Desktop turn starts and is in flight
+        seedSession('f-turn-iso', {})
+        const desktopTurn = sm.sendMessage('f-turn-iso', 'desktop task', [], [], { invocationSource: 'desktop' })
+        await waitForCondition(() => chatInvocations === 1)
+        expect(getManaged('f-turn-iso').isProcessing).toBe(true)
+
+        // Messaging message arrives mid-turn → queued for FIFO replay (its
+        // own options must NOT touch the running turn's source)
+        await sm.sendMessage('f-turn-iso', 'messaging reply', [], [], { invocationSource: 'messaging' })
+        expect(getManaged('f-turn-iso').messageQueue.length).toBe(1)
+
+        // The agent flag was NOT flipped by the queued message
+        expect(flagCapture.last).toBe(true)
+
+        // The desktop turn asks a question — the stamp must be desktop
+        const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-turn-iso')
+        const questions = makeQuestionRequest('f-turn-iso').questions
+        await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
+          .handleQuestionRequested(managed, questions)
+        const stamped = sm.getPendingQuestion('f-turn-iso')
+        expect(stamped?.invocationSource).toBe('desktop')
+
+        // Release the turn; the queued messaging message replays as a NEW
+        // turn with ITS own source (messaging → tool not registered).
+        releaseTurn!()
+        await desktopTurn
+        await waitForCondition(() => (getManaged('f-turn-iso').messageQueue.length ?? 0) === 0)
+        await waitForCondition(() => chatInvocations >= 2)
+        expect(flagCapture.last).toBe(false)
       })
     })
 

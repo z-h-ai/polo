@@ -27,7 +27,7 @@ export interface EditPopoverSessionRestoreParams {
   open: boolean
   /** Current workspace id (adopt + create are scoped to it). */
   workspaceId: string | undefined
-  /** Stable owner identity for this popover (label::filePath). */
+  /** Stable owner identity for this popover (fixed-length editor-identity hash). */
   popoverOwnerId: string
   /** Server lookup for the scoped pending-question session. */
   restorePendingSession: () => Promise<{ sessionId: string } | null>
@@ -61,12 +61,12 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
   // In-flight restores AND creations capture the generation they started with
   // and commit nothing once it has moved on.
   const scopeGenerationRef = useRef(0)
-  // True while an ensureSessionForSend creation is in flight (CAS guard for
-  // the adoption path).
-  const creatingRef = useRef(false)
-  // Shared in-flight create promise — concurrent sends dedupe onto it so a
-  // double send creates exactly one hidden session.
-  const creatingPromiseRef = useRef<Promise<string | null> | null>(null)
+  // The in-flight creation, bound to the generation it belongs to (review
+  // round 4, issue 1): dedupe happens ONLY between same-generation calls —
+  // after a scope switch the new scope starts its OWN creation instead of
+  // inheriting the stale one, and a stale settlement can never clear the new
+  // scope's in-flight state.
+  const creatingRef = useRef<{ generation: number; promise: Promise<string | null> } | null>(null)
 
   const setSessionId = useCallback((id: string | null) => {
     inlineSessionIdRef.current = id
@@ -90,10 +90,12 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
     void restorePendingSession()
       .then(result => {
         if (cancelled || !result) return
-        // CAS + scope guard: only adopt when the scope is unchanged and no
-        // session exists / creation is in flight.
+        // CAS + scope guard: only adopt when the scope is unchanged, no
+        // session exists, and no creation for THIS scope is in flight. An
+        // in-flight creation from an OLD scope does not block this scope's
+        // adoption (review round 4, issue 1).
         if (scopeGenerationRef.current !== generation) return
-        if (inlineSessionIdRef.current === null && !creatingRef.current) {
+        if (inlineSessionIdRef.current === null && creatingRef.current?.generation !== generation) {
           setSessionId(result.sessionId)
         }
       })
@@ -119,13 +121,15 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
     const existing = inlineSessionIdRef.current
     if (existing) return existing
     if (!workspaceId) return null
-    // Concurrent sends dedupe onto ONE in-flight creation — a double send
-    // must never create two hidden sessions.
-    if (creatingPromiseRef.current) return creatingPromiseRef.current
     const generation = scopeGenerationRef.current
+    // Dedupe concurrent sends WITHIN the same scope generation only — a
+    // double send creates exactly one hidden session, while a scope switch
+    // lets the NEW scope start its own creation instead of inheriting the
+    // stale one (review round 4, issue 1).
+    const inFlight = creatingRef.current
+    if (inFlight && inFlight.generation === generation) return inFlight.promise
     // Mark the creation synchronously: an in-flight restore that resolves
     // later must never adopt over this reserved slot.
-    creatingRef.current = true
     const promise = createPopoverSession()
       .then(sessionId => {
         if (scopeGenerationRef.current !== generation) {
@@ -140,10 +144,13 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
         return inlineSessionIdRef.current
       })
       .finally(() => {
-        creatingRef.current = false
-        creatingPromiseRef.current = null
+        // Only clear the in-flight entry if it is still OURS — a stale
+        // settlement must never clean up a newer scope's creation.
+        if (creatingRef.current?.promise === promise) {
+          creatingRef.current = null
+        }
       })
-    creatingPromiseRef.current = promise
+    creatingRef.current = { generation, promise }
     return promise
   }, [workspaceId, createPopoverSession, setSessionId])
 

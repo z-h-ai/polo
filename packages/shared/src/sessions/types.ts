@@ -216,7 +216,7 @@ export interface SessionConfig {
   hidden?: boolean;
   /** Host experience that owns this session. */
   origin?: SessionOrigin;
-  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
   popoverOwner?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
@@ -279,7 +279,7 @@ export interface SessionHeader {
   name?: string;
   /** Host experience that owns this session. */
   origin?: SessionOrigin;
-  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
   popoverOwner?: string;
   createdAt: number;
   lastUsedAt: number;
@@ -438,7 +438,7 @@ export interface SessionMetadata {
   hidden?: boolean;
   /** Host experience that owns this session (from the JSONL header). */
   origin?: SessionOrigin;
-  /** Stable Edit Popover owner identity (label::filePath) for popover-origin sessions. */
+  /** Stable Edit Popover owner identity (fixed-length renderer hash) for popover-origin sessions. */
   popoverOwner?: string;
   /** Whether this session is archived */
   isArchived?: boolean;
