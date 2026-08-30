@@ -199,17 +199,41 @@ export function createCodexContext(config: SessionConfig): SessionToolContext {
         ...request,
       });
     },
-    // Question handoff parity with Claude/Pi (review fix round 7, issue B):
-    // the handler snapshot (generationAtRequest) was bound at tool-call
-    // initiation and travels with the callback; the host harness resolves it
-    // into a durable handoff the same way the Claude/Pi hosts do.
-    onQuestionRequested: (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[], generationAtRequest: number) => {
+    // Question handoff parity with Claude/Pi (review fix rounds 7-9, issue B):
+    // 1. stderr mirror — hosts that integrate via the lifecycle line protocol
+    //    observe `question_requested` (parsed by
+    //    `parseSessionMcpCallbackLine` and routed into the agent's durable
+    //    handoff chain);
+    // 2. AWAITABLE ACK — with a callback host, the tool result does NOT
+    //    resolve until the host has performed the durable handoff and the
+    //    user's answer/cancel reached a terminal state (mirroring the
+    //    call_llm / spawn-session HTTP callback contract). Without a callback
+    //    host the tool fails honestly — never a fake "waiting" success.
+    onQuestionRequested: async (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[], generationAtRequest: number) => {
       sendCallback({
         __callback__: 'question_requested',
         sessionId,
         questions,
         generationAtRequest,
       });
+      if (!config.callbackPort) {
+        throw new Error(
+          'request_user_input requires a callback host (--callback-port / POLO_AI_LLM_CALLBACK_PORT). Ask your question as plain text instead.'
+        );
+      }
+      const resp = await fetch(`http://127.0.0.1:${config.callbackPort}/request-user-input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, questions, generationAtRequest }),
+        signal: AbortSignal.timeout(CALLBACK_TOOL_TIMEOUT_MS),
+      });
+      const result = await resp.json() as { status?: string; error?: string };
+      if (result.error) {
+        throw new Error(`request_user_input failed: ${result.error}`);
+      }
+      if (result.status && result.status !== 'accepted') {
+        throw new Error(`request_user_input was not accepted: ${result.status}`);
+      }
     },
   };
 

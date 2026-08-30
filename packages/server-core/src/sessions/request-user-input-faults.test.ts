@@ -773,10 +773,13 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
   })
 
-  // ---- Review fix round 4, issue C: a resolution that waited for the lock
-  // past a delete/replace returns session_missing — no persistence, no events.
+  // ---- Review fix round 9, issue A: deletion LINEARIZATION. The delete's
+  // declaration (tombstone + availability removal) lives INSIDE the
+  // question-state lock, so it is mutually exclusive with the sendMessage
+  // owner transaction and with resolution commits — whichever acquires the
+  // lock first wins, and no intermediate state is visible.
 
-  it('a resolution whose session is deleted while it waits for the lock returns session_missing (no persistence, no events)', async () => {
+  it('a resolution that queues AHEAD of the delete declaration commits; the delete then completes after it', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-del-1')
     seedSession('f-del-1', { pendingQuestion: request })
@@ -787,24 +790,21 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-1', () => hungLock)
 
+    // The resolution queues FIRST — it acquires the lock before the delete's
+    // declaration, so it commits legitimately.
     const answerPromise = sm.respondToQuestion('f-del-1', makeAnswerResolution(request))
     await new Promise(r => setTimeout(r, 30))
 
-    // The session is deleted while the resolution waits. Deletion sets its
-    // terminal marker SYNCHRONOUSLY at entry, then queues its cleanup behind
-    // the resolution's lock turn.
     const deletePromise = sm.deleteSession('f-del-1')
     await new Promise(r => setTimeout(r, 10))
     releaseLock()
 
-    expect(await answerPromise).toEqual({ status: 'session_missing' })
+    expect(await answerPromise).toEqual({ status: 'accepted' })
     await deletePromise
 
-    // Nothing was persisted back (the storage file stays deleted) and no
-    // resolution events were broadcast for the dead session.
+    // The delete then converges everything: storage copy removed.
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-1'))).toBe(false)
     expect(loadSession(tmpRoot, 'f-del-1')).toBeNull()
-    expect(events.filter(e => e.type === 'question_resolved' || e.type === 'user_message')).toHaveLength(0)
   })
 
   // ---- Review fix round 5, issue B: the DELETE-START gate. The marker is
@@ -812,29 +812,26 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   // that was already queued when the delete began observes session_missing,
   // even though its own lock turn runs BEFORE the delete's cleanup.
 
-  it('a resolution that commits after the deletion STARTED (cleanup not yet run) returns session_missing', async () => {
+  it('a resolution that queues BEHIND the delete declaration observes session_missing (no persistence, no events)', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-del-2')
     seedSession('f-del-2', { pendingQuestion: request })
 
-    // Hold the lock; queue the resolution behind it.
+    // Hold the lock; the DELETE's declaration queues FIRST.
     let releaseLock!: () => void
     const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-2', () => hungLock)
 
-    const answerPromise = sm.respondToQuestion('f-del-2', makeAnswerResolution(request))
+    const deletePromise = sm.deleteSession('f-del-2')
     await new Promise(r => setTimeout(r, 30))
 
-    // Deletion STARTS: the tombstone is set synchronously, its cleanup queues
-    // behind the resolution's lock turn.
-    const deletePromise = sm.deleteSession('f-del-2')
+    // The resolution queues SECOND — it commits after the declaration
+    // (tombstone + availability removal) and must observe session_missing.
+    const answerPromise = sm.respondToQuestion('f-del-2', makeAnswerResolution(request))
     await new Promise(r => setTimeout(r, 30))
     releaseLock()
 
-    // The resolution commits AFTER deletion started — while the session
-    // object is still registered — and must be fail-closed via the
-    // deleted-tombstone gate, never persisted into the deletion window.
     expect(await answerPromise).toEqual({ status: 'session_missing' })
     await deletePromise
 
@@ -842,92 +839,74 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_resolved' || e.type === 'user_message')).toHaveLength(0)
   })
 
-  // ---- Review fix round 6, issue B: the deletion gate covers the NEW TURN
-  // entry. A sendMessage during the deletion window must be rejected BEFORE
-  // the turn-start boundary — otherwise the generation bump would CLEAR the
-  // deleted tombstone and resurrect the dying session's lifecycle.
+  // ---- Review fix round 6, issue B (round-9 linearized form): a send that
+  // arrives after the deletion completed is rejected — the session is
+  // unavailable and nothing is resurrected.
 
-  it('a sendMessage during the deletion window is rejected; the deleted tombstone survives and deletion completes', async () => {
+  it('a sendMessage after the deletion completes is rejected (session unavailable)', async () => {
     patchPrivateFlush()
     seedSession('f-del-turn', {})
 
-    // Hold the question lock so the delete's cleanup queues behind it —
-    // a genuine deletion window with the session still registered.
-    let releaseLock!: () => void
-    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
-    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
-      .withQuestionStateLock('f-del-turn', () => hungLock)
+    await sm.deleteSession('f-del-turn')
 
-    const deletePromise = sm.deleteSession('f-del-turn')
-    await new Promise(r => setTimeout(r, 30))
-    // Deletion has STARTED: the tombstone was set synchronously at entry.
-    expect((getManaged('f-del-turn') as unknown as { questionLifecycleTombstone?: { reason: string } })
-      .questionLifecycleTombstone?.reason).toBe('deleted')
-
-    // A new turn attempts to start inside the window — fail closed.
     await expect(sm.sendMessage('f-del-turn', 'late message', [], [], { invocationSource: 'desktop' }))
-      .rejects.toThrow(/session_missing/)
-
-    // The rejected send never reached the turn-start boundary: the tombstone
-    // is NOT cleared and the session stays terminally deleted.
-    expect((getManaged('f-del-turn') as unknown as { questionLifecycleTombstone?: { reason: string } })
-      .questionLifecycleTombstone?.reason).toBe('deleted')
-    expect(getManaged('f-del-turn').isProcessing).toBe(false)
-
-    releaseLock()
-    await deletePromise
+      .rejects.toThrow()
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-turn'))).toBe(false)
+    expect(events.filter(e => e.type === 'user_message')).toHaveLength(0)
   })
 
-  // ---- Review fix round 7, issue A: the TOCTOU between the sendMessage
-  // ENTRY gate and the turn-start commit. A delete that STARTS after the
-  // reservation was claimed must abort the reserved turn at the critical
-  // commit point (under the question-state lock) — the tombstone survives
-  // and the deleted session is never resurrected.
+  // ---- Review fix round 9, issue A: linearization (b) — the sendMessage
+  // transaction acquires the lock BEFORE the delete's declaration, so it
+  // commits normally and the delete waits, then finishes after it. No
+  // intermediate state: exactly one accepted broadcast, one turn, one delete.
 
-  it('a deleteSession that starts after the reservation is claimed aborts the reserved turn (tombstone kept, no resurrection)', async () => {
+  it('linearization (b): a sendMessage that acquires the lock before the delete declaration commits normally; the delete waits and converges after', async () => {
     patchPrivateFlush()
     const managed = seedSession('f-del-resv', {}) as unknown as { questionLifecycleTombstone?: { reason: string }; turnStartReserved?: boolean; isProcessing: boolean }
+    let chats = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      chats++
+      return makeFakeAgent()
+    }
 
-    // Hold the question lock: the send will claim its reservation (synchronous)
-    // and then park on its locked fast-fail checkpoint inside the try.
+    // Hold the question lock: the send claims its reservation synchronously
+    // and parks at the critical-section entry; the delete's declaration then
+    // queues BEHIND it.
     let releaseLock!: () => void
     const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-resv', () => hungLock)
 
-    const sendPromise = sm.sendMessage('f-del-resv', 'racing message', [], [], { invocationSource: 'desktop' })
+    const sendPromise = sm.sendMessage('f-del-resv', 'winning message', [], [], { invocationSource: 'desktop' })
     await new Promise(r => setTimeout(r, 30))
-    // The reservation was claimed; the send is parked at its checkpoint.
-    expect(getManaged('f-del-resv').turnStartReserved).toBe(true)
+    expect(managed.turnStartReserved).toBe(true)
 
-    // Deletion STARTS now: the marker is set synchronously at entry, and the
-    // delete's cleanup queues behind the same lock.
     const deletePromise = sm.deleteSession('f-del-resv')
     await new Promise(r => setTimeout(r, 30))
 
     releaseLock()
-    // The reserved turn is abandoned at the (re-validated) commit point.
-    await expect(sendPromise).rejects.toThrow(/session_missing/)
+    // The send transaction commits FIRST — no error, exactly one accepted
+    // broadcast — and the turn runs to completion (chats). The delete's
+    // declaration then lands after the transaction: the tombstone ends up
+    // 'deleted' (re-set by the declaration after the commit cleared it) and
+    // the cleanup converges the storage away.
+    await sendPromise
+    await waitForCondition(() => chats === 1, 3000)
+    expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
 
-    // No resurrection: the tombstone was NOT cleared by a generation bump
-    // and the reservation was released (asserted on the possibly-orphaned
-    // object — the delete's cleanup may already have unregistered it).
-    expect(managed.questionLifecycleTombstone?.reason).toBe('deleted')
-    expect(managed.turnStartReserved).toBe(false)
-    expect(managed.isProcessing).toBe(false)
-
+    // The delete's declaration then lands (after the transaction) and the
+    // cleanup converges: the storage copy is removed.
     await deletePromise
+    expect(managed.questionLifecycleTombstone?.reason).toBe('deleted')
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv'))).toBe(false)
   })
 
-  // ---- Review fix round 8, issue A: the reservation→commit gap is CLOSED —
-  // deletion re-validation, user-message persistence and the turn-start
-  // commit are ONE lock-held transaction. A delete inserted before the
-  // section's persistence aborts the send BEFORE any persistence or
-  // broadcast.
+  // ---- Review fix round 9, issue A: linearization (a) — the delete's
+  // declaration acquires the lock BEFORE the sendMessage critical section, so
+  // the send observes the tombstone BEFORE any persistence: no message, no
+  // broadcast, reservation released, session_missing.
 
-  it('a delete inserted before the user-message persistence: no persist, no accepted broadcast, no resurrection', async () => {
+  it('linearization (a): a delete declaration that precedes the sendMessage critical section aborts the send (no persist, no broadcast)', async () => {
     patchPrivateFlush()
     const managed = seedSession('f-del-gap', {}) as unknown as {
       questionLifecycleTombstone?: { reason: string }
@@ -936,12 +915,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       messages: Array<Record<string, unknown>>
     }
 
-    // Hold the lock: the send claims its reservation synchronously, then
-    // parks at the critical-section entry — BEFORE any persistence.
+    // Hold the lock: the DELETE's declaration queues FIRST; the send's
+    // critical section queues behind it.
     let releaseLock!: () => void
     const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-gap', () => hungLock)
+
+    const deletePromise = sm.deleteSession('f-del-gap')
+    await new Promise(r => setTimeout(r, 30))
 
     let acked = false
     const sendPromise = sm.sendMessage(
@@ -954,18 +936,14 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     await new Promise(r => setTimeout(r, 30))
     expect(managed.turnStartReserved).toBe(true)
 
-    // The delete is inserted NOW — before the user-message persist.
-    const deletePromise = sm.deleteSession('f-del-gap')
-    await new Promise(r => setTimeout(r, 30))
-
     releaseLock()
+    // The declaration ran first — the send's section re-validates and aborts
+    // BEFORE any persistence or broadcast.
     await expect(sendPromise).rejects.toThrow(/session_missing/)
 
-    // Nothing was persisted or broadcast for the dying session.
     expect(acked).toBe(false)
     expect(managed.messages.filter(m => m.role === 'user')).toHaveLength(0)
     expect(events.filter(e => e.type === 'user_message')).toHaveLength(0)
-    // The tombstone was NOT cleared by a generation bump; reservation released.
     expect(managed.questionLifecycleTombstone?.reason).toBe('deleted')
     expect(managed.turnStartReserved).toBe(false)
     expect(managed.isProcessing).toBe(false)
@@ -1003,6 +981,63 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
     const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-mcp-cb'), 'utf-8').split('\n')[0])
     expect(header.hasPendingQuestion).toBe(true)
+  })
+
+  // ---- Review fix round 9, issue B: the PRODUCTION callback router — the
+  // host HTTP route that the session MCP server POSTs to — lands in the same
+  // durable handoff and answers with the protocol result.
+
+  it('the session MCP callback router routes /request-user-input into the durable handoff (accepted + session_missing)', async () => {
+    const { createSessionMcpCallbackHandler } = await import('./session-mcp-callback-router.ts')
+    const handler = createSessionMcpCallbackHandler(sm)
+    const managed = seedSession('f-mcp-cb-2', { isProcessing: true, withAgent: true }) as unknown as { processingGeneration: number }
+    const request = makeQuestionRequest('f-mcp-cb-2')
+
+    const server = Bun.serve({
+      port: 0,
+      fetch: req => handler(req),
+    })
+    try {
+      // ACCEPTED: the payload routes into the durable handoff.
+      const accepted = await fetch(
+        `http://localhost:${server.port}/request-user-input`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: 'f-mcp-cb-2',
+            questions: request.questions,
+            generationAtRequest: managed.processingGeneration,
+          }),
+        },
+      )
+      expect(accepted.status).toBe(200)
+      expect(await accepted.json()).toEqual({ status: 'accepted' })
+      expect(sm.getPendingQuestion('f-mcp-cb-2')).not.toBeNull()
+      expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+
+      // SESSION_MISSING: a payload for an unknown session degrades honestly.
+      const missing = await fetch(
+        `http://localhost:${server.port}/request-user-input`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: 'no-such-session',
+            questions: request.questions,
+            generationAtRequest: 0,
+          }),
+        },
+      )
+      expect(missing.status).toBe(200)
+      expect(await missing.json()).toEqual({ status: 'session_missing' })
+
+      // Unknown paths are not routed.
+      const notFound = await fetch(`http://localhost:${server.port}/other`, { method: 'POST' })
+      expect(notFound.status).toBe(404)
+    } finally {
+      server.stop(true)
+    }
   })
 
   // ---- Review fix round 5, issue A: the generation is bound to the callback

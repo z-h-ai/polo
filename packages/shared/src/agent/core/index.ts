@@ -104,7 +104,9 @@ export {
 export {
   parseSessionMcpCallbackLine,
   isQuestionRequestedCallback,
+  buildSessionMcpServerArgs,
 } from './session-lifecycle.ts';
+export type { SessionMcpSpawnOptions } from './session-lifecycle.ts';
 export type { SessionMcpCallbackMessage } from './session-lifecycle.ts';
 
 // Usage Tracker

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import type { BackendHostRuntimeContext } from '../types.ts';
 import { setPathToClaudeCodeExecutable } from '../../options.ts';
+import { buildSessionMcpServerArgs } from '../../core/session-lifecycle.ts';
 
 /**
  * When set, the resolver walks further up from the .app bundle to find SDK,
@@ -268,4 +269,27 @@ export function applyAnthropicRuntimeBootstrap(
   } else if (strict) {
     throw new Error('Claude Agent SDK native binary not found. The app package may be corrupted.');
   }
+}
+
+/**
+ * PRODUCTION SPAWN SPEC for the session MCP server subprocess (the
+ * Codex/external-harness path) — review fix round 9, issue B.
+ *
+ * Composes the resolved packaged-server path + node runtime with the
+ * per-turn request_user_input capability and generation (via
+ * `buildSessionMcpServerArgs`). The host spawns `command` with `args` for
+ * EVERY turn; desktop turns carry the capability flag + generation, all
+ * other sources omit them (fail closed). Returns null when the packaged
+ * server is not available in this runtime.
+ */
+export function buildSessionMcpServerInvocation(
+  hostRuntime: BackendHostRuntimeContext,
+  options: import('../../core/session-lifecycle.ts').SessionMcpSpawnOptions,
+): { command: string; args: string[] } | null {
+  const paths = resolveBackendRuntimePaths(hostRuntime);
+  if (!paths.sessionServerPath) return null;
+  return {
+    command: paths.nodeRuntimePath ?? process.execPath,
+    args: [paths.sessionServerPath, ...buildSessionMcpServerArgs(options)],
+  };
 }

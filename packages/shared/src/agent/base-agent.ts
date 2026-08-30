@@ -44,6 +44,7 @@ import type {
   RecoveryMessage,
 } from './backend/types.ts';
 import { AbortReason } from './backend/types.ts';
+import { parseSessionMcpCallbackLine, isQuestionRequestedCallback } from './core/session-lifecycle.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
 import { parseRequestUserInputArgs, type RequestUserInputQuestionArgs } from '@polo-ai/session-tools-core';
 import type { Workspace } from '../config/storage.ts';
@@ -457,6 +458,41 @@ export abstract class BaseAgent implements AgentBackend {
    * - Auth tools → this.onAuthRequest(authRequest)
    *   → Electron shows auth dialog, calls interruptForHandoff(AuthRequest)
    */
+  /**
+   * Consume one stderr line emitted by the session MCP server subprocess
+   * (review fix round 9, issue B — PRODUCTION consumer of
+   * {@link parseSessionMcpCallbackLine}).
+   *
+   * Hosts embedding this agent pipe the subprocess's stderr lines here. A
+   * `question_requested` line is routed into the SAME durable handoff chain
+   * the in-process paths use — {@link onQuestionRequested} with the
+   * initiation-time generation snapshot — whose resolution (answered /
+   * cancelled / stale) settles the awaiting tool result on the server side.
+   * Plan/auth callbacks are routed likewise.
+   *
+   * @returns true when the line was a recognized lifecycle callback.
+   */
+  handleSessionMcpStderrLine(line: string): boolean {
+    const message = parseSessionMcpCallbackLine(line);
+    if (!message) return false;
+    if (isQuestionRequestedCallback(message)) {
+      void this.onQuestionRequested?.(
+        message.questions as unknown as Parameters<NonNullable<typeof this.onQuestionRequested>>[0],
+        message.generationAtRequest,
+      );
+      return true;
+    }
+    if (message.__callback__ === 'plan_submitted') {
+      this.onPlanSubmitted?.(message.planPath);
+      return true;
+    }
+    if (message.__callback__ === 'auth_request') {
+      this.onAuthRequest?.(message.request as never);
+      return true;
+    }
+    return false;
+  }
+
   protected handleSessionMcpToolCompletion(
     toolName: string,
     args: Record<string, unknown>

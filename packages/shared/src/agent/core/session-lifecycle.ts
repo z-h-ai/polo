@@ -300,3 +300,52 @@ export function isQuestionRequestedCallback(
 ): message is Extract<SessionMcpCallbackMessage, { __callback__: 'question_requested' }> {
   return message.__callback__ === 'question_requested';
 }
+
+// ============================================================
+// Session MCP Server Launch Spec (review fix round 9, issue B)
+// ============================================================
+
+/**
+ * Per-turn spawn options for the session MCP server subprocess (the
+ * Codex/external-harness path). Lives in shared so BOTH the runtime resolver
+ * (production spawn-spec construction) and the server package can consume it.
+ */
+export interface SessionMcpSpawnOptions {
+  sessionId: string;
+  workspaceRootPath: string;
+  plansFolderPath: string;
+  /** HTTP callback port for call_llm / request_user_input (optional). */
+  callbackPort?: string;
+  /**
+   * Whether THIS turn may call request_user_input (desktop interactive
+   * turns only). Omitted/false fails closed.
+   */
+  allowRequestUserInput?: boolean;
+  /**
+   * The processing generation of THIS turn — snapshotted into every
+   * question_requested callback the server emits.
+   */
+  turnGeneration?: number;
+}
+
+/**
+ * Build the argv for spawning `session-mcp-server` for one turn.
+ * Pure function — the caller owns process.spawn and its lifecycle.
+ */
+export function buildSessionMcpServerArgs(options: SessionMcpSpawnOptions): string[] {
+  const args = [
+    '--session-id', options.sessionId,
+    '--workspace-root', options.workspaceRootPath,
+    '--plans-folder', options.plansFolderPath,
+  ];
+  if (options.callbackPort) {
+    args.push('--callback-port', options.callbackPort);
+  }
+  if (options.allowRequestUserInput) {
+    args.push('--allow-request-user-input');
+  }
+  if (options.turnGeneration !== undefined) {
+    args.push('--turn-generation', String(options.turnGeneration));
+  }
+  return args;
+}

@@ -53,20 +53,23 @@ describe('session MCP / Codex request_user_input parity', () => {
     }
   })
 
-  it('the Codex context emits the question_requested callback carrying the initiation snapshot', () => {
+  it('the Codex context emits the question_requested callback carrying the initiation snapshot', async () => {
     const ctx = createCodexContext({
       sessionId: 'codex-bind',
       workspaceRootPath: '/tmp/codex-bind',
       plansFolderPath: '/tmp/codex-bind/plans',
       allowRequestUserInput: true,
       turnGeneration: 12,
+      callbackPort: '1', // unreachable port — the mirror fires before the POST fails
     })
 
     const errors: string[] = []
     const originalError = console.error
     console.error = (message: string) => { errors.push(message) }
     try {
-      ctx.callbacks.onQuestionRequested?.(validQuestions() as never, 12)
+      // The awaitable POST to the unreachable host fails — but the stderr
+      // mirror fires FIRST, which is what this test asserts.
+      await ctx.callbacks.onQuestionRequested?.(validQuestions() as never, 12).catch(() => {})
     } finally {
       console.error = originalError
     }
@@ -141,5 +144,78 @@ describe('session MCP / Codex request_user_input parity', () => {
     // Non-callback log lines and corrupt payloads are skipped, never thrown.
     expect(parseSessionMcpCallbackLine('[session] some regular log')).toBeNull()
     expect(parseSessionMcpCallbackLine('__CALLBACK__not-json')).toBeNull()
+  })
+
+  // ---- Review fix round 9, issue B: the AWAITABLE ACK — the ctx callback
+  // POSTs to the host callback port and resolves only when the durable
+  // handoff reached its terminal state.
+
+  it('ctx onQuestionRequested awaits the host durable handoff and surfaces the terminal state', async () => {
+    const received: Array<Record<string, unknown>> = []
+    const host = Bun.serve({
+      port: 0,
+      fetch: async req => {
+        const body = await req.json() as { sessionId: string; questions: Array<Record<string, unknown>> }
+        received.push(body)
+        const missing = Array.isArray(body.questions) && body.questions[0]?.__payload === 'gone'
+        return new Response(
+          JSON.stringify(missing ? { status: 'session_missing' } : { status: 'accepted' }),
+          { headers: { 'Content-Type': 'application/json' } },
+        )
+      },
+    })
+    const ctx = createCodexContext({
+      sessionId: 'ack-1',
+      workspaceRootPath: '/tmp/ack',
+      plansFolderPath: '/tmp/ack/plans',
+      allowRequestUserInput: true,
+      turnGeneration: 21,
+      callbackPort: String(host.port),
+    })
+
+    try {
+      // accepted: the host handoff resolved at the terminal state.
+      await expect(
+        ctx.callbacks.onQuestionRequested!(validQuestions() as never, 21),
+      ).resolves.toBeUndefined()
+      expect(received).toHaveLength(1)
+      expect(received[0].generationAtRequest).toBe(21)
+      expect(received[0].sessionId).toBe('ack-1')
+
+      // session_missing: the host rejected the handoff — the tool errors
+      // (never a fake "waiting" success).
+      await expect(
+        ctx.callbacks.onQuestionRequested!(
+          [{ __payload: 'gone' }] as never,
+          21,
+        ),
+      ).rejects.toThrow(/session_missing/)
+    } finally {
+      host.stop(true)
+    }
+  })
+
+  it('ctx onQuestionRequested without a callback host fails honestly (no fake success)', async () => {
+    const ctx = createCodexContext({
+      sessionId: 'ack-2',
+      workspaceRootPath: '/tmp/ack2',
+      plansFolderPath: '/tmp/ack2/plans',
+      allowRequestUserInput: true,
+      turnGeneration: 3,
+      // no callbackPort
+    })
+    const errors: string[] = []
+    const originalError = console.error
+    console.error = (message: string) => { errors.push(message) }
+    try {
+      await expect(
+        ctx.callbacks.onQuestionRequested!(validQuestions() as never, 3),
+      ).rejects.toThrow(/requires a callback host/)
+    } finally {
+      console.error = originalError
+    }
+    // The stderr mirror still fired (notification channel), but the tool
+    // result is an honest failure.
+    expect(errors.some(e => e.includes('question_requested'))).toBe(true)
   })
 })

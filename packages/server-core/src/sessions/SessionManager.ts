@@ -5754,30 +5754,50 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    // DELETE START GATE (review fix round 5, issue B): the tombstone is
-    // established SYNCHRONOUSLY at the first instant of deletion — before any
-    // await — so every later resolution and question request is fail-closed
-    // for the entire deletion window (abort wait, share revoke, storage
-    // removal): resolutions observe `session_missing` via the locked commit's
-    // deleted-tombstone check, and question requests are rejected by the
-    // tombstone gate. (The question-state lock serializes the marker with any
-    // in-flight commit; the gate itself must not wait behind queued work —
-    // an equivalent fail-closed gate per the fix contract.)
-    managed.questionLifecycleTombstone = { reason: 'deleted', at: Date.now() }
-    // The final removal runs under the question-state lock: an in-flight
-    // question commit that started before deletion settles FIRST, so its
-    // flush can never re-create the storage directory after deletion.
-    await this.withQuestionStateLock(sessionId, () => this.deleteSessionLocked(managed))
+    // DELETION DECLARATION — inside the question-state lock (review fix
+    // round 9, issue A): the tombstone write AND the availability-removal
+    // visibility point form the linearization point of the deletion. This
+    // makes "the sendMessage owner transaction" and "the deletion" mutually
+    // exclusive by construction:
+    // - declaration first → every send observes the tombstone before ANY
+    //   persistence (the owner critical section re-validates under this same
+    //   lock) and aborts with session_missing;
+    // - sendMessage transaction first → the delete waits for the lock, then
+    //   declares and tears the (already running) turn down in its cleanup.
+    // No out-of-lock marker write can interleave a visible intermediate state
+    // anymore. The declaration is the lock's ONLY critical content; the
+    // remaining cleanup runs AFTER it (never before).
+    await this.withQuestionStateLock(sessionId, async () => this.declareSessionDeletedLocked(managed))
+    await this.cleanupDeletedSession(managed)
   }
 
-  private async deleteSessionLocked(managed: ManagedSession): Promise<void> {
+  /**
+   * LOCKED declaration — caller must hold the question-state lock. Marks the
+   * session terminally deleted and removes it from the available-session map
+   * (the visibility point). Every later send / resolution / question request
+   * observes the deletion from this instant on.
+   */
+  private declareSessionDeletedLocked(managed: ManagedSession): void {
+    managed.questionLifecycleTombstone = { reason: 'deleted', at: Date.now() }
+    this.sessions.delete(managed.id)
+    sessionLog.info(`Session ${managed.id} declared deleted (linearization point)`)
+  }
+
+  /**
+   * Post-declaration cleanup — runs AFTER the locked declaration, never
+   * before it. Disarms the remaining runtime state and removes the storage
+   * copy. All question-state gates already reject via the declared tombstone
+   * (and the missing map entry), so no lock is required here.
+   */
+  private async cleanupDeletedSession(managed: ManagedSession): Promise<void> {
     const sessionId = managed.id
 
     // Immediately disarm any answer→resume retry — synchronously, BEFORE the
-    // abort wait / share-revoke window. Until removal the identity guard
-    // (`sessions.get(id) === managed`) still holds, so a live timer could
-    // start a ghost turn during deletion's external I/O. The disk copy is
-    // removed below, so no flush is needed.
+    // abort wait / share-revoke window. The identity guard
+    // (`sessions.get(id) === managed`) no longer holds after the declaration,
+    // so a live timer could start a ghost turn during deletion's external
+    // I/O — disarm it here. The disk copy is removed below, so no flush is
+    // needed.
     if (managed.resumeRetryTimer) {
       clearTimeout(managed.resumeRetryTimer)
       managed.resumeRetryTimer = undefined
@@ -5867,7 +5887,8 @@ export class SessionManager implements ISessionManager {
     }
     managed.autoRetryPending = undefined
 
-    this.sessions.delete(sessionId)
+    // (Runtime availability removal — this.sessions.delete — happened in the
+    // LOCKED declaration phase, before this cleanup started.)
 
     // Clean up session metadata in AutomationSystem (prevents memory leak)
     const automationSystem = this.automationSystems.get(workspaceRootPath)
@@ -7240,6 +7261,26 @@ export class SessionManager implements ISessionManager {
    * @throws when validation or the durable persist fails — the request_user_input
    * tool converts this into an isError result so the model can retry.
    */
+  /**
+   * PRODUCTION durable-handoff entry for EXTERNAL hosts (review fix round 9,
+   * issue B): the session MCP server (Codex/external-harness path) POSTs its
+   * `question_requested` callback to the host's callback router, which routes
+   * here. Same durable semantics as the in-process chain: pendingQuestion
+   * persist + question_request event + handoff, awaited by the caller so the
+   * remote tool result settles only at the durable boundary.
+   */
+  async handleExternalQuestionRequested(
+    sessionId: string,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest: number,
+  ): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      throw new Error(`Session ${sessionId} not found (session_missing)`)
+    }
+    return this.handleQuestionRequested(managed, questions, generationAtRequest)
+  }
+
   private async handleQuestionRequested(
     managed: ManagedSession,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],

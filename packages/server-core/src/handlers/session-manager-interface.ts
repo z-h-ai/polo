@@ -126,6 +126,16 @@ export interface ISessionManager {
   getPendingQuestion(sessionId: string): QuestionRequest | null
   respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
   /**
+   * Durable handoff entry for EXTERNAL hosts (session MCP server / Codex):
+   * routes a parsed `question_requested` callback into the same persist +
+   * question_request + handoff chain as the in-process paths.
+   */
+  handleExternalQuestionRequested(
+    sessionId: string,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest: number,
+  ): Promise<void>
+  /**
    * Locate the Edit Popover session that still owns an active pending
    * question for the given workspace + popover owner (hidden session — not
    * reachable through the session list). Exact match only; returns null when
