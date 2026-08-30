@@ -200,18 +200,18 @@ export function QuestionRequest({
           className={cn(
             'mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center border bg-background',
             multiple ? 'rounded-[4px]' : 'rounded-full',
-            selected ? 'border-primary border-2' : 'border-foreground/30 border-[1.5px]',
+            selected ? 'border-accent border-2' : 'border-foreground/30 border-[1.5px]',
           )}
         >
-          {multiple && selected && <Check className="h-2.5 w-2.5 text-primary-foreground" strokeWidth={3} />}
-          {!multiple && selected && <span className="h-2 w-2 rounded-full bg-primary" />}
+          {multiple && selected && <Check className="h-2.5 w-2.5 text-accent" strokeWidth={3} />}
+          {!multiple && selected && <span className="h-2 w-2 rounded-full bg-accent" />}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium leading-tight text-foreground">{label}</span>
             {recommended && (
               <span
-                className="inline-flex items-center rounded-[4px] border border-primary/50 bg-primary/5 px-1.5 text-[10px] font-medium leading-[18px] text-primary"
+                className="inline-flex items-center rounded-[4px] border border-accent/50 bg-accent/5 px-1.5 text-[10px] font-medium leading-[18px] text-accent"
                 data-testid={`question-recommended-${question.id}-${id}`}
               >
                 {t('chat.questionRecommended')}
@@ -300,7 +300,7 @@ export function QuestionRequest({
                   disabled={inactive || submitting}
                   placeholder={t('chat.questionOtherPlaceholder')}
                   data-testid={`question-other-input-${question.id}`}
-                  className="block h-9 w-full rounded-md border border-foreground/20 bg-background px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:ring-1 focus:ring-ring/40 disabled:opacity-70"
+                  className="block h-9 w-full rounded-md border border-foreground/20 bg-background px-3 text-sm text-foreground outline-none focus:border-accent/60 focus:ring-1 focus:ring-ring/40 disabled:opacity-70"
                 />
               </div>
             )}

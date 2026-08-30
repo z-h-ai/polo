@@ -851,6 +851,48 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-turn'))).toBe(false)
   })
 
+  // ---- Review fix round 7, issue A: the TOCTOU between the sendMessage
+  // ENTRY gate and the turn-start commit. A delete that STARTS after the
+  // reservation was claimed must abort the reserved turn at the critical
+  // commit point (under the question-state lock) — the tombstone survives
+  // and the deleted session is never resurrected.
+
+  it('a deleteSession that starts after the reservation is claimed aborts the reserved turn (tombstone kept, no resurrection)', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-del-resv', {}) as unknown as { questionLifecycleTombstone?: { reason: string }; turnStartReserved?: boolean; isProcessing: boolean }
+
+    // Hold the question lock: the send will claim its reservation (synchronous)
+    // and then park on its locked fast-fail checkpoint inside the try.
+    let releaseLock!: () => void
+    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
+    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
+      .withQuestionStateLock('f-del-resv', () => hungLock)
+
+    const sendPromise = sm.sendMessage('f-del-resv', 'racing message', [], [], { invocationSource: 'desktop' })
+    await new Promise(r => setTimeout(r, 30))
+    // The reservation was claimed; the send is parked at its checkpoint.
+    expect(getManaged('f-del-resv').turnStartReserved).toBe(true)
+
+    // Deletion STARTS now: the marker is set synchronously at entry, and the
+    // delete's cleanup queues behind the same lock.
+    const deletePromise = sm.deleteSession('f-del-resv')
+    await new Promise(r => setTimeout(r, 30))
+
+    releaseLock()
+    // The reserved turn is abandoned at the (re-validated) commit point.
+    await expect(sendPromise).rejects.toThrow(/session_missing/)
+
+    // No resurrection: the tombstone was NOT cleared by a generation bump
+    // and the reservation was released (asserted on the possibly-orphaned
+    // object — the delete's cleanup may already have unregistered it).
+    expect(managed.questionLifecycleTombstone?.reason).toBe('deleted')
+    expect(managed.turnStartReserved).toBe(false)
+    expect(managed.isProcessing).toBe(false)
+
+    await deletePromise
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv'))).toBe(false)
+  })
+
   // ---- Review fix round 5, issue A: the generation is bound to the callback
   // CLOSURE at the issuing turn (agent-stamped at tool-call time). A late
   // callback carrying its ISSUING generation is rejected once a newer turn

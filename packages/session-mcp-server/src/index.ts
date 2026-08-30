@@ -58,6 +58,19 @@ interface SessionConfig {
   workspaceRootPath: string;
   plansFolderPath: string;
   callbackPort?: string;
+  /**
+   * Per-turn request_user_input capability (review fix round 7, issue B):
+   * same fail-closed filter as the Claude/Pi paths. The harness spawns this
+   * server per turn and passes the capability via CLI flag or env — desktop
+   * turns enable it, every other source leaves it off.
+   */
+  allowRequestUserInput: boolean;
+  /**
+   * The processing generation of the turn this server instance serves (env
+   * per spawn). Read at tool-call initiation by getTurnGeneration and bound
+   * immutably into the question callback.
+   */
+  turnGeneration: number;
 }
 
 const CALLBACK_TOOL_TIMEOUT_MS = 120000;
@@ -152,9 +165,8 @@ function createCredentialManager(workspaceRootPath: string): CredentialManagerIn
  * Create a SessionToolContext for the Codex MCP server.
  * This provides the context needed by all handlers.
  */
-function createCodexContext(config: SessionConfig): SessionToolContext {
+export function createCodexContext(config: SessionConfig): SessionToolContext {
   const { sessionId, workspaceRootPath, plansFolderPath } = config;
-
   // File system implementation
   const fs = {
     exists: (path: string) => existsSync(path),
@@ -187,6 +199,18 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
         ...request,
       });
     },
+    // Question handoff parity with Claude/Pi (review fix round 7, issue B):
+    // the handler snapshot (generationAtRequest) was bound at tool-call
+    // initiation and travels with the callback; the host harness resolves it
+    // into a durable handoff the same way the Claude/Pi hosts do.
+    onQuestionRequested: (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[], generationAtRequest: number) => {
+      sendCallback({
+        __callback__: 'question_requested',
+        sessionId,
+        questions,
+        generationAtRequest,
+      });
+    },
   };
 
   // Create credential manager that reads from cache files
@@ -200,6 +224,11 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
   return {
     sessionId,
     workspacePath: workspaceRootPath,
+    // Tool-call-time generation reader (review fix rounds 5-7): the handler
+    // invokes this synchronously at initiation and binds the value immutably
+    // into the callback chain. The server instance serves ONE turn (per-turn
+    // spawn), so the env value is that turn's generation.
+    getTurnGeneration: () => config.turnGeneration,
     get sourcesPath() { return join(workspaceRootPath, 'sources'); },
     get skillsPath() { return join(workspaceRootPath, 'skills'); },
     plansFolderPath,
@@ -261,9 +290,16 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
 // Tool Definitions (from canonical registry)
 // ============================================================
 
-function createSessionTools(includeDeveloperFeedback: boolean): Tool[] {
+/**
+ * Session tool list for the Codex/session-MCP path. `allowRequestUserInput`
+ * applies the SAME canonical per-turn filter as the Claude/Pi paths
+ * (review fix round 7, issue B): desktop turns include request_user_input,
+ * every other source fails closed.
+ */
+export function createSessionTools(includeDeveloperFeedback: boolean, allowRequestUserInput: boolean): Tool[] {
   return getToolDefsAsJsonSchema({
     includeDeveloperFeedback,
+    allowRequestUserInput,
   }).map(def => ({
     name: def.name,
     description: def.description,
@@ -466,7 +502,7 @@ function setupSignalHandlers(): void {
   });
 }
 
-async function main() {
+export async function main() {
   setupSignalHandlers();
 
   // Parse command line arguments
@@ -475,6 +511,7 @@ async function main() {
   let workspaceRootPath: string | undefined;
   let plansFolderPath: string | undefined;
   let callbackPort: string | undefined;
+  let allowRequestUserInputFlag = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--session-id' && args[i + 1]) {
@@ -486,6 +523,8 @@ async function main() {
     } else if (args[i] === '--plans-folder' && args[i + 1]) {
       plansFolderPath = args[i + 1];
       i++;
+    } else if (args[i] === '--allow-request-user-input') {
+      allowRequestUserInputFlag = true;
     } else if (args[i] === '--callback-port' && args[i + 1]) {
       callbackPort = args[i + 1];
       i++;
@@ -503,12 +542,19 @@ async function main() {
     plansFolderPath,
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.POLO_AI_LLM_CALLBACK_PORT,
+    // Per-turn request_user_input capability (review fix round 7, issue B):
+    // fail closed — only an explicit opt-in (desktop turn spawn) enables it.
+    allowRequestUserInput: allowRequestUserInputFlag || process.env.POLO_AI_ALLOW_REQUEST_USER_INPUT === '1',
+    turnGeneration: Number.parseInt(process.env.POLO_AI_TURN_GENERATION ?? '0', 10) || 0,
   };
   // Create the Codex context
   const ctx = createCodexContext(config);
 
   const includeDeveloperFeedback = isDeveloperFeedbackEnabled();
-  const sessionToolRegistry = getSessionToolRegistry({ includeDeveloperFeedback });
+  // SAME per-turn capability filter as the Claude/Pi paths (review fix round
+  // 7, issue B): the registry (call routing) and the tool list stay in sync —
+  // desktop turns expose request_user_input, everything else fails closed.
+  const sessionToolRegistry = getSessionToolRegistry({ includeDeveloperFeedback, allowRequestUserInput: config.allowRequestUserInput });
 
   // Create MCP server
   const server = new Server(
@@ -528,7 +574,7 @@ async function main() {
 
   // Handle tool listing — session tools + docs upstream tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...createSessionTools(includeDeveloperFeedback), ...docsTools],
+    tools: [...createSessionTools(includeDeveloperFeedback, config.allowRequestUserInput), ...docsTools],
   }));
 
   // Handle tool calls — route via canonical registry, call_llm, or docs upstream
@@ -572,7 +618,11 @@ async function main() {
   console.error(`Session MCP Server started for session ${sessionId} (developerFeedback=${includeDeveloperFeedback})`);
 }
 
-main().catch((error) => {
-  console.error('Fatal error:', error);
-  process.exit(1);
-});
+// Only auto-start the stdio server when executed directly — importing this
+// module (tests, tooling) must not spawn the transport.
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error('Fatal error:', error);
+    process.exit(1);
+  });
+}

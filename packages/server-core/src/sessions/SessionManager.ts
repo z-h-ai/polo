@@ -5963,6 +5963,19 @@ export class SessionManager implements ISessionManager {
     // never strand a phantom reservation (followers would queue forever
     // behind a turn that never starts).
     try {
+      // DELETION RE-VALIDATION — FAST-FAIL (review fix round 7, issue A): the
+      // entry gate ran BEFORE the reservation was claimed; deletion can start
+      // during the subsequent awaits. Check again under the question-state
+      // lock BEFORE any cleanup/persistence of this turn touches the session.
+      // The authoritative re-check runs again at the critical commit point.
+      if (isTurnStartOwner) {
+        await this.withQuestionStateLock(sessionId, async () => {
+          if (managed.questionLifecycleTombstone?.reason === 'deleted') {
+            throw new Error(`Session ${sessionId} is being deleted (session_missing): the reserved turn is abandoned`)
+          }
+        })
+      }
+
       // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
       // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
       // duplicate that arrives from a legacy renderer still running the client-side
@@ -6195,23 +6208,37 @@ export class SessionManager implements ISessionManager {
           sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
         }
 
-        managed.lastMessageAt = Date.now()
-        this.setProcessing(managed, true)
-        managed.streamingText = ''
-        managed.processingGeneration++
-        // A new turn starts a NEW question lifecycle — a prior stop/archive
-        // tombstone no longer applies to this generation (review fix round 3,
-        // issue A).
-        managed.questionLifecycleTombstone = undefined
-        // GENERATION BINDING (review fix round 5, issue A): stamp the agent
-        // with the claiming generation so request_user_input callbacks carry
-        // their ISSUING turn's generation (snapshotted at tool-call time),
-        // not whatever generation happens to be active at late execution.
-        managed.agent?.setSessionTurnGeneration(managed.processingGeneration)
-        managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
-      // The turn has claimed its processing generation — the reservation is
-      // consumed; isProcessing now gates subsequent callers.
-      turnStarted = true
+        // CRITICAL COMMIT POINT — RE-VALIDATION under the question-state lock
+        // (review fix round 7, issue A): deleteSession sets its terminal
+        // marker synchronously at entry, even while its cleanup waits for this
+        // lock. The marker must be re-checked HERE — serialized against the
+        // delete's own locked cleanup — BEFORE the generation bump, which
+        // would otherwise clear the tombstone and resurrect the deleted
+        // session's question lifecycle. On rejection the reservation is
+        // released by the surrounding finally (turnStarted stays false) and
+        // the error propagates per the result contract.
+        await this.withQuestionStateLock(sessionId, async () => {
+          if (managed.questionLifecycleTombstone?.reason === 'deleted') {
+            throw new Error(`Session ${sessionId} is being deleted (session_missing): the reserved turn is abandoned before commit`)
+          }
+          managed.lastMessageAt = Date.now()
+          this.setProcessing(managed, true)
+          managed.streamingText = ''
+          managed.processingGeneration++
+          // A new turn starts a NEW question lifecycle — a prior stop/archive
+          // tombstone no longer applies to this generation (review fix round 3,
+          // issue A).
+          managed.questionLifecycleTombstone = undefined
+          // GENERATION BINDING (review fix round 5, issue A): stamp the agent
+          // with the claiming generation so request_user_input callbacks carry
+          // their ISSUING turn's generation (snapshotted at tool-call time),
+          // not whatever generation happens to be active at late execution.
+          managed.agent?.setSessionTurnGeneration(managed.processingGeneration)
+          managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+        })
+        // The turn has claimed its processing generation — the reservation is
+        // consumed; isProcessing now gates subsequent callers.
+        turnStarted = true
     } finally {
       if (isTurnStartOwner) {
         this.releaseTurnStartReservation(managed, sessionId, turnStarted)
