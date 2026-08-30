@@ -5869,16 +5869,28 @@ export class SessionManager implements ISessionManager {
           connectionSlug: connection?.slug,
         })
 
-        // Create user message for UI
-        const userMessage: Message = {
-          id: generateMessageId(),
-          role: 'user',
-          content: message,
-          timestamp: this.monotonic(),
-          attachments: storedAttachments,
-          badges: options?.badges,
+        // Create user message for UI — or REUSE the already-persisted one
+        // when existingMessageId is provided (the answer→resume path): the
+        // queue branch must never duplicate the single readable answer
+        // message (review round 7, issue 2).
+        let userMessage: Message
+        if (existingMessageId) {
+          const existing = managed.messages.find(m => m.id === existingMessageId)
+          if (!existing) {
+            throw new Error(`Existing message ${existingMessageId} not found`)
+          }
+          userMessage = existing
+        } else {
+          userMessage = {
+            id: generateMessageId(),
+            role: 'user',
+            content: message,
+            timestamp: this.monotonic(),
+            attachments: storedAttachments,
+            badges: options?.badges,
+          }
+          managed.messages.push(userMessage)
         }
-        managed.messages.push(userMessage)
 
         // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
         // (covers both queue-direct and queue-after-abort paths).
@@ -7574,11 +7586,14 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    if (managed.isProcessing) {
-      // A turn is already running; the answer message is in history and will
-      // be part of its context. Reschedule (without counting a failed
-      // attempt) so the resume happens once the turn finishes — never a
-      // dead-end busy-skip.
+    if (managed.isProcessing || managed.turnStartReserved) {
+      // A turn is already running — OR another sender holds the turn-start
+      // reservation (its pre-chat work is in flight, review round 7, issue
+      // 2). The answer message is already persisted as history; starting now
+      // would make this resume a FOLLOWER, whose queue branch duplicates the
+      // answer message and clears the recovery state without executing the
+      // turn. Reschedule (without counting a failed attempt) so the resume
+      // happens once the reservation resolves — never a dead-end busy-skip.
       this.scheduleResumeRetry(managed, 2000)
       return
     }

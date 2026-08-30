@@ -1095,6 +1095,123 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       })
     })
 
+    // Round 7, issue 2: the answer→resume path must treat a held turn-start
+    // reservation as "not startable yet" — entering as a follower would
+    // duplicate the single answer message and clear the recovery state
+    // without executing the turn.
+    describe('answer resume vs turn-start reservation', () => {
+      function makeCountingAgentFactory(): { getOrCreateAgent: () => Promise<unknown>; chats: () => number } {
+        let chats = 0
+        const getOrCreateAgent = async () => {
+          chats++
+          return makeFakeAgent()
+        }
+        return { getOrCreateAgent, chats: () => chats }
+      }
+
+      const answerMessageCount = (sessionId: string) =>
+        (getManaged(sessionId).messages as Array<Record<string, unknown>>)
+          .filter(m => (m as { questionResponse?: unknown }).questionResponse).length
+
+      it('reservation in flight while the answer commits: ONE answer message, resume deferred, exactly one answer turn eventually', async () => {
+        const factory = makeCountingAgentFactory()
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = factory.getOrCreateAgent
+        const request = makeQuestionRequest('f-res-resv')
+        seedSession('f-res-resv', { pendingQuestion: { ...request, invocationSource: 'desktop' } })
+
+        // Owner claims the turn start, then stalls at its pre-start flush.
+        let releaseFlush: (() => void) | null = null
+        const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
+        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+        let flushCalls = 0
+        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+          flushCalls++
+          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          return realFlush.call(sm, id)
+        }
+        const ownerSend = sm.sendMessage('f-res-resv', 'owner message', [], [], { invocationSource: 'desktop' })
+        await waitForCondition(() => flushCalls === 1)
+        expect(getManaged('f-res-resv').turnStartReserved).toBe(true)
+
+        // The answer commits while the reservation is held.
+        const result = await sm.respondToQuestion('f-res-resv', makeAnswerResolution(request))
+        expect(result).toEqual({ status: 'accepted' })
+        // Exactly ONE answer message — the deferred resume must not add one.
+        expect(answerMessageCount('f-res-resv')).toBe(1)
+        expect(getManaged('f-res-resv').pendingAgentResume).toBeDefined()
+        // The resume was deferred: no agent turn has started for it.
+        expect(factory.chats()).toBe(0)
+
+        // Owner turn proceeds and completes.
+        releaseFlush!()
+        await ownerSend
+
+        // The scheduled retry eventually runs the answer turn EXACTLY once.
+        await waitForCondition(() => getManaged('f-res-resv').pendingAgentResume === undefined, 8000)
+        expect(answerMessageCount('f-res-resv')).toBe(1)
+        expect(factory.chats()).toBe(2) // owner turn + one answer turn
+        expect(getManaged('f-res-resv').isProcessing).toBe(false)
+      })
+
+      it('owner success baseline: the resume runs immediately with one answer message and one answer turn', async () => {
+        const factory = makeCountingAgentFactory()
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = factory.getOrCreateAgent
+        const request = makeQuestionRequest('f-res-owner-ok')
+        seedSession('f-res-owner-ok', { pendingQuestion: { ...request, invocationSource: 'desktop' } })
+
+        const result = await sm.respondToQuestion('f-res-owner-ok', makeAnswerResolution(request))
+        expect(result).toEqual({ status: 'accepted' })
+        await waitForCondition(() => getManaged('f-res-owner-ok').pendingAgentResume === undefined, 5000)
+
+        expect(answerMessageCount('f-res-owner-ok')).toBe(1)
+        expect(factory.chats()).toBe(1)
+        expect(getManaged('f-res-owner-ok').turnStartReserved).toBe(false)
+      })
+
+      it('owner pre-start failure after the answer committed: the answer is preserved, the recovery survives until the real resume executes once', async () => {
+        const factory = makeCountingAgentFactory()
+        ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = factory.getOrCreateAgent
+        const request = makeQuestionRequest('f-res-owner-fail')
+        seedSession('f-res-owner-fail', { pendingQuestion: { ...request, invocationSource: 'desktop' } })
+
+        // Owner claims, then its pre-start flush FAILS.
+        let rejectFlush: ((e: Error) => void) | null = null
+        const flushGate = new Promise<void>((_resolve, reject) => { rejectFlush = reject })
+        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+        let flushCalls = 0
+        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+          flushCalls++
+          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          return realFlush.call(sm, id)
+        }
+        const ownerSend = sm.sendMessage('f-res-owner-fail', 'owner message', [], [], { invocationSource: 'desktop' })
+        await waitForCondition(() => flushCalls === 1)
+
+        // The answer commits while the reservation is held; the resume defers.
+        const result = await sm.respondToQuestion('f-res-owner-fail', makeAnswerResolution(request))
+        expect(result).toEqual({ status: 'accepted' })
+        expect(answerMessageCount('f-res-owner-fail')).toBe(1)
+        expect(getManaged('f-res-owner-fail').pendingAgentResume).toBeDefined()
+        expect(factory.chats()).toBe(0)
+
+        // The owner turn never starts (pre-start failure).
+        rejectFlush!(new Error('pre-start flush failed (injected)'))
+        await expect(ownerSend).rejects.toThrow('pre-start flush failed (injected)')
+
+        // The owner failure must NOT clear the armed recovery — the answer
+        // turn has not executed yet.
+        expect(getManaged('f-res-owner-fail').pendingAgentResume).toBeDefined()
+        expect(answerMessageCount('f-res-owner-fail')).toBe(1)
+
+        // The deferred retry eventually runs the answer turn EXACTLY once,
+        // and only then clears the recovery.
+        await waitForCondition(() => getManaged('f-res-owner-fail').pendingAgentResume === undefined, 8000)
+        expect(answerMessageCount('f-res-owner-fail')).toBe(1)
+        expect(factory.chats()).toBe(1)
+        expect(getManaged('f-res-owner-fail').isProcessing).toBe(false)
+      })
+    })
+
     describe('turn source isolation (queued messages never overwrite the active turn)', () => {
       it('a question asked during a desktop turn that has queued messaging messages stamps desktop, not messaging', async () => {
         stubAgentCaptureFlag()

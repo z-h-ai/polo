@@ -29,7 +29,7 @@ import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
-import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, restorePendingQuestionWithRealtimeGate, setPendingQuestionForSession } from './lib/pending-questions'
+import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, restorePendingQuestionUntilAuthoritative, setPendingQuestionForSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -2166,25 +2166,30 @@ export default function App() {
   // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
   // deleted) and can never cross workspaces or popover owners.
   const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<{ sessionId: string; request: QuestionRequest } | null> => {
-    // Bounded realtime-gated restore (review round 5, issue 1 + round 6,
-    // issue 2): the global pending-state epoch is captured before every RPC
-    // attempt. Drifted attempts (question_resolved from another window, new
-    // question_request anywhere) are never seeded and trigger a bounded
-    // scoped re-query; only an authoritative fresh result seeds the card and
-    // only an authoritative fresh empty ends the restore — a drifted lookup
-    // must not strand a still-pending question behind a brand-new session.
-    const gated = await restorePendingQuestionWithRealtimeGate(
+    // Authoritative realtime-gated restore (review round 5, issue 1 +
+    // round 6, issue 2 + round 7, issue 1): the global pending-state epoch is
+    // captured before every RPC attempt. Drifted attempts are never seeded
+    // and never reported as authoritative empty — the loop re-queries the
+    // same scope with bounded backoff until a fresh pending or an undrifted
+    // empty lands, so the restore gate (send disabled) stays engaged and a
+    // valid pending question can never be orphaned behind a new session.
+    const outcome = await restorePendingQuestionUntilAuthoritative(
       pendingQuestionGenerationsRef.current,
       () => window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner),
     )
-    if (!gated) return null
+    if (outcome.outcome === 'inconclusive') {
+      // Defensive: unreachable with the default unbounded rounds — treat as
+      // "nothing adopted" rather than fabricating an authoritative empty.
+      return null
+    }
+    if (outcome.outcome === 'empty') return null
 
     // Seed the authoritative request the same way the question_request event
     // path does, so usePendingQuestion(inlineSessionId) resolves and every
     // existing event-driven cleanup keeps working.
-    pendingQuestionGenerationsRef.current.bump(gated.sessionId)
-    setPendingQuestions(prev => setPendingQuestionForSession(prev, gated.sessionId, gated.request))
-    return gated
+    pendingQuestionGenerationsRef.current.bump(outcome.result.sessionId)
+    setPendingQuestions(prev => setPendingQuestionForSession(prev, outcome.result.sessionId, outcome.result.request))
+    return outcome.result
   }, [])
 
   // Centralized link interceptor: classifies file types and decides whether to
