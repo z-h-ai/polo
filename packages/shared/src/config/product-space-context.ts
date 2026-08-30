@@ -11,12 +11,19 @@ export interface VerifiedProductSpaceContextPreference {
   verifiedAt: number
 }
 
+export interface ProductSpaceLegacyCleanupLedgerPreference {
+  completedAt: number
+  results: Record<string, boolean>
+}
+
 export interface ProductSpaceContextStorage {
   verifiedContext?: VerifiedProductSpaceContextPreference
+  legacyCleanup?: ProductSpaceLegacyCleanupLedgerPreference
 }
 
 export interface ProductSpaceContextStoragePatch {
   verifiedContext?: VerifiedProductSpaceContextPreference | null
+  legacyCleanup?: ProductSpaceLegacyCleanupLedgerPreference | null
 }
 
 export type ProductSpaceContextStorageByAccount = Record<

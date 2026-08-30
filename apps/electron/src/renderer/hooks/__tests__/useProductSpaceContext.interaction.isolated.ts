@@ -65,6 +65,8 @@ let productSpaceContextStorage: ProductSpaceContextStorage | null = null
 let cleanupResult: { success: boolean; results: Record<string, boolean> }
 let catalogResult: { success: boolean; errorCode?: string }
 let declaredActiveSpace: string | null | undefined
+let activeContextAckSuccess: boolean
+let cleanupCalls: number
 
 function configureIpc(): void {
   Object.defineProperty(window, 'electronAPI', {
@@ -75,10 +77,14 @@ function configureIpc(): void {
       productSpaceStopAllExecutions: async () => stopAllResult,
       productSpaceGetCatalog: async () => catalogResult,
       productSpaceSetActiveSpace: async (productSpaceId: string | null) => {
+        if (!activeContextAckSuccess) return { success: false }
         declaredActiveSpace = productSpaceId
         return { success: true }
       },
-      productSpaceCleanupLegacyState: async () => cleanupResult,
+      productSpaceCleanupLegacyState: async () => {
+        cleanupCalls += 1
+        return cleanupResult
+      },
       getProductSpaceContextStorage: async () => productSpaceContextStorage,
       updateProductSpaceContextStorage: async (
         _accountId: string,
@@ -122,6 +128,8 @@ beforeEach(() => {
   cleanupResult = { success: true, results: {} }
   catalogResult = { success: true }
   declaredActiveSpace = undefined
+  activeContextAckSuccess = true
+  cleanupCalls = 0
   configureIpc()
 })
 
@@ -384,6 +392,49 @@ describe('useProductSpaceContextState switching', () => {
       result.current.dismissTargetAccessLost()
     })
     expect(result.current.pendingSwitch).toBeNull()
+  })
+})
+
+describe('useProductSpaceContextState trusted commit gate (round 2)', () => {
+  it('never enters the business surface while legacy cleanup keeps failing', async () => {
+    cleanupResult = { success: false, results: { legacyCatalogCacheRemoved: false } }
+    const first = renderHook(useHarness)
+    expect(await boot(first.result)).toBe('error')
+
+    const second = renderHook(useHarness)
+    expect(await boot(second.result)).toBe('error')
+    expect(second.result.current.flowState).toBe('error')
+    expect(second.result.current.activeProductSpaceId).toBeNull()
+
+    cleanupResult = { success: true, results: {} }
+    const third = renderHook(useHarness)
+    expect(await boot(third.result)).toBe('ready')
+    expect(cleanupCalls).toBe(3)
+  })
+
+  it('runs the cleanup once and skips it on later boots via the ledger', async () => {
+    const first = renderHook(useHarness)
+    expect(await boot(first.result)).toBe('ready')
+    expect(cleanupCalls).toBe(1)
+
+    const second = renderHook(useHarness)
+    expect(await boot(second.result)).toBe('ready')
+    expect(cleanupCalls).toBe(1)
+  })
+
+  it('keeps the origin space when the runtime refuses the active-context commit', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    activeContextAckSuccess = false
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    await waitFor(() => {
+      expect(result.current.pendingSwitch?.phase).toBe('target-failed')
+    })
+    expect(result.current.pendingSwitch?.errorCode).toBe('runtime_commit_failed')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(declaredActiveSpace).toBe(personalId)
   })
 })
 

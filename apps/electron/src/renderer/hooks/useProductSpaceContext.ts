@@ -10,8 +10,10 @@ import {
   createProductSpaceContextKey,
   getProductSpaceContextStorage,
   getStoredActiveProductSpaceId,
+  readLegacyCleanupLedger,
   setStoredActiveProductSpaceId,
   setVerifiedProductSpaceContext,
+  writeLegacyCleanupLedger,
 } from '@/lib/product-space-storage'
 
 export type ProductSpaceFlowState =
@@ -132,12 +134,20 @@ export function useProductSpaceContextState() {
     })
   }, [])
 
-  const applySpaceSelection = useCallback((
+  const applySpaceSelection = useCallback(async (
     accountId: string,
     list: ProductSpaceSummary[],
     personalId: string,
     productSpaceId: string,
-  ) => {
+  ): Promise<void> => {
+    // Commit order matters: the Main runtime must acknowledge the new active
+    // space (fence moves first) before any renderer state is published. A
+    // failed ack keeps every piece of state — selection, context key,
+    // runtime scope — inside the origin space.
+    const ack = await window.electronAPI.productSpaceSetActiveSpace(productSpaceId)
+    if (!ack?.success) {
+      throw { code: 'runtime_commit_failed' }
+    }
     setStoredActiveProductSpaceId(accountId, productSpaceId)
     persistVerifiedContext(accountId, list, personalId, productSpaceId)
     activeProductSpaceIdRef.current = productSpaceId
@@ -145,9 +155,6 @@ export function useProductSpaceContextState() {
     setContextVersion(version => version + 1)
     setFlowState('ready')
     setError(null)
-    // The runtime now fences sessions and executions to this space.
-    void window.electronAPI.productSpaceSetActiveSpace(productSpaceId)
-      .catch(() => {})
 
     window.dispatchEvent(new CustomEvent('polo:product-space-changed', {
       detail: {
@@ -237,7 +244,7 @@ export function useProductSpaceContextState() {
       const storedId = getStoredActiveProductSpaceId(accountId)
       const restored = storedId ? availableById.get(storedId) : undefined
       const target = restored && isActiveSpace(restored) ? restored.id : fetched.personalId
-      applySpaceSelection(accountId, fetched.list, fetched.personalId, target)
+      await applySpaceSelection(accountId, fetched.list, fetched.personalId, target)
       return 'ready'
     } catch (caught) {
       if (!isCurrentAccountScope(scope)) return null
@@ -265,7 +272,7 @@ export function useProductSpaceContextState() {
         )
         const target = listed?.id ?? verified.list.personalProductSpaceId
         applyListResponse(verified.list)
-        applySpaceSelection(
+        await applySpaceSelection(
           accountId,
           verified.list.productSpaces,
           verified.list.personalProductSpaceId,
@@ -344,7 +351,14 @@ export function useProductSpaceContextState() {
         switchGenerationRef.current += 1
         pendingTargetRef.current = null
         setPendingSwitch(null)
-        applySpaceSelection(accountId, fetched.list, fetched.personalId, fetched.personalId)
+        try {
+          await applySpaceSelection(accountId, fetched.list, fetched.personalId, fetched.personalId)
+        } catch {
+          // The runtime refused the commit: keep the old space and degrade
+          // safely instead of half-switching.
+          setFlowState('error')
+          return fetched.list
+        }
       }
       return fetched.list
     } catch (caught) {
@@ -412,13 +426,22 @@ export function useProductSpaceContextState() {
     }
   }, [applyListResponse, isCurrentAccountScope, persistVerifiedContext])
 
-  const commitSwitch = useCallback((scope: AccountScope, targetId: string): boolean => {
+  const commitSwitch = useCallback(async (
+    scope: AccountScope,
+    targetId: string,
+  ): Promise<boolean> => {
     const accountId = accountIdRef.current
     if (!accountId || !isCurrentAccountScope(scope)) return false
     const personalId = personalProductSpaceIdRef.current
     if (!personalId) return false
-    applySpaceSelection(accountId, productSpacesRef.current, personalId, targetId)
-    return true
+    try {
+      await applySpaceSelection(accountId, productSpacesRef.current, personalId, targetId)
+      return true
+    } catch {
+      // The runtime commit failed: nothing was published, so the client is
+      // still fully inside the origin space.
+      return false
+    }
   }, [applySpaceSelection, isCurrentAccountScope])
 
   const finishSwitchAfterStop = useCallback(async (
@@ -468,14 +491,14 @@ export function useProductSpaceContextState() {
       ))
       return
     }
-    if (commitSwitch(scope, targetId)) {
+    if (await commitSwitch(scope, targetId)) {
       switchGenerationRef.current += 1
       pendingTargetRef.current = null
       setPendingSwitch(null)
     } else {
       setPendingSwitch(previous => (
         previous && previous.targetId === targetId
-          ? { ...previous, phase: 'target-failed', errorCode: 'product_space_context_unavailable' }
+          ? { ...previous, phase: 'target-failed', errorCode: 'runtime_commit_failed' }
           : previous
       ))
     }

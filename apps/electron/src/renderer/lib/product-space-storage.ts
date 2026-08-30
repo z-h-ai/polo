@@ -9,6 +9,7 @@ import type {
 } from '@polo-ai/shared/product-spaces'
 import type {
   ProductSpaceContextStorage,
+  ProductSpaceLegacyCleanupLedgerPreference,
   VerifiedProductSpaceContextPreference,
 } from '@polo-ai/shared/config/product-space-context'
 
@@ -132,6 +133,42 @@ export async function clearVerifiedProductSpaceContext(
   }).catch(() => {
     // The in-memory selection was already cleared by the caller.
   })
+}
+
+/**
+ * The verifiable one-shot cleanup ledger. A cleanup is only recorded when the
+ * runtime reported success for every step; anything else stays unrecorded so
+ * the next bootstrap retries and keeps failing closed.
+ */
+export async function readLegacyCleanupLedger(
+  accountId: string,
+): Promise<ProductSpaceLegacyCleanupLedgerPreference | null> {
+  try {
+    const stored = await window.electronAPI.getProductSpaceContextStorage(accountId)
+    const ledger = stored?.legacyCleanup ?? null
+    if (ledger && Object.values(ledger.results).every(passed => passed)) {
+      return ledger
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+export async function writeLegacyCleanupLedger(
+  accountId: string,
+  results: Record<string, boolean>,
+): Promise<boolean> {
+  const allPassed = Object.values(results).every(passed => passed)
+  if (!allPassed) return false
+  try {
+    await window.electronAPI.updateProductSpaceContextStorage(accountId, {
+      legacyCleanup: { completedAt: Date.now(), results },
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function createProductSpaceContextKey(

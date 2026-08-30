@@ -30,6 +30,7 @@ import {
   type ProductSpaceContextStorage,
   type ProductSpaceContextStorageByAccount,
   type ProductSpaceContextStoragePatch,
+  type ProductSpaceLegacyCleanupLedgerPreference,
   type VerifiedProductSpaceContextPreference,
 } from './product-space-context.ts';
 export type {
@@ -280,7 +281,8 @@ export function getOrganizationContextStorage(
 export function updateOrganizationContextStorage(
   accountId: string,
   patch: OrganizationContextStoragePatch,
-): OrganizationContextStorage | null {  assertOrganizationContextAccountId(accountId);
+): OrganizationContextStorage | null {
+  assertOrganizationContextAccountId(accountId);
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new Error('Organization context patch is invalid');
   }
@@ -385,6 +387,33 @@ function sanitizeVerifiedProductSpaceContext(
   };
 }
 
+function sanitizeLegacyCleanupLedger(
+  value: unknown,
+): ProductSpaceLegacyCleanupLedgerPreference | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Partial<ProductSpaceLegacyCleanupLedgerPreference>;
+  if (
+    !Number.isSafeInteger(candidate.completedAt)
+    || (candidate.completedAt ?? -1) < 0
+    || !candidate.results
+    || typeof candidate.results !== 'object'
+    || Array.isArray(candidate.results)
+  ) {
+    return undefined;
+  }
+  const results = Object.entries(candidate.results).filter(
+    (entry): entry is [string, boolean] =>
+      typeof entry[0] === 'string' && typeof entry[1] === 'boolean',
+  );
+  if (results.length === 0) return undefined;
+  return {
+    completedAt: candidate.completedAt!,
+    results: Object.fromEntries(results),
+  };
+}
+
 function sanitizeProductSpaceContextStorage(
   value: unknown,
 ): ProductSpaceContextStorage | null {
@@ -395,8 +424,12 @@ function sanitizeProductSpaceContextStorage(
   const verifiedContext = sanitizeVerifiedProductSpaceContext(
     candidate.verifiedContext,
   );
-  return verifiedContext
-    ? { verifiedContext }
+  const legacyCleanup = sanitizeLegacyCleanupLedger(candidate.legacyCleanup);
+  return verifiedContext || legacyCleanup
+    ? {
+        ...(verifiedContext ? { verifiedContext } : {}),
+        ...(legacyCleanup ? { legacyCleanup } : {}),
+      }
     : null;
 }
 
@@ -451,10 +484,20 @@ export function updateProductSpaceContextStorage(
       next.verifiedContext = verified;
     }
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'legacyCleanup')) {
+    if (patch.legacyCleanup === null) {
+      delete next.legacyCleanup;
+    } else {
+      const ledger = sanitizeLegacyCleanupLedger(patch.legacyCleanup);
+      if (!ledger) throw new Error('ProductSpace cleanup ledger is invalid');
+      next.legacyCleanup = ledger;
+    }
+  }
+
   const byAccount = {
     ...(currentPreferences.productSpaceContextStorage ?? {}),
   };
-  if (next.verifiedContext) {
+  if (next.verifiedContext || next.legacyCleanup) {
     Object.defineProperty(byAccount, accountId, {
       configurable: true,
       enumerable: true,
@@ -468,7 +511,7 @@ export function updateProductSpaceContextStorage(
     ...currentPreferences,
     productSpaceContextStorage: byAccount,
   });
-  return next.verifiedContext ? next : null;
+  return next.verifiedContext || next.legacyCleanup ? next : null;
 }
 
 export function getPreferencesPath(): string {

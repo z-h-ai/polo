@@ -2111,6 +2111,21 @@ function invalidateAllCreatorArtifactCaches(): void {
   creatorArtifactOrganizationGenerations.clear()
 }
 
+/**
+ * One-shot direct-switch cleanup step: invalidates every cached creator
+ * artifact / skill view. There is no client-side skill-enablement cache —
+ * enablement state is server-authoritative — so this covers the local skill
+ * caches that do exist.
+ */
+export function clearLegacySkillCaches(): boolean {
+  try {
+    invalidateAllCreatorArtifactCaches()
+    return true
+  } catch {
+    return false
+  }
+}
+
 function invalidateCreatorArtifactCache(userId: string, organizationId?: string): void {
   if (organizationId) {
     // Publication and membership changes alter what every member may see.

@@ -1461,13 +1461,7 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    // The runtime binds the session to the committed ProductSpace at creation
-    // time; the renderer cannot reclassify it later.
-    const scope = productSpaceScopeRef.current
-    const session = await window.electronAPI.createSession(workspaceId, {
-      ...options,
-      productSpaceId: scope.activeId ?? options?.productSpaceId,
-    })
+    const session = await window.electronAPI.createSession(workspaceId, options)
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
@@ -2439,9 +2433,16 @@ export default function App() {
       && loadedSpaceContextVersionRef.current === productSpaceContextValue.contextVersion
     ) return
     loadedSpaceContextVersionRef.current = productSpaceContextValue.contextVersion
+    // A committed switch must not leave any origin-space projection behind:
+    // previews, watchers, pending permission/credential prompts and session
+    // atoms are dropped together with the keyed shell remount.
+    linkInterceptor.closePreview()
+    setPendingPermissions(new Map())
+    setPendingCredentials(new Map())
+    void window.electronAPI.unwatchSessionFiles().catch(() => {})
     setSessionsLoaded(false)
     void loadSessionsFromServer()
-  }, [appState, productSpaceContextValue, loadSessionsFromServer])
+  }, [appState, productSpaceContextValue, loadSessionsFromServer, linkInterceptor.closePreview])
 
   useEffect(() => {
     if (!startupCatalogSpaceId) return
@@ -2706,20 +2707,21 @@ export default function App() {
                 </NavigationProvider>
               )}
               />
+              {/* File preview overlay — lives INSIDE the ProductSpace-keyed
+                  boundary so a committed switch unmounts any origin-space file
+                  preview together with the rest of the origin projection. */}
+              {linkInterceptor.previewState && (
+                <FilePreviewRenderer
+                  state={linkInterceptor.previewState}
+                  onClose={linkInterceptor.closePreview}
+                  loadDataUrl={linkInterceptor.readFileDataUrl}
+                  loadPdfData={linkInterceptor.readFileBinary}
+                  isDark={isDark}
+                />
+              )}
             </TabShellProvider>
             <ProductSpaceSwitchDialog />
           </MaybeProductSpaceProvider>
-
-          {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
-          {linkInterceptor.previewState && (
-            <FilePreviewRenderer
-              state={linkInterceptor.previewState}
-              onClose={linkInterceptor.closePreview}
-              loadDataUrl={linkInterceptor.readFileDataUrl}
-              loadPdfData={linkInterceptor.readFileBinary}
-              isDark={isDark}
-            />
-          )}
         </TooltipProvider>
         </ModalProvider>
         </DismissibleLayerProvider>

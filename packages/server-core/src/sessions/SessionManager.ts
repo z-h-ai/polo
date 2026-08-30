@@ -2799,7 +2799,7 @@ export class SessionManager implements ISessionManager {
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
-      productSpaceId: options?.productSpaceId ?? getRuntimeActiveProductSpace() ?? undefined,
+      productSpaceId: getRuntimeActiveProductSpace() ?? undefined,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -2882,7 +2882,7 @@ export class SessionManager implements ISessionManager {
       workingDirectory: resolvedWorkingDir,
       model: resolvedModel,
       llmConnection: options?.llmConnection,
-      productSpaceId: options?.productSpaceId ?? getRuntimeActiveProductSpace() ?? undefined,
+      productSpaceId: getRuntimeActiveProductSpace() ?? undefined,
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
@@ -7575,6 +7575,17 @@ export class SessionManager implements ISessionManager {
     if (!workspaceId) {
       sessionLog.warn(`Cannot send ${event.type} event - no workspaceId`)
       return
+    }
+
+    // Space fence on the event boundary: while a ProductSpace is committed on
+    // this device, events for sessions bound to another space (or never
+    // bound) never reach any client.
+    const activeProductSpaceId = getRuntimeActiveProductSpace()
+    if (activeProductSpaceId && 'sessionId' in event) {
+      const managed = this.sessions.get(event.sessionId)
+      if (!managed || managed.productSpaceId !== activeProductSpaceId) {
+        return
+      }
     }
 
     this.eventSink(RPC_CHANNELS.sessions.EVENT, { to: 'workspace', workspaceId }, event)

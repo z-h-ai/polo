@@ -214,6 +214,14 @@ mock.module('../../local-app-runtime', () => {
 })
 
 const { registerLocalAppHandlers } = await import('../local-apps')
+const { setTrustedProductSpaceAccountProvider } = await import(
+  '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+)
+const {
+  resetProductSpaceExecutionRegistryForTests: resetExecutionRegistry,
+  setRuntimeActiveProductSpace,
+  listRegisteredProductSpaceExecutions,
+} = await import('@polo-ai/server-core/runtime/product-space-executions')
 
 function createCatalog(count: number): AppCatalogCacheEntry {
   return {
@@ -324,6 +332,29 @@ describe('local app main-process authorization boundary', () => {
       },
     } satisfies RpcServer
     registerLocalAppHandlers(server)
+    setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    setRuntimeActiveProductSpace(null)
+    resetExecutionRegistry()
+  })
+
+  it('registers a restart as a fresh running execution so switching stays blocked', async () => {
+    setRuntimeActiveProductSpace('organization-a')
+    scopedRuntimeStatus.mockImplementation(async item => ({
+      appId: item.catalogAppId,
+      scope: item,
+      status: 'running' as const,
+      currentVersion: 'v1.2.3',
+    }))
+    const restart = handlers.get(RPC_CHANNELS.localApps.RESTART)!
+    await restart(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(1)
+    expect(registered[0]!.scope.productSpaceId as string).toBe('organization-a')
+    expect(registered[0]!.scope.executionId as string).toContain('organization-a')
+    expect(await registered[0]!.isActive()).toBe(true)
   })
 
   it('requests a short-lived download grant for the currently authorized release', async () => {
