@@ -36,6 +36,9 @@ export interface SessionScopedToolCallbacks {
    * Called when the agent requests structured user input via
    * request_user_input. The question UI should be shown and the turn paused.
    * May return a Promise — the tool handler awaits the durable handoff.
+   * `generationAtRequest` is the issuing turn's processing generation,
+   * snapshotted by the agent at tool-call time and carried through (review
+   * fix round 5, issue A).
    */
   onQuestionRequested?: (questions: RequestUserInputQuestionArgs[]) => void | Promise<void>;
 

@@ -179,6 +179,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   }
 
   function makeFakeAgent(): Record<string, unknown> {
+    let stampedGeneration = 0
     return {
       allowRequestUserInput: false,
       chat: async function* () { yield { type: 'complete' as const } },
@@ -193,6 +194,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       interruptForHandoff: () => {},
       forceAbort: () => {},
       respondToPermission: () => {},
+      setSessionTurnGeneration: (generation: number) => { stampedGeneration = generation },
+      get sessionTurnGeneration() { return stampedGeneration },
     }
   }
 
@@ -213,8 +216,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // The callback promise must REJECT on durable-persist failure — the tool
     // handler converts this into an isError result instead of "Waiting".
-    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
-      .handleQuestionRequested(managed, questions)).rejects.toThrow(/NOT paused/)
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, questions, 0)).rejects.toThrow(/NOT paused/)
 
     // Rolled back: the seeded pending question (already on disk) is restored,
     // and no NEW question became active
@@ -232,8 +235,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     const managed = seedSession('f-rel-1', { isProcessing: true, withAgent: true })
     const questions = makeQuestionRequest('f-rel-1').questions
 
-    await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
-      .handleQuestionRequested(managed, questions)
+    await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, questions, 0)
 
     // Pending persisted and notified BEFORE the handoff (Polo-generated id)
     const pendingAfter = sm.getPendingQuestion('f-rel-1')
@@ -613,8 +616,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // FIRST attempt: the single durable commit fails.
     failFlush = true
-    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
-      .handleQuestionRequested(managed, makeQuestionRequest('f-toolact-1').questions)).rejects.toThrow(/NOT paused/)
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, makeQuestionRequest('f-toolact-1').questions, 0)).rejects.toThrow(/NOT paused/)
 
     // FULL rollback: the activity is executing again, no pending, no events,
     // and the disk is consistent (no visible question, activity not completed).
@@ -631,8 +634,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // Retry with a healthy flush: ONE commit makes BOTH durable.
     failFlush = false
-    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown) => Promise<void> })
-      .handleQuestionRequested(managed, makeQuestionRequest('f-toolact-1-retry').questions)).resolves.toBeUndefined()
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, makeQuestionRequest('f-toolact-1-retry').questions, 0)).resolves.toBeUndefined()
 
     expect(toolMsg?.toolStatus).toBe('completed')
     expect(toolMsg?.content).toBe('Waiting for user input')
@@ -759,17 +762,83 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     const answerPromise = sm.respondToQuestion('f-del-1', makeAnswerResolution(request))
     await new Promise(r => setTimeout(r, 30))
 
-    // The session is deleted while the resolution waits.
-    await sm.deleteSession('f-del-1')
+    // The session is deleted while the resolution waits. Deletion sets its
+    // terminal marker SYNCHRONOUSLY at entry, then queues its cleanup behind
+    // the resolution's lock turn.
+    const deletePromise = sm.deleteSession('f-del-1')
+    await new Promise(r => setTimeout(r, 10))
     releaseLock()
 
     expect(await answerPromise).toEqual({ status: 'session_missing' })
+    await deletePromise
 
     // Nothing was persisted back (the storage file stays deleted) and no
     // resolution events were broadcast for the dead session.
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-1'))).toBe(false)
     expect(loadSession(tmpRoot, 'f-del-1')).toBeNull()
     expect(events.filter(e => e.type === 'question_resolved' || e.type === 'user_message')).toHaveLength(0)
+  })
+
+  // ---- Review fix round 5, issue B: the DELETE-START gate. The marker is
+  // established synchronously at the first instant of deletion — a resolution
+  // that was already queued when the delete began observes session_missing,
+  // even though its own lock turn runs BEFORE the delete's cleanup.
+
+  it('a resolution that commits after the deletion STARTED (cleanup not yet run) returns session_missing', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-del-2')
+    seedSession('f-del-2', { pendingQuestion: request })
+
+    // Hold the lock; queue the resolution behind it.
+    let releaseLock!: () => void
+    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
+    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
+      .withQuestionStateLock('f-del-2', () => hungLock)
+
+    const answerPromise = sm.respondToQuestion('f-del-2', makeAnswerResolution(request))
+    await new Promise(r => setTimeout(r, 30))
+
+    // Deletion STARTS: the tombstone is set synchronously, its cleanup queues
+    // behind the resolution's lock turn.
+    const deletePromise = sm.deleteSession('f-del-2')
+    await new Promise(r => setTimeout(r, 30))
+    releaseLock()
+
+    // The resolution commits AFTER deletion started — while the session
+    // object is still registered — and must be fail-closed via the
+    // deleted-tombstone gate, never persisted into the deletion window.
+    expect(await answerPromise).toEqual({ status: 'session_missing' })
+    await deletePromise
+
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-2'))).toBe(false)
+    expect(events.filter(e => e.type === 'question_resolved' || e.type === 'user_message')).toHaveLength(0)
+  })
+
+  // ---- Review fix round 5, issue A: the generation is bound to the callback
+  // CLOSURE at the issuing turn (agent-stamped at tool-call time). A late
+  // callback carrying its ISSUING generation is rejected once a newer turn
+  // claimed the session — even with the tombstone cleared, where the old
+  // execution-time read would have compared the NEW generation against
+  // itself and passed.
+
+  it('a late callback carrying its ISSUING generation is rejected after a newer turn claimed the session', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-tomb-4', {}) as unknown as { processingGeneration: number; questionLifecycleTombstone?: unknown }
+    const issuingGeneration = managed.processingGeneration
+
+    // Turn 1 is stopped, then a NEW turn claims the next generation — the
+    // production turn-start boundary (bump + tombstone clear + agent re-stamp).
+    managed.processingGeneration = issuingGeneration + 1
+    managed.questionLifecycleTombstone = undefined
+
+    // The late generation-N callback executes now. Reading the CURRENT
+    // generation at execution time would compare N+1 against N+1 and pass;
+    // the closure snapshot N must fail the gate.
+    await expect((sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown, g: number) => Promise<void> })
+      .handleQuestionRequested(managed, makeQuestionRequest('f-tomb-4-late').questions, issuingGeneration)).rejects.toThrow(/no longer active/)
+
+    expect(sm.getPendingQuestion('f-tomb-4')).toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
   })
 
   it('answer committed but sendMessage rejects before agent init: error surfaced, state recoverable, retry succeeds (never silent-accepted-stranded)', async () => {
@@ -1267,8 +1336,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
           // same owner (scoped association is intact). Polo regenerates the
           // requestId server-side, so assert on identity + freshness.
           const followUp = makeQuestionRequest('f-reach-identity-2')
-          await (sm2 as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
-            .handleQuestionRequested(managed, followUp.questions)
+          await (sm2 as unknown as { handleQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void> })
+            .handleQuestionRequested(managed, followUp.questions, (managed as unknown as { processingGeneration: number }).processingGeneration)
           const foundAgain = await sm2.getEditPopoverPendingSession('ws_test', OWNER_A)
           expect(foundAgain?.sessionId).toBe('f-reach-identity')
           expect(foundAgain?.request.requestId).toBeDefined()
@@ -1771,8 +1840,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         // The desktop turn asks a question — the stamp must be desktop
         const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-turn-iso')
         const questions = makeQuestionRequest('f-turn-iso').questions
-        await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
-          .handleQuestionRequested(managed, questions)
+        await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void> })
+          .handleQuestionRequested(managed, questions, (managed as unknown as { processingGeneration: number }).processingGeneration)
         const stamped = sm.getPendingQuestion('f-turn-iso')
         expect(stamped?.invocationSource).toBe('desktop')
 
@@ -1861,8 +1930,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         await waitForCondition(() => chatInvocations === 1)
         const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-atomic-1')
         const questions = makeQuestionRequest('f-atomic-1').questions
-        await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
-          .handleQuestionRequested(managed, questions)
+        await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void> })
+          .handleQuestionRequested(managed, questions, (managed as unknown as { processingGeneration: number }).processingGeneration)
         expect(sm.getPendingQuestion('f-atomic-1')?.invocationSource).toBe('desktop')
 
         // Release the chat — the desktop turn completes and the queued

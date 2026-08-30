@@ -1714,7 +1714,10 @@ export class PiAgent extends BaseAgent {
       },
       onQuestionRequested: (questions) => {
         this.onDebug?.(`[PiAgent] onQuestionRequested received: ${questions.length} question(s)`);
-        return this.onQuestionRequested?.(questions);
+        // GENERATION SNAPSHOT (review fix round 5, issue A): stamp the
+        // issuing turn's generation here — synchronously with the tool
+        // handler chain — never re-read at late execution time.
+        return this.onQuestionRequested?.(questions, this.sessionTurnGeneration);
       },
     });
 
@@ -2211,7 +2214,7 @@ export class PiAgent extends BaseAgent {
       mergeSessionScopedToolCallbacks(sessionId, {
         onPlanSubmitted: (planPath) => this.onPlanSubmitted?.(planPath),
         onAuthRequest: (request) => this.onAuthRequest?.(request),
-        onQuestionRequested: (questions) => this.onQuestionRequested?.(questions),
+        onQuestionRequested: (questions) => this.onQuestionRequested?.(questions, this.sessionTurnGeneration),
         queryFn: (request) => this.queryLlm(request),
       });
     }

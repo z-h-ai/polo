@@ -265,7 +265,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
           if (attempts <= 2) throw new Error('IPC temporarily unavailable (injected)')
           return found('session-recovered')
         },
-        backoffMs: () => 5,
+        backoffMs: () => 25,
       }),
     }) as unknown as HookRender
 
@@ -293,7 +293,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
           if (attempts <= 2) return { outcome: 'transient' as const, message: 'session listing failed' }
           return emptyOutcome
         },
-        backoffMs: () => 5,
+        backoffMs: () => 25,
       }),
     }) as unknown as HookRender
 

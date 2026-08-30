@@ -162,6 +162,7 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
   }
 
   function makeFakeAgent(): Record<string, unknown> {
+    let stampedGeneration = 0
     return {
       allowRequestUserInput: false,
       chat: async function* () { yield { type: 'complete' as const } },
@@ -176,6 +177,8 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
       interruptForHandoff: () => {},
       forceAbort: () => {},
       respondToPermission: () => {},
+      setSessionTurnGeneration: (generation: number) => { stampedGeneration = generation },
+      get sessionTurnGeneration() { return stampedGeneration },
     }
   }
 
@@ -226,8 +229,8 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
     // shape production uses (agent callback → SessionManager handoff).
     const { handleRequestUserInput } = await import('@polo-ai/session-tools-core')
     const ctx = makeToolContext((qs: unknown[]) =>
-      (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
-        .handleQuestionRequested(managed, qs),
+      (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void> })
+        .handleQuestionRequested(managed, qs, (managed as unknown as { processingGeneration: number }).processingGeneration),
     )
 
     const result = await handleRequestUserInput(ctx, { questions })
@@ -255,8 +258,8 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
     let handoffDone = false
     const ctx = makeToolContext(async (qs: unknown[]) => {
       await gate
-      await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
-        .handleQuestionRequested(managed, qs)
+      await (sm as unknown as { handleQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void> })
+        .handleQuestionRequested(managed, qs, (managed as unknown as { processingGeneration: number }).processingGeneration)
       handoffDone = true
     })
 
@@ -342,6 +345,7 @@ describe('request_user_input race + fault coverage (restored from b5bd957f)', ()
       const chatInvocationsForThisAgent = ++chatInvocations
       return {
         allowRequestUserInput: false,
+        setSessionTurnGeneration: () => {},
         getModel: () => 'fake-model',
         getSessionId: () => null,
         isProcessing: () => false,

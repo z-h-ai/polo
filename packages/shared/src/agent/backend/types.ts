@@ -102,7 +102,9 @@ export type AuthCallback = (request: AuthRequest) => void;
  * the tool handler so failures surface as tool errors.
  */
 export type QuestionRequestedCallback = (
-  questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]
+  questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+  /** The issuing turn's processing generation, stamped by the agent at tool-call time. */
+  generationAtRequest: number
 ) => void | Promise<void>;
 
 /**
@@ -496,6 +498,14 @@ export interface AgentBackend {
 
   /** Set permission mode */
   setPermissionMode(mode: PermissionMode): void;
+
+  /**
+   * Stamp the processing generation of the turn this agent is currently
+   * processing — called by the SessionManager at every turn start (and after
+   * agent creation) so request_user_input callbacks carry their issuing
+   * turn's generation (review fix round 5, issue A).
+   */
+  setSessionTurnGeneration(generation: number): void;
 
   /** Cycle to next permission mode */
   cyclePermissionMode(): PermissionMode;

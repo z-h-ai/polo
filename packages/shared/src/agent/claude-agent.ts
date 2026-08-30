@@ -667,7 +667,11 @@ export class ClaudeAgent extends BaseAgent {
       },
       onQuestionRequested: (questions) => {
         this.onDebug?.(`[ClaudeAgent] onQuestionRequested received: ${questions.length} question(s)`);
-        return this.onQuestionRequested?.(questions);
+        // GENERATION SNAPSHOT (review fix round 5, issue A): this arrow runs
+        // synchronously within the issuing turn's tool-handler chain — stamp
+        // the generation HERE so the value travels with the callback and is
+        // never re-read at late execution time.
+        return this.onQuestionRequested?.(questions, this.sessionTurnGeneration);
       },
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),

@@ -268,7 +268,9 @@ export function getSessionScopedTools(
       },
       onQuestionRequested: (questions) => {
         // Propagate the promise: the tool handler awaits the durable handoff
-        // (persist+flush+question_request) before reporting success.
+        // (persist+flush+question_request) before reporting success. The
+        // issuing turn's generation is stamped by the agent's registry
+        // registration (tool-call time), not here.
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         return callbacks?.onQuestionRequested?.(questions);
       },

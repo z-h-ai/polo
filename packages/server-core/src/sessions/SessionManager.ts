@@ -934,7 +934,7 @@ interface ManagedSession {
    * only originate from a live agent object in this process; after a restart
    * hydration re-derives authority from the (cleared) persisted state.
    */
-  questionLifecycleTombstone?: { reason: 'stopped' | 'archived'; at: number }
+  questionLifecycleTombstone?: { reason: 'stopped' | 'archived' | 'deleted'; at: number }
   /**
    * Synchronous turn-start reservation (review round 5, issue 2). Set at
    * sendMessage entry — BEFORE any await — by the caller that claimed the
@@ -3175,14 +3175,14 @@ export class SessionManager implements ISessionManager {
         managed,
         workspaceRootPath: managed.workspace.rootPath,
         sessionId: managed.id,
-        deleteFromRuntimeSessions: (id) => {
-          const m = this.sessions.get(id)
-          if (m?.autoRetryTimer) {
-            clearTimeout(m.autoRetryTimer)
-            m.autoRetryTimer = undefined
+        deleteFromRuntimeSessions: (orphanId) => {
+          const orphan = this.sessions.get(orphanId)
+          if (orphan?.autoRetryTimer) {
+            clearTimeout(orphan.autoRetryTimer)
+            orphan.autoRetryTimer = undefined
           }
-          if (m) m.autoRetryPending = undefined
-          this.sessions.delete(id)
+          if (orphan) orphan.autoRetryPending = undefined
+          this.sessions.delete(orphanId)
         },
         deleteStoredSession: (rootPath, id) => this.sessionStorage.delete(rootPath, id),
       })
@@ -4316,10 +4316,13 @@ export class SessionManager implements ISessionManager {
       // The returned promise is AWAITED by the tool handler — the request_user_input
       // tool only reports "waiting" success once the durable handoff completed;
       // a rejection surfaces to the model as a tool error instead.
-      // The dispatch-time generation snapshot lets the locked commit reject a
-      // callback whose turn was stopped/superseded while it waited (review fix
-      // round 3, issue A).
-      managed.agent.onQuestionRequested = (questions) => this.handleQuestionRequested(managed, questions, managed.processingGeneration)
+      // GENERATION BINDING (review fix round 5, issue A): the generation is
+      // snapshotted by the AGENT at tool-call time (setSessionTurnGeneration,
+      // stamped at every turn start) and carried through the callback — the
+      // locked commit validates that closure snapshot, never the CURRENT
+      // generation at late execution time.
+      managed.agent.setSessionTurnGeneration(managed.processingGeneration)
+      managed.agent.onQuestionRequested = (questions, generationAtRequest) => this.handleQuestionRequested(managed, questions, generationAtRequest)
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls
       managed.agent.onSpawnSession = async (request) => {
@@ -5751,6 +5754,25 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    // DELETE START GATE (review fix round 5, issue B): the tombstone is
+    // established SYNCHRONOUSLY at the first instant of deletion — before any
+    // await — so every later resolution and question request is fail-closed
+    // for the entire deletion window (abort wait, share revoke, storage
+    // removal): resolutions observe `session_missing` via the locked commit's
+    // deleted-tombstone check, and question requests are rejected by the
+    // tombstone gate. (The question-state lock serializes the marker with any
+    // in-flight commit; the gate itself must not wait behind queued work —
+    // an equivalent fail-closed gate per the fix contract.)
+    managed.questionLifecycleTombstone = { reason: 'deleted', at: Date.now() }
+    // The final removal runs under the question-state lock: an in-flight
+    // question commit that started before deletion settles FIRST, so its
+    // flush can never re-create the storage directory after deletion.
+    await this.withQuestionStateLock(sessionId, () => this.deleteSessionLocked(managed))
+  }
+
+  private async deleteSessionLocked(managed: ManagedSession): Promise<void> {
+    const sessionId = managed.id
+
     // Immediately disarm any answer→resume retry — synchronously, BEFORE the
     // abort wait / share-revoke window. Until removal the identity guard
     // (`sessions.get(id) === managed`) still holds, so a live timer could
@@ -6172,6 +6194,11 @@ export class SessionManager implements ISessionManager {
         // tombstone no longer applies to this generation (review fix round 3,
         // issue A).
         managed.questionLifecycleTombstone = undefined
+        // GENERATION BINDING (review fix round 5, issue A): stamp the agent
+        // with the claiming generation so request_user_input callbacks carry
+        // their ISSUING turn's generation (snapshotted at tool-call time),
+        // not whatever generation happens to be active at late execution.
+        managed.agent?.setSessionTurnGeneration(managed.processingGeneration)
         managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
       // The turn has claimed its processing generation — the reservation is
       // consumed; isProcessing now gates subsequent callers.
@@ -6240,6 +6267,12 @@ export class SessionManager implements ISessionManager {
       // ensureFreshToken mirrors the disk write to source.config in-memory).
       agent = await this.getOrCreateAgent(managed)
       sendSpan.mark('agent.ready')
+
+      // GENERATION BINDING (review fix round 5, issue A): a freshly created
+      // agent must carry the CURRENT turn's generation (the bump happened at
+      // the turn-start boundary, before this creation); later turns re-stamp
+      // there when the agent already exists.
+      agent.setSessionTurnGeneration(managed.processingGeneration)
 
       // Re-apply the per-turn capability flag — a freshly created agent defaults
       // to false, so desktop turns must set it after creation as well. The
@@ -7174,7 +7207,7 @@ export class SessionManager implements ISessionManager {
   private async handleQuestionRequested(
     managed: ManagedSession,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
-    generationAtRequest?: number,
+    generationAtRequest: number,
   ): Promise<void> {
     // Serialized behind the session's question-state lock (review fix round 2,
     // issue 1): a tool-requested replacement must never interleave with a
@@ -7182,13 +7215,14 @@ export class SessionManager implements ISessionManager {
     // enqueued its cleared snapshot could later flush it OVER a question that
     // legitimately replaced the pending state.
     //
-    // GENERATION SNAPSHOT (review fix round 3, issue A): the asking turn's
-    // processing generation is captured at DISPATCH — a callback that queues
-    // behind the lock is validated against this snapshot once the lock is
-    // held, so a request whose turn was stopped/superseded while waiting is
-    // rejected instead of resurrecting a question.
+    // GENERATION BINDING (review fix round 5, issue A): `generationAtRequest`
+    // is snapshotted by the agent AT TOOL-CALL TIME and carried through the
+    // callback closure — the locked commit validates it against the current
+    // generation. Reading the current generation at execution time (the old
+    // shape) was a no-op gate: a callback late enough to execute after the
+    // next turn started would read the NEW generation and pass.
     await this.withQuestionStateLock(managed.id, () =>
-      this.handleQuestionRequestedLocked(managed, questions, generationAtRequest ?? managed.processingGeneration),
+      this.handleQuestionRequestedLocked(managed, questions, generationAtRequest),
     )
   }
 
@@ -7648,6 +7682,14 @@ export class SessionManager implements ISessionManager {
     // broadcasting anything.
     if (this.sessions.get(sessionId) !== managed) {
       sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} rejected: the session was deleted or replaced while the resolution waited`)
+      return { result: { status: 'session_missing' }, resume: false }
+    }
+    // DELETE START GATE (review fix round 5, issue B): deletion established
+    // its terminal marker synchronously at entry — a resolution that queued
+    // before the delete but commits after it must observe session_missing,
+    // never persist into the deletion window.
+    if (managed.questionLifecycleTombstone?.reason === 'deleted') {
+      sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} rejected: the session is being deleted`)
       return { result: { status: 'session_missing' }, resume: false }
     }
 
