@@ -79,6 +79,8 @@ const server: RpcServer = {
     return []
   },
 }
+const skillsBoundarySpace = 'skills-boundary-space'
+
 const deps = {
   sessionManager: {
     getWorkspaces: () => workspaceOrder,
@@ -88,15 +90,21 @@ const deps = {
             id: sessionId,
             workspaceId: sessionWorkspaceId,
             workingDirectory: sessionWorkingDirectory,
+            productSpaceId: skillsBoundarySpace,
           }
         : requestedSessionId === secondSessionId
           ? {
               id: secondSessionId,
               workspaceId: workspaceOne.id,
               workingDirectory: secondSessionWorkingDirectory,
+              productSpaceId: skillsBoundarySpace,
             }
         : null
     ),
+    getSessions: () => [
+      { id: sessionId, productSpaceId: skillsBoundarySpace, isProcessing: false },
+      { id: secondSessionId, productSpaceId: skillsBoundarySpace, isProcessing: false },
+    ],
     setActiveViewingSession() {},
   },
   oauthFlowStore: {},
@@ -155,7 +163,10 @@ const installInput = {
   },
 }
 
+const { setRuntimeActiveProductSpace } = await import('../../runtime/product-space-executions')
+
 beforeEach(async () => {
+  setRuntimeActiveProductSpace(skillsBoundarySpace)
   clearClientActiveSession(ctx.clientId)
   sessionWorkspaceId = workspaceOne.id
   sessionWorkingDirectory = undefined

@@ -1142,6 +1142,8 @@
   "productSpace.role.member": "メンバー",
   "productSpace.role.owner": "オーナー",
   "productSpace.role.personal": "個人",
+  "productSpace.rollback.button": "前のスペースに戻る",
+  "productSpace.rollback.failed": "前のスペースに戻れませんでした。安全なエラー画面を表示しています。",
   "productSpace.switch.cancel": "切り替えをキャンセル",
   "productSpace.switch.currentSpaceNote": "現在も {{name}} にいます",
   "productSpace.switch.failedDesc": "失敗した項目を再試行するか、切り替えをキャンセルしてください",

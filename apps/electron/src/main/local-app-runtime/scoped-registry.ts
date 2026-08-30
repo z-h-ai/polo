@@ -308,6 +308,15 @@ export class ScopedLocalAppRuntimeRegistry {
     )
   }
 
+  /**
+   * Enumerates every persisted catalog scope on this device regardless of
+   * account. Used by the one-shot legacy direct-switch cleanup so stale
+   * installation/runtime state cannot survive it.
+   */
+  async listAllCatalogScopes(): Promise<CatalogLocalAppScope[]> {
+    return this.readPersistedScopes({})
+  }
+
   async getInstalledApps(
     scope: CatalogLocalAppScope,
   ): Promise<LocalAppInstalledApp[]> {

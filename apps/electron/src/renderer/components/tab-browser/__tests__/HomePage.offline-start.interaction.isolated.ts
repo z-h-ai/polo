@@ -148,13 +148,31 @@ beforeEach(async () => {
         else if (patch.verifiedContext) {
           next.verifiedContext = patch.verifiedContext
         }
+        if (patch.legacyCleanup === null) delete next.legacyCleanup
+        else if (patch.legacyCleanup) {
+          next.legacyCleanup = patch.legacyCleanup
+        }
         productSpaceContextStorage = next
         return next
       },
-      productSpaceSetActiveSpace: async () => ({ success: true }),
+      productSpaceExecuteSwitch: async (targetProductSpaceId: string) => ({
+        success: true as const,
+        from: null,
+        to: targetProductSpaceId,
+        executions: [],
+      }),
+      productSpaceRevokeActiveContext: async () => ({ success: true }),
       productSpaceCleanupLegacyState: async () => ({
         success: true,
-        results: {},
+        results: {
+          legacyRuntimeStopped: true,
+          registeredExecutionsStopped: true,
+          legacySessionIndexRemoved: true,
+          legacyInstallationStateRemoved: true,
+          legacyCatalogCacheRemoved: true,
+          legacySkillCachesRemoved: true,
+          legacyAuthorizationCacheRemoved: true,
+        },
       }),
       productSpaceGetCatalog: async () => ({
         success: true as const,

@@ -1142,6 +1142,8 @@
   "productSpace.role.member": "Tag",
   "productSpace.role.owner": "Tulajdonos",
   "productSpace.role.personal": "Személyes",
+  "productSpace.rollback.button": "Visszatérés az előző teremre",
+  "productSpace.rollback.failed": "Nem sikerült visszatérni az előző térre. A biztonsagos hibaoldal marad.",
   "productSpace.switch.cancel": "Váltás megszakítása",
   "productSpace.switch.currentSpaceNote": "Még mindig itt: {{name}}",
   "productSpace.switch.failedDesc": "Próbáld újra a sikertelen elemeket, vagy szakítsd meg a váltást",

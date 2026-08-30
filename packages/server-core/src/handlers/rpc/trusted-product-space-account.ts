@@ -21,3 +21,35 @@ export async function resolveTrustedProductSpaceAccountId(): Promise<string | nu
     return null
   }
 }
+
+export interface TrustedProductSpaceListSnapshot {
+  personalProductSpaceId: string
+  productSpaces: Array<{
+    id: string
+    kind: 'personal' | 'enterprise'
+    name: string
+    accessMode: 'active' | 'read_only'
+  }>
+}
+
+export type TrustedProductSpaceListFetcher = () => Promise<TrustedProductSpaceListSnapshot | null>
+
+let listFetcher: TrustedProductSpaceListFetcher | null = null
+
+/**
+ * Fetches the account's visible ProductSpaces from the trusted Admin API
+ * (contract-validated). Installed by the admin handler module; used by the
+ * Main-side switch transaction to verify the target space.
+ */
+export function setTrustedProductSpaceListFetcher(next: TrustedProductSpaceListFetcher): void {
+  listFetcher = next
+}
+
+export async function fetchTrustedProductSpaceList(): Promise<TrustedProductSpaceListSnapshot | null> {
+  if (!listFetcher) return null
+  try {
+    return await listFetcher()
+  } catch {
+    return null
+  }
+}

@@ -66,58 +66,65 @@ export async function drainExecutionUntilTerminal(
   return false
 }
 
-/**
- * Stops one execution and confirms its terminal outcome. An explicit stop
- * failure is terminal for the attempt (no point draining a runtime that
- * refused to stop); a claimed stop is still verified via the liveness probe.
- */
-export async function stopAndDrainExecution(
-  execution: RegisteredProductSpaceExecution,
-  deadline: number,
-): Promise<boolean> {
-  let outcome: ExecutionStopOutcome
-  try {
-    outcome = await execution.stop()
-  } catch {
-    outcome = 'failed'
-  }
-  if (outcome === 'failed') return false
-  return drainExecutionUntilTerminal(execution, deadline)
+export interface ExecutionStopResult {
+  executionId: string
+  status: 'stopped' | 'failed'
+  errorCode?: string
 }
 
 /**
- * Stops every registered execution regardless of space. Used by the one-shot
- * legacy direct-switch cleanup. Stop requests are dispatched concurrently and
- * terminal outcomes are awaited with bounded concurrency under one shared
- * deadline. Executions that fail to reach a terminal state stay registered so
- * a retry can stop them; only confirmed-terminal entries are removed.
+ * Stops the given registered executions. Each execution receives exactly ONE
+ * stop request (dispatched concurrently); the bounded workers only poll
+ * liveness until a terminal outcome under one shared deadline. Confirmed
+ * terminal executions are unregistered; failures stay registered for retry.
  */
-export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
-  ok: boolean
-  failedExecutionIds: string[]
-}> {
-  const entries = [...registry.values()]
-  // Dispatch every stop request concurrently.
+export async function stopRegisteredExecutionsOnce(
+  entries: RegisteredProductSpaceExecution[],
+): Promise<ExecutionStopResult[]> {
+  if (entries.length === 0) return []
+  const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
+
+  // One stop request per execution, dispatched concurrently.
   await Promise.allSettled(
     entries.map(entry => entry.stop().catch(() => undefined)),
   )
 
-  const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
-  const failedExecutionIds: string[] = []
+  const results: ExecutionStopResult[] = []
   let index = 0
   const workerCount = Math.min(EXECUTION_STOP_DRAIN_CONCURRENCY, entries.length)
   const workers = Array.from({ length: workerCount }, async () => {
     while (index < entries.length) {
       const entry = entries[index++]!
-      const terminal = await stopAndDrainExecution(entry, deadline)
+      const terminal = await drainExecutionUntilTerminal(entry, deadline)
       if (terminal) {
         registry.delete(entry.scope.executionId)
+        results.push({ executionId: entry.scope.executionId, status: 'stopped' })
       } else {
-        failedExecutionIds.push(entry.scope.executionId)
+        results.push({
+          executionId: entry.scope.executionId,
+          status: 'failed',
+          errorCode: 'runtime_stop_failed',
+        })
       }
     }
   })
   await Promise.all(workers)
+  return results
+}
+
+/**
+ * Stops every registered execution regardless of space. Used by the one-shot
+ * legacy direct-switch cleanup. Executions that fail to reach a terminal
+ * state stay registered so a retry can stop them.
+ */
+export async function stopAllRegisteredProductSpaceExecutions(): Promise<{
+  ok: boolean
+  failedExecutionIds: string[]
+}> {
+  const results = await stopRegisteredExecutionsOnce([...registry.values()])
+  const failedExecutionIds = results
+    .filter(result => result.status === 'failed')
+    .map(result => result.executionId)
   return { ok: failedExecutionIds.length === 0, failedExecutionIds }
 }
 
@@ -126,10 +133,10 @@ export function resetProductSpaceExecutionRegistryForTests(): void {
 }
 
 /**
- * The device's currently committed ProductSpace, declared by the trusted
- * client through the switch transaction. While set, the runtime hides
- * sessions and rejects session operations bound to another space; nothing
- * can be re-classified from the renderer side after creation.
+ * The device's currently committed ProductSpace, maintained exclusively by
+ * the Main-side switch transaction (never by renderer RPC). While set, the
+ * runtime hides sessions and rejects session operations bound to another
+ * space; nothing can be re-classified from the renderer side after creation.
  */
 let runtimeActiveProductSpaceId: string | null = null
 
@@ -139,4 +146,40 @@ export function setRuntimeActiveProductSpace(productSpaceId: string | null): voi
 
 export function getRuntimeActiveProductSpace(): string | null {
   return runtimeActiveProductSpaceId
+}
+
+/**
+ * Serializes Main-side switch transactions. Running-item checks, new-start
+ * blocking, termination, target verification and the fence commit all run
+ * inside this lock so no interleaved registration can slip between
+ * enumeration and commit.
+ */
+let switchLockTail: Promise<unknown> = Promise.resolve()
+
+export async function withSwitchLock<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = switchLockTail
+  let release!: () => void
+  switchLockTail = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await previous.catch(() => {})
+  try {
+    return await operation()
+  } finally {
+    release()
+  }
+}
+
+/**
+ * While a switch transaction is in flight, every path that could move an
+ * execution into running/preparing must refuse to start.
+ */
+let switchInProgress = false
+
+export function setSwitchInProgress(inProgress: boolean): void {
+  switchInProgress = inProgress
+}
+
+export function isSwitchInProgress(): boolean {
+  return switchInProgress
 }

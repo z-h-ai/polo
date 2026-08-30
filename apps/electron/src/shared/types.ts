@@ -948,7 +948,25 @@ export interface ElectronAPI {
       catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
     }
   >
-  productSpaceSetActiveSpace(productSpaceId: string | null): Promise<{ success: boolean }>
+  productSpaceExecuteSwitch(
+    targetProductSpaceId: string,
+  ): Promise<
+    | {
+      success: true
+      from: string | null
+      to: string
+      executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+    }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      from?: string | null
+      to?: string
+      executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceRevokeActiveContext(): Promise<{ success: boolean }>
   productSpaceCleanupLegacyState(): Promise<{
     success: boolean
     results: Record<string, boolean>

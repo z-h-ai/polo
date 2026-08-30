@@ -112,6 +112,8 @@ type SessionListRefreshOptions = {
 }
 
 const SESSION_REFRESH_LOG_ID_LIMIT = 25
+/** Window in which a failed post-switch load can roll back to the origin space. */
+const ROLLBACK_WINDOW_MS = 120_000
 
 function summarizeIds(ids: Iterable<string>, limit = SESSION_REFRESH_LOG_ID_LIMIT) {
   const all = Array.from(ids)
@@ -264,9 +266,11 @@ function handleBackgroundTaskEvent(
 function SessionLoadErrorScreen({
   message,
   onRetry,
+  onRollback,
 }: {
   message: string
   onRetry: () => void
+  onRollback?: () => void
 }) {
   const { t } = useTranslation()
 
@@ -287,6 +291,16 @@ function SessionLoadErrorScreen({
         >
           {t("errors.retryLoadingSessions")}
         </button>
+        {onRollback ? (
+          <button
+            type="button"
+            data-testid="product-space-rollback"
+            onClick={onRollback}
+            className="mt-2 block w-full text-sm text-foreground/60 underline-offset-2 hover:underline"
+          >
+            {t("productSpace.rollback.button")}
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -2425,6 +2439,8 @@ export default function App() {
   // A committed space switch remounts the whole shell through the context key
   // and reloads the session list so only target-space history is visible.
   const loadedSpaceContextVersionRef = useRef<number | null>(null)
+  const previousActiveSpaceRef = useRef<string | null>(null)
+  const lastCommittedSwitchRef = useRef<{ from: string; to: string; at: number } | null>(null)
   useEffect(() => {
     if (appState !== 'ready') return
     if (!productSpaceContextValue) return
@@ -2432,6 +2448,19 @@ export default function App() {
       loadedSpaceContextVersionRef.current !== null
       && loadedSpaceContextVersionRef.current === productSpaceContextValue.contextVersion
     ) return
+    const fromSpace = previousActiveSpaceRef.current
+    previousActiveSpaceRef.current = productSpaceContextValue.activeProductSpaceId
+    if (
+      fromSpace
+      && fromSpace !== productSpaceContextValue.activeProductSpaceId
+      && productSpace.flowState === 'ready'
+    ) {
+      lastCommittedSwitchRef.current = {
+        from: fromSpace,
+        to: productSpaceContextValue.activeProductSpaceId,
+        at: Date.now(),
+      }
+    }
     loadedSpaceContextVersionRef.current = productSpaceContextValue.contextVersion
     // A committed switch must not leave any origin-space projection behind:
     // previews, watchers, pending permission/credential prompts and session
@@ -2637,6 +2666,20 @@ export default function App() {
   // Show splash until exit animation completes
   const showSplash = !splashHidden
 
+  // PC-F11 at runtime: if the ProductSpace contract became unsupported while
+  // the shell was open, the hook has already revoked the Main fence and torn
+  // down its context; the contract gate is the only allowed surface.
+  if (appState === 'ready' && productSpace.flowState === 'contract-blocked') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <ProductSpaceContractGate />
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
   // Ready state - main app with splash overlay during data loading
   return (
     <PlatformProvider actions={platformActions}>
@@ -2688,6 +2731,26 @@ export default function App() {
                         <SessionLoadErrorScreen
                           message={sessionLoadError}
                           onRetry={() => { void loadSessionsFromServer() }}
+                          onRollback={
+                            lastCommittedSwitchRef.current
+                              && Date.now() - lastCommittedSwitchRef.current.at < ROLLBACK_WINDOW_MS
+                              ? () => {
+                                const entry = lastCommittedSwitchRef.current
+                                if (!entry) return
+                                void window.electronAPI.productSpaceExecuteSwitch(entry.from)
+                                  .then(result => {
+                                    if (!result.success) throw { code: result.errorCode }
+                                    lastCommittedSwitchRef.current = null
+                                    setSessionLoadError(null)
+                                    setSessionsLoaded(false)
+                                    void loadSessionsFromServer()
+                                  })
+                                  .catch(() => {
+                                    toast.error(t('productSpace.rollback.failed'))
+                                  })
+                              }
+                              : undefined
+                          }
                         />
                       ) : (
                         <AppShell

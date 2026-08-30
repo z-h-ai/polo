@@ -1142,6 +1142,8 @@
   "productSpace.role.member": "Member",
   "productSpace.role.owner": "Owner",
   "productSpace.role.personal": "个人",
+  "productSpace.rollback.button": "返回原空间",
+  "productSpace.rollback.failed": "未能返回原空间，当前仍停留在安全错误页。",
   "productSpace.switch.cancel": "取消切换",
   "productSpace.switch.currentSpaceNote": "当前仍在{{name}}",
   "productSpace.switch.failedDesc": "重试失败项或取消切换",

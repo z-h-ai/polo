@@ -18,28 +18,35 @@ import { clearAllOrganizationContextStorage } from '@polo-ai/shared/config'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
-  stopAndDrainExecution,
-  EXECUTION_STOP_DRAIN_CONCURRENCY,
-  EXECUTION_STOP_DRAIN_TIMEOUT_MS,
   EXECUTION_STOP_POLL_INTERVAL_MS,
   getRuntimeActiveProductSpace,
+  isSwitchInProgress,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   setRuntimeActiveProductSpace,
+  setSwitchInProgress,
   stopAllRegisteredProductSpaceExecutions,
-  unregisterProductSpaceExecution,
+  stopRegisteredExecutionsOnce,
+  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '../../runtime/product-space-executions'
 import { runLegacyLocalAppCleaner } from '../../runtime/legacy-state-cleaners'
 import { clearLegacySkillCaches } from './admin'
-import { resolveTrustedProductSpaceAccountId } from './trusted-product-space-account'
+import {
+  fetchTrustedProductSpaceList,
+  resolveTrustedProductSpaceAccountId,
+} from './trusted-product-space-account'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
-  RPC_CHANNELS.productSpace.SET_ACTIVE_CONTEXT,
+  RPC_CHANNELS.productSpace.EXECUTE_SWITCH,
+  RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT,
   RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE,
 ] as const
+
+/** Stable business-RPC error for an uncommitted (null) runtime fence. */
+export const PRODUCT_SPACE_CONTEXT_REQUIRED = 'PRODUCT_SPACE_CONTEXT_REQUIRED'
 
 const EXECUTION_ID_SCHEMA = ExecutionIdSchema
 const WORKER_POLL_INTERVAL_MS = EXECUTION_STOP_POLL_INTERVAL_MS
@@ -107,7 +114,7 @@ async function resolveTrustedExecutionRequest(
   if (!activeProductSpaceId) {
     return {
       success: false,
-      errorCode: 'FORBIDDEN',
+      errorCode: PRODUCT_SPACE_CONTEXT_REQUIRED,
       message: 'No committed ProductSpace is active on this device',
     }
   }
@@ -187,39 +194,26 @@ export async function stopAllProductSpaceExecutions(input: {
     return { allStopped: true, executions: [] }
   }
 
+  // One stop request per execution, dispatched concurrently; bounded workers
+  // only poll liveness until a terminal outcome under one shared deadline.
   const registeredById = new Map(
     listRegisteredProductSpaceExecutions().map(execution => [
       execution.scope.executionId,
       execution,
     ]),
   )
-
-  // Dispatch every stop request concurrently, then confirm terminal outcomes
-  // with bounded concurrency under one shared deadline.
   const targets = active.map(execution => ({
     execution,
     registered: registeredById.get(execution.executionId),
   }))
-  const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
-  const outcomeById = new Map<string, ExecutionSummary['status']>()
-  let index = 0
-  const workerCount = Math.min(EXECUTION_STOP_DRAIN_CONCURRENCY, targets.length)
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (index < targets.length) {
-      const target = targets[index++]!
-      const { execution, registered } = target
-      if (!registered) {
-        outcomeById.set(execution.executionId, 'failed')
-        continue
-      }
-      const terminal = await stopAndDrainExecution(registered, deadline)
-      outcomeById.set(execution.executionId, terminal ? 'stopped' : 'failed')
-      // Confirmed-terminal entries leave the registry; a failed entry stays
-      // registered so a retry can stop it again.
-      if (terminal) unregisterProductSpaceExecution(execution.executionId)
-    }
-  })
-  await Promise.all(workers)
+  const stopResults = await stopRegisteredExecutionsOnce(
+    targets.map(target => target.registered).filter(
+      (registered): registered is RegisteredProductSpaceExecution => Boolean(registered),
+    ),
+  )
+  const outcomeById = new Map(
+    stopResults.map(result => [result.executionId, result.status]),
+  )
 
   const summaries: ExecutionSummary[] = active.map(execution => {
     const status = outcomeById.get(execution.executionId) ?? 'failed'
@@ -277,7 +271,7 @@ export async function registerAssistantSessionExecution(input: {
     },
     stop: async () => {
       await input.sessionManager.cancelProcessing(input.sessionId, true)
-      const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
+      const deadline = Date.now() + 10_000
       while (Date.now() < deadline) {
         const session = input.sessionManager
           .getSessions()
@@ -349,21 +343,110 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
   // The trusted client declares the committed device space. While declared,
   // the runtime fences sessions and executions to that space only.
+  // The ONLY path that moves the runtime fence. Runs as one serial Main-side
+  // transaction: trusted identity, target visibility/membership, running-item
+  // termination and re-enumeration, then an atomic fence commit — all inside
+  // the switch lock, with new starts blocked for the duration. The renderer
+  // can request a verified target but can never write the fence directly.
   server.handle(
-    RPC_CHANNELS.productSpace.SET_ACTIVE_CONTEXT,
-    async (_ctx, productSpaceId: unknown) => {
-      if (productSpaceId !== null && typeof productSpaceId !== 'string') {
-        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Active context request is invalid' }
+    RPC_CHANNELS.productSpace.EXECUTE_SWITCH,
+    async (_ctx, targetProductSpaceId: unknown) => {
+      if (typeof targetProductSpaceId !== 'string' || !targetProductSpaceId) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch request is invalid' }
       }
-      if (productSpaceId) {
-        const trustedAccountId = await resolveTrustedProductSpaceAccountId()
-        if (!trustedAccountId) {
-          return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session' }
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+      }
+
+      return withSwitchLock(async () => {
+        const originProductSpaceId = getRuntimeActiveProductSpace()
+        if (targetProductSpaceId === originProductSpaceId) {
+          return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
         }
+
+        // From this point until the transaction settles, nothing new may
+        // start running — including while the target is being verified.
+        setSwitchInProgress(true)
+        try {
+          // Target verification against the account's contract-validated list.
+          const list = await fetchTrustedProductSpaceList()
+          if (!list) {
+            return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
+          }
+          const target = list.productSpaces.find(space => space.id === targetProductSpaceId)
+          if (!target) {
+            return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
+          }
+
+          // Terminate every running item of the origin space inside the lock.
+          let stopped: Awaited<ReturnType<typeof stopRegisteredExecutionsOnce>> = []
+          if (originProductSpaceId) {
+            const originEntries = []
+            for (const execution of listRegisteredProductSpaceExecutions()) {
+              if (execution.scope.accountId !== trustedAccountId) continue
+              if (execution.scope.productSpaceId !== originProductSpaceId) continue
+              let active: boolean
+              try {
+                active = Boolean(await execution.isActive())
+              } catch {
+                active = true
+              }
+              if (active) originEntries.push(execution)
+            }
+            stopped = await stopRegisteredExecutionsOnce(originEntries)
+          }
+
+          // Re-enumerate inside the lock: zero origin executions is a hard
+          // precondition for the fence commit.
+          const remaining = []
+          for (const execution of listRegisteredProductSpaceExecutions()) {
+            if (execution.scope.accountId !== trustedAccountId) continue
+            if (execution.scope.productSpaceId !== originProductSpaceId) continue
+            let active: boolean
+            try {
+              active = Boolean(await execution.isActive())
+            } catch {
+              active = true
+            }
+            if (active) remaining.push(execution)
+          }
+          if (remaining.length > 0) {
+            return {
+              success: false as const,
+              errorCode: 'runtime_stop_failed',
+              message: 'Origin ProductSpace still has running executions',
+              from: originProductSpaceId,
+              to: targetProductSpaceId,
+              executions: stopped,
+            }
+          }
+
+          // Atomic commit.
+          setRuntimeActiveProductSpace(targetProductSpaceId)
+          return {
+            success: true as const,
+            from: originProductSpaceId,
+            to: targetProductSpaceId,
+            executions: stopped,
+          }
+        } finally {
+          setSwitchInProgress(false)
+        }
+      })
+    },
+  )
+
+  // Fail-closed direction only: the renderer may clear the fence (contract
+  // loss, logout) but can never set it.
+  server.handle(
+    RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT,
+    async () => {
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session' }
       }
-      setRuntimeActiveProductSpace(
-        typeof productSpaceId === 'string' && productSpaceId ? productSpaceId : null,
-      )
+      setRuntimeActiveProductSpace(null)
       return { success: true as const }
     },
   )

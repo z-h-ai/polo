@@ -71,7 +71,11 @@ import {
   type LlmConnection,
 } from '@polo-ai/shared/config'
 import { getCredentialManager, type CredentialManager } from '@polo-ai/shared/credentials'
-import { setTrustedProductSpaceAccountProvider } from './trusted-product-space-account'
+import {
+  setTrustedProductSpaceAccountProvider,
+  setTrustedProductSpaceListFetcher,
+  type TrustedProductSpaceListSnapshot,
+} from './trusted-product-space-account'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -582,6 +586,32 @@ export function registerAdminHandlers(
         return null
       }
       return snapshot.tokens.userId
+    } catch {
+      return null
+    }
+  })
+
+  // The Main-side switch transaction verifies the target space against the
+  // account's contract-validated visible list (server-authoritative).
+  setTrustedProductSpaceListFetcher(async (): Promise<TrustedProductSpaceListSnapshot | null> => {
+    try {
+      const adminUrl = requireAdminUrl()
+      const manager = getCredentialManager()
+      const tokenResult = await ensureValidTokens(adminUrl, manager, sessions, deps)
+      if (!tokenResult.tokens) return null
+      const client = createAuthenticatedAdminClient(adminUrl, manager, sessions, {
+        session: tokenResult.session,
+      })
+      const list = await client.listProductSpaces(tokenResult.tokens.accessToken)
+      return {
+        personalProductSpaceId: list.personalProductSpaceId,
+        productSpaces: list.productSpaces.map(space => ({
+          id: space.id,
+          kind: space.kind,
+          name: space.name,
+          accessMode: space.accessMode,
+        })),
+      }
     } catch {
       return null
     }

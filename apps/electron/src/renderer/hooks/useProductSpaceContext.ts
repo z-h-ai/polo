@@ -134,20 +134,14 @@ export function useProductSpaceContextState() {
     })
   }, [])
 
-  const applySpaceSelection = useCallback(async (
+  const publishCommittedSelection = useCallback((
     accountId: string,
     list: ProductSpaceSummary[],
     personalId: string,
     productSpaceId: string,
-  ): Promise<void> => {
-    // Commit order matters: the Main runtime must acknowledge the new active
-    // space (fence moves first) before any renderer state is published. A
-    // failed ack keeps every piece of state — selection, context key,
-    // runtime scope — inside the origin space.
-    const ack = await window.electronAPI.productSpaceSetActiveSpace(productSpaceId)
-    if (!ack?.success) {
-      throw { code: 'runtime_commit_failed' }
-    }
+  ) => {
+    // The Main fence already moved (trusted transaction committed); now the
+    // renderer projection is published as one step.
     setStoredActiveProductSpaceId(accountId, productSpaceId)
     persistVerifiedContext(accountId, list, personalId, productSpaceId)
     activeProductSpaceIdRef.current = productSpaceId
@@ -164,6 +158,49 @@ export function useProductSpaceContextState() {
       },
     }))
   }, [persistVerifiedContext])
+
+  /**
+   * Moves the runtime fence through the Main-side trusted switch transaction.
+   * The renderer can never write the fence directly: Main verifies the target
+   * against the account's contract-validated list, terminates running items,
+   * re-enumerates under the switch lock and only then commits atomically. A
+   * rejected transaction keeps every piece of renderer state — selection,
+   * context key, runtime scope — inside the origin space.
+   */
+  const commitTrustedSwitch = useCallback(async (
+    targetId: string,
+  ): Promise<{
+    ok: boolean
+    errorCode?: string
+    statuses: Record<string, ExecutionSummary['status']>
+  }> => {
+    const result = await window.electronAPI.productSpaceExecuteSwitch(targetId)
+    if (result.success) {
+      const statuses: Record<string, ExecutionSummary['status']> = {}
+      for (const execution of result.executions) {
+        statuses[execution.executionId] = execution.status
+      }
+      return { ok: true, statuses }
+    }
+    const statuses: Record<string, ExecutionSummary['status']> = {}
+    for (const execution of result.executions ?? []) {
+      statuses[execution.executionId] = execution.status
+    }
+    return { ok: false, errorCode: result.errorCode, statuses }
+  }, [])
+
+  const applySpaceSelection = useCallback(async (
+    accountId: string,
+    list: ProductSpaceSummary[],
+    personalId: string,
+    productSpaceId: string,
+  ): Promise<void> => {
+    const committed = await commitTrustedSwitch(productSpaceId)
+    if (!committed.ok) {
+      throw { code: committed.errorCode ?? 'runtime_commit_failed' }
+    }
+    publishCommittedSelection(accountId, list, personalId, productSpaceId)
+  }, [commitTrustedSwitch])
 
   const applyListResponse = useCallback((parsed: {
     productSpaces: ProductSpaceSummary[]
@@ -199,6 +236,29 @@ export function useProductSpaceContextState() {
     }
   }, [applyListResponse, isCurrentAccountScope])
 
+  const enterContractBlocked = useCallback((accountId: string | null): void => {
+    // PC-F11 at runtime: revoke the Main fence synchronously (renderer can
+    // only ever clear it) and tear down every renderer projection so the
+    // business shell cannot be entered behind a stale context key.
+    void window.electronAPI.productSpaceRevokeActiveContext().catch(() => {})
+    if (accountId) {
+      clearStoredActiveProductSpaceId(accountId)
+      void clearVerifiedProductSpaceContext(accountId)
+      legacyInvalidatedAccountsRef.current.delete(accountId)
+    }
+    switchGenerationRef.current += 1
+    pendingTargetRef.current = null
+    activeProductSpaceIdRef.current = null
+    setProductSpaces([])
+    setPersonalProductSpaceId(null)
+    setActiveProductSpaceId(null)
+    setPendingSwitch(null)
+    setUnavailableSpaceIds(new Set())
+    setError({ code: 'product_space_contract_unsupported' })
+    setContextVersion(version => version + 1)
+    setFlowState('contract-blocked')
+  }, [])
+
   const bootstrap = useCallback(async (accountId: string): Promise<
     'ready' | 'contract-blocked' | 'error' | null
   > => {
@@ -224,21 +284,27 @@ export function useProductSpaceContextState() {
       if (!isCurrentAccountScope(scope)) return null
       hadPersistedContext = Boolean(persisted.verifiedContext)
 
+      // Direct switch: clear legacy Organization state once, executed by the
+      // runtime with verifiable per-step results. Only an all-green run is
+      // recorded in the device ledger; any failure (or a failed ledger
+      // persistence) keeps the account fail-closed and retried on the next
+      // bootstrap — the business surface never opens.
+      const ledger = await readLegacyCleanupLedger(accountId)
+      if (!ledger && !legacyInvalidatedAccountsRef.current.has(accountId)) {
+        const cleanup = await window.electronAPI.productSpaceCleanupLegacyState()
+        const ledgerWritten = cleanup.success
+          ? await writeLegacyCleanupLedger(accountId, cleanup.results)
+          : false
+        if (!ledgerWritten) {
+          throw { code: 'legacy_cleanup_failed' }
+        }
+      }
+      legacyInvalidatedAccountsRef.current.add(accountId)
+      legacyStateInvalidator.removeLegacyOrganizationAuthorizationCache()
+
       const fetched = await fetchProductSpaces(scope)
       if (!fetched || !isCurrentAccountScope(scope)) return null
 
-      // Direct switch: clear legacy Organization state once, executed by the
-      // runtime with verifiable per-step results. A failed cleanup fails
-      // closed instead of mixing legacy and ProductSpace state.
-      if (!hadPersistedContext && !legacyInvalidatedAccountsRef.current.has(accountId)) {
-        const cleanup = await window.electronAPI.productSpaceCleanupLegacyState()
-        if (!cleanup.success) {
-          legacyInvalidatedAccountsRef.current.add(accountId)
-          throw { code: 'legacy_cleanup_failed' }
-        }
-        legacyInvalidatedAccountsRef.current.add(accountId)
-        legacyStateInvalidator.removeLegacyOrganizationAuthorizationCache()
-      }
 
       const availableById = new Map<string, ProductSpaceSummary>(fetched.list.map(space => [space.id as string, space]))
       const storedId = getStoredActiveProductSpaceId(accountId)
@@ -252,18 +318,19 @@ export function useProductSpaceContextState() {
       const code = typeof record.code === 'string' ? record.code : 'request_failed'
       setError({ code, message: typeof record.message === 'string' ? record.message : undefined })
       if (code === 'product_space_contract_unsupported') {
-        clearStoredActiveProductSpaceId(accountId)
-        void clearVerifiedProductSpaceContext(accountId)
-        setFlowState('contract-blocked')
+        enterContractBlocked(accountId)
         return 'contract-blocked'
       }
       // Offline or server failure: fall back to the device's last verified
       // context so saved data stays viewable. This is cached view state only;
-      // new launches still require the network.
+      // new launches still require the network. The verified context never
+      // substitutes for the persisted cleanup ledger — an unverified direct
+      // switch keeps the account fail-closed.
       const verified = hadPersistedContext
         ? (await getProductSpaceContextStorage(accountId)).verifiedContext
         : null
-      if (verified && isCurrentAccountScope(scope)) {
+      const cleanupLedger = await readLegacyCleanupLedger(accountId)
+      if (verified && cleanupLedger && isCurrentAccountScope(scope)) {
         const storedId = getStoredActiveProductSpaceId(accountId)
           ?? verified.activeProductSpaceId
           ?? verified.list.personalProductSpaceId
@@ -284,23 +351,6 @@ export function useProductSpaceContextState() {
       return 'error'
     }
   }, [applyListResponse, applySpaceSelection, fetchProductSpaces, isCurrentAccountScope])
-
-  const stopAllExecutions = useCallback(async (scope: AccountScope) => {
-    const accountId = accountIdRef.current
-    const activeId = activeProductSpaceIdRef.current
-    if (!accountId || !activeId) {
-      throw { code: 'product_space_context_unavailable' }
-    }
-    const result = await window.electronAPI.productSpaceStopAllExecutions(
-      accountId,
-      activeId,
-    )
-    if (!isCurrentAccountScope(scope)) return null
-    if (!result.success) {
-      throw { code: result.errorCode, message: result.message }
-    }
-    return result.result
-  }, [isCurrentAccountScope])
 
   const refreshProductSpaces = useCallback(async (): Promise<ProductSpaceSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -337,25 +387,11 @@ export function useProductSpaceContextState() {
       // instead of half-switching. A read-only space stays entered so its
       // restriction reason remains visible.
       if (!active && activeId !== fetched.personalId) {
-        try {
-          const stopped = await stopAllExecutions(scope)
-          if (stopped && !stopped.executions.every(
-            execution => execution.status === 'stopped',
-          )) {
-            throw { code: 'runtime_stop_failed' }
-          }
-        } catch {
-          setFlowState('error')
-          return fetched.list
-        }
-        switchGenerationRef.current += 1
-        pendingTargetRef.current = null
-        setPendingSwitch(null)
+        // Same trusted transaction, no confirmation needed for membership
+        // loss. Any rejection keeps the old space and degrades safely.
         try {
           await applySpaceSelection(accountId, fetched.list, fetched.personalId, fetched.personalId)
         } catch {
-          // The runtime refused the commit: keep the old space and degrade
-          // safely instead of half-switching.
           setFlowState('error')
           return fetched.list
         }
@@ -365,17 +401,12 @@ export function useProductSpaceContextState() {
       const record = (caught ?? {}) as Record<string, unknown>
       const code = typeof record.code === 'string' ? record.code : null
       if (code === 'product_space_contract_unsupported') {
-        clearStoredActiveProductSpaceId(accountId)
-        void clearVerifiedProductSpaceContext(accountId)
-        switchGenerationRef.current += 1
-        pendingTargetRef.current = null
-        setPendingSwitch(null)
-        setFlowState('contract-blocked')
+        enterContractBlocked(accountId)
       }
       // Refresh failures keep the current space and its member relationships.
       return null
     }
-  }, [applySpaceSelection, fetchProductSpaces, persistVerifiedContext, stopAllExecutions])
+  }, [applySpaceSelection, enterContractBlocked, fetchProductSpaces, persistVerifiedContext])
 
   const listActiveExecutions = useCallback(async (): Promise<ExecutionSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -480,8 +511,7 @@ export function useProductSpaceContextState() {
       const record = (caught ?? {}) as Record<string, unknown>
       const errorCode = typeof record.code === 'string' ? record.code : 'catalog_load_failed'
       if (errorCode === 'product_space_contract_unsupported') {
-        setFlowState('contract-blocked')
-        setPendingSwitch(null)
+        enterContractBlocked(accountId)
         return
       }
       setPendingSwitch(previous => (
@@ -545,7 +575,7 @@ export function useProductSpaceContextState() {
         accountId,
         generation: accountScopeGenerationRef.current,
       }
-      const generation = switchGenerationRef.current
+      const generation = ++switchGenerationRef.current
       await finishSwitchAfterStop(scope, generation, targetId)
     }
   }, [finishSwitchAfterStop, listActiveExecutions])
@@ -555,6 +585,10 @@ export function useProductSpaceContextState() {
     const current = pendingSwitch
     if (!accountId || !current) return
     if (current.phase !== 'confirm' && current.phase !== 'stop-failed') return
+    const scope = {
+      accountId,
+      generation: accountScopeGenerationRef.current,
+    }
     const targetId = current.targetId
     const generation = ++switchGenerationRef.current
     pendingTargetRef.current = targetId
@@ -569,34 +603,38 @@ export function useProductSpaceContextState() {
           }
         : previous
     ))
-    const scope = {
-      accountId,
-      generation: accountScopeGenerationRef.current,
-    }
     try {
-      const result = await stopAllExecutions(scope)
-      if (!result || generation !== switchGenerationRef.current) return
-      const statuses: Record<string, ExecutionSummary['status']> = {}
-      let failed = false
-      for (const execution of result.executions) {
-        statuses[execution.executionId] = execution.status
-        if (execution.status === 'failed') failed = true
-      }
-      if (failed) {
+      const committed = await commitTrustedSwitch(targetId)
+      if (generation !== switchGenerationRef.current) return
+      if (!committed.ok) {
+        if (committed.errorCode === 'runtime_stop_failed') {
+          setPendingSwitch(previous => (
+            previous && previous.targetId === targetId
+              ? {
+                  ...previous,
+                  phase: 'stop-failed',
+                  statuses: committed.statuses,
+                  errorCode: 'runtime_stop_failed',
+                }
+              : previous
+          ))
+          return
+        }
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
-            ? { ...previous, phase: 'stop-failed', statuses, errorCode: 'runtime_stop_failed' }
+            ? { ...previous, phase: 'target-failed', errorCode: committed.errorCode ?? 'runtime_commit_failed' }
             : previous
         ))
         return
       }
       setPendingSwitch(previous => (
         previous && previous.targetId === targetId
-          ? { ...previous, phase: 'target-loading', statuses, errorCode: null }
+          ? { ...previous, phase: 'target-loading', statuses: committed.statuses, errorCode: null }
           : previous
       ))
       await finishSwitchAfterStop(scope, generation, targetId)
     } catch (caught) {
+      console.error('CONFIRM_SWITCH_CAUGHT', caught)
       if (generation !== switchGenerationRef.current) return
       const record = (caught ?? {}) as Record<string, unknown>
       const errorCode = typeof record.code === 'string' ? record.code : 'runtime_stop_failed'
@@ -611,7 +649,7 @@ export function useProductSpaceContextState() {
         return { ...previous, phase: 'stop-failed', statuses, errorCode }
       })
     }
-  }, [finishSwitchAfterStop, pendingSwitch, stopAllExecutions])
+  }, [commitTrustedSwitch, finishSwitchAfterStop, pendingSwitch])
 
   const retryFailedStops = useCallback(async (): Promise<void> => {
     await confirmStopAndSwitch()
@@ -644,6 +682,7 @@ export function useProductSpaceContextState() {
 
   const clearAccount = useCallback((accountId?: string | null) => {
     const targetAccountId = accountId ?? accountIdRef.current
+    void window.electronAPI.productSpaceRevokeActiveContext().catch(() => {})
     if (targetAccountId) {
       clearStoredActiveProductSpaceId(targetAccountId)
       void clearVerifiedProductSpaceContext(targetAccountId)

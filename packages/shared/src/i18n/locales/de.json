@@ -1142,6 +1142,8 @@
   "productSpace.role.member": "Mitglied",
   "productSpace.role.owner": "Inhaber",
   "productSpace.role.personal": "Persönlich",
+  "productSpace.rollback.button": "Zum vorherigen Bereich zurückkehren",
+  "productSpace.rollback.failed": "Rückkehr zum vorherigen Bereich fehlgeschlagen. Die sichere Fehlerseite bleibt geöffnet.",
   "productSpace.switch.cancel": "Wechsel abbrechen",
   "productSpace.switch.currentSpaceNote": "Noch in {{name}}",
   "productSpace.switch.failedDesc": "Fehlgeschlagene Elemente wiederholen oder Wechsel abbrechen",

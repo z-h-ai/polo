@@ -67,6 +67,11 @@ let catalogResult: { success: boolean; errorCode?: string }
 let declaredActiveSpace: string | null | undefined
 let activeContextAckSuccess: boolean
 let cleanupCalls: number
+let switchResult: {
+  success: boolean
+  errorCode?: string
+  executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+}
 
 function configureIpc(): void {
   Object.defineProperty(window, 'electronAPI', {
@@ -76,11 +81,28 @@ function configureIpc(): void {
       productSpaceListActiveExecutions: async () => executionsResult,
       productSpaceStopAllExecutions: async () => stopAllResult,
       productSpaceGetCatalog: async () => catalogResult,
-      productSpaceSetActiveSpace: async (productSpaceId: string | null) => {
-        if (!activeContextAckSuccess) return { success: false }
-        declaredActiveSpace = productSpaceId
-        return { success: true }
+      productSpaceExecuteSwitch: async (targetProductSpaceId: string) => {
+        if (!activeContextAckSuccess) {
+          return { success: false as const, errorCode: 'runtime_commit_failed' }
+        }
+        if (!switchResult.success) {
+          return {
+            success: false as const,
+            errorCode: switchResult.errorCode ?? 'runtime_stop_failed',
+            from: 'space-personal',
+            to: targetProductSpaceId,
+            executions: switchResult.executions ?? [],
+          }
+        }
+        declaredActiveSpace = targetProductSpaceId
+        return {
+          success: true as const,
+          from: 'space-personal',
+          to: targetProductSpaceId,
+          executions: switchResult.executions ?? [],
+        }
       },
+      productSpaceRevokeActiveContext: async () => ({ success: true }),
       productSpaceCleanupLegacyState: async () => {
         cleanupCalls += 1
         return cleanupResult
@@ -93,6 +115,8 @@ function configureIpc(): void {
         const next: ProductSpaceContextStorage = { ...(productSpaceContextStorage ?? {}) }
         if (patch.verifiedContext === null) delete next.verifiedContext
         else if (patch.verifiedContext) next.verifiedContext = patch.verifiedContext
+        if (patch.legacyCleanup === null) delete next.legacyCleanup
+        else if (patch.legacyCleanup) next.legacyCleanup = patch.legacyCleanup
         productSpaceContextStorage = next
         return next
       },
@@ -130,6 +154,7 @@ beforeEach(() => {
   declaredActiveSpace = undefined
   activeContextAckSuccess = true
   cleanupCalls = 0
+  switchResult = { success: true, executions: [] }
   configureIpc()
 })
 
@@ -201,6 +226,7 @@ describe('useProductSpaceContextState bootstrap', () => {
         activeProductSpaceId: 'space-ent',
         verifiedAt: Date.now(),
       },
+      legacyCleanup: { completedAt: Date.now(), results: { all: true } },
     } as unknown as ProductSpaceContextStorage
     const second = renderHook(useHarness)
     expect(await boot(second.result)).toBe('ready')
@@ -273,15 +299,13 @@ describe('useProductSpaceContextState switching', () => {
       success: true,
       executions: [{ executionId: 'exec-1', name: '访谈整理', status: 'running' }],
     }
-    stopAllResult = {
-      success: true,
-      result: {
-        allStopped: true,
-        executions: [{ executionId: 'exec-1', name: '访谈整理', status: 'failed' }],
-      },
-    }
     const { result } = renderHook(useHarness)
     await boot(result)
+    switchResult = {
+      success: false,
+      errorCode: 'runtime_stop_failed',
+      executions: [{ executionId: 'exec-1', status: 'failed' }],
+    }
     await act(async () => {
       await result.current.requestSwitch('space-ent')
     })
@@ -294,13 +318,7 @@ describe('useProductSpaceContextState switching', () => {
     expect(result.current.activeProductSpaceId).toBe(personalId)
     expect(result.current.pendingSwitch?.statuses['exec-1']).toBe('failed')
 
-    stopAllResult = {
-      success: true,
-      result: {
-        allStopped: true,
-        executions: [{ executionId: 'exec-1', name: '访谈整理', status: 'stopped' }],
-      },
-    }
+    switchResult = { success: true, executions: [{ executionId: 'exec-1', status: 'stopped' }] }
     await act(async () => {
       await result.current.retryFailedStops()
     })
@@ -469,30 +487,15 @@ describe('useProductSpaceContextState switch staging (round 1)', () => {
     expect(result.current.flowState).toBe('error')
   })
 
-  it('runs the stop-all fence before returning to personal space on access loss', async () => {
+  it('runs the trusted stop fence before returning to personal space on access loss', async () => {
     setStoredActiveProductSpaceId(accountId, 'space-ent')
     const { result } = renderHook(useHarness)
     await boot(result)
     expect(result.current.activeProductSpaceId).toBe('space-ent')
 
-    executionsResult = {
+    switchResult = {
       success: true,
-      executions: [{ executionId: 'exec-1', name: '企业任务', status: 'running' }],
-    }
-    let stopAllCalls = 0
-    Object.defineProperty(window.electronAPI, 'productSpaceStopAllExecutions', {
-      configurable: true,
-      value: async () => {
-        stopAllCalls += 1
-        return stopAllResult
-      },
-    })
-    stopAllResult = {
-      success: true,
-      result: {
-        allStopped: true,
-        executions: [{ executionId: 'exec-1', name: '企业任务', status: 'stopped' }],
-      },
+      executions: [{ executionId: 'exec-1', status: 'stopped' }],
     }
     listResult = {
       success: true,
@@ -502,7 +505,7 @@ describe('useProductSpaceContextState switch staging (round 1)', () => {
     await act(async () => {
       await result.current.refreshProductSpaces()
     })
-    expect(stopAllCalls).toBe(1)
+    expect(declaredActiveSpace).toBe(personalId)
     expect(result.current.activeProductSpaceId).toBe(personalId)
   })
 
@@ -511,12 +514,10 @@ describe('useProductSpaceContextState switch staging (round 1)', () => {
     const { result } = renderHook(useHarness)
     await boot(result)
 
-    stopAllResult = {
-      success: true,
-      result: {
-        allStopped: true,
-        executions: [{ executionId: 'exec-1', name: '企业任务', status: 'failed' }],
-      },
+    switchResult = {
+      success: false,
+      errorCode: 'runtime_stop_failed',
+      executions: [{ executionId: 'exec-2', status: 'failed' }],
     }
     listResult = {
       success: true,
@@ -528,6 +529,7 @@ describe('useProductSpaceContextState switch staging (round 1)', () => {
     })
     expect(result.current.activeProductSpaceId).toBe('space-ent')
     expect(result.current.flowState).toBe('error')
+    expect(declaredActiveSpace).toBe('space-ent')
   })
 })
 

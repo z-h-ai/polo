@@ -2368,7 +2368,7 @@ export class SessionManager implements ISessionManager {
    * Aggregate unread state across all workspaces.
    * Excludes hidden and archived sessions from counts/indicators.
    */
-  getUnreadSummary(): UnreadSummary {
+  getUnreadSummary(productSpaceId?: string | null): UnreadSummary {
     const byWorkspace: Record<string, number> = {}
     const hasUnreadByWorkspace: Record<string, boolean> = {}
 
@@ -2377,7 +2377,14 @@ export class SessionManager implements ISessionManager {
       hasUnreadByWorkspace[workspace.id] = false
     }
 
+    // Space fence: aggregate only sessions bound to the committed active
+    // ProductSpace; a null fence aggregates nothing (fail closed).
+    const spaceFilter = productSpaceId === undefined
+      ? getRuntimeActiveProductSpace()
+      : productSpaceId
     for (const session of this.sessions.values()) {
+      if (spaceFilter && session.productSpaceId !== spaceFilter) continue
+      if (!spaceFilter) continue
       if (session.hidden || session.isArchived) continue
       if (!session.hasUnread) continue
 
@@ -4997,9 +5004,15 @@ export class SessionManager implements ISessionManager {
    * Mark all non-hidden, non-archived sessions in a workspace as read.
    * Called from "Mark All Read" context menu on "All Sessions".
    */
-  async markAllSessionsRead(workspaceId: string): Promise<void> {
+  async markAllSessionsRead(workspaceId: string, productSpaceId?: string | null): Promise<void> {
+    // Space fence: only sessions bound to the committed active ProductSpace
+    // are mutable; a null fence mutates nothing (fail closed).
+    const spaceFilter = productSpaceId === undefined
+      ? getRuntimeActiveProductSpace()
+      : productSpaceId
     const updates: Promise<void>[] = []
     for (const managed of this.sessions.values()) {
+      if (!spaceFilter || managed.productSpaceId !== spaceFilter) continue
       if (managed.workspace.id !== workspaceId) continue
       if (managed.hidden || managed.isArchived) continue
       if (managed.isProcessing) continue
@@ -6531,6 +6544,12 @@ export class SessionManager implements ISessionManager {
       return null
     }
 
+    // Space fence: task output belongs to its owning session's ProductSpace.
+    const activeProductSpaceId = getRuntimeActiveProductSpace()
+    if (!activeProductSpaceId) return null
+    const owner = this.sessions.get(sessionId)
+    if (!owner || owner.productSpaceId !== activeProductSpaceId) return null
+
     const managed = this.sessions.get(sessionId)
     const info = managed?.backgroundTaskOutputs.get(taskId)
     if (!info) {
@@ -7577,11 +7596,12 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    // Space fence on the event boundary: while a ProductSpace is committed on
-    // this device, events for sessions bound to another space (or never
-    // bound) never reach any client.
+    // Space fence on the event boundary: a session event may only reach a
+    // client while its ProductSpace is the committed active space. A null
+    // fence means the business surface is not ready — nothing is delivered.
     const activeProductSpaceId = getRuntimeActiveProductSpace()
-    if (activeProductSpaceId && 'sessionId' in event) {
+    if (!activeProductSpaceId) return
+    if ('sessionId' in event) {
       const managed = this.sessions.get(event.sessionId)
       if (!managed || managed.productSpaceId !== activeProductSpaceId) {
         return

@@ -86,7 +86,11 @@ function createTestHarness(sessionPaths: Map<string, string>) {
     sessionManager: {
       getSessionPath: (sessionId: string) => sessionPaths.get(sessionId) ?? null,
       waitForInit: async () => {},
-      getSessions: () => [],
+      getSessions: () => [...sessionPaths.keys()].map(id => ({
+        id,
+        productSpaceId: 'watch-test-space',
+        isProcessing: false,
+      })),
     } as unknown as HandlerDeps['sessionManager'],
     platform: {
       appRootPath: '',
@@ -149,6 +153,10 @@ function makeCtx(clientId: string, workspaceId = 'ws-1'): RequestContext {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+const { setRuntimeActiveProductSpace } = await import('@polo-ai/server-core/runtime/product-space-executions')
+
+setRuntimeActiveProductSpace('watch-test-space')
 
 describe('session file watcher isolation', () => {
   afterEach(async () => {

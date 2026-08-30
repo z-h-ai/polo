@@ -35,6 +35,7 @@ import {
   validateCatalogLocalAppScope,
 } from '../local-app-runtime'
 import {
+  isSwitchInProgress,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   unregisterProductSpaceExecution,
@@ -443,24 +444,26 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   setLegacyLocalAppCleaner(async () => {
     const registry = getScopedLocalAppRuntimeRegistry()
     const failedRefs: string[] = []
-    for (const execution of listRegisteredProductSpaceExecutions()) {
-      if (execution.kind !== 'local_app') continue
-      if (execution.scope.subject.kind !== 'artifact_instance') continue
-      const productSpaceId = execution.scope.productSpaceId
-      const artifactInstanceId = execution.scope.subject.artifactInstanceId
-      const scope: CatalogLocalAppScope = {
-        kind: 'catalog',
-        accountId: execution.scope.accountId,
-        organizationId: productSpaceId,
-        catalogAppId: artifactInstanceId,
-      }
+    // Enumerate EVERY persisted scope on this device — not only executions in
+    // the current registry — so stale Organization-era installation/runtime
+    // state cannot survive the direct switch.
+    let persistedScopes: CatalogLocalAppScope[] = []
+    try {
+      persistedScopes = await registry.listAllCatalogScopes()
+    } catch {
+      failedRefs.push('persisted-scope-enumeration')
+    }
+    for (const scope of persistedScopes) {
       try {
         await registry.stop(scope)
         // Invalidate installation/runtime state while preserving user data.
         await registry.uninstall(scope, { preserveData: true })
       } catch {
-        failedRefs.push(execution.scope.executionId)
+        failedRefs.push(`${scope.organizationId}:${scope.catalogAppId}`)
       }
+    }
+    for (const execution of listRegisteredProductSpaceExecutions()) {
+      if (execution.kind !== 'local_app') continue
       unregisterProductSpaceExecution(execution.scope.executionId)
     }
     return { ok: failedRefs.length === 0, failedRefs }
@@ -617,6 +620,14 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     scope: CatalogLocalAppScope,
     startRuntime: () => Promise<{ version: string }>,
   ) => {
+    // A Main-side switch transaction blocks every path that could move an
+    // execution into running/preparing for its duration.
+    if (isSwitchInProgress()) {
+      throw new LocalAppRuntimeError(
+        'SWITCH_IN_PROGRESS',
+        'Apps cannot start while a ProductSpace switch is being committed',
+      )
+    }
     const result = await startRuntime()
     await registerLocalAppExecution(scope, result.version)
     return result

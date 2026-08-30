@@ -1142,6 +1142,8 @@
   "productSpace.role.member": "Członek",
   "productSpace.role.owner": "Właściciel",
   "productSpace.role.personal": "Osobista",
+  "productSpace.rollback.button": "Wróć do poprzedniej przestrzeni",
+  "productSpace.rollback.failed": "Nie udało się wrócić do poprzedniej przestrzeni. Pozostaje bezpieczny ekran błędu.",
   "productSpace.switch.cancel": "Anuluj przełączanie",
   "productSpace.switch.currentSpaceNote": "Nadal w: {{name}}",
   "productSpace.switch.failedDesc": "Ponów nieudane elementy lub anuluj przełączanie",

@@ -12,6 +12,10 @@ type HandlerFn = (ctx: { clientId: string }, ...args: any[]) => Promise<any> | a
 const CLIENT_A = 'sessions-watchers-client-a'
 const CLIENT_B = 'sessions-watchers-client-b'
 
+const { setRuntimeActiveProductSpace } = await import('@polo-ai/server-core/runtime/product-space-executions')
+
+setRuntimeActiveProductSpace('watch-test-space')
+
 describe('sessions file watchers', () => {
   const handlers = new Map<string, HandlerFn>()
   const pushed: Array<{ channel: string; target: any; args: any[] }> = []
@@ -68,6 +72,10 @@ describe('sessions file watchers', () => {
           if (sessionId === 'session-b') return sessionDirB
           return null
         },
+        getSessions: () => [
+          { id: 'session-a', productSpaceId: 'watch-test-space', isProcessing: false },
+          { id: 'session-b', productSpaceId: 'watch-test-space', isProcessing: false },
+        ],
       } as unknown as HandlerDeps['sessionManager'],
       platform: {
         appRootPath: '',

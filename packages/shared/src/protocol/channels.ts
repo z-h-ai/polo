@@ -295,7 +295,8 @@ export const RPC_CHANNELS = {
     CATALOG: 'product-space:catalog',
     LIST_ACTIVE_EXECUTIONS: 'product-space:listActiveExecutions',
     STOP_ALL_EXECUTIONS: 'product-space:stopAllExecutions',
-    SET_ACTIVE_CONTEXT: 'product-space:setActiveContext',
+    EXECUTE_SWITCH: 'product-space:executeSwitch',
+    REVOKE_ACTIVE_CONTEXT: 'product-space:revokeActiveContext',
     CLEANUP_LEGACY_STATE: 'product-space:cleanupLegacyState',
   },
   drafts: {
