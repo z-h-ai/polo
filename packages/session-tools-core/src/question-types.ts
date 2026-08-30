@@ -108,8 +108,13 @@ export function validateRequestUserInputArgs(args: RequestUserInputArgs): Valida
       }
       optionIds.add(option.id);
       if (option.recommended) recommendedCount++;
-      if (option.exclusive && !question.multiple) {
-        issues.push({ path: `${oPath}.exclusive`, message: `option "${option.id}" is exclusive but question "${question.id}" is not multi-select` });
+      // PRESENCE-BASED (review fix round 2, issue 2): the protocol forbids the
+      // `exclusive` FIELD on single-select questions — an explicit
+      // `exclusive: false` is still a declaration and must be rejected, not
+      // just a truthy value. Zod keeps `false` as `false` (present) and an
+      // absent field as `undefined`, so `!== undefined` is the faithful check.
+      if (option.exclusive !== undefined && !question.multiple) {
+        issues.push({ path: `${oPath}.exclusive`, message: `option "${option.id}" declares "exclusive" but question "${question.id}" is not multi-select` });
       }
     });
 

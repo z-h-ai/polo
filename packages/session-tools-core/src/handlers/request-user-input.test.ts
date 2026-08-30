@@ -199,6 +199,57 @@ describe('validateRequestUserInputArgs (cross-field rules)', () => {
     });
     expect(multi).toHaveLength(0);
   });
+
+  // Review fix round 2, issue 2: the exclusive FIELD is forbidden on
+  // single-select questions — presence, not truthiness. An explicit
+  // `exclusive: false` is still a declaration and must be rejected, including
+  // through the full parse path the tool handler uses.
+  it('rejects an explicit exclusive:false on single-select questions (presence, not truthiness)', () => {
+    const singleFalse = validateRequestUserInputArgs({
+      questions: [makeQuestion({ options: [
+        { id: 'none', label: 'None', description: 'No notifications', exclusive: false },
+        { id: 'all', label: 'All', description: 'All notifications' },
+      ] })],
+    });
+    expect(singleFalse.some(i => i.message.includes('exclusive'))).toBe(true);
+
+    // The explicit `multiple: false` form is equally single-select.
+    const explicitSingle = validateRequestUserInputArgs({
+      questions: [makeQuestion({
+        multiple: false,
+        options: [
+          { id: 'none', label: 'None', description: 'No notifications', exclusive: false },
+          { id: 'all', label: 'All', description: 'All notifications' },
+        ],
+      })],
+    });
+    expect(explicitSingle.some(i => i.message.includes('exclusive'))).toBe(true);
+
+    // A multi-select question may explicitly mark an option non-exclusive.
+    const multiFalse = validateRequestUserInputArgs({
+      questions: [makeQuestion({
+        multiple: true,
+        options: [
+          { id: 'none', label: 'None', description: 'No notifications', exclusive: false },
+          { id: 'email', label: 'Email', description: 'Email notifications' },
+        ],
+      })],
+    });
+    expect(multiFalse).toHaveLength(0);
+
+    // End-to-end: the malformed payload is rejected by the parser the
+    // SessionManager re-validates with.
+    const parsed = parseRequestUserInputArgs({
+      questions: [makeQuestion({ options: [
+        { id: 'none', label: 'None', description: 'No notifications', exclusive: false },
+        { id: 'all', label: 'All', description: 'All notifications' },
+      ] })],
+    });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error).toContain('exclusive');
+    }
+  });
 });
 
 describe('parseRequestUserInputArgs', () => {

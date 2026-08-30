@@ -52,7 +52,16 @@ export class ProxyToolRegistry {
 
   private rebuild(): void {
     const next = [...this.sessionTools, ...this.poolTools];
-    if (next.length !== this.defs.length || next.some((t, i) => t.name !== this.defs[i]?.name)) {
+    const prev = this.defs;
+    // A same-name tool whose description/schema was UPDATED must also count
+    // as a change — otherwise handlePrompt keeps the stale Pi session and the
+    // old schema survives until an unrelated name-level change happens.
+    const shapeChanged = next.length !== prev.length
+      || next.some((t, i) =>
+        t.name !== prev[i]?.name
+        || t.description !== prev[i]?.description
+        || JSON.stringify(t.inputSchema) !== JSON.stringify(prev[i]?.inputSchema));
+    if (shapeChanged) {
       this.changed = true;
     }
     this.defs = next;

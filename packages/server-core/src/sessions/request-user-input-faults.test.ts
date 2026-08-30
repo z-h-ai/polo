@@ -353,6 +353,144 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(resolved[0]).toMatchObject({ sessionId: 'f-stop-2', requestId: request.requestId, action: 'cancel' })
   })
 
+  // ---- Review fix round 2, issue 1: resolution vs lifecycle SERIALIZATION ----
+  // A stop's staged clear and a concurrent answer/cancel commit share the same
+  // per-session question-state lock: whichever lands first settles the
+  // question, and the other observes the settled world — no stale-then-
+  // restored divergence.
+
+  /** Instrument the flush so the FIRST call hangs until the test releases it. */
+  function hangFirstFlush() {
+    const real = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+    let calls = 0
+    let settle!: (err?: Error) => void
+    const hung = new Promise<void>((resolve, reject) => {
+      settle = (err?: Error) => (err ? reject(err) : resolve())
+    })
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      calls++
+      if (calls === 1) return hung
+      return real.call(sm, id)
+    }
+    return { release: settle }
+  }
+
+  it('an answer submitted while a stop flush is paused waits for the lock; a FAILED clear keeps the pending and the answer commits', async () => {
+    const request = makeQuestionRequest('f-conv-1')
+    seedSession('f-conv-1', { pendingQuestion: request, isProcessing: false })
+    // Resume stub: the accepted answer kicks resumePendingAgentTurn → sendMessage.
+    ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+
+    const { release } = hangFirstFlush()
+
+    // Window A: stop (its staged clear flush hangs).
+    const stopPromise = sm.cancelProcessing('f-conv-1')
+    await new Promise(r => setTimeout(r, 30))
+    // STAGED visibility: the pending question is NOT exposed as absent while
+    // the durable clear is in flight.
+    expect(sm.getPendingQuestion('f-conv-1')?.requestId).toBe(request.requestId)
+    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(0)
+
+    // Window B: the same request is answered — it must WAIT on the lock.
+    const answerPromise = sm.respondToQuestion('f-conv-1', makeAnswerResolution(request))
+    let answerSettled = false
+    void answerPromise.then(() => { answerSettled = true })
+    await new Promise(r => setTimeout(r, 30))
+    expect(answerSettled).toBe(false)
+
+    // The paused clear FAILS: the lifecycle surfaces the error with the
+    // pending intact, then the serialized answer commits normally.
+    release(new Error('disk full (injected)'))
+    await expect(stopPromise).rejects.toThrow('disk full')
+    expect(await answerPromise).toEqual({ status: 'accepted' })
+
+    // Convergence: memory + JSONL + events all reflect the ANSWER, broadcast
+    // exactly once — never the half-cleared divergence.
+    expect(sm.getPendingQuestion('f-conv-1')).toBeNull()
+    const resolved = events.filter(e => e.type === 'question_resolved')
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toMatchObject({ sessionId: 'f-conv-1', requestId: request.requestId, action: 'answer' })
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-conv-1'), 'utf-8').split('\n')[0])
+    expect(header.pendingQuestion).toBeUndefined()
+    expect(header.hasPendingQuestion).toBe(false)
+    const stored = loadSession(tmpRoot, 'f-conv-1')
+    const persistedAnswers = (stored?.messages ?? []).filter(m => (m as { questionResponse?: { requestId?: string } }).questionResponse)
+    expect(persistedAnswers).toHaveLength(1)
+    expect((persistedAnswers[0] as { questionResponse: { requestId: string } }).questionResponse.requestId).toBe(request.requestId)
+  })
+
+  it('an answer submitted while a stop flush is paused returns stale when the clear commits durably (one cancel broadcast)', async () => {
+    const request = makeQuestionRequest('f-conv-2')
+    seedSession('f-conv-2', { pendingQuestion: request, isProcessing: false })
+    ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+
+    const { release } = hangFirstFlush()
+
+    const stopPromise = sm.cancelProcessing('f-conv-2')
+    await new Promise(r => setTimeout(r, 30))
+    const answerPromise = sm.respondToQuestion('f-conv-2', makeAnswerResolution(request))
+    let answerSettled = false
+    void answerPromise.then(() => { answerSettled = true })
+    await new Promise(r => setTimeout(r, 30))
+    expect(answerSettled).toBe(false)
+
+    // The paused clear COMMITS: the question is terminally resolved — the
+    // serialized answer observes the settled world and reports stale.
+    release()
+    await stopPromise
+    expect(await answerPromise).toEqual({ status: 'stale' })
+
+    expect(sm.getPendingQuestion('f-conv-2')).toBeNull()
+    const resolved = events.filter(e => e.type === 'question_resolved')
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toMatchObject({ sessionId: 'f-conv-2', requestId: request.requestId, action: 'cancel' })
+    // Land the staged cleared snapshot (the hang patch bypassed the real
+    // queue flush; in production the debounce would do this).
+    await sm.flushSession('f-conv-2')
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-conv-2'), 'utf-8').split('\n')[0])
+    expect(header.pendingQuestion).toBeUndefined()
+    expect(header.hasPendingQuestion).toBe(false)
+    const stored = loadSession(tmpRoot, 'f-conv-2')
+    expect((stored?.messages ?? []).filter(m => (m as { questionResponse?: unknown }).questionResponse)).toHaveLength(0)
+  })
+
+  it('an archive flush failure rolls back the FULL lifecycle snapshot; the retry converges memory + JSONL + events', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-arch-1')
+    seedSession('f-arch-1', { pendingQuestion: request })
+
+    // FIRST archive: a flush fails mid-lifecycle.
+    failFlush = true
+    await expect(sm.archiveSession('f-arch-1')).rejects.toThrow('disk full')
+
+    // Full rollback: NOT archived, pending kept, zero lifecycle broadcasts,
+    // disk untouched.
+    const duringFault = getManaged('f-arch-1') as unknown as { isArchived?: boolean; archivedAt?: number }
+    expect(duringFault.isArchived).toBeFalsy()
+    expect(duringFault.archivedAt).toBeUndefined()
+    expect(sm.getPendingQuestion('f-arch-1')?.requestId).toBe(request.requestId)
+    expect(events.filter(e => e.type === 'question_resolved' || e.type === 'session_archived')).toHaveLength(0)
+    const headerDuringFault = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-arch-1'), 'utf-8').split('\n')[0])
+    expect(headerDuringFault.pendingQuestion?.requestId).toBe(request.requestId)
+    expect(headerDuringFault.isArchived).toBeFalsy()
+
+    // Fault clears: the retry converges everything exactly once.
+    failFlush = false
+    await sm.archiveSession('f-arch-1')
+
+    expect(sm.getPendingQuestion('f-arch-1')).toBeNull()
+    const after = getManaged('f-arch-1') as unknown as { isArchived?: boolean }
+    expect(after.isArchived).toBe(true)
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-arch-1'), 'utf-8').split('\n')[0])
+    expect(header.isArchived).toBe(true)
+    expect(header.pendingQuestion).toBeUndefined()
+    expect(header.hasPendingQuestion).toBe(false)
+    const resolved = events.filter(e => e.type === 'question_resolved')
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toMatchObject({ sessionId: 'f-arch-1', requestId: request.requestId, action: 'cancel' })
+    expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
+  })
+
   it('answer committed but sendMessage rejects before agent init: error surfaced, state recoverable, retry succeeds (never silent-accepted-stranded)', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-resume-1')

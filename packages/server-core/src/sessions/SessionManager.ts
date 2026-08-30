@@ -1249,6 +1249,17 @@ export class SessionManager implements ISessionManager {
    * rollback-able in-memory state.
    */
   private resolutionInFlight: Map<string, Promise<QuestionResolutionResult>> = new Map()
+  /**
+   * Question-state serialization (review fix round 2, issue 1): ONE tail-linked
+   * per-session lock chains every pendingQuestion transition — tool-requested
+   * replacements (handleQuestionRequested), answer/cancel commits
+   * (respondToQuestion) and lifecycle clears (stop/archive). A lifecycle
+   * clear's staged flush can therefore never interleave with a concurrent
+   * resolution commit, and vice versa. Links never reject; a failed critical
+   * section does not poison the next one. Entries are removed when the tail
+   * settles, so deleted sessions do not leak.
+   */
+  private questionStateLocks: Map<string, Promise<unknown>> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -2051,11 +2062,11 @@ export class SessionManager implements ISessionManager {
    * `loadStoredSession` is synchronous (sync fs reads), so the entire path
    * stays sync — no microtask race window between the load and the enqueue.
    */
-  private persistSession(managed: ManagedSession): void {
+  private persistSession(managed: ManagedSession, stagedOverrides?: Partial<StoredSession>): void {
     if (!managed.messagesLoaded) {
       this.hydrateMessagesForColdPersist(managed)
     }
-    this.enqueuePersist(managed)
+    this.enqueuePersist(managed, stagedOverrides)
   }
 
   // Cold-persist hydration. Mirrors the messages/queue-recovery half of
@@ -2109,7 +2120,14 @@ export class SessionManager implements ISessionManager {
 
   // Build the StoredSession snapshot and hand it to the persistence queue.
   // Caller must ensure `managed.messagesLoaded` is true.
-  private enqueuePersist(managed: ManagedSession): void {
+  //
+  // `stagedOverrides` (review fix round 2, issue 1) lets a caller enqueue a
+  // snapshot that differs from live memory — e.g. a lifecycle clear commits
+  // `pendingQuestion: undefined` to disk BEFORE publishing the cleared state
+  // to memory. The override applies to the enqueued snapshot only; the
+  // derived header fields (hasPendingQuestion / pendingQuestionRequestId)
+  // are recomputed from it at write time.
+  private enqueuePersist(managed: ManagedSession, stagedOverrides?: Partial<StoredSession>): void {
     try {
       // Filter out transient status messages (progress indicators like "Compacting...")
       // Error messages are now persisted with rich fields for diagnostics
@@ -2124,6 +2142,7 @@ export class SessionManager implements ISessionManager {
         lastUsedAt: Date.now(),
         messages: persistableMessages.map(messageToStored),
         tokenUsage: managed.tokenUsage ?? DEFAULT_TOKEN_USAGE,
+        ...stagedOverrides,
       } as StoredSession
 
       // Queue for async persistence with debouncing
@@ -4642,20 +4661,59 @@ export class SessionManager implements ISessionManager {
 
   async archiveSession(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (managed) {
+    if (!managed) return
+
+    // LIFECYCLE-ATOMIC archive (review fix round 2, issue 1): the archive
+    // flags, the pending-question clear and the answer→resume clear commit as
+    // ONE critical section on the session's question-state lock, with a full
+    // snapshot rollback on any flush failure — a failed archive must never
+    // leave a half-committed lifecycle (archived memory + live pending, or a
+    // pending that was already broadcast as resolved).
+    const prevIsArchived = managed.isArchived
+    const prevArchivedAt = managed.archivedAt
+    const prevPendingQuestion = managed.pendingQuestion
+    const prevPendingAgentResume = managed.pendingAgentResume
+    // A pending question durably cleared + broadcast BEFORE a later failure in
+    // this section must never be resurrected by the rollback.
+    let pendingDurablyResolved = false
+
+    await this.withQuestionStateLock(sessionId, async () => {
       managed.isArchived = true
       managed.archivedAt = Date.now()
-      // A pending question cannot outlive archival — clear memory + disk + renderers.
-      await this.clearPendingQuestionForSession(managed)
-      // Same for a pending answer→resume retry.
-      await this.clearPendingAgentResume(managed, 'session archived')
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
+      try {
+        // A pending question cannot outlive archival — staged clear + broadcast.
+        await this.clearPendingQuestionForSessionLocked(managed)
+        pendingDurablyResolved = true
+        // Same for a pending answer→resume retry.
+        await this.clearPendingAgentResume(managed, 'session archived')
+        // Persist in-memory state directly to avoid race with pending queue writes
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      } catch (error) {
+        // Roll back the WHOLE lifecycle snapshot (archive flags + resume);
+        // the pending question is restored only if the clear itself had not
+        // already committed durably.
+        managed.isArchived = prevIsArchived
+        managed.archivedAt = prevArchivedAt
+        managed.pendingAgentResume = prevPendingAgentResume
+        if (!pendingDurablyResolved) {
+          managed.pendingQuestion = prevPendingQuestion
+        }
+        // Best-effort re-persist so the queue matches the rolled-back memory.
+        try {
+          this.persistSession(managed)
+          void this.flushSession(managed.id).catch(requeueError => {
+            sessionLog.error(`Failed to re-persist rolled-back archive state for session ${sessionId}:`, requeueError)
+          })
+        } catch (requeueError) {
+          sessionLog.error(`Failed to re-persist rolled-back archive state for session ${sessionId}:`, requeueError)
+        }
+        throw error
+      }
       // Notify all windows for this workspace
       this.sendEvent({ type: 'session_archived', sessionId }, managed.workspace.id)
       this.emitUnreadSummaryChanged()
-    }
+    })
   }
 
   async unarchiveSession(sessionId: string): Promise<void> {
@@ -7073,6 +7131,18 @@ export class SessionManager implements ISessionManager {
     managed: ManagedSession,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
   ): Promise<void> {
+    // Serialized behind the session's question-state lock (review fix round 2,
+    // issue 1): a tool-requested replacement must never interleave with a
+    // lifecycle clear's staged commit — otherwise a stop clear that already
+    // enqueued its cleared snapshot could later flush it OVER a question that
+    // legitimately replaced the pending state.
+    await this.withQuestionStateLock(managed.id, () => this.handleQuestionRequestedLocked(managed, questions))
+  }
+
+  private async handleQuestionRequestedLocked(
+    managed: ManagedSession,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+  ): Promise<void> {
     // 1. Re-validate (defense in depth) and generate the Polo-side identity
     const { parseRequestUserInputArgs } = await import('@polo-ai/session-tools-core')
     const parsed = parseRequestUserInputArgs({ questions })
@@ -7165,12 +7235,22 @@ export class SessionManager implements ISessionManager {
     }
 
     // 7. Persist again so the completed tool activity is durable (best effort —
-    //    the pending question itself is already authoritative from step 3)
-    try {
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-    } catch (error) {
-      sessionLog.error(`Post-handoff persist failed for session ${managed.id} (question remains pending):`, error)
+    //    the pending question itself is already authoritative from step 3).
+    //    BOUNDED RETRY (review round 2 minor): if this persist fails the disk
+    //    keeps toolStatus 'executing' while memory says 'completed' — a
+    //    restart would render the activity as running forever. Retry a few
+    //    times before giving up; the in-memory state stays authoritative for
+    //    this process either way.
+    for (let persistRetry = 0; persistRetry < 3; persistRetry++) {
+      try {
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+        break
+      } catch (error) {
+        sessionLog.error(`Post-handoff persist failed for session ${managed.id} (attempt ${persistRetry + 1}/3, question remains pending):`, error)
+        if (persistRetry === 2) break
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
     }
   }
 
@@ -7453,141 +7533,27 @@ export class SessionManager implements ISessionManager {
     try {
       await this.ensureMessagesLoaded(managed)
 
-      const pending = managed.pendingQuestion
+      // The durable commit runs under the session's question-state lock
+      // (review fix round 2, issue 1) so it can never interleave with a
+      // stop/archive clear's staged flush — whichever lands first settles the
+      // question and the other observes the settled world.
+      const outcome = await this.withQuestionStateLock(sessionId, () =>
+        this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId),
+      )
 
-      if (!pending || pending.requestId !== requestId) {
-        // Idempotency: an answer for an already-resolved request succeeds quietly;
-        // anything else is stale (replaced, stopped, or from a previous run).
-        if (this.hasPersistedQuestionResolution(managed, requestId)) {
-          sessionLog.info(`Question ${requestId} already resolved for session ${sessionId}`)
-          return { status: 'already_answered' }
-        }
-        sessionLog.warn(`Stale question resolution ${requestId} for session ${sessionId} (active: ${pending?.requestId ?? 'none'})`)
-        return { status: 'stale' }
+      if (outcome.resume) {
+        // Resume the agent OUTSIDE the question-state lock: the resumed turn
+        // can run for minutes (and may itself ask follow-up questions, which
+        // re-enter the lock safely from handleQuestionRequested). Holding the
+        // lock here would block a concurrent stop/archive clear behind a
+        // whole agent turn.
+        // resumePendingAgentTurn never rejects: a failure is user-visible
+        // (error event), persisted in pendingAgentResume, and retried.
+        await this.resumePendingAgentTurn(managed)
+        sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
       }
 
-      if (resolution.action === 'cancel') {
-        // Atomic cleanup: write the readable cancel record, clear pending, persist.
-        const cancelMessage: Message = {
-          id: generateMessageId(),
-          role: 'user',
-          content: i18n.t('chat.questionSkippedRecord'),
-          timestamp: this.monotonic(),
-          questionResolution: { action: 'cancel', requestId },
-        }
-        // Rollback snapshot — a failed persist/flush must leave the session
-        // exactly as before so the skip can be retried.
-        const prevMessages = managed.messages.slice()
-        const prevLastMessageRole = managed.lastMessageRole
-        try {
-          managed.messages.push(cancelMessage)
-          managed.lastMessageRole = 'user'
-          managed.pendingQuestion = undefined
-
-          this.persistSession(managed)
-          await this.flushSession(managed.id)
-        } catch (error) {
-          this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole }, pending)
-          throw error
-        }
-
-        this.sendEvent({
-          type: 'user_message',
-          sessionId,
-          message: cancelMessage,
-          status: 'accepted',
-        }, managed.workspace.id)
-        this.sendEvent({
-          type: 'question_resolved',
-          sessionId,
-          requestId,
-          action: 'cancel',
-        }, managed.workspace.id)
-
-        sessionLog.info(`Question ${requestId} cancelled for session ${sessionId} (agent not resumed)`)
-        return { status: 'cancelled' }
-      }
-
-      // --- action === 'answer' ---
-
-      // Validate answers against the pending request before mutating anything.
-      const response = resolution.response
-      const validationError = this.validateQuestionAnswerPayload(pending, response)
-      if (validationError) {
-        return { status: 'transient_failure', message: validationError }
-      }
-
-      // Atomic: write ONE readable answer message with structured metadata,
-      // clear pending, arm the recoverable resume state, persist + flush —
-      // all before starting the agent. "Answer committed + awaiting resume"
-      // is itself persisted so a resume failure is never silently lost.
-      const content = this.formatQuestionAnswerContent(pending, response)
-      const answerMessage: Message = {
-        id: generateMessageId(),
-        role: 'user',
-        content,
-        timestamp: this.monotonic(),
-        questionResponse: {
-          requestId,
-          answers: response.answers,
-        },
-      }
-      // Rollback snapshot — a failed persist/flush must leave the session
-      // exactly as before so the same answer can be retried.
-      const prevMessages = managed.messages.slice()
-      const prevLastMessageRole = managed.lastMessageRole
-      const prevLastMessageAt = managed.lastMessageAt
-      const prevPendingAgentResume = managed.pendingAgentResume
-      try {
-        managed.messages.push(answerMessage)
-        managed.lastMessageRole = 'user'
-        managed.lastMessageAt = Date.now()
-        managed.pendingQuestion = undefined
-        // Carry the trusted entry capability of the question-producing turn
-        // into the recoverable resume state — first resume, failure retries,
-        // and restart recovery all pass it back to sendMessage.
-        managed.pendingAgentResume = {
-          messageId: answerMessage.id,
-          attempts: 0,
-          // DEFAULT IS INTERNAL (review round 3, issue 5) — fail closed for
-          // legacy/malformed pending states without a persisted source.
-          invocationSource: pending.invocationSource ?? 'internal',
-        }
-
-        this.persistSession(managed)
-        await this.flushSession(managed.id)
-      } catch (error) {
-        this.rollbackQuestionResolution(
-          managed,
-          { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
-          pending,
-        )
-        throw error
-      }
-
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: answerMessage,
-        status: 'accepted',
-      }, managed.workspace.id)
-      this.sendEvent({
-        type: 'question_resolved',
-        sessionId,
-        requestId,
-        action: 'answer',
-      }, managed.workspace.id)
-
-      // Resume the agent in the same session with the answer message as the
-      // user turn (existingMessageId prevents a duplicate user message).
-      // The answer UI lives on desktop, so the resumed turn is a desktop turn
-      // — the agent keeps the ability to ask follow-up questions.
-      // resumePendingAgentTurn never rejects: a failure is user-visible
-      // (error event), persisted in pendingAgentResume, and retried.
-      await this.resumePendingAgentTurn(managed)
-
-      sessionLog.info(`Question ${requestId} answered for session ${sessionId}; agent resumed`)
-      return { status: 'accepted' }
+      return outcome.result
     } catch (error) {
       sessionLog.error(`Failed to resolve question ${requestId} for session ${sessionId}:`, error)
       return {
@@ -7595,6 +7561,147 @@ export class SessionManager implements ISessionManager {
         message: error instanceof Error ? error.message : String(error),
       }
     }
+  }
+
+  /**
+   * The durable answer/cancel commit. Caller MUST hold the session's
+   * question-state lock (review fix round 2, issue 1). Returns whether the
+   * agent resume is owed so the caller can run it outside the lock.
+   */
+  private async commitQuestionResolutionLocked(
+    managed: ManagedSession,
+    sessionId: string,
+    resolution: QuestionResolution,
+    requestId: string,
+  ): Promise<{ result: QuestionResolutionResult; resume: boolean }> {
+    const pending = managed.pendingQuestion
+
+    if (!pending || pending.requestId !== requestId) {
+      // Idempotency: an answer for an already-resolved request succeeds quietly;
+      // anything else is stale (replaced, stopped, or from a previous run).
+      if (this.hasPersistedQuestionResolution(managed, requestId)) {
+        sessionLog.info(`Question ${requestId} already resolved for session ${sessionId}`)
+        return { result: { status: 'already_answered' }, resume: false }
+      }
+      sessionLog.warn(`Stale question resolution ${requestId} for session ${sessionId} (active: ${pending?.requestId ?? 'none'})`)
+      return { result: { status: 'stale' }, resume: false }
+    }
+
+    if (resolution.action === 'cancel') {
+      // Atomic cleanup: write the readable cancel record, clear pending, persist.
+      const cancelMessage: Message = {
+        id: generateMessageId(),
+        role: 'user',
+        content: i18n.t('chat.questionSkippedRecord'),
+        timestamp: this.monotonic(),
+        questionResolution: { action: 'cancel', requestId },
+      }
+      // Rollback snapshot — a failed persist/flush must leave the session
+      // exactly as before so the skip can be retried.
+      const prevMessages = managed.messages.slice()
+      const prevLastMessageRole = managed.lastMessageRole
+      try {
+        managed.messages.push(cancelMessage)
+        managed.lastMessageRole = 'user'
+        managed.pendingQuestion = undefined
+
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      } catch (error) {
+        this.rollbackQuestionResolution(managed, { messages: prevMessages, lastMessageRole: prevLastMessageRole }, pending)
+        throw error
+      }
+
+      this.sendEvent({
+        type: 'user_message',
+        sessionId,
+        message: cancelMessage,
+        status: 'accepted',
+      }, managed.workspace.id)
+      this.sendEvent({
+        type: 'question_resolved',
+        sessionId,
+        requestId,
+        action: 'cancel',
+      }, managed.workspace.id)
+
+      sessionLog.info(`Question ${requestId} cancelled for session ${sessionId} (agent not resumed)`)
+      return { result: { status: 'cancelled' }, resume: false }
+    }
+
+    // --- action === 'answer' ---
+
+    // Validate answers against the pending request before mutating anything.
+    const response = resolution.response
+    const validationError = this.validateQuestionAnswerPayload(pending, response)
+    if (validationError) {
+      return { result: { status: 'transient_failure', message: validationError }, resume: false }
+    }
+
+    // Atomic: write ONE readable answer message with structured metadata,
+    // clear pending, arm the recoverable resume state, persist + flush —
+    // all before starting the agent. "Answer committed + awaiting resume"
+    // is itself persisted so a resume failure is never silently lost.
+    const content = this.formatQuestionAnswerContent(pending, response)
+    const answerMessage: Message = {
+      id: generateMessageId(),
+      role: 'user',
+      content,
+      timestamp: this.monotonic(),
+      questionResponse: {
+        requestId,
+        answers: response.answers,
+      },
+    }
+    // Rollback snapshot — a failed persist/flush must leave the session
+    // exactly as before so the same answer can be retried.
+    const prevMessages = managed.messages.slice()
+    const prevLastMessageRole = managed.lastMessageRole
+    const prevLastMessageAt = managed.lastMessageAt
+    const prevPendingAgentResume = managed.pendingAgentResume
+    try {
+      managed.messages.push(answerMessage)
+      managed.lastMessageRole = 'user'
+      managed.lastMessageAt = Date.now()
+      managed.pendingQuestion = undefined
+      // Carry the trusted entry capability of the question-producing turn
+      // into the recoverable resume state — first resume, failure retries,
+      // and restart recovery all pass it back to sendMessage.
+      managed.pendingAgentResume = {
+        messageId: answerMessage.id,
+        attempts: 0,
+        // DEFAULT IS INTERNAL (review round 3, issue 5) — fail closed for
+        // legacy/malformed persisted states without a persisted source.
+        invocationSource: pending.invocationSource ?? 'internal',
+      }
+
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } catch (error) {
+      this.rollbackQuestionResolution(
+        managed,
+        { messages: prevMessages, lastMessageRole: prevLastMessageRole, lastMessageAt: prevLastMessageAt, pendingAgentResume: prevPendingAgentResume },
+        pending,
+      )
+      throw error
+    }
+
+    this.sendEvent({
+      type: 'user_message',
+      sessionId,
+      message: answerMessage,
+      status: 'accepted',
+    }, managed.workspace.id)
+    this.sendEvent({
+      type: 'question_resolved',
+      sessionId,
+      requestId,
+      action: 'answer',
+    }, managed.workspace.id)
+
+    // The agent resume is owed — the caller runs it OUTSIDE the
+    // question-state lock (see respondToQuestionInner).
+    return { result: { status: 'accepted' }, resume: true }
   }
 
   /**
@@ -7800,40 +7907,65 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Serialize a pendingQuestion transition behind the session's question-state
+   * lock (review fix round 2, issue 1). Critical sections are tail-linked:
+   * each waits for the previous one to settle (success OR failure) before
+   * running, so a stop/archive clear's staged flush can never interleave with
+   * a concurrent answer/cancel commit. Never rejects on its own — the
+   * critical section's error propagates to its own caller only.
+   */
+  private withQuestionStateLock<T>(sessionId: string, critical: () => Promise<T>): Promise<T> {
+    const tail = this.questionStateLocks.get(sessionId) ?? Promise.resolve()
+    const run = tail.then(critical, critical)
+    const release = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.questionStateLocks.set(sessionId, release)
+    void release.then(() => {
+      if (this.questionStateLocks.get(sessionId) === release) {
+        this.questionStateLocks.delete(sessionId)
+      }
+    })
+    return run
+  }
+
+  /**
    * Clear any pending question for a session and notify renderers.
    * Used by session stop / archive / delete lifecycle transitions.
    * Answers the "who cleared it" question on the wire via question_resolved.
    *
-   * FAILURE-ATOMIC (review fix round 1, issue 1): the memory clear only
-   * becomes final after the flush succeeds. On a persist/flush failure the
-   * authoritative pending question is restored in memory (and re-enqueued
-   * best-effort, mirroring {@link rollbackQuestionResolution}) and the error
-   * propagates, so the lifecycle transition stays retryable: a one-way
-   * memory clear would turn the NEXT stop/archive into a no-op while the
-   * disk still holds the question and renderers still show the card.
-   * question_resolved is broadcast ONLY after a durable clear — exactly one
-   * terminal notification per request.
+   * Serialized on the session's question-state lock against answer/cancel
+   * commits and tool-requested replacements (review fix round 2, issue 1).
    */
   private async clearPendingQuestionForSession(managed: ManagedSession): Promise<void> {
+    await this.withQuestionStateLock(managed.id, () => this.clearPendingQuestionForSessionLocked(managed))
+  }
+
+  /**
+   * LOCKED clear — caller must hold the question-state lock.
+   *
+   * FAILURE-ATOMIC + STAGED (review fix rounds 1+2, issue 1): the cleared
+   * header is committed to disk on a STAGED snapshot while live memory keeps
+   * the pending question visible. Only after the durable flush succeeds is
+   * the memory cleared and question_resolved broadcast — a lock-free reader
+   * (getPendingQuestion, metadata mapping, recovery lookups) can therefore
+   * never observe the pending flip absent-then-restored, and a failed flush
+   * leaves nothing to roll back: the pending simply stays authoritative and
+   * the lifecycle transition stays retryable. Exactly one terminal
+   * question_resolved is broadcast per request.
+   */
+  private async clearPendingQuestionForSessionLocked(managed: ManagedSession): Promise<void> {
     const pending = managed.pendingQuestion
     if (!pending) return
-    managed.pendingQuestion = undefined
     try {
-      this.persistSession(managed)
+      this.persistSession(managed, { pendingQuestion: undefined })
       await this.flushSession(managed.id)
     } catch (error) {
-      managed.pendingQuestion = pending
-      sessionLog.error(`Failed to durably clear pending question ${pending.requestId} for session ${managed.id}; state restored for retry:`, error)
-      try {
-        this.persistSession(managed)
-        void this.flushSession(managed.id).catch(requeueError => {
-          sessionLog.error(`Failed to re-persist restored pending question for session ${managed.id}:`, requeueError)
-        })
-      } catch (requeueError) {
-        sessionLog.error(`Failed to re-persist restored pending question for session ${managed.id}:`, requeueError)
-      }
+      sessionLog.error(`Failed to durably clear pending question ${pending.requestId} for session ${managed.id}; pending kept for retry:`, error)
       throw error
     }
+    managed.pendingQuestion = undefined
     this.sendEvent({
       type: 'question_resolved',
       sessionId: managed.id,
