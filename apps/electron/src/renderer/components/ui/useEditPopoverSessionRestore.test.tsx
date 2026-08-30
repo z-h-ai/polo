@@ -154,4 +154,128 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(createCalls).toBe(1)
     expect(result.current.inlineSessionId).toBeNull()
   })
+
+  // Round 3, issue 4: a create in flight when the scope changes (workspace
+  // A → B) must commit nothing — the stale A session is never adopted, never
+  // handed back, and B's messages can never land in it.
+  it('stale creation across a workspace A→B switch: commits nothing, hands back null, B creates its own session', async () => {
+    const createDeferred = makeDeferred<string>()
+    let createCalls = 0
+    const createdFor: string[] = []
+    const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        workspaceId: 'ws-a',
+        restorePendingSession: async () => null,
+        createPopoverSession: () => {
+          createCalls++
+          createdFor.push(`ws-${createCalls}`)
+          return createDeferred.promise
+        },
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    // Send in scope A — the creation is in flight when the scope switches.
+    const staleResult: { id: string | null } = { id: null }
+    await act(async () => {
+      void result.current.ensureSessionForSend().then(id => {
+        staleResult.id = id
+      })
+    })
+    // Switch scope — its effect bumps the generation BEFORE the A create
+    // resolves (separate act scope guarantees the passive effect has flushed).
+    rerender(baseParams({
+      workspaceId: 'ws-b',
+      restorePendingSession: async () => null,
+      createPopoverSession: async () => {
+        createCalls++
+        createdFor.push(`ws-${createCalls}`)
+        return 'session-b'
+      },
+    }))
+    await act(async () => {
+      createDeferred.resolve('session-a')
+      await new Promise(r => setTimeout(r, 20))
+    })
+
+    // The stale A creation handed back nothing and committed nothing.
+    expect(staleResult.id).toBeNull()
+    expect(result.current.inlineSessionId).toBeNull()
+
+    // B's own send creates B's session — A's late result cannot take over.
+    const bResult: { id: string | null } = { id: null }
+    await act(async () => {
+      bResult.id = await result.current.ensureSessionForSend()
+    })
+    expect(bResult.id).toBe('session-b')
+    expect(result.current.inlineSessionId).toBe('session-b')
+    expect(createdFor).toEqual(['ws-1', 'ws-2'])
+  })
+
+  // Round 3, issue 4: concurrent sends dedupe onto ONE in-flight creation —
+  // a double send creates exactly one hidden session.
+  it('concurrent double send shares one in-flight creation (single hidden session)', async () => {
+    const createDeferred = makeDeferred<string>()
+    let createCalls = 0
+    const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        restorePendingSession: async () => null,
+        createPopoverSession: () => {
+          createCalls++
+          return createDeferred.promise
+        },
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    const first: { id: string | null } = { id: null }
+    const second: { id: string | null } = { id: null }
+    await act(async () => {
+      const p1 = result.current.ensureSessionForSend().then(id => {
+        first.id = id
+      })
+      const p2 = result.current.ensureSessionForSend().then(id => {
+        second.id = id
+      })
+      createDeferred.resolve('session-single')
+      await Promise.all([p1, p2])
+    })
+
+    expect(createCalls).toBe(1)
+    expect(first.id).toBe('session-single')
+    expect(second.id).toBe('session-single')
+    expect(result.current.inlineSessionId).toBe('session-single')
+  })
+
+  // Round 3, issue 4: the adoption path is also generation-bound — a restore
+  // result for the OLD scope must not adopt after the scope changed.
+  it('late restore for a superseded scope does not adopt into the new scope', async () => {
+    const restoreDeferred = makeDeferred<{ sessionId: string } | null>()
+    const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        workspaceId: 'ws-a',
+        popoverOwnerId: 'owner-a',
+        restorePendingSession: () => restoreDeferred.promise,
+      }),
+    }) as unknown as HookRender
+
+    expect(result.current.restoring).toBe(true)
+
+    // Switch scope BEFORE the restore resolves.
+    rerender(baseParams({
+      workspaceId: 'ws-b',
+      popoverOwnerId: 'owner-b',
+      restorePendingSession: async () => null,
+    }))
+    await act(async () => {
+      restoreDeferred.resolve({ sessionId: 'session-old-scope' })
+      await new Promise(r => setTimeout(r, 20))
+    })
+
+    expect(result.current.inlineSessionId).toBeNull()
+    // restoring belongs to the NEW scope's query now (it resolved null).
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+  })
 })

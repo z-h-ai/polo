@@ -2,21 +2,25 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
  * Restore/ownership state machine for the Edit Popover's hidden inline
- * session (review round 2, issues 1–3).
+ * session (review round 2 issues 1–3; round 3 issue 4).
  *
  * The popover's session is hidden and its id only lives in component state,
- * so on every open this hook:
- *  1. clears the inline session,
+ * so on every open/scope change this hook:
+ *  1. bumps the scope generation and clears the inline session,
  *  2. flips `restoring` on (the popover must keep its send entry disabled
  *     while the adoption query is in flight),
  *  3. asks the server for the popover-origin session that still owns an
  *     active pending question for this workspace + owner, and adopts it.
  *
- * Concurrency contract (CAS): a late restore result is adopted ONLY when no
- * session has been created or adopted in the meantime (`inlineSessionIdRef`
- * still null and no creation in flight). A quick send during the restore
- * window wins; the stale restore result is discarded and never yanks the UI
- * back to an old question, and the freshly created session is never stranded.
+ * Concurrency contract:
+ * - CAS adoption: a late restore result is adopted ONLY when the scope is
+ *   unchanged and no session exists / no creation is in flight.
+ * - Generation binding (round 3): every create captures the generation of
+ *   its scope; when the scope changes (workspace A → B, popover reopen) the
+ *   stale creation commits nothing — the created A session is never adopted
+ *   into B's scope and B's messages can never land in it.
+ * - In-flight dedupe: concurrent sends share ONE create promise, so a double
+ *   send creates a single hidden session, never two.
  */
 export interface EditPopoverSessionRestoreParams {
   /** Whether the popover is currently open. */
@@ -38,7 +42,9 @@ export interface EditPopoverSessionRestoreState {
   restoring: boolean
   /**
    * Reuse the current inline session or create one. The creation is marked
-   * synchronously so an in-flight restore can never overwrite it.
+   * synchronously so an in-flight restore can never overwrite it, and it is
+   * bound to the current scope generation: a create that finishes after the
+   * scope changed commits nothing and hands back null.
    */
   ensureSessionForSend: () => Promise<string | null>
 }
@@ -51,28 +57,42 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
   // Synchronous mirror of inlineSessionId for CAS checks inside async flows
   // (state updates are not observable within the same tick).
   const inlineSessionIdRef = useRef<string | null>(null)
-  // True while ensureSessionForSend's createPopoverSession is in flight —
-  // blocks a late adoption from racing the reserved creation slot.
+  // Increments on every open/scope change (open, workspaceId, popoverOwnerId).
+  // In-flight restores AND creations capture the generation they started with
+  // and commit nothing once it has moved on.
+  const scopeGenerationRef = useRef(0)
+  // True while an ensureSessionForSend creation is in flight (CAS guard for
+  // the adoption path).
   const creatingRef = useRef(false)
+  // Shared in-flight create promise — concurrent sends dedupe onto it so a
+  // double send creates exactly one hidden session.
+  const creatingPromiseRef = useRef<Promise<string | null> | null>(null)
 
   const setSessionId = useCallback((id: string | null) => {
     inlineSessionIdRef.current = id
     setInlineSessionId(id)
   }, [])
 
-  // Reset + adopt on open. The CAS guards against the "delayed restore +
-  // quick send" race: only adopt when no session exists or is being created.
+  // Reset + adopt on open/scope change. The generation bump invalidates any
+  // in-flight work from the previous scope; the CAS guards the "delayed
+  // restore + quick send" race; the generation check guards the "scope
+  // switched mid-restore" race.
   useEffect(() => {
-    if (!open) return
+    scopeGenerationRef.current += 1
     setSessionId(null)
-    if (!workspaceId) return
+    if (!open || !workspaceId) {
+      setRestoring(false)
+      return
+    }
+    const generation = scopeGenerationRef.current
     let cancelled = false
     setRestoring(true)
     void restorePendingSession()
       .then(result => {
         if (cancelled || !result) return
-        // CAS: a send that already created/adopted (or is creating) a session
-        // keeps priority over this stale restore result.
+        // CAS + scope guard: only adopt when the scope is unchanged and no
+        // session exists / creation is in flight.
+        if (scopeGenerationRef.current !== generation) return
         if (inlineSessionIdRef.current === null && !creatingRef.current) {
           setSessionId(result.sessionId)
         }
@@ -83,7 +103,9 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
         console.warn('[EditPopover] failed to restore pending question session:', error)
       })
       .finally(() => {
-        if (!cancelled) setRestoring(false)
+        if (!cancelled && scopeGenerationRef.current === generation) {
+          setRestoring(false)
+        }
       })
     return () => {
       cancelled = true
@@ -97,16 +119,32 @@ export function useEditPopoverSessionRestore(params: EditPopoverSessionRestorePa
     const existing = inlineSessionIdRef.current
     if (existing) return existing
     if (!workspaceId) return null
+    // Concurrent sends dedupe onto ONE in-flight creation — a double send
+    // must never create two hidden sessions.
+    if (creatingPromiseRef.current) return creatingPromiseRef.current
+    const generation = scopeGenerationRef.current
     // Mark the creation synchronously: an in-flight restore that resolves
     // later must never adopt over this reserved slot.
     creatingRef.current = true
-    try {
-      const sessionId = await createPopoverSession()
-      setSessionId(sessionId)
-      return sessionId
-    } finally {
-      creatingRef.current = false
-    }
+    const promise = createPopoverSession()
+      .then(sessionId => {
+        if (scopeGenerationRef.current !== generation) {
+          // Scope changed while creating (workspace A → B switch, popover
+          // reopen): the stale session must NOT be adopted into the new
+          // scope — hand nothing back so no stale message lands in it.
+          return null
+        }
+        if (inlineSessionIdRef.current === null) {
+          setSessionId(sessionId)
+        }
+        return inlineSessionIdRef.current
+      })
+      .finally(() => {
+        creatingRef.current = false
+        creatingPromiseRef.current = null
+      })
+    creatingPromiseRef.current = promise
+    return promise
   }, [workspaceId, createPopoverSession, setSessionId])
 
   return { inlineSessionId, restoring, ensureSessionForSend }

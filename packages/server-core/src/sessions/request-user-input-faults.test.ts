@@ -722,6 +722,62 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         await sm.respondToQuestion('f-reach-clear', { action: 'cancel', requestId: request.requestId })
         expect(await sm.getEditPopoverPendingSession('ws_test', OWNER_A)).toBeNull()
       })
+
+      // Round 3, issue 3: cold recovery must hydrate the FULL identity from
+      // the header (hidden/origin/owner/preset), answering must not degrade
+      // the persisted header, and a follow-up question must be recoverable by
+      // the same owner.
+      it('cold recovery keeps the full popover identity; answering does not degrade the header; a follow-up question is recoverable', async () => {
+        patchPrivateFlush()
+        const request = makeQuestionRequest('f-reach-identity')
+        seedStoredPopover('f-reach-identity', request, { popoverOwner: OWNER_A })
+
+        const sm2 = new SessionManager({ workspace: buildWorkspace() })
+        try {
+          const found = await sm2.getEditPopoverPendingSession('ws_test', OWNER_A)
+          expect(found?.sessionId).toBe('f-reach-identity')
+
+          // The hydrated managed session carries the COMPLETE host identity
+          const managed = (sm2 as unknown as { sessions: Map<string, unknown> }).sessions.get('f-reach-identity') as unknown as {
+            hidden?: boolean
+            origin?: string
+            popoverOwner?: string
+            systemPromptPreset?: string
+            pendingQuestion?: { requestId: string }
+          }
+          expect(managed.hidden).toBe(true)
+          expect(managed.origin).toBe('edit-popover')
+          expect(managed.popoverOwner).toBe(OWNER_A)
+          expect(managed.systemPromptPreset).toBe('mini')
+
+          // Answer the recovered question (resume stubbed to a no-op turn)
+          ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
+          const result = await sm2.respondToQuestion('f-reach-identity', makeAnswerResolution(request))
+          expect(result).toEqual({ status: 'accepted' })
+
+          // The header did NOT degrade: host identity + owner survive the
+          // answer's persist; the pending state is cleared.
+          const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-reach-identity'), 'utf-8').split('\n')[0])
+          expect(header.origin).toBe('edit-popover')
+          expect(header.popoverOwner).toBe(OWNER_A)
+          expect(header.hidden).toBe(true)
+          expect(header.systemPromptPreset).toBe('mini')
+          expect(header.pendingQuestion).toBeUndefined()
+
+          // A follow-up question on the same session is recoverable by the
+          // same owner (scoped association is intact). Polo regenerates the
+          // requestId server-side, so assert on identity + freshness.
+          const followUp = makeQuestionRequest('f-reach-identity-2')
+          await (sm2 as unknown as { handleQuestionRequested: (m: unknown, q: unknown[]) => Promise<void> })
+            .handleQuestionRequested(managed, followUp.questions)
+          const foundAgain = await sm2.getEditPopoverPendingSession('ws_test', OWNER_A)
+          expect(foundAgain?.sessionId).toBe('f-reach-identity')
+          expect(foundAgain?.request.requestId).toBeDefined()
+          expect(foundAgain?.request.requestId).not.toBe(request.requestId)
+        } finally {
+          ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
+      })
     })
 
     // Review round 2, issue #1: the generic creation path can never grant the
@@ -783,6 +839,189 @@ describe('request_user_input fault injection + stop lifecycle', () => {
           expect(flagOf()).toBe(true)
         } finally {
           ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
+      })
+
+      // Round 3, issues 1+2: the owner is a REQUIRED, server-validated
+      // identity — a blank/missing owner rejects the creation outright, and a
+      // failed durable stamp rolls back to unprivileged (memory + disk). The
+      // session must never be "privileged but not persisted".
+      it('a blank or missing popoverOwner rejects the creation (fail closed)', async () => {
+        const smS = new SessionManager({ workspace: buildWorkspace() })
+        try {
+          await expect((smS as unknown as {
+            createEditPopoverSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
+          }).createEditPopoverSession('ws_test', {
+            model: 'fast',
+            systemPromptPreset: 'mini',
+            permissionMode: 'allow-all',
+            hidden: true,
+            popoverOwner: '   ',
+          })).rejects.toThrow(/popoverOwner/)
+
+          await expect((smS as unknown as {
+            createEditPopoverSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
+          }).createEditPopoverSession('ws_test', {
+            model: 'fast',
+            systemPromptPreset: 'mini',
+            permissionMode: 'allow-all',
+            hidden: true,
+            // cast simulates an RPC caller omitting the required field
+          } as never)).rejects.toThrow(/popoverOwner/)
+
+          // Nothing privileged was registered
+          for (const managed of (smS as unknown as { sessions: Map<string, unknown> }).sessions.values()) {
+            expect((managed as unknown as { origin?: string }).origin).not.toBe('edit-popover')
+          }
+        } finally {
+          ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
+      })
+
+      it('a failed durable stamp rolls back to unprivileged (memory + disk); the turn stays fail closed', async () => {
+        const smS = new SessionManager({ workspace: buildWorkspace() })
+        stubAgentCaptureFlag(smS)
+        try {
+          // Fail exactly the FIRST flushSession call (the stamp flush); the
+          // rollback flush and everything after succeeds.
+          const realFlush = (Object.getPrototypeOf(smS) as { flushSession: (id: string) => Promise<void> }).flushSession
+          let flushCalls = 0
+          ;(smS as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+            flushCalls++
+            if (flushCalls === 1) {
+              return Promise.reject(new Error('disk full (injected)'))
+            }
+            return realFlush.call(smS, id)
+          }
+
+          const session = await (smS as unknown as {
+            createEditPopoverSession: (workspaceId: string, options: Record<string, unknown>) => Promise<{ id: string }>
+          }).createEditPopoverSession('ws_test', {
+            model: 'fast',
+            systemPromptPreset: 'mini',
+            permissionMode: 'allow-all',
+            hidden: true,
+            popoverOwner: OWNER_ID,
+          })
+          seededSessionIds.add(session.id)
+
+          // In-memory: the stamp was rolled back
+          const managed = (smS as unknown as { sessions: Map<string, unknown> }).sessions.get(session.id) as unknown as {
+            origin?: string
+            popoverOwner?: string
+          }
+          expect(managed.origin).toBeUndefined()
+          expect(managed.popoverOwner).toBeUndefined()
+
+          // Disk: the rolled-back (unprivileged) state was persisted
+          const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, session.id), 'utf-8').split('\n')[0])
+          expect(header.origin).not.toBe('edit-popover')
+          expect(header.popoverOwner).toBeUndefined()
+
+          // The hidden+mini session stays fail closed on a desktop turn
+          await smS.sendMessage(session.id, 'turn on unprivileged session', [], [], { invocationSource: 'desktop' })
+          expect(flagOf()).toBe(false)
+        } finally {
+          ;(smS as unknown as { sessions: Map<string, unknown> }).sessions.clear()
+        }
+      })
+    })
+
+    // Round 3, issue 5: every invocationSource DEFAULT is internal (fail
+    // closed). Legacy/malformed persisted state without a source must never
+    // upgrade to a desktop resume — neither on ordinary sessions nor on the
+    // privileged edit-popover shape.
+    describe('missing invocationSource defaults are fail-closed', () => {
+      const OWNER_ID = 'Permissions::/ws/a/config.json'
+
+      it('a legacy pendingQuestion without invocationSource resumes as internal — no eligibility upgrade on a popover session', async () => {
+        patchPrivateFlush()
+        stubAgentCaptureFlag()
+        const request = makeQuestionRequest('f-src-legacy-popover')
+        // Legacy shape: pendingQuestion WITHOUT invocationSource
+        seedHiddenMini('f-src-legacy-popover', request, 'edit-popover', OWNER_ID)
+
+        const resumed: { options?: { invocationSource?: string } } = {}
+        const realSend = (Object.getPrototypeOf(sm) as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage
+        ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = function (this: unknown, ...args: unknown[]) {
+          resumed.options = args[4] as { invocationSource?: string }
+          return realSend.apply(this, args)
+        }
+
+        const result = await sm.respondToQuestion('f-src-legacy-popover', makeAnswerResolution(request))
+        expect(result).toEqual({ status: 'accepted' })
+        expect(resumed.options?.invocationSource).toBe('internal')
+        // The hidden+mini popover session must NOT regain the tool
+        expect(flagCapture.last).toBe(false)
+      })
+
+      it('a legacy pendingQuestion without invocationSource resumes as internal — no eligibility upgrade on an ordinary desktop session', async () => {
+        patchPrivateFlush()
+        stubAgentCaptureFlag()
+        const request = makeQuestionRequest('f-src-legacy-plain')
+        seedSession('f-src-legacy-plain', { pendingQuestion: request })
+
+        const resumed: { options?: { invocationSource?: string } } = {}
+        const realSend = (Object.getPrototypeOf(sm) as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage
+        ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = function (this: unknown, ...args: unknown[]) {
+          resumed.options = args[4] as { invocationSource?: string }
+          return realSend.apply(this, args)
+        }
+
+        const result = await sm.respondToQuestion('f-src-legacy-plain', makeAnswerResolution(request))
+        expect(result).toEqual({ status: 'accepted' })
+        expect(resumed.options?.invocationSource).toBe('internal')
+        expect(flagCapture.last).toBe(false)
+      })
+
+      it('a legacy pendingAgentResume without invocationSource stays internal after restart (popover shape)', async () => {
+        stubAgentCaptureFlag()
+        const request = makeQuestionRequest('f-src-legacy-resume')
+        // Seed a persisted answer turn + resume state WITHOUT a source, on a
+        // fully privileged popover session header.
+        const filePath = getSessionFilePath(tmpRoot, 'f-src-legacy-resume')
+        mkdirSync(dirname(filePath), { recursive: true })
+        const answerMessage = { id: 'msg-legacy-answer', type: 'user', role: 'user', content: 'legacy answer', timestamp: Date.now() }
+        const stored = {
+          id: 'f-src-legacy-resume',
+          workspaceRootPath: tmpRoot,
+          name: 'popover legacy resume',
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          hidden: true,
+          systemPromptPreset: 'mini',
+          origin: 'edit-popover',
+          popoverOwner: OWNER_ID,
+          messages: [answerMessage] as unknown as StoredSession['messages'],
+          tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, contextTokens: 0 },
+          pendingAgentResume: { messageId: answerMessage.id, attempts: 1 },
+        } as StoredSession
+        writeSessionJsonl(filePath, stored)
+        seededSessionIds.add('f-src-legacy-resume')
+
+        // Restart: hydration re-arms the resume; the retry drives the REAL
+        // sendMessage entry with the fail-closed internal default.
+        const sm2 = new SessionManager({ workspace: buildWorkspace() })
+        try {
+          stubAgentCaptureFlag(sm2)
+          const resumed: { options?: { invocationSource?: string } } = {}
+          const sm2RealSend = (Object.getPrototypeOf(sm2) as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage
+          ;(sm2 as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = function (this: unknown, ...args: unknown[]) {
+            resumed.options = args[4] as { invocationSource?: string }
+            return sm2RealSend.apply(this, args)
+          }
+          const storedLoaded = loadSession(tmpRoot, 'f-src-legacy-resume')!
+          const managed2 = createManagedSession(
+            { id: storedLoaded.id, name: storedLoaded.name, createdAt: storedLoaded.createdAt, hidden: true, systemPromptPreset: 'mini', origin: 'edit-popover', popoverOwner: OWNER_ID },
+            buildWorkspace(),
+          )
+          ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.set('f-src-legacy-resume', managed2)
+          await (sm2 as unknown as { ensureMessagesLoaded: (m: unknown) => Promise<void> }).ensureMessagesLoaded(managed2)
+          await waitForCondition(() => resumed.options !== undefined)
+          expect(resumed.options?.invocationSource).toBe('internal')
+          expect(flagCapture.last).toBe(false)
+        } finally {
+          ;(sm2 as unknown as { sessions: Map<string, unknown> }).sessions.clear()
         }
       })
     })

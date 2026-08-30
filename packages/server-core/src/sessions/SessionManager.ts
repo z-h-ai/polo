@@ -3076,11 +3076,20 @@ export class SessionManager implements ISessionManager {
    */
   async createEditPopoverSession(
     workspaceId: string,
-    options?: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner?: string },
+    options: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner: string },
   ): Promise<Session> {
-    // Never trust a caller-provided origin/owner routing — destructured off
-    // and replaced by the server-side stamp below.
-    const { popoverOwner, ...createOptions } = options ?? {}
+    // Fail closed (review round 3, issues 1+2): the owner is a REQUIRED,
+    // server-validated non-empty stable identity. A missing/blank owner
+    // rejects the creation outright — the session must never exist in a
+    // state where the privileged origin is granted but the scoped recovery
+    // identity is missing.
+    const popoverOwner = typeof options?.popoverOwner === 'string' ? options.popoverOwner.trim() : ''
+    if (!popoverOwner || popoverOwner.length > 200) {
+      throw new Error('createEditPopoverSession requires a non-empty popoverOwner (max 200 chars)')
+    }
+    // Never trust a caller-provided origin routing — destructured off and
+    // replaced by the server-side stamp below.
+    const { popoverOwner: _ignored, ...createOptions } = options
     const session = await this.createSession(workspaceId, createOptions)
     const managed = this.sessions.get(session.id)
     if (!managed) {
@@ -3088,16 +3097,27 @@ export class SessionManager implements ISessionManager {
       // defense in depth.
       return session
     }
+    // Stamp server-side, then make it durable. ONLY a successful persist+flush
+    // leaves the session privileged: a transient disk failure rolls the stamp
+    // back (in memory AND on disk) so this process can never treat the
+    // session as an eligible Edit Popover session without a complete,
+    // restart-safe header (origin + owner). Fail closed, never
+    // "privileged but not persisted".
     managed.origin = 'edit-popover'
     managed.popoverOwner = popoverOwner
     try {
       this.persistSession(managed)
       await this.flushSession(managed.id)
     } catch (error) {
-      // A persistence failure does not roll back creation (the session exists
-      // and works); the popover simply runs WITHOUT the question capability
-      // after a restart in this rare window. Fail closed, never privileged.
-      sessionLog.error(`Failed to persist Edit Popover origin for session ${managed.id}:`, error)
+      sessionLog.error(`Failed to durably stamp Edit Popover origin for session ${managed.id}; rolling back to unprivileged:`, error)
+      managed.origin = undefined
+      managed.popoverOwner = undefined
+      try {
+        this.persistSession(managed)
+        await this.flushSession(managed.id)
+      } catch (rollbackError) {
+        sessionLog.error(`Failed to persist the rolled-back (unprivileged) state for session ${managed.id}:`, rollbackError)
+      }
     }
     return managedToSession(managed, this.sessionStorage)
   }
@@ -6900,7 +6920,11 @@ export class SessionManager implements ISessionManager {
       // recovery re-derive tool visibility from this instead of re-inferring
       // an ordinary desktop turn — the Edit Popover's hidden+mini session
       // keeps asking follow-up questions after an answer.
-      invocationSource: managed.invocationSource ?? 'desktop',
+      // DEFAULT IS INTERNAL (review round 3, issue 5): the protocol's
+      // fail-closed contract — a missing source (legacy/malformed persisted
+      // state) must never upgrade to desktop; only an explicit value is
+      // persisted and restored.
+      invocationSource: managed.invocationSource ?? 'internal',
     }
 
     // 2. Authoritative pending state — replaces any active request
@@ -7047,32 +7071,39 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`getEditPopoverPendingSession: failed to list sessions for workspace ${workspace.id}:`, error)
       return null
     }
-    let best: { sessionId: string; createdAt: number; request: QuestionRequest } | null = null
+    let best: { sessionId: string; createdAt: number; request: QuestionRequest; meta: SessionMetadata } | null = null
     for (const meta of metas) {
       if (meta.origin !== 'edit-popover' || meta.isArchived || meta.hidden !== true) continue
       if ((meta.popoverOwner ?? '') !== popoverOwner) continue
       const pending = meta.pendingQuestion
       if (pending && (!best || pending.createdAt > best.createdAt)) {
-        best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending }
+        best = { sessionId: meta.id, createdAt: pending.createdAt, request: pending, meta }
       }
     }
     if (!best) return null
 
-    // Hydrate the cold session the same way startup does (register managed
-    // from header + lazy-load messages) so loadMessagesFromDisk restores the
-    // authoritative pending state and prunes a request that was already
-    // resolved (answer/cancel recorded) before this lookup.
+    // Hydrate the cold session from the FULL metadata (review round 3,
+    // issue 3): createManagedSession spreads every header field, so hidden /
+    // origin / popoverOwner / systemPromptPreset survive. Registering from a
+    // bare {id, createdAt} would answer into a managed session that lost its
+    // host identity, and the next persist would write that degraded metadata
+    // back — breaking later recovery by the same owner and downgrading the
+    // eligibility matrix to an ordinary desktop session.
     if (!this.sessions.has(best.sessionId)) {
-      this.sessions.set(best.sessionId, createManagedSession(
-        { id: best.sessionId, createdAt: best.createdAt },
-        workspace,
-      ))
+      this.sessions.set(best.sessionId, createManagedSession(best.meta, workspace))
     }
     await this.getSession(best.sessionId)
     const hydrated = this.sessions.get(best.sessionId)
     const pending = hydrated?.pendingQuestion
-    if (!pending) {
-      // Resolved while the server was down — the association is over.
+    // Re-validate the scope on the hydrated session (defense in depth): the
+    // identity must have survived hydration intact.
+    if (!pending
+      || hydrated?.origin !== 'edit-popover'
+      || (hydrated.popoverOwner ?? '') !== popoverOwner
+      || hydrated.workspace.id !== workspaceId
+      || hydrated.hidden !== true
+      || hydrated.systemPromptPreset !== 'mini') {
+      sessionLog.warn(`getEditPopoverPendingSession: hydrated session ${best.sessionId} lost its Edit Popover identity — refusing to adopt`)
       return null
     }
     return { sessionId: best.sessionId, request: pending }
@@ -7302,7 +7333,9 @@ export class SessionManager implements ISessionManager {
         managed.pendingAgentResume = {
           messageId: answerMessage.id,
           attempts: 0,
-          invocationSource: pending.invocationSource ?? 'desktop',
+          // DEFAULT IS INTERNAL (review round 3, issue 5) — fail closed for
+          // legacy/malformed pending states without a persisted source.
+          invocationSource: pending.invocationSource ?? 'internal',
         }
 
         this.persistSession(managed)
@@ -7453,7 +7486,7 @@ export class SessionManager implements ISessionManager {
         answerMessage.content,
         [],
         [],
-        { invocationSource: resume.invocationSource ?? 'desktop' },
+        { invocationSource: resume.invocationSource ?? 'internal' },
         answerMessage.id,
       )
     } catch (error) {

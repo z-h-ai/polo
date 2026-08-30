@@ -137,7 +137,7 @@ export interface ISessionManager {
    * stamps the server-verified 'edit-popover' origin + owner identity. The
    * generic createSession path strips any caller-provided 'edit-popover'.
    */
-  createEditPopoverSession(workspaceId: string, options?: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner?: string }): Promise<import('@polo-ai/shared/protocol').Session>
+  createEditPopoverSession(workspaceId: string, options: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner: string }): Promise<import('@polo-ai/shared/protocol').Session>
 
   // ---------------------------------------------------------------------------
   // Plans

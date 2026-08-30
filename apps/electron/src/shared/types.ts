@@ -427,7 +427,7 @@ export interface ElectronAPI {
    */
   createEditPopoverSession(
     workspaceId: string,
-    options?: Omit<CreateSessionOptions, 'origin'> & { popoverOwner?: string },
+    options: Omit<CreateSessionOptions, 'origin'> & { popoverOwner: string },
   ): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>

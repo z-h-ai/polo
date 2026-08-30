@@ -1564,7 +1564,7 @@ export default function App() {
   // handleCreateSession above can never grant that origin (review round 2).
   const handleCreateEditPopoverSession = useCallback(async (
     workspaceId: string,
-    options?: Omit<import('../shared/types').CreateSessionOptions, 'origin'> & { popoverOwner?: string },
+    options: Omit<import('../shared/types').CreateSessionOptions, 'origin'> & { popoverOwner: string },
   ): Promise<Session> => {
     const session = await window.electronAPI.createEditPopoverSession(workspaceId, options)
     // Add to per-session atom and metadata map (no sessionsAtom)

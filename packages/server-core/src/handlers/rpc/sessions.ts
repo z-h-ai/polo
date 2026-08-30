@@ -199,7 +199,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Dedicated, trusted creation path for the renderer Edit Popover session.
   // The server stamps the 'edit-popover' origin + owner identity here — the
   // generic CREATE above strips any caller-provided value (review round 2).
-  server.handle(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION, async (_ctx, workspaceId: string, options?: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner?: string }) => {
+  server.handle(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION, async (_ctx, workspaceId: string, options: Omit<import('@polo-ai/shared/protocol').CreateSessionOptions, 'origin'> & { popoverOwner: string }) => {
     const end = perf.start('rpc.createEditPopoverSession', { workspaceId })
     const session = await sessionManager.createEditPopoverSession(workspaceId, options)
     end()
