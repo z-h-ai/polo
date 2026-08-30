@@ -333,6 +333,84 @@ describe('Main-side switch transaction', () => {
   })
 })
 
+describe('two-phase switch transaction', () => {
+  it('prepares with a one-time token and commits only with it', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(typeof prepared.token).toBe('string')
+    expect(getRuntimeActive()).toBe(spaceA)
+
+    // A commit without the exact token is rejected and consumes nothing.
+    const badToken = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      'not-the-token',
+      spaceB,
+    )
+    expect(badToken.success).toBe(false)
+    expect(badToken.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(committed.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+
+    // The token is one-time: a replay fails.
+    const replay = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(replay.success).toBe(false)
+  })
+
+  it('fails the commit when an origin execution appears after prepare', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    registerProductSpaceExecution(fakeExecution({ executionId: 'exec-late' }))
+
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(committed.success).toBe(false)
+    expect(committed.errorCode).toBe('runtime_stop_failed')
+    expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('permanently invalidates a prepared transaction after a revoke', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    await invoke(RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT)
+    expect(getRuntimeActive()).toBeNull()
+
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(committed.success).toBe(false)
+    expect(committed.errorCode).toBe('SWITCH_SUPERSEDED')
+    expect(getRuntimeActive()).toBeNull()
+  })
+})
+
+describe('offline read-only restore', () => {
+  it('fails closed without a verified snapshot', async () => {
+    const { invoke } = createHarness()
+    const result = await invoke(RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW)
+    expect(result.success).toBe(false)
+  })
+})
+
 describe('revoke active context', () => {
   it('clears the fence (fail-closed direction only)', async () => {
     const { invoke } = createHarness()

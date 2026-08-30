@@ -333,7 +333,7 @@ describe('local app main-process authorization boundary', () => {
     } satisfies RpcServer
     registerLocalAppHandlers(server)
     setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
-    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
     resetExecutionRegistry()
   })
 

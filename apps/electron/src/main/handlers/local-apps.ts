@@ -35,14 +35,39 @@ import {
   validateCatalogLocalAppScope,
 } from '../local-app-runtime'
 import {
+  getRuntimeActiveProductSpace,
   isSwitchInProgress,
+  isRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
   unregisterProductSpaceExecution,
+  withSwitchLock,
   type RegisteredProductSpaceExecution,
 } from '@polo-ai/server-core/runtime/product-space-executions'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { resolveTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+
+/**
+ * Trusted active ProductSpace gate for every renderer-reachable Local App
+ * business RPC: the scope's space must equal the Main runtime's committed
+ * active fence. Only the controlled legacy cleanup path may touch other
+ * spaces, and it never goes through this gate.
+ */
+function assertScopeInsideActiveProductSpace(scope: CatalogLocalAppScope): void {
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  if (!activeProductSpaceId || isRuntimeOfflineReadOnly()) {
+    throw new LocalAppRuntimeError(
+      'PRODUCT_SPACE_CONTEXT_REQUIRED',
+      'No committed ProductSpace is active on this device',
+    )
+  }
+  if (scope.organizationId !== activeProductSpaceId) {
+    throw new LocalAppRuntimeError(
+      'NOT_AUTHORIZED',
+      'Local App requests cannot target another ProductSpace',
+    )
+  }
+}
 
 function requireRendererCatalogScope(reference: unknown): CatalogLocalAppScope {
   if (
@@ -58,7 +83,9 @@ function requireRendererCatalogScope(reference: unknown): CatalogLocalAppScope {
       'Renderer local app RPC only permits authorized Catalog scopes',
     )
   }
-  return validateCatalogLocalAppScope(reference)
+  const scope = validateCatalogLocalAppScope(reference)
+  assertScopeInsideActiveProductSpace(scope)
+  return scope
 }
 
 async function requireTrustedCatalogAccount(scope: CatalogLocalAppScope): Promise<void> {
@@ -542,6 +569,14 @@ export function registerLocalAppHandlers(server: RpcServer): void {
 
   let localAppStartSequence = 0
 
+  const registryStopQuietly = async (scope: CatalogLocalAppScope): Promise<void> => {
+    try {
+      await getScopedLocalAppRuntimeRegistry().stop(scope)
+    } catch {
+      // Best-effort rollback of a superseded start.
+    }
+  }
+
   const unregisterLocalAppExecutions = (scope: CatalogLocalAppScope): void => {
     for (const execution of listRegisteredProductSpaceExecutions()) {
       if (execution.kind !== 'local_app') continue
@@ -620,17 +655,42 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     scope: CatalogLocalAppScope,
     startRuntime: () => Promise<{ version: string }>,
   ) => {
-    // A Main-side switch transaction blocks every path that could move an
-    // execution into running/preparing for its duration.
-    if (isSwitchInProgress()) {
-      throw new LocalAppRuntimeError(
-        'SWITCH_IN_PROGRESS',
-        'Apps cannot start while a ProductSpace switch is being committed',
-      )
-    }
-    const result = await startRuntime()
-    await registerLocalAppExecution(scope, result.version)
-    return result
+    // Runs under the same mutex as EXECUTE_SWITCH/PREPARE_SWITCH: a switch
+    // transaction cannot interleave with a starting app, and the app cannot
+    // slip past a switch that begins while its runtime boots.
+    return withSwitchLock(async () => {
+      const activeProductSpaceId = getRuntimeActiveProductSpace()
+      if (!activeProductSpaceId || isRuntimeOfflineReadOnly()) {
+        throw new LocalAppRuntimeError(
+          'PRODUCT_SPACE_CONTEXT_REQUIRED',
+          'No committed ProductSpace is active on this device',
+        )
+      }
+      if (isSwitchInProgress()) {
+        throw new LocalAppRuntimeError(
+          'SWITCH_IN_PROGRESS',
+          'Apps cannot start while a ProductSpace switch is being committed',
+        )
+      }
+      assertScopeInsideActiveProductSpace(scope)
+      const result = await startRuntime()
+
+      // Re-verify under the lock after the runtime booted: if a switch began
+      // while the start was in flight, the runtime is stopped again and never
+      // registered — no orphan execution of the origin space survives.
+      if (
+        isSwitchInProgress()
+        || getRuntimeActiveProductSpace() !== scope.organizationId
+      ) {
+        await registryStopQuietly(scope)
+        throw new LocalAppRuntimeError(
+          'SWITCH_IN_PROGRESS',
+          'A ProductSpace switch superseded this start',
+        )
+      }
+      await registerLocalAppExecution(scope, result.version)
+      return result
+    })
   }
 
   const startCatalogApp = async (scope: CatalogLocalAppScope) => {

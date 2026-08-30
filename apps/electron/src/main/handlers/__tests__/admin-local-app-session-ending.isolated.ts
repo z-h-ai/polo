@@ -328,6 +328,9 @@ const { registerAdminHandlers } = await import(
   '@polo-ai/server-core/handlers/rpc/admin'
 )
 const { registerLocalAppHandlers } = await import('../local-apps')
+const { setRuntimeActiveProductSpace } = await import(
+  '@polo-ai/server-core/runtime/product-space-executions'
+)
 
 function createSignedInTokens(): StoredTokens {
   return {
@@ -458,6 +461,7 @@ function registerProductionHandlers(
   } satisfies HandlerDeps
   registerAdminHandlers(server, deps)
   registerLocalAppHandlers(server)
+  setRuntimeActiveProductSpace(scope.organizationId)
   return {
     handlers,
     context: {
@@ -546,6 +550,8 @@ describe('Admin session and scoped local app production wiring', () => {
       'organization\0creator',
       `org:${'x'.repeat(508)}`,
     ]) {
+      // The committed active fence follows the space under test.
+      setRuntimeActiveProductSpace(organizationId)
       const entityScope = { ...scope, organizationId }
       catalog = {
         ...createCatalog(),

@@ -23,6 +23,10 @@ import {
 } from '@polo-ai/shared/protocol'
 import { useOptionalProductSpaceContext } from '@/context/ProductSpaceContext'
 import {
+  isProductSpaceContractUnsupported,
+  reportProductSpaceContractFailure,
+} from '@/lib/product-space-contract-failure'
+import {
   emitAdminCatalogSessionAuthFailure,
 } from '@/lib/admin-auth-failure'
 import { getHomeAppErrorCode } from '@/lib/home-app-errors'
@@ -598,6 +602,15 @@ export function useAppCatalog() {
         || contextKeyRef.current !== contextKey
       ) return
       if (!catalogResult.success) {
+        // PC-F11: a contract-incompatible Catalog is never a local load
+        // error — it goes through the global contract channel.
+        if (isProductSpaceContractUnsupported(catalogResult)) {
+          reportProductSpaceContractFailure({
+            errorCode: 'product_space_contract_unsupported',
+            source: 'catalog',
+          })
+          return
+        }
         emitAdminCatalogSessionAuthFailure(catalogResult)
         const failureCode = catalogResult.errorCode || 'request_failed'
         // Authorization loss keeps a denied catalog tombstone: visible for

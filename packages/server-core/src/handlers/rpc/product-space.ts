@@ -13,17 +13,28 @@ import type {
   StopAllExecutionsResult,
   WorkspaceId,
 } from '@polo-ai/shared/product-spaces'
+import { randomBytes } from 'node:crypto'
 import { purgeAppCatalogCache } from '@polo-ai/shared/admin/app-catalog-cache'
-import { clearAllOrganizationContextStorage } from '@polo-ai/shared/config'
+import {
+  clearAllOrganizationContextStorage,
+  getProductSpaceContextStorage,
+} from '@polo-ai/shared/config'
+import {
+  ListProductSpacesResponseSchema,
+} from '@polo-ai/shared/product-spaces'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import {
   EXECUTION_STOP_POLL_INTERVAL_MS,
+  getPendingSwitchTransaction,
   getRuntimeActiveProductSpace,
+  getRuntimeFenceGeneration,
   isSwitchInProgress,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
+  setPendingSwitchTransaction,
   setRuntimeActiveProductSpace,
+  setRuntimeOfflineReadOnly,
   setSwitchInProgress,
   stopAllRegisteredProductSpaceExecutions,
   stopRegisteredExecutionsOnce,
@@ -41,7 +52,11 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
   RPC_CHANNELS.productSpace.EXECUTE_SWITCH,
+  RPC_CHANNELS.productSpace.PREPARE_SWITCH,
+  RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+  RPC_CHANNELS.productSpace.CANCEL_SWITCH,
   RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT,
+  RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW,
   RPC_CHANNELS.productSpace.CLEANUP_LEGACY_STATE,
 ] as const
 
@@ -343,6 +358,175 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
   // The trusted client declares the committed device space. While declared,
   // the runtime fences sessions and executions to that space only.
+  // Phase 1 of the two-phase switch: verify the target, terminate origin
+  // executions, re-enumerate to zero, and hold the switch lock behind a
+  // one-time transaction token. The fence is NOT moved yet — the renderer
+  // stages the target projections against this prepared state and then
+  // commits. Any failure keeps the origin fence untouched.
+  server.handle(
+    RPC_CHANNELS.productSpace.PREPARE_SWITCH,
+    async (_ctx, targetProductSpaceId: unknown) => {
+      if (typeof targetProductSpaceId !== 'string' || !targetProductSpaceId) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch prepare request is invalid' }
+      }
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+      }
+
+      return withSwitchLock(async () => {
+        const originProductSpaceId = getRuntimeActiveProductSpace()
+        if (targetProductSpaceId === originProductSpaceId) {
+          return {
+            success: false as const,
+            errorCode: 'VALIDATION_ERROR',
+            message: 'The target ProductSpace is already active',
+          }
+        }
+        // A revoke (contract loss / logout) permanently invalidates any
+        // switch prepared against an older fence generation.
+        const fenceGeneration = getRuntimeFenceGeneration()
+
+        setSwitchInProgress(true)
+        try {
+          const list = await fetchTrustedProductSpaceList()
+          if (!list) {
+            return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
+          }
+          const target = list.productSpaces.find(space => space.id === targetProductSpaceId)
+          if (!target) {
+            return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
+          }
+
+          let stopped: Awaited<ReturnType<typeof stopRegisteredExecutionsOnce>> = []
+          if (originProductSpaceId) {
+            const originEntries: RegisteredProductSpaceExecution[] = []
+            for (const execution of listRegisteredProductSpaceExecutions()) {
+              if (execution.scope.accountId !== trustedAccountId) continue
+              if (execution.scope.productSpaceId !== originProductSpaceId) continue
+              let active: boolean
+              try {
+                active = Boolean(await execution.isActive())
+              } catch {
+                active = true
+              }
+              if (active) originEntries.push(execution)
+            }
+            stopped = await stopRegisteredExecutionsOnce(originEntries)
+          }
+
+          const remaining = []
+          for (const execution of listRegisteredProductSpaceExecutions()) {
+            if (execution.scope.accountId !== trustedAccountId) continue
+            if (execution.scope.productSpaceId !== originProductSpaceId) continue
+            let active: boolean
+            try {
+              active = Boolean(await execution.isActive())
+            } catch {
+              active = true
+            }
+            if (active) remaining.push(execution)
+          }
+          if (remaining.length > 0) {
+            return {
+              success: false as const,
+              errorCode: 'runtime_stop_failed',
+              message: 'Origin ProductSpace still has running executions',
+              executions: stopped,
+            }
+          }
+
+          const token = randomBytes(24).toString('hex')
+          setPendingSwitchTransaction({
+            token,
+            targetProductSpaceId,
+            originProductSpaceId: originProductSpaceId ?? '',
+            fenceGeneration,
+            createdAt: Date.now(),
+          })
+          return {
+            success: true as const,
+            token,
+            from: originProductSpaceId,
+            to: targetProductSpaceId,
+            executions: stopped,
+          }
+        } finally {
+          setSwitchInProgress(false)
+        }
+      })
+    },
+  )
+
+  // Phase 2: one-time token commit. Verifies the token, the fence generation
+  // (any revoke permanently invalidates prepared transactions) and — inside
+  // the lock — that the origin space still has zero running executions
+  // (nothing may have been registered between prepare and commit).
+  server.handle(
+    RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+    async (_ctx, commitToken: unknown, targetProductSpaceId: unknown) => {
+      if (typeof commitToken !== 'string' || !commitToken
+        || typeof targetProductSpaceId !== 'string' || !targetProductSpaceId) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch commit request is invalid' }
+      }
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+      }
+
+      return withSwitchLock(async () => {
+        const pending = getPendingSwitchTransaction()
+        if (
+          !pending
+          || pending.token !== commitToken
+          || pending.targetProductSpaceId !== targetProductSpaceId
+        ) {
+          return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'No matching prepared switch transaction' }
+        }
+        // Consume the token immediately: one-time use.
+        setPendingSwitchTransaction(null)
+        if (pending.fenceGeneration !== getRuntimeFenceGeneration()) {
+          return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The prepared switch was superseded by a fence change' }
+        }
+        const originProductSpaceId = pending.originProductSpaceId || null
+        for (const execution of listRegisteredProductSpaceExecutions()) {
+          if (execution.scope.accountId !== trustedAccountId) continue
+          if (execution.scope.productSpaceId !== originProductSpaceId) continue
+          let active: boolean
+          try {
+            active = Boolean(await execution.isActive())
+          } catch {
+            active = true
+          }
+          if (active) {
+            return { success: false as const, errorCode: 'runtime_stop_failed', message: 'Origin executions appeared after prepare' }
+          }
+        }
+        setRuntimeActiveProductSpace(targetProductSpaceId)
+        return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
+      })
+    },
+  )
+
+  // Cancel is only valid before a commit: it releases the prepared
+  // transaction and leaves the origin fence untouched. After a commit the
+  // only recovery is the atomic reverse transaction.
+  server.handle(
+    RPC_CHANNELS.productSpace.CANCEL_SWITCH,
+    async (_ctx, cancelToken: unknown) => {
+      if (typeof cancelToken !== 'string' || !cancelToken) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch cancel request is invalid' }
+      }
+      return withSwitchLock(async () => {
+        const pending = getPendingSwitchTransaction()
+        if (pending?.token === cancelToken) {
+          setPendingSwitchTransaction(null)
+        }
+        return { success: true as const }
+      })
+    },
+  )
+
   // The ONLY path that moves the runtime fence. Runs as one serial Main-side
   // transaction: trusted identity, target visibility/membership, running-item
   // termination and re-enumeration, then an atomic fence commit — all inside
@@ -422,7 +606,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             }
           }
 
-          // Atomic commit.
+          // Atomic commit: supersedes any pending two-phase transaction and
+          // ends the offline read-only view (the online list re-validated).
+          setPendingSwitchTransaction(null)
+          setRuntimeOfflineReadOnly(false)
           setRuntimeActiveProductSpace(targetProductSpaceId)
           return {
             success: true as const,
@@ -438,7 +625,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
   )
 
   // Fail-closed direction only: the renderer may clear the fence (contract
-  // loss, logout) but can never set it.
+  // loss, logout) but can never set it. Serialized with the switch lock and
+  // it invalidates any prepared switch by consuming the pending transaction
+  // and advancing the fence generation — an older prepared transaction can
+  // then never commit.
   server.handle(
     RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT,
     async () => {
@@ -446,10 +636,66 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       if (!trustedAccountId) {
         return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session' }
       }
-      setRuntimeActiveProductSpace(null)
+      await withSwitchLock(async () => {
+        // The pending transaction record is deliberately kept: its commit
+        // consumes the token, then fails on the advanced fence generation —
+        // a prepared switch can never land after a revoke.
+        setRuntimeOfflineReadOnly(false)
+        setRuntimeActiveProductSpace(null)
+      })
       return { success: true as const }
     },
   )
+
+  // Trusted offline restore: the snapshot comes from Main-owned preferences
+  // storage (never from renderer arguments) and requires the persisted
+  // verified context plus a completed cleanup ledger for the same trusted
+  // account. The restored view is read-only: no resolve-launch, no new
+  // App/Skill/assistant executions until an online switch re-validates.
+  server.handle(RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW, async () => {
+    const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+    if (!trustedAccountId) {
+      return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+    }
+    return withSwitchLock(async () => {
+      const storage = getProductSpaceContextStorage(trustedAccountId)
+      const verified = storage?.verifiedContext
+      const ledger = storage?.legacyCleanup
+      if (
+        !verified
+        || !ledger
+        || !Object.values(ledger.results).every(passed => passed)
+      ) {
+        return {
+          success: false as const,
+          errorCode: PRODUCT_SPACE_CONTEXT_REQUIRED,
+          message: 'No verified offline ProductSpace snapshot is available',
+        }
+      }
+      const list = ListProductSpacesResponseSchema.safeParse(verified.list)
+      if (!list.success) {
+        return { success: false as const, errorCode: PRODUCT_SPACE_CONTEXT_REQUIRED, message: 'The persisted ProductSpace snapshot is invalid' }
+      }
+      const storedId = verified.activeProductSpaceId
+        ?? list.data.personalProductSpaceId
+      const listed = list.data.productSpaces.find(
+        space => space.id === storedId && space.accessMode === 'active',
+      )
+      const activeId = listed?.id ?? list.data.personalProductSpaceId
+      setPendingSwitchTransaction(null)
+      setRuntimeOfflineReadOnly(true)
+      setRuntimeActiveProductSpace(activeId)
+      return {
+        success: true as const,
+        snapshot: {
+          contractVersion: list.data.contractVersion,
+          personalProductSpaceId: list.data.personalProductSpaceId,
+          productSpaces: list.data.productSpaces,
+          activeProductSpaceId: activeId,
+        },
+      }
+    })
+  })
 
   // One-shot pre-release direct-switch cleanup. Steps run in order and every
   // result is reported; the client persists the ledger only when every step

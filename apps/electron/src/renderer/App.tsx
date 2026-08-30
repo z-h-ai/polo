@@ -91,6 +91,9 @@ import {
   type AdminErrorLike,
 } from '@/lib/admin-auth-failure'
 import { Button } from '@/components/ui/button'
+import {
+  subscribeToProductSpaceContractFailures,
+} from '@/lib/product-space-contract-failure'
 
 /** App-level states for the ProductSpace-first client shell. */
 type AppState =
@@ -1040,6 +1043,15 @@ export default function App() {
   useEffect(() => {
     return subscribeToAdminAuthFailures(handleAdminAuthFailure)
   }, [handleAdminAuthFailure])
+
+  // PC-F11 single gate: any ProductSpace DTO reporting contract
+  // incompatibility tears down the fence and projections through the hook's
+  // trusted transition and renders the upgrade gate.
+  useEffect(() => {
+    return subscribeToProductSpaceContractFailures(() => {
+      productSpace.enterContractBlocked(currentAdminUserIdRef.current)
+    })
+  }, [productSpace.enterContractBlocked])
 
   const productSpaceDeepLinkHandlersRef = useRef({
     refreshProductSpaces: () => {},
@@ -2735,11 +2747,16 @@ export default function App() {
                             lastCommittedSwitchRef.current
                               && Date.now() - lastCommittedSwitchRef.current.at < ROLLBACK_WINDOW_MS
                               ? () => {
+                                // Trusted reverse transaction through the
+                                // ProductSpace context: Main restores the
+                                // origin fence, then the full origin
+                                // projection (selection, context key, shell)
+                                // is republished before sessions reload.
                                 const entry = lastCommittedSwitchRef.current
                                 if (!entry) return
-                                void window.electronAPI.productSpaceExecuteSwitch(entry.from)
-                                  .then(result => {
-                                    if (!result.success) throw { code: result.errorCode }
+                                void productSpace.rollbackToOrigin()
+                                  .then(rolledBack => {
+                                    if (!rolledBack) throw new Error('rollback failed')
                                     lastCommittedSwitchRef.current = null
                                     setSessionLoadError(null)
                                     setSessionsLoaded(false)

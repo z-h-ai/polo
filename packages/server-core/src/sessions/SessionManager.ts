@@ -24,6 +24,7 @@ import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaul
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import { getRuntimeActiveProductSpace } from '../runtime/product-space-executions'
+import { ensureAssistantSessionExecution } from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
 import {
@@ -2633,6 +2634,19 @@ export class SessionManager implements ISessionManager {
       }
 
       const sourceManaged = this.sessions.get(options.branchFromSessionId)
+      // The branch source must live inside the committed active ProductSpace:
+      // an old-space session can never seed a new-space branch.
+      const activeProductSpaceId = getRuntimeActiveProductSpace()
+      const sourceSpaceId = sourceManaged?.productSpaceId
+      if (activeProductSpaceId && sourceSpaceId !== activeProductSpaceId) {
+        sessionLog.warn('Branch validation failed: source session belongs to another ProductSpace', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          sourceProductSpaceId: sourceSpaceId,
+          activeProductSpaceId,
+        })
+        throw new Error('Invalid branch request: source session belongs to a different ProductSpace')
+      }
       if (sourceManaged) {
         if (sourceManaged.workspace.rootPath !== workspaceRootPath) {
           sessionLog.warn('Branch validation failed: source session belongs to different workspace', {
@@ -2656,6 +2670,16 @@ export class SessionManager implements ISessionManager {
           branchFromSessionId: options.branchFromSessionId,
         })
         throw new Error(`Invalid branch request: source session ${options.branchFromSessionId} not found`)
+      }
+      // Cold sources carry the same immutable binding in their header.
+      if (activeProductSpaceId && sourceSession.productSpaceId !== activeProductSpaceId) {
+        sessionLog.warn('Branch validation failed: cold source session belongs to another ProductSpace', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          sourceProductSpaceId: sourceSession.productSpaceId,
+          activeProductSpaceId,
+        })
+        throw new Error('Invalid branch request: source session belongs to a different ProductSpace')
       }
 
       const sourceBackendContext = resolveBackendContext({
@@ -5588,6 +5612,17 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found`)
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
+
+    // Every entry that can push a session into processing must have the
+    // session's immutable execution scope registered — including restored
+    // (cold) sessions on their first send.
+    void ensureAssistantSessionExecution({
+      sessionManager: this,
+      sessionId,
+      workspaceId: managed.workspace.id,
+      productSpaceId: managed.productSpaceId ?? '',
+      name: managed.name || sessionId,
+    })
 
     // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching

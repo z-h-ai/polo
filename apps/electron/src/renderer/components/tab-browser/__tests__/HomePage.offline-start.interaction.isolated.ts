@@ -161,6 +161,45 @@ beforeEach(async () => {
         to: targetProductSpaceId,
         executions: [],
       }),
+      productSpacePrepareSwitch: async (targetProductSpaceId: string) => ({
+        success: true as const,
+        token: `token-${targetProductSpaceId}`,
+        from: null,
+        to: targetProductSpaceId,
+        executions: [],
+      }),
+      productSpaceCommitSwitch: async (_token: string, targetProductSpaceId: string) => ({
+        success: true as const,
+        from: null,
+        to: targetProductSpaceId,
+      }),
+      productSpaceCancelSwitch: async () => ({ success: true }),
+      productSpaceRestoreOfflineView: async () => ({
+        success: true as const,
+        snapshot: {
+          contractVersion: 1,
+          personalProductSpaceId: 'space-personal-offline',
+          productSpaces: [
+            {
+              id: 'space-personal-offline',
+              kind: 'personal' as const,
+              name: '我的空间',
+              accessMode: 'active' as const,
+              payer: { kind: 'account' as const },
+            },
+            {
+              id: enterpriseSpaceId,
+              kind: 'enterprise' as const,
+              enterpriseId: 'enterprise-offline',
+              name: 'Offline Studio',
+              role: 'member' as const,
+              accessMode: 'active' as const,
+              payer: { kind: 'enterprise' as const, enterpriseId: 'enterprise-offline' },
+            },
+          ],
+          activeProductSpaceId: enterpriseSpaceId,
+        },
+      }),
       productSpaceRevokeActiveContext: async () => ({ success: true }),
       productSpaceCleanupLegacyState: async () => ({
         success: true,

@@ -140,12 +140,70 @@ export function resetProductSpaceExecutionRegistryForTests(): void {
  */
 let runtimeActiveProductSpaceId: string | null = null
 
+/**
+ * Monotonic fence generation. Every committed switch and every revoke
+ * advances it; in-flight switch transactions capture the generation at
+ * prepare time and their commit is permanently rejected after any revoke.
+ */
+let runtimeFenceGeneration = 0
+
+export function getRuntimeFenceGeneration(): number {
+  return runtimeFenceGeneration
+}
+
 export function setRuntimeActiveProductSpace(productSpaceId: string | null): void {
   runtimeActiveProductSpaceId = productSpaceId
+  runtimeFenceGeneration += 1
 }
 
 export function getRuntimeActiveProductSpace(): string | null {
   return runtimeActiveProductSpaceId
+}
+
+/**
+ * A prepared (not yet committed) switch transaction. The token is one-time:
+ * only the renderer that prepared the switch may commit it, and any revoke
+ * invalidates the whole transaction via the fence generation.
+ */
+export interface PendingSwitchTransaction {
+  token: string
+  targetProductSpaceId: string
+  originProductSpaceId: string
+  fenceGeneration: number
+  createdAt: number
+}
+
+const SWITCH_TRANSACTION_TTL_MS = 120_000
+
+let pendingSwitchTransaction: PendingSwitchTransaction | null = null
+
+export function setPendingSwitchTransaction(
+  transaction: PendingSwitchTransaction | null,
+): void {
+  pendingSwitchTransaction = transaction
+}
+
+export function getPendingSwitchTransaction(): PendingSwitchTransaction | null {
+  const pending = pendingSwitchTransaction
+  if (pending && Date.now() - pending.createdAt > SWITCH_TRANSACTION_TTL_MS) {
+    pendingSwitchTransaction = null
+    return null
+  }
+  return pending
+}
+
+/**
+ * While a switch transaction is being prepared, the runtime refuses to move
+ * any execution into running/preparing.
+ */
+let runtimeOfflineReadOnly = false
+
+export function setRuntimeOfflineReadOnly(offline: boolean): void {
+  runtimeOfflineReadOnly = offline
+}
+
+export function isRuntimeOfflineReadOnly(): boolean {
+  return runtimeOfflineReadOnly
 }
 
 /**

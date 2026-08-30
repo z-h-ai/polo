@@ -72,6 +72,17 @@ let switchResult: {
   errorCode?: string
   executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
 }
+let commitResult: { success: boolean; errorCode?: string }
+let restoreViewResult: {
+  success: boolean
+  errorCode?: string
+  snapshot?: {
+    contractVersion: number
+    personalProductSpaceId: string
+    productSpaces: typeof personalSpace[]
+    activeProductSpaceId: string
+  }
+}
 
 function configureIpc(): void {
   Object.defineProperty(window, 'electronAPI', {
@@ -100,6 +111,45 @@ function configureIpc(): void {
           from: 'space-personal',
           to: targetProductSpaceId,
           executions: switchResult.executions ?? [],
+        }
+      },
+      productSpacePrepareSwitch: async (targetProductSpaceId: string) => {
+        if (!activeContextAckSuccess) {
+          return { success: false as const, errorCode: 'runtime_commit_failed' }
+        }
+        if (!switchResult.success) {
+          return {
+            success: false as const,
+            errorCode: switchResult.errorCode ?? 'runtime_stop_failed',
+            executions: switchResult.executions ?? [],
+          }
+        }
+        return {
+          success: true as const,
+          token: `token-${targetProductSpaceId}`,
+          from: 'space-personal',
+          to: targetProductSpaceId,
+          executions: switchResult.executions ?? [],
+        }
+      },
+      productSpaceCommitSwitch: async (token: string, targetProductSpaceId: string) => {
+        if (!token.startsWith('token-')) {
+          return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID' }
+        }
+        if (!commitResult.success) {
+          return { success: false as const, errorCode: commitResult.errorCode ?? 'runtime_commit_failed' }
+        }
+        declaredActiveSpace = targetProductSpaceId
+        return { success: true as const, from: 'space-personal', to: targetProductSpaceId }
+      },
+      productSpaceCancelSwitch: async () => ({ success: true }),
+      productSpaceRestoreOfflineView: async () => {
+        if (restoreViewResult?.success && restoreViewResult.snapshot) {
+          return { success: true as const, snapshot: restoreViewResult.snapshot }
+        }
+        return {
+          success: false as const,
+          errorCode: restoreViewResult?.errorCode ?? 'PRODUCT_SPACE_CONTEXT_REQUIRED',
         }
       },
       productSpaceRevokeActiveContext: async () => ({ success: true }),
@@ -155,6 +205,8 @@ beforeEach(() => {
   activeContextAckSuccess = true
   cleanupCalls = 0
   switchResult = { success: true, executions: [] }
+  commitResult = { success: true }
+  restoreViewResult = { success: false, errorCode: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
   configureIpc()
 })
 
@@ -204,7 +256,7 @@ describe('useProductSpaceContextState bootstrap', () => {
     expect(result.current.flowState).toBe('contract-blocked')
   })
 
-  it('falls back to the last verified context while offline', async () => {
+  it('restores the read-only offline view from the verified snapshot', async () => {
     listResult = {
       success: false,
       errorCode: 'NETWORK_ERROR',
@@ -215,7 +267,8 @@ describe('useProductSpaceContextState bootstrap', () => {
     expect(await boot(result)).toBe('error')
     expect(result.current.flowState).toBe('error')
 
-    // A later boot with a verified snapshot keeps the account working.
+    // A later boot with a verified snapshot + completed ledger restores the
+    // read-only view through the trusted Main snapshot.
     productSpaceContextStorage = {
       verifiedContext: {
         list: {
@@ -228,6 +281,15 @@ describe('useProductSpaceContextState bootstrap', () => {
       },
       legacyCleanup: { completedAt: Date.now(), results: { all: true } },
     } as unknown as ProductSpaceContextStorage
+    restoreViewResult = {
+      success: true,
+      snapshot: {
+        contractVersion: 1,
+        personalProductSpaceId: personalId,
+        productSpaces: [personalSpace, enterpriseSpace('space-ent', '北辰智能科技')],
+        activeProductSpaceId: 'space-ent',
+      },
+    }
     const second = renderHook(useHarness)
     expect(await boot(second.result)).toBe('ready')
     expect(second.result.current.flowState).toBe('ready')

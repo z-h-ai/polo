@@ -11,9 +11,12 @@ import { pushTyped, type RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps, SessionFileWatcher } from '../handler-deps'
 import { setTransferableHandler } from './transfer'
 import { bindClientActiveSession } from './client-active-session'
-import { getRuntimeActiveProductSpace } from '../../runtime/product-space-executions'
+import {
+  getRuntimeActiveProductSpace,
+  isRuntimeOfflineReadOnly,
+} from '../../runtime/product-space-executions'
 import { unregisterProductSpaceExecution } from '../../runtime/product-space-executions'
-import { registerAssistantSessionExecution } from './product-space'
+import { ensureAssistantSessionExecution } from '../../runtime/assistant-executions'
 
 interface ClientSessionWatchState {
   watcher: SessionFileWatcher
@@ -231,11 +234,16 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Create a new session
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions) => {
+    // A session may only be created inside the committed active ProductSpace;
+    // a null fence means the business surface is not ready.
+    if (!getRuntimeActiveProductSpace()) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
     const end = perf.start('rpc.createSession', { workspaceId })
     const session = await sessionManager.createSession(workspaceId, options)
     end()
     if (session.productSpaceId) {
-      await registerAssistantSessionExecution({
+      await ensureAssistantSessionExecution({
         sessionManager,
         sessionId: session.id,
         workspaceId: session.workspaceId,
@@ -271,6 +279,24 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     const callerClientId = ctx.clientId
 
     assertSessionSpaceAllowed(sessionManager, sessionId)
+    // The offline read-only view shows saved history but starts no executions.
+    if (isRuntimeOfflineReadOnly()) {
+      throw new Error('OFFLINE_READ_ONLY')
+    }
+
+    // their first send, so a switch can never leave them running unregistered.
+    const sendTarget = sessionManager
+      .getSessions()
+      .find(candidate => candidate.id === sessionId)
+    if (sendTarget?.productSpaceId) {
+      await ensureAssistantSessionExecution({
+        sessionManager,
+        sessionId,
+        workspaceId: sendTarget.workspaceId,
+        productSpaceId: sendTarget.productSpaceId,
+        name: sendTarget.name || sessionId,
+      })
+    }
 
     return await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {
       let acked = false
@@ -664,7 +690,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
     return sessionManager.importSession(targetWorkspaceId, bundle as import('@polo-ai/shared/sessions').SessionBundle, mode)
   }
-  server.handle(RPC_CHANNELS.sessions.IMPORT, importHandler)
+  server.handle(RPC_CHANNELS.sessions.IMPORT, async (ctx, ...rest: unknown[]) => {
+    if (!getRuntimeActiveProductSpace()) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
+    return (importHandler as (c: typeof ctx, ...args: unknown[]) => unknown)(ctx, ...rest)
+  })
   // Also register as transferable so chunked transfer can invoke it on commit
   setTransferableHandler(RPC_CHANNELS.sessions.IMPORT, importHandler)
 
@@ -682,6 +713,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Import a summarized remote-transfer payload into a target workspace.
   server.handle(RPC_CHANNELS.sessions.IMPORT_REMOTE_TRANSFER, async (_ctx, targetWorkspaceId: string, payload: import('@polo-ai/shared/protocol').RemoteSessionTransferPayload) => {
+    if (!getRuntimeActiveProductSpace()) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
     await sessionManager.waitForInit()
     if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
     return sessionManager.importRemoteSessionTransfer(targetWorkspaceId, payload)

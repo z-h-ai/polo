@@ -948,6 +948,43 @@ export interface ElectronAPI {
       catalog?: import('@polo-ai/shared/admin').AppCatalogCacheEntry
     }
   >
+  productSpacePrepareSwitch(
+    targetProductSpaceId: string,
+  ): Promise<
+    | {
+      success: true
+      token: string
+      from: string | null
+      to: string
+      executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+    }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceCommitSwitch(
+    token: string,
+    targetProductSpaceId: string,
+  ): Promise<
+    | { success: true; from: string | null; to: string }
+    | { success: false; errorCode: string; message?: string }
+  >
+  productSpaceCancelSwitch(token: string): Promise<{ success: boolean }>
+  productSpaceRestoreOfflineView(): Promise<
+    | {
+      success: true
+      snapshot: {
+        contractVersion: number
+        personalProductSpaceId: string
+        productSpaces: import('@polo-ai/shared/product-spaces').ProductSpaceSummary[]
+        activeProductSpaceId: string
+      }
+    }
+    | { success: false; errorCode: string; message?: string }
+  >
   productSpaceExecuteSwitch(
     targetProductSpaceId: string,
   ): Promise<
