@@ -240,14 +240,24 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
       sessionManager
         .sendMessage(sessionId, message, attachments, storedAttachments, options, undefined, undefined, onAck, { callerClientId })
-        .then(() => {
+        .then(async () => {
+          if (acked) return
+          // SILENT DELETE CONVERGENCE: sendMessage returns without an ack
+          // when the send raced a deletion and converged before persisting
+          // anything. That is an expected cancellation, not an invariant
+          // violation — settle the RPC normally (the session_deleted event
+          // informs the UI); only a genuine ack-contract violation errors.
+          const sessionGone = !(await sessionManager.getSession(sessionId).catch(() => null))
+          if (sessionGone) {
+            acked = true
+            resolve({ accepted: true, messageId: '' })
+            return
+          }
           // sendMessage finished without firing onAck — should not happen in
           // practice (every code path that creates a user message acks).
           // Treat as a defensive failure rather than silently dropping.
-          if (!acked) {
-            acked = true
-            reject(new Error('sendMessage completed without persisting a user message'))
-          }
+          acked = true
+          reject(new Error('sendMessage completed without persisting a user message'))
         })
         .catch(err => {
           log.error('Error in sendMessage:', err)

@@ -192,6 +192,69 @@ describe('syncPendingQuestionFromSession (restart/open hydration)', () => {
     expect(map.get('s-1')?.requestId).toBe('q2')
   })
 
+  it('TRUSTED REPRO r5: realtime q0..q17 rotate → resolve q17 → an in-flight OLD snapshot(q0) must not resurrect q0', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    // The session snapshot is captured BEFORE the realtime sequence runs.
+    guard.beginSnapshot()
+
+    // Realtime: q0..q17 each replace the previous (superseded markers),
+    // then q17 is resolved (hole).
+    for (let i = 0; i <= 17; i++) {
+      map = setPendingQuestionForSession(map, 's-1', makeRequest(`q-${i}`), guard)
+    }
+    map = removePendingQuestionForSession(map, 's-1', 'q-17', guard)
+    expect(map.has('s-1')).toBe(false)
+
+    // The OLD in-flight snapshot carrying q0 returns — it must NOT be
+    // re-inserted (q0's terminal marker was retention-pinned by the scope).
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q-0') }, guard)
+    expect(map.has('s-1')).toBe(false)
+
+    guard.endSnapshot()
+    // After the scope closes the marker set is pruned to the recent window —
+    // the pinned-scope guarantee above is the invariant under test (a late
+    // snapshot for an evicted id is the documented trade-off, tested below).
+  })
+
+  it('snapshot scopes bound eviction: markers pinned while in flight, pruned to the recent window only when idle', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    // IN FLIGHT: rotate far beyond the idle bound — nothing is evicted.
+    guard.beginSnapshot()
+    for (let i = 0; i <= 30; i++) {
+      map = setPendingQuestionForSession(map, 's-1', makeRequest(`q-${i}`), guard)
+    }
+    guard.endSnapshot()
+    map = removePendingQuestionForSession(map, 's-1', 'q-30', guard)
+
+    // Idle now: rotate another 30 — old markers beyond the idle bound are
+    // pruned as they fall out of the recent window.
+    for (let i = 31; i <= 60; i++) {
+      map = setPendingQuestionForSession(map, 's-1', makeRequest(`q-${i}`), guard)
+    }
+    // A late snapshot carrying a RECENT terminal id is still blocked.
+    map = removePendingQuestionForSession(map, 's-1', 'q-60', guard)
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q-60') }, guard)
+    expect(map.has('s-1')).toBe(false)
+  })
+
+  it('a cleared card with a closed snapshot scope can still be re-filled by a genuinely stale snapshot (documented trade-off)', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    // Settle q1, apply the snapshot, close the scope (idle) — rotation
+    // beyond the idle bound may forget q1; a late q1 snapshot then fills.
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'), guard)
+    map = removePendingQuestionForSession(map, 's-1', 'q1', guard)
+    for (let i = 0; i <= 30; i++) {
+      map = setPendingQuestionForSession(map, 's-1', makeRequest(`q-x-${i}`), guard)
+    }
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') }, guard)
+    // Documented trade-off: only markers still within the recent window (or
+    // pinned by an in-flight scope) are guaranteed.
+    expect(['q1', 'q-x-30']).toContain(map.get('s-1')?.requestId as string)
+  })
+
   it('Edit-Popover RPC snapshots use the same ordering guard (fill-only, terminal-aware)', () => {
     const guard = new PendingQuestionTerminalGuard()
     let map = new Map<string, QuestionRequest>()

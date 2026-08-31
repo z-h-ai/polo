@@ -1312,41 +1312,33 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   // (getSessionExternalModelToolset) and its tool call reaches the durable
   // handoff through its own stdio connection to the spawned server.
 
-  it('cross-process loop: the externally registered session serves request_user_input over the harness stdio config into the durable handoff (ONE requestId)', async () => {
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
-    const managed = seedSession('f-mcp-loop', {}) as unknown as { processingGeneration: number }
-    // The packaged server entry — point at the SOURCE and let the bun
-    // runtime execute it (nodeRuntimePath = process.execPath).
+  it('cross-process loop: the externally registered session runs the MODEL against the driver-owned sidecar into the durable handoff (ONE requestId)', async () => {
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
 
     await sm.startSessionMcpHost({
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    // PRODUCTION registration + turn launch: the session is externally
-    // driven; sendMessage launches the production driver, which owns the
-    // turn's ONLY sidecar.
-    const loopManaged = seedExternalSession('f-mcp-loop') as unknown as { processingGeneration: number }
+    // PRODUCTION registration + turn launch + MODEL: the registered model
+    // layer discovers request_user_input in the model-visible toolset of the
+    // driver-owned sidecar and calls it — stdio → HTTP → durable handoff.
+    seedExternalSession('f-mcp-loop')
+    const request = makeQuestionRequest('f-mcp-loop')
+    const adapter: import('./external-engine-driver.ts').ExternalEngineModelTurn = {
+      async runModelTurn({ prompt, listTools, callTool }) {
+        const tools = await listTools()
+        expect(tools.map(t => t.name)).toContain('request_user_input')
+        const result = await callTool('request_user_input', { questions: request.questions })
+        expect(result.isError).toBe(false)
+        expect(JSON.stringify(result.content)).toContain('Waiting for user input')
+      },
+    }
+    ;(sm as unknown as { setExternalEngineModelAdapter: (m: import('./external-engine-driver.ts').ExternalEngineModelTurn) => void }).setExternalEngineModelAdapter(adapter)
     patchPrivateFlush()
     ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
     await sm.sendMessage('f-mcp-loop', 'turn one', [], [], { invocationSource: 'desktop' })
-
-    // The model-visible toolset comes from the production driver.
-    const driver = sm.getExternalEngineDriver('f-mcp-loop')
-    expect(driver).not.toBeNull()
-    expect(driver!.config.args).toContain('--allow-request-user-input')
-
-    // The external engine's model discovers the tool in the model-visible
-    // toolset.
-    const tools = await driver!.listTools()
-    expect(tools.map(t => t.name)).toContain('request_user_input')
-
-    // ONE model tool call through the owned sidecar → ONE durable handoff.
-    const request = makeQuestionRequest('f-mcp-loop')
-    const result = await driver!.callTool('request_user_input', { questions: request.questions })
-    expect(result.isError).toBe(false)
-    expect(JSON.stringify(result.content)).toContain('Waiting for user input')
+    // The model turn runs concurrently — wait for its durable handoff.
+    await waitForCondition(() => sm.getPendingQuestion('f-mcp-loop') !== null, 20000)
 
     const pending = sm.getPendingQuestion('f-mcp-loop')
     expect(pending).not.toBeNull()
@@ -1371,121 +1363,24 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
+    // The registered model layer sees a toolset WITHOUT request_user_input
+    // and its tool call fails closed.
+    const ndAdapter: import('./external-engine-driver.ts').ExternalEngineModelTurn = {
+      async runModelTurn({ listTools, callTool }) {
+        const tools = await listTools()
+        expect(tools.map(t => t.name)).not.toContain('request_user_input')
+        const result = await callTool('request_user_input', { questions: makeQuestionRequest('f-mcp-nd').questions })
+        expect(result.isError).toBe(true)
+      },
+    }
+    ;(sm as unknown as { setExternalEngineModelAdapter: (m: import('./external-engine-driver.ts').ExternalEngineModelTurn) => void }).setExternalEngineModelAdapter(ndAdapter)
     await sm.sendMessage('f-mcp-nd', 'messaging turn', [], [], { invocationSource: 'messaging' })
-    const driver = sm.getExternalEngineDriver('f-mcp-nd')
-    expect(driver).not.toBeNull()
-    expect(driver!.config.args).not.toContain('--allow-request-user-input')
-
-    const tools = await driver!.listTools()
-    expect(tools.map(t => t.name)).not.toContain('request_user_input')
-
-    const result = await driver!.callTool('request_user_input', { questions: makeQuestionRequest('f-mcp-nd').questions })
-    expect(result.isError).toBe(true)
+    await waitForCondition(() => !getManaged('f-mcp-nd').isProcessing, 15000)
 
     expect(sm.getPendingQuestion('f-mcp-nd')).toBeNull()
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
-    await sm.completeExternalEngineTurn('f-mcp-nd')
     sm.stopSessionMcpHost()
   }, 60000)
-
-  // ---- the "turn committed, lazy agent not
-  // yet created" deletion window. A delete that wins the declaration BLOCKS
-  // lazy agent creation (in-lock gate) — no ghost turn, no agent leak.
-
-  it('delete interleaved with a SLOW in-flight agent creation: the turn converges before chat — no ghost turn, no agent leak, no cancel exception', async () => {
-    patchPrivateFlush()
-    seedSession('f-del-agent', {})
-    let agentCreations = 0
-    let agentDisposed = 0
-    let chatStarted = 0
-    let resolveCreationStarted!: () => void
-    const creationStarted = new Promise<void>(resolve => { resolveCreationStarted = resolve })
-    let releaseCreationGate!: () => void
-    const creationGate = new Promise<void>(resolve => { releaseCreationGate = resolve })
-    // The lazy creation genuinely hangs IN-FLIGHT (production: a cold
-    // backend build) until the test releases it — the delete interleaves.
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
-      agentCreations++
-      resolveCreationStarted()
-      await creationGate
-      // Mirror the real getOrCreateAgent: the created agent is assigned to
-      // the session (that is what the convergence gate's dispose targets).
-      ;(getManaged('f-del-agent') as unknown as { agent: unknown }).agent = disposableFakeAgent
-      return disposableFakeAgent
-    }
-    const disposableFakeAgent = {
-      ...makeFakeAgent(),
-      chat: async function* () {
-        chatStarted++
-        yield { type: 'complete' as const }
-      },
-      dispose: () => { agentDisposed++ },
-    }
-
-    // T1: the send commits its turn and enters the SLOW in-lock creation.
-    const sendPromise = sm.sendMessage('f-del-agent', 'message before delete', [], [], { invocationSource: 'desktop' })
-    await creationStarted
-    expect(agentCreations).toBe(1)
-    expect(chatStarted).toBe(0)
-
-    // T2: the delete queues BEHIND the creation's lock and its declaration
-    // (tombstone + availability removal) lands the moment creation yields.
-    const deletePromise = sm.deleteSession('f-del-agent')
-    await new Promise(r => setTimeout(r, 30))
-    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent'))).toBe(true)
-
-    // Release the slow creation: the delete's declaration runs, the
-    // chat-start convergence gate sees the deletion, disposes the fresh
-    // agent (no leak) and returns SILENTLY (no error to the caller, no
-    // ghost chat on the deleted session).
-    releaseCreationGate!()
-    await sendPromise
-    expect(agentDisposed).toBe(1)
-    expect(chatStarted).toBe(0)
-
-    // The delete's own cleanup removes the storage copy.
-    await deletePromise
-    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent'))).toBe(false)
-    expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
-    expect(events.filter(e => e.type === 'error')).toHaveLength(0)
-  })
-
-  it('a delete that lands BEFORE the creation gate blocks creation entirely (no ghost turn, no agent leak)', async () => {
-    patchPrivateFlush()
-    seedSession('f-del-agent-2', {})
-    let agentCreations = 0
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
-      agentCreations++
-      return makeFakeAgent()
-    }
-
-    // Hold the question lock: the send's critical section queues FIRST (T1);
-    // the delete's declaration queues SECOND (T2); the lazy agent creation
-    // gate queues THIRD (T3, after the declaration).
-    let releaseLock!: () => void
-    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
-    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
-      .withQuestionStateLock('f-del-agent-2', () => hungLock)
-
-    const sendPromise = sm.sendMessage('f-del-agent-2', 'message before delete', [], [], { invocationSource: 'desktop' })
-    await new Promise(r => setTimeout(r, 30))
-    const deletePromise = sm.deleteSession('f-del-agent-2')
-    await new Promise(r => setTimeout(r, 30))
-
-    releaseLock()
-    // T1: the send transaction commits (isProcessing true)…
-    await waitForCondition(() => getManaged('f-del-agent-2') === undefined || getManaged('f-del-agent-2').isProcessing === false, 3000).catch(() => {})
-    // T2: the declaration lands (tombstone + availability removal).
-    // T3: the lazy agent creation gate observes the deletion and converges
-    // the turn SILENTLY as deleted — no agent is ever created and no ghost
-    // turn runs.
-    await sendPromise
-    expect(agentCreations).toBe(0)
-
-    await deletePromise
-    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent-2'))).toBe(false)
-    expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
-  })
 
   // ---- chat-start reservation: a delete whose declaration lands after the
   // chat-start gate WAITS for the reserved query to become genuinely

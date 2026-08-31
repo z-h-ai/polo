@@ -29,16 +29,65 @@ import type { QuestionRequest } from '../../shared/types'
  * snapshot staleness windows are short, so a small memory is sufficient.
  */
 export class PendingQuestionTerminalGuard {
-  /** Bounded number of remembered terminal requestIds per session. */
-  private static readonly MAX_PER_SESSION = 16
   /**
-   * Session → TERMINAL requestIds (resolved, cancelled, skipped OR
-   * superseded by a newer realtime question), FIFO-bounded. A terminal
-   * requestId can never legitimately re-fill from an older snapshot.
+   * While snapshots are in flight, terminal markers are NEVER evicted: an
+   * in-flight snapshot can still be carrying any of them, and forgetting one
+   * would resurrect a settled question. Markers accumulated during flight
+   * are pruned only after the last in-flight snapshot applies (then bounded
+   * to the recent window — new snapshots always capture fresh state).
    */
+  private static readonly MAX_PER_SESSION_WHEN_IDLE = 16
+  /** Session → terminal requestIds (resolved OR superseded). */
   private terminal = new Map<string, Set<string>>()
   /** Sessions deleted locally — every snapshot fill for them is stale. */
   private deleted = new Set<string>()
+  /** In-flight snapshot scopes (lifecycle-bound eviction guard). */
+  private inFlightSnapshots = 0
+
+  /**
+   * Mark a snapshot fetch as in flight. MUST be paired with
+   * {@link endSnapshot} (finally) after the fetch's result has been applied
+   * or discarded. Terminal markers are retention-pinned until every scope
+   * opened before their creation has closed.
+   */
+  beginSnapshot(): void {
+    this.inFlightSnapshots += 1
+  }
+
+  /** Close one in-flight snapshot scope; prune when none remain. */
+  endSnapshot(): void {
+    this.inFlightSnapshots = Math.max(0, this.inFlightSnapshots - 1)
+    if (this.inFlightSnapshots === 0) this.pruneToBound()
+  }
+
+  private pruneToBound(): void {
+    for (const [sessionId, ids] of this.terminal) {
+      if (ids.size <= PendingQuestionTerminalGuard.MAX_PER_SESSION_WHEN_IDLE) continue
+      const excess = ids.size - PendingQuestionTerminalGuard.MAX_PER_SESSION_WHEN_IDLE
+      let removed = 0
+      for (const id of ids) {
+        if (removed >= excess) break
+        ids.delete(id)
+        removed++
+      }
+      if (ids.size === 0) this.terminal.delete(sessionId)
+    }
+  }
+
+  private markTerminal(sessionId: string, requestId: string): void {
+    let ids = this.terminal.get(sessionId)
+    if (!ids) {
+      ids = new Set()
+      this.terminal.set(sessionId, ids)
+    }
+    ids.add(requestId)
+    // Eviction only while NO snapshot is in flight — a marker that any
+    // in-flight snapshot can still carry is retention-pinned.
+    if (this.inFlightSnapshots === 0 && ids.size > PendingQuestionTerminalGuard.MAX_PER_SESSION_WHEN_IDLE) {
+      const oldest = ids.values().next().value
+      if (oldest !== undefined) ids.delete(oldest)
+    }
+  }
 
   /** Record a requestId as terminally settled (resolution consumed it). */
   markResolved(sessionId: string, requestId: string): void {
@@ -52,19 +101,6 @@ export class PendingQuestionTerminalGuard {
    */
   markSuperseded(sessionId: string, requestId: string): void {
     this.markTerminal(sessionId, requestId)
-  }
-
-  private markTerminal(sessionId: string, requestId: string): void {
-    let ids = this.terminal.get(sessionId)
-    if (!ids) {
-      ids = new Set()
-      this.terminal.set(sessionId, ids)
-    }
-    ids.add(requestId)
-    if (ids.size > PendingQuestionTerminalGuard.MAX_PER_SESSION) {
-      const oldest = ids.values().next().value
-      if (oldest !== undefined) ids.delete(oldest)
-    }
   }
 
   /** Record a session deletion — blocks every snapshot fill for it. */

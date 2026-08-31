@@ -578,8 +578,14 @@ export default function App() {
       syncSessionOptionsFromSession(nextSession)
       // Opening/refreshing a session fills a MISSING pending question from
       // the snapshot — an existing entry (fresher realtime state) is never
-      // downgraded by the fetch.
-      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
+      // downgraded by the fetch. The guard scope retention-pins terminal
+      // markers until this snapshot has been applied.
+      pendingQuestionGuardRef.current.beginSnapshot()
+      try {
+        setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
+      } finally {
+        pendingQuestionGuardRef.current.endSnapshot()
+      }
       void reconcilePermissionModeState(sessionId)
       return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
     } catch (err) {
@@ -600,14 +606,20 @@ export default function App() {
 
       // Hydrate pending agent questions from the snapshot — fill holes only:
       // entries that already exist came from fresher realtime events and are
-      // never downgraded by the list fetch.
-      setPendingQuestions(prev => {
-        let next = prev
-        for (const session of loadedSessions) {
-          next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
-        }
-        return next
-      })
+      // never downgraded by the list fetch. Guard scope: retention-pins
+      // terminal markers until the snapshot has been applied.
+      pendingQuestionGuardRef.current.beginSnapshot()
+      try {
+        setPendingQuestions(prev => {
+          let next = prev
+          for (const session of loadedSessions) {
+            next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+          }
+          return next
+        })
+      } finally {
+        pendingQuestionGuardRef.current.endSnapshot()
+      }
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
@@ -702,15 +714,20 @@ export default function App() {
       // Reconnect metadata refresh carries the pending state — fill missing
       // entries (drift missed while the transport was down; events are not
       // replayed after stale reconnects). Snapshot-present sessions converge
-      // holes; existing event-driven entries are never touched. removeMissing
-      // only affects the session LIST, not this fill-only map update.
-      setPendingQuestions(prev => {
-        let next = prev
-        for (const session of sessions) {
-          next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
-        }
-        return next
-      })
+      // holes; existing event-driven entries are never touched. Guard scope:
+      // retention-pins terminal markers until the snapshot has been applied.
+      pendingQuestionGuardRef.current.beginSnapshot()
+      try {
+        setPendingQuestions(prev => {
+          let next = prev
+          for (const session of sessions) {
+            next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+          }
+          return next
+        })
+      } finally {
+        pendingQuestionGuardRef.current.endSnapshot()
+      }
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
       return nextMetaMap
@@ -1317,7 +1334,12 @@ export default function App() {
                 addSession(createdSession)
               }
               syncSessionOptionsFromSession(createdSession)
-              setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession, pendingQuestionGuardRef.current))
+              pendingQuestionGuardRef.current.beginSnapshot()
+              try {
+                setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession, pendingQuestionGuardRef.current))
+              } finally {
+                pendingQuestionGuardRef.current.endSnapshot()
+              }
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
