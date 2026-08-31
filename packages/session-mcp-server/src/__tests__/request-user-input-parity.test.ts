@@ -1,5 +1,5 @@
 /**
- * Session MCP / Codex request_user_input parity (review fix round 7, issue B)
+ * Session MCP / Codex request_user_input parity
  *
  * The session MCP server path must apply the SAME canonical per-turn
  * capability filter as the Claude/Pi paths — desktop turns register
@@ -67,7 +67,7 @@ describe('session MCP / Codex request_user_input parity', () => {
     const originalError = console.error
     console.error = (message: string) => { errors.push(message) }
     try {
-      // SINGLE DELIVERY (review fix round 11): stderr carries NO delivery —
+      // SINGLE DELIVERY: stderr carries NO delivery —
       // no __CALLBACK__ question_requested line may be emitted. Only a pure
       // diagnostic line is allowed. The awaitable POST to the unreachable
       // host fails honestly.
@@ -213,7 +213,7 @@ describe('session MCP / Codex request_user_input parity', () => {
     } finally {
       console.error = originalError
     }
-    // SINGLE DELIVERY (review fix round 11): no __CALLBACK__ delivery on
+    // SINGLE DELIVERY: no __CALLBACK__ delivery on
     // stderr — only the pure diagnostic line.
     expect(errors.some(e => e.includes('__CALLBACK__'))).toBe(false)
     expect(errors.some(e => e.includes('[session-mcp] request_user_input dispatched'))).toBe(true)

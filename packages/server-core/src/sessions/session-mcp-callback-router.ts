@@ -1,6 +1,5 @@
 /**
- * Session MCP callback router (review fix round 9, issue B — PRODUCTION
- * host side of the request_user_input chain).
+ * Session MCP callback router.
  *
  * The session MCP server subprocess POSTs its `question_requested` callback
  * to `POST /request-user-input` on the host's callback port and AWAITS the
@@ -68,7 +67,7 @@ export async function handleSessionMcpRequestUserInputCallback(
 export function createSessionMcpCallbackHandler(sessionManager: ISessionManager) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (request: any): Promise<Response> => {
-    // METHOD GATE (review fix round 10, issue C): only the declared POST is
+    // METHOD GATE: only the declared POST is
     // allowed on the callback endpoint — any other method is rejected with
     // 405 + Allow BEFORE touching the SessionManager.
     if (request.method !== 'POST') {

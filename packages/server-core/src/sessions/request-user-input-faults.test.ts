@@ -26,8 +26,7 @@ mock.module('@polo-ai/server-core/domain', () => ({
   },
 }))
 
-// Optional park point for the sendMessage OWNER path (review fix round 8,
-// issue A): the owner's pre-section plan-state clear. Lets a test hold the
+// Optional park point for the sendMessage OWNER path: the owner's pre-section plan-state clear. Lets a test hold the
 // turn-start reservation while the question-state lock stays FREE — so an
 // answer/cancel can still commit (the round-8 critical section serialized
 // those behind the owner section). Only set per-test; null = pass-through.
@@ -352,7 +351,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(1)
   })
 
-  // Review fix round 1, issue 1: the lifecycle clear is FAILURE-ATOMIC — a
+  // the lifecycle clear is FAILURE-ATOMIC — a
   // failed flush must restore the pending (the next stop stays a real retry,
   // not a no-op) and must NOT broadcast question_resolved. Only the durable
   // clear converges memory + disk + renderers, exactly once.
@@ -388,7 +387,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(resolved[0]).toMatchObject({ sessionId: 'f-stop-2', requestId: request.requestId, action: 'cancel' })
   })
 
-  // ---- Review fix round 2, issue 1: resolution vs lifecycle SERIALIZATION ----
+  // ---- resolution vs lifecycle SERIALIZATION ----
   // A stop's staged clear and a concurrent answer/cancel commit share the same
   // per-session question-state lock: whichever lands first settles the
   // question, and the other observes the settled world — no stale-then-
@@ -526,7 +525,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
   })
 
-  // ---- Review fix round 3, issue B: the archive clear + archive flags commit
+  // ---- the archive clear + archive flags commit
   // in ONE staged flush. A flush failure can therefore NEVER leave a
   // "cancel already broadcast + active question lost" half-commit — the
   // pre-round-3 two-phase shape could do exactly that when the first phase
@@ -569,7 +568,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
   })
 
-  // ---- Review fix round 3, issue A: lifecycle tombstone + generation gate ----
+  // ---- lifecycle tombstone + generation gate ----
   // After a durable stop/archive, a LATE onQuestionRequested callback of the
   // stopped agent must be rejected: no pending rebuild, no question_request.
 
@@ -625,7 +624,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
   })
 
-  // ---- Review fix round 3, issue C: the completed tool activity and the
+  // ---- the completed tool activity and the
   // pending question commit in the SAME durable flush — a visible question
   // can never hydrate with an activity still stuck on 'executing'.
 
@@ -683,7 +682,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
   })
 
-  // ---- Review fix round 4, issue A: the tombstone does not depend on a
+  // ---- the tombstone does not depend on a
   // pending question existing. A stop with NO active question still terminates
   // the question scope (the callback may not have arrived yet).
 
@@ -710,7 +709,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(header.hasPendingQuestion).toBe(false)
   })
 
-  // ---- Review fix round 4, issue B: the archive lifecycle snapshot is read
+  // ---- the archive lifecycle snapshot is read
   // INSIDE the lock. While the archive waits, an in-flight answer can fail and
   // roll the pending question back — a pre-lock snapshot would clobber that
   // restored pending with a stale value on the archive's own rollback.
@@ -777,7 +776,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'session_archived')).toHaveLength(1)
   })
 
-  // ---- Review fix round 9, issue A: deletion LINEARIZATION. The delete's
+  // ---- deletion LINEARIZATION. The delete's
   // declaration (tombstone + availability removal) lives INSIDE the
   // question-state lock, so it is mutually exclusive with the sendMessage
   // owner transaction and with resolution commits — whichever acquires the
@@ -811,7 +810,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(loadSession(tmpRoot, 'f-del-1')).toBeNull()
   })
 
-  // ---- Review fix round 5, issue B: the DELETE-START gate. The marker is
+  // ---- the DELETE-START gate. The marker is
   // established synchronously at the first instant of deletion — a resolution
   // that was already queued when the delete began observes session_missing,
   // even though its own lock turn runs BEFORE the delete's cleanup.
@@ -843,7 +842,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_resolved' || e.type === 'user_message')).toHaveLength(0)
   })
 
-  // ---- Review fix round 6, issue B (round-9 linearized form): a send that
+  // ---- a send that
   // arrives after the deletion completed is rejected — the session is
   // unavailable and nothing is resurrected.
 
@@ -859,7 +858,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'user_message')).toHaveLength(0)
   })
 
-  // ---- Review fix rounds 9+12, issue A/B: linearization (b) — the
+  // ---- linearization (b) — the
   // sendMessage transaction acquires the lock BEFORE the delete's
   // declaration, so the user message commits (persisted + ONE accepted
   // broadcast). The delete declaration then lands, and the round-12 lazy
@@ -908,7 +907,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv'))).toBe(false)
   })
 
-  // ---- Review fix round 9, issue A: linearization (a) — the delete's
+  // ---- linearization (a) — the delete's
   // declaration acquires the lock BEFORE the sendMessage critical section, so
   // the send observes the tombstone BEFORE any persistence: no message, no
   // broadcast, reservation released, session_missing.
@@ -959,7 +958,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-gap'))).toBe(false)
   })
 
-  // ---- Review fix round 8, issue B: the session MCP/Codex callback chain
+  // ---- the session MCP/Codex callback chain
   // lands in the SAME durable handoff — a parsed question_requested stderr
   // message drives handleQuestionRequested (persist + broadcast + handoff).
 
@@ -990,7 +989,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(header.hasPendingQuestion).toBe(true)
   })
 
-  // ---- Review fix round 9, issue B: the PRODUCTION callback router — the
+  // ---- the PRODUCTION callback router — the
   // host HTTP route that the session MCP server POSTs to — lands in the same
   // durable handoff and answers with the protocol result.
 
@@ -1091,7 +1090,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     sm.stopSessionMcpHost()
   }, 30000)
 
-  // ---- Review fix round 14, issue C: node host adversarial — body size
+  // ---- node host adversarial — body size
   // limit (413) and deterministic listen-failure rejection.
 
   it('node http host: a 2MiB body is rejected with 413 at the boundary', async () => {
@@ -1135,7 +1134,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     sm.stopSessionMcpHost()
   })
 
-  // ---- Review fix round 11, issue B: the PRODUCTION host — a listening
+  // ---- the PRODUCTION host — a listening
   // localhost callback server + per-turn server spawns driven from the
   // sendMessage capability boundary. desktop→messaging→desktop capability
   // switching is expressed in the spawned args; ONE tool call produces ONE
@@ -1232,7 +1231,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     sm.stopSessionMcpHost()
   })
 
-  // ---- Review fix round 13, issue B: the SPAWN↔STDIO↔MCP-CLIENT↔TOOL↔
+  // ---- the SPAWN↔STDIO↔MCP-CLIENT↔TOOL↔
   // CALLBACK↔DURABLE-HANDOFF closed loop, cross-process.
 
   it('cross-process loop: the spawned session MCP server serves request_user_input over stdio into the durable handoff (ONE requestId)', async () => {
@@ -1294,7 +1293,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     sm.stopSessionMcpHost()
   })
 
-  // ---- Review fix round 12, issue B: the "turn committed, lazy agent not
+  // ---- the "turn committed, lazy agent not
   // yet created" deletion window. A delete that wins the declaration BLOCKS
   // lazy agent creation (in-lock gate) — no ghost turn, no agent leak.
 
@@ -1335,7 +1334,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
   })
 
-  // ---- Review fix round 5, issue A: the generation is bound to the callback
+  // ---- the generation is bound to the callback
   // CLOSURE at the issuing turn (agent-stamped at tool-call time). A late
   // callback carrying its ISSUING generation is rejected once a newer turn
   // claimed the session — even with the tombstone cleared, where the old
@@ -2020,7 +2019,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         }
       })
 
-      // Review fix round 1, issue 2: a failed durable stamp (or a failed
+      // a failed durable stamp (or a failed
       // rollback) must REJECT the creation — never hand back a silently
       // unprivileged session. The just-created hidden orphan is removed from
       // memory AND disk, and a retry with the fault cleared succeeds and is
@@ -2516,7 +2515,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
           if (inject === 'plan') {
             // clearPendingPlanExecution loads the session JSONL directly via
             // getSessionFilePath → readSessionJsonl — the storage PATH lookup
-            // is the injectable seam (review round 8, issue 2 scenario).
+            // is the injectable seam.
             const storage = (sm as unknown as { sessionStorage: { getSessionFilePath: (root: string, id: string) => string } }).sessionStorage
             const realPath = storage.getSessionFilePath.bind(storage)
             storage.getSessionFilePath = (root: string, id: string) => {

@@ -1,5 +1,5 @@
 /**
- * BaseAgent stderr lifecycle-line consumption (review fix round 10, issue B):
+ * BaseAgent stderr lifecycle-line consumption:
  * `handleSessionMcpStderrLine` is the PRODUCTION consumer of the session MCP
  * server's stderr protocol — a `question_requested` line routed through the
  * agent reaches the durable handoff chain (onQuestionRequested) with the

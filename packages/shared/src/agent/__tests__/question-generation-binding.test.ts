@@ -1,5 +1,5 @@
 /**
- * request_user_input generation binding (review fix rounds 5+6, issue A)
+ * request_user_input generation binding
  *
  * The issuing turn's processing generation must be bound IMMUTABLY at
  * tool-call initiation on every callback path — never re-read from the

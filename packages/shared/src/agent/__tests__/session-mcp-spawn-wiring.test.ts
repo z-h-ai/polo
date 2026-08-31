@@ -1,5 +1,5 @@
 /**
- * Session MCP spawn-spec wiring (review fix rounds 9-10, issue B): the
+ * Session MCP spawn-spec wiring: the
  * resolved backend runtime carries the PRODUCTION per-turn spawn-spec builder
  * for the packaged session MCP server — desktop turns get the capability flag
  * + generation, non-desktop turns fail closed.

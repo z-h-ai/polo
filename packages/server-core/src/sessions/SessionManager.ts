@@ -919,8 +919,7 @@ interface ManagedSession {
   // request_user_input; defaults to 'internal' — fail closed).
   invocationSource?: InvocationSource
   /**
-   * Invocation source bound to the CURRENT processing generation (review
-   * round 4, issue 2). Set only when a new turn actually starts — queued or
+   * Invocation source bound to the CURRENT processing generation. Set only when a new turn actually starts — queued or
    * steered messages never touch it, so a mid-flight desktop turn keeps its
    * request_user_input capability even when messaging/automation messages
    * are queued behind it. handleQuestionRequested reads THIS, never the
@@ -928,7 +927,7 @@ interface ManagedSession {
    */
    activeTurnSource?: InvocationSource
   /**
-   * Question-lifecycle TOMBSTONE (review fix round 3, issue A). Set AFTER a
+   * Question-lifecycle TOMBSTONE. Set AFTER a
    * durable stop/archive clear of the pending question; cleared when a NEW
    * turn starts (generation bump). A late onQuestionRequested callback from
    * an aborted/stopped agent must find this tombstone and be REJECTED —
@@ -939,7 +938,7 @@ interface ManagedSession {
    */
    questionLifecycleTombstone?: { reason: 'stopped' | 'archived' | 'deleted'; at: number }
    /**
-   * Synchronous turn-start reservation (review round 5, issue 2). Set at
+   * Synchronous turn-start reservation. Set at
    * sendMessage entry — BEFORE any await — by the caller that claimed the
    * next processing generation; cleared when the turn actually starts
    * (setProcessing(true)) or when the reserved turn aborts before starting.
@@ -1058,7 +1057,7 @@ export function claimAutoRetryPending(
 /**
  * Per-turn eligibility for the request_user_input tool (fail-closed matrix).
  *
- * The Edit Popover exception (round-10 adjudication, request_id 83c0c3ce-r10-d1)
+ * The Edit Popover exception (adjudicated product decision)
  * is bound to a SERVER-VERIFIABLE session origin, not a per-turn marker:
  * - Non-desktop invocation sources (messaging / automation / headless /
  *   internal) NEVER get the tool.
@@ -2173,7 +2172,7 @@ export class SessionManager implements ISessionManager {
   // Build the StoredSession snapshot and hand it to the persistence queue.
   // Caller must ensure `managed.messagesLoaded` is true.
   //
-  // `stagedOverrides` (review fix round 2, issue 1) lets a caller enqueue a
+  // `stagedOverrides` lets a caller enqueue a
   // snapshot that differs from live memory — e.g. a lifecycle clear commits
   // `pendingQuestion: undefined` to disk BEFORE publishing the cleared state
   // to memory. The override applies to the enqueued snapshot only; the
@@ -2714,7 +2713,7 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
 
-    // Fail closed (review round 2, issue 1): the generic creation path can
+    // Fail closed: the generic creation path can
     // NEVER grant the Edit Popover origin. The type system already excludes
     // it, but the RPC boundary is untyped JSON — a forged value must be
     // stripped before anything is persisted. Only createEditPopoverSession
@@ -3162,27 +3161,26 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Dedicated, trusted creation path for the renderer Edit Popover session
-   * (round-10 adjudication; review round 2, issue 1).
+   *.
    *
    * The generic sessions:CREATE RPC can never grant the 'edit-popover' origin
    * — the caller-asserted value is stripped by createSession. THIS method is
    * the only place the origin is stamped, server-side, together with the
    * stable popover owner identity that scopes pending-question recovery
-   * (review round 2, issue 2). Both are persisted immediately so restart
+   *. Both are persisted immediately so restart
    * hydration keeps the capability and the recovery scope.
    */
   async createEditPopoverSession(
     workspaceId: string,
     options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
   ): Promise<Session> {
-    // Fail closed (review round 3, issues 1+2): the owner is a REQUIRED,
+    // Fail closed: the owner is a REQUIRED,
     // server-validated non-empty stable identity. A missing/blank owner
     // rejects the creation outright — the session must never exist in a
     // state where the privileged origin is granted but the scoped recovery
     // identity is missing. The renderer sends a fixed-length hash id
     // (editor-identity), but the bound accepts any legal identity up to the
-    // platform path range — no arbitrary truncation (review round 4,
-    // issue 3).
+    // platform path range — no arbitrary truncation.
     const popoverOwner = typeof options?.popoverOwner === 'string' ? options.popoverOwner.trim() : ''
     if (!popoverOwner || popoverOwner.length > 4096) {
       throw new Error('createEditPopoverSession requires a non-empty popoverOwner (max 4096 chars)')
@@ -3204,7 +3202,7 @@ export class SessionManager implements ISessionManager {
     // invisible to owner-scoped recovery forever. The just-created hidden
     // orphan is torn down (runtime + memory + disk, best-effort) and the RPC
     // REJECTS as transient so the restore/send entry can retry cleanly
-    // (review fix round 1, issue 2).
+    //.
     managed.origin = 'edit-popover'
     managed.popoverOwner = popoverOwner
     try {
@@ -4357,13 +4355,13 @@ export class SessionManager implements ISessionManager {
       // The returned promise is AWAITED by the tool handler — the request_user_input
       // tool only reports "waiting" success once the durable handoff completed;
       // a rejection surfaces to the model as a tool error instead.
-      // GENERATION BINDING (review fix round 5, issue A): the generation is
+      // GENERATION BINDING: the generation is
       // snapshotted by the AGENT at tool-call time (setSessionTurnGeneration,
       // stamped at every turn start) and carried through the callback — the
       // locked commit validates that closure snapshot, never the CURRENT
       // generation at late execution time.
       managed.agent.setSessionTurnGeneration(managed.processingGeneration)
-      // AGENT TOOL-SET WIRING (review fix round 14, issue A): the model's
+      // AGENT TOOL-SET WIRING: the model's
       // request_user_input tool call reaches the durable handoff through the
       // session MCP HOST CLIENT when one is running for this session — the
       // full stdio loop (client → session-mcp-server → callback POST →
@@ -4728,7 +4726,7 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
 
-    // LIFECYCLE-ATOMIC archive (review fix rounds 2+3+4, issue B): the archive
+    // LIFECYCLE-ATOMIC archive: the archive
     // flags, the pending-question clear and the answer→resume clear commit as
     // ONE staged snapshot in ONE flush on the session's question-state lock.
     // The clear is no longer a separate committed phase: a first-phase
@@ -4738,8 +4736,7 @@ export class SessionManager implements ISessionManager {
     // the whole lifecycle snapshot with ZERO broadcasts, and the terminal
     // events fire only after the unified commit is durable.
     //
-    // The lifecycle snapshot is taken INSIDE the lock (review fix round 4,
-    // issue B): while the archive waits for the lock, an answer/cancel/new
+    // The lifecycle snapshot is taken INSIDE the lock: while the archive waits for the lock, an answer/cancel/new
     // question can legitimately change the state — rollback must only ever
     // restore lock-observed values, never values captured in a stale
     // pre-lock world (the old out-of-lock read could clobber a freshly
@@ -4797,7 +4794,7 @@ export class SessionManager implements ISessionManager {
           action: 'cancel',
         }, managed.workspace.id)
       }
-      // Lifecycle TOMBSTONE (review fix round 3, issue A): late question
+      // Lifecycle TOMBSTONE: late question
       // callbacks of the archived session's turn are rejected; a NEW turn
       // clears it at the generation bump.
       managed.questionLifecycleTombstone = { reason: 'archived', at: Date.now() }
@@ -5837,7 +5834,7 @@ export class SessionManager implements ISessionManager {
    */
   private async cleanupDeletedSession(managed: ManagedSession): Promise<void> {
     const sessionId = managed.id
-    // SESSION MCP HOST (review fix round 11, issue B): a deletion kills the
+    // SESSION MCP HOST: a deletion kills the
     // session's per-turn server subprocess (if any) immediately.
     this.stopSessionMcpServerForTurn(sessionId)
 
@@ -5984,7 +5981,7 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
-    // DELETE TURN-START GATE (review fix round 6, issue B): deletion sets its
+    // DELETE TURN-START GATE: deletion sets its
     // terminal tombstone synchronously at deleteSession entry. A send that
     // arrives during the deletion window must never start a new turn — the
     // turn-start boundary below would bump the generation and CLEAR the
@@ -5995,7 +5992,7 @@ export class SessionManager implements ISessionManager {
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
-    // NOTE (review round 8, issue 2): the pending answer→resume supersede is
+    // NOTE: the pending answer→resume supersede is
     // NOT performed here. Firing it at entry — before the replacement message
     // is durable — permanently destroys the recovery when this send later
     // fails pre-start (pending-plan cleanup, lazy load, flush): the answer
@@ -6008,10 +6005,10 @@ export class SessionManager implements ISessionManager {
     // Per-turn invocation source: only desktop interactive turns expose
     // request_user_input; every other source (and the implicit default)
     // fails closed. Hidden/mini sessions never ask questions — except the
-    // Edit Popover's own session (round-10 adjudication), which carries the
+    // Edit Popover's own session (adjudicated exception), which carries the
     // server-verified 'edit-popover' origin recorded at creation.
     //
-    // SYNCHRONOUS turn-start reservation (review round 5, issue 2): the
+    // SYNCHRONOUS turn-start reservation: the
     // claim of the next processing generation AND the binding of its source
     // happen BEFORE any await. Two concurrent senders can otherwise both see
     // isProcessing=false across the pre-processing awaits and both take the
@@ -6026,8 +6023,7 @@ export class SessionManager implements ISessionManager {
       this.applyTurnInvocationSource(managed, invocationSource)
     }
 
-    // Single cleanup boundary (review round 5, issue 2 + round 6, issues
-    // 1+3): EVERYTHING between the synchronous claim and the actual
+    // Single cleanup boundary: EVERYTHING between the synchronous claim and the actual
     // setProcessing(true) is inside this try — including the pending-plan
     // cleanup and lazy message load awaits — so a pre-start failure can
     // never strand a phantom reservation (followers would queue forever
@@ -6054,7 +6050,7 @@ export class SessionManager implements ISessionManager {
       // If currently processing — or another caller holds the turn-start
       // reservation (its pre-chat work is in flight) — this message must not
       // start a second turn. Steer into the live turn when possible, otherwise
-      // queue for FIFO replay WITH ITS OWN OPTIONS (review round 4, issue 2):
+      // queue for FIFO replay WITH ITS OWN OPTIONS:
       // a queued message's source is applied when the replay becomes a new
       // turn, never by overwriting the reserved/active turn's source.
       //
@@ -6090,7 +6086,7 @@ export class SessionManager implements ISessionManager {
         // Create user message for UI — or REUSE the already-persisted one
         // when existingMessageId is provided (the answer→resume path): the
         // queue branch must never duplicate the single readable answer
-        // message (review round 7, issue 2).
+        // message.
         let userMessage: Message
         if (existingMessageId) {
           userMessage = this.requireExistingMessage(managed, existingMessageId)
@@ -6160,7 +6156,7 @@ export class SessionManager implements ISessionManager {
         // point nothing else may have claimed the generation, and question
         // requests from this turn stamp THIS source — messages that arrive
         // mid-turn and get queued keep their own options for their own future
-        // turn (review round 4, issue 2 / round 5, issue 2).
+        // turn.
         this.applyTurnInvocationSource(managed, invocationSource)
 
         // Add user message with stored attachments for persistence
@@ -6169,7 +6165,7 @@ export class SessionManager implements ISessionManager {
         if (existingMessageId) {
           userMessage = this.requireExistingMessage(managed, existingMessageId)
           // A replayed QUEUED message (not the answer's own resume call)
-          // supersedes a pending recovery (review round 8, issue 2): the
+          // supersedes a pending recovery: the
           // answer content is already in history as part of the context, so
           // the recovery retry would double-start the answer turn.
           if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
@@ -6206,7 +6202,7 @@ export class SessionManager implements ISessionManager {
             optimisticMessageId: options?.optimisticMessageId
           }, managed.workspace.id)
 
-          // Supersede a pending answer→resume NOW (review round 8, issue 2):
+          // Supersede a pending answer→resume NOW:
           // the replacement message is durably persisted, so clearing the
           // recovery is semantically final — the answer content is already in
           // history and a resume retry would double-start the turn. Applied
@@ -6290,10 +6286,9 @@ export class SessionManager implements ISessionManager {
         managed.streamingText = ''
         managed.processingGeneration++
         // A new turn starts a NEW question lifecycle — a prior stop/archive
-        // tombstone no longer applies to this generation (review fix round 3,
-        // issue A).
+        // tombstone no longer applies to this generation.
         managed.questionLifecycleTombstone = undefined
-        // GENERATION BINDING (review fix round 5, issue A): stamp the agent
+        // GENERATION BINDING: stamp the agent
         // with the claiming generation so request_user_input callbacks carry
         // their ISSUING turn's generation (snapshotted at tool-call time),
         // not whatever generation happens to be active at late execution.
@@ -6388,7 +6383,7 @@ export class SessionManager implements ISessionManager {
       agent = created
       sendSpan.mark('agent.ready')
 
-      // GENERATION BINDING (review fix round 5, issue A): a freshly created
+      // GENERATION BINDING: a freshly created
       // agent must carry the CURRENT turn's generation (the bump happened at
       // the turn-start boundary, before this creation); later turns re-stamp
       // there when the agent already exists.
@@ -6408,8 +6403,7 @@ export class SessionManager implements ISessionManager {
         agent.allowRequestUserInput = allowRequestUserInputNow
       }
 
-      // SESSION MCP HOST — per-turn consumption (review fix round 11, issue
-      // B): when a host is running, spawn THIS turn's session MCP server with
+      // SESSION MCP HOST — per-turn consumption: when a host is running, spawn THIS turn's session MCP server with
       // the current sessionId, the host callback port, the capability DERIVED
       // FROM THE INVOCATION SOURCE (desktop→messaging→desktop switching is
       // expressed in the spawned args) and the IMMUTABLE processing
@@ -6928,7 +6922,7 @@ export class SessionManager implements ISessionManager {
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
-    // SESSION MCP HOST (review fix round 11, issue B): this turn's server
+    // SESSION MCP HOST: this turn's server
     // subprocess is stopped at turn end — one live server per session.
     this.stopSessionMcpServerForTurn(sessionId)
 
@@ -7269,8 +7263,7 @@ export class SessionManager implements ISessionManager {
   // ============================================================
 
   /**
-   * Bind an invocation source to the turn that is actually starting (review
-   * round 4, issue 2): stores it as the session's last-applied source AND as
+   * Bind an invocation source to the turn that is actually starting: stores it as the session's last-applied source AND as
    * the ACTIVE turn's source, and applies the request_user_input eligibility
    * flag to the agent. Must only be called on a new processing generation —
    * queued/steered messages keep their own options for their own future turn
@@ -7292,7 +7285,7 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Shared existing-message resolution for the follower (queue-reuse) and
-   * owner (replay) branches (review round 8 suggestion): one missing-message
+   * owner (replay) branches: one missing-message
    * error and one identity check.
    */
   private requireExistingMessage(managed: ManagedSession, existingMessageId: string): Message {
@@ -7304,8 +7297,7 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Single named cleanup boundary for the turn-start reservation (review
-   * round 6, issues 1+3): the finally around sendMessage's pre-start section
+   * Single named cleanup boundary for the turn-start reservation: the finally around sendMessage's pre-start section
    * funnels EVERY exit through here.
    *
    * - turnStarted: the claim is consumed — isProcessing now gates callers,
@@ -7358,16 +7350,14 @@ export class SessionManager implements ISessionManager {
    * tool converts this into an isError result so the model can retry.
    */
   /**
-   * PRODUCTION durable-handoff entry for EXTERNAL hosts (review fix round 9,
-   * issue B): the session MCP server (Codex/external-harness path) POSTs its
+   * PRODUCTION durable-handoff entry for EXTERNAL hosts: the session MCP server (Codex/external-harness path) POSTs its
    * `question_requested` callback to the host's callback router, which routes
    * here. Same durable semantics as the in-process chain: pendingQuestion
    * persist + question_request event + handoff, awaited by the caller so the
    * remote tool result settles only at the durable boundary.
    */
   /**
-   * PRODUCTION HTTP surface for the session MCP callback protocol (review
-   * fix round 10, issues B+C): wraps `createSessionMcpCallbackHandler` so a
+   * PRODUCTION HTTP surface for the session MCP callback protocol: wraps `createSessionMcpCallbackHandler` so a
    * host callback server mounts the route with one call. Enforces the
    * POST-only method gate (405 otherwise) and routes valid payloads into the
    * durable handoff.
@@ -7494,7 +7484,7 @@ export class SessionManager implements ISessionManager {
     port: number,
   ): Promise<{ stop(force?: boolean): void; port: number }> {
     const { createServer } = await import('node:http')
-    // BODY SIZE LIMIT (review fix round 14, issue C): reject oversized
+    // BODY SIZE LIMIT: reject oversized
     // request bodies at the boundary with 413 and destroy the connection.
     const MAX_BODY_BYTES = 1024 * 1024
     const nodes = createServer((req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
@@ -7541,7 +7531,7 @@ export class SessionManager implements ISessionManager {
           })
       })
     })
-    // LISTEN ERROR (review fix round 14, issue C): port conflicts /
+    // LISTEN ERROR: port conflicts /
     // permission failures surface as a REJECTED promise so the bootstrap can
     // degrade deterministically (and never leak an uncaught 'error' event).
     await new Promise<void>((resolve, reject) => {
@@ -7621,7 +7611,7 @@ export class SessionManager implements ISessionManager {
    * stopped at turn end (onProcessingStopped) and by deleteSession cleanup.
    */
   async spawnSessionMcpServerForTurn(sessionId: string, invocationSource: InvocationSource, processingGeneration: number): Promise<void> {
-    // READINESS GATE (review fix round 14, issue B): a first turn that
+    // READINESS GATE: a first turn that
     // arrives before the listener is up WAITS for it; a failed startup
     // skips the session MCP path deterministically.
     const host = await this.awaitSessionMcpHost()
@@ -7630,7 +7620,7 @@ export class SessionManager implements ISessionManager {
     if (!built) return
     // Stop any previous turn's server first — one live server per session.
     this.stopSessionMcpServerForTurn(sessionId)
-    // STDIO CLIENT (review fix round 13, issue B): the transport SPAWNS the
+    // STDIO CLIENT: the transport SPAWNS the
     // server subprocess and wires its stdin/stdout to the server's
     // StdioServerTransport — closing the spawn↔stdio↔MCP-client loop that
     // round 11's ignored-stdio spawn left open. The MCP client is kept per
@@ -7666,8 +7656,7 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * AWAITABLE tool call over the spawned session MCP server (review fix
-   * round 13, issue B): invokes request_user_input through the MCP client —
+   * AWAITABLE tool call over the spawned session MCP server: invokes request_user_input through the MCP client —
    * the server handler POSTs the question to the host callback port, which
    * performs the SessionManager durable handoff and answers at the boundary;
    * the tool result (and this promise) settles with that terminal outcome.
@@ -7765,13 +7754,12 @@ export class SessionManager implements ISessionManager {
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
     generationAtRequest: number,
   ): Promise<void> {
-    // Serialized behind the session's question-state lock (review fix round 2,
-    // issue 1): a tool-requested replacement must never interleave with a
+    // Serialized behind the session's question-state lock: a tool-requested replacement must never interleave with a
     // lifecycle clear's staged commit — otherwise a stop clear that already
     // enqueued its cleared snapshot could later flush it OVER a question that
     // legitimately replaced the pending state.
     //
-    // GENERATION BINDING (review fix round 5, issue A): `generationAtRequest`
+    // GENERATION BINDING: `generationAtRequest`
     // is snapshotted by the agent AT TOOL-CALL TIME and carried through the
     // callback closure — the locked commit validates it against the current
     // generation. Reading the current generation at execution time (the old
@@ -7787,7 +7775,7 @@ export class SessionManager implements ISessionManager {
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
     generationAtRequest: number,
   ): Promise<void> {
-    // 0. STALE-CALLBACK GATE (review fix round 3, issue A): a late callback
+    // 0. STALE-CALLBACK GATE: a late callback
     //    from an aborted/stopped agent must never rebuild a pending question
     //    or re-broadcast question_request on a terminated lifecycle. All
     //    three checks reject BEFORE any state mutation or I/O:
@@ -7827,16 +7815,16 @@ export class SessionManager implements ISessionManager {
       // question. This is the ACTIVE turn's source (bound at the
       // new-generation boundary) — NOT the most recent sendMessage call,
       // which may be a messaging/automation message queued behind a running
-      // desktop turn (review round 4, issue 2). The post-answer resume, its
+      // desktop turn. The post-answer resume, its
       // retries, and restart recovery re-derive tool visibility from this.
-      // DEFAULT IS INTERNAL (review round 3, issue 5): the protocol's
+      // DEFAULT IS INTERNAL: the protocol's
       // fail-closed contract — a missing source (legacy/malformed persisted
       // state) must never upgrade to desktop; only an explicit value is
       // persisted and restored.
       invocationSource: managed.activeTurnSource ?? 'internal',
     }
 
-    // 2. SINGLE DURABLE COMMIT (review fix round 3, issue C): the completed
+    // 2. SINGLE DURABLE COMMIT: the completed
     //    tool activity AND the new pending question land in the SAME staged
     //    persist+flush. The old two-phase shape (pending first, tool-activity
     //    "best effort" later) could leave a VISIBLE question whose activity
@@ -7923,8 +7911,7 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Locate the Edit Popover session that still owns an active pending
-   * question for a SPECIFIC workspace + popover owner (round-10 adjudication
-   * reachability contract; review round 2, issue 2).
+   * question for a SPECIFIC workspace + popover owner (reachability contract).
    *
    * The Edit Popover's session is hidden — it never appears in the session
    * list, and the popover component clears its local inlineSessionId on every
@@ -7979,7 +7966,7 @@ export class SessionManager implements ISessionManager {
     try {
       metas = this.sessionStorage.list(workspace.rootPath)
     } catch (error) {
-      // TRANSIENT (review round 8, issue 1): an I/O failure here must NOT be
+      // TRANSIENT: an I/O failure here must NOT be
       // reported as an authoritative "no pending question" — that would let
       // the renderer release its restore gate and orphan the still-persisted
       // pendingQuestion behind a brand-new session. Re-throw so the RPC
@@ -7998,8 +7985,7 @@ export class SessionManager implements ISessionManager {
     }
     if (!best) return null
 
-    // Hydrate the cold session from the FULL metadata (review round 3,
-    // issue 3): createManagedSession spreads every header field, so hidden /
+    // Hydrate the cold session from the FULL metadata: createManagedSession spreads every header field, so hidden /
     // origin / popoverOwner / systemPromptPreset survive. Registering from a
     // bare {id, createdAt} would answer into a managed session that lost its
     // host identity, and the next persist would write that degraded metadata
@@ -8011,7 +7997,7 @@ export class SessionManager implements ISessionManager {
     try {
       await this.getSession(best.sessionId)
     } catch (error) {
-      // TRANSIENT (review round 8, issue 1): a hydration failure (disk I/O)
+      // TRANSIENT: a hydration failure (disk I/O)
       // is not an authoritative "no pending question" — re-throw so the RPC
       // rejects and the client retries with backoff.
       sessionLog.warn(`getEditPopoverPendingSession: failed to hydrate session ${best.sessionId}:`, error)
@@ -8177,7 +8163,7 @@ export class SessionManager implements ISessionManager {
       await this.ensureMessagesLoaded(managed)
 
       // The durable commit runs under the session's question-state lock
-      // (review fix round 2, issue 1) so it can never interleave with a
+      // so it can never interleave with a
       // stop/archive clear's staged flush — whichever lands first settles the
       // question and the other observes the settled world.
       const outcome = await this.withQuestionStateLock(sessionId, () =>
@@ -8208,7 +8194,7 @@ export class SessionManager implements ISessionManager {
 
   /**
    * The durable answer/cancel commit. Caller MUST hold the session's
-   * question-state lock (review fix round 2, issue 1). Returns whether the
+   * question-state lock. Returns whether the
    * agent resume is owed so the caller can run it outside the lock.
    */
   private async commitQuestionResolutionLocked(
@@ -8217,7 +8203,7 @@ export class SessionManager implements ISessionManager {
     resolution: QuestionResolution,
     requestId: string,
   ): Promise<{ result: QuestionResolutionResult; resume: boolean }> {
-    // SESSION IDENTITY RE-VALIDATION (review fix round 4, issue C): the
+    // SESSION IDENTITY RE-VALIDATION: the
     // resolution may have waited for the lock past a delete/replace — the
     // managed object held by this closure can be an orphaned leftover. A
     // stale resolution must return session_missing without persisting or
@@ -8226,7 +8212,7 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Question resolution ${requestId} for session ${sessionId} rejected: the session was deleted or replaced while the resolution waited`)
       return { result: { status: 'session_missing' }, resume: false }
     }
-    // DELETE START GATE (review fix round 5, issue B): deletion established
+    // DELETE START GATE: deletion established
     // its terminal marker synchronously at entry — a resolution that queued
     // before the delete but commits after it must observe session_missing,
     // never persist into the deletion window.
@@ -8331,7 +8317,7 @@ export class SessionManager implements ISessionManager {
       managed.pendingAgentResume = {
         messageId: answerMessage.id,
         attempts: 0,
-        // DEFAULT IS INTERNAL (review round 3, issue 5) — fail closed for
+        // DEFAULT IS INTERNAL — fail closed for
         // legacy/malformed persisted states without a persisted source.
         invocationSource: pending.invocationSource ?? 'internal',
       }
@@ -8443,8 +8429,7 @@ export class SessionManager implements ISessionManager {
 
     if (managed.isProcessing || managed.turnStartReserved) {
       // A turn is already running — OR another sender holds the turn-start
-      // reservation (its pre-chat work is in flight, review round 7, issue
-      // 2). The answer message is already persisted as history; starting now
+      // reservation (its pre-chat work is in flight). The answer message is already persisted as history; starting now
       // would make this resume a FOLLOWER, whose queue branch duplicates the
       // answer message and clears the recovery state without executing the
       // turn. Reschedule (without counting a failed attempt) so the resume
@@ -8569,7 +8554,7 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Serialize a pendingQuestion transition behind the session's question-state
-   * lock (review fix round 2, issue 1). Critical sections are tail-linked:
+   * lock. Critical sections are tail-linked:
    * each waits for the previous one to settle (success OR failure) before
    * running, so a stop/archive clear's staged flush can never interleave with
    * a concurrent answer/cancel commit. Never rejects on its own — the
@@ -8597,7 +8582,7 @@ export class SessionManager implements ISessionManager {
    * Answers the "who cleared it" question on the wire via question_resolved.
    *
    * Serialized on the session's question-state lock against answer/cancel
-   * commits and tool-requested replacements (review fix round 2, issue 1).
+   * commits and tool-requested replacements.
    */
   private async clearPendingQuestionForSession(managed: ManagedSession): Promise<void> {
     await this.withQuestionStateLock(managed.id, () => this.clearPendingQuestionForSessionLocked(managed))
@@ -8606,7 +8591,7 @@ export class SessionManager implements ISessionManager {
   /**
    * LOCKED clear — caller must hold the question-state lock.
    *
-   * FAILURE-ATOMIC + STAGED (review fix rounds 1+2, issue 1): the cleared
+   * FAILURE-ATOMIC + STAGED: the cleared
    * header is committed to disk on a STAGED snapshot while live memory keeps
    * the pending question visible. Only after the durable flush succeeds is
    * the memory cleared and question_resolved broadcast — a lock-free reader
@@ -8616,7 +8601,7 @@ export class SessionManager implements ISessionManager {
    * the lifecycle transition stays retryable. Exactly one terminal
    * question_resolved is broadcast per request.
    *
-   * UNCONDITIONAL TOMBSTONE (review fix round 4, issue A): the stop lifecycle
+   * UNCONDITIONAL TOMBSTONE: the stop lifecycle
    * terminates the session's question scope EVEN WHEN no question was active —
    * the tool callback may simply not have arrived yet. The tombstone is
    * therefore set on every durable stop clear, pending or not, so a late

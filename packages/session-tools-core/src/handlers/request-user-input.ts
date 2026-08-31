@@ -29,7 +29,7 @@ export async function handleRequestUserInput(ctx: SessionToolContext, args: unkn
 
   const questions: RequestUserInputQuestionArgs[] = parsed.data.questions;
 
-  // GENERATION SNAPSHOT (review fix round 6, issue A): bound at TOOL-CALL
+  // GENERATION SNAPSHOT: bound at TOOL-CALL
   // INITIATION — this is the first line of the handler, before any await —
   // and carried immutably through the callback chain. The host-provided
   // reader may be re-stamped by newer turns later; this local never changes.

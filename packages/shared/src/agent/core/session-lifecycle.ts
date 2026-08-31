@@ -256,7 +256,7 @@ export function createSessionLifecycleManager(
 }
 
 // ============================================================
-// Session MCP Server stderr Callback Protocol (review fix round 8, issue B)
+// Session MCP Server stderr Callback Protocol
 // ============================================================
 
 /**
