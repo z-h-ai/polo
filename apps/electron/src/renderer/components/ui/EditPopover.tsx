@@ -766,8 +766,7 @@ export function EditPopover({
   // Use App context for session management (same code path as main chat)
   const { onCreateSession, onCreateEditPopoverSession, onSendMessage, onRespondToPermission, onRespondToCredential, onRespondToQuestion, onGetEditPopoverPendingQuestion } = useAppShellContext()
 
-  // Stable owner identity for scoped pending-question recovery (review round
-  // 2, issue 2; round 4, issue 3): a fixed-length collision-safe hash of the
+  // Stable owner identity for scoped pending-question recovery: a fixed-length collision-safe hash of the
   // structured editor identity (label + filePath). The raw pair can exceed
   // any sane field bound for deeply nested projects, so it is hashed —
   // deterministic across reopen/reload/restart.
@@ -780,7 +779,7 @@ export function EditPopover({
     if (!workspace?.id) {
       throw new Error('[EditPopover] cannot create a session without a workspace')
     }
-    // Trusted creation path (review round 2, issue 1): the server stamps the
+    // Trusted creation path: the server stamps the
     // 'edit-popover' origin + owner identity here. The generic
     // onCreateSession can never grant that origin, and no per-turn marker
     // exists — ordinary hidden/mini turns and every non-desktop entry fail
@@ -799,7 +798,7 @@ export function EditPopover({
   // Hidden inline session lifecycle (adopt on open / create on first send),
   // with the restoring gate + CAS adoption that closes the "delayed restore
   // vs quick send" race.
-  const { inlineSessionId, restoring, restoreNote, ensureSessionForSend } = useEditPopoverSessionRestore({
+  const { inlineSessionId, restoring, ensureSessionForSend } = useEditPopoverSessionRestore({
     open,
     workspaceId: workspace?.id,
     popoverOwnerId,
@@ -1063,6 +1062,7 @@ export function EditPopover({
             {/* Container */}
             <div
               ref={popoverRef}
+              data-testid="edit-popover-panel"
               className="relative bg-foreground-2 overflow-hidden w-full h-full shadow-modal-small"
               style={{
                 transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
@@ -1080,18 +1080,6 @@ export function EditPopover({
                 <GripHorizontal className="w-4 h-4 text-muted-foreground/30" />
               </div>
 
-              {/* Readable transient-restore state (review round 8, issue 1):
-                  while the scoped pending-question lookup is retrying, the
-                  send entry stays disabled and the user sees why. */}
-              {restoring && restoreNote && (
-                <div
-                  data-testid="edit-popover-restoring"
-                  role="status"
-                  className="px-3 py-1.5 text-xs text-foreground-3"
-                >
-                  {restoreNote}
-                </div>
-              )}
               {/* Content area - always uses compact ChatDisplay */}
               <div className="flex-1 flex flex-col bg-foreground-2" style={{ height: '100%' }}>
                 <ChatDisplay
@@ -1110,7 +1098,7 @@ export function EditPopover({
                   compactMode={true}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
-                  // Restoring gate (review round 2, issue 3): the send entry
+                  // Restoring gate: the send entry
                   // stays disabled while the adoption query is in flight, so
                   // a quick send cannot create a throw-away session that a
                   // late restore result would then strand.

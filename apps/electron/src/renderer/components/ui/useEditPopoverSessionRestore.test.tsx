@@ -159,9 +159,9 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(result.current.inlineSessionId).toBeNull()
   })
 
-  // Round 3, issue 4: a create in flight when the scope changes (workspace
-  // A → B) must commit nothing — the stale A session is never adopted, never
-  // handed back, and B's messages can never land in it.
+  // A create in flight when the scope changes (workspace A → B) must commit
+  // nothing — the stale A session is never adopted, never handed back, and
+  // B's messages can never land in it.
   it('stale creation across a workspace A→B switch: commits nothing, hands back null, B creates its own session', async () => {
     const createDeferred = makeDeferred<string>()
     let createCalls = 0
@@ -217,8 +217,8 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(createdFor).toEqual(['ws-1', 'ws-2'])
   })
 
-  // Round 3, issue 4: concurrent sends dedupe onto ONE in-flight creation —
-  // a double send creates exactly one hidden session.
+  // Concurrent sends dedupe onto ONE in-flight creation — a double send
+  // creates exactly one hidden session.
   it('concurrent double send shares one in-flight creation (single hidden session)', async () => {
     const createDeferred = makeDeferred<string>()
     let createCalls = 0
@@ -253,64 +253,74 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(result.current.inlineSessionId).toBe('session-single')
   })
 
-  // Round 8, issue 1: an RPC rejection is TRANSIENT — the restore gate stays
-  // closed (restoring true), a readable note appears, and the bounded-backoff
-  // retry adopts once a later attempt finds the pending session.
-  it('RPC rejection keeps the gate closed, surfaces the retry note, and recovers on a later attempt', async () => {
+  // An RPC rejection is TRANSIENT — the restore gate stays closed
+  // (restoring true) and the bounded retry adopts once a later attempt finds
+  // the pending session.
+  it('RPC rejection keeps the gate closed and the bounded retry recovers on a later attempt', async () => {
     let attempts = 0
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
         restorePendingSession: async () => {
           attempts++
-          if (attempts <= 2) throw new Error('IPC temporarily unavailable (injected)')
+          if (attempts === 1) {
+            // Hold the FIRST attempt in flight so the closed gate is
+            // observable while a transient failure is pending.
+            await new Promise(r => setTimeout(r, 40))
+            throw new Error('IPC temporarily unavailable (injected)')
+          }
+          if (attempts === 2) throw new Error('IPC temporarily unavailable (injected)')
           return found('session-recovered')
         },
-        backoffMs: () => 25,
+        backoffMs: () => 1,
       }),
     }) as unknown as HookRender
 
-    // Gate stays closed through the transient failure.
+    // Gate stays closed while the first (slow) attempt is in flight.
     await act(async () => {
       await new Promise(r => setTimeout(r, 10))
     })
     expect(result.current.restoring).toBe(true)
     expect(result.current.inlineSessionId).toBeNull()
-    expect(result.current.restoreNote).not.toBeNull()
+    expect(attempts).toBe(1)
 
-    // The retry adopts; the note clears and the gate releases.
+    // The bounded retry adopts; the gate releases.
     await waitFor(() => expect(result.current.inlineSessionId).toBe('session-recovered'))
-    expect(result.current.restoreNote).toBeNull()
     expect(result.current.restoring).toBe(false)
-    expect(attempts).toBeGreaterThanOrEqual(2)
+    expect(attempts).toBe(3)
   })
 
-  it('a transient outcome never releases the gate; only the authoritative empty does', async () => {
+  it('a transient outcome retries within the bounded budget, then budget exhaustion releases the gate', async () => {
     let attempts = 0
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
       initialProps: baseParams({
         restorePendingSession: async () => {
           attempts++
-          if (attempts <= 2) return { outcome: 'transient' as const, message: 'session listing failed' }
-          return emptyOutcome
+          if (attempts === 1) {
+            // Hold the FIRST attempt in flight so the closed gate is
+            // observable while a transient failure is pending.
+            await new Promise(r => setTimeout(r, 40))
+          }
+          return { outcome: 'transient' as const, message: 'session listing failed' }
         },
-        backoffMs: () => 25,
+        backoffMs: () => 1,
       }),
     }) as unknown as HookRender
 
+    // Gate stays closed while the bounded budget is running.
     await act(async () => {
       await new Promise(r => setTimeout(r, 10))
     })
     expect(result.current.restoring).toBe(true)
-    expect(result.current.restoreNote).not.toBeNull()
+    expect(attempts).toBe(1)
 
+    // Budget exhaustion releases the gate (best-effort restore).
     await waitFor(() => expect(result.current.restoring).toBe(false))
-    expect(attempts).toBeGreaterThanOrEqual(3)
-    expect(result.current.restoreNote).toBeNull()
+    expect(attempts).toBe(3)
     expect(result.current.inlineSessionId).toBeNull()
   })
 
-  // Round 3, issue 4: the adoption path is also generation-bound — a restore
-  // result for the OLD scope must not adopt after the scope changed.
+  // The adoption path is also generation-bound — a restore result for the
+  // OLD scope must not adopt after the scope changed.
   it('late restore for a superseded scope does not adopt into the new scope', async () => {
     const restoreDeferred = makeDeferred<RestoreOutcome>()
     const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
@@ -339,9 +349,9 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     await waitFor(() => expect(result.current.restoring).toBe(false))
   })
 
-  // Round 4, issue 1: while A's create is still in flight, a send from scope
-  // B must NOT reuse A's promise — B starts its own creation and gets its own
-  // session; A's late settlement commits nothing.
+  // While A's create is still in flight, a send from scope B must NOT reuse
+  // A's promise — B starts its own creation and gets its own session; A's
+  // late settlement commits nothing.
   it('overlapping window: B sends while A\u2019s create is unsettled — B builds its own session, A\u2019s late result is discarded', async () => {
     const createADeferred = makeDeferred<string>()
     const createdFor: string[] = []
@@ -396,9 +406,9 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(result.current.inlineSessionId).toBe('session-b')
   })
 
-  // Round 4, issue 1: while A's create is unsettled and the scope switched
-  // to B, B's pending-question restore must NOT be blocked by A's in-flight
-  // creation — B adopts its pending session.
+  // While A's create is unsettled and the scope switched to B, B's
+  // pending-question restore must NOT be blocked by A's in-flight creation —
+  // B adopts its pending session.
   it('overlapping window: B adopts its pending session while A\u2019s create is still unsettled', async () => {
     const createADeferred = makeDeferred<string>()
     const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {

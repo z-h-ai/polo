@@ -30,7 +30,7 @@ import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import type { EditPopoverRestoreOutcome } from './components/ui/useEditPopoverSessionRestore'
-import { PendingQuestionGenerationTracker, applyAuthoritativePendingQuestion, clearPendingQuestionForDeletedSession, questionResolutionRequestId, reconcilePendingQuestionsFromSnapshot, removePendingQuestionForSession, restorePendingQuestionWithRealtimeGate, setPendingQuestionForSession } from './lib/pending-questions'
+import { clearPendingQuestionForDeletedSession, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -418,27 +418,11 @@ export default function App() {
   // Pending agent questions per session (request_user_input).
   // At most one per session — a new requestId replaces the previous entry.
   // Survives refresh/restart via Session.pendingQuestion hydration.
+  // State model: realtime events are authoritative; session snapshots only
+  // fill holes (an existing entry is never downgraded by an in-flight fetch);
+  // resolutions are requestId-guarded so a stale resolution never deletes a
+  // newer card.
   const [pendingQuestions, setPendingQuestions] = useState<Map<string, QuestionRequest>>(new Map())
-  // Generation guard for authoritative snapshot application: realtime events
-  // (question_request/question_resolved) bump the per-session generation; a
-  // session fetch captures the token at request time and its response is only
-  // applied while still current — a stale fetch can never overwrite a fresher
-  // event (server snapshot remains the single source of truth).
-  const pendingQuestionGenerationsRef = useRef(new PendingQuestionGenerationTracker())
-
-  // Render-time mirror so pre-fetch generation capture can see the latest map
-  // without wiring it through every setter (same pattern as inputValueRef).
-  const pendingQuestionsRef = useRef(pendingQuestions)
-  pendingQuestionsRef.current = pendingQuestions
-
-  /** Apply an authoritative pending-question snapshot if its fetch generation is still current. */
-  const applyPendingQuestionSnapshotIfCurrent = useCallback((sessionId: string, generationToken: number, payload: QuestionRequest | undefined) => {
-    if (!pendingQuestionGenerationsRef.current.isCurrent(sessionId, generationToken)) {
-      console.info(`[App] Skipped stale pending-question snapshot for ${sessionId} (generation drifted)`)
-      return
-    }
-    setPendingQuestions(prev => applyAuthoritativePendingQuestion(prev, sessionId, payload))
-  }, [])
   // Draft composer state per session (text + attachment refs), preserved across mode
   // switches, conversation changes, and app restarts. Using a ref avoids re-renders
   // during typing; attachments are stored as lightweight refs (path + name) and
@@ -576,9 +560,6 @@ export default function App() {
 
   const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
     try {
-      // Capture the generation BEFORE fetching: events arriving while the
-      // fetch is in flight bump it, making the response's snapshot stale.
-      const generationToken = pendingQuestionGenerationsRef.current.capture(sessionId)
       const fresh = await window.electronAPI.getSessionMessages(sessionId)
       if (!fresh) return 'failed'
 
@@ -591,45 +572,38 @@ export default function App() {
       clearStreamingState(sessionId)
       replaceLoadedSession(nextSession)
       syncSessionOptionsFromSession(nextSession)
-      // Opening/refreshing a session converges its pending question to the
-      // authoritative snapshot — unless events bumped the generation while the
-      // fetch was in flight (stale fetch must not overwrite fresher state).
-      applyPendingQuestionSnapshotIfCurrent(sessionId, generationToken, nextSession.pendingQuestion)
+      // Opening/refreshing a session fills a MISSING pending question from
+      // the snapshot — an existing entry (fresher realtime state) is never
+      // downgraded by the fetch.
+      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession))
       void reconcilePermissionModeState(sessionId)
       return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
     } catch (err) {
       console.error(`[App] Failed to refresh session ${sessionId}:`, err)
       return 'failed'
     }
-  }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, applyPendingQuestionSnapshotIfCurrent, store])
+  }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, store])
 
   const loadSessionsFromServer = useCallback(async () => {
     setSessionLoadError(null)
 
     try {
-      // Full-list hydration is authoritative for every session whose pending
-      // state didn't change while the fetch was in flight. Capture the full
-      // generation snapshot AND the global epoch BEFORE fetching — the
-      // snapshot records fetch-start generations for every session the
-      // tracker knows about (others implicitly 0), so even newly-returned
-      // sessions can be classified.
-      const generationsAtFetch = pendingQuestionGenerationsRef.current.captureAll()
-      const epochAtFetch = pendingQuestionGenerationsRef.current.epoch
       const loadedSessions = await window.electronAPI.getSessions()
 
       // Initialize per-session atoms and metadata map
       // NOTE: No sessionsAtom used - sessions are only in per-session atoms
       initializeSessions(loadedSessions)
 
-      // Hydrate pending agent questions from the authoritative snapshot.
-      setPendingQuestions(prev => reconcilePendingQuestionsFromSnapshot(
-        prev,
-        loadedSessions,
-        generationsAtFetch,
-        pendingQuestionGenerationsRef.current,
-        epochAtFetch,
-        'full',
-      ))
+      // Hydrate pending agent questions from the snapshot — fill holes only:
+      // entries that already exist came from fresher realtime events and are
+      // never downgraded by the list fetch.
+      setPendingQuestions(prev => {
+        let next = prev
+        for (const session of loadedSessions) {
+          next = syncPendingQuestionFromSession(next, session)
+        }
+        return next
+      })
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
@@ -681,12 +655,6 @@ export default function App() {
     } = options
     const beforeMetaMap = store.get(sessionMetaMapAtom)
     const beforeIds = new Set(beforeMetaMap.keys())
-    // Capture the full generation snapshot AND global epoch BEFORE fetching —
-    // same contract as loadSessionsFromServer (events during the fetch make
-    // the snapshot stale; newly-returned stable sessions are classified via
-    // their fetch-start generation).
-    const generationsAtFetch = pendingQuestionGenerationsRef.current.captureAll()
-    const epochAtFetch = pendingQuestionGenerationsRef.current.epoch
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
     try {
@@ -727,19 +695,18 @@ export default function App() {
       for (const session of sessions) {
         syncSessionOptionsFromSession(session)
       }
-      // Reconnect metadata refresh carries the authoritative pending state —
-      // converge any drift missed while the transport was down (events are
-      // not replayed after stale reconnects). Shared reconciler with the
-      // full-load path; removeMissing=false lists may legitimately omit
-      // sessions, so absent entries never clear cards in that mode.
-      setPendingQuestions(prev => reconcilePendingQuestionsFromSnapshot(
-        prev,
-        sessions,
-        generationsAtFetch,
-        pendingQuestionGenerationsRef.current,
-        epochAtFetch,
-        removeMissing ? 'full' : 'partial',
-      ))
+      // Reconnect metadata refresh carries the pending state — fill missing
+      // entries (drift missed while the transport was down; events are not
+      // replayed after stale reconnects). Snapshot-present sessions converge
+      // holes; existing event-driven entries are never touched. removeMissing
+      // only affects the session LIST, not this fill-only map update.
+      setPendingQuestions(prev => {
+        let next = prev
+        for (const session of sessions) {
+          next = syncPendingQuestionFromSession(next, session)
+        }
+        return next
+      })
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
       return nextMetaMap
@@ -758,7 +725,7 @@ export default function App() {
       })
       return null
     }
-  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, applyPendingQuestionSnapshotIfCurrent, windowWorkspaceId, windowRemoteWorkspaceId])
+  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, windowWorkspaceId, windowRemoteWorkspaceId])
 
   // Stale session watchdog — catches stuck sessions that the reconnect protocol misses
   const { trackSessionActivity } = useStaleSessionRecovery({
@@ -1269,7 +1236,6 @@ export default function App() {
           case 'question_request': {
             // A new requestId replaces any previous pending question —
             // the old card's local answers are dropped with it.
-            pendingQuestionGenerationsRef.current.bump(sessionId)
             setPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request))
             // Native notification (same gating as permission notifications)
             const notifySession = store.get(sessionAtomFamily(sessionId))
@@ -1281,7 +1247,6 @@ export default function App() {
           case 'question_resolved': {
             // requestId-conditional: never delete a newer question card that
             // replaced the one this resolution is about.
-            pendingQuestionGenerationsRef.current.bump(sessionId)
             setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId))
             break
           }
@@ -1338,7 +1303,6 @@ export default function App() {
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
       if (event.type === 'session_created') {
-        const generationToken = pendingQuestionGenerationsRef.current.capture(sessionId)
         window.electronAPI.getSessionMessages(sessionId)
           .then((createdSession: Session | null) => {
             if (createdSession) {
@@ -1349,7 +1313,7 @@ export default function App() {
                 addSession(createdSession)
               }
               syncSessionOptionsFromSession(createdSession)
-              applyPendingQuestionSnapshotIfCurrent(sessionId, generationToken, createdSession.pendingQuestion)
+              setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession))
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
@@ -1361,9 +1325,7 @@ export default function App() {
       if (event.type === 'session_deleted') {
         // Deletion is a terminal state: the pending question (if any) expires —
         // clear unconditionally so no stale card survives in any window
-        // (repeated events are idempotent). The bump also invalidates any
-        // in-flight list snapshot that still contains this session's card.
-        pendingQuestionGenerationsRef.current.bump(sessionId)
+        // (repeated events are idempotent).
         setPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId))
         removeSession(sessionId)
         return
@@ -2136,7 +2098,6 @@ export default function App() {
     // question (q2) while this resolution (q1) was in flight, the stale
     // resolution must not delete the newer card.
     const resolvedRequestId = questionResolutionRequestId(resolution)
-    pendingQuestionGenerationsRef.current.bump(sessionId)
 
     switch (result.status) {
       case 'accepted':
@@ -2167,27 +2128,21 @@ export default function App() {
   // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
   // deleted) and can never cross workspaces or popover owners.
   const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<EditPopoverRestoreOutcome> => {
-    // Bounded realtime-gated restore query (review round 5, issue 1 +
-    // round 6, issue 2 + round 7/8): the global pending-state epoch is
-    // captured before every RPC attempt; drifted results are never seeded;
-    // RPC rejections (I/O / IPC / hydration) are absorbed as transient.
-    // Retry ownership (backoff loop + readable state) lives in
-    // useEditPopoverSessionRestore — ONLY an authoritative empty releases
-    // the restore gate and allows a fresh session.
-    const outcome = await restorePendingQuestionWithRealtimeGate(
-      pendingQuestionGenerationsRef.current,
-      () => window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner),
-    )
-    if (outcome.outcome === 'fresh') {
+    // ONE scoped lookup attempt: an authoritative result is returned as
+    // found/empty; an RPC rejection (I/O / IPC / hydration) says nothing
+    // about whether a pending question exists and is absorbed as transient —
+    // retry ownership (bounded loop) lives in useEditPopoverSessionRestore.
+    try {
+      const result = await window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner)
+      if (!result) return { outcome: 'empty' }
       // Seed the authoritative request the same way the question_request event
       // path does, so usePendingQuestion(inlineSessionId) resolves and every
       // existing event-driven cleanup keeps working.
-      pendingQuestionGenerationsRef.current.bump(outcome.result.sessionId)
-      setPendingQuestions(prev => setPendingQuestionForSession(prev, outcome.result.sessionId, outcome.result.request))
-      return { outcome: 'found', sessionId: outcome.result.sessionId }
+      setPendingQuestions(prev => setPendingQuestionForSession(prev, result.sessionId, result.request))
+      return { outcome: 'found', sessionId: result.sessionId }
+    } catch {
+      return { outcome: 'transient' }
     }
-    if (outcome.outcome === 'empty') return { outcome: 'empty' }
-    return { outcome: 'transient' }
   }, [])
 
   // Centralized link interceptor: classifies file types and decides whether to
