@@ -882,12 +882,21 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-resv', () => hungLock)
 
+    // Deterministic ordering: count question-state lock acquisitions so the
+    // send's critical section is provably queued BEFORE the delete's
+    // declaration (no scheduling-dependent sleeps).
+    let lockAcquisitions = 0
+    const realLock = (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<unknown>) => Promise<unknown> }).withQuestionStateLock.bind(sm)
+    ;(sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<unknown>) => Promise<unknown> }).withQuestionStateLock = (id: string, critical: () => Promise<unknown>) => {
+      lockAcquisitions++
+      return realLock(id, critical)
+    }
+
     const sendPromise = sm.sendMessage('f-del-resv', 'winning message', [], [], { invocationSource: 'desktop' })
-    await new Promise(r => setTimeout(r, 30))
-    expect(managed.turnStartReserved).toBe(true)
+    await waitForCondition(() => lockAcquisitions >= 1 && managed.turnStartReserved === true, 5000)
 
     const deletePromise = sm.deleteSession('f-del-resv')
-    await new Promise(r => setTimeout(r, 30))
+    await waitForCondition(() => lockAcquisitions >= 2, 5000)
 
     releaseLock()
     // T1: the send transaction commits — exactly one accepted broadcast.
@@ -909,10 +918,11 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
   // ---- linearization (a) — the delete's
   // declaration acquires the lock BEFORE the sendMessage critical section, so
-  // the send observes the tombstone BEFORE any persistence: no message, no
-  // broadcast, reservation released, session_missing.
+  // the send observes the deletion BEFORE any persistence: no message, no
+  // broadcast, reservation released — the send converges SILENTLY (an
+  // expected cancellation never surfaces as an error to the caller).
 
-  it('linearization (a): a delete declaration that precedes the sendMessage critical section aborts the send (no persist, no broadcast)', async () => {
+  it('linearization (a): a delete declaration that precedes the sendMessage critical section converges the send silently (no persist, no broadcast, no cancel exception)', async () => {
     patchPrivateFlush()
     const managed = seedSession('f-del-gap', {}) as unknown as {
       questionLifecycleTombstone?: { reason: string }
@@ -928,8 +938,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-gap', () => hungLock)
 
+    let lockAcquisitions = 0
+    const realLockA = (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<unknown>) => Promise<unknown> }).withQuestionStateLock.bind(sm)
+    ;(sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<unknown>) => Promise<unknown> }).withQuestionStateLock = (id: string, critical: () => Promise<unknown>) => {
+      lockAcquisitions++
+      return realLockA(id, critical)
+    }
+
     const deletePromise = sm.deleteSession('f-del-gap')
-    await new Promise(r => setTimeout(r, 30))
+    await waitForCondition(() => lockAcquisitions >= 1, 5000)
 
     let acked = false
     const sendPromise = sm.sendMessage(
@@ -939,13 +956,12 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       undefined,
       () => { acked = true },
     )
-    await new Promise(r => setTimeout(r, 30))
-    expect(managed.turnStartReserved).toBe(true)
+    await waitForCondition(() => lockAcquisitions >= 2 && managed.turnStartReserved === true, 5000)
 
     releaseLock()
-    // The declaration ran first — the send's section re-validates and aborts
-    // BEFORE any persistence or broadcast.
-    await expect(sendPromise).rejects.toThrow(/session_missing/)
+    // The declaration ran first — the send's section re-validates and
+    // converges SILENTLY before any persistence or broadcast.
+    await sendPromise
 
     expect(acked).toBe(false)
     expect(managed.messages.filter(m => m.role === 'user')).toHaveLength(0)
@@ -1068,12 +1084,10 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     await sm.startSessionMcpHost({ serverEntryPath: entryPath, nodeRuntimePath: process.execPath })
 
     // An embedded session is NOT registered for external consumption: the
-    // config surface fails closed and the turn spawns NO sidecar — the
+    // config surface fails closed and no sidecar channel exists — the
     // in-process registry is its single owner/channel, structurally.
     expect(await sm.getSessionExternalModelToolset('f-wire-1', 'desktop', managed.processingGeneration)).toBeNull()
     await sm.sendMessage('f-wire-1', 'turn one', [], [], { invocationSource: 'desktop' })
-    const host = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } | null }).sessionMcpHost
-    expect(host?.children.has('f-wire-1')).toBe(false)
 
     // The model calls the tool — the embedded wiring lands DIRECTLY in the
     // durable handoff.
@@ -1182,57 +1196,59 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   // switching is expressed in the spawned args; ONE tool call produces ONE
   // durable handoff (the stderr delivery mirror is gone).
 
-  it('session MCP host: desktop→messaging→desktop spawn switching and single-delivery durable handoff', async () => {
+  it('session MCP host: desktop→messaging→desktop per-turn config switching and single-delivery durable handoff', async () => {
     patchPrivateFlush()
     const managed = seedSession('f-host-1', {}) as unknown as { processingGeneration: number }
-    let chats = 0
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
-      chats++
-      return makeFakeAgent()
-    }
+    // The session is registered for external-engine consumption at creation:
+    // its turns provision the per-turn harness config instead of running an
+    // embedded agent.
+    ;(managed as unknown as { externalToolset: boolean }).externalToolset = true
 
-    // Stub server entry + start the production host; the session is
-    // registered for external-engine consumption (the sidecar gate).
+    // Stub server entry + start the production host.
     const entry = join(tmpRoot, 'session-mcp-stub.js')
     writeFileSync(entry, 'process.exit(0)\n')
     const hostPort = await sm.startSessionMcpHost({ serverEntryPath: entry })
     expect(hostPort).toBeGreaterThan(0)
-    sm.markSessionExternalEngine('f-host-1')
 
-    // TURN 1 — desktop: capability ON.
+    // TURN 1 — desktop: capability ON. sendMessage IS the external turn
+    // launch; the config is provisioned once for the turn's generation.
     await sm.sendMessage('f-host-1', 'turn one', [], [], { invocationSource: 'desktop' })
-    await waitForCondition(() => chats === 1)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const spec1 = (sm as unknown as { sessionMcpHost: { lastSpawnSpec: { args: string[] } | null } }).sessionMcpHost!.lastSpawnSpec!
-    expect(spec1.args).toContain('--allow-request-user-input')
-    expect(spec1.args[spec1.args.indexOf('--turn-generation') + 1]!).toBe(String(managed.processingGeneration))
-    expect(spec1.args[spec1.args.indexOf('--callback-port') + 1]!).toBe(String(hostPort))
+    const gen1 = managed.processingGeneration
+    const config1 = await sm.getSessionExternalModelToolset('f-host-1', 'desktop', gen1)
+    expect(config1).not.toBeNull()
+    expect(config1!.args).toContain('--allow-request-user-input')
+    expect(config1!.args[config1!.args.indexOf('--turn-generation') + 1]!).toBe(String(gen1))
+    expect(config1!.args[config1!.args.indexOf('--callback-port') + 1]!).toBe(String(hostPort))
+    // Idempotent within the turn — one logical channel provisioning.
+    expect(await sm.getSessionExternalModelToolset('f-host-1', 'desktop', gen1)).toBe(config1)
+    // The driver reports turn completion before the next turn launches.
+    await sm.completeExternalEngineTurn('f-host-1')
 
     // TURN 2 — messaging: capability OFF (fail closed, args switched).
     await sm.sendMessage('f-host-1', 'turn two', [], [], { invocationSource: 'messaging' })
-    await waitForCondition(() => chats === 2)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const spec2 = (sm as unknown as { sessionMcpHost: { lastSpawnSpec: { args: string[] } | null } }).sessionMcpHost!.lastSpawnSpec!
-    expect(spec2.args).not.toContain('--allow-request-user-input')
-    expect(spec2.args[spec2.args.indexOf('--turn-generation') + 1]!).toBe(String(managed.processingGeneration))
+    const gen2 = managed.processingGeneration
+    const config2 = await sm.getSessionExternalModelToolset('f-host-1', 'messaging', gen2)
+    expect(config2).not.toBeNull()
+    expect(config2!.args).not.toContain('--allow-request-user-input')
+    expect(config2!.args[config2!.args.indexOf('--turn-generation') + 1]!).toBe(String(gen2))
+    await sm.completeExternalEngineTurn('f-host-1')
 
     // TURN 3 — desktop again: capability back ON.
     await sm.sendMessage('f-host-1', 'turn three', [], [], { invocationSource: 'desktop' })
-    await waitForCondition(() => chats === 3)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const spec3 = (sm as unknown as { sessionMcpHost: { lastSpawnSpec: { args: string[] } | null } }).sessionMcpHost!.lastSpawnSpec!
-    expect(spec3.args).toContain('--allow-request-user-input')
+    const gen3 = managed.processingGeneration
+    const config3 = await sm.getSessionExternalModelToolset('f-host-1', 'desktop', gen3)
+    expect(config3!.args).toContain('--allow-request-user-input')
 
     // SINGLE DELIVERY: one tool call (one POST to the host route) → exactly
     // one durable handoff: one pending requestId, one question_request event.
-    const request = makeQuestionRequest('f-host-1-q')
+    const request = makeQuestionRequest('f-host-1')
     const response = await fetch(`http://127.0.0.1:${hostPort}/request-user-input`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sessionId: 'f-host-1',
         questions: request.questions,
-        generationAtRequest: managed.processingGeneration,
+        generationAtRequest: gen3,
       }),
     })
     expect(response.status).toBe(200)
@@ -1293,11 +1309,9 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    // PRODUCTION registration: the session is externally driven; the
-    // sendMessage turn spawns and awaits the per-turn sidecar.
-    sm.markSessionExternalEngine('f-mcp-loop')
-    patchPrivateFlush()
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
+    // PRODUCTION registration + turn launch: the session is externally
+    // driven; sendMessage provisions the per-turn harness config.
+    ;(managed as unknown as { externalToolset: boolean }).externalToolset = true
     await sm.sendMessage('f-mcp-loop', 'turn one', [], [], { invocationSource: 'desktop' })
 
     // The harness model MCP config comes from the PRODUCTION surface.
@@ -1340,14 +1354,14 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   it('cross-process fail-closed: a non-desktop harness config serves no request_user_input tool', async () => {
     const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
     const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
-    seedSession('f-mcp-nd', {})
+    const seeded = seedSession('f-mcp-nd', {}) as unknown as { externalToolset: boolean }
+    seeded.externalToolset = true
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
 
     await sm.startSessionMcpHost({
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    sm.markSessionExternalEngine('f-mcp-nd')
     const config = await sm.getSessionExternalModelToolset('f-mcp-nd', 'messaging', 1)
     expect(config).not.toBeNull()
     expect(config!.args).not.toContain('--allow-request-user-input')
@@ -1470,6 +1484,99 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
   })
 
+  // ---- chat-start reservation: a delete whose declaration lands after the
+  // chat-start gate WAITS for the reserved query to become genuinely
+  // abortable before declaring — the cleanup force-aborts a LIVE turn, never
+  // a not-yet-started one.
+
+  it('delete declaration waits for the irrevocable chat-start reservation, then converges the live turn', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-del-resv-final', {}) as unknown as {
+      isProcessing: boolean
+      processingGeneration: number
+      chatStartReservation?: { generation: number; started: Promise<void>; resolveStarted: () => void }
+      agent?: { forceAbortCount?: number }
+    }
+    ;(managed as unknown as { isProcessing: boolean }).isProcessing = true
+    let forceAborts = 0
+    ;(managed as unknown as { agent: unknown }).agent = {
+      forceAbort: () => { forceAborts++ },
+      dispose: () => {},
+    }
+    // Fixture state: the turn passed the chat-start gate (production sets
+    // this in the gate's critical section) but the query has not been
+    // entered yet.
+    let resolveStarted!: () => void
+    const started = new Promise<void>(resolve => { resolveStarted = resolve })
+    ;(managed as unknown as { chatStartReservation: unknown }).chatStartReservation = {
+      generation: managed.processingGeneration,
+      started,
+      resolveStarted,
+    }
+
+    // The delete declaration must WAIT while the reservation is pending.
+    const deletePromise = sm.deleteSession('f-del-resv-final')
+    await new Promise(r => setTimeout(r, 80))
+    expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.has('f-del-resv-final')).toBe(true)
+    expect(forceAborts).toBe(0)
+
+    // The query starts → the reservation resolves → the declaration lands
+    // and the cleanup aborts the LIVE turn.
+    resolveStarted()
+    await deletePromise
+    expect(forceAborts).toBe(1)
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv-final'))).toBe(false)
+  })
+
+  // ---- supersede durability: the new-user-message supersede clear is a
+  // STAGED durable clear — the live recovery state stays armed until the
+  // staged snapshot is durably flushed; a gated (or failed) flush never
+  // publishes the clear, so a restart cannot re-run a superseded answer turn.
+
+  it('supersede clear is staged: while the durable flush is gated the live recovery stays ARMED; release converges memory + disk', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-supersede-staged')
+    seedSession('f-supersede-staged', {})
+    // Arm the recovery ON DISK (the production restart-recovery source) so
+    // the lazy message load restores it into the live session.
+    const armedPath = getSessionFilePath(tmpRoot, 'f-supersede-staged')
+    const armedStored = JSON.parse(readFileSync(armedPath, 'utf-8').split('\n')[0]) as Record<string, unknown>
+    armedStored.pendingAgentResume = { messageId: 'msg-answer', attempts: 0 }
+    armedStored.messages = armedStored.messages ?? []
+    writeSessionJsonl(armedPath, armedStored as never)
+    const managed = getManaged('f-supersede-staged') as unknown as { pendingAgentResume?: { messageId: string; attempts: number } }
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'msg-answer', attempts: 0 }
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
+
+    // Gate every flush AFTER the first (the first flush persists the new
+    // user message; the second is the supersede clear's staged snapshot).
+    let releaseFlush: (() => void) | null = null
+    const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
+    let flushCalls = 0
+    const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      flushCalls++
+      if (flushCalls >= 2) return flushGate.then(() => realFlush.call(sm, id))
+      return realFlush.call(sm, id)
+    }
+
+    const sendPromise = sm.sendMessage('f-supersede-staged', 'a new user message')
+    // Wait until the supersede clear's staged flush is in flight.
+    await waitForCondition(() => flushCalls >= 2, 5000)
+    await new Promise(r => setTimeout(r, 30))
+    // INSIDE the gated flush window: the live recovery state is STILL ARMED.
+    expect(managed.pendingAgentResume).toEqual({ messageId: 'msg-answer', attempts: 0 })
+
+    releaseFlush!()
+    await sendPromise
+    // Durable commit landed → the live clear is published: memory + header
+    // converged (a restart cannot re-run the superseded answer turn).
+    expect(managed.pendingAgentResume).toBeUndefined()
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-supersede-staged'), 'utf-8').split('\n')[0])
+    expect(header.pendingAgentResume).toBeUndefined()
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = realFlush
+  })
+
   // ---- the generation is bound to the callback
   // CLOSURE at the issuing turn (agent-stamped at tool-call time). A late
   // callback carrying its ISSUING generation is rejected once a newer turn
@@ -1556,9 +1663,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       }
     }
     void sm.respondToQuestion('f-resume-2', makeAnswerResolution(request))
-    await new Promise(r => setTimeout(r, 30))
-    // Recovery state armed after the failed first resume
-    expect(getManaged('f-resume-2').pendingAgentResume).toBeDefined()
+    // Recovery state armed after the failed first resume (deterministic wait).
+    await waitForCondition(() => getManaged('f-resume-2').pendingAgentResume !== undefined, 5000)
 
     // A user's new message (existingMessageId undefined ≠ resume messageId)
     // supersedes the recovery state.

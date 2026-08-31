@@ -164,17 +164,16 @@ export const AGENT_FLAGS = {
   defaultModesEnabled: true,
 } as const
 
+/**
+ * Bounded wait for a reserved chat start (see chatStartReservation). A turn
+ * that set the reservation reaches its query within this budget; the delete
+ * declaration must not run its abort-less cleanup before that.
+ */
+const CHAT_START_RESERVATION_WAIT_MS = 15_000
+
 const MAX_ADMIN_REMEMBER_MINUTES = 60
 const MAX_ANNOTATIONS_PER_MESSAGE = 200
 const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
-
-/**
- * Bounded wait for a per-turn session MCP server to boot and complete its
- * MCP handshake. A server that cannot become ready within this budget is
- * degraded deterministically for the turn (sendMessage proceeds without the
- * session MCP channel) — the turn never hangs on a broken child.
- */
-const SESSION_MCP_CONNECT_TIMEOUT_MS = 20_000
 
 // Window during which fs.watch metadata-revert events from our own atomic write
 // are ignored, so the watcher does not roll back the in-memory mutation we
@@ -926,12 +925,29 @@ interface ManagedSession {
   /**
    * EXTERNAL-ENGINE registration: the session's model turn is driven by an
    * external harness (e.g. Codex CLI) whose model-visible toolset is the
-   * per-turn session MCP server. Only registered sessions spawn the per-turn
-   * sidecar (and carry its stdio client) — embedded Claude/Pi sessions keep
-   * the in-process registry as their SINGLE owner/channel and never run a
-   * second, dead channel.
+   * per-turn session MCP server. Registered sessions never run an embedded
+   * agent: sendMessage provisions the harness's per-turn model MCP config
+   * and hands the turn over — the external driver is the sidecar's SINGLE
+   * owner (it spawns and manages that process). Embedded Claude/Pi sessions
+   * keep the in-process registry as their SINGLE owner/channel and never run
+   * a second, dead channel.
    */
   externalToolset?: boolean
+  /**
+   * The per-turn model MCP config provisioned for the CURRENT generation
+   * (idempotent within the turn — the harness and its toolset are one
+   * logical channel per turn).
+   */
+  externalToolsetConfig?: { generation: number; config: { command: string; args: string[]; callbackPort: number } }
+  /**
+   * IRREVOCABLE CHAT-START RESERVATION (embedded turns): created in the SAME
+   * locked critical section as the chat-start identity gate; its `started`
+   * promise resolves once agent.chat() has been entered (the turn is
+   * genuinely abortable). A delete declaration that lands while this is set
+   * AWITS the promise (bounded) — declaring before the query exists would
+   * strand a ghost turn the cleanup cannot abort.
+   */
+  chatStartReservation?: { generation: number; started: Promise<void>; resolveStarted: () => void }
   // Invocation source of the most recent turn ('desktop' enables
   // request_user_input; defaults to 'internal' — fail closed).
   invocationSource?: InvocationSource
@@ -1311,20 +1327,6 @@ export class SessionManager implements ISessionManager {
     serverEntryPath: string
     nodeRuntimePath?: string
     server: { stop(force?: boolean): void }
-    /**
-     * One live session MCP server (stdio client + transport owning the child
-     * process) per session, stopped at turn end. `ready` is the client
-     * connect promise — a first-turn tool call awaits it before use.
-     */
-    children: Map<string, {
-      // Loosely typed: the concrete MCP SDK Client satisfies this shape.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: any
-      ready: Promise<void>
-      close(): Promise<void>
-    }>
-    /** Last spawn spec built (diagnostics + tests). */
-    lastSpawnSpec: { command: string; args: string[] } | null
   } | null = null
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
@@ -2741,6 +2743,7 @@ export class SessionManager implements ISessionManager {
     // Get new session defaults from workspace config (with global fallback)
     // Options.permissionMode overrides the workspace default (used by EditPopover for auto-execute)
     const workspaceRootPath = workspace.rootPath
+    const externalEngine = options?.externalEngine === true
     const wsConfig = loadWorkspaceConfig(workspaceRootPath)
     const globalDefaults = loadConfigDefaults()
 
@@ -3099,6 +3102,12 @@ export class SessionManager implements ISessionManager {
       branchSeedApplied: validatedBranch ? validatedBranch.branchContextStrategy === 'sdk-fork' : undefined,
       messagesLoaded: !isBranch,  // Branched sessions: lazy-load messages from JSONL
     })
+    // EXTERNAL-ENGINE registration (creation path): the session's model turns
+    // are driven by an external harness consuming the per-turn session MCP
+    // server as its model toolset.
+    if (externalEngine) {
+      this.provisionExternalEngineRegistration(managed)
+    }
 
     // Eagerly load messages for branched sessions so the renderer gets the full
     // conversation immediately (needed for scroll-to-bottom on panel open)
@@ -5835,7 +5844,22 @@ export class SessionManager implements ISessionManager {
    * (the visibility point). Every later send / resolution / question request
    * observes the deletion from this instant on.
    */
-  private declareSessionDeletedLocked(managed: ManagedSession): void {
+  private async declareSessionDeletedLocked(managed: ManagedSession): Promise<void> {
+    // IRREVOCABLE CHAT-START RESERVATION: a turn that passed the chat-start
+    // gate is milliseconds from a genuinely abortable query. Declaring now
+    // would run the deletion cleanup's forceAbort BEFORE the query exists —
+    // a ghost turn nothing can abort. Await the reserved chat start
+    // (bounded); the subsequent cleanup then aborts the LIVE turn.
+    const reservation = managed.chatStartReservation
+    if (reservation) {
+      const timeout = new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), CHAT_START_RESERVATION_WAIT_MS).unref?.())
+      const outcome = await Promise.race([reservation.started.then(() => 'started' as const), timeout])
+      if (outcome === 'timeout') {
+        sessionLog.error(`Session ${managed.id}: chat-start reservation for generation ${reservation.generation} did not clear within ${CHAT_START_RESERVATION_WAIT_MS}ms — declaring deleted anyway`)
+      } else {
+        sessionLog.info(`Session ${managed.id}: waited for the reserved chat start (generation ${reservation.generation}) before declaring deleted`)
+      }
+    }
     managed.questionLifecycleTombstone = { reason: 'deleted', at: Date.now() }
     this.sessions.delete(managed.id)
     sessionLog.info(`Session ${managed.id} declared deleted (linearization point)`)
@@ -5849,10 +5873,6 @@ export class SessionManager implements ISessionManager {
    */
   private async cleanupDeletedSession(managed: ManagedSession): Promise<void> {
     const sessionId = managed.id
-    // SESSION MCP HOST: a deletion kills the
-    // session's per-turn server subprocess (if any) immediately.
-    this.stopSessionMcpServerForTurn(sessionId)
-
     // Immediately disarm any answer→resume retry — synchronously, BEFORE the
     // abort wait / share-revoke window. The identity guard
     // (`sessions.get(id) === managed`) no longer holds after the declaration,
@@ -6000,10 +6020,13 @@ export class SessionManager implements ISessionManager {
     // terminal tombstone synchronously at deleteSession entry. A send that
     // arrives during the deletion window must never start a new turn — the
     // turn-start boundary below would bump the generation and CLEAR the
-    // tombstone, resurrecting a deleted session's question lifecycle. Fail
-    // closed with the protocol's terminal status.
+    // tombstone, resurrecting a deleted session's question lifecycle.
+    // CONVERGES SILENTLY: nothing was persisted or reserved yet, the
+    // session_deleted event informs the UI, and an expected-cancellation
+    // error must not surface to the caller.
     if (managed.questionLifecycleTombstone?.reason === 'deleted') {
-      throw new Error(`Session ${sessionId} is being deleted (session_missing): new turns are rejected during the deletion window`)
+      sessionLog.info(`sendMessage: session ${sessionId} is being deleted — the send converges silently (nothing persisted)`)
+      return
     }
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
@@ -6161,9 +6184,16 @@ export class SessionManager implements ISessionManager {
       // any persistence side effect; the lock also serializes this section
       // against the delete's own locked cleanup, so a committed turn can only
       // ever be torn down by that cleanup — never resurrect after it.
+      let turnAbandonedBeforeCommit = false
       await this.withQuestionStateLock(sessionId, async () => {
         if (this.sessions.get(sessionId) !== managed) {
-          throw new Error(`Session ${sessionId} is being deleted or replaced (session_missing): the reserved turn is abandoned before any persistence`)
+          // The delete/replace declaration won the linearization race.
+          // CONVERGES SILENTLY: no persistence side effect happened, the
+          // reservation is released by the finally below, and the
+          // session_deleted event informs the UI — an expected-cancellation
+          // error must not surface to the caller.
+          turnAbandonedBeforeCommit = true
+          return
         }
 
         // The turn-start reservation was already bound at entry (before any
@@ -6184,7 +6214,7 @@ export class SessionManager implements ISessionManager {
           // answer content is already in history as part of the context, so
           // the recovery retry would double-start the answer turn.
           if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
-            void this.clearPendingAgentResume(managed, 'superseded by a replayed queued message', { flush: false })
+            await this.clearPendingAgentResume(managed, 'superseded by a replayed queued message')
           }
         } else {
           // Create new message
@@ -6228,7 +6258,7 @@ export class SessionManager implements ISessionManager {
           // message) is exempt — otherwise it would clear its own recovery
           // state.
           if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
-            void this.clearPendingAgentResume(managed, 'superseded by a new user message', { flush: false })
+            await this.clearPendingAgentResume(managed, 'superseded by a new user message')
           }
 
           // If this is the first user message and no title exists, set one immediately
@@ -6310,6 +6340,12 @@ export class SessionManager implements ISessionManager {
         managed.agent?.setSessionTurnGeneration(managed.processingGeneration)
         managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
       })
+      if (turnAbandonedBeforeCommit) {
+        // The turn-start reservation is released by the finally below — the
+        // turn converges as silently deleted (the session no longer exists).
+        sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted before commit (declaration won the race)`)
+        return
+      }
       // The turn has claimed its processing generation — the reservation is
       // consumed; isProcessing now gates subsequent callers.
       turnStarted = true
@@ -6339,8 +6375,37 @@ export class SessionManager implements ISessionManager {
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
 
+
     // Start perf span for entire sendMessage flow
     const sendSpan = perf.span('session.sendMessage', { sessionId })
+
+    // EXTERNAL-ENGINE TURN LAUNCH: an externally driven session has no
+    // embedded agent — the model runs in the external harness. The turn
+    // boundary (message commit + generation + processing state) is already
+    // committed above; this path provisions the harness's per-turn model MCP
+    // config (the sidecar's SINGLE channel — the driver owns the process)
+    // and hands the turn over. Any armed answer→resume recovery is durably
+    // settled here: the continuation is the driver's responsibility from
+    // this point on.
+    if (managed.externalToolset) {
+      try {
+        await this.getSessionExternalModelToolset(sessionId, invocationSource, myGeneration)
+        if (managed.pendingAgentResume) {
+          await this.clearPendingAgentResume(managed, 'external engine turn launched — continuation owned by the driver')
+        }
+        sendSpan.mark('external-turn.provisioned')
+        sessionLog.info(`External engine turn provisioned for session ${sessionId} (generation ${myGeneration})`)
+      } catch (prepError) {
+        sendSpan.mark('external-turn.failed')
+        sessionLog.error(`External engine turn provisioning failed for session ${sessionId}:`, prepError)
+        if (managed.isProcessing && managed.processingGeneration === myGeneration) {
+          await this.onProcessingStopped(sessionId, 'error')
+        }
+        throw prepError
+      }
+      sendSpan.end()
+      return
+    }
 
     const workspaceRootPath = managed.workspace.rootPath
     const enabledSlugs = managed.enabledSourceSlugs ?? []
@@ -6421,24 +6486,6 @@ export class SessionManager implements ISessionManager {
         agent.allowRequestUserInput = allowRequestUserInputNow
       }
 
-      // SESSION MCP HOST — per-turn consumption boundary, gated to
-      // EXTERNAL-ENGINE sessions only: a registered session's model-visible
-      // toolset is the per-turn session MCP server (host callback port +
-      // capability DERIVED FROM THE INVOCATION SOURCE + the IMMUTABLE
-      // processing generation expressed in the spawned args). The spawn is
-      // AWAITED to a full readiness edge — host listening AND this turn's
-      // MCP client connected — before the model may start the turn, so the
-      // very first turn can already discover (and call) request_user_input
-      // through the real toolset. A failed spawn/connect degrades
-      // deterministically (turn proceeds without the session MCP channel;
-      // the healthy host stays registered). Embedded Claude/Pi sessions
-      // never spawn a sidecar: the in-process registry is their single
-      // owner/channel. Stopped at turn end; dormant when no host was
-      // started.
-      if (managed.externalToolset) {
-        await this.spawnSessionMcpServerForTurn(sessionId, invocationSource, managed.processingGeneration)
-      }
-
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = loadAllSources(workspaceRootPath)
       agent.setAllSources(allSources)
@@ -6480,13 +6527,19 @@ export class SessionManager implements ISessionManager {
     // - a delete that declared before this point converges the turn silently
     //   here (the freshly created agent is disposed — no ghost turn, no
     //   agent leak, no exception to the caller);
-    // - a delete that declares after this point owns the teardown of the
-    //   RUNNING turn through its cleanup (force-abort + dispose).
+    // - a delete that declares after this point sees the IRREVOCABLE
+    //   CHAT-START RESERVATION set below (same critical section) and WAITS
+    //   until the query is genuinely abortable, then owns the teardown of
+    //   the RUNNING turn through its cleanup (force-abort + dispose).
     // A terminal lifecycle tombstone (stopped/archived) converges the same
     // way: the lifecycle was already torn down when the tombstone was set.
-    const turnAlive = await this.withQuestionStateLock(sessionId, async () =>
-      this.sessions.get(sessionId) === managed && !managed.questionLifecycleTombstone,
-    )
+    const turnAlive = await this.withQuestionStateLock(sessionId, async () => {
+      if (this.sessions.get(sessionId) !== managed || managed.questionLifecycleTombstone) return false
+      let resolveStarted!: () => void
+      const started = new Promise<void>(resolve => { resolveStarted = resolve })
+      managed.chatStartReservation = { generation: myGeneration, started, resolveStarted }
+      return true
+    })
     if (!turnAlive) {
       sendSpan.mark('turn.converged-deleted')
       sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted/stopped before chat start`)
@@ -6546,6 +6599,12 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('chat.starting')
       const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
       sessionLog.info('Got chat iterator, starting iteration...')
+      // The query is now being entered — the reservation's promise ("a
+      // delete declaration waits until the turn is genuinely abortable")
+      // is fulfilled; a delete from here on force-aborts the LIVE turn.
+      if (managed.chatStartReservation?.generation === myGeneration) {
+        managed.chatStartReservation.resolveStarted()
+      }
 
       for await (const event of chatIterator) {
         // Log events (skip noisy text_delta)
@@ -6950,10 +7009,6 @@ export class SessionManager implements ISessionManager {
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
-    // SESSION MCP HOST: this turn's server
-    // subprocess is stopped at turn end — one live server per session.
-    this.stopSessionMcpServerForTurn(sessionId)
-
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
 
@@ -7477,8 +7532,6 @@ export class SessionManager implements ISessionManager {
       serverEntryPath: options.serverEntryPath,
       nodeRuntimePath: options.nodeRuntimePath,
       server,
-      children: new Map(),
-      lastSpawnSpec: null,
     }
     // A successful replacement retires the previous host's subprocesses and
     // listener — exactly one live host per runtime.
@@ -7489,12 +7542,8 @@ export class SessionManager implements ISessionManager {
     return callbackPort
   }
 
-  /** Kill a host object's per-turn subprocesses and its listener. */
+  /** Stop a host object's listener. */
   private disposeSessionMcpHost(host: NonNullable<SessionManager['sessionMcpHost']>): void {
-    for (const entry of host.children.values()) {
-      void entry.close().catch(() => {})
-    }
-    host.children.clear()
     host.server.stop(true)
   }
 
@@ -7632,92 +7681,16 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Spawn THIS turn's session MCP server (per-turn consumption from the
-   * sendMessage capability boundary). One live server per session; it is
-   * stopped at turn end (onProcessingStopped) and by deleteSession cleanup.
-   *
-   * RESOLVES AT FULL READINESS: the returned promise settles only after the
-   * host is listening AND this turn's MCP client connect has settled —
-   * sendMessage awaits it before the model may start the turn. A failed
-   * connect is a deterministic degrade (entry removed, promise resolves);
-   * it never throws and never leaves a half-usable channel behind.
+   * Register a session as EXTERNALLY driven at CREATION time: its model turns
+   * run in an external harness (e.g. Codex CLI) whose model-visible toolset
+   * is the per-turn session MCP server. The external driver is the sidecar's
+   * SINGLE owner — it spawns and manages that process from the config this
+   * host hands out ({@link getSessionExternalModelToolset}); the host never
+   * runs a second, un-consumed copy.
    */
-  async spawnSessionMcpServerForTurn(sessionId: string, invocationSource: InvocationSource, processingGeneration: number): Promise<void> {
-    // READINESS GATE: a first turn that arrives before the listener is up
-    // WAITS for it; a failed startup skips the session MCP path
-    // deterministically (the healthy incumbent stays registered).
-    const host = await this.awaitSessionMcpHost()
-    if (!host) return
-    const built = this.buildSessionMcpServerForTurnArgs(sessionId, invocationSource, processingGeneration)
-    if (!built) return
-    // Stop any previous turn's server first — one live server per session.
-    this.stopSessionMcpServerForTurn(sessionId)
-    // STDIO CLIENT: the transport SPAWNS the server subprocess and wires its
-    // stdin/stdout to the server's StdioServerTransport. The MCP client is
-    // kept per session; the external engine's request_user_input tool call
-    // reaches the durable handoff through it (see callSessionMcpRequestUserInput)
-    // and AWAITS the durable handoff's terminal result.
-    const transport = new StdioClientTransport({
-      command: built.spec.command,
-      args: built.spec.args,
-      stderr: 'pipe',
-    })
-    const client = new Client({ name: 'polo-session-mcp-host', version: '0.3.1' })
-    // CLIENT READINESS: the connect promise is part of the entry and this
-    // spawn AWAITS it (full readiness edge for the turn). A rejected connect
-    // — or the bounded timeout below — removes the entry and degrades
-    // silently: the turn runs without the session MCP channel, never hangs.
-    // NOTE: the child-process close is observed via the CLIENT's onclose
-    // (the SDK owns transport.onclose while connecting and its internal
-    // handler performs the connect-time early reject).
-    const entry = { client, ready: client.connect(transport), close: () => client.close() }
-    entry.ready.catch(connectError => {
-      sessionLog.error(`Session MCP server connect failed for session ${sessionId}:`, connectError)
-      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
-    })
-    client.onclose = () => {
-      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
-    }
-    transport.onerror = error => {
-      sessionLog.error(`Session MCP transport error for session ${sessionId}:`, error)
-    }
-    transport.stderr?.on('data', (chunk: Buffer) => {
-      sessionLog.info(`[session-mcp stderr] ${chunk.toString().trim()}`)
-    })
-    host.children.set(sessionId, entry)
-    host.lastSpawnSpec = built.spec
-    sessionLog.info(`Spawned session MCP server for session ${sessionId} (capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
-    const connected = await Promise.race([
-      entry.ready.then(
-        () => 'connected' as const,
-        // Deterministic degrade: the connect failure handler already removed
-        // the entry; the turn proceeds without the session MCP channel.
-        () => 'failed' as const,
-      ),
-      new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), SESSION_MCP_CONNECT_TIMEOUT_MS).unref?.()),
-    ])
-    if (connected === 'timeout') {
-      sessionLog.error(`Session MCP server connect timed out after ${SESSION_MCP_CONNECT_TIMEOUT_MS}ms for session ${sessionId} — degrading this turn without the session MCP channel`)
-      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
-      void entry.close().catch(() => {})
-    }
-  }
-
-  /**
-   * Register a session as EXTERNALLY driven: its model turns run in an
-   * external harness (e.g. Codex CLI) whose model-visible toolset is the
-   * per-turn session MCP server. From the next sendMessage turn on, the
-   * host spawns that sidecar for this session (awaited to full readiness
-   * before chat); {@link getSessionExternalModelToolset} hands the harness
-   * its per-turn model MCP config.
-   */
-  markSessionExternalEngine(sessionId: string): void {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      throw new Error(`Session ${sessionId} not found`)
-    }
+  private provisionExternalEngineRegistration(managed: ManagedSession): void {
     managed.externalToolset = true
-    sessionLog.info(`Session ${sessionId} registered for external-engine consumption (per-turn session MCP sidecar enabled)`)
+    sessionLog.info(`Session ${managed.id} registered for external-engine consumption (per-turn session MCP sidecar enabled)`)
   }
 
   /**
@@ -7726,7 +7699,11 @@ export class SessionManager implements ISessionManager {
    * spawn `command` with `args` (session binding, host callback port, the
    * turn's capability derived from the invocation source, and the immutable
    * turn generation) so the model's toolset contains request_user_input
-   * exactly when the turn is desktop-eligible. Awaits the host readiness
+   * exactly when the turn is desktop-eligible.
+   *
+   * SINGLE CHANNEL: the config is provisioned once per turn (cached on the
+   * session by generation) and the harness is its only consumer — the host
+   * never spawns its own copy of the sidecar. Awaits the host readiness
    * gate; null when no host exists, the session is gone, or the session was
    * never registered as externally driven (fail closed for embedded
    * sessions — their toolset never routes through a sidecar).
@@ -7740,28 +7717,27 @@ export class SessionManager implements ISessionManager {
     if (!managed?.externalToolset) return null
     const host = await this.awaitSessionMcpHost()
     if (!host) return null
+    const cached = managed.externalToolsetConfig
+    if (cached && cached.generation === processingGeneration) return cached.config
     const built = this.buildSessionMcpServerForTurnArgs(sessionId, invocationSource, processingGeneration)
     if (!built) return null
-    return { command: built.spec.command, args: built.spec.args, callbackPort: host.callbackPort }
+    const config = { command: built.spec.command, args: built.spec.args, callbackPort: host.callbackPort }
+    managed.externalToolsetConfig = { generation: processingGeneration, config }
+    sessionLog.info(`Provisioned external model toolset for session ${sessionId} (capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
+    return config
   }
 
   /**
-   * The per-turn MCP client for a session, after the host startup gate and
-   * the client connect have settled. Null when no host/client exists.
+   * PRODUCTION completion hook for an externally driven turn: the harness
+   * reports its model turn finished. Runs the same processing-stopped
+   * boundary the embedded engines use.
    */
-  private async awaitSessionMcpClient(
-    sessionId: string,
-  ): Promise<NonNullable<SessionManager['sessionMcpHost']>['children'] extends Map<string, infer E> ? E : never> {
-    const host = await this.awaitSessionMcpHost()
-    if (!host) return undefined as never
-    const entry = host.children.get(sessionId)
-    if (!entry) return undefined as never
-    try {
-      await entry.ready
-    } catch {
-      return undefined as never
-    }
-    return entry
+  async completeExternalEngineTurn(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return
+    if (!managed.externalToolset) return
+    if (!managed.isProcessing) return
+    await this.onProcessingStopped(sessionId, 'complete')
   }
 
   /**
@@ -7779,19 +7755,6 @@ export class SessionManager implements ISessionManager {
       return this.sessionMcpHost
     }
     return this.sessionMcpHost
-  }
-
-  /** Stop THIS session's per-turn server (client + transport + subprocess). */
-  stopSessionMcpServerForTurn(sessionId: string): void {
-    const host = this.sessionMcpHost
-    if (!host) return
-    const entry = host.children.get(sessionId)
-    if (entry) {
-      host.children.delete(sessionId)
-      void entry.close().catch(closeError => {
-        sessionLog.warn(`Failed to close session MCP server for session ${sessionId}:`, closeError)
-      })
-    }
   }
 
   /**
@@ -8422,31 +8385,23 @@ export class SessionManager implements ISessionManager {
   private async clearPendingAgentResume(
     managed: ManagedSession,
     reason: string,
-    opts: { flush?: boolean } = {},
   ): Promise<void> {
     if (managed.resumeRetryTimer) {
       clearTimeout(managed.resumeRetryTimer)
       managed.resumeRetryTimer = undefined
     }
     if (!managed.pendingAgentResume) return
-    // STAGED DURABLE CLEAR: the live ManagedSession stays ARMED while the
-    // staged snapshot — built with `pendingAgentResume` omitted — is
-    // persisted and flushed. Only after the durable flush succeeds is the
-    // in-memory clear published, so an observer inside the flush window (or
-    // a crash) always sees a CONSISTENT world: runtime armed + disk armed
-    // (pre-commit), or runtime cleared + disk cleared (post-commit) — never
-    // "runtime cleared + recovery still on disk".
+    // STAGED DURABLE CLEAR — NO un-awaited variant: the live ManagedSession
+    // stays ARMED while the staged snapshot — built with `pendingAgentResume`
+    // omitted — is persisted and flushed. Only after the durable flush
+    // succeeds is the in-memory clear published, so an observer inside the
+    // flush window (or a crash, however the write is triggered) always sees
+    // a CONSISTENT world: runtime armed + disk armed (pre-commit), or
+    // runtime cleared + disk cleared (post-commit) — never "runtime cleared
+    // + recovery still on disk" (a restart would re-run a superseded answer
+    // turn).
     this.persistSession(managed, { pendingAgentResume: undefined })
-    if (opts.flush !== false) {
-      try {
-        await this.flushSession(managed.id)
-      } catch (error) {
-        // The staged write failed — the live state was never cleared and
-        // still matches the (still-armed) disk. The caller decides between
-        // retrying the persistence and marking the record terminal.
-        throw error
-      }
-    }
+    await this.flushSession(managed.id)
     managed.pendingAgentResume = undefined
     sessionLog.info(`Cleared pendingAgentResume for session ${managed.id}: ${reason}`)
   }
