@@ -32,6 +32,7 @@ export const RPC_CHANNELS = {
     RESPOND_TO_PERMISSION: 'sessions:respondToPermission',
     RESPOND_TO_CREDENTIAL: 'sessions:respondToCredential',
     RESPOND_TO_QUESTION: 'sessions:respondToQuestion',
+    COMPLETE_EXTERNAL_ENGINE_TURN: 'sessions:completeExternalEngineTurn',
     GET_EDIT_POPOVER_PENDING_QUESTION: 'sessions:getEditPopoverPendingQuestion',
     COMMAND: 'sessions:command',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',

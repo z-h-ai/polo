@@ -84,6 +84,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'transferredSessionSummaryApplied',
   // Automation origin
   'triggeredBy',
+  // External-engine registration (per-turn session MCP sidecar consumption)
+  'externalToolset',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -180,6 +182,13 @@ export interface SessionConfig {
   thinkingLevel?: ThinkingLevel;
   /** System prompt preset for this session ('default' | 'mini' or custom) */
   systemPromptPreset?: string;
+  /**
+   * EXTERNAL-ENGINE registration: this session's model turns are driven by an
+   * external harness (e.g. Codex CLI) consuming the per-turn session MCP
+   * server as its model toolset. External sessions never run an embedded
+   * agent; the driver owns the single sidecar process.
+   */
+  externalToolset?: boolean;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -325,6 +334,13 @@ export interface SessionHeader {
   thinkingLevel?: ThinkingLevel;
   /** System prompt preset for this session ('default' | 'mini' or custom) */
   systemPromptPreset?: string;
+  /**
+   * EXTERNAL-ENGINE registration: this session's model turns are driven by an
+   * external harness (e.g. Codex CLI) consuming the per-turn session MCP
+   * server as its model toolset. External sessions never run an embedded
+   * agent; the driver owns the single sidecar process.
+   */
+  externalToolset?: boolean;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.

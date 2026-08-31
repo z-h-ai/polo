@@ -126,6 +126,12 @@ export interface ISessionManager {
   getPendingQuestion(sessionId: string): QuestionRequest | null
   respondToQuestion(sessionId: string, resolution: QuestionResolution): Promise<QuestionResolutionResult>
   /**
+   * PRODUCTION completion hook for an externally driven session (Codex
+   * harness / external CLI driver): disposes the turn's owned sidecar and
+   * runs the processing-stopped boundary.
+   */
+  completeExternalEngineTurn(sessionId: string): Promise<void>
+  /**
    * Durable handoff entry for EXTERNAL hosts (session MCP server / Codex):
    * routes a parsed `question_requested` callback into the same persist +
    * question_request + handoff chain as the in-process paths.

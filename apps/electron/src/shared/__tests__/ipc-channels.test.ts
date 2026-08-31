@@ -279,6 +279,7 @@ const EXPECTED_CHANNELS: string[] = [
   'session:setModel',
   'sessions:cancel',
   'sessions:command',
+  'sessions:completeExternalEngineTurn',
   'sessions:create',
   'sessions:createEditPopoverSession',
   'sessions:delete',

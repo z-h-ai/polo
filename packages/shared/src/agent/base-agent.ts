@@ -282,6 +282,26 @@ export abstract class BaseAgent implements AgentBackend {
   setSessionTurnGeneration(generation: number): void {
     this.sessionTurnGeneration = generation;
   }
+
+  /**
+   * LIVE-TURN SIGNAL (chat-start reservation): the SessionManager arms this
+   * right before the query is entered; the backend fires it at the exact
+   * point its per-turn abort state is installed (Claude: the query's
+   * AbortController; Pi: the subprocess turn handle after the state reset).
+   * A deletion declaration waits on this signal — forceAbort must never hit
+   * a not-yet-created/already-reset abort state.
+   */
+  private turnQueryLiveSignal: (() => void) | null = null;
+
+  setTurnQueryLiveSignal(signal: () => void): void {
+    this.turnQueryLiveSignal = signal;
+  }
+
+  protected signalTurnQueryLive(): void {
+    const signal = this.turnQueryLiveSignal;
+    this.turnQueryLiveSignal = null;
+    signal?.();
+  }
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
   onConfigValidationError: ((file: string, errors: string[]) => void) | null = null;

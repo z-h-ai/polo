@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createSessionMcpCallbackHandler } from './session-mcp-callback-router.ts'
+import { ExternalEngineSessionDriver } from './external-engine-driver.ts'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, buildSessionMcpServerArgs } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
@@ -939,6 +940,13 @@ interface ManagedSession {
    * logical channel per turn).
    */
   externalToolsetConfig?: { generation: number; config: { command: string; args: string[]; callbackPort: number } }
+  /**
+   * The ACTIVE production driver for the current turn: it OWNS the session's
+   * single sidecar process (launched from the per-turn config) and exposes
+   * the model-visible toolset. One live driver per turn; disposed at turn
+   * end and by session teardown.
+   */
+  externalEngineDriver?: { generation: number; driver: import('./external-engine-driver.ts').ExternalEngineSessionDriver }
   /**
    * IRREVOCABLE CHAT-START RESERVATION (embedded turns): created in the SAME
    * locked critical section as the chat-start identity gate; its `started`
@@ -2647,6 +2655,8 @@ export class SessionManager implements ISessionManager {
       // Sync transferred session summary state from disk
       managed.transferredSessionSummary = storedSession.transferredSessionSummary
       managed.transferredSessionSummaryApplied = storedSession.transferredSessionSummaryApplied
+      // EXTERNAL-ENGINE registration survives restarts (persisted header field).
+      managed.externalToolset = storedSession.externalToolset
       // Restore the authoritative pending question (survives restarts).
       // A stale request that was resolved while the server was down is pruned:
       // if a resolution record already exists on disk, the pending copy is dropped.
@@ -2680,6 +2690,12 @@ export class SessionManager implements ISessionManager {
         }
       } else {
         managed.pendingAgentResume = undefined
+      }
+      // EXTERNAL-ENGINE registration survives restarts (persisted header
+      // field): the hydrated session keeps walking the external
+      // single-owner/channel turn path.
+      if (managed.externalToolset) {
+        sessionLog.info(`Restored external-engine registration for session ${managed.id} from disk`)
       }
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
 
@@ -3184,15 +3200,14 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Dedicated, trusted creation path for the renderer Edit Popover session
-   *.
+   * Dedicated, trusted creation path for the renderer Edit Popover session.
    *
    * The generic sessions:CREATE RPC can never grant the 'edit-popover' origin
    * — the caller-asserted value is stripped by createSession. THIS method is
    * the only place the origin is stamped, server-side, together with the
-   * stable popover owner identity that scopes pending-question recovery
-   *. Both are persisted immediately so restart
-   * hydration keeps the capability and the recovery scope.
+   * stable popover owner identity that scopes pending-question recovery.
+   * Both are persisted immediately so restart hydration keeps the capability
+   * and the recovery scope.
    */
   async createEditPopoverSession(
     workspaceId: string,
@@ -5873,6 +5888,9 @@ export class SessionManager implements ISessionManager {
    */
   private async cleanupDeletedSession(managed: ManagedSession): Promise<void> {
     const sessionId = managed.id
+    // EXTERNAL ENGINE: kill the driver's owned sidecar immediately.
+    void this.disposeExternalEngineDriver(managed)
+
     // Immediately disarm any answer→resume retry — synchronously, BEFORE the
     // abort wait / share-revoke window. The identity guard
     // (`sessions.get(id) === managed`) no longer holds after the declaration,
@@ -6210,11 +6228,17 @@ export class SessionManager implements ISessionManager {
         if (existingMessageId) {
           userMessage = this.requireExistingMessage(managed, existingMessageId)
           // A replayed QUEUED message (not the answer's own resume call)
-          // supersedes a pending recovery: the
-          // answer content is already in history as part of the context, so
-          // the recovery retry would double-start the answer turn.
+          // supersedes a pending recovery: the answer content is already in
+          // history as part of the context, so the recovery retry would
+          // double-start the answer turn. ONE staged durable commit carries
+          // the cleared recovery (the replayed message itself is already
+          // durable from when it was queued); the live clear publishes only
+          // after the flush succeeds.
           if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
-            await this.clearPendingAgentResume(managed, 'superseded by a replayed queued message')
+            this.persistSession(managed, { pendingAgentResume: undefined })
+            await this.flushSession(managed.id)
+            managed.pendingAgentResume = undefined
+            sessionLog.info(`Superseded the armed answer→resume recovery for session ${sessionId} (replayed queued message, durable)`)
           }
         } else {
           // Create new message
@@ -6231,12 +6255,27 @@ export class SessionManager implements ISessionManager {
           // Update lastMessageRole for badge display
           managed.lastMessageRole = 'user'
 
-          // Persist + flush before announcing — the user message must be
-          // genuinely on disk before we tell the renderer "accepted", and
-          // `persistSession` is debounced (500ms). #616.
-          this.persistSession(managed)
+          // SUPERSEDE + USER MESSAGE — ONE durable commit: when this new
+          // message supersedes an armed answer→resume recovery, the staged
+          // snapshot carries BOTH the new message AND the cleared recovery.
+          // The two state changes therefore share a single awaited flush:
+          // a crash before it leaves the previous consistent world (no new
+          // message + armed recovery → the deferred retry still completes
+          // the answer turn), a crash after it leaves the new message +
+          // cleared recovery — the superseded answer turn can never replay.
+          // Applied here rather than at method entry so a pre-start failure
+          // preserves the recovery. The resume path's OWN call
+          // (existingMessageId = the answer message) is exempt — otherwise
+          // it would clear its own recovery state.
+          const supersedesRecovery = managed.pendingAgentResume !== undefined
+            && managed.pendingAgentResume.messageId !== existingMessageId
+          this.persistSession(managed, supersedesRecovery ? { pendingAgentResume: undefined } : undefined)
           await this.flushSession(managed.id)
           onAck?.(userMessage.id)
+          if (supersedesRecovery) {
+            managed.pendingAgentResume = undefined
+            sessionLog.info(`Superseded the armed answer→resume recovery for session ${sessionId} (single durable commit with the new message)`)
+          }
 
           // Emit user_message event so UI can confirm the optimistic message
           this.sendEvent({
@@ -6246,20 +6285,6 @@ export class SessionManager implements ISessionManager {
             status: 'accepted',
             optimisticMessageId: options?.optimisticMessageId
           }, managed.workspace.id)
-
-          // Supersede a pending answer→resume NOW:
-          // the replacement message is durably persisted, so clearing the
-          // recovery is semantically final — the answer content is already in
-          // history and a resume retry would double-start the turn. Applied
-          // here instead of at method entry so a pre-start failure (plan
-          // cleanup, lazy load, this very flush) preserves the recovery and
-          // the deferred retry can still complete the answer turn.
-          // The resume path's OWN call (existingMessageId = the answer
-          // message) is exempt — otherwise it would clear its own recovery
-          // state.
-          if (managed.pendingAgentResume && managed.pendingAgentResume.messageId !== existingMessageId) {
-            await this.clearPendingAgentResume(managed, 'superseded by a new user message')
-          }
 
           // If this is the first user message and no title exists, set one immediately
           // AI generation will enhance it later, but we always have a title from the start
@@ -6380,24 +6405,36 @@ export class SessionManager implements ISessionManager {
     const sendSpan = perf.span('session.sendMessage', { sessionId })
 
     // EXTERNAL-ENGINE TURN LAUNCH: an externally driven session has no
-    // embedded agent — the model runs in the external harness. The turn
-    // boundary (message commit + generation + processing state) is already
-    // committed above; this path provisions the harness's per-turn model MCP
-    // config (the sidecar's SINGLE channel — the driver owns the process)
-    // and hands the turn over. Any armed answer→resume recovery is durably
-    // settled here: the continuation is the driver's responsibility from
-    // this point on.
+    // embedded agent — the model runs in the external harness, and the
+    // PRODUCTION DRIVER below owns the turn's single sidecar: it launches
+    // the session MCP server process from the per-turn config and exposes
+    // the model-visible toolset. The turn boundary (message commit +
+    // generation + processing state) is already committed above. Any armed
+    // answer→resume recovery is durably settled here: the continuation is
+    // the driver's responsibility from this point on.
     if (managed.externalToolset) {
       try {
-        await this.getSessionExternalModelToolset(sessionId, invocationSource, myGeneration)
+        const config = await this.getSessionExternalModelToolset(sessionId, invocationSource, myGeneration)
         if (managed.pendingAgentResume) {
           await this.clearPendingAgentResume(managed, 'external engine turn launched — continuation owned by the driver')
         }
-        sendSpan.mark('external-turn.provisioned')
-        sessionLog.info(`External engine turn provisioned for session ${sessionId} (generation ${myGeneration})`)
+        // HAND THE CONFIG TO THE DRIVER: it launches and owns the turn's
+        // ONLY sidecar process (previous turn's driver is already disposed).
+        // No host/config → deterministic degrade: the turn runs without a
+        // session MCP channel (the durable handoff is still reachable for
+        // embedded routes, and the driver stays null).
+        if (config) {
+          const driver = await ExternalEngineSessionDriver.launch(config)
+          managed.externalEngineDriver = { generation: myGeneration, driver }
+          sendSpan.mark('external-turn.launched')
+          sessionLog.info(`External engine turn launched for session ${sessionId} (generation ${myGeneration}) — sidecar owned by the driver`)
+        } else {
+          sendSpan.mark('external-turn.degraded')
+          sessionLog.info(`External engine turn degraded for session ${sessionId} (generation ${myGeneration}) — no session MCP host/config`)
+        }
       } catch (prepError) {
         sendSpan.mark('external-turn.failed')
-        sessionLog.error(`External engine turn provisioning failed for session ${sessionId}:`, prepError)
+        sessionLog.error(`External engine turn launch failed for session ${sessionId}:`, prepError)
         if (managed.isProcessing && managed.processingGeneration === myGeneration) {
           await this.onProcessingStopped(sessionId, 'error')
         }
@@ -6538,6 +6575,16 @@ export class SessionManager implements ISessionManager {
       let resolveStarted!: () => void
       const started = new Promise<void>(resolve => { resolveStarted = resolve })
       managed.chatStartReservation = { generation: myGeneration, started, resolveStarted }
+      // LIVE-TURN SIGNAL: the backend resolves the reservation at the exact
+      // point its per-turn abort state is installed (Claude: query
+      // AbortController; Pi: subprocess turn handle). Backends without the
+      // signal (plain test doubles) are treated as live at query entry.
+      const signalCapable = agent as { setTurnQueryLiveSignal?: (fn: () => void) => void }
+      if (typeof signalCapable.setTurnQueryLiveSignal === 'function') {
+        signalCapable.setTurnQueryLiveSignal(resolveStarted)
+      } else {
+        resolveStarted()
+      }
       return true
     })
     if (!turnAlive) {
@@ -6599,12 +6646,6 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('chat.starting')
       const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
       sessionLog.info('Got chat iterator, starting iteration...')
-      // The query is now being entered — the reservation's promise ("a
-      // delete declaration waits until the turn is genuinely abortable")
-      // is fulfilled; a delete from here on force-aborts the LIVE turn.
-      if (managed.chatStartReservation?.generation === myGeneration) {
-        managed.chatStartReservation.resolveStarted()
-      }
 
       for await (const event of chatIterator) {
         // Log events (skip noisy text_delta)
@@ -7009,6 +7050,9 @@ export class SessionManager implements ISessionManager {
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
+    // EXTERNAL ENGINE: the driver's owned sidecar lives for exactly one
+    // turn — dispose it here (one live sidecar per turn, driver-owned).
+    void this.disposeExternalEngineDriver(managed)
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
 
@@ -7433,17 +7477,11 @@ export class SessionManager implements ISessionManager {
    * tool converts this into an isError result so the model can retry.
    */
   /**
-   * PRODUCTION durable-handoff entry for EXTERNAL hosts: the session MCP server (Codex/external-harness path) POSTs its
-   * `question_requested` callback to the host's callback router, which routes
-   * here. Same durable semantics as the in-process chain: pendingQuestion
-   * persist + question_request event + handoff, awaited by the caller so the
-   * remote tool result settles only at the durable boundary.
-   */
   /**
-   * PRODUCTION HTTP surface for the session MCP callback protocol: wraps `createSessionMcpCallbackHandler` so a
-   * host callback server mounts the route with one call. Enforces the
-   * POST-only method gate (405 otherwise) and routes valid payloads into the
-   * durable handoff.
+   * PRODUCTION HTTP surface for the session MCP callback protocol: wraps
+   * `createSessionMcpCallbackHandler` so a host callback server mounts the
+   * route with one call. Enforces the POST-only method gate (405 otherwise)
+   * and routes valid payloads into the durable handoff.
    */
   handleSessionMcpCallbackRequest(request: {
     method?: string;
@@ -7453,6 +7491,14 @@ export class SessionManager implements ISessionManager {
     return createSessionMcpCallbackHandler(this)(request)
   }
 
+  /**
+   * PRODUCTION durable-handoff entry for EXTERNAL hosts: the session MCP
+   * server (Codex/external-harness path) POSTs its `question_requested`
+   * callback to the host's callback router, which routes here. Same durable
+   * semantics as the in-process chain: pendingQuestion persist +
+   * question_request event + handoff, awaited by the caller so the remote
+   * tool result settles only at the durable boundary.
+   */
   async handleExternalQuestionRequested(
     sessionId: string,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
@@ -7727,17 +7773,39 @@ export class SessionManager implements ISessionManager {
     return config
   }
 
+  /** Dispose the session's active external-engine driver (owned sidecar). */
+  private async disposeExternalEngineDriver(managed: ManagedSession): Promise<void> {
+    const active = managed.externalEngineDriver
+    if (!active) return
+    managed.externalEngineDriver = undefined
+    await active.driver.dispose().catch(() => {})
+  }
+
   /**
    * PRODUCTION completion hook for an externally driven turn: the harness
-   * reports its model turn finished. Runs the same processing-stopped
-   * boundary the embedded engines use.
+   * reports its model turn finished. Disposes the driver's owned sidecar and
+   * runs the same processing-stopped boundary the embedded engines use.
+   * Exposed on ISessionManager + the sessions RPC channel so external
+   * drivers can report completion.
    */
   async completeExternalEngineTurn(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
     if (!managed.externalToolset) return
     if (!managed.isProcessing) return
+    await this.disposeExternalEngineDriver(managed)
     await this.onProcessingStopped(sessionId, 'complete')
+  }
+
+  /**
+   * The ACTIVE driver for an externally driven session — the production
+   * handle a real model/credential integration consumes for model-visible
+   * toolset discovery and tool calls (one live sidecar per turn).
+   */
+  getExternalEngineDriver(sessionId: string): import('./external-engine-driver.ts').ExternalEngineSessionDriver | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed?.externalToolset) return null
+    return managed.externalEngineDriver?.driver ?? null
   }
 
   /**
@@ -7902,10 +7970,13 @@ export class SessionManager implements ISessionManager {
       request,
     }, managed.workspace.id)
 
-    // 4. Handoff — the agent pauses until the user answers or skips
-    if (managed.isProcessing && managed.agent) {
+    // 4. Handoff — the turn pauses until the user answers or skips. External
+    // sessions have no embedded agent, but the turn is THEIRS (the external
+    // driver's model is waiting on the tool result) — the processing-stopped
+    // boundary applies equally.
+    if (managed.isProcessing && (managed.agent || managed.externalToolset)) {
       sessionLog.info(`Interrupting for question request in session ${managed.id} (${request.requestId})`)
-      managed.agent.interruptForHandoff(AbortReason.QuestionRequested)
+      managed.agent?.interruptForHandoff(AbortReason.QuestionRequested)
       this.setProcessing(managed, false)
 
       // Release browser overlay + session binding because the agent is paused.
@@ -8195,6 +8266,12 @@ export class SessionManager implements ISessionManager {
       const outcome = await this.withQuestionStateLock(sessionId, () =>
         this.commitQuestionResolutionLocked(managed, sessionId, resolution, requestId),
       )
+
+      if (outcome.result.status === 'cancelled' && managed.externalToolset) {
+        // The question lifecycle ended WITHOUT a resume — the cancelled
+        // turn's driver sidecar is disposed with it (no continuation).
+        await this.disposeExternalEngineDriver(managed)
+      }
 
       if (outcome.resume) {
         // Resume the agent OUTSIDE the question-state lock: the resumed turn

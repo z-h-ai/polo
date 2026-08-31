@@ -31,17 +31,34 @@ import type { QuestionRequest } from '../../shared/types'
 export class PendingQuestionTerminalGuard {
   /** Bounded number of remembered terminal requestIds per session. */
   private static readonly MAX_PER_SESSION = 16
-  /** Session → terminal requestIds (resolved OR superseded), FIFO-bounded. */
-  private resolved = new Map<string, Set<string>>()
+  /**
+   * Session → TERMINAL requestIds (resolved, cancelled, skipped OR
+   * superseded by a newer realtime question), FIFO-bounded. A terminal
+   * requestId can never legitimately re-fill from an older snapshot.
+   */
+  private terminal = new Map<string, Set<string>>()
   /** Sessions deleted locally — every snapshot fill for them is stale. */
   private deleted = new Set<string>()
 
-  /** Record a requestId whose card was removed by a realtime resolution. */
+  /** Record a requestId as terminally settled (resolution consumed it). */
   markResolved(sessionId: string, requestId: string): void {
-    let ids = this.resolved.get(sessionId)
+    this.markTerminal(sessionId, requestId)
+  }
+
+  /**
+   * Record the card a fresh realtime question REPLACED as terminal — the
+   * superseded requestId can never legitimately re-fill, even though its
+   * card was swapped (not removed) by the newer question.
+   */
+  markSuperseded(sessionId: string, requestId: string): void {
+    this.markTerminal(sessionId, requestId)
+  }
+
+  private markTerminal(sessionId: string, requestId: string): void {
+    let ids = this.terminal.get(sessionId)
     if (!ids) {
       ids = new Set()
-      this.resolved.set(sessionId, ids)
+      this.terminal.set(sessionId, ids)
     }
     ids.add(requestId)
     if (ids.size > PendingQuestionTerminalGuard.MAX_PER_SESSION) {
@@ -50,25 +67,17 @@ export class PendingQuestionTerminalGuard {
     }
   }
 
-  /**
-   * Record the card a fresh realtime question REPLACED as terminal — the
-   * superseded requestId can never legitimately re-fill, even though its
-   * card was already swapped (not removed) by the newer question.
-   */
-  markSuperseded(sessionId: string, requestId: string): void {
-    this.markResolved(sessionId, requestId)
-  }
-
   /** Record a session deletion — blocks every snapshot fill for it. */
   markDeleted(sessionId: string): void {
     this.deleted.add(sessionId)
-    this.resolved.delete(sessionId)
+    this.terminal.delete(sessionId)
   }
 
   /**
    * A fresh realtime question re-opens the lifecycle for DELETION markers
-   * only. Resolved/superseded requestId markers are NEVER cleared: a
-   * terminal requestId stays terminal even when a newer question took over.
+   * only. Terminal requestId markers are NEVER cleared: a settled or
+   * superseded requestId stays terminal even when a newer question took
+   * over.
    */
   markReplaced(sessionId: string): void {
     this.deleted.delete(sessionId)
@@ -77,7 +86,7 @@ export class PendingQuestionTerminalGuard {
   /** Whether a snapshot payload with this requestId may fill the hole. */
   canFill(sessionId: string, requestId: string): boolean {
     if (this.deleted.has(sessionId)) return false
-    return !this.resolved.get(sessionId)?.has(requestId)
+    return !this.terminal.get(sessionId)?.has(requestId)
   }
 }
 

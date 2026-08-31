@@ -196,6 +196,22 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
   }
 
+  /**
+   * Seed a session registered for external-engine consumption — the flag is
+   * persisted on the DISK header (the production createSession path writes
+   * it there), so hydration restores it like any real external session.
+   */
+  function seedExternalSession(sessionId: string) {
+    const managed = seedSession(sessionId, {}) as unknown as { externalToolset: boolean; processingGeneration: number }
+    const headerPath = getSessionFilePath(tmpRoot, sessionId)
+    const stored = JSON.parse(readFileSync(headerPath, 'utf-8').split('\n')[0]) as Record<string, unknown>
+    stored.externalToolset = true
+    stored.messages = stored.messages ?? []
+    writeSessionJsonl(headerPath, stored as never)
+    managed.externalToolset = true
+    return managed
+  }
+
   function patchPrivateFlush() {
     // Replace the private flushSession with an instrumented version that can
     // be made to fail while preserving the real flush behavior otherwise.
@@ -1198,16 +1214,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
   it('session MCP host: desktop→messaging→desktop per-turn config switching and single-delivery durable handoff', async () => {
     patchPrivateFlush()
-    const managed = seedSession('f-host-1', {}) as unknown as { processingGeneration: number }
-    // The session is registered for external-engine consumption at creation:
-    // its turns provision the per-turn harness config instead of running an
-    // embedded agent.
-    ;(managed as unknown as { externalToolset: boolean }).externalToolset = true
+    const managed = seedExternalSession('f-host-1') as unknown as { processingGeneration: number }
+    // (getOrCreateAgent stays stubbed — the async title generation probe
+    // must not build a real backend.)
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
 
-    // Stub server entry + start the production host.
-    const entry = join(tmpRoot, 'session-mcp-stub.js')
-    writeFileSync(entry, 'process.exit(0)\n')
-    const hostPort = await sm.startSessionMcpHost({ serverEntryPath: entry })
+    // REAL server entry: the production driver launches and owns it as the
+    // turn's sidecar, so the entry must be a live MCP server.
+    const entry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
+    const hostPort = await sm.startSessionMcpHost({ serverEntryPath: entry, nodeRuntimePath: process.execPath })
     expect(hostPort).toBeGreaterThan(0)
 
     // TURN 1 — desktop: capability ON. sendMessage IS the external turn
@@ -1310,31 +1325,27 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       nodeRuntimePath: process.execPath,
     })
     // PRODUCTION registration + turn launch: the session is externally
-    // driven; sendMessage provisions the per-turn harness config.
-    ;(managed as unknown as { externalToolset: boolean }).externalToolset = true
+    // driven; sendMessage launches the production driver, which owns the
+    // turn's ONLY sidecar.
+    const loopManaged = seedExternalSession('f-mcp-loop') as unknown as { processingGeneration: number }
+    patchPrivateFlush()
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
     await sm.sendMessage('f-mcp-loop', 'turn one', [], [], { invocationSource: 'desktop' })
 
-    // The harness model MCP config comes from the PRODUCTION surface.
-    const config = await sm.getSessionExternalModelToolset('f-mcp-loop', 'desktop', managed.processingGeneration)
-    expect(config).not.toBeNull()
-    expect(config!.args).toContain('--allow-request-user-input')
+    // The model-visible toolset comes from the production driver.
+    const driver = sm.getExternalEngineDriver('f-mcp-loop')
+    expect(driver).not.toBeNull()
+    expect(driver!.config.args).toContain('--allow-request-user-input')
 
-    // The external engine connects per that config and its model discovers
-    // the tool in the model-visible toolset.
-    const transport = new StdioClientTransport({
-      command: config!.command,
-      args: config!.args,
-      stderr: 'pipe',
-    })
-    const harness = new Client({ name: 'external-codex-harness', version: '1.0.0' })
-    await harness.connect(transport)
-    const tools = await harness.listTools()
-    expect(tools.tools.map(t => t.name)).toContain('request_user_input')
+    // The external engine's model discovers the tool in the model-visible
+    // toolset.
+    const tools = await driver!.listTools()
+    expect(tools.map(t => t.name)).toContain('request_user_input')
 
-    // ONE model tool call over the harness config → ONE durable handoff.
+    // ONE model tool call through the owned sidecar → ONE durable handoff.
     const request = makeQuestionRequest('f-mcp-loop')
-    const result = await harness.callTool({ name: 'request_user_input', arguments: { questions: request.questions } })
-    expect(result.isError).toBeFalsy()
+    const result = await driver!.callTool('request_user_input', { questions: request.questions })
+    expect(result.isError).toBe(false)
     expect(JSON.stringify(result.content)).toContain('Waiting for user input')
 
     const pending = sm.getPendingQuestion('f-mcp-loop')
@@ -1347,41 +1358,33 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     await sm.respondToQuestion('f-mcp-loop', makeAnswerResolution(pending!))
     expect(sm.getPendingQuestion('f-mcp-loop')).toBeNull()
 
-    await harness.close()
     sm.stopSessionMcpHost()
   }, 60000)
 
-  it('cross-process fail-closed: a non-desktop harness config serves no request_user_input tool', async () => {
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
-    const seeded = seedSession('f-mcp-nd', {}) as unknown as { externalToolset: boolean }
-    seeded.externalToolset = true
+  it('cross-process fail-closed: a messaging turn serves a driver toolset without request_user_input', async () => {
+    seedExternalSession('f-mcp-nd')
+    patchPrivateFlush()
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
 
     await sm.startSessionMcpHost({
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    const config = await sm.getSessionExternalModelToolset('f-mcp-nd', 'messaging', 1)
-    expect(config).not.toBeNull()
-    expect(config!.args).not.toContain('--allow-request-user-input')
+    await sm.sendMessage('f-mcp-nd', 'messaging turn', [], [], { invocationSource: 'messaging' })
+    const driver = sm.getExternalEngineDriver('f-mcp-nd')
+    expect(driver).not.toBeNull()
+    expect(driver!.config.args).not.toContain('--allow-request-user-input')
 
-    const transport = new StdioClientTransport({
-      command: config!.command,
-      args: config!.args,
-      stderr: 'pipe',
-    })
-    const harness = new Client({ name: 'external-codex-harness', version: '1.0.0' })
-    await harness.connect(transport)
-    const tools = await harness.listTools()
-    expect(tools.tools.map(t => t.name)).not.toContain('request_user_input')
+    const tools = await driver!.listTools()
+    expect(tools.map(t => t.name)).not.toContain('request_user_input')
 
-    const result = await harness.callTool({ name: 'request_user_input', arguments: { questions: makeQuestionRequest('f-mcp-nd').questions } })
+    const result = await driver!.callTool('request_user_input', { questions: makeQuestionRequest('f-mcp-nd').questions })
     expect(result.isError).toBe(true)
 
     expect(sm.getPendingQuestion('f-mcp-nd')).toBeNull()
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
-    await harness.close()
+    await sm.completeExternalEngineTurn('f-mcp-nd')
     sm.stopSessionMcpHost()
   }, 60000)
 
@@ -1528,6 +1531,68 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv-final'))).toBe(false)
   })
 
+  // ---- chat-start reservation driven by the BACKEND live-turn signal: a
+  // delete whose declaration runs after the chat-start gate waits until the
+  // backend reports the query genuinely abortable, then force-aborts the
+  // LIVE turn — no ghost events, no exception to the caller.
+
+  it('delete queued behind the chat-start gate waits for the backend live-turn signal, then aborts the live turn (no ghost)', async () => {
+    patchPrivateFlush()
+    seedSession('f-del-live', {})
+    let chatStarted = 0
+    let forceAborts = 0
+    let agentDisposed = 0
+    let liveSignal: (() => void) | null = null
+    let releaseChat: (() => void) | null = null
+    const chatGate = new Promise<void>(resolve => { releaseChat = resolve })
+    // A backend-shaped fake: the query becomes genuinely abortable only when
+    // the backend fires the live-turn signal (after the test releases it).
+    const backendFake = {
+      ...makeFakeAgent(),
+      setTurnQueryLiveSignal: (fn: () => void) => { liveSignal = fn },
+      forceAbort: () => { forceAborts++ },
+      dispose: () => { agentDisposed++ },
+      chat: async function* () {
+        chatStarted++
+        await chatGate
+        yield { type: 'complete' as const }
+      },
+    }
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      // Mirror the real getOrCreateAgent: the created agent is assigned to
+      // the session (the delete cleanup's forceAbort targets it).
+      ;(getManaged('f-del-live') as unknown as { agent: unknown }).agent = backendFake
+      return backendFake
+    }
+
+    const sendPromise = sm.sendMessage('f-del-live', 'turn that will be deleted mid-flight', [], [], { invocationSource: 'desktop' })
+    // The chat-start gate armed the reservation and handed the signal to the
+    // backend; the backend has not fired it yet (the query body may have been
+    // entered, but no abort state existed before the signal).
+    await waitForCondition(() => liveSignal !== null, 5000)
+    expect(forceAborts).toBe(0)
+
+    // The delete declaration queues behind the gate and WAITS on the signal.
+    const deletePromise = sm.deleteSession('f-del-live')
+    await new Promise(r => setTimeout(r, 40))
+    expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.has('f-del-live')).toBe(true)
+    expect(forceAborts).toBe(0)
+    void deletePromise
+
+    // Backend fires (query genuinely abortable) → declaration lands → the
+    // cleanup force-aborts the LIVE turn; the chat had started (live), and
+    // the delete converges it — no ghost completion events after deletion.
+    liveSignal!()
+    await waitForCondition(() => forceAborts === 1, 5000)
+    releaseChat!()
+    await sendPromise
+    await deletePromise
+    expect(chatStarted).toBe(1)
+    expect(agentDisposed).toBe(1)
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-live'))).toBe(false)
+    expect(events.filter(e => e.type === 'error')).toHaveLength(0)
+  })
+
   // ---- supersede durability: the new-user-message supersede clear is a
   // STAGED durable clear — the live recovery state stays armed until the
   // staged snapshot is durably flushed; a gated (or failed) flush never
@@ -1544,25 +1609,25 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     armedStored.pendingAgentResume = { messageId: 'msg-answer', attempts: 0 }
     armedStored.messages = armedStored.messages ?? []
     writeSessionJsonl(armedPath, armedStored as never)
-    const managed = getManaged('f-supersede-staged') as unknown as { pendingAgentResume?: { messageId: string; attempts: number } }
+    const managed = getManaged('f-supersede-staged') as unknown as {
+      pendingAgentResume?: { messageId: string; attempts: number }
+      messages: Array<Record<string, unknown>>
+    }
     ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'msg-answer', attempts: 0 }
     ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
 
-    // Gate every flush AFTER the first (the first flush persists the new
-    // user message; the second is the supersede clear's staged snapshot).
+    // Gate the FIRST flush: it is the SINGLE durable commit carrying BOTH
+    // the new user message AND the cleared recovery (one staged snapshot).
     let releaseFlush: (() => void) | null = null
     const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
-    let flushCalls = 0
     const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
     ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
-      flushCalls++
-      if (flushCalls >= 2) return flushGate.then(() => realFlush.call(sm, id))
-      return realFlush.call(sm, id)
+      return flushGate.then(() => realFlush.call(sm, id))
     }
 
     const sendPromise = sm.sendMessage('f-supersede-staged', 'a new user message')
-    // Wait until the supersede clear's staged flush is in flight.
-    await waitForCondition(() => flushCalls >= 2, 5000)
+    // Wait until the single durable commit is in flight.
+    await waitForCondition(() => managed.messages.some(m => m['role'] === 'user'), 5000)
     await new Promise(r => setTimeout(r, 30))
     // INSIDE the gated flush window: the live recovery state is STILL ARMED.
     expect(managed.pendingAgentResume).toEqual({ messageId: 'msg-answer', attempts: 0 })

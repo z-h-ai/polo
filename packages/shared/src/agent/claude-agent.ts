@@ -1503,6 +1503,9 @@ export class ClaudeAgent extends BaseAgent {
 
       // Create AbortController for this query - allows force-stopping via forceAbort()
       this.currentQueryAbortController = new AbortController();
+      // The query's abort state is installed — the turn is genuinely
+      // abortable from here (chat-start reservation signal).
+      this.signalTurnQueryLive();
       const optionsWithAbort = {
         ...options,
         abortController: this.currentQueryAbortController,

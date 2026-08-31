@@ -117,6 +117,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION,
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
   RPC_CHANNELS.sessions.RESPOND_TO_QUESTION,
+  RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN,
   RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
@@ -307,6 +308,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Returns the QuestionResolutionResult contract that drives the UI cleanup.
   server.handle(RPC_CHANNELS.sessions.RESPOND_TO_QUESTION, async (_ctx, sessionId: string, resolution: import('@polo-ai/shared/protocol').QuestionResolution) => {
     return sessionManager.respondToQuestion(sessionId, resolution)
+  })
+
+  // External-engine drivers report model turn completion here (the owned
+  // sidecar is disposed and the processing-stopped boundary runs).
+  server.handle(RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN, async (_ctx, sessionId: string) => {
+    await sessionManager.completeExternalEngineTurn(sessionId)
+    return { ok: true }
   })
 
   // Locate the Edit Popover session that still owns an active pending

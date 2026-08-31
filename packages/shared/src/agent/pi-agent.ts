@@ -2367,6 +2367,10 @@ export class PiAgent extends BaseAgent {
         systemPrompt: fullSystemPrompt,
         images: images.length > 0 ? images : undefined,
       });
+      // The subprocess turn handle is live (state reset done, prompt sent) —
+      // the turn is genuinely abortable from here (chat-start reservation
+      // signal).
+      this.signalTurnQueryLive();
 
       // Yield events as they arrive. The source-activation drain controller
       // captures a pending restart on the first triggering tool_result and
