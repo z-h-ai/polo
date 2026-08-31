@@ -1093,6 +1093,44 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   // ---- node host adversarial — body size
   // limit (413) and deterministic listen-failure rejection.
 
+  it('real host: a valid JSON body behind a non-JSON Content-Type is rejected with 415 and NEVER reaches the durable handoff', async () => {
+    seedSession('f-node-ctype', {})
+    const request = makeQuestionRequest('f-node-ctype')
+    const port = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js') })
+
+    // A simple cross-origin text/plain POST needs no CORS preflight — the
+    // state-changing loopback endpoint must reject it before parsing.
+    const response = await fetch(`http://127.0.0.1:${port}/request-user-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        sessionId: 'f-node-ctype',
+        questions: request.questions,
+        generationAtRequest: 0,
+      }),
+    })
+    expect(response.status).toBe(415)
+    expect(await response.json()).toEqual({ error: 'Unsupported Media Type: expected application/json' })
+    // The durable handoff never saw the payload.
+    expect(sm.getPendingQuestion('f-node-ctype')).toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
+
+    // The production consumer's exact media type still works end-to-end.
+    const ok = await fetch(`http://127.0.0.1:${port}/request-user-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        sessionId: 'f-node-ctype',
+        questions: request.questions,
+        generationAtRequest: 0,
+      }),
+    })
+    expect(ok.status).toBe(200)
+    expect(await ok.json()).toEqual({ status: 'accepted' })
+    expect(sm.getPendingQuestion('f-node-ctype')).not.toBeNull()
+    sm.stopSessionMcpHost()
+  })
+
   it('node http host: a 2MiB body is rejected with 413 at the boundary', async () => {
     seedSession('f-node-413', {})
     const port = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js') })
@@ -2821,6 +2859,40 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(agentInitCalls).toBe(1)
     expect(events.filter(e => e.type === 'error').length).toBe(errorEventsAfterDelete)
     void errorEventsBefore
+  })
+
+  it('durable resume clear is STAGED: the awaited call converges memory + disk; a failed flush rolls the memory back (never runtime-cleared + stale disk)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-clear-stage')
+    seedSession('f-clear-stage', { pendingQuestion: request })
+    const managed = getManaged('f-clear-stage') as unknown as { pendingAgentResume?: { messageId: string; attempts: number } }
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'msg-stage', attempts: 0 }
+
+    // SUCCESS: after the awaited clear, an observer sees runtime AND disk
+    // converged — the durable completion boundary is deterministic.
+    await (sm as unknown as { clearPendingAgentResume: (m: unknown, reason: string) => Promise<void> })
+      .clearPendingAgentResume(managed, 'staged clear (success)')
+    expect(managed.pendingAgentResume).toBeUndefined()
+    let header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-clear-stage'), 'utf-8').split('\n')[0])
+    expect(header.pendingAgentResume).toBeUndefined()
+
+    // FAILURE: the flush breaks — the in-memory clear is ROLLED BACK so the
+    // runtime matches the (still-armed) disk state; the error propagates to
+    // the caller (retry / terminal marking).
+    let diskBroken = false
+    const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      if (diskBroken) return Promise.reject(new Error('disk full (injected)'))
+      return realFlush.call(sm, id)
+    }
+    diskBroken = true
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'msg-stage-2', attempts: 0 }
+    await expect((sm as unknown as { clearPendingAgentResume: (m: unknown, reason: string) => Promise<void> })
+      .clearPendingAgentResume(managed, 'staged clear (failure)')).rejects.toThrow('disk full (injected)')
+    // Rolled back — the recovery state is still observable in memory.
+    expect(managed.pendingAgentResume).toEqual({ messageId: 'msg-stage-2', attempts: 0 })
+    diskBroken = false
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = realFlush
   })
 
   it('stop → the armed retry is cancelled and never restarts (immediate, awaited flush)', async () => {

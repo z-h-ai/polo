@@ -651,6 +651,7 @@
   "editPopover.placeholder1": "変更したいことを教えてください",
   "editPopover.placeholder2": "更新内容を説明してください",
   "editPopover.placeholder3": "何を変更しますか？",
+  "editPopover.restoreUnavailable": "未回答の質問の確認に失敗しました。もう一度送信してください。",
   "editPopover.whatToChange": "何を変更しますか？",
   "editor.bold": "太字",
   "editor.code": "コード",

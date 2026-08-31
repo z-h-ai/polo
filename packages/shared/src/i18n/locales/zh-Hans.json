@@ -651,6 +651,7 @@
   "editPopover.placeholder1": "告诉我要改什么",
   "editPopover.placeholder2": "描述更新内容",
   "editPopover.placeholder3": "需要修改什么?",
+  "editPopover.restoreUnavailable": "无法检查是否有待回答的问题，请重新发送。",
   "editPopover.whatToChange": "想更改什么?",
   "editor.bold": "粗体",
   "editor.code": "代码",

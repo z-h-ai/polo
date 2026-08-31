@@ -30,7 +30,7 @@ import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import type { EditPopoverRestoreOutcome } from './components/ui/useEditPopoverSessionRestore'
-import { clearPendingQuestionForDeletedSession, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
+import { clearPendingQuestionForDeletedSession, PendingQuestionTerminalGuard, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -423,6 +423,10 @@ export default function App() {
   // resolutions are requestId-guarded so a stale resolution never deletes a
   // newer card.
   const [pendingQuestions, setPendingQuestions] = useState<Map<string, QuestionRequest>>(new Map())
+  // Terminal markers (resolved requestIds / deleted sessions): an in-flight
+  // session snapshot whose payload is OLDER than a local resolution or
+  // deletion must never re-fill the hole that the newer realtime event made.
+  const pendingQuestionGuardRef = useRef(new PendingQuestionTerminalGuard())
   // Draft composer state per session (text + attachment refs), preserved across mode
   // switches, conversation changes, and app restarts. Using a ref avoids re-renders
   // during typing; attachments are stored as lightweight refs (path + name) and
@@ -575,7 +579,7 @@ export default function App() {
       // Opening/refreshing a session fills a MISSING pending question from
       // the snapshot — an existing entry (fresher realtime state) is never
       // downgraded by the fetch.
-      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession))
+      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
       void reconcilePermissionModeState(sessionId)
       return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
     } catch (err) {
@@ -600,7 +604,7 @@ export default function App() {
       setPendingQuestions(prev => {
         let next = prev
         for (const session of loadedSessions) {
-          next = syncPendingQuestionFromSession(next, session)
+          next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
         }
         return next
       })
@@ -703,7 +707,7 @@ export default function App() {
       setPendingQuestions(prev => {
         let next = prev
         for (const session of sessions) {
-          next = syncPendingQuestionFromSession(next, session)
+          next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
         }
         return next
       })
@@ -1236,7 +1240,7 @@ export default function App() {
           case 'question_request': {
             // A new requestId replaces any previous pending question —
             // the old card's local answers are dropped with it.
-            setPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request))
+            setPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request, pendingQuestionGuardRef.current))
             // Native notification (same gating as permission notifications)
             const notifySession = store.get(sessionAtomFamily(sessionId))
             if (notifySession && !notifySession.hidden) {
@@ -1247,7 +1251,7 @@ export default function App() {
           case 'question_resolved': {
             // requestId-conditional: never delete a newer question card that
             // replaced the one this resolution is about.
-            setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId))
+            setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId, pendingQuestionGuardRef.current))
             break
           }
           case 'restore_input': {
@@ -1313,7 +1317,7 @@ export default function App() {
                 addSession(createdSession)
               }
               syncSessionOptionsFromSession(createdSession)
-              setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession))
+              setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession, pendingQuestionGuardRef.current))
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
@@ -1326,7 +1330,7 @@ export default function App() {
         // Deletion is a terminal state: the pending question (if any) expires —
         // clear unconditionally so no stale card survives in any window
         // (repeated events are idempotent).
-        setPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId))
+        setPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId, pendingQuestionGuardRef.current))
         removeSession(sessionId)
         return
       }
@@ -2103,13 +2107,13 @@ export default function App() {
       case 'accepted':
       case 'cancelled':
       case 'already_answered':
-        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId))
+        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
         break
       case 'stale':
       case 'session_missing':
         // One-time readable notice, then drop the stale card
         toast.error(i18n.t('toast.questionNoLongerActive'), { duration: 5000 })
-        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId))
+        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
         break
       case 'transient_failure':
         throw new Error(result.message)
@@ -2138,7 +2142,7 @@ export default function App() {
       // Seed the authoritative request the same way the question_request event
       // path does, so usePendingQuestion(inlineSessionId) resolves and every
       // existing event-driven cleanup keeps working.
-      setPendingQuestions(prev => setPendingQuestionForSession(prev, result.sessionId, result.request))
+      setPendingQuestions(prev => setPendingQuestionForSession(prev, result.sessionId, result.request, pendingQuestionGuardRef.current))
       return { outcome: 'found', sessionId: result.sessionId }
     } catch {
       return { outcome: 'transient' }

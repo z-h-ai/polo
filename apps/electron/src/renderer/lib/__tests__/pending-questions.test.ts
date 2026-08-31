@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   clearPendingQuestionForDeletedSession,
+  PendingQuestionTerminalGuard,
   questionResolutionRequestId,
   removePendingQuestionForSession,
   setPendingQuestionForSession,
@@ -129,6 +130,49 @@ describe('syncPendingQuestionFromSession (restart/open hydration)', () => {
     expect(map.get('s-1')?.requestId).toBe('q2')
   })
 
+  it('a question_resolved landing mid-snapshot must NOT be resurrected by the stale snapshot (fill-hole guard)', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'), guard)
+    // A session snapshot carrying q1 is now in flight. Meanwhile the user
+    // answers: the realtime resolution removes the card and marks the
+    // requestId terminal.
+    map = removePendingQuestionForSession(map, 's-1', 'q1', guard)
+    expect(map.has('s-1')).toBe(false)
+
+    // The STALE snapshot (still carrying q1) returns — it must not re-fill
+    // the hole that the newer resolution event made.
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') }, guard)
+    expect(map.has('s-1')).toBe(false)
+
+    // A snapshot for a DIFFERENT, genuinely unknown session still fills.
+    map = syncPendingQuestionFromSession(map, { id: 's-2', pendingQuestion: makeRequest('q9') }, guard)
+    expect(map.get('s-2')?.requestId).toBe('q9')
+  })
+
+  it('a session_deleted landing mid-snapshot blocks the stale snapshot fill entirely', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    // Snapshot in flight with q1; the session is deleted before it returns.
+    map = clearPendingQuestionForDeletedSession(map, 's-1', guard)
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') }, guard)
+    expect(map.has('s-1')).toBe(false)
+  })
+
+  it('a fresh realtime question re-opens the lifecycle for snapshot fills (per-requestId scoping)', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'), guard)
+    map = removePendingQuestionForSession(map, 's-1', 'q1', guard)
+    // A NEW question arrives via the realtime path — the lifecycle re-opens.
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q2'), guard)
+    expect(map.get('s-1')?.requestId).toBe('q2')
+    // The terminal marker stays scoped to q1: a snapshot that still carries
+    // q2 fills nothing (entry exists), and an unknown newer session fills.
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') }, guard)
+    expect(map.get('s-1')?.requestId).toBe('q2')
+  })
+
   it('sessions without a pending payload leave the map untouched', () => {
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'))
@@ -166,8 +210,3 @@ describe('clearPendingQuestionForDeletedSession (session_deleted)', () => {
     expect(same).toBe(map)
   })
 })
-
-// Round 6, issue #1: full-list snapshot reconciliation must handle sessions
-// that were NOT tracked at fetch start, must keep event-driven state for every
-// session that changed mid-fetch (even when present in the snapshot), and a
-// session deletion must invalidate in-flight snapshots.

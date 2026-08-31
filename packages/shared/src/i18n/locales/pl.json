@@ -651,6 +651,7 @@
   "editPopover.placeholder1": "Powiedz mi, co zmienić",
   "editPopover.placeholder2": "Opisz aktualizację",
   "editPopover.placeholder3": "Co powinienem zmodyfikować?",
+  "editPopover.restoreUnavailable": "Nie udało się sprawdzić oczekującego pytania. Spróbuj wysłać ponownie.",
   "editPopover.whatToChange": "Co chcesz zmienić?",
   "editor.bold": "Pogrubienie",
   "editor.code": "Kod",

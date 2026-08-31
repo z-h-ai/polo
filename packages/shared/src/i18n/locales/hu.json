@@ -651,6 +651,7 @@
   "editPopover.placeholder1": "Mondd el, mit változtassak",
   "editPopover.placeholder2": "Írd le a módosítást",
   "editPopover.placeholder3": "Mit módosítsak?",
+  "editPopover.restoreUnavailable": "Nem sikerült ellenőrizni a függő kérdést. Próbálja újra a küldést.",
   "editPopover.whatToChange": "Mit szeretnél megváltoztatni?",
   "editor.bold": "Félkövér",
   "editor.code": "Kód",

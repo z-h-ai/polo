@@ -651,6 +651,7 @@
   "editPopover.placeholder1": "Just tell me what to change",
   "editPopover.placeholder2": "Describe the update",
   "editPopover.placeholder3": "What should I modify?",
+  "editPopover.restoreUnavailable": "Couldn’t check for a pending question. Please try sending again.",
   "editPopover.whatToChange": "What would you like to change?",
   "editor.bold": "Bold",
   "editor.code": "Code",

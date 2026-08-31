@@ -168,6 +168,14 @@ const MAX_ADMIN_REMEMBER_MINUTES = 60
 const MAX_ANNOTATIONS_PER_MESSAGE = 200
 const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
 
+/**
+ * Bounded wait for a per-turn session MCP server to boot and complete its
+ * MCP handshake. A server that cannot become ready within this budget is
+ * degraded deterministically for the turn (sendMessage proceeds without the
+ * session MCP channel) — the turn never hangs on a broken child.
+ */
+const SESSION_MCP_CONNECT_TIMEOUT_MS = 20_000
+
 // Window during which fs.watch metadata-revert events from our own atomic write
 // are ignored, so the watcher does not roll back the in-memory mutation we
 // just persisted. See onSessionMetadataChange.
@@ -6368,19 +6376,22 @@ export class SessionManager implements ISessionManager {
       // atomically removes the map entry, and the lock serializes this gate
       // against the delete's own locked declaration) — otherwise the freshly
       // created agent would start a ghost turn on a deleted session.
-      let created: AgentBackend | null = null
+      // `resolvedAgent` is the gate's sentinel: null = the identity gate
+      // failed (converge as deleted); non-null = the agent this turn runs on
+      // (freshly created OR already existing — getOrCreateAgent returns both).
+      let resolvedAgent: AgentBackend | null = null
       await this.withQuestionStateLock(sessionId, async () => {
         if (this.sessions.get(sessionId) !== managed) return
-        created = await this.getOrCreateAgent(managed)
+        resolvedAgent = await this.getOrCreateAgent(managed)
       })
-      if (created === null) {
+      if (resolvedAgent === null) {
         // The turn converges silently as deleted (the user message was
         // already persisted/broadcast in the section; the delete's cleanup —
         // queued behind this section — owns the storage removal).
         sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted before agent start`)
         return
       }
-      agent = created
+      agent = resolvedAgent
       sendSpan.mark('agent.ready')
 
       // GENERATION BINDING: a freshly created
@@ -6403,13 +6414,19 @@ export class SessionManager implements ISessionManager {
         agent.allowRequestUserInput = allowRequestUserInputNow
       }
 
-      // SESSION MCP HOST — per-turn consumption: when a host is running, spawn THIS turn's session MCP server with
-      // the current sessionId, the host callback port, the capability DERIVED
-      // FROM THE INVOCATION SOURCE (desktop→messaging→desktop switching is
-      // expressed in the spawned args) and the IMMUTABLE processing
-      // generation. Stopped at turn end; dormant (zero behavior) when no
-      // host was started.
-      this.spawnSessionMcpServerForTurn(sessionId, invocationSource, managed.processingGeneration)
+      // SESSION MCP HOST — per-turn consumption boundary: when a host is
+      // running, spawn THIS turn's session MCP server with the current
+      // sessionId, the host callback port, the capability DERIVED FROM THE
+      // INVOCATION SOURCE (desktop→messaging→desktop switching is expressed
+      // in the spawned args) and the IMMUTABLE processing generation. This is
+      // AWAITED to a full readiness edge — host listening AND this turn's
+      // MCP client connected — before the model may start the turn, so the
+      // very first turn can already discover (and call) request_user_input
+      // through the real session MCP toolset. A failed spawn/connect degrades
+      // deterministically (turn proceeds without the session MCP channel;
+      // the healthy host stays registered). Stopped at turn end; dormant
+      // (zero behavior) when no host was started.
+      await this.spawnSessionMcpServerForTurn(sessionId, invocationSource, managed.processingGeneration)
 
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = loadAllSources(workspaceRootPath)
@@ -7385,8 +7402,6 @@ export class SessionManager implements ISessionManager {
   // ===========================================================================
   // Session MCP host — production wiring
   // ===========================================================================
-  // Session MCP host — production wiring
-  // ===========================================================================
 
   /**
    * Start the session MCP host: mounts the ONLY ack route
@@ -7609,39 +7624,47 @@ export class SessionManager implements ISessionManager {
    * Spawn THIS turn's session MCP server (per-turn consumption from the
    * sendMessage capability boundary). One live server per session; it is
    * stopped at turn end (onProcessingStopped) and by deleteSession cleanup.
+   *
+   * RESOLVES AT FULL READINESS: the returned promise settles only after the
+   * host is listening AND this turn's MCP client connect has settled —
+   * sendMessage awaits it before the model may start the turn. A failed
+   * connect is a deterministic degrade (entry removed, promise resolves);
+   * it never throws and never leaves a half-usable channel behind.
    */
   async spawnSessionMcpServerForTurn(sessionId: string, invocationSource: InvocationSource, processingGeneration: number): Promise<void> {
-    // READINESS GATE: a first turn that
-    // arrives before the listener is up WAITS for it; a failed startup
-    // skips the session MCP path deterministically.
+    // READINESS GATE: a first turn that arrives before the listener is up
+    // WAITS for it; a failed startup skips the session MCP path
+    // deterministically (the healthy incumbent stays registered).
     const host = await this.awaitSessionMcpHost()
     if (!host) return
     const built = this.buildSessionMcpServerForTurnArgs(sessionId, invocationSource, processingGeneration)
     if (!built) return
     // Stop any previous turn's server first — one live server per session.
     this.stopSessionMcpServerForTurn(sessionId)
-    // STDIO CLIENT: the transport SPAWNS the
-    // server subprocess and wires its stdin/stdout to the server's
-    // StdioServerTransport — closing the spawn↔stdio↔MCP-client loop that
-    // round 11's ignored-stdio spawn left open. The MCP client is kept per
-    // session; request_user_input is invoked through it (see
-    // callSessionMcpRequestUserInput) and AWAITS the durable handoff's
-    // terminal result.
+    // STDIO CLIENT: the transport SPAWNS the server subprocess and wires its
+    // stdin/stdout to the server's StdioServerTransport. The MCP client is
+    // kept per session; the external engine's request_user_input tool call
+    // reaches the durable handoff through it (see callSessionMcpRequestUserInput)
+    // and AWAITS the durable handoff's terminal result.
     const transport = new StdioClientTransport({
       command: built.spec.command,
       args: built.spec.args,
       stderr: 'pipe',
     })
     const client = new Client({ name: 'polo-session-mcp-host', version: '0.3.1' })
-    // CLIENT READINESS: the connect promise is part of the entry. The first
-    // turn's tool call awaits it (see awaitSessionMcpClient) — a call must
-    // never race an unconnected client.
+    // CLIENT READINESS: the connect promise is part of the entry and this
+    // spawn AWAITS it (full readiness edge for the turn). A rejected connect
+    // — or the bounded timeout below — removes the entry and degrades
+    // silently: the turn runs without the session MCP channel, never hangs.
+    // NOTE: the child-process close is observed via the CLIENT's onclose
+    // (the SDK owns transport.onclose while connecting and its internal
+    // handler performs the connect-time early reject).
     const entry = { client, ready: client.connect(transport), close: () => client.close(), toolCalls: 0 }
     entry.ready.catch(connectError => {
       sessionLog.error(`Session MCP server connect failed for session ${sessionId}:`, connectError)
       if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
     })
-    transport.onclose = () => {
+    client.onclose = () => {
       if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
     }
     transport.onerror = error => {
@@ -7653,6 +7676,20 @@ export class SessionManager implements ISessionManager {
     host.children.set(sessionId, entry)
     host.lastSpawnSpec = built.spec
     sessionLog.info(`Spawned session MCP server for session ${sessionId} (capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
+    const connected = await Promise.race([
+      entry.ready.then(
+        () => 'connected' as const,
+        // Deterministic degrade: the connect failure handler already removed
+        // the entry; the turn proceeds without the session MCP channel.
+        () => 'failed' as const,
+      ),
+      new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), SESSION_MCP_CONNECT_TIMEOUT_MS).unref?.()),
+    ])
+    if (connected === 'timeout') {
+      sessionLog.error(`Session MCP server connect timed out after ${SESSION_MCP_CONNECT_TIMEOUT_MS}ms for session ${sessionId} — degrading this turn without the session MCP channel`)
+      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
+      void entry.close().catch(() => {})
+    }
   }
 
   /**
@@ -8365,11 +8402,24 @@ export class SessionManager implements ISessionManager {
       clearTimeout(managed.resumeRetryTimer)
       managed.resumeRetryTimer = undefined
     }
-    if (!managed.pendingAgentResume) return
+    const staged = managed.pendingAgentResume
+    if (!staged) return
+    // STAGED DURABLE CLEAR: the debounced write + awaited flush carry the
+    // cleared state, and only then is the in-memory clear PUBLISHED. An
+    // observer (or a retry path) that runs after this call's await therefore
+    // sees runtime and disk converged — never "runtime cleared + recovery
+    // still on disk". A failed flush ROLLS BACK the in-memory clear so the
+    // runtime matches the (still-armed) disk state; the caller decides
+    // between retrying the persistence and marking the record terminal.
     managed.pendingAgentResume = undefined
     this.persistSession(managed)
     if (opts.flush !== false) {
-      await this.flushSession(managed.id)
+      try {
+        await this.flushSession(managed.id)
+      } catch (error) {
+        managed.pendingAgentResume = staged
+        throw error
+      }
     }
     sessionLog.info(`Cleared pendingAgentResume for session ${managed.id}: ${reason}`)
   }
@@ -8498,10 +8548,10 @@ export class SessionManager implements ISessionManager {
         `Agent turn completed but the durable resume clear failed for session ${managed.id} — marking terminal and retrying persistence:`,
         clearError,
       )
-      // In-memory state is already clean (timer cancelled inside
-      // clearPendingAgentResume). Mark the persisted recovery TERMINAL so a
-      // restart cannot re-execute the completed answer turn, then retry the
-      // persistence a few times.
+      // The failed clear ROLLED BACK to the armed state (runtime matches
+      // disk). Mark the persisted recovery TERMINAL so a restart cannot
+      // re-execute the completed answer turn, then retry the persistence a
+      // few times.
       managed.pendingAgentResume = { ...resume, completed: true }
       for (let persistRetry = 0; persistRetry < 3; persistRetry++) {
         try {

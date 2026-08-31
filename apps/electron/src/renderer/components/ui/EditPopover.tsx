@@ -17,11 +17,12 @@ import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Button } from './button'
 import { cn } from '@/lib/utils'
 import { usePlatform } from '@polo-ai/ui'
+import { toast } from 'sonner'
 import type { ContentBadge, Session, CreateSessionOptions } from '../../../shared/types'
 import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential, usePendingQuestion } from '@/context/AppShellContext'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { editorIdentityId } from '@/lib/editor-identity'
-import { useEditPopoverSessionRestore } from './useEditPopoverSessionRestore'
+import { EditPopoverRestoreUnavailableError, useEditPopoverSessionRestore } from './useEditPopoverSessionRestore'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
 
 /** Rotating placeholder keys for compact mode input - short, action-oriented */
@@ -1000,7 +1001,20 @@ export function EditPopover({
   const handleInlineSendMessage = useCallback(async (message: string) => {
     const { prompt, badges } = buildEditPrompt(context, message, displayLabel)
 
-    const sessionId = await ensureSessionForSend()
+    let sessionId: string | null
+    try {
+      sessionId = await ensureSessionForSend()
+    } catch (error) {
+      // FAIL-CLOSED restore: an inconclusive scoped lookup must not create a
+      // fresh hidden session (a still-pending question would be orphaned —
+      // the popover session is unreachable through the session list). The
+      // send is surfaced as retryable; the draft stays in the input.
+      if (error instanceof EditPopoverRestoreUnavailableError) {
+        toast.error(i18n.t('editPopover.restoreUnavailable'), { duration: 5000 })
+        return
+      }
+      throw error
+    }
 
     // Send message via App context (includes optimistic user message update)
     // Pass badges to hide the <edit_request> XML metadata in the user message bubble

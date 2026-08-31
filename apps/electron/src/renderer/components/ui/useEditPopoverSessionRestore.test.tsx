@@ -80,7 +80,7 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(result.current.restoring).toBe(false)
   })
 
-  it('THE RACE: a quick send during the restore window wins — a late restore result is discarded (CAS), the created session is not stranded', async () => {
+  it('THE RACE: a send during an in-flight restore settles the adoption — the found pending session is adopted, never a created orphan', async () => {
     const restoreDeferred = makeDeferred<RestoreOutcome>()
     let createCalls = 0
     const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
@@ -93,27 +93,32 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
       }),
     }) as unknown as HookRender
 
-    // The send happens BEFORE the restore query resolves.
+    // The send happens BEFORE the restore query resolves. The send's
+    // fail-closed gate runs the authoritative query to a verdict instead of
+    // creating blind.
     const sendResult: { sessionId: string | null } = { sessionId: null }
     await act(async () => {
       const sendPromise = result.current.ensureSessionForSend().then(id => {
         sendResult.sessionId = id
       })
-      // Reserve happens synchronously; the restore now resolves LATE.
+      // The scoped lookup resolves FOUND while the send is waiting on it.
       restoreDeferred.resolve(found('session-stale-pending'))
       await sendPromise
     })
 
-    expect(sendResult.sessionId).toBe('session-created-late-restore')
-    expect(createCalls).toBe(1)
-
-    // Let the late adoption attempt flush — it must NOT overwrite the session
-    // the user's send created.
-    await act(async () => {
-      await new Promise(r => setTimeout(r, 20))
-    })
-    expect(result.current.inlineSessionId).toBe('session-created-late-restore')
+    // The pending session is ADOPTED — no orphaning creation happened.
+    expect(sendResult.sessionId).toBe('session-stale-pending')
+    expect(createCalls).toBe(0)
+    expect(result.current.inlineSessionId).toBe('session-stale-pending')
     expect(result.current.restoring).toBe(false)
+
+    // A follow-up send reuses the adopted session (single session, CAS).
+    const second: { sessionId: string | null } = { sessionId: null }
+    await act(async () => {
+      second.sessionId = await result.current.ensureSessionForSend()
+    })
+    expect(second.sessionId).toBe('session-stale-pending')
+    expect(createCalls).toBe(0)
   })
 
   it('no race: when the restore resolves first, the send reuses the adopted session (no extra creation)', async () => {
@@ -313,10 +318,153 @@ describe('useEditPopoverSessionRestore (delayed restore vs quick send)', () => {
     expect(result.current.restoring).toBe(true)
     expect(attempts).toBe(1)
 
-    // Budget exhaustion releases the gate (best-effort restore).
+    // Budget exhaustion releases the disable flag — but the restore is
+    // INCONCLUSIVE, so creation stays fail-closed (see the send-gate tests).
     await waitFor(() => expect(result.current.restoring).toBe(false))
     expect(attempts).toBe(3)
     expect(result.current.inlineSessionId).toBeNull()
+  })
+
+  it('inconclusive restore: a send runs ONE final authoritative query; still-transient → fail-closed error and NO session creation', async () => {
+    let attempts = 0
+    let createCalls = 0
+    const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        restorePendingSession: async () => {
+          attempts++
+          // The bounded restore loop (3 attempts) AND the send's final
+          // authoritative query are all transient.
+          return { outcome: 'transient' as const, message: 'session listing failed' }
+        },
+        createPopoverSession: async () => {
+          createCalls++
+          return 'session-orphan'
+        },
+        backoffMs: () => 1,
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+    expect(attempts).toBe(3)
+
+    // The send must NOT silently create a fresh hidden session.
+    let sendError: unknown = null
+    await act(async () => {
+      try {
+        await result.current.ensureSessionForSend()
+      } catch (error) {
+        sendError = error
+      }
+    })
+    expect((sendError as Error)?.name).toBe('EditPopoverRestoreUnavailableError')
+    expect(createCalls).toBe(0)
+    expect(result.current.inlineSessionId).toBeNull()
+    // The final authoritative query ran exactly once (4th attempt overall)
+    // and is deduped for concurrent sends.
+    expect(attempts).toBe(4)
+  })
+
+  it('inconclusive restore: the send’s final authoritative query ADOPTS a found pending session (no creation)', async () => {
+    let attempts = 0
+    let createCalls = 0
+    const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        restorePendingSession: async () => {
+          attempts++
+          if (attempts <= 3) return { outcome: 'transient' as const }
+          return found('session-late-pending')
+        },
+        createPopoverSession: async () => {
+          createCalls++
+          return 'session-orphan'
+        },
+        backoffMs: () => 1,
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    const id: { value: string | null } = { value: null }
+    await act(async () => {
+      id.value = await result.current.ensureSessionForSend()
+    })
+    expect(id.value).toBe('session-late-pending')
+    expect(result.current.inlineSessionId).toBe('session-late-pending')
+    expect(createCalls).toBe(0)
+  })
+
+  it('inconclusive restore: the send’s final authoritative query settling empty AUTHORIZES creation; a later send skips the query', async () => {
+    let attempts = 0
+    let createCalls = 0
+    const { result } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        restorePendingSession: async () => {
+          attempts++
+          if (attempts <= 3) return { outcome: 'transient' as const }
+          return emptyOutcome
+        },
+        createPopoverSession: async () => {
+          createCalls++
+          return 'session-created'
+        },
+        backoffMs: () => 1,
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+
+    const id: { value: string | null } = { value: null }
+    await act(async () => {
+      id.value = await result.current.ensureSessionForSend()
+    })
+    expect(id.value).toBe('session-created')
+    expect(createCalls).toBe(1)
+
+    // A second send reuses the session — no extra query, no extra creation.
+    const second: { value: string | null } = { value: null }
+    await act(async () => {
+      second.value = await result.current.ensureSessionForSend()
+    })
+    expect(second.value).toBe('session-created')
+    expect(createCalls).toBe(1)
+    expect(attempts).toBe(4)
+  })
+
+  it('reopen (scope change) after an inconclusive restore restarts the bounded restore loop', async () => {
+    let attempts = 0
+    const { result, rerender } = renderHook((props: HookParams) => useEditPopoverSessionRestore(props), {
+      initialProps: baseParams({
+        workspaceId: 'ws-a',
+        restorePendingSession: async () => {
+          attempts++
+          return { outcome: 'transient' as const }
+        },
+        backoffMs: () => 1,
+      }),
+    }) as unknown as HookRender
+
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+    const attemptsAfterFirstScope = attempts
+    expect(attemptsAfterFirstScope).toBe(3)
+
+    // Reopen in workspace B: the bounded loop reruns for the new scope.
+    rerender(baseParams({
+      workspaceId: 'ws-b',
+      restorePendingSession: async () => {
+        attempts++
+        return emptyOutcome
+      },
+      backoffMs: () => 1,
+    }))
+    await waitFor(() => expect(result.current.restoring).toBe(false))
+    expect(attempts).toBe(attemptsAfterFirstScope + 1)
+    // Authoritative empty for B: creation is authorized for the new scope.
+    let created = false
+    await act(async () => {
+      const id = await result.current.ensureSessionForSend()
+      created = id === 'session-created'
+    })
+    expect(created).toBe(true)
   })
 
   // The adoption path is also generation-bound — a restore result for the

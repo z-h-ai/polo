@@ -63,6 +63,14 @@ export async function handleSessionMcpRequestUserInputCallback(
  * Minimal request handler for the host callback HTTP server: routes
  * `POST /request-user-input` callbacks of the session MCP server into the
  * SessionManager durable handoff. All other paths are answered 404.
+ *
+ * MEDIA-TYPE GATE: the endpoint is a STATE-CHANGING loopback route, so a
+ * request body is only parsed when the sender declares an exact
+ * `application/json` media type (optional parameters such as `charset` are
+ * accepted; sub-type suffixes like `+json` and text/plain are NOT). Anything
+ * else is rejected with 415 BEFORE the body is read — a simple cross-origin
+ * `text/plain` POST needs no CORS preflight and must never reach the
+ * SessionManager.
  */
 export function createSessionMcpCallbackHandler(sessionManager: ISessionManager) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,6 +87,15 @@ export function createSessionMcpCallbackHandler(sessionManager: ISessionManager)
     const url = typeof request.url === 'string' ? request.url : '';
     if (new URL(url, 'http://localhost').pathname !== '/request-user-input') {
       return new Response('Not found', { status: 404 });
+    }
+    const contentType = typeof request.headers?.get === 'function'
+      ? (request.headers.get('content-type') ?? '')
+      : '';
+    if (!/^application\/json\s*(?:;.*)?$/i.test(contentType.trim())) {
+      return new Response(JSON.stringify({ error: 'Unsupported Media Type: expected application/json' }), {
+        status: 415,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
     let body: unknown;
     try {

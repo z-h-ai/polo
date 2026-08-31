@@ -651,6 +651,7 @@
   "editPopover.placeholder1": "Dime qué quieres cambiar",
   "editPopover.placeholder2": "Describe la actualización",
   "editPopover.placeholder3": "¿Qué debería modificar?",
+  "editPopover.restoreUnavailable": "No se pudo verificar si hay una pregunta pendiente. Intente enviar de nuevo.",
   "editPopover.whatToChange": "¿Qué te gustaría cambiar?",
   "editor.bold": "Negrita",
   "editor.code": "Código",
