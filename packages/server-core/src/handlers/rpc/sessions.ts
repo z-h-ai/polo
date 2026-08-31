@@ -118,6 +118,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL,
   RPC_CHANNELS.sessions.RESPOND_TO_QUESTION,
   RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN,
+  RPC_CHANNELS.sessions.CREATE_EXTERNAL_ENGINE_SESSION,
   RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION,
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
@@ -189,10 +190,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return session
   })
 
-  // Create a new session
+  // Create a new session. FAIL-CLOSED on the external-engine registration:
+  // a generic create can never grant it — `externalEngine` is stripped here
+  // and only the dedicated CREATE_EXTERNAL_ENGINE_SESSION path grants it.
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions) => {
     const end = perf.start('rpc.createSession', { workspaceId })
-    const session = await sessionManager.createSession(workspaceId, options)
+    const { externalEngine: _untrustedExternalEngine, ...trustedOptions } = options ?? {}
+    const session = await sessionManager.createSession(workspaceId, trustedOptions)
     end()
     return session
   })
@@ -325,6 +329,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN, async (_ctx, sessionId: string, expectedGeneration?: number) => {
     await sessionManager.completeExternalEngineTurn(sessionId, expectedGeneration)
     return { ok: true }
+  })
+
+  // PRODUCTION entry for creating an externally driven session (the external
+  // Codex harness owns the model; the driver owns the single sidecar).
+  server.handle(RPC_CHANNELS.sessions.CREATE_EXTERNAL_ENGINE_SESSION, async (_ctx, workspaceId: string, options?: { name?: string }) => {
+    return sessionManager.createExternalEngineSession(workspaceId, options)
   })
 
   // Locate the Edit Popover session that still owns an active pending

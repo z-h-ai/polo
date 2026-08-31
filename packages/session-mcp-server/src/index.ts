@@ -597,7 +597,11 @@ export async function main() {
   );
 
   // Connect to upstream docs server (non-blocking, best-effort)
-  await connectDocsUpstream();
+  // Non-blocking, best-effort: the session tools must be served IMMEDIATELY —
+  // the docs upstream attempt can stall on slow networks and would otherwise
+  // delay every tools/list (and thus the model's request_user_input
+  // discovery).
+  void connectDocsUpstream();
 
   // Handle tool listing — session tools + docs upstream tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

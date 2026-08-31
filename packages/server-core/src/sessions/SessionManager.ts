@@ -11,7 +11,8 @@ import { randomUUID } from 'node:crypto'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createSessionMcpCallbackHandler } from './session-mcp-callback-router.ts'
-import { ExternalEngineSessionDriver, type ExternalEngineModelTurn } from './external-engine-driver.ts'
+import { ExternalEngineSessionDriver } from './external-engine-driver.ts'
+import { type ExternalEngineModelTurn } from './external-engine-model-adapter.ts'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, buildSessionMcpServerArgs } from '@polo-ai/shared/agent'
 import {
   resolveSessionConnection,
@@ -2739,6 +2740,15 @@ export class SessionManager implements ISessionManager {
   getSessionsRoot(workspaceId: string): string | null {
     const workspace = this.resolveRuntimeWorkspace(workspaceId)
     return workspace ? this.sessionStorage.getSessionsRoot(workspace.rootPath) : null
+  }
+
+  /**
+   * PRODUCTION entry for creating an externally driven session (the external
+   * Codex harness owns the model): creation registers the session for the
+   * external single-owner/channel turn path.
+   */
+  async createExternalEngineSession(workspaceId: string, options?: { name?: string }): Promise<Session> {
+    return this.createSession(workspaceId, { ...options, externalEngine: true })
   }
 
   async createSession(workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions): Promise<Session> {
@@ -6011,6 +6021,98 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`Deleted session ${sessionId}`)
   }
 
+  /**
+   * The MID-STREAM branch of sendMessage: this message must not start a new
+   * turn, so it is steered into the live turn when possible and otherwise
+   * queued for FIFO replay with its own options. Runs INSIDE the
+   * question-state lock with session identity already re-validated — the
+   * push/persist/flush below must never land on a session whose declaration
+   * already removed it (that would be a ghost queue entry and a persistence
+   * attempt on a deleted session).
+   */
+  private async steerOrQueueMidStreamSend(args: {
+    managed: ManagedSession
+    sessionId: string
+    message: string
+    attachments?: FileAttachment[]
+    storedAttachments?: StoredAttachment[]
+    options?: SendMessageOptions
+    existingMessageId?: string
+    onAck?: (messageId: string) => void
+  }): Promise<void> {
+    const { managed, sessionId, message, attachments, storedAttachments, options, existingMessageId, onAck } = args
+    const connection = resolveSessionConnection(managed.llmConnection, undefined)
+    // Fallback to 'steer' when no connection is resolvable — preserves
+    // today's exact behavior (call redirect, take whatever it returns).
+    const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
+
+    const agent = managed.agent
+    let steered = false
+    if (behavior === 'steer') {
+      steered = agent?.redirect(message) ?? false
+    }
+    // For 'queue': skip redirect entirely. The current turn is undisturbed.
+
+    sessionLog.info('mid-stream send', {
+      sessionId,
+      behavior,
+      steered,
+      queueLengthBefore: managed.messageQueue.length,
+      backend: agent ? agent.constructor.name : 'none',
+      connectionSlug: connection?.slug,
+    })
+
+    // Create user message for UI — or REUSE the already-persisted one
+    // when existingMessageId is provided (the answer→resume path): the
+    // queue branch must never duplicate the single readable answer
+    // message.
+    let userMessage: Message
+    if (existingMessageId) {
+      userMessage = this.requireExistingMessage(managed, existingMessageId)
+    } else {
+      userMessage = {
+        id: generateMessageId(),
+        role: 'user',
+        content: message,
+        timestamp: this.monotonic(),
+        attachments: storedAttachments,
+        badges: options?.badges,
+      }
+      managed.messages.push(userMessage)
+    }
+
+    // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
+    // (covers both queue-direct and queue-after-abort paths).
+    this.sendEvent({
+      type: 'user_message',
+      sessionId,
+      message: userMessage,
+      status: steered ? 'accepted' : 'queued',
+      optimisticMessageId: options?.optimisticMessageId
+    }, managed.workspace.id)
+
+    if (!steered) {
+      // Push for FIFO replay on next onProcessingStopped tick. Same shape
+      // for both queue-direct (current turn still running) and
+      // queue-after-abort (backend already aborted) — the replay path in
+      // processNextQueuedMessage is identical. The interrupted-response
+      // reminder only applies when a turn was actually running or was
+      // aborted — a reservation-queued message (turn not started yet) is
+      // a fresh message, not a continuation.
+      managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
+      if (managed.isProcessing) {
+        managed.wasInterrupted = true
+      }
+    }
+
+    this.persistSession(managed)
+    // Force a synchronous flush so the user message is genuinely on disk
+    // before we tell the renderer "accepted" — `persistSession` only
+    // enqueues with a 500ms debounce. (#616 reliability fix.)
+    await this.flushSession(managed.id)
+    onAck?.(userMessage.id)
+  }
+
   async sendMessage(
     sessionId: string,
     message: string,
@@ -6078,136 +6180,34 @@ export class SessionManager implements ISessionManager {
     // A caller that arrives while a reservation is held takes the steer/queue
     // branch below and keeps its own options for its own future turn.
     const invocationSource: InvocationSource = options?.invocationSource ?? 'internal'
-    const isTurnStartOwner = !managed.isProcessing && !managed.turnStartReserved
+    const claimedAtEntry = !managed.isProcessing && !managed.turnStartReserved
     let turnStarted = false
-    if (isTurnStartOwner) {
+    // `holdsReservation` may grow past the entry claim: a caller that WAITED
+    // on the question-state lock re-evaluates in-lock (see below) and can
+    // claim a freshly freed reservation there.
+    let holdsReservation = claimedAtEntry
+    if (claimedAtEntry) {
       managed.turnStartReserved = true
       this.applyTurnInvocationSource(managed, invocationSource)
     }
 
     // Single cleanup boundary: EVERYTHING between the synchronous claim and the actual
-    // setProcessing(true) is inside this try — including the pending-plan
-    // cleanup and lazy message load awaits — so a pre-start failure can
+    // setProcessing(true) is inside this try — so a pre-start failure can
     // never strand a phantom reservation (followers would queue forever
     // behind a turn that never starts).
+    //
+    // ONE LOCK-HELD LINEARIZATION SECTION: session identity, the pending-plan
+    // clear, the lazy message load, the mid-stream branch's queue/persist
+    // side effects and the turn-start commit all run under the question-state
+    // lock. Identity is validated FIRST — before any await or storage side
+    // effect — so a delete whose declaration won the race converges with zero
+    // persistence attempts, zero events and zero ghost turns (the declaration
+    // atomically removes the map entry). The lock also serializes every side
+    // effect below against the delete's own locked cleanup, so nothing can
+    // interleave a declaration between the identity check and the commit.
     try {
-      // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
-      // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
-      // duplicate that arrives from a legacy renderer still running the client-side
-      // auto_retry. The first matching caller wins (server timer or legacy RPC,
-      // whichever arrives first), subsequent matching calls within the deadline drop.
-      if (claimAutoRetryPending(managed, message) === 'drop') {
-        sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
-        return
-      }
-
-      // Clear any pending plan execution state when a new user message is sent.
-      // This acts as a safety valve - if the user moves on, we don't want to
-      // auto-execute an old plan later.
-      await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
-
-      // Ensure messages are loaded before we try to add new ones
-      await this.ensureMessagesLoaded(managed)
-
-      // If currently processing — or another caller holds the turn-start
-      // reservation (its pre-chat work is in flight) — this message must not
-      // start a second turn. Steer into the live turn when possible, otherwise
-      // queue for FIFO replay WITH ITS OWN OPTIONS:
-      // a queued message's source is applied when the replay becomes a new
-      // turn, never by overwriting the reserved/active turn's source.
-      //
-      // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
-      //   Claude emulates via PreToolUse hook. If `redirect()` returns false
-      //   (Claude with no live query, or backend can't steer), the backend has
-      //   already called forceAbort(Redirect) and we queue for replay.
-      // - 'queue': hold the message untouched; the current turn keeps running
-      //   to natural completion; replay as a new turn afterwards. NO call to
-      //   `agent.redirect()`, NO forceAbort, NO interruption.
-      if (managed.isProcessing || !isTurnStartOwner) {
-        const connection = resolveSessionConnection(managed.llmConnection, undefined)
-        // Fallback to 'steer' when no connection is resolvable — preserves
-        // today's exact behavior (call redirect, take whatever it returns).
-        const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
-
-        const agent = managed.agent
-        let steered = false
-        if (behavior === 'steer') {
-          steered = agent?.redirect(message) ?? false
-        }
-        // For 'queue': skip redirect entirely. The current turn is undisturbed.
-
-        sessionLog.info('mid-stream send', {
-          sessionId,
-          behavior,
-          steered,
-          queueLengthBefore: managed.messageQueue.length,
-          backend: agent ? agent.constructor.name : 'none',
-          connectionSlug: connection?.slug,
-        })
-
-        // Create user message for UI — or REUSE the already-persisted one
-        // when existingMessageId is provided (the answer→resume path): the
-        // queue branch must never duplicate the single readable answer
-        // message.
-        let userMessage: Message
-        if (existingMessageId) {
-          userMessage = this.requireExistingMessage(managed, existingMessageId)
-        } else {
-          userMessage = {
-            id: generateMessageId(),
-            role: 'user',
-            content: message,
-            timestamp: this.monotonic(),
-            attachments: storedAttachments,
-            badges: options?.badges,
-          }
-          managed.messages.push(userMessage)
-        }
-
-        // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
-        // (covers both queue-direct and queue-after-abort paths).
-        this.sendEvent({
-          type: 'user_message',
-          sessionId,
-          message: userMessage,
-          status: steered ? 'accepted' : 'queued',
-          optimisticMessageId: options?.optimisticMessageId
-        }, managed.workspace.id)
-
-        if (!steered) {
-          // Push for FIFO replay on next onProcessingStopped tick. Same shape
-          // for both queue-direct (current turn still running) and
-          // queue-after-abort (backend already aborted) — the replay path in
-          // processNextQueuedMessage is identical. The interrupted-response
-          // reminder only applies when a turn was actually running or was
-          // aborted — a reservation-queued message (turn not started yet) is
-          // a fresh message, not a continuation.
-          managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
-          if (managed.isProcessing) {
-            managed.wasInterrupted = true
-          }
-        }
-
-        this.persistSession(managed)
-        // Force a synchronous flush so the user message is genuinely on disk
-        // before we tell the renderer "accepted" — `persistSession` only
-        // enqueues with a 500ms debounce. (#616 reliability fix.)
-        await this.flushSession(managed.id)
-        onAck?.(userMessage.id)
-        return
-      }
-
-      // OWNER PATH — ONE LOCK-HELD CRITICAL SECTION: deletion re-validation,
-      // user-message persistence and the turn-start commit form a single
-      // transaction on the question-state lock. The entry gate alone left a
-      // TOCTOU window: a deleteSession that started (and even completed)
-      // during the pre-commit awaits left the accepted user message persisted
-      // and broadcast on a deleted session. Here the deletion is
-      // re-validated by SESSION IDENTITY (the declaration atomically removes
-      // the map entry, so an orphaned/removed object can never commit) BEFORE
-      // any persistence side effect; the lock also serializes this section
-      // against the delete's own locked cleanup, so a committed turn can only
-      // ever be torn down by that cleanup — never resurrect after it.
+      let droppedDuplicateRetry = false
+      let queuedMidStream = false
       let turnAbandonedBeforeCommit = false
       await this.withQuestionStateLock(sessionId, async () => {
         if (this.sessions.get(sessionId) !== managed) {
@@ -6219,6 +6219,63 @@ export class SessionManager implements ISessionManager {
           turnAbandonedBeforeCommit = true
           return
         }
+
+        // Source-activation auto-retry dedup (polo-ai-oss#804). When the server
+        // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
+        // duplicate that arrives from a legacy renderer still running the client-side
+        // auto_retry. The first matching caller wins (server timer or legacy RPC,
+        // whichever arrives first), subsequent matching calls within the deadline drop.
+        if (claimAutoRetryPending(managed, message) === 'drop') {
+          droppedDuplicateRetry = true
+          return
+        }
+
+        // Clear any pending plan execution state when a new user message is sent.
+        // This acts as a safety valve - if the user moves on, we don't want to
+        // auto-execute an old plan later.
+        await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, this.sessionStorage)
+
+        // Ensure messages are loaded before we try to add new ones
+        await this.ensureMessagesLoaded(managed)
+
+        // If currently processing — or another caller holds the turn-start
+        // reservation (its pre-chat work is in flight) — this message must not
+        // start a second turn. Steer into the live turn when possible, otherwise
+        // queue for FIFO replay WITH ITS OWN OPTIONS:
+        // a queued message's source is applied when the replay becomes a new
+        // turn, never by overwriting the reserved/active turn's source.
+        //
+        // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
+        //   Claude emulates via PreToolUse hook. If `redirect()` returns false
+        //   (Claude with no live query, or backend can't steer), the backend has
+        //   already called forceAbort(Redirect) and we queue for replay.
+        // - 'queue': hold the message untouched; the current turn keeps running
+        //   to natural completion; replay as a new turn afterwards. NO call to
+        //   `agent.redirect()`, NO forceAbort, NO interruption.
+        //
+        // The branch decision uses the POST-WAIT state, not the stale entry
+        // snapshot: a caller that waited on this lock behind a reservation
+        // whose turn then failed pre-start finds the reservation freed here
+        // and claims the fresh turn itself — exactly what the failed-turn-start
+        // drain used to replay, now decided at a single linearized point.
+        if (!holdsReservation && !managed.isProcessing && !managed.turnStartReserved) {
+          managed.turnStartReserved = true
+          holdsReservation = true
+        }
+        if (managed.isProcessing || !holdsReservation) {
+          await this.steerOrQueueMidStreamSend({
+            managed, sessionId, message, attachments, storedAttachments, options, existingMessageId, onAck,
+          })
+          queuedMidStream = true
+          return
+        }
+
+        // OWNER PATH — the turn-start commit: the lock entry re-validated
+        // session identity and the lock serializes this section against the
+        // delete's own locked declaration, so nothing can have deleted the
+        // session mid-section: starting the turn here is final for this
+        // generation, and a committed turn can only ever be torn down by that
+        // cleanup — never resurrect after it.
 
         // The turn-start reservation was already bound at entry (before any
         // await). Re-assert here defensively: between the entry bind and this
@@ -6371,6 +6428,15 @@ export class SessionManager implements ISessionManager {
         managed.agent?.setSessionTurnGeneration(managed.processingGeneration)
         managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
       })
+      if (droppedDuplicateRetry) {
+        sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
+        return
+      }
+      if (queuedMidStream) {
+        // The message was steered into the live turn or queued for FIFO
+        // replay — this call never starts a turn of its own.
+        return
+      }
       if (turnAbandonedBeforeCommit) {
         // The turn-start reservation is released by the finally below — the
         // turn converges as silently deleted (the session no longer exists).
@@ -6381,7 +6447,7 @@ export class SessionManager implements ISessionManager {
       // consumed; isProcessing now gates subsequent callers.
       turnStarted = true
     } finally {
-      if (isTurnStartOwner) {
+      if (holdsReservation) {
         this.releaseTurnStartReservation(managed, sessionId, turnStarted)
       }
     }
@@ -6456,8 +6522,18 @@ export class SessionManager implements ISessionManager {
           // sidecar or stop its processing.
           const model = this.externalEngineModel
           if (model) {
-            void driver
-              .runModelTurn(sessionId, message, model)
+            // The model layer receives the REAL per-turn session MCP config
+            // (this driver's owned sidecar) — it registers the session tools
+            // natively into the actual model session/toolset, so the model
+            // discovers the request_user_input JSON schema directly.
+            void model
+              .start({
+                sessionId,
+                prompt: message,
+                sessionMcpConfig: config,
+                listTools: () => driver.listTools(),
+                callTool: (name, args) => driver.callTool(name, args),
+              })
               .then(async () => {
                 await this.completeExternalEngineTurnFor(sessionId, { generation: myGeneration, driver })
               })
@@ -7520,7 +7596,7 @@ export class SessionManager implements ISessionManager {
    * @throws when validation or the durable persist fails — the request_user_input
    * tool converts this into an isError result so the model can retry.
    */
-  /**
+
   /**
    * PRODUCTION HTTP surface for the session MCP callback protocol: wraps
    * `createSessionMcpCallbackHandler` so a host callback server mounts the

@@ -132,6 +132,12 @@ export interface ISessionManager {
    */
   completeExternalEngineTurn(sessionId: string, expectedGeneration?: number): Promise<void>
   /**
+   * PRODUCTION entry for creating an externally driven session (external
+   * Codex harness): the returned session walks the external
+   * single-owner/channel turn path.
+   */
+  createExternalEngineSession(workspaceId: string, options?: { name?: string }): Promise<import('@polo-ai/shared/protocol').Session>
+  /**
    * Durable handoff entry for EXTERNAL hosts (session MCP server / Codex):
    * routes a parsed `question_requested` callback into the same persist +
    * question_request + handoff chain as the in-process paths.

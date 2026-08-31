@@ -77,7 +77,7 @@ import { join, delimiter } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
-import { createLlmToolLoopModelTurn } from '@polo-ai/server-core/sessions'
+import { createCodexSessionModelTurn } from '@polo-ai/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
 import {
   clearClientActiveSession,
@@ -938,11 +938,27 @@ app.whenReady().then(async () => {
               console.error('[session-mcp] host failed to start — continuing without the session MCP path:', startupError)
             })
           }
-          // EXTERNAL ENGINE: register the production model adapter — the
-          // external driver runs each model turn as a tool loop over its
-          // owned sidecar, querying the session's configured LLM backend.
+          // EXTERNAL ENGINE: register the production model adapter — each
+          // external turn runs a REAL Codex session process whose toolset is
+          // the driver-owned session MCP sidecar. Command resolution: an
+          // explicit runtime override first, then the Codex CLI on PATH. No
+          // CLI in this runtime degrades the turn deterministically (the
+          // adapter ends the turn, the message stays persisted) — it never
+          // crashes the bootstrap.
           sm.setExternalEngineModelAdapter(
-            createLlmToolLoopModelTurn({ query: sessionId => sm.getSessionQueryFn(sessionId) }),
+            createCodexSessionModelTurn({
+              resolveCodexCommand: sessionId => {
+                const configured = process.env.POLO_CODEX_CLI?.trim()
+                if (configured) return { command: configured, args: ['exec', '--session', sessionId] }
+                const onPath = (process.env.PATH ?? '')
+                  .split(delimiter)
+                  .filter(Boolean)
+                  .map(dir => join(dir, 'codex'))
+                  .find(candidate => existsSync(candidate))
+                if (!onPath) return null
+                return { command: onPath, args: ['exec', '--session', sessionId] }
+              },
+            }),
           )
           return sm
         },

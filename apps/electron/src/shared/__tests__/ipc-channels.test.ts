@@ -282,6 +282,7 @@ const EXPECTED_CHANNELS: string[] = [
   'sessions:completeExternalEngineTurn',
   'sessions:create',
   'sessions:createEditPopoverSession',
+  'sessions:createExternalEngineSession',
   'sessions:delete',
   'sessions:export',
   'sessions:exportRemoteTransfer',

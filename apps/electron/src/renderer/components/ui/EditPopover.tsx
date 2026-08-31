@@ -1010,7 +1010,7 @@ export function EditPopover({
       // the popover session is unreachable through the session list). The
       // send is surfaced as retryable; the draft stays in the input.
       if (error instanceof EditPopoverRestoreUnavailableError) {
-        toast.error(i18n.t('editPopover.restoreUnavailable'), { duration: 5000 })
+        toast.error(t('editPopover.restoreUnavailable'), { duration: 5000 })
         return
       }
       throw error

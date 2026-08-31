@@ -478,8 +478,7 @@ export abstract class BaseAgent implements AgentBackend {
    *   → Electron shows auth dialog, calls interruptForHandoff(AuthRequest)
    */
   /**
-   * Consume one stderr line emitted by the session MCP server subprocess
-   *.
+   * Consume one stderr line emitted by the session MCP server subprocess.
    *
    * Hosts embedding this agent pipe the subprocess's stderr lines here. A
    * `question_requested` line is routed into the SAME durable handoff chain

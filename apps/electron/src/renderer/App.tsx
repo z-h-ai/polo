@@ -612,29 +612,31 @@ export default function App() {
   const loadSessionsFromServer = useCallback(async () => {
     setSessionLoadError(null)
 
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
+    // closes after the snapshot has been applied synchronously.
+    let loadedSessions: Session[] = []
     try {
-      const loadedSessions = await window.electronAPI.getSessions()
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessions(),
+        sessions => {
+          loadedSessions = sessions
+          // Initialize per-session atoms and metadata map
+          // NOTE: No sessionsAtom used - sessions are only in per-session atoms
+          initializeSessions(loadedSessions)
 
-      // Initialize per-session atoms and metadata map
-      // NOTE: No sessionsAtom used - sessions are only in per-session atoms
-      initializeSessions(loadedSessions)
-
-      // Hydrate pending agent questions from the snapshot — fill holes only:
-      // entries that already exist came from fresher realtime events and are
-      // never downgraded by the list fetch. Guard scope: retention-pins
-      // terminal markers until the snapshot has been applied.
-      pendingQuestionGuardRef.current.beginSnapshot()
-      try {
-        applyPendingQuestions(prev => {
-          let next = prev
-          for (const session of loadedSessions) {
-            next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
-          }
-          return next
-        })
-      } finally {
-        pendingQuestionGuardRef.current.endSnapshot()
-      }
+          // Hydrate pending agent questions from the snapshot — fill holes
+          // only: entries that already exist came from fresher realtime
+          // events and are never downgraded by the list fetch.
+          applyPendingQuestions(prev => {
+            let next = prev
+            for (const session of loadedSessions) {
+              next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+            }
+            return next
+          })
+        },
+      )
 
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
@@ -688,6 +690,10 @@ export default function App() {
     const beforeIds = new Set(beforeMetaMap.keys())
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
+    // SNAPSHOT LIFECYCLE: the pending-question guard scope opens BEFORE the
+    // list RPC and closes in the finally below — terminal markers are pinned
+    // for the whole in-flight window.
+    pendingQuestionGuardRef.current.beginSnapshot()
     try {
       const sessions = await window.electronAPI.getSessions()
       const returnedIds = new Set(sessions.map(s => s.id))
@@ -727,22 +733,16 @@ export default function App() {
         syncSessionOptionsFromSession(session)
       }
       // Reconnect metadata refresh carries the pending state — fill missing
-      // entries (drift missed while the transport was down; events are not
-      // replayed after stale reconnects). Snapshot-present sessions converge
-      // holes; existing event-driven entries are never touched. Guard scope:
-      // retention-pins terminal markers until the snapshot has been applied.
-      pendingQuestionGuardRef.current.beginSnapshot()
-      try {
-        applyPendingQuestions(prev => {
-          let next = prev
-          for (const session of sessions) {
-            next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
-          }
-          return next
-        })
-      } finally {
-        pendingQuestionGuardRef.current.endSnapshot()
-      }
+      // entries; existing event-driven entries are never touched. The guard
+      // scope (opened before the RPC) closes in the finally below, after
+      // this synchronous application.
+      applyPendingQuestions(prev => {
+        let next = prev
+        for (const session of sessions) {
+          next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+        }
+        return next
+      })
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
       return nextMetaMap
@@ -760,8 +760,10 @@ export default function App() {
         error: err,
       })
       return null
+    } finally {
+      pendingQuestionGuardRef.current.endSnapshot()
     }
-  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, windowWorkspaceId, windowRemoteWorkspaceId])
+  }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, pendingQuestionGuardRef, windowWorkspaceId, windowRemoteWorkspaceId])
 
   // Stale session watchdog — catches stuck sessions that the reconnect protocol misses
   const { trackSessionActivity } = useStaleSessionRecovery({
@@ -1555,6 +1557,19 @@ export default function App() {
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
     const session = await window.electronAPI.createSession(workspaceId, options)
+    // Add to per-session atom and metadata map (no sessionsAtom)
+    addSession(session)
+    syncSessionOptionsFromSession(session)
+
+    return session
+  }, [addSession, syncSessionOptionsFromSession])
+
+  // Dedicated, trusted creation path for an externally driven session
+  // (`engine=codex` deep links): the server registers the session for the
+  // external single-owner turn path. The generic handleCreateSession above
+  // can never grant that registration.
+  const handleCreateExternalEngineSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
+    const session = await window.electronAPI.createExternalEngineSession(workspaceId, options)
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
@@ -2461,6 +2476,7 @@ export default function App() {
     sessionOptions,
     // Session callbacks
     onCreateSession: handleCreateSession,
+    onCreateExternalEngineSession: handleCreateExternalEngineSession,
     onCreateEditPopoverSession: handleCreateEditPopoverSession,
     onSendMessage: handleSendMessage,
     onRenameSession: handleRenameSession,
@@ -2802,6 +2818,7 @@ export default function App() {
                   workspaceSlug={windowWorkspaceSlug}
                   onSwitchWorkspaceBySlug={handleSwitchWorkspaceBySlug}
                   onCreateSession={handleCreateSession}
+                  onCreateExternalEngineSession={handleCreateExternalEngineSession}
                   onInputChange={handleInputChange}
                   getDraft={getDraft}
                   onAutoDeleteEmptySession={handleAutoDeleteEmptySession}

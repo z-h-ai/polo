@@ -134,6 +134,12 @@ interface NavigationProviderProps {
   onSwitchWorkspaceBySlug?: (slug: string) => void
   /** Session creation handler */
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
+  /**
+   * Dedicated, trusted creation handler for an externally driven session
+   * (`engine=codex` deep links). The generic onCreateSession can never grant
+   * that registration.
+   */
+  onCreateExternalEngineSession?: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
   /** Input change handler for pre-filling chat input */
   onInputChange?: (sessionId: string, value: string) => void
   /** Get draft input text for a session (reads from ref, no re-render) */
@@ -154,6 +160,7 @@ export function NavigationProvider({
   workspaceSlug,
   onSwitchWorkspaceBySlug,
   onCreateSession,
+  onCreateExternalEngineSession,
   onInputChange,
   getDraft,
   onAutoDeleteEmptySession,
@@ -715,7 +722,13 @@ export function NavigationProvider({
             if (parsed.params.systemPrompt) {
               createOptions.systemPromptPreset = parsed.params.systemPrompt as 'default' | 'mini' | string
             }
-            const session = await onCreateSession(workspaceId, createOptions)
+            // ENGINE SELECTION: `engine=codex` routes the creation through the
+            // dedicated trusted path (the external Codex harness owns the model
+            // turn). Any other value — including none — keeps the default
+            // embedded engine, so existing deep links behave exactly as before.
+            const session = parsed.params.engine === 'codex' && onCreateExternalEngineSession
+              ? await onCreateExternalEngineSession(workspaceId, createOptions)
+              : await onCreateSession(workspaceId, createOptions)
             reportActionResult({ sessionId: session.id })
 
             if (parsed.params.name) {
@@ -899,7 +912,7 @@ export function NavigationProvider({
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta, t]
+    [workspaceId, onCreateSession, onCreateExternalEngineSession, onInputChange, pushPanel, store, updateSessionMeta, t]
   )
 
   // =========================================================================

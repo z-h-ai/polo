@@ -119,7 +119,7 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
       return realLock(id, critical)
     }
     void realLock('rpc-del-first', () => hungLock)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise(r => setImmediate(r))
     lockAcquisitions = 0
 
     const deletePromise = sm.deleteSession('rpc-del-first')
@@ -137,6 +137,61 @@ describe('sessions:SEND_MESSAGE RPC — delete-first silent convergence', () => 
     expect(result.messageId).toBe('')
     expect(events.filter(e => e.type === 'user_message')).toHaveLength(0)
     expect(events.filter(e => e.type === 'error')).toHaveLength(0)
+
+    await deletePromise
+    expect(existsSync(getSessionFilePath(tmpRoot, 'rpc-del-first'))).toBe(false)
+    expect(events.filter(e => e.type === 'session_deleted')).toHaveLength(1)
+  })
+
+  it('delete-first barrier: a send serialized behind the declaration attempts ZERO persistence, ZERO agent allocation and emits ZERO question/resume events', async () => {
+    seedSession('rpc-del-first')
+    const sendMessage = handlers.get(RPC_CHANNELS.sessions.SEND_MESSAGE)!
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      throw new Error('agent must never be allocated for a converged send')
+    }
+
+    // Side-effect counters: a send that lost the linearization race must not
+    // touch persistence at all (the pre-lock side-effect window this guard
+    // closes is what used to surface as a post-delete ENOENT + ghost resume).
+    let persistenceAttempts = 0
+    let flushAttempts = 0
+    ;(sm as unknown as { persistSession: (m: unknown, o?: unknown) => void }).persistSession = () => { persistenceAttempts++ }
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = async () => { flushAttempts++ }
+
+    // Hold the question lock: the DELETE's declaration queues FIRST, the
+    // send's lock-held section SECOND.
+    let releaseLock!: () => void
+    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
+    let lockAcquisitions = 0
+    const realLock = (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<unknown>) => Promise<unknown> }).withQuestionStateLock.bind(sm)
+    ;(sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<unknown>) => Promise<unknown> }).withQuestionStateLock = (id: string, critical: () => Promise<unknown>) => {
+      lockAcquisitions++
+      return realLock(id, critical)
+    }
+    void realLock('rpc-del-first', () => hungLock)
+    await new Promise(r => setImmediate(r))
+    lockAcquisitions = 0
+
+    const deletePromise = sm.deleteSession('rpc-del-first')
+    await waitForConditionInternal(() => lockAcquisitions >= 1, 5000)
+
+    // The send is already in flight (it holds the managed object) when the
+    // declaration lands.
+    const rpcPromise = sendMessage({ clientId: 'rpc-client' }, 'rpc-del-first', 'racing rpc message') as Promise<{ accepted: boolean; messageId: string }>
+    await waitForConditionInternal(() => lockAcquisitions >= 2, 5000)
+
+    releaseLock()
+    const result = (await rpcPromise) as { accepted: boolean; messageId: string }
+    expect(result.accepted).toBe(true)
+    expect(result.messageId).toBe('')
+
+    // THE BARRIER: nothing was persisted, nothing was allocated, nothing was
+    // announced — the send converged before ANY side effect.
+    expect(persistenceAttempts).toBe(0)
+    expect(flushAttempts).toBe(0)
+    expect(events.filter(e => e.type === 'user_message')).toHaveLength(0)
+    expect(events.filter(e => e.type === 'error')).toHaveLength(0)
+    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(0)
 
     await deletePromise
     expect(existsSync(getSessionFilePath(tmpRoot, 'rpc-del-first'))).toBe(false)

@@ -26,13 +26,13 @@ mock.module('@polo-ai/server-core/domain', () => ({
   },
 }))
 
-// Optional park point for the sendMessage OWNER path: the owner's pre-section plan-state clear. Lets a test hold the
-// turn-start reservation while the question-state lock stays FREE — so an
-// answer/cancel can still commit (the round-8 critical section serialized
-// those behind the owner section). Only set per-test; null = pass-through.
-// bun's mock.module retargets the module globally, so the factory must
-// provide a WORKING implementation (same semantics as
-// clearPendingPlanExecution) built from the pass-through storage helpers.
+// Park point for the sendMessage owner path: the plan-state clear INSIDE the
+// lock-held linearization section. Holding it occupies the boundary, so a
+// concurrent answer/delete is observable as serialized behind it. Only set
+// per-test; null = pass-through. bun's mock.module retargets the module
+// globally, so the factory must provide a WORKING implementation (same
+// semantics as clearPendingPlanExecution) built from the pass-through storage
+// helpers.
 const actualSessions = await import('@polo-ai/shared/sessions')
 let planClearGate: Promise<void> | null = null
 mock.module('@polo-ai/shared/sessions', () => ({
@@ -57,9 +57,10 @@ const { SessionManager, createManagedSession, computeRequestUserInputEligibility
 const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@polo-ai/shared/sessions')
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
+const { createCodexSessionModelTurn } = await import('./external-engine-model-adapter.ts')
 
 
-// Round 6/7/8/10 fault-injection and lifecycle coverage for request_user_input:
+// Fault-injection and lifecycle coverage for request_user_input:
 // - question-request flush failure must roll the replacement back and NOT
 //   hand off (agent keeps running, no question_request/complete events)
 // - release failure must not skip the handoff completion (complete still sent)
@@ -96,6 +97,10 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
   afterEach(async () => {
     releaseShouldFail = false
+    // A timed-out test must never leave the plan-clear gate armed — it would
+    // serialize every later test's pre-start section behind a promise nobody
+    // resolves and turn one failure into a suite-wide cascade.
+    planClearGate = null
     // Drop sessions from previous sm instances: their orphaned retry timers
     // survive the test (plain bun test shares one process) and the identity
     // guard passes while the old map still holds the session — clearing the
@@ -253,6 +258,37 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       await new Promise(r => setTimeout(r, 50))
     }
     throw new Error('waitForCondition timed out')
+  }
+
+  /**
+   * Deterministic ordering barrier for the question-state lock: counts lock
+   * ENTRIES so a test can await "the delete's declaration has queued" /
+   * "the resolution has queued" instead of guessing with a timed sleep.
+   * `waitFor(settledBaseline)` resolves once N further sections have STARTED.
+   */
+  function observeQuestionLock(): {
+    entered: () => number
+    waitFor: (entryCount: number, timeoutMs?: number) => Promise<void>
+    restore: () => void
+  } {
+    const inner = sm as unknown as {
+      withQuestionStateLock: (id: string, critical: () => Promise<unknown>) => Promise<unknown>
+    }
+    const real = inner.withQuestionStateLock.bind(sm)
+    let entries = 0
+    inner.withQuestionStateLock = (id: string, critical: () => Promise<unknown>) => {
+      entries++
+      return real(id, critical)
+    }
+    return {
+      entered: () => entries,
+      waitFor: async (entryCount: number, timeoutMs = 5000) => {
+        await waitForCondition(() => entries >= entryCount, timeoutMs)
+        // Let the section's first synchronous statements run.
+        await new Promise(r => setImmediate(r))
+      },
+      restore: () => { inner.withQuestionStateLock = real },
+    }
   }
 
   it('question-request flush failure rolls back the pending replacement and REJECTS (no handoff, no fake success)', async () => {
@@ -422,7 +458,14 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       if (calls === 1) return hung
       return real.call(sm, id)
     }
-    return { release: settle }
+    return {
+      release: settle,
+      /** Barrier: the gated (first) flush has actually been entered. */
+      entered: async () => {
+        await waitForCondition(() => calls >= 1)
+        await new Promise(r => setImmediate(r))
+      },
+    }
   }
 
   it('an answer submitted while a stop flush is paused waits for the lock; a FAILED clear keeps the pending and the answer commits', async () => {
@@ -431,11 +474,13 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // Resume stub: the accepted answer kicks resumePendingAgentTurn → sendMessage.
     ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
 
-    const { release } = hangFirstFlush()
+    const lockObs = observeQuestionLock()
+    const baseline = lockObs.entered()
+    const { release, entered: flushEntered } = hangFirstFlush()
 
     // Window A: stop (its staged clear flush hangs).
     const stopPromise = sm.cancelProcessing('f-conv-1')
-    await new Promise(r => setTimeout(r, 30))
+    await flushEntered()
     // STAGED visibility: the pending question is NOT exposed as absent while
     // the durable clear is in flight.
     expect(sm.getPendingQuestion('f-conv-1')?.requestId).toBe(request.requestId)
@@ -445,7 +490,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     const answerPromise = sm.respondToQuestion('f-conv-1', makeAnswerResolution(request))
     let answerSettled = false
     void answerPromise.then(() => { answerSettled = true })
-    await new Promise(r => setTimeout(r, 30))
+    await lockObs.waitFor(baseline + 2)
     expect(answerSettled).toBe(false)
 
     // The paused clear FAILS: the lifecycle surfaces the error with the
@@ -474,14 +519,16 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     seedSession('f-conv-2', { pendingQuestion: request, isProcessing: false })
     ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
 
-    const { release } = hangFirstFlush()
+    const lockObs2 = observeQuestionLock()
+    const baseline2 = lockObs2.entered()
+    const { release, entered: flushEntered2 } = hangFirstFlush()
 
     const stopPromise = sm.cancelProcessing('f-conv-2')
-    await new Promise(r => setTimeout(r, 30))
+    await flushEntered2()
     const answerPromise = sm.respondToQuestion('f-conv-2', makeAnswerResolution(request))
     let answerSettled = false
     void answerPromise.then(() => { answerSettled = true })
-    await new Promise(r => setTimeout(r, 30))
+    await lockObs2.waitFor(baseline2 + 2)
     expect(answerSettled).toBe(false)
 
     // The paused clear COMMITS: the question is terminally resolved — the
@@ -757,13 +804,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // The answer holds the lock with its flush hung; memory already shows the
     // intermediate state (pending cleared, resume armed).
+    const lockObs3 = observeQuestionLock()
+    const baseline3 = lockObs3.entered()
     const answerPromise = sm.respondToQuestion('f-arch-race', makeAnswerResolution(request))
-    await new Promise(r => setTimeout(r, 30))
+    await lockObs3.waitFor(baseline3 + 1)
 
     // The archive is called NOW — a pre-lock snapshot would read the
     // intermediate state (pending=undefined, resume=armed) as "prev".
     const archivePromise = sm.archiveSession('f-arch-race')
-    await new Promise(r => setTimeout(r, 30))
+    await lockObs3.waitFor(baseline3 + 2)
 
     // The answer's flush FAILS: the resolution rolls back — pending is
     // RESTORED and the resume state disarmed — then releases the lock.
@@ -809,13 +858,16 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-1', () => hungLock)
 
+    const lockObs4 = observeQuestionLock()
+    const baseline4 = lockObs4.entered()
+
     // The resolution queues FIRST — it acquires the lock before the delete's
     // declaration, so it commits legitimately.
     const answerPromise = sm.respondToQuestion('f-del-1', makeAnswerResolution(request))
-    await new Promise(r => setTimeout(r, 30))
+    await lockObs4.waitFor(baseline4 + 1)
 
     const deletePromise = sm.deleteSession('f-del-1')
-    await new Promise(r => setTimeout(r, 10))
+    await lockObs4.waitFor(baseline4 + 2)
     releaseLock()
 
     expect(await answerPromise).toEqual({ status: 'accepted' })
@@ -842,13 +894,16 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
       .withQuestionStateLock('f-del-2', () => hungLock)
 
+    const lockObs5 = observeQuestionLock()
+    const baseline5 = lockObs5.entered()
+
     const deletePromise = sm.deleteSession('f-del-2')
-    await new Promise(r => setTimeout(r, 30))
+    await lockObs5.waitFor(baseline5 + 1)
 
     // The resolution queues SECOND — it commits after the declaration
     // (tombstone + availability removal) and must observe session_missing.
     const answerPromise = sm.respondToQuestion('f-del-2', makeAnswerResolution(request))
-    await new Promise(r => setTimeout(r, 30))
+    await lockObs5.waitFor(baseline5 + 2)
     releaseLock()
 
     expect(await answerPromise).toEqual({ status: 'session_missing' })
@@ -1312,33 +1367,34 @@ describe('request_user_input fault injection + stop lifecycle', () => {
   // (getSessionExternalModelToolset) and its tool call reaches the durable
   // handoff through its own stdio connection to the spawned server.
 
-  it('cross-process loop: the externally registered session runs the MODEL against the driver-owned sidecar into the durable handoff (ONE requestId)', async () => {
+  it('cross-process loop: the externally registered session runs the MODEL (harness process over the driver proxy) into the durable handoff (ONE requestId)', async () => {
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
 
     await sm.startSessionMcpHost({
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    // PRODUCTION registration + turn launch + MODEL: the registered model
-    // layer discovers request_user_input in the model-visible toolset of the
-    // driver-owned sidecar and calls it — stdio → HTTP → durable handoff.
+    // PRODUCTION registration + turn launch + MODEL: the production adapter
+    // starts the harness (model process), which natively discovers
+    // request_user_input via tools/list over the driver-mediated proxy and
+    // calls it — proxy → sidecar → HTTP → durable handoff.
     seedExternalSession('f-mcp-loop')
     const request = makeQuestionRequest('f-mcp-loop')
-    const adapter: import('./external-engine-driver.ts').ExternalEngineModelTurn = {
-      async runModelTurn({ prompt, listTools, callTool }) {
-        const tools = await listTools()
-        expect(tools.map(t => t.name)).toContain('request_user_input')
-        const result = await callTool('request_user_input', { questions: request.questions })
-        expect(result.isError).toBe(false)
-        expect(JSON.stringify(result.content)).toContain('Waiting for user input')
-      },
-    }
-    ;(sm as unknown as { setExternalEngineModelAdapter: (m: import('./external-engine-driver.ts').ExternalEngineModelTurn) => void }).setExternalEngineModelAdapter(adapter)
+    ;(sm as unknown as { setExternalEngineModelAdapter: (m: unknown) => void }).setExternalEngineModelAdapter(
+      createCodexSessionModelTurn({
+        resolveCodexCommand: () => ({
+          command: process.execPath,
+          args: [join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs'), JSON.stringify({ questions: request.questions })],
+        }),
+      }),
+    )
     patchPrivateFlush()
     ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
-    await sm.sendMessage('f-mcp-loop', 'turn one', [], [], { invocationSource: 'desktop' })
-    // The model turn runs concurrently — wait for its durable handoff.
-    await waitForCondition(() => sm.getPendingQuestion('f-mcp-loop') !== null, 20000)
+    await sm.sendMessage('f-mcp-loop', 'please ask me', [], [], { invocationSource: 'desktop' })
+
+    // The model turn runs concurrently (harness boots, discovers the toolset
+    // natively, calls the tool) — wait for its durable handoff.
+    await waitForCondition(() => sm.getPendingQuestion('f-mcp-loop') !== null, 45000)
 
     const pending = sm.getPendingQuestion('f-mcp-loop')
     expect(pending).not.toBeNull()
@@ -1363,19 +1419,18 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    // The registered model layer sees a toolset WITHOUT request_user_input
-    // and its tool call fails closed.
-    const ndAdapter: import('./external-engine-driver.ts').ExternalEngineModelTurn = {
-      async runModelTurn({ listTools, callTool }) {
-        const tools = await listTools()
-        expect(tools.map(t => t.name)).not.toContain('request_user_input')
-        const result = await callTool('request_user_input', { questions: makeQuestionRequest('f-mcp-nd').questions })
-        expect(result.isError).toBe(true)
-      },
-    }
-    ;(sm as unknown as { setExternalEngineModelAdapter: (m: import('./external-engine-driver.ts').ExternalEngineModelTurn) => void }).setExternalEngineModelAdapter(ndAdapter)
+    // The production adapter starts the harness; its native tools/list
+    // discovery sees NO request_user_input and its tool call fails closed.
+    ;(sm as unknown as { setExternalEngineModelAdapter: (m: unknown) => void }).setExternalEngineModelAdapter(
+      createCodexSessionModelTurn({
+        resolveCodexCommand: () => ({
+          command: process.execPath,
+          args: [join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs'), JSON.stringify({ questions: makeQuestionRequest('f-mcp-nd').questions }), 'messaging turn'],
+        }),
+      }),
+    )
     await sm.sendMessage('f-mcp-nd', 'messaging turn', [], [], { invocationSource: 'messaging' })
-    await waitForCondition(() => !getManaged('f-mcp-nd').isProcessing, 15000)
+    await waitForCondition(() => !getManaged('f-mcp-nd').isProcessing, 30000)
 
     expect(sm.getPendingQuestion('f-mcp-nd')).toBeNull()
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
@@ -1659,7 +1714,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => String(e.type).startsWith('question_'))).toEqual([])
   })
 
-  // Round 10 + review round 1 fixes: the adjudicated Edit Popover exception
+  // The adjudicated Edit Popover exception
   // (request_id 83c0c3ce-r10-d1) is bound to a SERVER-VERIFIABLE session
   // origin, not a per-turn marker. Only a session created with origin
   // 'edit-popover', hidden AND mini, on a desktop turn gets
@@ -1785,8 +1840,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       expect(flagCapture.last).toBe(false)
     })
 
-    // Review round 1, issue #2: the answer→resume path must preserve the
-    // trusted entry capability — the Edit Popover's hidden+mini session keeps
+    // CAPABILITY INVARIANT: the answer→resume path preserves the trusted
+    // entry capability — the Edit Popover's hidden+mini session keeps
     // request_user_input on the resumed turn (and its retries), instead of
     // being re-inferred as an ordinary desktop turn.
     it('answering a popover question resumes with the capability intact so the agent can ask again', async () => {
@@ -1870,7 +1925,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       }
     })
 
-    // Review round 1, issue #1 + round 2, issue #2: the popover's hidden
+    // REACHABILITY INVARIANT: the popover's hidden
     // session must stay reachable while a question is pending — across reopen
     // (in-memory lookup) and restart (on-disk header scan) — and the lookup
     // must be SCOPED to the requesting workspace + popover owner so
@@ -1979,7 +2034,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect(await sm.getEditPopoverPendingSession('ws_test', OWNER_A)).toBeNull()
       })
 
-      // Round 8, issue 1: a session-list I/O failure or a hydration failure
+      // A session-list I/O failure or a hydration failure
       // is TRANSIENT — the lookup must REJECT (RPC error → renderer retries)
       // instead of returning an authoritative null that would release the
       // restore gate and orphan the still-persisted pending question.
@@ -2018,7 +2073,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
           .rejects.toThrow('temporarily unavailable')
       })
 
-      // Round 3, issue 3: cold recovery must hydrate the FULL identity from
+      // Cold recovery must hydrate the FULL identity from
       // the header (hidden/origin/owner/preset), answering must not degrade
       // the persisted header, and a follow-up question must be recoverable by
       // the same owner.
@@ -2075,7 +2130,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       })
     })
 
-    // Review round 2, issue #1: the generic creation path can never grant the
+    // ORIGIN INVARIANT: the generic creation path can never grant the
     // 'edit-popover' origin — a forged value is stripped (fail closed), and
     // only the dedicated createEditPopoverSession stamps it server-side.
     describe('trusted origin stamping (generic forge stripped)', () => {
@@ -2137,7 +2192,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         }
       })
 
-      // Round 4, issue 3: a legal owner built from a deep project path (far
+      // A legal owner built from a deep project path (far
       // beyond the old 200-char bound) must create, stamp, and remain
       // recoverable across a restart — no arbitrary truncation.
       it('a deep-path owner beyond 200 chars creates, stamps, and recovers on reopen/restart', async () => {
@@ -2190,7 +2245,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         }
       })
 
-      // Round 3, issues 1+2: the owner is a REQUIRED, server-validated
+      // The owner is a REQUIRED, server-validated
       // identity — a blank/missing owner rejects the creation outright, and a
       // failed durable stamp rolls back to unprivileged (memory + disk). The
       // session must never be "privileged but not persisted".
@@ -2291,12 +2346,12 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       })
     })
 
-    // Round 4, issue 2: the invocation source is bound to the ACTIVE
+    // The invocation source is bound to the ACTIVE
     // processing generation. A messaging/automation message that arrives
     // while a desktop turn is running gets queued — it must never overwrite
     // the running turn's source, so a question asked during that turn still
     // stamps desktop (and the agent flag stays untouched).
-    // Round 6, issue 1: EVERYTHING between the synchronous turn-start claim
+    // EVERYTHING between the synchronous turn-start claim
     // and setProcessing(true) sits inside one cleanup boundary — a
     // pending-plan load failure, a lazy message load failure, or a user
     // message flush failure must release the reservation (and the bound
@@ -2359,7 +2414,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect(m.isProcessing).toBe(false)
       })
 
-      it('followers queued behind a failed turn start are drained (no stranded queue)', async () => {
+      it('followers serialized behind a failed turn start are not lost (no stranded queue)', async () => {
         let chatInvocations = 0
         ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
           chatInvocations++
@@ -2367,8 +2422,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         }
         seedSession('f-clean-3', {})
 
-        // Stall the OWNER at its user-message flush (inside the pre-start
-        // boundary) so a follower can queue behind the held reservation…
+        // Stall the OWNER inside the lock-held pre-start section (its
+        // user-message flush), occupying the linearization boundary…
         let rejectFlush: ((e: Error) => void) | null = null
         const flushGate = new Promise<void>((_resolve, reject) => { rejectFlush = reject })
         const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
@@ -2381,28 +2436,32 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
         const ownerSend = sm.sendMessage('f-clean-3', 'owner message', [], [], { invocationSource: 'desktop' })
         await waitForCondition(() => flushCalls === 1)
+        console.log('DBG T1 flush1', JSON.stringify({ isProc: getManaged('f-clean-3').isProcessing, res: getManaged('f-clean-3').turnStartReserved }))
         expect(getManaged('f-clean-3').turnStartReserved).toBe(true)
 
-        // …then the follower arrives and must queue (its own flush = call #2
-        // goes through immediately).
-        await sm.sendMessage('f-clean-3', 'follower message', [], [], { invocationSource: 'messaging' })
-        expect(getManaged('f-clean-3').messageQueue.length).toBe(1)
+        // …a follower arriving NOW is serialized behind that section: it can
+        // neither queue nor start while the boundary is held.
+        const followerSend = sm.sendMessage('f-clean-3', 'follower message', [], [], { invocationSource: 'messaging' })
+        console.log('DBG T1 follower-fired', JSON.stringify({ isProc: getManaged('f-clean-3').isProcessing, res: getManaged('f-clean-3').turnStartReserved }))
+        void followerSend.then(() => console.log('DBG T1 follower-settled'), e => console.log('DBG T1 follower-rejected', String(e)))
 
         // The owner's flush fails — the reserved turn never starts. The
-        // boundary must release the reservation AND drain the follower.
+        // boundary releases the reservation, and the serialized follower then
+        // claims a fresh turn of its own (no stranded queue, no lost message).
         rejectFlush!(new Error('pre-start flush failed (injected)'))
         await expect(ownerSend).rejects.toThrow('pre-start flush failed (injected)')
-        expect(getManaged('f-clean-3').turnStartReserved).toBe(false)
-        expect(getManaged('f-clean-3').activeTurnSource).toBeUndefined()
+        console.log('DBG T1 owner-rejected', JSON.stringify({ isProc: getManaged('f-clean-3').isProcessing, res: getManaged('f-clean-3').turnStartReserved, q: getManaged('f-clean-3').messageQueue.length }))
+        await followerSend
 
-        // The follower replays as its own turn and completes.
+        await waitForCondition(() => chatInvocations >= 1, 8000)
         await waitForCondition(() => getManaged('f-clean-3').messageQueue.length === 0)
-        await waitForCondition(() => chatInvocations >= 1)
+        await waitForCondition(() => getManaged('f-clean-3').isProcessing === false)
+        expect(getManaged('f-clean-3').turnStartReserved).toBe(false)
         expect((getManaged('f-clean-3') as unknown as { activeTurnSource?: string }).activeTurnSource).toBe('messaging')
       })
     })
 
-    // Round 7, issue 2: the answer→resume path must treat a held turn-start
+    // The answer→resume path must treat a held turn-start
     // reservation as "not startable yet" — entering as a follower would
     // duplicate the single answer message and clear the recovery state
     // without executing the turn.
@@ -2420,41 +2479,42 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         (getManaged(sessionId).messages as Array<Record<string, unknown>>)
           .filter(m => (m as { questionResponse?: unknown }).questionResponse).length
 
-      it('reservation in flight while the answer commits: ONE answer message, resume deferred, and the durable owner turn supersedes the recovery (the agent sees the answer in its context)', async () => {
+      it('the answer is serialized behind the lock-held turn-start section: no interleaved commit, ONE answer message, exactly one answer turn', async () => {
         const factory = makeCountingAgentFactory()
         ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = factory.getOrCreateAgent
         const request = makeQuestionRequest('f-res-resv')
         seedSession('f-res-resv', { pendingQuestion: { ...request, invocationSource: 'desktop' } })
 
-        // Owner claims the turn start, then stalls BEFORE the round-8
-        // critical section (plan-state clear) — the question-state lock stays
-        // FREE so the answer can commit while the reservation is held.
+        // Owner claims the turn start and stalls INSIDE the lock-held
+        // pre-start section (plan-state clear) — the linearization boundary.
         let releaseOwner!: () => void
         planClearGate = new Promise<void>(resolve => { releaseOwner = resolve })
         const ownerSend = sm.sendMessage('f-res-resv', 'owner message', [], [], { invocationSource: 'desktop' })
         await waitForCondition(() => getManaged('f-res-resv').turnStartReserved === true)
 
-        // The answer commits while the reservation is held.
-        const result = await sm.respondToQuestion('f-res-resv', makeAnswerResolution(request))
-        expect(result).toEqual({ status: 'accepted' })
-        // Exactly ONE answer message — the deferred resume must not add one.
-        expect(answerMessageCount('f-res-resv')).toBe(1)
-        expect(getManaged('f-res-resv').pendingAgentResume).toBeDefined()
-        // The resume was deferred: no agent turn has started for it.
-        expect(factory.chats()).toBe(0)
+        // An answer arriving NOW cannot commit: the durable answer commit runs
+        // under the same lock, so no amount of yielding settles it while the
+        // owner section is held — and no answer state is written.
+        const answerPromise = sm.respondToQuestion('f-res-resv', makeAnswerResolution(request))
+        let answerSettled = false
+        void answerPromise.then(() => { answerSettled = true })
+        for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r))
+        expect(answerSettled).toBe(false)
+        expect(answerMessageCount('f-res-resv')).toBe(0)
 
-        // Owner turn proceeds and completes. The owner message was durably
-        // persisted BEFORE the answer was committed, so when the owner turn
-        // claims its generation the (round-8) durable supersede clears the
-        // recovery: the owner turn's context already includes the answer
-        // message, and a separate resume turn would double-run it.
+        // Releasing the section lets the owner commit FIRST, then the answer:
+        // ONE answer message, and the answer turn runs exactly once after the
+        // owner turn completes (the owner context predates the answer).
         releaseOwner!()
         planClearGate = null
         await ownerSend
+        const result = await answerPromise
+        expect(result).toEqual({ status: 'accepted' })
+        expect(answerMessageCount('f-res-resv')).toBe(1)
 
         await waitForCondition(() => getManaged('f-res-resv').pendingAgentResume === undefined, 8000)
         expect(answerMessageCount('f-res-resv')).toBe(1)
-        expect(factory.chats()).toBe(1) // the owner turn consumed the answer context
+        expect(factory.chats()).toBe(2) // owner turn + answer turn
         expect(getManaged('f-res-resv').isProcessing).toBe(false)
       })
 
@@ -2473,19 +2533,17 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect(getManaged('f-res-owner-ok').turnStartReserved).toBe(false)
       })
 
-      it('owner pre-start failure after the answer committed: the answer is preserved, the recovery survives until the real resume executes once', async () => {
+      it('the answer serialized behind a failed turn-start section: the failure preserves the answer, and the armed recovery runs the answer turn exactly once', async () => {
         const factory = makeCountingAgentFactory()
         ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = factory.getOrCreateAgent
         const request = makeQuestionRequest('f-res-owner-fail')
         seedSession('f-res-owner-fail', { pendingQuestion: { ...request, invocationSource: 'desktop' } })
 
-        // Owner claims, then stalls BEFORE the round-8 critical section.
+        // Owner claims the turn start, then stalls INSIDE the lock-held
+        // pre-start section. Its user-message flush (call #1) is gated to
+        // FAIL — the owner turn never starts.
         let releaseOwner!: () => void
         planClearGate = new Promise<void>(resolve => { releaseOwner = resolve })
-
-        // The OWNER's user-message flush fails (pre-start failure). Call #1
-        // is the ANSWER's commit flush (must succeed); call #2 is the
-        // owner's — gated to fail.
         let rejectFlush: ((e: Error) => void) | null = null
         const flushGate = new Promise<void>((_resolve, reject) => { rejectFlush = reject })
         // The gate may be rejected slightly before the owner's flush awaits
@@ -2495,18 +2553,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         let flushCalls = 0
         ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
           flushCalls++
-          if (flushCalls === 2) return flushGate.then(() => { throw new Error('pre-start flush failed (injected)') })
+          if (flushCalls === 1) return flushGate.then(() => { throw new Error('pre-start flush failed (injected)') })
           return realFlush.call(sm, id)
         }
         const ownerSend = sm.sendMessage('f-res-owner-fail', 'owner message', [], [], { invocationSource: 'desktop' })
         await waitForCondition(() => getManaged('f-res-owner-fail').turnStartReserved === true)
 
-        // The answer commits while the reservation is held; the resume defers.
-        const result = await sm.respondToQuestion('f-res-owner-fail', makeAnswerResolution(request))
-        expect(result).toEqual({ status: 'accepted' })
-        expect(answerMessageCount('f-res-owner-fail')).toBe(1)
-        expect(getManaged('f-res-owner-fail').pendingAgentResume).toBeDefined()
-        expect(factory.chats()).toBe(0)
+        // The answer is serialized behind that failing section — it commits
+        // only once the lock is released.
+        const answerPromise = sm.respondToQuestion('f-res-owner-fail', makeAnswerResolution(request))
 
         // The owner turn never starts (pre-start failure).
         releaseOwner!()
@@ -2514,13 +2569,13 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         rejectFlush!(new Error('pre-start flush failed (injected)'))
         await expect(ownerSend).rejects.toThrow('pre-start flush failed (injected)')
 
-        // The owner failure must NOT clear the armed recovery — the answer
-        // turn has not executed yet.
-        expect(getManaged('f-res-owner-fail').pendingAgentResume).toBeDefined()
+        // The answer still commits, exactly once.
+        const result = await answerPromise
+        expect(result).toEqual({ status: 'accepted' })
         expect(answerMessageCount('f-res-owner-fail')).toBe(1)
 
-        // The deferred retry eventually runs the answer turn EXACTLY once,
-        // and only then clears the recovery.
+        // The armed recovery runs the answer turn EXACTLY once, and only then
+        // clears the recovery.
         await waitForCondition(() => getManaged('f-res-owner-fail').pendingAgentResume === undefined, 8000)
         expect(answerMessageCount('f-res-owner-fail')).toBe(1)
         expect(factory.chats()).toBe(1)
@@ -2587,12 +2642,14 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect(flagCapture.last).toBe(false)
       })
 
-      // Round 5, issue 2: the turn-start claim + source binding must be
+      // The turn-start claim + source binding must be
       // ATOMIC with respect to the pre-processing awaits. While the desktop
-      // FIRST message's pre-processing flush is stalled, a concurrent
-      // messaging send must NOT claim a second turn or overwrite the
-      // reserved source — it queues, and the desktop turn keeps asking.
-      it('concurrent sends during a stalled pre-processing flush: reservation holds desktop, messaging queues, replay applies its own source', async () => {
+      // FIRST message's pre-processing flush is stalled (inside the lock-held
+      // linearization section), a concurrent messaging send is serialized
+      // behind it: it can neither claim a second turn nor overwrite the
+      // reserved source. Once the section settles, the desktop turn owns the
+      // generation and the messaging message queues with ITS OWN options.
+      it('concurrent sends during a stalled pre-processing flush: serialization holds the reservation for desktop, messaging queues after, replay applies its own source', async () => {
         // Gated agent factory with flag capture (invocation 1 blocks until
         // the desktop turn's question is stamped).
         let releaseTurn: (() => void) | null = null
@@ -2648,18 +2705,28 @@ describe('request_user_input fault injection + stop lifecycle', () => {
         expect(reserved.activeTurnSource).toBe('desktop')
         expect(reserved.invocationSource).toBe('desktop')
 
-        // Concurrent messaging send while the reservation is held: it must
-        // take the steer/queue branch — queued with its own options, never
-        // claiming a second turn or overwriting the reserved source.
-        await sm.sendMessage('f-atomic-1', 'messaging reply', [], [], { invocationSource: 'messaging' })
-        expect(getManaged('f-atomic-1').messageQueue.length).toBe(1)
+        // Concurrent messaging send while the flush is stalled: it is
+        // SERIALIZED behind the lock-held section — it can neither queue nor
+        // claim a second turn, and the reserved source is untouched.
+        const messagingSend = sm.sendMessage('f-atomic-1', 'messaging reply', [], [], { invocationSource: 'messaging' })
+        let messagingSettled = false
+        void messagingSend.then(() => { messagingSettled = true })
+        for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r))
+        expect(messagingSettled).toBe(false)
+        expect(getManaged('f-atomic-1').messageQueue.length).toBe(0)
         expect(getManaged('f-atomic-1').activeTurnSource).toBe('desktop')
         expect(getManaged('f-atomic-1').invocationSource).toBe('desktop')
         expect(getManaged('f-atomic-1').isProcessing).toBe(false)
         expect(getManaged('f-atomic-1').turnStartReserved).toBe(true)
 
-        // Release the flush — the desktop turn proceeds and asks a question.
+        // Release the flush — the desktop turn commits its own generation
+        // FIRST, and only then does the messaging message queue (its own
+        // options, the running turn's source untouched).
         releaseFlush!()
+        await messagingSend
+        expect(getManaged('f-atomic-1').messageQueue.length).toBe(1)
+        expect(getManaged('f-atomic-1').activeTurnSource).toBe('desktop')
+        expect(getManaged('f-atomic-1').invocationSource).toBe('desktop')
         await waitForCondition(() => chatInvocations === 1)
         const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('f-atomic-1')
         const questions = makeQuestionRequest('f-atomic-1').questions
@@ -2678,7 +2745,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       })
     })
 
-    // Round 8, issue 2: the pending answer→resume supersede is applied only
+    // The pending answer→resume supersede is applied only
     // AFTER the replacement message is durably persisted — a pre-start
     // failure (pending-plan cleanup, lazy load, user-message flush) must
     // preserve the armed recovery so the deferred retry can still complete
@@ -2866,7 +2933,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       }
     })
 
-    // Round 3, issue 5: every invocationSource DEFAULT is internal (fail
+    // Every invocationSource DEFAULT is internal (fail
     // closed). Legacy/malformed persisted state without a source must never
     // upgrade to a desktop resume — neither on ordinary sessions nor on the
     // privileged edit-popover shape.
@@ -2966,7 +3033,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     })
   })
 
-  // Round 7, issues #2/#3: the resume path must drive the REAL sendMessage
+  // The resume path must drive the REAL sendMessage
   // (mocking getOrCreateAgent, not sendMessage) so pre-chat failures exercise
   // the processing-reset boundary, the retry drives the real entry again
   // without duplicating the user message, and the retry timer is owned by the
@@ -3128,7 +3195,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(agentInitCalls).toBe(1)
   })
 
-  // Round 7, issue #3: a failed durable clear AFTER a fully executed turn is
+  // A failed durable clear AFTER a fully executed turn is
   // NOT a resume failure — no fake "could not resume", no turn re-execution;
   // the terminal marker keeps a restart from re-running the answer.
   it('success → clear flush failure: turn executes once, no fake resume error, terminal marker persists, restart does not re-run', async () => {
@@ -3178,7 +3245,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // Restart simulation: a fresh SessionManager hydrates the TERMINAL marker
     // and clears it WITHOUT re-executing the answer turn.
     //
-    // IMPORTANT (round 8, issue #3): sm2 keeps the REAL sendMessage — wrapped
+    // NOTE: sm2 keeps the REAL sendMessage — wrapped
     // in a counting delegate that calls through to the original. A total stub
     // would silently swallow a wrongful resume and let the test pass.
     flushFailAtCall = 0

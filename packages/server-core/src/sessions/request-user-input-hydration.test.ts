@@ -12,8 +12,8 @@ import {
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 import { buildQuestionFixtures } from './request-user-input-fixtures.ts'
 
-// Review round 2, issue #1: restart hydration must preserve the pending
-// question through the metadata path:
+// Restart hydration INVARIANT: the pending question survives the metadata
+// path:
 //   initialize → (loadSessionsFromDisk) → header → metadata → ManagedSession
 //   → getSessions() carries hasPendingQuestion + requestId + full payload
 //   → opening the session restores the SAME requestId (no message load needed

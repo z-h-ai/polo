@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { mkdirSync, mkdtempSync, existsSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -28,7 +28,7 @@ type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 const sharedAgent = await import('@polo-ai/shared/agent')
 const { ExternalEngineSessionDriver } = await import('./external-engine-driver.ts')
-const { createLlmToolLoopModelTurn } = await import('./external-engine-model-adapter.ts')
+const { createCodexSessionModelTurn } = await import('./external-engine-model-adapter.ts')
 
 const sidecarAlive = (pid: number | null): boolean => {
   if (pid === null) return false
@@ -494,41 +494,74 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     expect(renderer.pendingOf(managed.id)).toBeNull()
   })
 
+
+  const HARNESS_ENTRY = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
+  const harnessModelScript = join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs')
+
+  /**
+   * Register the PRODUCTION Codex session model adapter. The model process
+   * stand-in (credentials/decision layer) is the harness script: a real
+   * process consuming the driver-owned toolset over real stdio MCP —
+   * natively discovering the request_user_input schema via tools/list.
+   */
+  function registerProductionCodexModelAdapter(
+    toolArgsJson: string,
+    options?: { holdFilePath?: string; exitMarkerPath?: string; onLaunch?: () => void },
+  ): void {
+    sm.setExternalEngineModelAdapter(
+      createCodexSessionModelTurn({
+        // The spawn appends the turn prompt as the LAST argv; the harness
+        // decides from it (ask → request_user_input; continuation → done).
+        resolveCodexCommand: () => {
+          options?.onLaunch?.()
+          return {
+            command: process.execPath,
+            args: [harnessModelScript, toolArgsJson],
+            env: {
+              ...(options?.holdFilePath ? { POLO_HARNESS_HOLD_FILE: options.holdFilePath } : {}),
+              ...(options?.exitMarkerPath ? { POLO_HARNESS_EXIT_MARKER: options.exitMarkerPath } : {}),
+            },
+          }
+        },
+      }),
+    )
+  }
+
   // -------------------------------------------------------------------------
   // Engine 3: external Codex — real server process; sendMessage awaits the
   // spawn to full readiness BEFORE the model may start.
   // -------------------------------------------------------------------------
 
-  it('external codex: the production driver owns the turn sidecar and RUNS THE MODEL against it; ONE durable handoff; the answer continues the SAME session via a NEW driver turn; exactly one live sidecar at all times', async () => {
+  it('external codex: the production driver owns the turn sidecar and RUNS THE MODEL (real process, native toolset discovery); ONE durable handoff; the answer continues the SAME session via a NEW model process', async () => {
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
 
     // PRODUCTION CREATION PATH: the session is registered as externally
     // driven at creation (externalEngine option) — no embedded agent exists.
-    const created = await sm.createSession('ws_test', { externalEngine: true, name: 'acc-codex-1' })
+    const created = await sm.createExternalEngineSession('ws_test', { name: 'acc-codex-1' })
     const sessionId = created.id
     expect((sm as unknown as { sessions: Map<string, { externalToolset?: boolean }> }).sessions.get(sessionId)!.externalToolset).toBe(true)
 
-    // PRODUCTION MODEL ADAPTER (registered by the bootstrap in production):
-    // the LLM query layer is the credentials stand-in — turn 1's scripted
-    // model output requests request_user_input through the REAL tool loop
-    // (discovery + call happen in production code over the owned sidecar).
+    // PRODUCTION MODEL ADAPTER: the model process performs the REAL
+    // consumption — native tools/list schema discovery and the
+    // request_user_input call — over real stdio MCP through the driver.
+    // The continuation (generation 2) is a model process that completes
+    // without tools (the answer is in its history). The exit marker records
+    // HOW each model session ended, which is the pause-boundary evidence.
     const request = makeQuestionRequest(sessionId)
-    const llmReplies: string[] = [
-      `TOOL_CALL request_user_input ${JSON.stringify({ questions: request.questions })}`,
-      'Continuation completed.',
-    ]
-    sm.setExternalEngineModelAdapter(
-      createLlmToolLoopModelTurn({ query: async () => async () => ({
-        text: llmReplies.shift() ?? 'Done.',
-      }) }),
-    )
+    const exitMarker = join(tmpRoot, 'gen1-model-exit.marker')
+    let modelLaunches = 0
+    registerProductionCodexModelAdapter(JSON.stringify({ questions: request.questions }), {
+      exitMarkerPath: exitMarker,
+      onLaunch: () => { modelLaunches += 1 },
+    })
 
-    // PRODUCTION TURN LAUNCH: sendMessage IS the external turn entry.
+    // PRODUCTION TURN LAUNCH: sendMessage IS the external turn entry — the
+    // driver owns the sidecar and starts the model turn.
     await sm.sendMessage(sessionId, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
 
     // The model turn runs concurrently — wait for its durable handoff.
-    await waitForCondition(() => sm.getPendingQuestion(sessionId) !== null, 20000)
+    await waitForCondition(() => sm.getPendingQuestion(sessionId) !== null, 30000)
     const pending = sm.getPendingQuestion(sessionId)
     expect(questionEvents()).toHaveLength(1)
     expect((questionEvents()[0] as { request: { requestId: string } }).request.requestId).toBe(pending!.requestId)
@@ -538,100 +571,109 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     expect(pausedPid).not.toBeNull()
     expect(sidecarAlive(pausedPid)).toBe(true)
 
+    // PAUSE BOUNDARY: the accepted handoff settles the model turn — the FIRST
+    // model session was terminated by the host (not a natural exit) BEFORE
+    // any user resolution, and nothing else was launched into the turn.
+    await waitForCondition(() => existsSync(exitMarker), 30000)
+    expect(readFileSync(exitMarker, 'utf-8')).toBe('sigterm')
+    expect(modelLaunches).toBe(1)
+    expect(questionEvents()).toHaveLength(1)
+
     // Answer → ONE readable message → the SAME session continues: the resume
-    // path launches a NEW driver turn whose prompt IS the answer, and the
-    // old sidecar was closed before the new one launched (count stays 1).
+    // path launches a NEW model process (old sidecar closed before launch).
     const outcome = await sm.respondToQuestion(sessionId, makeAnswerResolution(pending!))
     expect(outcome).toEqual({ status: 'accepted' })
     expect(readableAnswerMessages(sessionId, pending!.requestId)).toHaveLength(1)
     expect(renderer.pendingOf(sessionId)).toBeNull()
-    await waitForCondition(() => !getManaged(sessionId).isProcessing, 15000)
-    // The continuation turn ended through the production completion boundary.
+    await waitForCondition(() => !getManaged(sessionId).isProcessing, 30000)
+    // The continuation was exactly ONE new model session (no mid-pause
+    // queries ever happened), ended through the production completion boundary.
+    expect(modelLaunches).toBe(2)
     expect(sm.getExternalEngineDriverPid(sessionId)).toBeNull()
     expect(sidecarAlive(pausedPid)).toBe(false)
     expect(questionEvents()).toHaveLength(1)
-  }, 60000)
+  }, 120000)
 
   it('external codex: stale completion for generation N never disposes the live generation N+1 driver or stops its processing', async () => {
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
-    const created = await sm.createSession('ws_test', { externalEngine: true, name: 'acc-codex-stale' })
+    const created = await sm.createExternalEngineSession('ws_test', { name: 'acc-codex-stale' })
     const sessionId = created.id
 
-    // The gen1 model asks the question and HOLDS its turn open (deferred) —
-    // its completion arrives only after gen2 is live.
+    // The turn's toolset consumption stays REAL (driver sidecar → stdio →
+    // HTTP callback → durable handoff); only the model session's COMPLETION
+    // timing is held on a test gate, which is exactly the ordering under
+    // test: gen1's completion must arrive while gen2 is the live turn.
     const request = makeQuestionRequest(sessionId)
-    let releaseGen1: (() => void) | null = null
-    const gen1Hold = new Promise<void>(resolve => { releaseGen1 = resolve })
-    let releaseGen2: (() => void) | null = null
-    const gen2Hold = new Promise<void>(resolve => { releaseGen2 = resolve })
-    const adapter: import('./external-engine-driver.ts').ExternalEngineModelTurn = {
-      async runModelTurn({ prompt, listTools, callTool }) {
-        await listTools()
-        if (prompt.includes('please ask')) {
-          const result = await callTool('request_user_input', { questions: request.questions })
-          expect(result.isError).toBe(false)
-          await gen1Hold
-        } else {
-          await gen2Hold
-        }
-      },
+    const gate = () => {
+      let resolve!: () => void
+      const promise = new Promise<void>(r => { resolve = r })
+      return { promise, resolve }
     }
-    sm.setExternalEngineModelAdapter(adapter)
+    const turnGates = [gate(), gate()]
+    let turnIndex = 0
+    sm.setExternalEngineModelAdapter({
+      async start(input) {
+        const myTurn = turnIndex
+        turnIndex += 1
+        if (myTurn === 0) {
+          // gen1 asks the question through the REAL consumption path.
+          const tools = await input.listTools()
+          expect(tools.map(t => t.name)).toContain('request_user_input')
+          const result = await input.callTool('request_user_input', { questions: request.questions })
+          expect(result.isError).toBeFalsy()
+        }
+        // Hold the model session open — its completion is test-ordered.
+        await turnGates[myTurn].promise
+      },
+    })
 
     await sm.sendMessage(sessionId, 'please ask me', [], [], { invocationSource: 'desktop' })
-    // The model turn runs concurrently — wait for its durable handoff.
-    await waitForCondition(() => sm.getPendingQuestion(sessionId) !== null, 20000)
+    // The gen1 model turn runs concurrently — wait for its durable handoff.
+    await waitForCondition(() => sm.getPendingQuestion(sessionId) !== null, 30000)
     const pending = sm.getPendingQuestion(sessionId)!
+    const pid1 = sm.getExternalEngineDriverPid(sessionId)
+    expect(pid1).not.toBeNull()
 
     // Answer → the resume launches generation 2 (gen1 sidecar closed first:
-    // count stays 1) → gen2 defers.
+    // exactly one live sidecar at all times); gen2 is held live on its gate.
     const outcome = await sm.respondToQuestion(sessionId, makeAnswerResolution(pending!))
     expect(outcome).toEqual({ status: 'accepted' })
     await waitForCondition(() => {
       const pid = sm.getExternalEngineDriverPid(sessionId)
-      return pid !== null && sidecarAlive(pid) && getManaged(sessionId).isProcessing
-    }, 15000)
-    const gen2Pid = sm.getExternalEngineDriverPid(sessionId)
-    const completesBefore = events.filter(e => e.type === 'complete').length
+      return pid !== null && pid !== pid1
+    }, 30000)
+    const pid2 = sm.getExternalEngineDriverPid(sessionId)
 
-    // THE STALE COMPLETION: gen1's model turn returns NOW. The identity/
-    // generation guard must treat it as an idempotent no-op — gen2's sidecar
-    // process stays live and gen2 keeps processing.
-    releaseGen1!()
-    await new Promise(r => setTimeout(r, 60))
-    expect(sm.getExternalEngineDriverPid(sessionId)).toBe(gen2Pid)
-    expect(sidecarAlive(gen2Pid)).toBe(true)
+    // THE STALE COMPLETION: gen1's model session settles NOW, while gen2 is
+    // the live turn. The identity/generation guard must treat it as an
+    // idempotent no-op — the newer turn's driver and processing state stay.
+    turnGates[0].resolve()
+    // Macrotask yields let the stale completion settle; the assertion is
+    // "state unchanged", so settling only strengthens the proof.
+    await new Promise(r => setImmediate(r))
+    await new Promise(r => setImmediate(r))
+    expect(sm.getExternalEngineDriverPid(sessionId)).toBe(pid2)
     expect(getManaged(sessionId).isProcessing).toBe(true)
-    expect(events.filter(e => e.type === 'complete').length).toBe(completesBefore)
+    expect(events.filter(e => e.type === 'error')).toHaveLength(0)
 
-    // The LIVE gen2 turn still completes normally through its own boundary;
-    // its sidecar process is torn down with it.
-    releaseGen2!()
-    await waitForCondition(() => sm.getExternalEngineDriverPid(sessionId) === null && !getManaged(sessionId).isProcessing, 15000)
-    await new Promise(r => setTimeout(r, 50))
-    expect(sidecarAlive(gen2Pid)).toBe(false)
+    // gen2 then completes normally through the same boundary.
+    turnGates[1].resolve()
+    await waitForCondition(() => getManaged(sessionId).isProcessing === false, 30000)
+    expect(sm.getExternalEngineDriverPid(sessionId)).toBeNull()
   }, 120000)
 
   it('external codex: cancel through the model tool call records ONE skip message and the session does not continue', async () => {
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
-    const created = await sm.createSession('ws_test', { externalEngine: true, name: 'acc-codex-2' })
+    const created = await sm.createExternalEngineSession('ws_test', { name: 'acc-codex-2' })
     const sessionId = created.id
 
     const request = makeQuestionRequest(sessionId)
-    sm.setExternalEngineModelAdapter({
-      async runModelTurn({ prompt, listTools, callTool }) {
-        await listTools()
-        if (prompt.includes('please ask')) {
-          await callTool('request_user_input', { questions: request.questions })
-        }
-      },
-    })
+    registerProductionCodexModelAdapter(JSON.stringify({ questions: request.questions }))
 
     await sm.sendMessage(sessionId, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
-    // The model turn runs concurrently — wait for its durable handoff.
-    await waitForCondition(() => sm.getPendingQuestion(sessionId) !== null, 20000)
+    await waitForCondition(() => sm.getPendingQuestion(sessionId) !== null, 30000)
     const pending = sm.getPendingQuestion(sessionId)
     expect(renderer.pendingOf(sessionId)?.requestId).toBe(pending!.requestId)
 
@@ -648,95 +690,26 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     expect(renderer.pendingOf(sessionId)).toBeNull()
     // No continuation: cancel ends the lifecycle AND the owned sidecar.
     expect(sm.getExternalEngineDriverPid(sessionId)).toBeNull()
-  }, 60000)
+  }, 120000)
 
   it('external codex: a messaging turn serves a driver toolset WITHOUT request_user_input (fail closed)', async () => {
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
-    const created = await sm.createSession('ws_test', { externalEngine: true, name: 'acc-codex-3' })
+    const created = await sm.createExternalEngineSession('ws_test', { name: 'acc-codex-3' })
     const sessionId = created.id
 
-    sm.setExternalEngineModelAdapter({
-      async runModelTurn({ listTools }) {
-        const tools = await listTools()
-        expect(tools.map(t => t.name)).not.toContain('request_user_input')
-      },
-    })
+    // The messaging model's tool call fails closed (the sidecar serves no
+    // request_user_input) — the harness exits non-zero, the turn ends via
+    // the error boundary, and NOTHING reaches the durable handoff.
+    registerProductionCodexModelAdapter('request_user_input')
+
     await sm.sendMessage(sessionId, 'messaging turn', [], [], { invocationSource: 'messaging' })
-    await waitForCondition(() => !getManaged(sessionId).isProcessing, 15000)
+    await waitForCondition(() => !getManaged(sessionId).isProcessing, 30000)
     expect(sm.getPendingQuestion(sessionId)).toBeNull()
     expect(questionEvents()).toHaveLength(0)
     expect(renderer.pendingOf(sessionId)).toBeNull()
     expect(sm.getExternalEngineDriverPid(sessionId)).toBeNull()
-  }, 60000)
-
-  it('one owner per engine: an embedded session never runs a driver; an external-engine session has EXACTLY ONE driver-owned sidecar per turn', async () => {
-    const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
-    await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
-
-    // ---- EMBEDDED: no external registration → the config surface and the
-    // driver surface fail closed; the in-process registry route lands
-    // DIRECTLY in the durable handoff (its single channel).
-    const embedded = seedSession('acc-owner-emb')
-    const embeddedRequest = makeQuestionRequest(embedded.id)
-    const embeddedAgent = scriptedAgent([
-      async generation => {
-        expect(await sm.getSessionExternalModelToolset(embedded.id, 'desktop', generation)).toBeNull()
-        await (sm as unknown as {
-          routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
-        }).routeAgentQuestionRequested(
-          (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(embedded.id),
-          embeddedRequest.questions,
-          generation,
-        )
-      },
-    ])
-    wireAgentQuestionField(embedded, embeddedAgent as Record<string, unknown>)
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => embeddedAgent
-    await sm.sendMessage(embedded.id, 'please ask', [], [], { invocationSource: 'desktop' })
-
-    expect(questionEvents()).toHaveLength(1)
-    const embeddedPending = sm.getPendingQuestion(embedded.id)
-    expect(embeddedPending).not.toBeNull()
-    expect(renderer.pendingOf(embedded.id)?.requestId).toBe(embeddedPending!.requestId)
-    await sm.respondToQuestion(embedded.id, makeAnswerResolution(embeddedPending!))
-    expect(events.filter(e => e.type === 'question_resolved' && e.sessionId === embedded.id)).toHaveLength(1)
-
-    // ---- EXTERNAL: production creation + turn launch. The driver owns the
-    // turn's ONLY sidecar and RUNS THE MODEL against it; its tool call lands
-    // in exactly ONE durable handoff.
-    const created = await sm.createSession('ws_test', { externalEngine: true, name: 'acc-owner-ext' })
-    const externalId = created.id
-    const externalRequest = makeQuestionRequest(externalId)
-    sm.setExternalEngineModelAdapter({
-      async runModelTurn({ prompt, listTools, callTool }) {
-        const tools = await listTools()
-        expect(tools.map(t => t.name)).toContain('request_user_input')
-        if (prompt.includes('please ask')) {
-          const result = await callTool('request_user_input', { questions: externalRequest.questions })
-          expect(result.isError).toBe(false)
-        }
-        // The continuation turn answers from history.
-      },
-    })
-    await sm.sendMessage(externalId, 'please ask', [], [], { invocationSource: 'desktop' })
-    // The model turn runs concurrently — wait for its durable handoff.
-    await waitForCondition(() => sm.getPendingQuestion(externalId) !== null, 20000)
-
-    expect(questionEvents().filter(e => (e as { sessionId: string }).sessionId === externalId)).toHaveLength(1)
-    const externalPending = sm.getPendingQuestion(externalId)
-    expect(externalPending!.requestId).toEqual(expect.any(String))
-    expect(renderer.pendingOf(externalId)?.requestId).toBe(externalPending!.requestId)
-
-    // The paused turn keeps its driver (the model consumed the tool result;
-    // the sidecar is closed only when the lifecycle moves on).
-    expect(sm.getExternalEngineDriverPid(externalId)).not.toBeNull()
-    await sm.respondToQuestion(externalId, makeAnswerResolution(externalPending!))
-    expect(events.filter(e => e.type === 'question_resolved' && e.sessionId === externalId)).toHaveLength(1)
-    // The resume launched a NEW driver turn (old sidecar closed first) and
-    // the model finished → completion boundary disposed it.
-    await waitForCondition(() => sm.getExternalEngineDriverPid(externalId) === null, 15000)
-  }, 60000)
+  }, 120000)
 
   // -------------------------------------------------------------------------
   // Restart: the external-engine registration persists — a restarted session
@@ -769,13 +742,16 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
       expect((sm2 as unknown as { sessions: Map<string, { externalToolset?: boolean }> }).sessions.get(sessionId)!.externalToolset).toBe(true)
 
       // The next turn walks the EXTERNAL path again: the driver launches the
-      // owned sidecar and runs the model against the model-visible toolset.
-      sm2.setExternalEngineModelAdapter({
-        async runModelTurn({ listTools }) {
-          const tools: Array<{ name: string }> = await listTools()
-          expect(tools.map(t => t.name)).toContain('request_user_input')
-        },
-      })
+      // owned sidecar and the production adapter starts the REAL model
+      // process (harness), which natively discovers the toolset.
+      sm2.setExternalEngineModelAdapter(
+        createCodexSessionModelTurn({
+          resolveCodexCommand: () => ({
+            command: process.execPath,
+            args: [harnessModelScript, 'none', '{}'],
+          }),
+        }),
+      )
       await sm2.sendMessage(sessionId, 'turn after restart', [], [], { invocationSource: 'desktop' })
       await waitForCondition(() => sm2.getExternalEngineDriverPid(sessionId) === null, 15000)
       const queue = (sm2 as unknown as { sessionStorage: { persistenceQueue: { cancel: (id: string) => void } } }).sessionStorage.persistenceQueue

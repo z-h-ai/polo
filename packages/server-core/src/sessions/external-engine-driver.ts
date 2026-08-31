@@ -29,52 +29,21 @@ export interface ExternalEngineTool {
   description?: string
 }
 
-/**
- * The MODEL layer of an external engine (credentials/LLM integration). The
- * driver serves the toolset; the model decides which tools to call and when
- * the turn is finished.
- */
-export interface ExternalEngineModelTurn {
-  runModelTurn(input: {
-    sessionId: string
-    prompt: string
-    /** Real toolset discovery against the driver-owned sidecar. */
-    listTools(): Promise<ExternalEngineTool[]>
-    /** Real tool call: stdio → HTTP callback → durable handoff. */
-    callTool(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; content: unknown }>
-  }): Promise<void>
-}
-
 export class ExternalEngineSessionDriver {
-  /**
-   * LEAK DETECTOR: drivers launched but never disposed. Not consulted by any
-   * runtime decision — the one-sidecar-per-turn invariant is owned by the
-   * SessionManager's driver slot (identity + generation CAS). Diagnostics
-   * and tests use this to prove no orphan sidecar process survives teardown.
-   */
-  private static undisposed = new Set<ExternalEngineSessionDriver>()
-
   private constructor(
     // Loosely typed: the concrete MCP SDK Client satisfies this shape.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private readonly client: any,
     private readonly transport: StdioClientTransport,
     readonly config: ExternalEngineToolsetConfig,
-  ) {
-    ExternalEngineSessionDriver.undisposed.add(this)
-  }
-
-  /** The owned sidecar's OS process id (real-process evidence). */
-  get pid(): number | null {
-    return this.transport.pid ?? null
-  }
+  ) {}
 
   /**
-   * Number of launched-but-never-disposed drivers (leak detector). A
-   * non-zero value after teardown means an orphan sidecar process.
+   * The owned sidecar's OS process id (real-process evidence that exactly
+   * one sidecar serves this turn).
    */
-  static countUndisposed(): number {
-    return ExternalEngineSessionDriver.undisposed.size
+  get pid(): number | null {
+    return this.transport.pid ?? null
   }
 
   /**
@@ -94,23 +63,11 @@ export class ExternalEngineSessionDriver {
   }
 
   /**
-   * PRODUCTION MODEL TURN ENTRY: starts the model (the injected model layer)
-   * against the driver-owned toolset with the turn's prompt. The model may
-   * call request_user_input — that tool call travels stdio → HTTP callback →
-   * the SessionManager durable handoff and its tool result settles at the
-   * durable boundary. Resolves when the model finishes its turn.
+   * Real toolset discovery against the owned sidecar (tools/list). Consumed
+   * by the production model layer to register the session tools natively
+   * into the actual model session.
    */
-  async runModelTurn(sessionId: string, prompt: string, model: ExternalEngineModelTurn): Promise<void> {
-    await model.runModelTurn({
-      sessionId,
-      prompt,
-      listTools: () => this.listTools(),
-      callTool: (name, args) => this.callTool(name, args),
-    })
-  }
-
-  /** The model-visible toolset (real discovery from the sidecar's tools/list). */
-  private async listTools(): Promise<ExternalEngineTool[]> {
+  async listTools(): Promise<ExternalEngineTool[]> {
     const tools = await this.client.listTools()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (tools.tools ?? []).map((t: any) => ({ name: t.name as string, description: t.description as string | undefined }))
@@ -122,14 +79,13 @@ export class ExternalEngineSessionDriver {
    * durable boundary.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async callTool(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; content: unknown }> {
+  async callTool(name: string, args: Record<string, unknown>): Promise<{ isError: boolean; content: unknown }> {
     const result = await this.client.callTool({ name, arguments: args })
     return { isError: result.isError === true, content: result.content }
   }
 
   /** Stop the owned sidecar (turn end / session teardown). */
   async dispose(): Promise<void> {
-    ExternalEngineSessionDriver.undisposed.delete(this)
     await this.client.close().catch(() => {})
   }
 }

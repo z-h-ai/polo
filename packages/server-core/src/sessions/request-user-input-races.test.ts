@@ -28,9 +28,8 @@ const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@po
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 
-// Review round 1, issue #4: these race/fault scenarios were accidentally
-// deleted relative to the fork point b5bd957f. Each test protects a distinct
-// invariant and runs through the REAL handler / sendMessage paths:
+// Each scenario here protects a distinct race/fault invariant and runs
+// through the REAL handler / sendMessage paths:
 //
 // 1. "real handler entry: flush failure surfaces as a tool error" —
 //    INVARIANT: a durable-persist failure propagates through the REAL
