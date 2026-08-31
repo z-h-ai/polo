@@ -121,7 +121,7 @@ export interface Session {
  * Host experiences that can own a session (persisted origin identity).
  * `edit-popover` marks the renderer Edit Popover's hidden+mini session. It is
  * stamped SERVER-SIDE by the dedicated trusted creation path and can NEVER be
- * requested through the generic creation API (review round 2).
+ * requested through the generic creation API.
  */
 export type SessionOrigin = 'cli-run' | 'cli-exec' | 'edit-popover'
 

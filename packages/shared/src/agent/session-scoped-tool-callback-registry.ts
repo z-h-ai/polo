@@ -37,8 +37,7 @@ export interface SessionScopedToolCallbacks {
    * request_user_input. The question UI should be shown and the turn paused.
    * May return a Promise — the tool handler awaits the durable handoff.
    * `generationAtRequest` is the issuing turn's processing generation,
-   * snapshotted by the agent at tool-call time and carried through (review
-   * fix round 5, issue A).
+   * snapshotted by the agent at tool-call time and carried through.
    */
   onQuestionRequested?: (questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>;
 
@@ -46,8 +45,7 @@ export interface SessionScopedToolCallbacks {
    * Reader for the CURRENT processing generation, registered by each agent
    * backend. It is invoked by the tool handler AT TOOL-CALL INITIATION —
    * synchronously, before any await — and the returned value is bound
-   * immutably into the callback chain from there (review fix rounds 5+6,
-   * issue A).
+   * immutably into the callback chain from there.
    */
   getTurnGeneration?: () => number;
 

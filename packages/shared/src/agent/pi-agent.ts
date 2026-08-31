@@ -559,7 +559,7 @@ export class PiAgent extends BaseAgent {
     child.stderr?.on('data', (data: Buffer) => {
       const text = data.toString();
       this.recordStderr(text);
-      // SESSION MCP LIFECYCLE LINES (review fix round 10, issue B): complete
+      // SESSION MCP LIFECYCLE LINES: complete
       // stderr lines are routed through the shared parser — a
       // `question_requested` callback lands in the SessionManager durable
       // handoff chain (onQuestionRequested), everything else is ignored.
@@ -1718,7 +1718,7 @@ export class PiAgent extends BaseAgent {
       workspaceId,
       sessionStorage: this.sessionStorage,
       workingDirectory: this.workingDirectory,
-      // Tool-call-time generation reader (review fix rounds 5+6, issue A):
+      // Tool-call-time generation reader:
       // the handler invokes this SYNCHRONOUSLY at initiation and binds the
       // returned value immutably into the callback chain. The ctx itself is
       // cached across turns — the reader always reflects the CURRENT turn,
@@ -2229,7 +2229,7 @@ export class PiAgent extends BaseAgent {
     // survives across turns.
     const sessionId = this.config.session?.id;
     if (sessionId) {
-      // GENERATION BINDING (review fix rounds 5+6, issue A): this merge runs
+      // GENERATION BINDING: this merge runs
       // PER TURN — capture THIS turn's generation into the closure now. Any
       // proxy-forwarded question callback of this turn carries the captured
       // value immutably, even if a newer turn re-stamps the field before the

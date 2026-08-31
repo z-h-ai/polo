@@ -260,8 +260,7 @@ export abstract class BaseAgent implements AgentBackend {
    * snapshotted by THIS agent at tool-completion handling time (synchronous
    * with the issuing turn's event stream, via {@link sessionTurnGeneration})
    * and carried through the closure, so the SessionManager can reject a
-   * callback whose turn was stopped/superseded before it executed (review
-   * fix round 5, issue A).
+   * callback whose turn was stopped/superseded before it executed.
    */
   onQuestionRequested: ((questions: RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>) | null = null;
   /**
@@ -275,7 +274,7 @@ export abstract class BaseAgent implements AgentBackend {
    * currently processing. Injected by the SessionManager at every turn start
    * (and after agent creation) so tool-call callbacks can carry their
    * issuing turn's generation instead of reading the CURRENT one at late
-   * execution time (review fix round 5, issue A).
+   * execution time.
    */
   protected sessionTurnGeneration = 0;
 
@@ -460,8 +459,7 @@ export abstract class BaseAgent implements AgentBackend {
    */
   /**
    * Consume one stderr line emitted by the session MCP server subprocess
-   * (review fix round 9, issue B — PRODUCTION consumer of
-   * {@link parseSessionMcpCallbackLine}).
+   *.
    *
    * Hosts embedding this agent pipe the subprocess's stderr lines here. A
    * `question_requested` line is routed into the SAME durable handoff chain
@@ -517,7 +515,7 @@ export abstract class BaseAgent implements AgentBackend {
         this.debug(`request_user_input completed: ${parsed.data.questions.length} question(s)`);
         // Legacy event-stream completion path (fire-and-forget); the primary
         // awaited path is the SessionToolContext callback chain.
-        // GENERATION SNAPSHOT (review fix round 5, issue A): the issuing
+        // GENERATION SNAPSHOT: the issuing
         // turn's generation is captured HERE — synchronously with this turn's
         // event stream — and carried through the callback, never re-read at
         // late execution time.

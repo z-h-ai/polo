@@ -503,7 +503,7 @@ export interface AgentBackend {
    * Stamp the processing generation of the turn this agent is currently
    * processing — called by the SessionManager at every turn start (and after
    * agent creation) so request_user_input callbacks carry their issuing
-   * turn's generation (review fix round 5, issue A).
+   * turn's generation.
    */
   setSessionTurnGeneration(generation: number): void;
 

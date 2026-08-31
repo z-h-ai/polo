@@ -257,7 +257,7 @@ export function getSessionScopedTools(
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
       sessionStorage: storage,
       workingDirectory,
-      // Tool-call-time generation reader (review fix rounds 5+6, issue A):
+      // Tool-call-time generation reader:
       // the handler invokes this SYNCHRONOUSLY at initiation and binds the
       // returned value immutably into the callback chain.
       getTurnGeneration: () => getSessionScopedToolCallbacks(sessionId)?.getTurnGeneration?.() ?? 0,
@@ -274,7 +274,7 @@ export function getSessionScopedTools(
         // Propagate the promise: the tool handler awaits the durable handoff
         // (persist+flush+question_request) before reporting success.
         // `generationAtRequest` was snapshotted at tool-call initiation by
-        // the handler (review fix rounds 5+6, issue A) — forward it as-is.
+        // the handler — forward it as-is.
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         return callbacks?.onQuestionRequested?.(questions, generationAtRequest);
       },

@@ -667,7 +667,7 @@ export class ClaudeAgent extends BaseAgent {
         this.onDebug?.(`[ClaudeAgent] onAuthRequest received: ${request.sourceSlug} (type: ${request.type})`);
         this.onAuthRequest?.(request);
       },
-      // GENERATION BINDING (review fix rounds 5+6, issue A): the generation
+      // GENERATION BINDING: the generation
       // is snapshotted at TOOL-CALL INITIATION by the handler via
       // getTurnGeneration below, and this registration only FORWARDS that
       // immutable value — it never re-reads the mutable field at execution.
@@ -1071,7 +1071,7 @@ export class ClaudeAgent extends BaseAgent {
           if (this.lastStderrOutput.length > 20) {
             this.lastStderrOutput.shift();
           }
-          // SESSION MCP LIFECYCLE LINES (review fix round 10, issue B):
+          // SESSION MCP LIFECYCLE LINES:
           // route complete stderr lines through the shared parser so a
           // `question_requested` callback from a spawned session MCP server
           // lands in the durable handoff chain.

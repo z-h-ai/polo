@@ -183,8 +183,7 @@ export interface SessionToolContext {
    * The processing generation of the turn currently executing tools in this
    * context. Read by tool handlers AT TOOL-CALL INITIATION (synchronously,
    * before any await) so the value can be bound immutably into callbacks —
-   * never re-read from mutable state after a delay (review fix round 6,
-   * issue A). Optional: hosts without generation tracking default to 0.
+   * never re-read from mutable state after a delay. Optional: hosts without generation tracking default to 0.
    */
   getTurnGeneration?: () => number;
 

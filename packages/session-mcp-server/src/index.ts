@@ -59,7 +59,7 @@ interface SessionConfig {
   plansFolderPath: string;
   callbackPort?: string;
   /**
-   * Per-turn request_user_input capability (review fix round 7, issue B):
+   * Per-turn request_user_input capability:
    * same fail-closed filter as the Claude/Pi paths. The harness spawns this
    * server per turn and passes the capability via CLI flag or env — desktop
    * turns enable it, every other source leaves it off.
@@ -199,8 +199,7 @@ export function createCodexContext(config: SessionConfig): SessionToolContext {
         ...request,
       });
     },
-    // Question handoff parity with Claude/Pi (review fix rounds 7-11, issue
-    // B): the HTTP POST to the host callback server is the SINGLE
+    // Question handoff parity with Claude/Pi: the HTTP POST to the host callback server is the SINGLE
     // AUTHORITATIVE delivery channel — the tool result does NOT resolve until
     // the host has performed the durable handoff and the user's
     // answer/cancel reached a terminal state. stderr carries a PURE
@@ -242,7 +241,7 @@ export function createCodexContext(config: SessionConfig): SessionToolContext {
   return {
     sessionId,
     workspacePath: workspaceRootPath,
-    // Tool-call-time generation reader (review fix rounds 5-7): the handler
+    // Tool-call-time generation reader: the handler
     // invokes this synchronously at initiation and binds the value immutably
     // into the callback chain. The server instance serves ONE turn (per-turn
     // spawn), so the env value is that turn's generation.
@@ -316,7 +315,7 @@ export type { SessionMcpSpawnOptions } from '@polo-ai/session-tools-core';
 /**
  * Session tool list for the Codex/session-MCP path. `allowRequestUserInput`
  * applies the SAME canonical per-turn filter as the Claude/Pi paths
- * (review fix round 7, issue B): desktop turns include request_user_input,
+ *: desktop turns include request_user_input,
  * every other source fails closed.
  */
 export function createSessionTools(includeDeveloperFeedback: boolean, allowRequestUserInput: boolean): Tool[] {
@@ -569,7 +568,7 @@ export async function main() {
     plansFolderPath,
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.POLO_AI_LLM_CALLBACK_PORT,
-    // Per-turn request_user_input capability (review fix round 7, issue B):
+    // Per-turn request_user_input capability:
     // fail closed — only an explicit opt-in (desktop turn spawn) enables it.
     allowRequestUserInput: allowRequestUserInputFlag || process.env.POLO_AI_ALLOW_REQUEST_USER_INPUT === '1',
     // Explicit per-turn spawn argument (the launcher's channel) takes
@@ -580,8 +579,7 @@ export async function main() {
   const ctx = createCodexContext(config);
 
   const includeDeveloperFeedback = isDeveloperFeedbackEnabled();
-  // SAME per-turn capability filter as the Claude/Pi paths (review fix round
-  // 7, issue B): the registry (call routing) and the tool list stay in sync —
+  // SAME per-turn capability filter as the Claude/Pi paths: the registry (call routing) and the tool list stay in sync —
   // desktop turns expose request_user_input, everything else fails closed.
   const sessionToolRegistry = getSessionToolRegistry({ includeDeveloperFeedback, allowRequestUserInput: config.allowRequestUserInput });
 

@@ -58,7 +58,7 @@ import {
   resolveBackendRuntimePaths,
 } from './internal/runtime-resolver.ts';
 
-// PRODUCTION re-exports (review fix rounds 9-12, issue B): the runtime path
+// PRODUCTION re-exports: the runtime path
 // resolution and the session MCP server spawn-spec builder are part of the
 // backend's public surface — the electron bootstrap consumes them to start
 // the session MCP host.

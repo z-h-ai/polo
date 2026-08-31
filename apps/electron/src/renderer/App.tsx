@@ -1528,7 +1528,7 @@ export default function App() {
 
   // Dedicated, trusted creation path for the Edit Popover session: the server
   // stamps the 'edit-popover' origin + owner identity. The generic
-  // handleCreateSession above can never grant that origin (review round 2).
+  // handleCreateSession above can never grant that origin.
   const handleCreateEditPopoverSession = useCallback(async (
     workspaceId: string,
     options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions,
@@ -2139,10 +2139,13 @@ export default function App() {
     try {
       const result = await window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner)
       if (!result) return { outcome: 'empty' }
-      // Seed the authoritative request the same way the question_request event
-      // path does, so usePendingQuestion(inlineSessionId) resolves and every
+      // Seed the authoritative request through the SNAPSHOT path (fill-only
+      // + terminal guard) — the same ordering rules as a session fetch: a
+      // realtime card that arrived while the RPC was in flight is never
+      // overwritten, and a terminal (resolved/superseded) requestId is never
+      // re-seeded. usePendingQuestion(inlineSessionId) resolves and every
       // existing event-driven cleanup keeps working.
-      setPendingQuestions(prev => setPendingQuestionForSession(prev, result.sessionId, result.request, pendingQuestionGuardRef.current))
+      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, { id: result.sessionId, pendingQuestion: result.request }, pendingQuestionGuardRef.current))
       return { outcome: 'found', sessionId: result.sessionId }
     } catch {
       return { outcome: 'transient' }

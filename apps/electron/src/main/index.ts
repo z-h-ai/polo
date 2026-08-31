@@ -915,7 +915,7 @@ app.whenReady().then(async () => {
         createSessionManager: () => {
           const sm = new SessionManager()
           sm.setBrowserPaneManager(browserPaneManager!)
-          // SESSION MCP HOST (review fix round 12, issue A): production
+          // SESSION MCP HOST: production
           // bootstrap — the host listens on localhost for the session MCP
           // server's durable question callbacks (POST /request-user-input →
           // SessionManager durable handoff) and carries the per-turn spawn
@@ -927,7 +927,7 @@ app.whenReady().then(async () => {
             isPackaged: app.isPackaged,
           })
           if (runtimePaths.sessionServerPath) {
-            // DEGRADE, NEVER CRASH (review fix round 13, issue A): a host
+            // DEGRADE, NEVER CRASH: a host
             // startup failure only disables the session MCP path — it must
             // not propagate to the bootstrap's top level.
             sm.startSessionMcpHost({

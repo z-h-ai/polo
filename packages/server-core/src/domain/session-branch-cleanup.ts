@@ -36,8 +36,8 @@ export async function rollbackFailedBranchCreation(params: RollbackParams): Prom
 
   deleteFromRuntimeSessions(sessionId)
 
-  // The rollback now also covers the Edit Popover orphan cleanup (review fix
-  // round 1, issue 2), where a leftover on-disk session is a REAL hazard: an
+  // The rollback now also covers the Edit Popover orphan cleanup, where a
+  // leftover on-disk session is a REAL hazard: an
   // unprivileged leftover is fail-closed, but a partially stamped one must
   // never silently survive. Surface deletion failures instead of swallowing
   // them — the caller has already rejected the creation, this log is the

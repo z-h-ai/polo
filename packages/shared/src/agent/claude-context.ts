@@ -81,7 +81,7 @@ export interface ClaudeContextOptions {
   onAuthRequest: (request: unknown) => void;
   onQuestionRequested?: (questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[], generationAtRequest: number) => void | Promise<void>;
   /**
-   * Tool-call-time generation reader (review fix rounds 5+6, issue A): the
+   * Tool-call-time generation reader: the
    * request_user_input handler invokes this synchronously at initiation and
    * binds the value immutably into the callback chain.
    */

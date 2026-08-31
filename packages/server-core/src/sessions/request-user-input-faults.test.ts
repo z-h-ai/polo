@@ -1046,38 +1046,42 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
   })
 
-  // ---- Ownership: the per-turn MCP client is the EXTERNAL engine's channel;
-  // the EMBEDDED agent wiring goes DIRECT to the durable handoff — one
+  // ---- Ownership: the per-turn sidecar is the EXTERNAL engine's channel
+  // (gated to externally registered sessions); the EMBEDDED agent wiring goes
+  // DIRECT to the durable handoff and never runs a sidecar — one
   // owner/channel per engine, no stdio/HTTP callback loop, no double delivery.
 
-  it('embedded agent wiring goes DIRECT to the durable handoff even with a live per-turn child (no loop, one handoff)', async () => {
-    seedSession('f-wire-1', {})
-    const managed = getManaged('f-wire-1') as unknown as { processingGeneration: number }
-    // Wire the agent field EXACTLY like the production onQuestionRequested
-    // wiring does (direct durable routing via routeAgentQuestionRequested).
-    ;(getManaged('f-wire-1') as unknown as { agent: { onQuestionRequested?: (q: unknown[], g: number) => Promise<void> } }).agent = {
-      onQuestionRequested: (questions: unknown[], generation: number) =>
-        (sm as unknown as {
-          routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
-        }).routeAgentQuestionRequested(managed, questions, generation),
-    }
+  it('embedded sessions spawn NO per-turn sidecar and their agent wiring goes DIRECT to the durable handoff (single channel)', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-wire-1', {}) as unknown as { processingGeneration: number }
+    // A fully functional fake agent runs the turn; the question field is
+    // wired EXACTLY like the production onQuestionRequested wiring (direct
+    // durable routing via routeAgentQuestionRequested).
+    const fake = makeFakeAgent()
+    fake.onQuestionRequested = (questions: unknown[], generation: number) =>
+      (sm as unknown as {
+        routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
+      }).routeAgentQuestionRequested(managed, questions, generation)
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => fake
 
     const entryPath = join(import.meta.dir, '..', '..', '..', '..', 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: entryPath, nodeRuntimePath: process.execPath })
-    void sm.spawnSessionMcpServerForTurn('f-wire-1', 'desktop', managed.processingGeneration)
-    await waitForCondition(() => {
-      const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { toolCalls: number }> } }).sessionMcpHost
-      return !!host?.children.get('f-wire-1')
-    }, 15000)
+
+    // An embedded session is NOT registered for external consumption: the
+    // config surface fails closed and the turn spawns NO sidecar — the
+    // in-process registry is its single owner/channel, structurally.
+    expect(await sm.getSessionExternalModelToolset('f-wire-1', 'desktop', managed.processingGeneration)).toBeNull()
+    await sm.sendMessage('f-wire-1', 'turn one', [], [], { invocationSource: 'desktop' })
+    const host = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } | null }).sessionMcpHost
+    expect(host?.children.has('f-wire-1')).toBe(false)
 
     // The model calls the tool — the embedded wiring lands DIRECTLY in the
-    // durable handoff; the stdio child is NOT traversed (toolCalls stays 0).
+    // durable handoff.
     const request = makeQuestionRequest('f-wire-1')
-    await (getManaged('f-wire-1') as unknown as { agent: { onQuestionRequested: (q: unknown[], g: number) => Promise<void> } }).agent
-      .onQuestionRequested!(request.questions as never, managed.processingGeneration)
-
-    const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { toolCalls: number }>; callbackPort: number } }).sessionMcpHost
-    expect(host!.children.get('f-wire-1')!.toolCalls).toBe(0)
+    await (fake.onQuestionRequested as ((q: unknown[], g: number) => Promise<void>) | undefined)!(
+      request.questions as never,
+      managed.processingGeneration,
+    )
     const pending = sm.getPendingQuestion('f-wire-1')
     expect(pending).not.toBeNull()
     // ONE tool call → exactly ONE durable handoff.
@@ -1187,11 +1191,13 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       return makeFakeAgent()
     }
 
-    // Stub server entry + start the production host.
+    // Stub server entry + start the production host; the session is
+    // registered for external-engine consumption (the sidecar gate).
     const entry = join(tmpRoot, 'session-mcp-stub.js')
     writeFileSync(entry, 'process.exit(0)\n')
     const hostPort = await sm.startSessionMcpHost({ serverEntryPath: entry })
     expect(hostPort).toBeGreaterThan(0)
+    sm.markSessionExternalEngine('f-host-1')
 
     // TURN 1 — desktop: capability ON.
     await sm.sendMessage('f-host-1', 'turn one', [], [], { invocationSource: 'desktop' })
@@ -1269,10 +1275,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     sm.stopSessionMcpHost()
   })
 
-  // ---- the SPAWN↔STDIO↔MCP-CLIENT↔TOOL↔
-  // CALLBACK↔DURABLE-HANDOFF closed loop, cross-process.
+  // ---- the SPAWN-CONFIG↔EXTERNAL-HARNESS↔
+  // STDIO↔TOOL↔CALLBACK↔DURABLE-HANDOFF closed loop, cross-process: the
+  // harness builds its model MCP config from the PRODUCTION config surface
+  // (getSessionExternalModelToolset) and its tool call reaches the durable
+  // handoff through its own stdio connection to the spawned server.
 
-  it('cross-process loop: the spawned session MCP server serves request_user_input over stdio into the durable handoff (ONE requestId)', async () => {
+  it('cross-process loop: the externally registered session serves request_user_input over the harness stdio config into the durable handoff (ONE requestId)', async () => {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
     const managed = seedSession('f-mcp-loop', {}) as unknown as { processingGeneration: number }
     // The packaged server entry — point at the SOURCE and let the bun
     // runtime execute it (nodeRuntimePath = process.execPath).
@@ -1282,17 +1293,35 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    void sm.spawnSessionMcpServerForTurn('f-mcp-loop', 'desktop', managed.processingGeneration)
-    // Wait for the stdio client to connect (the server takes a moment to boot).
-    await waitForCondition(() => {
-      const entry = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } }).sessionMcpHost?.children.get('f-mcp-loop')
-      return !!entry
-    }, 15000)
+    // PRODUCTION registration: the session is externally driven; the
+    // sendMessage turn spawns and awaits the per-turn sidecar.
+    sm.markSessionExternalEngine('f-mcp-loop')
+    patchPrivateFlush()
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => makeFakeAgent()
+    await sm.sendMessage('f-mcp-loop', 'turn one', [], [], { invocationSource: 'desktop' })
 
-    // ONE tool call through the MCP client → ONE durable handoff.
+    // The harness model MCP config comes from the PRODUCTION surface.
+    const config = await sm.getSessionExternalModelToolset('f-mcp-loop', 'desktop', managed.processingGeneration)
+    expect(config).not.toBeNull()
+    expect(config!.args).toContain('--allow-request-user-input')
+
+    // The external engine connects per that config and its model discovers
+    // the tool in the model-visible toolset.
+    const transport = new StdioClientTransport({
+      command: config!.command,
+      args: config!.args,
+      stderr: 'pipe',
+    })
+    const harness = new Client({ name: 'external-codex-harness', version: '1.0.0' })
+    await harness.connect(transport)
+    const tools = await harness.listTools()
+    expect(tools.tools.map(t => t.name)).toContain('request_user_input')
+
+    // ONE model tool call over the harness config → ONE durable handoff.
     const request = makeQuestionRequest('f-mcp-loop')
-    const text = await sm.callSessionMcpRequestUserInput('f-mcp-loop', request.questions)
-    expect(text).toContain('Waiting for user input')
+    const result = await harness.callTool({ name: 'request_user_input', arguments: { questions: request.questions } })
+    expect(result.isError).toBeFalsy()
+    expect(JSON.stringify(result.content)).toContain('Waiting for user input')
 
     const pending = sm.getPendingQuestion('f-mcp-loop')
     expect(pending).not.toBeNull()
@@ -1304,40 +1333,109 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     await sm.respondToQuestion('f-mcp-loop', makeAnswerResolution(pending!))
     expect(sm.getPendingQuestion('f-mcp-loop')).toBeNull()
 
+    await harness.close()
     sm.stopSessionMcpHost()
-  })
+  }, 60000)
 
-  it('cross-process fail-closed: a non-desktop spawn serves no request_user_input tool', async () => {
-    const managed = seedSession('f-mcp-nd', {}) as unknown as { processingGeneration: number }
+  it('cross-process fail-closed: a non-desktop harness config serves no request_user_input tool', async () => {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
+    seedSession('f-mcp-nd', {})
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
 
     await sm.startSessionMcpHost({
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    void sm.spawnSessionMcpServerForTurn('f-mcp-nd', 'messaging', managed.processingGeneration)
-    await waitForCondition(() => {
-      const entry = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } }).sessionMcpHost?.children.get('f-mcp-nd')
-      return !!entry
-    }, 15000)
-    // Give the subprocess a moment to finish booting before the failing call.
-    await new Promise(r => setTimeout(r, 500))
+    sm.markSessionExternalEngine('f-mcp-nd')
+    const config = await sm.getSessionExternalModelToolset('f-mcp-nd', 'messaging', 1)
+    expect(config).not.toBeNull()
+    expect(config!.args).not.toContain('--allow-request-user-input')
 
-    await expect(sm.callSessionMcpRequestUserInput('f-mcp-nd', makeQuestionRequest('f-mcp-nd').questions))
-      .rejects.toThrow()
+    const transport = new StdioClientTransport({
+      command: config!.command,
+      args: config!.args,
+      stderr: 'pipe',
+    })
+    const harness = new Client({ name: 'external-codex-harness', version: '1.0.0' })
+    await harness.connect(transport)
+    const tools = await harness.listTools()
+    expect(tools.tools.map(t => t.name)).not.toContain('request_user_input')
+
+    const result = await harness.callTool({ name: 'request_user_input', arguments: { questions: makeQuestionRequest('f-mcp-nd').questions } })
+    expect(result.isError).toBe(true)
 
     expect(sm.getPendingQuestion('f-mcp-nd')).toBeNull()
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
+    await harness.close()
     sm.stopSessionMcpHost()
-  })
+  }, 60000)
 
   // ---- the "turn committed, lazy agent not
   // yet created" deletion window. A delete that wins the declaration BLOCKS
   // lazy agent creation (in-lock gate) — no ghost turn, no agent leak.
 
-  it('a delete that wins the declaration blocks lazy agent creation (no ghost turn, no agent leak)', async () => {
+  it('delete interleaved with a SLOW in-flight agent creation: the turn converges before chat — no ghost turn, no agent leak, no cancel exception', async () => {
     patchPrivateFlush()
-    const managed = seedSession('f-del-agent', {}) as unknown as { isProcessing: boolean }
+    seedSession('f-del-agent', {})
+    let agentCreations = 0
+    let agentDisposed = 0
+    let chatStarted = 0
+    let resolveCreationStarted!: () => void
+    const creationStarted = new Promise<void>(resolve => { resolveCreationStarted = resolve })
+    let releaseCreationGate!: () => void
+    const creationGate = new Promise<void>(resolve => { releaseCreationGate = resolve })
+    // The lazy creation genuinely hangs IN-FLIGHT (production: a cold
+    // backend build) until the test releases it — the delete interleaves.
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      agentCreations++
+      resolveCreationStarted()
+      await creationGate
+      // Mirror the real getOrCreateAgent: the created agent is assigned to
+      // the session (that is what the convergence gate's dispose targets).
+      ;(getManaged('f-del-agent') as unknown as { agent: unknown }).agent = disposableFakeAgent
+      return disposableFakeAgent
+    }
+    const disposableFakeAgent = {
+      ...makeFakeAgent(),
+      chat: async function* () {
+        chatStarted++
+        yield { type: 'complete' as const }
+      },
+      dispose: () => { agentDisposed++ },
+    }
+
+    // T1: the send commits its turn and enters the SLOW in-lock creation.
+    const sendPromise = sm.sendMessage('f-del-agent', 'message before delete', [], [], { invocationSource: 'desktop' })
+    await creationStarted
+    expect(agentCreations).toBe(1)
+    expect(chatStarted).toBe(0)
+
+    // T2: the delete queues BEHIND the creation's lock and its declaration
+    // (tombstone + availability removal) lands the moment creation yields.
+    const deletePromise = sm.deleteSession('f-del-agent')
+    await new Promise(r => setTimeout(r, 30))
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent'))).toBe(true)
+
+    // Release the slow creation: the delete's declaration runs, the
+    // chat-start convergence gate sees the deletion, disposes the fresh
+    // agent (no leak) and returns SILENTLY (no error to the caller, no
+    // ghost chat on the deleted session).
+    releaseCreationGate!()
+    await sendPromise
+    expect(agentDisposed).toBe(1)
+    expect(chatStarted).toBe(0)
+
+    // The delete's own cleanup removes the storage copy.
+    await deletePromise
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent'))).toBe(false)
+    expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
+    expect(events.filter(e => e.type === 'error')).toHaveLength(0)
+  })
+
+  it('a delete that lands BEFORE the creation gate blocks creation entirely (no ghost turn, no agent leak)', async () => {
+    patchPrivateFlush()
+    seedSession('f-del-agent-2', {})
     let agentCreations = 0
     ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
       agentCreations++
@@ -1350,16 +1448,16 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     let releaseLock!: () => void
     const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
     void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
-      .withQuestionStateLock('f-del-agent', () => hungLock)
+      .withQuestionStateLock('f-del-agent-2', () => hungLock)
 
-    const sendPromise = sm.sendMessage('f-del-agent', 'message before delete', [], [], { invocationSource: 'desktop' })
+    const sendPromise = sm.sendMessage('f-del-agent-2', 'message before delete', [], [], { invocationSource: 'desktop' })
     await new Promise(r => setTimeout(r, 30))
-    const deletePromise = sm.deleteSession('f-del-agent')
+    const deletePromise = sm.deleteSession('f-del-agent-2')
     await new Promise(r => setTimeout(r, 30))
 
     releaseLock()
     // T1: the send transaction commits (isProcessing true)…
-    await waitForCondition(() => getManaged('f-del-agent') === undefined || getManaged('f-del-agent').isProcessing === false, 3000).catch(() => {})
+    await waitForCondition(() => getManaged('f-del-agent-2') === undefined || getManaged('f-del-agent-2').isProcessing === false, 3000).catch(() => {})
     // T2: the declaration lands (tombstone + availability removal).
     // T3: the lazy agent creation gate observes the deletion and converges
     // the turn SILENTLY as deleted — no agent is ever created and no ghost
@@ -1368,7 +1466,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(agentCreations).toBe(0)
 
     await deletePromise
-    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent'))).toBe(false)
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent-2'))).toBe(false)
     expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
   })
 
@@ -2861,6 +2959,41 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void errorEventsBefore
   })
 
+  it('TRUSTED PROBE: while the durable clear flush is pending, the live recovery state stays ARMED (never runtime-cleared + stale disk)', async () => {
+    patchPrivateFlush()
+    const request = makeQuestionRequest('f-clear-probe')
+    seedSession('f-clear-probe', { pendingQuestion: request })
+    const managed = getManaged('f-clear-probe') as unknown as { pendingAgentResume?: { messageId: string; attempts: number } }
+    ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'msg-probe', attempts: 0 }
+
+    // Gate the flush: the durable write is in flight while we observe.
+    let releaseFlush: (() => void) | null = null
+    const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
+    const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      return flushGate.then(() => realFlush.call(sm, id))
+    }
+
+    let clearDone = false
+    const clearPromise = (sm as unknown as { clearPendingAgentResume: (m: unknown, reason: string) => Promise<void> })
+      .clearPendingAgentResume(managed, 'probe').then(() => { clearDone = true })
+
+    // INSIDE the flush window: the live ManagedSession is still ARMED —
+    // an observer (or a crash) sees a consistent armed world.
+    await new Promise(r => setTimeout(r, 50))
+    expect(clearDone).toBe(false)
+    expect(managed.pendingAgentResume).toEqual({ messageId: 'msg-probe', attempts: 0 })
+
+    // Durable commit lands → only now is the in-memory clear published.
+    releaseFlush!()
+    await clearPromise
+    expect(clearDone).toBe(true)
+    expect(managed.pendingAgentResume).toBeUndefined()
+    const header = JSON.parse(readFileSync(getSessionFilePath(tmpRoot, 'f-clear-probe'), 'utf-8').split('\n')[0])
+    expect(header.pendingAgentResume).toBeUndefined()
+    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = realFlush
+  })
+
   it('durable resume clear is STAGED: the awaited call converges memory + disk; a failed flush rolls the memory back (never runtime-cleared + stale disk)', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-clear-stage')
@@ -2889,7 +3022,8 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'msg-stage-2', attempts: 0 }
     await expect((sm as unknown as { clearPendingAgentResume: (m: unknown, reason: string) => Promise<void> })
       .clearPendingAgentResume(managed, 'staged clear (failure)')).rejects.toThrow('disk full (injected)')
-    // Rolled back — the recovery state is still observable in memory.
+    // The live state was never published-cleared — still armed, matching
+    // the (still-armed) disk; the caller retries or marks terminal.
     expect(managed.pendingAgentResume).toEqual({ messageId: 'msg-stage-2', attempts: 0 })
     diskBroken = false
     ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = realFlush

@@ -4,7 +4,6 @@ import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js'
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
 
@@ -308,6 +307,23 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     return client
   }
 
+  /**
+   * Connect an EXTERNAL harness (Codex CLI stand-in) to the session's model
+   * MCP toolset using the config the production surface returned — spawn
+   * command + argv exactly as handed out, no test-side reconstruction.
+   */
+  async function connectExternalHarness(config: { command: string; args: string[] }) {
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
+    const transport = new StdioClientTransport({
+      command: config.command,
+      args: config.args,
+      stderr: 'pipe',
+    })
+    const client = new Client({ name: 'external-codex-harness', version: '1.0.0' })
+    await client.connect(transport)
+    return client
+  }
+
   /** The model's tool call on the REAL Claude SDK session toolset. */
   async function claudeModelToolCall(sessionId: string, questions: unknown[]): Promise<void> {
     const client = await connectClaudeToolset(sessionId, true)
@@ -467,26 +483,38 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
   // spawn to full readiness BEFORE the model may start.
   // -------------------------------------------------------------------------
 
-  it('external codex: sendMessage awaits the per-turn server readiness before chat; the real toolset exposes the tool; ONE call makes ONE durable handoff', async () => {
+  it('external codex: the registered session gets its model MCP config from the production surface; the harness model discovers and calls the tool; ONE durable handoff', async () => {
     const managed = seedSession('acc-codex-1')
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     const hostPortBefore = await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
     expect(hostPortBefore).toBeGreaterThan(0)
 
-    // ISSUE-2 REGRESSION: the model's first turn starts only AFTER the
-    // per-turn server is fully ready (host listening + host-owned client
-    // connected). The proof runs INSIDE the production chat boundary — no
-    // test-side polling.
-    let readinessAtChatStart: { childPresent: boolean } = { childPresent: false }
+    // PRODUCTION REGISTRATION: this session is driven by an external engine
+    // (Codex harness). Its turn spawns the per-turn sidecar; its model MCP
+    // config comes from the production surface.
+    sm.markSessionExternalEngine(managed.id)
+
+    // The model's turn: the harness model calls request_user_input from ITS
+    // OWN toolset (spawned per the returned config) — via the real stdio +
+    // HTTP callback loop.
+    const request = makeQuestionRequest(managed.id)
     const agent = scriptedAgent([
-      async () => {
-        const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { ready: Promise<void> }> } | null }).sessionMcpHost
-        const entry = host?.children.get(managed.id)
-        readinessAtChatStart = { childPresent: !!entry }
-        if (entry) await entry.ready
-        // The production host-owned client is the external engine's channel;
-        // its first tool call must work immediately at chat start.
-        await sm.callSessionMcpRequestUserInput(managed.id, makeQuestionRequest(managed.id).questions)
+      async generation => {
+        // The harness asks the production surface for its per-turn model
+        // MCP config (the same readiness boundary the sidecar spawn took).
+        const config = await sm.getSessionExternalModelToolset(managed.id, 'desktop', generation)
+        expect(config).not.toBeNull()
+        expect(config!.args).toContain('--allow-request-user-input')
+        expect(config!.args[config!.args.indexOf('--callback-port') + 1]).toBe(String(hostPortBefore))
+
+        // The model's toolset = a real client spawned from THAT config.
+        const harness = await connectExternalHarness(config!)
+        const tools = await harness.listTools()
+        expect(tools.tools.map(t => t.name)).toContain('request_user_input')
+        const result = await harness.callTool({ name: 'request_user_input', arguments: { questions: request.questions } })
+        expect(result.isError).toBeFalsy()
+        expect(JSON.stringify(result.content)).toContain('Waiting for user input')
+        await harness.close()
       },
       async () => { /* continuation turn completes */ },
     ])
@@ -494,8 +522,6 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
 
     await sm.sendMessage(managed.id, 'please ask me what to do', [], [], { invocationSource: 'desktop' })
 
-    // The chat could only start after the spawn's readiness edge.
-    expect(readinessAtChatStart.childPresent).toBe(true)
     const pending = sm.getPendingQuestion(managed.id)
     expect(pending).not.toBeNull()
     expect(questionEvents()).toHaveLength(1)
@@ -508,31 +534,18 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     expect(renderer.pendingOf(managed.id)).toBeNull()
   }, 60000)
 
-  it('external codex: an out-of-process harness sees the tool in tools/list and its call lands in ONE durable handoff; a non-desktop server fails closed', async () => {
+  it('external codex: an out-of-process harness sees the tool in tools/list and its call lands in ONE durable handoff', async () => {
     const managed = seedSession('acc-codex-2')
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
-    // The production spawn boundary (sendMessage awaits it) — driven here on
-    // an idle session so the out-of-process client can attach afterwards.
-    await sm.spawnSessionMcpServerForTurn(managed.id, 'desktop', managed.processingGeneration)
-    const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { ready: Promise<void> }>; callbackPort: number } | null }).sessionMcpHost!
-    await host.children.get(managed.id)!.ready
+    sm.markSessionExternalEngine(managed.id)
 
-    const externalTransport = new StdioClientTransport({
-      command: process.execPath,
-      args: [
-        serverEntry,
-        '--session-id', managed.id,
-        '--workspace-root', tmpRoot,
-        '--plans-folder', join(tmpRoot, 'plans'),
-        '--callback-port', String(host.callbackPort),
-        '--allow-request-user-input',
-        '--turn-generation', String(managed.processingGeneration),
-      ],
-      stderr: 'pipe',
-    })
-    const externalClient = new Client({ name: 'external-codex', version: '1.0.0' })
-    await externalClient.connect(externalTransport)
+    // The harness config comes from the PRODUCTION surface — the harness may
+    // attach before any turn runs.
+    const config = await sm.getSessionExternalModelToolset(managed.id, 'desktop', managed.processingGeneration)
+    expect(config).not.toBeNull()
+    expect(config!.args).toContain('--allow-request-user-input')
+    const externalClient = await connectExternalHarness(config!)
 
     const tools = await externalClient.listTools()
     expect(tools.tools.map(t => t.name)).toContain('request_user_input')
@@ -554,28 +567,16 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     await externalClient.close()
   }, 60000)
 
-  it('external codex: a non-desktop server serves a toolset WITHOUT request_user_input (fail closed)', async () => {
+  it('external codex: a non-desktop harness config serves a toolset WITHOUT request_user_input (fail closed)', async () => {
     const managed = seedSession('acc-codex-3')
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
-    await sm.spawnSessionMcpServerForTurn(managed.id, 'messaging', 1)
-    const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { ready: Promise<void> }>; callbackPort: number } | null }).sessionMcpHost!
-    await host.children.get(managed.id)!.ready
+    sm.markSessionExternalEngine(managed.id)
 
-    const externalTransport = new StdioClientTransport({
-      command: process.execPath,
-      args: [
-        serverEntry,
-        '--session-id', managed.id,
-        '--workspace-root', tmpRoot,
-        '--plans-folder', join(tmpRoot, 'plans'),
-        '--callback-port', String(host.callbackPort),
-        '--turn-generation', '1',
-      ],
-      stderr: 'pipe',
-    })
-    const externalClient = new Client({ name: 'external-codex', version: '1.0.0' })
-    await externalClient.connect(externalTransport)
+    const config = await sm.getSessionExternalModelToolset(managed.id, 'messaging', 1)
+    expect(config).not.toBeNull()
+    expect(config!.args).not.toContain('--allow-request-user-input')
+    const externalClient = await connectExternalHarness(config!)
     const tools = await externalClient.listTools()
     expect(tools.tools.map(t => t.name)).not.toContain('request_user_input')
     const request = makeQuestionRequest(managed.id)
@@ -591,53 +592,75 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
   // Ownership: one channel per engine, no callback loops, no double delivery.
   // -------------------------------------------------------------------------
 
-  it('one owner per engine: an embedded call never traverses the per-turn stdio child; the child channel serves the external engine', async () => {
-    const managed = seedSession('acc-owner-1')
-    const request = makeQuestionRequest(managed.id)
-    const external = makeQuestionRequest(managed.id)
-    // Both engine calls run INSIDE the live turn (the per-turn server is
-    // stopped at turn end, so the ownership proof must hold mid-turn).
-    const agent = scriptedAgent([
-      async generation => {
-        const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { toolCalls: number }> } | null }).sessionMcpHost!
-        // EMBEDDED call WITH a live child: goes DIRECT to the durable
-        // handler — the child's tool call counter stays at zero (no
-        // stdio/HTTP loop, exactly one durable handoff).
-        await (sm as unknown as {
-          routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
-        }).routeAgentQuestionRequested(
-          (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(managed.id),
-          request.questions,
-          generation,
-        )
-        expect(host.children.get(managed.id)!.toolCalls).toBe(0)
-        // EXTERNAL call: the child channel is a DIFFERENT engine's
-        // consumption path — a replacement question with its own requestId,
-        // still exactly ONE durable handoff per call.
-        await sm.callSessionMcpRequestUserInput(managed.id, external.questions)
-        expect(host.children.get(managed.id)!.toolCalls).toBe(1)
-      },
-    ])
-    wireAgentQuestionField(managed, agent as Record<string, unknown>)
-    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => agent
+  it('one owner per engine: an embedded session runs NO sidecar; an externally registered session serves the harness toolset — each channel exactly ONE durable handoff', async () => {
     const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
     await sm.startSessionMcpHost({ serverEntryPath: serverEntry, nodeRuntimePath: process.execPath })
 
-    // A production turn spawns and awaits the per-turn server, then the
-    // scripted model performs both calls mid-turn.
-    await sm.sendMessage(managed.id, 'please ask twice', [], [], { invocationSource: 'desktop' })
+    // ---- EMBEDDED: no registration → no sidecar; the in-process registry
+    // route lands DIRECTLY in the durable handoff (its single channel).
+    const embedded = seedSession('acc-owner-emb')
+    const embeddedRequest = makeQuestionRequest(embedded.id)
+    const embeddedAgent = scriptedAgent([
+      async generation => {
+        expect(await sm.getSessionExternalModelToolset(embedded.id, 'desktop', generation)).toBeNull()
+        await (sm as unknown as {
+          routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
+        }).routeAgentQuestionRequested(
+          (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(embedded.id),
+          embeddedRequest.questions,
+          generation,
+        )
+        // MID-TURN (the sidecar would be live if one existed): none.
+        const liveHost = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } | null }).sessionMcpHost!
+        expect(liveHost.children.has(embedded.id)).toBe(false)
+      },
+    ])
+    wireAgentQuestionField(embedded, embeddedAgent as Record<string, unknown>)
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => embeddedAgent
+    await sm.sendMessage(embedded.id, 'please ask', [], [], { invocationSource: 'desktop' })
+
+    expect(questionEvents()).toHaveLength(1)
+    const embeddedPending = sm.getPendingQuestion(embedded.id)
+    expect(embeddedPending).not.toBeNull()
+    expect(renderer.pendingOf(embedded.id)?.requestId).toBe(embeddedPending!.requestId)
+    await sm.respondToQuestion(embedded.id, makeAnswerResolution(embeddedPending!))
+    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(1)
+
+    // ---- EXTERNAL: registration gates the sidecar; the harness model
+    // discovers the tool in ITS toolset (config from the production surface)
+    // and its call travels stdio → HTTP → durable handoff.
+    const externalSession = seedSession('acc-owner-ext')
+    sm.markSessionExternalEngine(externalSession.id)
+    const externalRequest = makeQuestionRequest(externalSession.id)
+    let harness: Awaited<ReturnType<typeof connectExternalHarness>> | null = null
+    const externalAgent = scriptedAgent([
+      async generation => {
+        const config = await sm.getSessionExternalModelToolset(externalSession.id, 'desktop', generation)
+        expect(config).not.toBeNull()
+        harness = await connectExternalHarness(config!)
+        const tools = await harness.listTools()
+        expect(tools.tools.map(t => t.name)).toContain('request_user_input')
+        const result = await harness.callTool({ name: 'request_user_input', arguments: { questions: externalRequest.questions } })
+        expect(result.isError).toBeFalsy()
+        // MID-TURN: the sidecar ran for the EXTERNAL session only.
+        const liveHost = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } | null }).sessionMcpHost!
+        expect(liveHost.children.has(externalSession.id)).toBe(true)
+      },
+    ])
+    wireAgentQuestionField(externalSession, externalAgent as Record<string, unknown>)
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => externalAgent
+    await sm.sendMessage(externalSession.id, 'please ask', [], [], { invocationSource: 'desktop' })
 
     expect(questionEvents()).toHaveLength(2)
-    // Two DISTINCT requestIds — the external replacement replaced the
-    // embedded question; the newest holds the card.
-    const ids = questionEvents().map(e => (e as { request: { requestId: string } }).request.requestId)
-    expect(new Set(ids).size).toBe(2)
-    const pending = sm.getPendingQuestion(managed.id)
-    expect(pending!.requestId).toBe(ids[1])
-    expect(renderer.pendingOf(managed.id)?.requestId).toBe(pending!.requestId)
-    // Settle with ONE resolution; the child served exactly one tool call.
-    await sm.respondToQuestion(managed.id, makeAnswerResolution(pending!))
-    expect(events.filter(e => e.type === 'question_resolved')).toHaveLength(1)
+    const externalPending = sm.getPendingQuestion(externalSession.id)
+    expect(externalPending!.requestId).toEqual(expect.any(String))
+    expect(renderer.pendingOf(externalSession.id)?.requestId).toBe(externalPending!.requestId)
+    await sm.respondToQuestion(externalSession.id, makeAnswerResolution(externalPending!))
+    // ONE resolution per session (embedded + external), each settling its
+    // own question exactly once.
+    expect(events.filter(e => e.type === 'question_resolved' && e.sessionId === embedded.id)).toHaveLength(1)
+    expect(events.filter(e => e.type === 'question_resolved' && e.sessionId === externalSession.id)).toHaveLength(1)
+    await harness!.close()
   }, 60000)
 
   // -------------------------------------------------------------------------

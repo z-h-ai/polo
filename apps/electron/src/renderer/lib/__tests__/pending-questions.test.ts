@@ -159,6 +159,76 @@ describe('syncPendingQuestionFromSession (restart/open hydration)', () => {
     expect(map.has('s-1')).toBe(false)
   })
 
+  it('TRUSTED REPRO: q1 snapshot in-flight → realtime q2 replaces AND resolves → the stale q1 snapshot does not resurrect q1', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'), guard)
+
+    // The session snapshot carrying q1 is now in flight. Meanwhile realtime
+    // authority moves on TWICE: q2 replaces q1, then q2 is resolved.
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q2'), guard)
+    map = removePendingQuestionForSession(map, 's-1', 'q2', guard)
+    expect(map.has('s-1')).toBe(false)
+
+    // The STALE q1 snapshot returns — q1 was superseded (terminal when q2
+    // replaced it), so it must NOT be resurrected.
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') }, guard)
+    expect(map.has('s-1')).toBe(false)
+
+    // And a q2-carrier snapshot is blocked too (resolved terminal).
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q2') }, guard)
+    expect(map.has('s-1')).toBe(false)
+  })
+
+  it('a resolution marks its requestId terminal EVEN when the displayed card already moved on (no removal)', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q2'), guard)
+    // q1 resolves while q2 holds the card — the removal is a no-op but the
+    // requestId still becomes terminal.
+    map = removePendingQuestionForSession(map, 's-1', 'q1', guard)
+    expect(map.get('s-1')?.requestId).toBe('q2')
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') }, guard)
+    expect(map.get('s-1')?.requestId).toBe('q2')
+  })
+
+  it('Edit-Popover RPC snapshots use the same ordering guard (fill-only, terminal-aware)', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    // The RPC result seeds a genuinely unknown hidden session.
+    const seed = (rid: string) => ({ id: 'pop-1', pendingQuestion: makeRequest(rid) })
+    map = syncPendingQuestionFromSession(map, seed('q-pop'), guard)
+    expect(map.get('pop-1')?.requestId).toBe('q-pop')
+
+    // A realtime question replaced the seeded card while a SECOND RPC (still
+    // carrying q-pop) was in flight — the stale RPC must not overwrite it.
+    map = setPendingQuestionForSession(map, 'pop-1', makeRequest('q-pop-2'), guard)
+    map = syncPendingQuestionFromSession(map, seed('q-pop'), guard)
+    expect(map.get('pop-1')?.requestId).toBe('q-pop-2')
+
+    // After the realtime q-pop-2 is resolved, a stale q-pop-2 RPC must not
+    // resurrect the card either.
+    map = removePendingQuestionForSession(map, 'pop-1', 'q-pop-2', guard)
+    map = syncPendingQuestionFromSession(map, seed('q-pop-2'), guard)
+    expect(map.has('pop-1')).toBe(false)
+  })
+
+  it('terminal markers stay bounded per session (FIFO, MAX_PER_SESSION)', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    // Rotate more requestIds than the bound; each replaces the previous.
+    for (let i = 0; i < 24; i++) {
+      map = setPendingQuestionForSession(map, 's-1', makeRequest(`q-${i}`), guard)
+    }
+    // Old markers beyond the bound are forgotten (fill allowed again), the
+    // most recent ones still block.
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q-0') }, guard)
+    expect(map.get('s-1')?.requestId).toBe('q-23')
+    map = removePendingQuestionForSession(map, 's-1', 'q-23', guard)
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q-23') }, guard)
+    expect(map.has('s-1')).toBe(false)
+  })
+
   it('a fresh realtime question re-opens the lifecycle for snapshot fills (per-requestId scoping)', () => {
     const guard = new PendingQuestionTerminalGuard()
     let map = new Map<string, QuestionRequest>()

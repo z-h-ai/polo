@@ -198,7 +198,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Dedicated, trusted creation path for the renderer Edit Popover session.
   // The server stamps the 'edit-popover' origin + owner identity here — the
-  // generic CREATE above strips any caller-provided value (review round 2).
+  // generic CREATE above strips any caller-provided value.
   server.handle(RPC_CHANNELS.sessions.CREATE_EDIT_POPOVER_SESSION, async (_ctx, workspaceId: string, options: import('@polo-ai/shared/protocol').CreateEditPopoverSessionOptions) => {
     const end = perf.start('rpc.createEditPopoverSession', { workspaceId })
     const session = await sessionManager.createEditPopoverSession(workspaceId, options)
@@ -312,8 +312,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Locate the Edit Popover session that still owns an active pending
   // question for the given workspace + popover owner (hidden session — not
   // reachable through the session list). Exact workspace + owner match only,
-  // so concurrent popovers can never adopt each other's session (review
-  // round 2). Lets the popover re-adopt the same hidden session after a
+  // so concurrent popovers can never adopt each other's session. Lets the
+  // popover re-adopt the same hidden session after a
   // reopen, renderer reload, or app restart instead of orphaning the request.
   server.handle(RPC_CHANNELS.sessions.GET_EDIT_POPOVER_PENDING_QUESTION, async (_ctx, workspaceId: string, popoverOwner: string) => {
     return sessionManager.getEditPopoverPendingSession(workspaceId, popoverOwner)

@@ -5,7 +5,7 @@
  * it is persisted as the session's `popoverOwner` and matched EXACTLY on
  * pending-question recovery (reopen / reload / restart). The raw
  * "label::filePath" pair can exceed any sane field bound for deeply nested
- * projects, so it is hashed instead (review round 4, issue 3).
+ * projects, so it is hashed instead.
  *
  * FNV-1a 64-bit: deterministic across processes and restarts, no async
  * crypto, and a 64-bit space that is collision-safe for the realistic number

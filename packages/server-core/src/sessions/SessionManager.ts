@@ -923,6 +923,15 @@ interface ManagedSession {
   // delete/stop can cancel it (a stale closure must never fire events or
   // restart turns for a removed session).
   resumeRetryTimer?: ReturnType<typeof setTimeout>
+  /**
+   * EXTERNAL-ENGINE registration: the session's model turn is driven by an
+   * external harness (e.g. Codex CLI) whose model-visible toolset is the
+   * per-turn session MCP server. Only registered sessions spawn the per-turn
+   * sidecar (and carry its stdio client) — embedded Claude/Pi sessions keep
+   * the in-process registry as their SINGLE owner/channel and never run a
+   * second, dead channel.
+   */
+  externalToolset?: boolean
   // Invocation source of the most recent turn ('desktop' enables
   // request_user_input; defaults to 'internal' — fail closed).
   invocationSource?: InvocationSource
@@ -1313,8 +1322,6 @@ export class SessionManager implements ISessionManager {
       client: any
       ready: Promise<void>
       close(): Promise<void>
-      /** Number of request_user_input tool calls served via this client. */
-      toolCalls: number
     }>
     /** Last spawn spec built (diagnostics + tests). */
     lastSpawnSpec: { command: string; args: string[] } | null
@@ -6414,19 +6421,23 @@ export class SessionManager implements ISessionManager {
         agent.allowRequestUserInput = allowRequestUserInputNow
       }
 
-      // SESSION MCP HOST — per-turn consumption boundary: when a host is
-      // running, spawn THIS turn's session MCP server with the current
-      // sessionId, the host callback port, the capability DERIVED FROM THE
-      // INVOCATION SOURCE (desktop→messaging→desktop switching is expressed
-      // in the spawned args) and the IMMUTABLE processing generation. This is
+      // SESSION MCP HOST — per-turn consumption boundary, gated to
+      // EXTERNAL-ENGINE sessions only: a registered session's model-visible
+      // toolset is the per-turn session MCP server (host callback port +
+      // capability DERIVED FROM THE INVOCATION SOURCE + the IMMUTABLE
+      // processing generation expressed in the spawned args). The spawn is
       // AWAITED to a full readiness edge — host listening AND this turn's
       // MCP client connected — before the model may start the turn, so the
       // very first turn can already discover (and call) request_user_input
-      // through the real session MCP toolset. A failed spawn/connect degrades
+      // through the real toolset. A failed spawn/connect degrades
       // deterministically (turn proceeds without the session MCP channel;
-      // the healthy host stays registered). Stopped at turn end; dormant
-      // (zero behavior) when no host was started.
-      await this.spawnSessionMcpServerForTurn(sessionId, invocationSource, managed.processingGeneration)
+      // the healthy host stays registered). Embedded Claude/Pi sessions
+      // never spawn a sidecar: the in-process registry is their single
+      // owner/channel. Stopped at turn end; dormant when no host was
+      // started.
+      if (managed.externalToolset) {
+        await this.spawnSessionMcpServerForTurn(sessionId, invocationSource, managed.processingGeneration)
+      }
 
       // Always set all sources for context (even if none are enabled), including built-ins
       const allSources = loadAllSources(workspaceRootPath)
@@ -7659,7 +7670,7 @@ export class SessionManager implements ISessionManager {
     // NOTE: the child-process close is observed via the CLIENT's onclose
     // (the SDK owns transport.onclose while connecting and its internal
     // handler performs the connect-time early reject).
-    const entry = { client, ready: client.connect(transport), close: () => client.close(), toolCalls: 0 }
+    const entry = { client, ready: client.connect(transport), close: () => client.close() }
     entry.ready.catch(connectError => {
       sessionLog.error(`Session MCP server connect failed for session ${sessionId}:`, connectError)
       if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
@@ -7693,30 +7704,45 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * AWAITABLE tool call over the spawned session MCP server: invokes request_user_input through the MCP client —
-   * the server handler POSTs the question to the host callback port, which
-   * performs the SessionManager durable handoff and answers at the boundary;
-   * the tool result (and this promise) settles with that terminal outcome.
+   * Register a session as EXTERNALLY driven: its model turns run in an
+   * external harness (e.g. Codex CLI) whose model-visible toolset is the
+   * per-turn session MCP server. From the next sendMessage turn on, the
+   * host spawns that sidecar for this session (awaited to full readiness
+   * before chat); {@link getSessionExternalModelToolset} hands the harness
+   * its per-turn model MCP config.
    */
-  async callSessionMcpRequestUserInput(sessionId: string, questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]): Promise<string> {
-    const entry = await this.awaitSessionMcpClient(sessionId)
-    if (!entry) {
-      throw new Error(`No session MCP server is running for session ${sessionId}`)
+  markSessionExternalEngine(sessionId: string): void {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      throw new Error(`Session ${sessionId} not found`)
     }
-    entry.toolCalls += 1
-    const result = await entry.client.callTool({
-      name: 'request_user_input',
-      arguments: { questions },
-    })
-    const text = (result.content as Array<{ type: string; text?: string }> | undefined)
-      ?.map(part => part.text ?? '')
-      .join('') ?? ''
-    // Tool-level errors (e.g. the tool not being registered on a
-    // fail-closed/non-desktop server) surface as rejections.
-    if (result.isError) {
-      throw new Error(text || 'request_user_input tool call failed')
-    }
-    return text
+    managed.externalToolset = true
+    sessionLog.info(`Session ${sessionId} registered for external-engine consumption (per-turn session MCP sidecar enabled)`)
+  }
+
+  /**
+   * The REAL per-turn model MCP config for an external-engine session — what
+   * the harness (e.g. Codex CLI) puts into its session/model MCP setup:
+   * spawn `command` with `args` (session binding, host callback port, the
+   * turn's capability derived from the invocation source, and the immutable
+   * turn generation) so the model's toolset contains request_user_input
+   * exactly when the turn is desktop-eligible. Awaits the host readiness
+   * gate; null when no host exists, the session is gone, or the session was
+   * never registered as externally driven (fail closed for embedded
+   * sessions — their toolset never routes through a sidecar).
+   */
+  async getSessionExternalModelToolset(
+    sessionId: string,
+    invocationSource: InvocationSource,
+    processingGeneration: number,
+  ): Promise<{ command: string; args: string[]; callbackPort: number } | null> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed?.externalToolset) return null
+    const host = await this.awaitSessionMcpHost()
+    if (!host) return null
+    const built = this.buildSessionMcpServerForTurnArgs(sessionId, invocationSource, processingGeneration)
+    if (!built) return null
+    return { command: built.spec.command, args: built.spec.args, callbackPort: host.callbackPort }
   }
 
   /**
@@ -8402,25 +8428,26 @@ export class SessionManager implements ISessionManager {
       clearTimeout(managed.resumeRetryTimer)
       managed.resumeRetryTimer = undefined
     }
-    const staged = managed.pendingAgentResume
-    if (!staged) return
-    // STAGED DURABLE CLEAR: the debounced write + awaited flush carry the
-    // cleared state, and only then is the in-memory clear PUBLISHED. An
-    // observer (or a retry path) that runs after this call's await therefore
-    // sees runtime and disk converged — never "runtime cleared + recovery
-    // still on disk". A failed flush ROLLS BACK the in-memory clear so the
-    // runtime matches the (still-armed) disk state; the caller decides
-    // between retrying the persistence and marking the record terminal.
-    managed.pendingAgentResume = undefined
-    this.persistSession(managed)
+    if (!managed.pendingAgentResume) return
+    // STAGED DURABLE CLEAR: the live ManagedSession stays ARMED while the
+    // staged snapshot — built with `pendingAgentResume` omitted — is
+    // persisted and flushed. Only after the durable flush succeeds is the
+    // in-memory clear published, so an observer inside the flush window (or
+    // a crash) always sees a CONSISTENT world: runtime armed + disk armed
+    // (pre-commit), or runtime cleared + disk cleared (post-commit) — never
+    // "runtime cleared + recovery still on disk".
+    this.persistSession(managed, { pendingAgentResume: undefined })
     if (opts.flush !== false) {
       try {
         await this.flushSession(managed.id)
       } catch (error) {
-        managed.pendingAgentResume = staged
+        // The staged write failed — the live state was never cleared and
+        // still matches the (still-armed) disk. The caller decides between
+        // retrying the persistence and marking the record terminal.
         throw error
       }
     }
+    managed.pendingAgentResume = undefined
     sessionLog.info(`Cleared pendingAgentResume for session ${managed.id}: ${reason}`)
   }
 

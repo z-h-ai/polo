@@ -108,7 +108,7 @@ export function validateRequestUserInputArgs(args: RequestUserInputArgs): Valida
       }
       optionIds.add(option.id);
       if (option.recommended) recommendedCount++;
-      // PRESENCE-BASED (review fix round 2, issue 2): the protocol forbids the
+      // PRESENCE-BASED: the protocol forbids the
       // `exclusive` FIELD on single-select questions — an explicit
       // `exclusive: false` is still a declaration and must be rejected, not
       // just a truthy value. Zod keeps `false` as `false` (present) and an

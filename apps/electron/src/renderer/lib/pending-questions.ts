@@ -18,18 +18,20 @@ import type { QuestionRequest } from '../../shared/types'
  */
 
 /**
- * Terminal markers for snapshot filling (lightweight per-session /
- * requestId guard).
+ * Terminal markers for snapshot filling (lightweight, requestId-scoped).
  *
- * A realtime resolution or deletion makes a HOLE in the map; a session
- * snapshot that was already in flight carries the OLDER state and must not
- * re-fill that hole. The guard records which requestIds (and whole sessions)
- * reached a terminal state locally; {@link syncPendingQuestionFromSession}
- * consults it before filling. A fresh realtime `question_request` re-opens
- * the lifecycle and clears the session's markers.
+ * A requestIds' lifecycle is terminal the moment realtime authority moves
+ * past it — it is RESOLVED (answer/cancel/skip) or SUPERSEDED (a newer
+ * question_request replaced it) or the whole session was DELETED. A session
+ * snapshot that was already in flight carries OLDER state and must never
+ * re-fill a terminal requestId's card. {@link syncPendingQuestionFromSession}
+ * consults this guard before filling. Sets are bounded per session (FIFO) —
+ * snapshot staleness windows are short, so a small memory is sufficient.
  */
 export class PendingQuestionTerminalGuard {
-  /** Session → requestIds whose resolution/deletion removed the local card. */
+  /** Bounded number of remembered terminal requestIds per session. */
+  private static readonly MAX_PER_SESSION = 16
+  /** Session → terminal requestIds (resolved OR superseded), FIFO-bounded. */
   private resolved = new Map<string, Set<string>>()
   /** Sessions deleted locally — every snapshot fill for them is stale. */
   private deleted = new Set<string>()
@@ -42,6 +44,19 @@ export class PendingQuestionTerminalGuard {
       this.resolved.set(sessionId, ids)
     }
     ids.add(requestId)
+    if (ids.size > PendingQuestionTerminalGuard.MAX_PER_SESSION) {
+      const oldest = ids.values().next().value
+      if (oldest !== undefined) ids.delete(oldest)
+    }
+  }
+
+  /**
+   * Record the card a fresh realtime question REPLACED as terminal — the
+   * superseded requestId can never legitimately re-fill, even though its
+   * card was already swapped (not removed) by the newer question.
+   */
+  markSuperseded(sessionId: string, requestId: string): void {
+    this.markResolved(sessionId, requestId)
   }
 
   /** Record a session deletion — blocks every snapshot fill for it. */
@@ -50,10 +65,13 @@ export class PendingQuestionTerminalGuard {
     this.resolved.delete(sessionId)
   }
 
-  /** A fresh realtime question re-opens the lifecycle — clear the markers. */
+  /**
+   * A fresh realtime question re-opens the lifecycle for DELETION markers
+   * only. Resolved/superseded requestId markers are NEVER cleared: a
+   * terminal requestId stays terminal even when a newer question took over.
+   */
   markReplaced(sessionId: string): void {
     this.deleted.delete(sessionId)
-    this.resolved.delete(sessionId)
   }
 
   /** Whether a snapshot payload with this requestId may fill the hole. */
@@ -65,8 +83,10 @@ export class PendingQuestionTerminalGuard {
 
 /**
  * Set (replace) the pending question for a session. A new requestId
- * automatically replaces the previous entry, and a fresh realtime request
- * re-opens the snapshot-fill lifecycle.
+ * automatically replaces the previous entry; the REPLACED requestId (if a
+ * card was displayed) is recorded terminal — superseded requestIds can never
+ * be re-filled by an older in-flight snapshot — and deletion markers for the
+ * session are re-opened by the fresh realtime authority.
  */
 export function setPendingQuestionForSession(
   map: Map<string, QuestionRequest>,
@@ -75,17 +95,22 @@ export function setPendingQuestionForSession(
   guard?: PendingQuestionTerminalGuard,
 ): Map<string, QuestionRequest> {
   const next = new Map(map)
+  const previous = next.get(sessionId)
   next.set(sessionId, request)
+  if (guard && previous && previous.requestId !== request.requestId) {
+    guard.markSuperseded(sessionId, previous.requestId)
+  }
   guard?.markReplaced(sessionId)
   return next
 }
 
 /**
  * Remove the pending question for a session ONLY when its current requestId
- * matches resolvedRequestId. Guards the race where a follow-up question
- * (q2) arrives while an earlier resolution (q1) is still in flight — the
- * stale resolution must not delete the newer card. The removed requestId is
- * recorded as terminal so an older in-flight snapshot cannot resurrect it.
+ * matches resolvedRequestId — a stale resolution must not delete a newer
+ * card. The resolved requestId is marked terminal REGARDLESS of the match:
+ * the realtime resolution proves that requestId is terminal even when the
+ * displayed card has already moved on, so an older in-flight snapshot can
+ * never re-fill it.
  */
 export function removePendingQuestionForSession(
   map: Map<string, QuestionRequest>,
@@ -93,11 +118,11 @@ export function removePendingQuestionForSession(
   resolvedRequestId: string,
   guard?: PendingQuestionTerminalGuard,
 ): Map<string, QuestionRequest> {
+  guard?.markResolved(sessionId, resolvedRequestId)
   const current = map.get(sessionId)
   if (!current || current.requestId !== resolvedRequestId) return map
   const next = new Map(map)
   next.delete(sessionId)
-  guard?.markResolved(sessionId, resolvedRequestId)
   return next
 }
 

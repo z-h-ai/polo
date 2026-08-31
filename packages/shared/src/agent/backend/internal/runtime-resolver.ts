@@ -30,7 +30,7 @@ export interface ResolvedBackendRuntimePaths {
   sessionServerPath?: string;
   /**
    * PRODUCTION per-turn spawn-spec builder for the packaged session MCP
-   * server (review fix rounds 9-10, issue B): hosts/drivers call this with
+   * server: hosts/drivers call this with
    * the TURN's capability + generation to get the complete spawn spec
    * (command + args) for the resolved packaged server. Built via
    * `buildSessionMcpServerInvocation`. Null when the packaged server is not
@@ -245,10 +245,10 @@ export function resolveBackendRuntimePaths(hostRuntime: BackendHostRuntimeContex
     claudeCliPath: resolveClaudeBinaryPath(hostRuntime),
     interceptorBundlePath: resolveInterceptorBundlePath(hostRuntime),
     sessionServerPath: resolveServerPath(hostRuntime, 'session-mcp-server'),
-    // PRODUCTION consumption of the per-turn invocation builder (review fix
-    // rounds 9-10, issue B): the resolved runtime carries the spawn-spec
-    // builder bound to THIS runtime's packaged server + node binary; hosts
-    // and drivers spawn the session MCP server through it.
+    // PRODUCTION consumption of the per-turn invocation builder: the
+    // resolved runtime carries the spawn-spec builder bound to THIS runtime's
+    // packaged server + node binary; hosts and drivers spawn the session MCP
+    // server through it.
     buildSessionMcpServerInvocation: (options) =>
       buildSessionMcpServerInvocation(hostRuntime, options),
     bridgeServerPath: resolveServerPath(hostRuntime, 'bridge-mcp-server'),
@@ -292,7 +292,7 @@ export function applyAnthropicRuntimeBootstrap(
 
 /**
  * PRODUCTION SPAWN SPEC for the session MCP server subprocess (the
- * Codex/external-harness path) — review fix round 9, issue B.
+ * Codex/external-harness path).
  *
  * Composes the resolved packaged-server path + node runtime with the
  * per-turn request_user_input capability and generation (via

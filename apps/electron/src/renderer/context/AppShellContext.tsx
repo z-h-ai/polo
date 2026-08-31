@@ -97,7 +97,7 @@ export interface AppShellContextType {
   /**
    * Dedicated, trusted creation path for the Edit Popover session: the server
    * stamps the 'edit-popover' origin + owner identity. The generic
-   * onCreateSession can never grant that origin (review round 2).
+   * onCreateSession can never grant that origin.
    */
   onCreateEditPopoverSession: (
     workspaceId: string,
