@@ -8,6 +8,8 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createSessionMcpCallbackHandler } from './session-mcp-callback-router.ts'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, buildSessionMcpServerArgs } from '@polo-ai/shared/agent'
 import {
@@ -937,6 +939,14 @@ interface ManagedSession {
    */
   questionLifecycleTombstone?: { reason: 'stopped' | 'archived' | 'deleted'; at: number }
   /**
+   * Synchronous count of deleteSession initiations for this session object
+   * (review fix round 13, issue C). Snapshotted by the lazy agent creation
+   * transaction before creating and re-checked after — a changed counter
+   * means a delete was initiated mid-creation and the freshly created agent
+   * must be disposed (creation rollback, no ghost turn, no leak).
+   */
+  deleteAttempts?: number
+  /**
    * Synchronous turn-start reservation (review round 5, issue 2). Set at
    * sendMessage entry — BEFORE any await — by the caller that claimed the
    * next processing generation; cleared when the turn actually starts
@@ -1285,7 +1295,16 @@ export class SessionManager implements ISessionManager {
     nodeRuntimePath?: string
     server: { stop(force?: boolean): void }
     /** One live server subprocess per session, stopped at turn end. */
-    children: Map<string, { kill(): void; exited?: Promise<unknown> }>
+    /**
+     * One live session MCP server (stdio client + transport owning the child
+     * process) per session, stopped at turn end.
+     */
+    children: Map<string, {
+      // Loosely typed: the concrete MCP SDK Client satisfies this shape.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client: any
+      close(): Promise<void>
+    }>
     /** Last spawn spec built (diagnostics + tests). */
     lastSpawnSpec: { command: string; args: string[] } | null
   } | null = null
@@ -5772,6 +5791,13 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    // DELETE INITIATION MARKER (review fix round 13, issue C): counted
+    // synchronously at entry — BEFORE the locked declaration — so a lazy
+    // agent creation in flight can detect (and roll back for) a delete that
+    // was INITIATED during its creation transaction, even though the
+    // declaration itself cannot run until the creation releases the lock.
+    managed.deleteAttempts = (managed.deleteAttempts ?? 0) + 1
+
     // DELETION DECLARATION — inside the question-state lock (review fix
     // round 9, issue A): the tombstone write AND the availability-removal
     // visibility point form the linearization point of the deletion. This
@@ -5956,7 +5982,6 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
-    console.log('DBG-SEND-ENTRY', sessionId)
     // DELETE TURN-START GATE (review fix round 6, issue B): deletion sets its
     // terminal tombstone synchronously at deleteSession entry. A send that
     // arrives during the deletion window must never start a new turn — the
@@ -6353,27 +6378,38 @@ export class SessionManager implements ISessionManager {
       // would start a ghost turn on a deleted session. On rejection the error
       // path converges the turn (onProcessingStopped) and the delete's
       // cleanup removes the storage copy.
-      let deletedDuringCreation = false
+      let rolledBackForDelete = false
       let created: AgentBackend | null = null
       await this.withQuestionStateLock(sessionId, async () => {
         // In-lock check: deletion declared → do NOT create the agent (a
         // ghost turn on a deleted session). The turn converges silently as
         // deleted — the delete's cleanup owns the storage removal.
         if (managed.questionLifecycleTombstone?.reason === 'deleted') {
-          deletedDuringCreation = true
+          rolledBackForDelete = true
           return
         }
+        // Snapshot the delete-initiation counter BEFORE creating so a delete
+        // INITIATED during the slow creation is detected after it (review
+        // fix round 13, issue C).
+        const deleteAttemptsBefore = managed.deleteAttempts ?? 0
         created = await this.getOrCreateAgent(managed)
-      })
-      if (deletedDuringCreation || created === null) {
-        // The tombstone field is compiler-narrowed after the in-lock check;
-        // a concurrent deleteSession mutates it, so re-read it widened.
-        const tombstoneNow = managed.questionLifecycleTombstone as { reason?: string } | undefined
-        if (tombstoneNow?.reason === 'deleted') {
-          sessionLog.info(`sendMessage: session ${sessionId} was deleted during lazy agent creation — turn converged as deleted`)
+        // POST-AWAIT RE-VALIDATION (review fix round 13, issue C): a delete
+        // that queued during the slow creation lands right after this section
+        // — roll the creation transaction back NOW (dispose the fresh agent —
+        // no leak) so no turn can start on a deleted session.
+        if ((managed.deleteAttempts ?? 0) !== deleteAttemptsBefore) {
+          rolledBackForDelete = true
+          sessionLog.info(`Session ${sessionId} deleted during lazy agent creation — disposing the created agent`)
+          await this.disposeManagedAgentRuntime(managed, 'session deleted during lazy agent creation')
           return
         }
-        throw new Error(`Session ${sessionId}: lazy agent creation failed`)
+      })
+      if (rolledBackForDelete || created === null) {
+        // The turn converges silently as deleted (the user message was
+        // already persisted/broadcast in the section; the delete's cleanup —
+        // queued behind this section — owns the storage removal).
+        sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted before agent start`)
+        return
       }
       agent = created
       sendSpan.mark('agent.ready')
@@ -7372,15 +7408,29 @@ export class SessionManager implements ISessionManager {
    * parameters. Per-turn servers are then spawned by {@link
    * spawnSessionMcpServerForTurn} from the sendMessage turn-start path.
    */
-  startSessionMcpHost(options: { serverEntryPath: string; nodeRuntimePath?: string; callbackPort?: number }): number {
+  async startSessionMcpHost(options: {
+    serverEntryPath: string
+    nodeRuntimePath?: string
+    callbackPort?: number
+    /** Test/Node-runtime hook: skip Bun.serve and use the node:http listener. */
+    forceNodeHttp?: boolean
+  }): Promise<number> {
     if (this.sessionMcpHost) return this.sessionMcpHost.callbackPort
     const handler = createSessionMcpCallbackHandler(this)
-    const server = Bun.serve({
-      port: options.callbackPort ?? 0,
-      hostname: '127.0.0.1',
-      fetch: req => handler(req),
-    })
-    const callbackPort: number = (server as { port: number }).port
+    // CROSS-RUNTIME (review fix round 13, issue A): the Electron main process
+    // is a NODE runtime — Bun.serve would crash production startup. Prefer
+    // Bun.serve when the Bun API exists; otherwise fall back to a node:http
+    // listener with a web-Request adapter.
+    const bunGlobal = globalThis as { Bun?: { serve?: (o: unknown) => { stop: (force?: boolean) => void; port: number } } }
+    const useBun = !options.forceNodeHttp && typeof bunGlobal.Bun?.serve === 'function'
+    const server = useBun
+      ? bunGlobal.Bun!.serve!({
+          port: options.callbackPort ?? 0,
+          hostname: '127.0.0.1',
+          fetch: (req: Request) => handler(req),
+        })
+      : await this.startNodeHttpHost(handler, options.callbackPort ?? 0)
+    const callbackPort: number = server.port
     this.sessionMcpHost = {
       callbackPort,
       serverEntryPath: options.serverEntryPath,
@@ -7389,16 +7439,70 @@ export class SessionManager implements ISessionManager {
       children: new Map(),
       lastSpawnSpec: null,
     }
-    sessionLog.info(`Session MCP host started on 127.0.0.1:${callbackPort} (entry: ${options.serverEntryPath})`)
+    sessionLog.info(`Session MCP host started on 127.0.0.1:${callbackPort} (entry: ${options.serverEntryPath}, runtime: ${useBun ? 'bun' : 'node'})`)
     return callbackPort
+  }
+
+  /**
+   * NODE-runtime listener (review fix round 13, issue A): node:http server
+   * adapting IncomingMessage/ServerResponse to the web-standard Request the
+   * callback router expects. Same 127.0.0.1-only binding as the Bun path.
+   */
+  private async startNodeHttpHost(
+    handler: (request: Request) => Promise<Response>,
+    port: number,
+  ): Promise<{ stop(force?: boolean): void; port: number }> {
+    const { createServer } = await import('node:http')
+    const nodes = createServer((req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
+      const chunks: Buffer[] = []
+      req.on('data', chunk => chunks.push(chunk as Buffer))
+      req.on('error', () => res.destroy())
+      req.on('end', () => {
+        const method = (req.method ?? 'GET').toUpperCase()
+        const headers = new Headers()
+        for (const [key, value] of Object.entries(req.headers)) {
+          if (value === undefined) continue
+          headers.set(key, Array.isArray(value) ? value.join(', ') : String(value))
+        }
+        const url = `http://127.0.0.1${req.url ?? '/'}`
+        const body = method === 'GET' || method === 'HEAD' ? undefined : Buffer.concat(chunks)
+        const request = new Request(url, { method, headers, body })
+        handler(request)
+          .then(async response => {
+            const outHeaders: Record<string, string> = {}
+            response.headers.forEach((value, key) => { outHeaders[key] = value })
+            res.writeHead(response.status, outHeaders)
+            res.end(Buffer.from(await response.arrayBuffer()))
+          })
+          .catch(handlerError => {
+            sessionLog.error('Session MCP callback handler failed:', handlerError)
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: handlerError instanceof Error ? handlerError.message : String(handlerError) }))
+          })
+      })
+    })
+    await new Promise<void>(resolve => {
+      nodes.once('listening', resolve)
+      nodes.listen(port, '127.0.0.1')
+    })
+    const address = nodes.address()
+    const boundPort = typeof address === 'object' && address !== null ? address.port : port
+    return {
+      port: boundPort,
+      stop: (force?: boolean) => {
+        const closable = nodes as unknown as { closeAllConnections?: () => void }
+        if (force && typeof closable.closeAllConnections === 'function') closable.closeAllConnections()
+        nodes.close()
+      },
+    }
   }
 
   /** Stop the host: kills every per-turn server subprocess and the listener. */
   stopSessionMcpHost(): void {
     const host = this.sessionMcpHost
     if (!host) return
-    for (const child of host.children.values()) {
-      try { child.kill() } catch { /* already exited */ }
+    for (const entry of host.children.values()) {
+      void entry.close().catch(() => {})
     }
     host.children.clear()
     host.server.stop(true)
@@ -7457,30 +7561,65 @@ export class SessionManager implements ISessionManager {
     if (!built) return
     // Stop any previous turn's server first — one live server per session.
     this.stopSessionMcpServerForTurn(sessionId)
-    const child = Bun.spawn([built.spec.command, ...built.spec.args], {
-      stdin: 'ignore',
-      stdout: 'ignore',
-      stderr: 'ignore',
-    })
-    host.children.set(sessionId, child)
-    host.lastSpawnSpec = built.spec
-    sessionLog.info(`Spawned session MCP server for session ${sessionId} (pid ${child.pid}, capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
-    const exited: Promise<unknown> | undefined = child.exited
-    if (exited) {
-      void exited.then(() => {
-        if (host.children.get(sessionId) === child) host.children.delete(sessionId)
-      }).catch(() => {})
+    // STDIO CLIENT (review fix round 13, issue B): the transport SPAWNS the
+    // server subprocess and wires its stdin/stdout to the server's
+    // StdioServerTransport — closing the spawn↔stdio↔MCP-client loop that
+    // round 11's ignored-stdio spawn left open. The MCP client is kept per
+    // session; request_user_input is invoked through it (see
+    // callSessionMcpRequestUserInput) and AWAITS the durable handoff's
+    // terminal result.
+    const transport = new StdioClientTransport({ command: built.spec.command, args: built.spec.args })
+    const client = new Client({ name: 'polo-session-mcp-host', version: '0.3.1' })
+    const entry = { client, close: () => client.close() }
+    transport.onclose = () => {
+      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
     }
+    host.children.set(sessionId, entry)
+    host.lastSpawnSpec = built.spec
+    sessionLog.info(`Spawned session MCP server for session ${sessionId} (capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
+    void client.connect(transport).catch((connectError: Error) => {
+      sessionLog.error(`Session MCP server connect failed for session ${sessionId}:`, connectError)
+      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
+    })
   }
 
-  /** Stop THIS session's per-turn server subprocess (turn end / deletion). */
+  /**
+   * AWAITABLE tool call over the spawned session MCP server (review fix
+   * round 13, issue B): invokes request_user_input through the MCP client —
+   * the server handler POSTs the question to the host callback port, which
+   * performs the SessionManager durable handoff and answers at the boundary;
+   * the tool result (and this promise) settles with that terminal outcome.
+   */
+  async callSessionMcpRequestUserInput(sessionId: string, questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]): Promise<string> {
+    const entry = this.sessionMcpHost?.children.get(sessionId)
+    if (!entry) {
+      throw new Error(`No session MCP server is running for session ${sessionId}`)
+    }
+    const result = await entry.client.callTool({
+      name: 'request_user_input',
+      arguments: { questions },
+    })
+    const text = (result.content as Array<{ type: string; text?: string }> | undefined)
+      ?.map(part => part.text ?? '')
+      .join('') ?? ''
+    // Tool-level errors (e.g. the tool not being registered on a
+    // fail-closed/non-desktop server) surface as rejections.
+    if (result.isError) {
+      throw new Error(text || 'request_user_input tool call failed')
+    }
+    return text
+  }
+
+  /** Stop THIS session's per-turn server (client + transport + subprocess). */
   stopSessionMcpServerForTurn(sessionId: string): void {
     const host = this.sessionMcpHost
     if (!host) return
-    const child = host.children.get(sessionId)
-    if (child) {
-      try { child.kill() } catch { /* already exited */ }
+    const entry = host.children.get(sessionId)
+    if (entry) {
       host.children.delete(sessionId)
+      void entry.close().catch(closeError => {
+        sessionLog.warn(`Failed to close session MCP server for session ${sessionId}:`, closeError)
+      })
     }
   }
 

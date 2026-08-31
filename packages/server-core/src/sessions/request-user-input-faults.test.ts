@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
+// Repo root (this file: packages/server-core/src/sessions/) — used to point
+// the spawned session MCP server at its SOURCE entry (bun executes TS).
+const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..')
 import * as serverCoreDomain from '@polo-ai/server-core/domain'
 
 // Fault injection for releaseBrowserOwnershipOnForcedStop — must be installed
@@ -899,16 +902,10 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(agentCreations).toBe(0)
     expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
 
-    // The delete converges everything: tombstone terminal, storage removed.
-    console.log('DBGD before deletePromise')
-    try {
-      await deletePromise
-      console.log('DBGD delete OK')
-    } catch (de) {
-      console.log('DBGD delete REJECTED:', (de as Error)?.message)
-    }
-    console.log('DBGD tombstone:', JSON.stringify(managed.questionLifecycleTombstone))
-    console.log('DBGD body completed')
+    // The delete MUST complete; the tombstone MUST stay terminal.
+    await deletePromise
+    expect(managed.questionLifecycleTombstone?.reason).toBe('deleted')
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv'))).toBe(false)
   })
 
   // ---- Review fix round 9, issue A: linearization (a) — the delete's
@@ -1068,7 +1065,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // Stub server entry + start the production host.
     const entry = join(tmpRoot, 'session-mcp-stub.js')
     writeFileSync(entry, 'process.exit(0)\n')
-    const hostPort = sm.startSessionMcpHost({ serverEntryPath: entry })
+    const hostPort = await sm.startSessionMcpHost({ serverEntryPath: entry })
     expect(hostPort).toBeGreaterThan(0)
 
     // TURN 1 — desktop: capability ON.
@@ -1115,6 +1112,99 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // Exactly ONE durable handoff for the single tool call.
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
 
+    sm.stopSessionMcpHost()
+  })
+
+  // ---- Review fix round 13, issue A: the host must start on a NODE runtime
+  // (Electron main) — the forceNodeHttp path exercises the node:http
+  // listener with a real POST round-trip.
+
+  it('host startup works on the NODE http path (forceNodeHttp) with a real POST round-trip', async () => {
+    seedSession('f-node-host', {})
+    const request = makeQuestionRequest('f-node-host')
+
+    const port = await sm.startSessionMcpHost({
+      serverEntryPath: join(tmpRoot, 'whatever-entry.js'),
+      forceNodeHttp: true,
+    })
+    expect(port).toBeGreaterThan(0)
+
+    const response = await fetch(`http://127.0.0.1:${port}/request-user-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'f-node-host',
+        questions: request.questions,
+        generationAtRequest: 0,
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'accepted' })
+    expect(sm.getPendingQuestion('f-node-host')).not.toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+
+    sm.stopSessionMcpHost()
+  })
+
+  // ---- Review fix round 13, issue B: the SPAWN↔STDIO↔MCP-CLIENT↔TOOL↔
+  // CALLBACK↔DURABLE-HANDOFF closed loop, cross-process.
+
+  it('cross-process loop: the spawned session MCP server serves request_user_input over stdio into the durable handoff (ONE requestId)', async () => {
+    const managed = seedSession('f-mcp-loop', {}) as unknown as { processingGeneration: number }
+    // The packaged server entry — point at the SOURCE and let the bun
+    // runtime execute it (nodeRuntimePath = process.execPath).
+    const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
+
+    await sm.startSessionMcpHost({
+      serverEntryPath: serverEntry,
+      nodeRuntimePath: process.execPath,
+    })
+    void sm.spawnSessionMcpServerForTurn('f-mcp-loop', 'desktop', managed.processingGeneration)
+    // Wait for the stdio client to connect (the server takes a moment to boot).
+    await waitForCondition(() => {
+      const entry = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } }).sessionMcpHost?.children.get('f-mcp-loop')
+      return !!entry
+    }, 15000)
+
+    // ONE tool call through the MCP client → ONE durable handoff.
+    const request = makeQuestionRequest('f-mcp-loop')
+    const text = await sm.callSessionMcpRequestUserInput('f-mcp-loop', request.questions)
+    expect(text).toContain('Waiting for user input')
+
+    const pending = sm.getPendingQuestion('f-mcp-loop')
+    expect(pending).not.toBeNull()
+    expect(pending?.requestId).toEqual(expect.any(String))
+    // ONE tool call → exactly ONE durable handoff (single delivery).
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+
+    // Terminal: answering settles the question.
+    await sm.respondToQuestion('f-mcp-loop', makeAnswerResolution(pending!))
+    expect(sm.getPendingQuestion('f-mcp-loop')).toBeNull()
+
+    sm.stopSessionMcpHost()
+  })
+
+  it('cross-process fail-closed: a non-desktop spawn serves no request_user_input tool', async () => {
+    const managed = seedSession('f-mcp-nd', {}) as unknown as { processingGeneration: number }
+    const serverEntry = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
+
+    await sm.startSessionMcpHost({
+      serverEntryPath: serverEntry,
+      nodeRuntimePath: process.execPath,
+    })
+    void sm.spawnSessionMcpServerForTurn('f-mcp-nd', 'messaging', managed.processingGeneration)
+    await waitForCondition(() => {
+      const entry = (sm as unknown as { sessionMcpHost: { children: Map<string, unknown> } }).sessionMcpHost?.children.get('f-mcp-nd')
+      return !!entry
+    }, 15000)
+    // Give the subprocess a moment to finish booting before the failing call.
+    await new Promise(r => setTimeout(r, 500))
+
+    await expect(sm.callSessionMcpRequestUserInput('f-mcp-nd', makeQuestionRequest('f-mcp-nd').questions))
+      .rejects.toThrow()
+
+    expect(sm.getPendingQuestion('f-mcp-nd')).toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(0)
     sm.stopSessionMcpHost()
   })
 

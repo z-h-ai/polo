@@ -927,9 +927,14 @@ app.whenReady().then(async () => {
             isPackaged: app.isPackaged,
           })
           if (runtimePaths.sessionServerPath) {
+            // DEGRADE, NEVER CRASH (review fix round 13, issue A): a host
+            // startup failure only disables the session MCP path — it must
+            // not propagate to the bootstrap's top level.
             sm.startSessionMcpHost({
               serverEntryPath: runtimePaths.sessionServerPath,
               nodeRuntimePath: runtimePaths.nodeRuntimePath,
+            }).catch(startupError => {
+              console.error('[session-mcp] host failed to start — continuing without the session MCP path:', startupError)
             })
           }
           return sm
