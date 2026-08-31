@@ -57,6 +57,12 @@ import {
   resolveBackendHostTooling as resolveHostToolingPaths,
   resolveBackendRuntimePaths,
 } from './internal/runtime-resolver.ts';
+
+// PRODUCTION re-exports (review fix rounds 9-12, issue B): the runtime path
+// resolution and the session MCP server spawn-spec builder are part of the
+// backend's public surface — the electron bootstrap consumes them to start
+// the session MCP host.
+export { resolveBackendRuntimePaths, buildSessionMcpServerInvocation } from './internal/runtime-resolver.ts';
 import { anthropicDriver } from './internal/drivers/anthropic.ts';
 import { piDriver } from './internal/drivers/pi.ts';
 

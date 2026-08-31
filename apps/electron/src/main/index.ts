@@ -106,7 +106,7 @@ import { initializeReleaseNotes } from '@polo-ai/shared/release-notes'
 import { ensureDefaultPermissions } from '@polo-ai/shared/agent/permissions-config'
 import { ensureToolIcons, ensurePresetThemes } from '@polo-ai/shared/config'
 import { setBundledAssetsRoot } from '@polo-ai/shared/utils'
-import { initializeBackendHostRuntime } from '@polo-ai/shared/agent/backend'
+import { initializeBackendHostRuntime, resolveBackendRuntimePaths } from '@polo-ai/shared/agent/backend'
 import { setPowerShellValidatorRoot } from '@polo-ai/shared/agent'
 import { handleDeepLink } from './deep-link'
 import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
@@ -915,6 +915,23 @@ app.whenReady().then(async () => {
         createSessionManager: () => {
           const sm = new SessionManager()
           sm.setBrowserPaneManager(browserPaneManager!)
+          // SESSION MCP HOST (review fix round 12, issue A): production
+          // bootstrap — the host listens on localhost for the session MCP
+          // server's durable question callbacks (POST /request-user-input →
+          // SessionManager durable handoff) and carries the per-turn spawn
+          // spec for the packaged server. Dormant when the packaged server is
+          // not part of this runtime.
+          const runtimePaths = resolveBackendRuntimePaths({
+            appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
+            resourcesPath: process.resourcesPath,
+            isPackaged: app.isPackaged,
+          })
+          if (runtimePaths.sessionServerPath) {
+            sm.startSessionMcpHost({
+              serverEntryPath: runtimePaths.sessionServerPath,
+              nodeRuntimePath: runtimePaths.nodeRuntimePath,
+            })
+          }
           return sm
         },
         bindRpcServer: (sm, server) => sm.setRpcServer(server),

@@ -67,6 +67,8 @@ export {
   createBackendFromResolvedContext,
   initializeBackendHostRuntime,
   resolveBackendHostTooling,
+  resolveBackendRuntimePaths,
+  buildSessionMcpServerInvocation,
   fetchBackendModels,
   validateStoredBackendConnection,
   providerTypeToAgentProvider,

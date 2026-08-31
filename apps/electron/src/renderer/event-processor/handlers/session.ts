@@ -797,8 +797,10 @@ export function handleQuestionRequest(
   state: SessionState,
   event: QuestionRequestEvent
 ): ProcessResult {
+  // Always return a NEW state reference (apps/electron/CLAUDE.md — the event
+  // processor contract; Jotai depends on reference changes to propagate).
   return {
-    state,
+    state: { ...state },
     effects: [{
       type: 'question_request',
       request: event.request,
@@ -814,8 +816,10 @@ export function handleQuestionResolved(
   state: SessionState,
   event: QuestionResolvedEvent
 ): ProcessResult {
+  // Always return a NEW state reference (apps/electron/CLAUDE.md — the event
+  // processor contract; Jotai depends on reference changes to propagate).
   return {
-    state,
+    state: { ...state },
     effects: [{
       type: 'question_resolved',
       requestId: event.requestId,

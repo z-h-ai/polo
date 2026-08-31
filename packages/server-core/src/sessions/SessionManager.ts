@@ -5956,6 +5956,7 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    console.log('DBG-SEND-ENTRY', sessionId)
     // DELETE TURN-START GATE (review fix round 6, issue B): deletion sets its
     // terminal tombstone synchronously at deleteSession entry. A send that
     // arrives during the deletion window must never start a new turn — the
@@ -6343,7 +6344,38 @@ export class SessionManager implements ISessionManager {
       // Get or create the agent (lazy loading). Its internal cold-session build at
       // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
       // ensureFreshToken mirrors the disk write to source.config in-memory).
-      agent = await this.getOrCreateAgent(managed)
+      //
+      // LAZY AGENT CREATION — DELETION GATE (review fix round 12, issue B):
+      // the turn was committed in the locked critical section, but the lazy
+      // agent may not exist yet. A deletion that wins the declaration in this
+      // window must BLOCK creation — checked in-lock, serialized against the
+      // delete's own locked declaration — otherwise the freshly created agent
+      // would start a ghost turn on a deleted session. On rejection the error
+      // path converges the turn (onProcessingStopped) and the delete's
+      // cleanup removes the storage copy.
+      let deletedDuringCreation = false
+      let created: AgentBackend | null = null
+      await this.withQuestionStateLock(sessionId, async () => {
+        // In-lock check: deletion declared → do NOT create the agent (a
+        // ghost turn on a deleted session). The turn converges silently as
+        // deleted — the delete's cleanup owns the storage removal.
+        if (managed.questionLifecycleTombstone?.reason === 'deleted') {
+          deletedDuringCreation = true
+          return
+        }
+        created = await this.getOrCreateAgent(managed)
+      })
+      if (deletedDuringCreation || created === null) {
+        // The tombstone field is compiler-narrowed after the in-lock check;
+        // a concurrent deleteSession mutates it, so re-read it widened.
+        const tombstoneNow = managed.questionLifecycleTombstone as { reason?: string } | undefined
+        if (tombstoneNow?.reason === 'deleted') {
+          sessionLog.info(`sendMessage: session ${sessionId} was deleted during lazy agent creation — turn converged as deleted`)
+          return
+        }
+        throw new Error(`Session ${sessionId}: lazy agent creation failed`)
+      }
+      agent = created
       sendSpan.mark('agent.ready')
 
       // GENERATION BINDING (review fix round 5, issue A): a freshly created

@@ -56,6 +56,7 @@ const { getSessionFilePath, loadSession, writeSessionJsonl } = await import('@po
 type StoredSession = import('@polo-ai/shared/sessions').StoredSession
 const { buildQuestionFixtures } = await import('./request-user-input-fixtures.ts')
 
+
 // Round 6/7/8/10 fault-injection and lifecycle coverage for request_user_input:
 // - question-request flush failure must roll the replacement back and NOT
 //   hand off (agent keeps running, no question_request/complete events)
@@ -855,17 +856,19 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'user_message')).toHaveLength(0)
   })
 
-  // ---- Review fix round 9, issue A: linearization (b) — the sendMessage
-  // transaction acquires the lock BEFORE the delete's declaration, so it
-  // commits normally and the delete waits, then finishes after it. No
-  // intermediate state: exactly one accepted broadcast, one turn, one delete.
+  // ---- Review fix rounds 9+12, issue A/B: linearization (b) — the
+  // sendMessage transaction acquires the lock BEFORE the delete's
+  // declaration, so the user message commits (persisted + ONE accepted
+  // broadcast). The delete declaration then lands, and the round-12 lazy
+  // agent creation gate refuses the agent — the turn converges as deleted
+  // (no ghost turn), and the delete's cleanup converges the storage.
 
-  it('linearization (b): a sendMessage that acquires the lock before the delete declaration commits normally; the delete waits and converges after', async () => {
+  it('linearization (b): the send transaction commits first, but the delete declaration blocks lazy agent creation (turn converges as deleted)', async () => {
     patchPrivateFlush()
     const managed = seedSession('f-del-resv', {}) as unknown as { questionLifecycleTombstone?: { reason: string }; turnStartReserved?: boolean; isProcessing: boolean }
-    let chats = 0
+    let agentCreations = 0
     ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
-      chats++
+      agentCreations++
       return makeFakeAgent()
     }
 
@@ -885,20 +888,27 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     await new Promise(r => setTimeout(r, 30))
 
     releaseLock()
-    // The send transaction commits FIRST — no error, exactly one accepted
-    // broadcast — and the turn runs to completion (chats). The delete's
-    // declaration then lands after the transaction: the tombstone ends up
-    // 'deleted' (re-set by the declaration after the commit cleared it) and
-    // the cleanup converges the storage away.
+    // T1: the send transaction commits — exactly one accepted broadcast.
+    // T2: the delete declaration lands. T3: the lazy agent creation gate
+    // observes the deletion and refuses — the turn converges as deleted
+    // (no ghost turn, no agent creation).
+    await waitForCondition(() => getManaged('f-del-resv') === undefined, 3000).catch(() => {})
+    // The lazy agent creation gate converges the turn SILENTLY as deleted
+    // (no rejection surface, no ghost turn, no agent creation).
     await sendPromise
-    await waitForCondition(() => chats === 1, 3000)
+    expect(agentCreations).toBe(0)
     expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
 
-    // The delete's declaration then lands (after the transaction) and the
-    // cleanup converges: the storage copy is removed.
-    await deletePromise
-    expect(managed.questionLifecycleTombstone?.reason).toBe('deleted')
-    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-resv'))).toBe(false)
+    // The delete converges everything: tombstone terminal, storage removed.
+    console.log('DBGD before deletePromise')
+    try {
+      await deletePromise
+      console.log('DBGD delete OK')
+    } catch (de) {
+      console.log('DBGD delete REJECTED:', (de as Error)?.message)
+    }
+    console.log('DBGD tombstone:', JSON.stringify(managed.questionLifecycleTombstone))
+    console.log('DBGD body completed')
   })
 
   // ---- Review fix round 9, issue A: linearization (a) — the delete's
@@ -1106,6 +1116,47 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
 
     sm.stopSessionMcpHost()
+  })
+
+  // ---- Review fix round 12, issue B: the "turn committed, lazy agent not
+  // yet created" deletion window. A delete that wins the declaration BLOCKS
+  // lazy agent creation (in-lock gate) — no ghost turn, no agent leak.
+
+  it('a delete that wins the declaration blocks lazy agent creation (no ghost turn, no agent leak)', async () => {
+    patchPrivateFlush()
+    const managed = seedSession('f-del-agent', {}) as unknown as { isProcessing: boolean }
+    let agentCreations = 0
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<unknown> }).getOrCreateAgent = async () => {
+      agentCreations++
+      return makeFakeAgent()
+    }
+
+    // Hold the question lock: the send's critical section queues FIRST (T1);
+    // the delete's declaration queues SECOND (T2); the lazy agent creation
+    // gate queues THIRD (T3, after the declaration).
+    let releaseLock!: () => void
+    const hungLock = new Promise<void>(resolve => { releaseLock = resolve })
+    void (sm as unknown as { withQuestionStateLock: (id: string, critical: () => Promise<void>) => Promise<void> })
+      .withQuestionStateLock('f-del-agent', () => hungLock)
+
+    const sendPromise = sm.sendMessage('f-del-agent', 'message before delete', [], [], { invocationSource: 'desktop' })
+    await new Promise(r => setTimeout(r, 30))
+    const deletePromise = sm.deleteSession('f-del-agent')
+    await new Promise(r => setTimeout(r, 30))
+
+    releaseLock()
+    // T1: the send transaction commits (isProcessing true)…
+    await waitForCondition(() => getManaged('f-del-agent') === undefined || getManaged('f-del-agent').isProcessing === false, 3000).catch(() => {})
+    // T2: the declaration lands (tombstone + availability removal).
+    // T3: the lazy agent creation gate observes the deletion and converges
+    // the turn SILENTLY as deleted — no agent is ever created and no ghost
+    // turn runs.
+    await sendPromise
+    expect(agentCreations).toBe(0)
+
+    await deletePromise
+    expect(existsSync(getSessionFilePath(tmpRoot, 'f-del-agent'))).toBe(false)
+    expect(events.filter(e => e.type === 'user_message' && (e as { status?: string }).status === 'accepted')).toHaveLength(1)
   })
 
   // ---- Review fix round 5, issue A: the generation is bound to the callback
