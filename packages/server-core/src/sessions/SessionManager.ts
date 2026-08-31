@@ -1289,6 +1289,14 @@ export class SessionManager implements ISessionManager {
    * carries the per-turn spawn parameters. When null, the session MCP
    * production path is dormant and zero behavior changes for Claude/Pi.
    */
+  /**
+   * Readiness gate (review fix round 14, issue B): resolves with the
+   * callback port when the host listener is actually listening; rejects when
+   * startup failed (bootstrap degrades). The per-turn spawn path awaits this
+   * deterministically — a first turn that arrives before the listener is up
+   * WAITS, and a failed startup skips the session MCP path deterministically.
+   */
+  private sessionMcpHostReady: Promise<number> | null = null
   private sessionMcpHost: {
     callbackPort: number
     serverEntryPath: string
@@ -1304,6 +1312,8 @@ export class SessionManager implements ISessionManager {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client: any
       close(): Promise<void>
+      /** Number of request_user_input tool calls served via this client. */
+      toolCalls: number
     }>
     /** Last spawn spec built (diagnostics + tests). */
     lastSpawnSpec: { command: string; args: string[] } | null
@@ -4359,7 +4369,14 @@ export class SessionManager implements ISessionManager {
       // locked commit validates that closure snapshot, never the CURRENT
       // generation at late execution time.
       managed.agent.setSessionTurnGeneration(managed.processingGeneration)
-      managed.agent.onQuestionRequested = (questions, generationAtRequest) => this.handleQuestionRequested(managed, questions, generationAtRequest)
+      // AGENT TOOL-SET WIRING (review fix round 14, issue A): the model's
+      // request_user_input tool call reaches the durable handoff through the
+      // session MCP HOST CLIENT when one is running for this session — the
+      // full stdio loop (client → session-mcp-server → callback POST →
+      // SessionManager durable handoff) — and through the in-process durable
+      // path otherwise.
+      managed.agent.onQuestionRequested = (questions, generationAtRequest) =>
+        this.routeAgentQuestionRequested(managed, questions, generationAtRequest)
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls
       managed.agent.onSpawnSession = async (request) => {
@@ -5797,6 +5814,7 @@ export class SessionManager implements ISessionManager {
     // was INITIATED during its creation transaction, even though the
     // declaration itself cannot run until the creation releases the lock.
     managed.deleteAttempts = (managed.deleteAttempts ?? 0) + 1
+    console.log('DBGR deleteSession entered for', sessionId)
 
     // DELETION DECLARATION — inside the question-state lock (review fix
     // round 9, issue A): the tombstone write AND the availability-removal
@@ -7382,6 +7400,7 @@ export class SessionManager implements ISessionManager {
     url?: string;
     json(): Promise<unknown>;
   }): Promise<Response> {
+    console.log('DBGR callback request on sm, mapSize:', this.sessions.size)
     return createSessionMcpCallbackHandler(this)(request)
   }
 
@@ -7391,6 +7410,7 @@ export class SessionManager implements ISessionManager {
     generationAtRequest: number,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
+    console.log('DBGX external q:', sessionId, 'inMap:', !!managed, 'mapSize:', this.sessions.size, 'thisTag:', (this as unknown as { __tag?: string }).__tag, 'hostPort:', this.sessionMcpHost?.callbackPort)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found (session_missing)`)
     }
@@ -7415,7 +7435,30 @@ export class SessionManager implements ISessionManager {
     /** Test/Node-runtime hook: skip Bun.serve and use the node:http listener. */
     forceNodeHttp?: boolean
   }): Promise<number> {
-    if (this.sessionMcpHost) return this.sessionMcpHost.callbackPort
+    // READINESS GATE (review fix round 14, issue B): the returned promise
+    // resolves only when the listener is actually listening (and rejects
+    // deterministically on startup failure) — the per-turn spawn path awaits
+    // this before touching the host.
+    //
+    // PORT-CONFLICT SEMANTICS (review fix round 14, issue C): an explicit
+    // callbackPort is ALWAYS attempted — a second start on an occupied port
+    // rejects deterministically (EADDRINUSE) instead of silently returning
+    // the existing host. Only a port-less re-entry is idempotent.
+    if (!options.callbackPort && this.sessionMcpHost) {
+      return this.sessionMcpHostReady ?? Promise.resolve(this.sessionMcpHost.callbackPort)
+    }
+    const ready = this.startSessionMcpHostInner(options)
+    this.sessionMcpHostReady = ready
+    void ready.catch(() => {})
+    return ready
+  }
+
+  private async startSessionMcpHostInner(options: {
+    serverEntryPath: string
+    nodeRuntimePath?: string
+    callbackPort?: number
+    forceNodeHttp?: boolean
+  }): Promise<number> {
     const handler = createSessionMcpCallbackHandler(this)
     // CROSS-RUNTIME (review fix round 13, issue A): the Electron main process
     // is a NODE runtime — Bun.serve would crash production startup. Prefer
@@ -7453,11 +7496,30 @@ export class SessionManager implements ISessionManager {
     port: number,
   ): Promise<{ stop(force?: boolean): void; port: number }> {
     const { createServer } = await import('node:http')
+    // BODY SIZE LIMIT (review fix round 14, issue C): reject oversized
+    // request bodies at the boundary with 413 and destroy the connection.
+    const MAX_BODY_BYTES = 1024 * 1024
     const nodes = createServer((req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
       const chunks: Buffer[] = []
-      req.on('data', chunk => chunks.push(chunk as Buffer))
+      let bodyBytes = 0
+      let bodyRejected = false
+      req.on('data', chunk => {
+        if (bodyRejected) return
+        const buffer = chunk as Buffer
+        bodyBytes += buffer.length
+        if (bodyBytes > MAX_BODY_BYTES) {
+          bodyRejected = true
+          chunks.length = 0
+          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
+          res.end(JSON.stringify({ error: 'Request body too large' }))
+          req.destroy()
+          return
+        }
+        chunks.push(buffer)
+      })
       req.on('error', () => res.destroy())
       req.on('end', () => {
+        if (bodyRejected) return
         const method = (req.method ?? 'GET').toUpperCase()
         const headers = new Headers()
         for (const [key, value] of Object.entries(req.headers)) {
@@ -7481,8 +7543,16 @@ export class SessionManager implements ISessionManager {
           })
       })
     })
-    await new Promise<void>(resolve => {
-      nodes.once('listening', resolve)
+    // LISTEN ERROR (review fix round 14, issue C): port conflicts /
+    // permission failures surface as a REJECTED promise so the bootstrap can
+    // degrade deterministically (and never leak an uncaught 'error' event).
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => reject(error)
+      nodes.once('listening', () => {
+        nodes.off('error', onError)
+        resolve()
+      })
+      nodes.once('error', onError)
       nodes.listen(port, '127.0.0.1')
     })
     const address = nodes.address()
@@ -7507,6 +7577,7 @@ export class SessionManager implements ISessionManager {
     host.children.clear()
     host.server.stop(true)
     this.sessionMcpHost = null
+    this.sessionMcpHostReady = null
     sessionLog.info('Session MCP host stopped')
   }
 
@@ -7554,8 +7625,11 @@ export class SessionManager implements ISessionManager {
    * sendMessage capability boundary). One live server per session; it is
    * stopped at turn end (onProcessingStopped) and by deleteSession cleanup.
    */
-  spawnSessionMcpServerForTurn(sessionId: string, invocationSource: InvocationSource, processingGeneration: number): void {
-    const host = this.sessionMcpHost
+  async spawnSessionMcpServerForTurn(sessionId: string, invocationSource: InvocationSource, processingGeneration: number): Promise<void> {
+    // READINESS GATE (review fix round 14, issue B): a first turn that
+    // arrives before the listener is up WAITS for it; a failed startup
+    // skips the session MCP path deterministically.
+    const host = await this.awaitSessionMcpHost()
     if (!host) return
     const built = this.buildSessionMcpServerForTurnArgs(sessionId, invocationSource, processingGeneration)
     if (!built) return
@@ -7568,12 +7642,22 @@ export class SessionManager implements ISessionManager {
     // session; request_user_input is invoked through it (see
     // callSessionMcpRequestUserInput) and AWAITS the durable handoff's
     // terminal result.
-    const transport = new StdioClientTransport({ command: built.spec.command, args: built.spec.args })
+    const transport = new StdioClientTransport({
+      command: built.spec.command,
+      args: built.spec.args,
+      stderr: 'pipe',
+    })
     const client = new Client({ name: 'polo-session-mcp-host', version: '0.3.1' })
-    const entry = { client, close: () => client.close() }
+    const entry = { client, close: () => client.close(), toolCalls: 0 }
     transport.onclose = () => {
       if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
     }
+    transport.onerror = error => {
+      sessionLog.error(`Session MCP transport error for session ${sessionId}:`, error)
+    }
+    transport.stderr?.on('data', (chunk: Buffer) => {
+      sessionLog.info(`[session-mcp stderr] ${chunk.toString().trim()}`)
+    })
     host.children.set(sessionId, entry)
     host.lastSpawnSpec = built.spec
     sessionLog.info(`Spawned session MCP server for session ${sessionId} (capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
@@ -7591,10 +7675,11 @@ export class SessionManager implements ISessionManager {
    * the tool result (and this promise) settles with that terminal outcome.
    */
   async callSessionMcpRequestUserInput(sessionId: string, questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[]): Promise<string> {
-    const entry = this.sessionMcpHost?.children.get(sessionId)
+    const entry = await this.awaitSessionMcpClient(sessionId)
     if (!entry) {
       throw new Error(`No session MCP server is running for session ${sessionId}`)
     }
+    entry.toolCalls += 1
     const result = await entry.client.callTool({
       name: 'request_user_input',
       arguments: { questions },
@@ -7610,6 +7695,37 @@ export class SessionManager implements ISessionManager {
     return text
   }
 
+  /**
+   * The per-turn MCP client for a session, after the host startup gate and
+   * the client connect have settled. Null when no host/client exists.
+   */
+  private async awaitSessionMcpClient(
+    sessionId: string,
+  ): Promise<NonNullable<SessionManager['sessionMcpHost']>['children'] extends Map<string, infer E> ? E : never> {
+    const host = await this.awaitSessionMcpHost()
+    if (!host) return undefined as never
+    const ready = host.children.get(sessionId)
+    if (!ready) return undefined as never
+    return ready
+  }
+
+  /**
+   * Resolve the session MCP host AFTER its startup promise settles. Returns
+   * null when the host was never started or its startup failed — the spawn
+   * path then skips the session MCP tool deterministically (review fix
+   * round 14, issue B).
+   */
+  private async awaitSessionMcpHost(): Promise<SessionManager['sessionMcpHost']> {
+    const ready = this.sessionMcpHostReady
+    if (!ready) return null
+    try {
+      await ready
+    } catch {
+      return null
+    }
+    return this.sessionMcpHost
+  }
+
   /** Stop THIS session's per-turn server (client + transport + subprocess). */
   stopSessionMcpServerForTurn(sessionId: string): void {
     const host = this.sessionMcpHost
@@ -7621,6 +7737,26 @@ export class SessionManager implements ISessionManager {
         sessionLog.warn(`Failed to close session MCP server for session ${sessionId}:`, closeError)
       })
     }
+  }
+
+  /**
+   * PRODUCTION agent tool-set routing (review fix round 14, issue A): the
+   * model's request_user_input tool call reaches the durable handoff through
+   * the session MCP HOST CLIENT when one is running for this session — the
+   * full stdio loop (client → session-mcp-server → callback POST →
+   * SessionManager durable handoff, awaitable ack preserved) — and through
+   * the in-process durable path otherwise.
+   */
+  private routeAgentQuestionRequested(
+    managed: ManagedSession,
+    questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
+    generationAtRequest: number,
+  ): Promise<void> {
+    console.log('DBGR route: children keys', JSON.stringify([...(this.sessionMcpHost?.children.keys() ?? [])]), 'host:', !!this.sessionMcpHost)
+    if (this.sessionMcpHost?.children.get(managed.id)) {
+      return this.callSessionMcpRequestUserInput(managed.id, questions).then(() => undefined)
+    }
+    return this.handleQuestionRequested(managed, questions, generationAtRequest)
   }
 
   private async handleQuestionRequested(

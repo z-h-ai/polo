@@ -1047,6 +1047,102 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
   })
 
+  // ---- Review fix round 14, issue A: the per-turn MCP client is wired into
+  // the AGENT tool set -- the model's request_user_input tool call routes
+  // through the client -> stdio -> session-mcp-server -> callback POST ->
+  // SessionManager durable handoff (full closed loop), via the PRODUCTION
+  // routing method.
+
+  it('agent tool call routes through the spawned stdio client into the durable handoff (closed loop)', async () => {
+    seedSession('f-wire-1', {})
+    const managed = getManaged('f-wire-1') as unknown as { processingGeneration: number }
+    // Wire the agent field EXACTLY like the production onQuestionRequested
+    // wiring does (client-preferred routing via routeAgentQuestionRequested).
+    ;(getManaged('f-wire-1') as unknown as { agent: { onQuestionRequested?: (q: unknown[], g: number) => Promise<void> } }).agent = {
+      onQuestionRequested: (questions: unknown[], generation: number) =>
+        (sm as unknown as {
+          routeAgentQuestionRequested: (m: unknown, q: unknown[], g: number) => Promise<void>
+        }).routeAgentQuestionRequested(managed, questions, generation),
+    }
+
+    const entryPath = join(import.meta.dir, '..', '..', '..', '..', 'packages', 'session-mcp-server', 'src', 'index.ts')
+    await sm.startSessionMcpHost({ serverEntryPath: entryPath, nodeRuntimePath: process.execPath })
+    void sm.spawnSessionMcpServerForTurn('f-wire-1', 'desktop', managed.processingGeneration)
+    await waitForCondition(() => {
+      const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { toolCalls: number }> } }).sessionMcpHost
+      return !!host?.children.get('f-wire-1')
+    }, 15000)
+
+    ;(sm as unknown as { __tag: string }).__tag = 'TEST-SM'
+    console.log('DBGY test-side map size:', (sm as unknown as { sessions: Map<string, unknown> }).sessions.size, 'hostPort:', (sm as unknown as { sessionMcpHost: { callbackPort: number } }).sessionMcpHost?.callbackPort)
+    // The model calls the tool -- the production routing sends it through the
+    // spawned stdio CLIENT into the durable handoff.
+    const request = makeQuestionRequest('f-wire-1')
+    // AWAIT the agent-field call: the stdio loop (client → server → callback
+    // POST → durable handoff) must complete before the assertions.
+    await (getManaged('f-wire-1') as unknown as { agent: { onQuestionRequested: (q: unknown[], g: number) => Promise<void> } }).agent
+      .onQuestionRequested!(request.questions as never, managed.processingGeneration)
+
+    // The tool call traversed the CLIENT (counted) and landed in the durable
+    // handoff (pending + event).
+    const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { toolCalls: number }>; callbackPort: number } }).sessionMcpHost
+    console.log('DBGE children keys:', JSON.stringify([...host!.children.keys()]), 'toolCalls:', host!.children.get('f-wire-1')?.toolCalls, 'port:', host!.callbackPort, 'mapSize:', (sm as unknown as { sessions: Map<string, unknown> }).sessions.size, 'pending:', !!sm.getPendingQuestion('f-wire-1'), 'events:', JSON.stringify(events.map(e => e.type)))
+    expect(host!.children.get('f-wire-1')!.toolCalls).toBe(1)
+    const pending = sm.getPendingQuestion('f-wire-1')
+    expect(pending).not.toBeNull()
+    expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
+
+    // Terminal: answering settles the question.
+    await sm.respondToQuestion('f-wire-1', makeAnswerResolution(pending!))
+    expect(sm.getPendingQuestion('f-wire-1')).toBeNull()
+
+    sm.stopSessionMcpHost()
+  })
+
+  // ---- Review fix round 14, issue C: node host adversarial — body size
+  // limit (413) and deterministic listen-failure rejection.
+
+  it('node http host: a 2MiB body is rejected with 413 at the boundary', async () => {
+    seedSession('f-node-413', {})
+    const port = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), forceNodeHttp: true })
+
+    const bigBody = JSON.stringify({
+      sessionId: 'f-node-413',
+      questions: makeQuestionRequest('f-node-413').questions,
+      generationAtRequest: 0,
+      padding: 'x'.repeat(2 * 1024 * 1024),
+    })
+    const response = await fetch(`http://127.0.0.1:${port}/request-user-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: bigBody,
+    })
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({ error: 'Request body too large' })
+    // The oversized payload never reached the durable handoff.
+    expect(sm.getPendingQuestion('f-node-413')).toBeNull()
+    sm.stopSessionMcpHost()
+  })
+
+  it('node http host: a port conflict rejects startup deterministically (no uncaught error, no half-open host)', async () => {
+    seedSession('f-node-port', {})
+    const firstPort = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), forceNodeHttp: true })
+
+    // A second host on the SAME port must fail deterministically.
+    await expect(sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), callbackPort: firstPort, forceNodeHttp: true }))
+      .rejects.toThrow()
+
+    // The first host keeps serving; the failed start left no stray state.
+    const response = await fetch(`http://127.0.0.1:${firstPort}/request-user-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'f-node-port', questions: makeQuestionRequest('f-node-port').questions, generationAtRequest: 0 }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: 'accepted' })
+    sm.stopSessionMcpHost()
+  })
+
   // ---- Review fix round 11, issue B: the PRODUCTION host — a listening
   // localhost callback server + per-turn server spawns driven from the
   // sendMessage capability boundary. desktop→messaging→desktop capability
