@@ -127,6 +127,27 @@ export class PendingQuestionTerminalGuard {
 }
 
 /**
+ * UNIFIED snapshot lifecycle: the guard scope opens BEFORE the snapshot RPC
+ * is issued and closes only after the fetched payload has been applied (or
+ * discarded) SYNCHRONOUSLY. Terminal markers pinned by the scope therefore
+ * cover the entire in-flight window — a payload that was already in flight
+ * can never lose its terminal marker to FIFO eviction.
+ */
+export async function applySnapshotUnderGuard<T>(
+  guard: PendingQuestionTerminalGuard,
+  fetchSnapshot: () => Promise<T>,
+  apply: (payload: T) => void,
+): Promise<void> {
+  guard.beginSnapshot()
+  try {
+    const payload = await fetchSnapshot()
+    apply(payload)
+  } finally {
+    guard.endSnapshot()
+  }
+}
+
+/**
  * Set (replace) the pending question for a session. A new requestId
  * automatically replaces the previous entry; the REPLACED requestId (if a
  * card was displayed) is recorded terminal — superseded requestIds can never

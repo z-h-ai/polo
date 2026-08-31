@@ -1414,7 +1414,10 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // The delete declaration must WAIT while the reservation is pending.
     const deletePromise = sm.deleteSession('f-del-resv-final')
-    await new Promise(r => setTimeout(r, 80))
+    // One macrotask yield: the delete has queued on the question lock and
+    // parked on the reservation — which BLOCKS until the test resolves it,
+    // so the assertions below are timing-independent.
+    await new Promise(r => setImmediate(r))
     expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.has('f-del-resv-final')).toBe(true)
     expect(forceAborts).toBe(0)
 
@@ -1467,9 +1470,10 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     await waitForCondition(() => liveSignal !== null, 5000)
     expect(forceAborts).toBe(0)
 
-    // The delete declaration queues behind the gate and WAITS on the signal.
+    // The delete declaration queues behind the gate and WAITS on the signal
+    // (one macrotask yield lets the delete reach its parking point).
     const deletePromise = sm.deleteSession('f-del-live')
-    await new Promise(r => setTimeout(r, 40))
+    await new Promise(r => setImmediate(r))
     expect((sm as unknown as { sessions: Map<string, unknown> }).sessions.has('f-del-live')).toBe(true)
     expect(forceAborts).toBe(0)
     void deletePromise
@@ -1515,15 +1519,16 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     // the new user message AND the cleared recovery (one staged snapshot).
     let releaseFlush: (() => void) | null = null
     const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
+    let flushEntered = false
     const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
     ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      flushEntered = true
       return flushGate.then(() => realFlush.call(sm, id))
     }
 
     const sendPromise = sm.sendMessage('f-supersede-staged', 'a new user message')
-    // Wait until the single durable commit is in flight.
-    await waitForCondition(() => managed.messages.some(m => m['role'] === 'user'), 5000)
-    await new Promise(r => setTimeout(r, 30))
+    // Wait until the durable commit is inside the gated flush.
+    await waitForCondition(() => flushEntered, 5000)
     // INSIDE the gated flush window: the live recovery state is STILL ARMED.
     expect(managed.pendingAgentResume).toEqual({ messageId: 'msg-answer', attempts: 0 })
 
@@ -3025,18 +3030,21 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     void errorEventsBefore
   })
 
-  it('TRUSTED PROBE: while the durable clear flush is pending, the live recovery state stays ARMED (never runtime-cleared + stale disk)', async () => {
+  it('while the durable clear flush is pending, the live recovery state stays ARMED (never runtime-cleared + stale disk)', async () => {
     patchPrivateFlush()
     const request = makeQuestionRequest('f-clear-probe')
     seedSession('f-clear-probe', { pendingQuestion: request })
     const managed = getManaged('f-clear-probe') as unknown as { pendingAgentResume?: { messageId: string; attempts: number } }
     ;(managed as unknown as { pendingAgentResume: unknown }).pendingAgentResume = { messageId: 'msg-probe', attempts: 0 }
 
-    // Gate the flush: the durable write is in flight while we observe.
+    // Gate the flush: the durable write is in flight while we observe. The
+    // gate-entry flag is the deferred signal — no scheduling sleeps.
     let releaseFlush: (() => void) | null = null
+    let flushEntered = false
     const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
     const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
     ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
+      flushEntered = true
       return flushGate.then(() => realFlush.call(sm, id))
     }
 
@@ -3046,7 +3054,7 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
     // INSIDE the flush window: the live ManagedSession is still ARMED —
     // an observer (or a crash) sees a consistent armed world.
-    await new Promise(r => setTimeout(r, 50))
+    await waitForCondition(() => flushEntered, 5000)
     expect(clearDone).toBe(false)
     expect(managed.pendingAgentResume).toEqual({ messageId: 'msg-probe', attempts: 0 })
 

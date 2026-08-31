@@ -30,7 +30,7 @@ import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import type { EditPopoverRestoreOutcome } from './components/ui/useEditPopoverSessionRestore'
-import { clearPendingQuestionForDeletedSession, PendingQuestionTerminalGuard, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
+import { applySnapshotUnderGuard, clearPendingQuestionForDeletedSession, PendingQuestionTerminalGuard, questionResolutionRequestId, removePendingQuestionForSession, setPendingQuestionForSession, syncPendingQuestionFromSession } from './lib/pending-questions'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
@@ -427,6 +427,15 @@ export default function App() {
   // session snapshot whose payload is OLDER than a local resolution or
   // deletion must never re-fill the hole that the newer realtime event made.
   const pendingQuestionGuardRef = useRef(new PendingQuestionTerminalGuard())
+  // Synchronous mirror: snapshot reducers must apply against the CURRENT map
+  // inside the guard scope (before endSnapshot), not during a later render.
+  const pendingQuestionsRef = useRef(pendingQuestions)
+  const applyPendingQuestions = useCallback((updater: (prev: Map<string, QuestionRequest>) => Map<string, QuestionRequest>) => {
+    const next = updater(pendingQuestionsRef.current)
+    pendingQuestionsRef.current = next
+    setPendingQuestions(next)
+    return next
+  }, [])
   // Draft composer state per session (text + attachment refs), preserved across mode
   // switches, conversation changes, and app restarts. Using a ref avoids re-renders
   // during typing; attachments are stored as lightweight refs (path + name) and
@@ -563,31 +572,37 @@ export default function App() {
   }, [])
 
   const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the RPC is issued and
+    // closes after the payload has been applied synchronously — terminal
+    // markers are pinned for the whole in-flight window.
     try {
-      const fresh = await window.electronAPI.getSessionMessages(sessionId)
-      if (!fresh) return 'failed'
+      let outcome: 'refreshed' | 'preserved_stale_messages' | 'failed' = 'refreshed'
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessionMessages(sessionId),
+        fresh => {
+          if (!fresh) {
+            outcome = 'failed'
+            return
+          }
+          const prevSession = store.get(sessionAtomFamily(sessionId))
+          const preservedStaleMessages = !!prevSession && prevSession.messages.length > 0 && (!fresh.messages || fresh.messages.length === 0)
+          const nextSession = preservedStaleMessages
+            ? { ...fresh, messages: prevSession.messages }
+            : fresh
 
-      const prevSession = store.get(sessionAtomFamily(sessionId))
-      const preservedStaleMessages = !!prevSession && prevSession.messages.length > 0 && (!fresh.messages || fresh.messages.length === 0)
-      const nextSession = preservedStaleMessages
-        ? { ...fresh, messages: prevSession.messages }
-        : fresh
-
-      clearStreamingState(sessionId)
-      replaceLoadedSession(nextSession)
-      syncSessionOptionsFromSession(nextSession)
-      // Opening/refreshing a session fills a MISSING pending question from
-      // the snapshot — an existing entry (fresher realtime state) is never
-      // downgraded by the fetch. The guard scope retention-pins terminal
-      // markers until this snapshot has been applied.
-      pendingQuestionGuardRef.current.beginSnapshot()
-      try {
-        setPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
-      } finally {
-        pendingQuestionGuardRef.current.endSnapshot()
-      }
-      void reconcilePermissionModeState(sessionId)
-      return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
+          clearStreamingState(sessionId)
+          replaceLoadedSession(nextSession)
+          syncSessionOptionsFromSession(nextSession)
+          // Opening/refreshing a session fills a MISSING pending question from
+          // the snapshot — an existing entry (fresher realtime state) is never
+          // downgraded by the fetch.
+          applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, nextSession, pendingQuestionGuardRef.current))
+          void reconcilePermissionModeState(sessionId)
+          if (preservedStaleMessages) outcome = 'preserved_stale_messages'
+        },
+      )
+      return outcome
     } catch (err) {
       console.error(`[App] Failed to refresh session ${sessionId}:`, err)
       return 'failed'
@@ -610,7 +625,7 @@ export default function App() {
       // terminal markers until the snapshot has been applied.
       pendingQuestionGuardRef.current.beginSnapshot()
       try {
-        setPendingQuestions(prev => {
+        applyPendingQuestions(prev => {
           let next = prev
           for (const session of loadedSessions) {
             next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
@@ -718,7 +733,7 @@ export default function App() {
       // retention-pins terminal markers until the snapshot has been applied.
       pendingQuestionGuardRef.current.beginSnapshot()
       try {
-        setPendingQuestions(prev => {
+        applyPendingQuestions(prev => {
           let next = prev
           for (const session of sessions) {
             next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
@@ -1257,7 +1272,7 @@ export default function App() {
           case 'question_request': {
             // A new requestId replaces any previous pending question —
             // the old card's local answers are dropped with it.
-            setPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request, pendingQuestionGuardRef.current))
+            applyPendingQuestions(prev => setPendingQuestionForSession(prev, sessionId, effect.request, pendingQuestionGuardRef.current))
             // Native notification (same gating as permission notifications)
             const notifySession = store.get(sessionAtomFamily(sessionId))
             if (notifySession && !notifySession.hidden) {
@@ -1268,7 +1283,7 @@ export default function App() {
           case 'question_resolved': {
             // requestId-conditional: never delete a newer question card that
             // replaced the one this resolution is about.
-            setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId, pendingQuestionGuardRef.current))
+            applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, effect.requestId, pendingQuestionGuardRef.current))
             break
           }
           case 'restore_input': {
@@ -1324,6 +1339,9 @@ export default function App() {
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
       if (event.type === 'session_created') {
+        // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the fetch RPC and
+        // closes after the payload has been applied synchronously.
+        pendingQuestionGuardRef.current.beginSnapshot()
         window.electronAPI.getSessionMessages(sessionId)
           .then((createdSession: Session | null) => {
             if (createdSession) {
@@ -1334,17 +1352,13 @@ export default function App() {
                 addSession(createdSession)
               }
               syncSessionOptionsFromSession(createdSession)
-              pendingQuestionGuardRef.current.beginSnapshot()
-              try {
-                setPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession, pendingQuestionGuardRef.current))
-              } finally {
-                pendingQuestionGuardRef.current.endSnapshot()
-              }
+              applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, createdSession, pendingQuestionGuardRef.current))
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
           })
           .catch((error: unknown) => console.error('Failed to handle session_created event:', error))
+          .finally(() => pendingQuestionGuardRef.current.endSnapshot())
         return
       }
 
@@ -1352,7 +1366,7 @@ export default function App() {
         // Deletion is a terminal state: the pending question (if any) expires —
         // clear unconditionally so no stale card survives in any window
         // (repeated events are idempotent).
-        setPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId, pendingQuestionGuardRef.current))
+        applyPendingQuestions(prev => clearPendingQuestionForDeletedSession(prev, sessionId, pendingQuestionGuardRef.current))
         removeSession(sessionId)
         return
       }
@@ -2129,13 +2143,13 @@ export default function App() {
       case 'accepted':
       case 'cancelled':
       case 'already_answered':
-        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
+        applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
         break
       case 'stale':
       case 'session_missing':
         // One-time readable notice, then drop the stale card
         toast.error(i18n.t('toast.questionNoLongerActive'), { duration: 5000 })
-        setPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
+        applyPendingQuestions(prev => removePendingQuestionForSession(prev, sessionId, resolvedRequestId, pendingQuestionGuardRef.current))
         break
       case 'transient_failure':
         throw new Error(result.message)
@@ -2154,24 +2168,31 @@ export default function App() {
   // when the lifecycle ends (answered, skipped, replaced, stopped, archived,
   // deleted) and can never cross workspaces or popover owners.
   const handleGetEditPopoverPendingQuestion = useCallback(async (workspaceId: string, popoverOwner: string): Promise<EditPopoverRestoreOutcome> => {
-    // ONE scoped lookup attempt: an authoritative result is returned as
-    // found/empty; an RPC rejection (I/O / IPC / hydration) says nothing
-    // about whether a pending question exists and is absorbed as transient —
-    // retry ownership (bounded loop) lives in useEditPopoverSessionRestore.
-    try {
-      const result = await window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner)
-      if (!result) return { outcome: 'empty' }
-      // Seed the authoritative request through the SNAPSHOT path (fill-only
-      // + terminal guard) — the same ordering rules as a session fetch: a
-      // realtime card that arrived while the RPC was in flight is never
-      // overwritten, and a terminal (resolved/superseded) requestId is never
-      // re-seeded. usePendingQuestion(inlineSessionId) resolves and every
-      // existing event-driven cleanup keeps working.
-      setPendingQuestions(prev => syncPendingQuestionFromSession(prev, { id: result.sessionId, pendingQuestion: result.request }, pendingQuestionGuardRef.current))
-      return { outcome: 'found', sessionId: result.sessionId }
-    } catch {
-      return { outcome: 'transient' }
-    }
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the lookup RPC and
+    // closes after the seed has been applied synchronously — terminal markers
+    // are pinned for the whole in-flight window (an RPC rejection absorbs as
+    // transient; retry ownership (bounded loop) lives in
+    // useEditPopoverSessionRestore).
+    let outcome: EditPopoverRestoreOutcome = { outcome: 'transient' }
+    await applySnapshotUnderGuard(
+      pendingQuestionGuardRef.current,
+      () => window.electronAPI.getEditPopoverPendingQuestion(workspaceId, popoverOwner),
+      result => {
+        if (!result) {
+          outcome = { outcome: 'empty' }
+          return
+        }
+        // Seed the authoritative request through the SNAPSHOT path (fill-only
+        // + terminal guard) — the same ordering rules as a session fetch: a
+        // realtime card that arrived while the RPC was in flight is never
+        // overwritten, and a terminal (resolved/superseded) requestId is
+        // never re-seeded. usePendingQuestion(inlineSessionId) resolves and
+        // every existing event-driven cleanup keeps working.
+        applyPendingQuestions(prev => syncPendingQuestionFromSession(prev, { id: result.sessionId, pendingQuestion: result.request }, pendingQuestionGuardRef.current))
+        outcome = { outcome: 'found', sessionId: result.sessionId }
+      },
+    )
+    return outcome
   }, [])
 
   // Centralized link interceptor: classifies file types and decides whether to

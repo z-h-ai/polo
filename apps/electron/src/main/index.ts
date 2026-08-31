@@ -77,6 +77,7 @@ import { join, delimiter } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@polo-ai/server-core/sessions'
+import { createLlmToolLoopModelTurn } from '@polo-ai/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
 import {
   clearClientActiveSession,
@@ -937,6 +938,12 @@ app.whenReady().then(async () => {
               console.error('[session-mcp] host failed to start — continuing without the session MCP path:', startupError)
             })
           }
+          // EXTERNAL ENGINE: register the production model adapter — the
+          // external driver runs each model turn as a tool loop over its
+          // owned sidecar, querying the session's configured LLM backend.
+          sm.setExternalEngineModelAdapter(
+            createLlmToolLoopModelTurn({ query: sessionId => sm.getSessionQueryFn(sessionId) }),
+          )
           return sm
         },
         bindRpcServer: (sm, server) => sm.setRpcServer(server),

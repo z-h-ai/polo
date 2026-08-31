@@ -286,7 +286,6 @@ describe('request_user_input React-mounted acceptance', () => {
       () => events.some(e => e.type === 'question_resolved' && e.requestId === pending!.requestId),
       15000,
     )
-    console.log('DBG post-resolve mapsize:', (sm as unknown as { sessions: Map<string, unknown> }).sessions.size, 'pending:', JSON.stringify(sm.getPendingQuestion(sessionId)))
     expect(sm.getPendingQuestion(sessionId)).toBeNull()
     expect(readableMessages(sessionId, pending!.requestId)).toHaveLength(1)
     // ONE durable handoff; the renderer card cleared.

@@ -6449,22 +6449,21 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`External engine turn launched for session ${sessionId} (generation ${myGeneration}) — sidecar owned by the driver`)
           // PRODUCTION MODEL TURN: hand the prompt + owned toolset to the
           // registered model layer; the model consumes tool results at the
-          // durable boundary (a question handoff pauses the turn). Turn
-          // completion flows through the same processing-stopped boundary
-          // the embedded engines use.
+          // durable boundary (a question handoff pauses the turn). The
+          // completion closure carries THIS turn's generation + driver
+          // identity — a stale completion (the turn was superseded/replaced)
+          // is an idempotent no-op and can never dispose a newer turn's
+          // sidecar or stop its processing.
           const model = this.externalEngineModel
           if (model) {
             void driver
-              .runModelTurn(message, model)
+              .runModelTurn(sessionId, message, model)
               .then(async () => {
-                await this.completeExternalEngineTurn(sessionId)
+                await this.completeExternalEngineTurnFor(sessionId, { generation: myGeneration, driver })
               })
               .catch(async (turnError: unknown) => {
                 sessionLog.error(`External engine model turn failed for session ${sessionId}:`, turnError)
-                const current = this.sessions.get(sessionId)
-                if (current === managed && managed.isProcessing && managed.processingGeneration === myGeneration) {
-                  await this.onProcessingStopped(sessionId, 'error')
-                }
+                await this.completeExternalEngineTurnFor(sessionId, { generation: myGeneration, driver }, 'error', turnError)
               })
           } else {
             // No model layer registered — deterministic degrade: the turn
@@ -7835,19 +7834,91 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * PRODUCTION completion hook for an externally driven turn: the harness
-   * reports its model turn finished. Disposes the driver's owned sidecar and
-   * runs the same processing-stopped boundary the embedded engines use.
-   * Exposed on ISessionManager + the sessions RPC channel so external
-   * drivers can report completion.
+   * PRODUCTION completion hook for an externally driven turn (generation +
+   * driver identity bound): settles ONLY when the session identity, the
+   * processing generation, AND the live driver slot all still match the
+   * completing turn. A stale completion (the answer already launched
+   * generation N+1 with its own driver) is an idempotent no-op — it can
+   * never dispose a newer turn's sidecar or stop its processing.
    */
-  async completeExternalEngineTurn(sessionId: string): Promise<void> {
+  private async completeExternalEngineTurnFor(
+    sessionId: string,
+    turn: { generation: number; driver: import('./external-engine-driver.ts').ExternalEngineSessionDriver },
+    status: 'complete' | 'error' = 'complete',
+    error?: unknown,
+  ): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    // Session identity + generation + driver slot must ALL still be this
+    // turn's; anything else is a stale completion.
+    if (!managed || this.sessions.get(sessionId) !== managed) return
+    if (!managed.externalToolset) return
+    if (managed.processingGeneration !== turn.generation) return
+    const active = managed.externalEngineDriver
+    if (!active || active.generation !== turn.generation || active.driver !== turn.driver) return
+    if (status === 'error') {
+      sessionLog.error(`External engine model turn failed for session ${sessionId} (generation ${turn.generation}):`, error)
+    }
+    // PAUSED (question handoff): the model asked a question and consumed its
+    // result — the turn stays paused for the answer, and the driver's
+    // sidecar stays owned by THIS turn until the answer's resume replaces
+    // it. Completing here would strand the pending question.
+    if (managed.pendingQuestion) return
+    await this.disposeExternalEngineDriver(managed)
+    await this.onProcessingStopped(sessionId, status)
+  }
+
+  /**
+   * RPC/ISessionManager completion entry: settles the CURRENT external
+   * engine turn. Pass `expectedGeneration` to make the completion
+   * generation-bound (a stale report for an older turn is an idempotent
+   * no-op).
+   */
+  async completeExternalEngineTurn(sessionId: string, expectedGeneration?: number): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
     if (!managed.externalToolset) return
-    if (!managed.isProcessing) return
+    if (expectedGeneration !== undefined && managed.processingGeneration !== expectedGeneration) {
+      sessionLog.info(`External engine turn completion for session ${sessionId} is stale (generation ${expectedGeneration} vs active ${managed.processingGeneration}) — ignored`)
+      return
+    }
+    if (!managed.isProcessing) {
+      // PAUSED (question handoff): keep the driver's sidecar for the answer
+      // resume — completing here would strand the pending question.
+      return
+    }
     await this.disposeExternalEngineDriver(managed)
     await this.onProcessingStopped(sessionId, 'complete')
+  }
+
+  /**
+   * PRODUCTION DIAGNOSTIC: the OS process id of the session's current
+   * driver-owned sidecar (ops/logging evidence that exactly one sidecar
+   * process serves this turn). Null when no external driver is active.
+   */
+  getExternalEngineDriverPid(sessionId: string): number | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed?.externalToolset) return null
+    return managed.externalEngineDriver?.driver.pid ?? null
+  }
+
+  /**
+   * The session's LLM query client (its configured backend), used by the
+   * external-engine model adapter as the model channel. The agent here is
+   * strictly the query client — the turn itself stays driver-owned.
+   */
+  async getSessionQueryFn(sessionId: string): Promise<((request: { prompt: string; systemPrompt?: string }) => Promise<{ text: string }>) | null> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return null
+    try {
+      const agent = (await this.getOrCreateAgent(managed)) as unknown as {
+        queryLlm?: (request: { prompt: string; systemPrompt?: string }) => Promise<{ text: string }>
+      }
+      if (!managed.agent || typeof agent.queryLlm !== 'function') return null
+      return request => agent.queryLlm!(request)
+    } catch (error) {
+      sessionLog.warn(`No LLM query client available for session ${sessionId}:`, error)
+      return null
+    }
   }
 
   /**

@@ -322,8 +322,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // External-engine drivers report model turn completion here (the owned
   // sidecar is disposed and the processing-stopped boundary runs).
-  server.handle(RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN, async (_ctx, sessionId: string) => {
-    await sessionManager.completeExternalEngineTurn(sessionId)
+  server.handle(RPC_CHANNELS.sessions.COMPLETE_EXTERNAL_ENGINE_TURN, async (_ctx, sessionId: string, expectedGeneration?: number) => {
+    await sessionManager.completeExternalEngineTurn(sessionId, expectedGeneration)
     return { ok: true }
   })
 

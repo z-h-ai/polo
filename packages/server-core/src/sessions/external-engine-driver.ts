@@ -36,6 +36,7 @@ export interface ExternalEngineTool {
  */
 export interface ExternalEngineModelTurn {
   runModelTurn(input: {
+    sessionId: string
     prompt: string
     /** Real toolset discovery against the driver-owned sidecar. */
     listTools(): Promise<ExternalEngineTool[]>
@@ -45,9 +46,13 @@ export interface ExternalEngineModelTurn {
 }
 
 export class ExternalEngineSessionDriver {
-  /** Live (launched, not yet disposed) driver instances — production
-   * diagnostic for the one-live-sidecar-per-turn invariant. */
-  private static live = new Set<ExternalEngineSessionDriver>()
+  /**
+   * LEAK DETECTOR: drivers launched but never disposed. Not consulted by any
+   * runtime decision — the one-sidecar-per-turn invariant is owned by the
+   * SessionManager's driver slot (identity + generation CAS). Diagnostics
+   * and tests use this to prove no orphan sidecar process survives teardown.
+   */
+  private static undisposed = new Set<ExternalEngineSessionDriver>()
 
   private constructor(
     // Loosely typed: the concrete MCP SDK Client satisfies this shape.
@@ -56,12 +61,20 @@ export class ExternalEngineSessionDriver {
     private readonly transport: StdioClientTransport,
     readonly config: ExternalEngineToolsetConfig,
   ) {
-    ExternalEngineSessionDriver.live.add(this)
+    ExternalEngineSessionDriver.undisposed.add(this)
   }
 
-  /** Number of live (owned, undisposed) sidecars across all sessions. */
-  static activeCount(): number {
-    return ExternalEngineSessionDriver.live.size
+  /** The owned sidecar's OS process id (real-process evidence). */
+  get pid(): number | null {
+    return this.transport.pid ?? null
+  }
+
+  /**
+   * Number of launched-but-never-disposed drivers (leak detector). A
+   * non-zero value after teardown means an orphan sidecar process.
+   */
+  static countUndisposed(): number {
+    return ExternalEngineSessionDriver.undisposed.size
   }
 
   /**
@@ -87,8 +100,9 @@ export class ExternalEngineSessionDriver {
    * the SessionManager durable handoff and its tool result settles at the
    * durable boundary. Resolves when the model finishes its turn.
    */
-  async runModelTurn(prompt: string, model: ExternalEngineModelTurn): Promise<void> {
+  async runModelTurn(sessionId: string, prompt: string, model: ExternalEngineModelTurn): Promise<void> {
     await model.runModelTurn({
+      sessionId,
       prompt,
       listTools: () => this.listTools(),
       callTool: (name, args) => this.callTool(name, args),
@@ -115,7 +129,7 @@ export class ExternalEngineSessionDriver {
 
   /** Stop the owned sidecar (turn end / session teardown). */
   async dispose(): Promise<void> {
-    ExternalEngineSessionDriver.live.delete(this)
+    ExternalEngineSessionDriver.undisposed.delete(this)
     await this.client.close().catch(() => {})
   }
 }

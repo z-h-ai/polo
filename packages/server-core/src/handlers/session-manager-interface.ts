@@ -130,7 +130,7 @@ export interface ISessionManager {
    * harness / external CLI driver): disposes the turn's owned sidecar and
    * runs the processing-stopped boundary.
    */
-  completeExternalEngineTurn(sessionId: string): Promise<void>
+  completeExternalEngineTurn(sessionId: string, expectedGeneration?: number): Promise<void>
   /**
    * Durable handoff entry for EXTERNAL hosts (session MCP server / Codex):
    * routes a parsed `question_requested` callback into the same persist +

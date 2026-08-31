@@ -159,7 +159,7 @@ describe('syncPendingQuestionFromSession (restart/open hydration)', () => {
     expect(map.has('s-1')).toBe(false)
   })
 
-  it('TRUSTED REPRO: q1 snapshot in-flight → realtime q2 replaces AND resolves → the stale q1 snapshot does not resurrect q1', () => {
+  it('q1 snapshot in-flight → realtime q2 replaces AND resolves → the stale q1 snapshot does not resurrect q1', () => {
     const guard = new PendingQuestionTerminalGuard()
     let map = new Map<string, QuestionRequest>()
     map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'), guard)
@@ -192,7 +192,7 @@ describe('syncPendingQuestionFromSession (restart/open hydration)', () => {
     expect(map.get('s-1')?.requestId).toBe('q2')
   })
 
-  it('TRUSTED REPRO r5: realtime q0..q17 rotate → resolve q17 → an in-flight OLD snapshot(q0) must not resurrect q0', () => {
+  it('realtime q0..q17 rotate → resolve q17 → an in-flight OLD snapshot(q0) must not resurrect q0', () => {
     const guard = new PendingQuestionTerminalGuard()
     let map = new Map<string, QuestionRequest>()
     // The session snapshot is captured BEFORE the realtime sequence runs.
@@ -239,20 +239,44 @@ describe('syncPendingQuestionFromSession (restart/open hydration)', () => {
     expect(map.has('s-1')).toBe(false)
   })
 
-  it('a cleared card with a closed snapshot scope can still be re-filled by a genuinely stale snapshot (documented trade-off)', () => {
+  it('RPC in-flight window: >16 terminal markers during the await must NOT evict an older in-flight payload (no q-0 resurrection)', () => {
     const guard = new PendingQuestionTerminalGuard()
     let map = new Map<string, QuestionRequest>()
-    // Settle q1, apply the snapshot, close the scope (idle) — rotation
-    // beyond the idle bound may forget q1; a late q1 snapshot then fills.
-    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'), guard)
-    map = removePendingQuestionForSession(map, 's-1', 'q1', guard)
+    // The snapshot RPC fires FIRST (scope opens), carrying the old q-0 state.
+    guard.beginSnapshot()
+
+    // While the RPC is awaited, realtime authority rotates through MORE than
+    // the idle bound of terminal markers...
     for (let i = 0; i <= 30; i++) {
-      map = setPendingQuestionForSession(map, 's-1', makeRequest(`q-x-${i}`), guard)
+      map = setPendingQuestionForSession(map, 's-1', makeRequest(`q-${i}`), guard)
     }
+    // ...and settles q-30 (hole).
+    map = removePendingQuestionForSession(map, 's-1', 'q-30', guard)
+    expect(map.has('s-1')).toBe(false)
+
+    // The stale in-flight payload (q-0) returns — its terminal marker was
+    // PINNED by the open scope (no FIFO eviction during flight): no
+    // resurrection.
+    map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q-0') }, guard)
+    expect(map.has('s-1')).toBe(false)
+    guard.endSnapshot()
+  })
+
+  it('RPC in-flight window: the current card cleared mid-flight does not re-open the fill for the stale payload', () => {
+    const guard = new PendingQuestionTerminalGuard()
+    let map = new Map<string, QuestionRequest>()
+    // Snapshot RPC in flight carrying q1.
+    guard.beginSnapshot()
+    map = setPendingQuestionForSession(map, 's-1', makeRequest('q1'), guard)
+    // The user answers: the card is cleared AND the requestId settles.
+    map = removePendingQuestionForSession(map, 's-1', 'q1', guard)
+    // The stale payload returns after the resolution: still blocked.
     map = syncPendingQuestionFromSession(map, { id: 's-1', pendingQuestion: makeRequest('q1') }, guard)
-    // Documented trade-off: only markers still within the recent window (or
-    // pinned by an in-flight scope) are guaranteed.
-    expect(['q1', 'q-x-30']).toContain(map.get('s-1')?.requestId as string)
+    expect(map.has('s-1')).toBe(false)
+    // A DIFFERENT session's genuinely unknown payload still fills.
+    map = syncPendingQuestionFromSession(map, { id: 's-2', pendingQuestion: makeRequest('q9') }, guard)
+    expect(map.get('s-2')?.requestId).toBe('q9')
+    guard.endSnapshot()
   })
 
   it('Edit-Popover RPC snapshots use the same ordering guard (fill-only, terminal-aware)', () => {
