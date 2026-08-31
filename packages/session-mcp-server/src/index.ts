@@ -304,8 +304,10 @@ export function createCodexContext(config: SessionConfig): SessionToolContext {
   };
 }
 
-export { buildSessionMcpServerArgs } from './launcher.ts';
-export type { SessionMcpSpawnOptions } from './launcher.ts';
+// The spawn spec lives in the dependency-free leaf module in
+// session-tools-core — the single definition shared with the host side.
+export { buildSessionMcpServerArgs } from '@polo-ai/session-tools-core';
+export type { SessionMcpSpawnOptions } from '@polo-ai/session-tools-core';
 
 // ============================================================
 // Tool Definitions (from canonical registry)

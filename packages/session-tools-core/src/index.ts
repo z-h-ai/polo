@@ -132,6 +132,10 @@ export type {
   RequestUserInputArgs,
 } from './question-types.ts';
 
+// Session MCP server spawn spec (dependency-free leaf — see spawn-spec.ts)
+export { buildSessionMcpServerArgs } from './spawn-spec.ts';
+export type { SessionMcpSpawnOptions } from './spawn-spec.ts';
+
 // Context interface
 export type {
   SessionToolContext,

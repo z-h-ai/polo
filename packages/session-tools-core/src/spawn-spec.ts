@@ -1,21 +1,21 @@
 /**
- * Session MCP Server Launcher (review fix round 10, issue A).
+ * Session MCP server spawn spec — dependency-free leaf module.
  *
- * SELF-CONTAINED by design: this module must not import the
- * `@polo-ai/shared/agent` barrel (or anything else that reaches native
- * assets) — the session MCP server production bundle is a single light
- * file, and a barrel re-export here pulled the whole agent graph + koffi
- * `.node` assets into the outdir, breaking `electron:build`.
+ * This is the SINGLE definition of the per-turn spawn contract for the
+ * session MCP server subprocess (the external Codex/harness path). It lives
+ * in session-tools-core because both sides of the contract already depend on
+ * that package and it must stay import-light: the session-mcp-server
+ * production bundle is a single light file, and a barrel re-export here once
+ * pulled the whole agent graph + koffi `.node` assets into the outdir,
+ * breaking `electron:build`. This module imports NOTHING.
  *
- * The identical spawn-spec builder for the runtime resolver lives in
- * `@polo-ai/shared/agent` (session-lifecycle); keep the two copies in sync.
+ * The harness spawns ONE server instance per turn and passes the turn's
+ * request_user_input capability and processing generation as EXPLICIT
+ * construct arguments — never ambient global state.
  */
 
 /**
- * Per-turn spawn options for the session MCP server subprocess (the
- * Codex/external-harness path). The harness spawns ONE server instance per
- * turn and passes the turn's request_user_input capability and processing
- * generation as EXPLICIT construct arguments — never ambient global state.
+ * Per-turn spawn options for the session MCP server subprocess.
  */
 export interface SessionMcpSpawnOptions {
   sessionId: string;

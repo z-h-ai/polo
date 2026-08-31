@@ -937,16 +937,8 @@ interface ManagedSession {
    * only originate from a live agent object in this process; after a restart
    * hydration re-derives authority from the (cleared) persisted state.
    */
-  questionLifecycleTombstone?: { reason: 'stopped' | 'archived' | 'deleted'; at: number }
-  /**
-   * Synchronous count of deleteSession initiations for this session object
-   * (review fix round 13, issue C). Snapshotted by the lazy agent creation
-   * transaction before creating and re-checked after — a changed counter
-   * means a delete was initiated mid-creation and the freshly created agent
-   * must be disposed (creation rollback, no ghost turn, no leak).
-   */
-  deleteAttempts?: number
-  /**
+   questionLifecycleTombstone?: { reason: 'stopped' | 'archived' | 'deleted'; at: number }
+   /**
    * Synchronous turn-start reservation (review round 5, issue 2). Set at
    * sendMessage entry — BEFORE any await — by the caller that claimed the
    * next processing generation; cleared when the turn actually starts
@@ -1265,52 +1257,54 @@ export class SessionManager implements ISessionManager {
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
   /**
-   * Resolution single-flight (review round 8, issue 3): in-flight
-   * respondToQuestion promises keyed by `sessionId::requestId`. Followers
-   * await the first durable commit instead of deriving idempotency from
+   * Question-state serialization: ONE tail-linked per-session lock chains
+   * every pendingQuestion transition — tool-requested replacements
+   * (handleQuestionRequested), answer/cancel commits (respondToQuestion) and
+   * lifecycle clears (stop/archive). Because the ENTIRE durable resolution
+   * commit (memory mutation + persist + flush + rollback) runs inside this
+   * lock, concurrent resolutions of the same requestId serialize: the loser
+   * reads fully-committed or fully-rolled-back state and derives
+   * already_answered / gets a real retry — never a fake outcome from
    * rollback-able in-memory state.
-   */
-  private resolutionInFlight: Map<string, Promise<QuestionResolutionResult>> = new Map()
-  /**
-   * Question-state serialization (review fix round 2, issue 1): ONE tail-linked
-   * per-session lock chains every pendingQuestion transition — tool-requested
-   * replacements (handleQuestionRequested), answer/cancel commits
-   * (respondToQuestion) and lifecycle clears (stop/archive). A lifecycle
-   * clear's staged flush can therefore never interleave with a concurrent
-   * resolution commit, and vice versa. Links never reject; a failed critical
-   * section does not poison the next one. Entries are removed when the tail
-   * settles, so deleted sessions do not leak.
    */
   private questionStateLocks: Map<string, Promise<unknown>> = new Map()
   /**
-   * Session MCP host (review fix round 11, issue B — PRODUCTION wiring).
-   * Started per runtime: mounts the ONLY ack route (POST /request-user-input
-   * → SessionManager durable handoff) on a listening localhost server and
-   * carries the per-turn spawn parameters. When null, the session MCP
-   * production path is dormant and zero behavior changes for Claude/Pi.
+   * Session MCP host — PRODUCTION wiring. Started per runtime: mounts the
+   * ONLY ack route (POST /request-user-input → SessionManager durable
+   * handoff) on a listening localhost server and carries the per-turn spawn
+   * parameters. When null, the session MCP production path is dormant and
+   * zero behavior changes for Claude/Pi.
    */
   /**
-   * Readiness gate (review fix round 14, issue B): resolves with the
-   * callback port when the host listener is actually listening; rejects when
-   * startup failed (bootstrap degrades). The per-turn spawn path awaits this
-   * deterministically — a first turn that arrives before the listener is up
-   * WAITS, and a failed startup skips the session MCP path deterministically.
+   * Readiness gate: resolves with the callback port when the host listener
+   * is actually listening; rejects when startup failed (bootstrap degrades).
+   * The per-turn spawn path awaits this deterministically — a first turn
+   * that arrives before the listener is up WAITS, and a failed startup skips
+   * the session MCP path deterministically. A failed CANDIDATE startup
+   * restores the still-healthy incumbent's readiness, never clobbers it.
    */
   private sessionMcpHostReady: Promise<number> | null = null
+  /**
+   * Single-flight startup guard: a port-less re-entry joins the in-flight
+   * start instead of racing a second listener (the host object only exists
+   * after the listener is up, so the map alone cannot detect in-flight).
+   */
+  private sessionMcpHostStart: Promise<number> | null = null
   private sessionMcpHost: {
     callbackPort: number
     serverEntryPath: string
     nodeRuntimePath?: string
     server: { stop(force?: boolean): void }
-    /** One live server subprocess per session, stopped at turn end. */
     /**
      * One live session MCP server (stdio client + transport owning the child
-     * process) per session, stopped at turn end.
+     * process) per session, stopped at turn end. `ready` is the client
+     * connect promise — a first-turn tool call awaits it before use.
      */
     children: Map<string, {
       // Loosely typed: the concrete MCP SDK Client satisfies this shape.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client: any
+      ready: Promise<void>
       close(): Promise<void>
       /** Number of request_user_input tool calls served via this client. */
       toolCalls: number
@@ -5808,22 +5802,12 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    // DELETE INITIATION MARKER (review fix round 13, issue C): counted
-    // synchronously at entry — BEFORE the locked declaration — so a lazy
-    // agent creation in flight can detect (and roll back for) a delete that
-    // was INITIATED during its creation transaction, even though the
-    // declaration itself cannot run until the creation releases the lock.
-    managed.deleteAttempts = (managed.deleteAttempts ?? 0) + 1
-    console.log('DBGR deleteSession entered for', sessionId)
-
-    // DELETION DECLARATION — inside the question-state lock (review fix
-    // round 9, issue A): the tombstone write AND the availability-removal
-    // visibility point form the linearization point of the deletion. This
-    // makes "the sendMessage owner transaction" and "the deletion" mutually
-    // exclusive by construction:
-    // - declaration first → every send observes the tombstone before ANY
-    //   persistence (the owner critical section re-validates under this same
-    //   lock) and aborts with session_missing;
+    // DELETION DECLARATION — inside the question-state lock: the tombstone
+    // write AND the availability-removal visibility point form the
+    // linearization point of the deletion. This makes "the sendMessage owner
+    // transaction" and "the deletion" mutually exclusive by construction:
+    // - declaration first → every send observes the removal (identity
+    //   re-validation under this same lock) and aborts with session_missing;
     // - sendMessage transaction first → the delete waits for the lock, then
     //   declares and tears the (already running) turn down in its cleanup.
     // No out-of-lock marker write can interleave a visible intermediate state
@@ -6155,19 +6139,20 @@ export class SessionManager implements ISessionManager {
         return
       }
 
-      // OWNER PATH — ONE LOCK-HELD CRITICAL SECTION (review fix round 8,
-      // issue A): deletion re-validation, user-message persistence and the
-      // turn-start commit form a single transaction on the question-state
-      // lock. The entry gate alone left a TOCTOU window: a deleteSession that
-      // started (and even completed) during the pre-commit awaits left the
-      // accepted user message persisted and broadcast on a deleted session.
-      // Here the deleted marker is re-validated BEFORE any persistence side
-      // effect; the lock also serializes this section against the delete's
-      // own locked cleanup, so a committed turn can only ever be torn down by
-      // that cleanup — never resurrect after it.
+      // OWNER PATH — ONE LOCK-HELD CRITICAL SECTION: deletion re-validation,
+      // user-message persistence and the turn-start commit form a single
+      // transaction on the question-state lock. The entry gate alone left a
+      // TOCTOU window: a deleteSession that started (and even completed)
+      // during the pre-commit awaits left the accepted user message persisted
+      // and broadcast on a deleted session. Here the deletion is
+      // re-validated by SESSION IDENTITY (the declaration atomically removes
+      // the map entry, so an orphaned/removed object can never commit) BEFORE
+      // any persistence side effect; the lock also serializes this section
+      // against the delete's own locked cleanup, so a committed turn can only
+      // ever be torn down by that cleanup — never resurrect after it.
       await this.withQuestionStateLock(sessionId, async () => {
-        if (managed.questionLifecycleTombstone?.reason === 'deleted') {
-          throw new Error(`Session ${sessionId} is being deleted (session_missing): the reserved turn is abandoned before any persistence`)
+        if (this.sessions.get(sessionId) !== managed) {
+          throw new Error(`Session ${sessionId} is being deleted or replaced (session_missing): the reserved turn is abandoned before any persistence`)
         }
 
         // The turn-start reservation was already bound at entry (before any
@@ -6296,17 +6281,10 @@ export class SessionManager implements ISessionManager {
           sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
         }
 
-        // COMMIT — re-validate once more at the final mutation: a delete that
-        // entered mid-section set its marker synchronously (invisible to the
-        // compiler's narrowing of the field after the section-start check, so
-        // re-read through a widened local); starting a turn now would clear
-        // the marker. Aborting here leaves the already-persisted message to
-        // be wiped by the delete's own (lock-ordered) cleanup — no
-        // resurrection either way.
-        const tombstoneAtCommit = managed.questionLifecycleTombstone as { reason?: string } | undefined
-        if (tombstoneAtCommit?.reason === 'deleted') {
-          throw new Error(`Session ${sessionId} is being deleted (session_missing): the reserved turn is abandoned before commit`)
-        }
+        // COMMIT — the locked section entry re-validated session identity and
+        // the lock serializes against the delete's own locked declaration,
+        // so nothing can have deleted the session mid-section: starting the
+        // turn here is final for this generation.
         managed.lastMessageAt = Date.now()
         this.setProcessing(managed, true)
         managed.streamingText = ''
@@ -6388,41 +6366,19 @@ export class SessionManager implements ISessionManager {
       // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
       // ensureFreshToken mirrors the disk write to source.config in-memory).
       //
-      // LAZY AGENT CREATION — DELETION GATE (review fix round 12, issue B):
-      // the turn was committed in the locked critical section, but the lazy
-      // agent may not exist yet. A deletion that wins the declaration in this
-      // window must BLOCK creation — checked in-lock, serialized against the
-      // delete's own locked declaration — otherwise the freshly created agent
-      // would start a ghost turn on a deleted session. On rejection the error
-      // path converges the turn (onProcessingStopped) and the delete's
-      // cleanup removes the storage copy.
-      let rolledBackForDelete = false
+      // LAZY AGENT CREATION — DELETION GATE: the turn was committed in the
+      // locked critical section, but the lazy agent may not exist yet. A
+      // deletion that wins the declaration in this window must BLOCK
+      // creation — checked by SESSION IDENTITY in-lock (the declaration
+      // atomically removes the map entry, and the lock serializes this gate
+      // against the delete's own locked declaration) — otherwise the freshly
+      // created agent would start a ghost turn on a deleted session.
       let created: AgentBackend | null = null
       await this.withQuestionStateLock(sessionId, async () => {
-        // In-lock check: deletion declared → do NOT create the agent (a
-        // ghost turn on a deleted session). The turn converges silently as
-        // deleted — the delete's cleanup owns the storage removal.
-        if (managed.questionLifecycleTombstone?.reason === 'deleted') {
-          rolledBackForDelete = true
-          return
-        }
-        // Snapshot the delete-initiation counter BEFORE creating so a delete
-        // INITIATED during the slow creation is detected after it (review
-        // fix round 13, issue C).
-        const deleteAttemptsBefore = managed.deleteAttempts ?? 0
+        if (this.sessions.get(sessionId) !== managed) return
         created = await this.getOrCreateAgent(managed)
-        // POST-AWAIT RE-VALIDATION (review fix round 13, issue C): a delete
-        // that queued during the slow creation lands right after this section
-        // — roll the creation transaction back NOW (dispose the fresh agent —
-        // no leak) so no turn can start on a deleted session.
-        if ((managed.deleteAttempts ?? 0) !== deleteAttemptsBefore) {
-          rolledBackForDelete = true
-          sessionLog.info(`Session ${sessionId} deleted during lazy agent creation — disposing the created agent`)
-          await this.disposeManagedAgentRuntime(managed, 'session deleted during lazy agent creation')
-          return
-        }
       })
-      if (rolledBackForDelete || created === null) {
+      if (created === null) {
         // The turn converges silently as deleted (the user message was
         // already persisted/broadcast in the section; the delete's cleanup —
         // queued behind this section — owns the storage removal).
@@ -6493,6 +6449,27 @@ export class SessionManager implements ISessionManager {
         await this.onProcessingStopped(sessionId, 'error')
       }
       throw prepError
+    }
+
+    // CHAT-START CONVERGENCE GATE: the deterministic delete-vs-slow-creation
+    // convergence point. The deletion's declaration (tombstone + availability
+    // removal) is the linearization point; re-validate it under the
+    // question-state lock IMMEDIATELY before chat:
+    // - a delete that declared before this point converges the turn silently
+    //   here (the freshly created agent is disposed — no ghost turn, no
+    //   agent leak, no exception to the caller);
+    // - a delete that declares after this point owns the teardown of the
+    //   RUNNING turn through its cleanup (force-abort + dispose).
+    // A terminal lifecycle tombstone (stopped/archived) converges the same
+    // way: the lifecycle was already torn down when the tombstone was set.
+    const turnAlive = await this.withQuestionStateLock(sessionId, async () =>
+      this.sessions.get(sessionId) === managed && !managed.questionLifecycleTombstone,
+    )
+    if (!turnAlive) {
+      sendSpan.mark('turn.converged-deleted')
+      sessionLog.info(`sendMessage: turn for session ${sessionId} converged as deleted/stopped before chat start`)
+      await this.disposeManagedAgentRuntime(managed, 'session deleted or stopped before chat start')
+      return
     }
 
     try {
@@ -7400,7 +7377,6 @@ export class SessionManager implements ISessionManager {
     url?: string;
     json(): Promise<unknown>;
   }): Promise<Response> {
-    console.log('DBGR callback request on sm, mapSize:', this.sessions.size)
     return createSessionMcpCallbackHandler(this)(request)
   }
 
@@ -7410,7 +7386,6 @@ export class SessionManager implements ISessionManager {
     generationAtRequest: number,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    console.log('DBGX external q:', sessionId, 'inMap:', !!managed, 'mapSize:', this.sessions.size, 'thisTag:', (this as unknown as { __tag?: string }).__tag, 'hostPort:', this.sessionMcpHost?.callbackPort)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found (session_missing)`)
     }
@@ -7418,7 +7393,9 @@ export class SessionManager implements ISessionManager {
   }
 
   // ===========================================================================
-  // Session MCP host — production wiring (review fix round 11, issue B)
+  // Session MCP host — production wiring
+  // ===========================================================================
+  // Session MCP host — production wiring
   // ===========================================================================
 
   /**
@@ -7427,53 +7404,58 @@ export class SessionManager implements ISessionManager {
    * durable handoff) on a listening localhost server and records the spawn
    * parameters. Per-turn servers are then spawned by {@link
    * spawnSessionMcpServerForTurn} from the sendMessage turn-start path.
+   *
+   * - READINESS GATE: the returned promise resolves only when the listener
+   *   is actually listening (and rejects deterministically on startup
+   *   failure) — the per-turn spawn path awaits this before touching the
+   *   host.
+   * - SINGLE-FLIGHT START: a port-less re-entry joins an in-flight startup
+   *   or the healthy host; only an explicit callbackPort forces a candidate
+   *   start (port-conflict semantics: an occupied port rejects with
+   *   EADDRINUSE instead of silently reusing the existing host).
+   * - HEALTHY-INCUMBENT PRESERVATION: a failed candidate start never clobbers
+   *   the healthy incumbent's readiness — consumers keep seeing the working
+   *   host after the candidate rejects.
    */
   async startSessionMcpHost(options: {
     serverEntryPath: string
     nodeRuntimePath?: string
     callbackPort?: number
-    /** Test/Node-runtime hook: skip Bun.serve and use the node:http listener. */
-    forceNodeHttp?: boolean
   }): Promise<number> {
-    // READINESS GATE (review fix round 14, issue B): the returned promise
-    // resolves only when the listener is actually listening (and rejects
-    // deterministically on startup failure) — the per-turn spawn path awaits
-    // this before touching the host.
-    //
-    // PORT-CONFLICT SEMANTICS (review fix round 14, issue C): an explicit
-    // callbackPort is ALWAYS attempted — a second start on an occupied port
-    // rejects deterministically (EADDRINUSE) instead of silently returning
-    // the existing host. Only a port-less re-entry is idempotent.
-    if (!options.callbackPort && this.sessionMcpHost) {
-      return this.sessionMcpHostReady ?? Promise.resolve(this.sessionMcpHost.callbackPort)
+    if (!options.callbackPort) {
+      if (this.sessionMcpHostStart) return this.sessionMcpHostStart
+      if (this.sessionMcpHost) return Promise.resolve(this.sessionMcpHost.callbackPort)
     }
-    const ready = this.startSessionMcpHostInner(options)
-    this.sessionMcpHostReady = ready
-    void ready.catch(() => {})
-    return ready
+    const incumbentHost = this.sessionMcpHost
+    const incumbentReady = this.sessionMcpHostReady
+    const start = this.startSessionMcpHostInner(options).catch(error => {
+      if (this.sessionMcpHost === incumbentHost && incumbentReady) {
+        this.sessionMcpHostReady = incumbentReady
+      }
+      throw error
+    })
+    this.sessionMcpHostStart = start
+    this.sessionMcpHostReady = start
+    return start.finally(() => {
+      if (this.sessionMcpHostStart === start) this.sessionMcpHostStart = null
+    })
   }
 
   private async startSessionMcpHostInner(options: {
     serverEntryPath: string
     nodeRuntimePath?: string
     callbackPort?: number
-    forceNodeHttp?: boolean
   }): Promise<number> {
     const handler = createSessionMcpCallbackHandler(this)
-    // CROSS-RUNTIME (review fix round 13, issue A): the Electron main process
-    // is a NODE runtime — Bun.serve would crash production startup. Prefer
-    // Bun.serve when the Bun API exists; otherwise fall back to a node:http
-    // listener with a web-Request adapter.
-    const bunGlobal = globalThis as { Bun?: { serve?: (o: unknown) => { stop: (force?: boolean) => void; port: number } } }
-    const useBun = !options.forceNodeHttp && typeof bunGlobal.Bun?.serve === 'function'
-    const server = useBun
-      ? bunGlobal.Bun!.serve!({
-          port: options.callbackPort ?? 0,
-          hostname: '127.0.0.1',
-          fetch: (req: Request) => handler(req),
-        })
-      : await this.startNodeHttpHost(handler, options.callbackPort ?? 0)
+    // SINGLE LISTENER TECHNOLOGY: a node:http server bound to 127.0.0.1 —
+    // the Electron main process is a NODE runtime, so the host must not
+    // depend on a Bun-only API. The listener adapts IncomingMessage /
+    // ServerResponse to the web-standard Request the callback router
+    // expects, with the same 1 MiB body limit (413) and deterministic
+    // listen-error rejection as before.
+    const server = await this.startNodeHttpHost(handler, options.callbackPort ?? 0)
     const callbackPort: number = server.port
+    const previous = this.sessionMcpHost
     this.sessionMcpHost = {
       callbackPort,
       serverEntryPath: options.serverEntryPath,
@@ -7482,14 +7464,30 @@ export class SessionManager implements ISessionManager {
       children: new Map(),
       lastSpawnSpec: null,
     }
-    sessionLog.info(`Session MCP host started on 127.0.0.1:${callbackPort} (entry: ${options.serverEntryPath}, runtime: ${useBun ? 'bun' : 'node'})`)
+    // A successful replacement retires the previous host's subprocesses and
+    // listener — exactly one live host per runtime.
+    if (previous) {
+      this.disposeSessionMcpHost(previous)
+    }
+    sessionLog.info(`Session MCP host started on 127.0.0.1:${callbackPort} (entry: ${options.serverEntryPath}, runtime: node)`)
     return callbackPort
   }
 
+  /** Kill a host object's per-turn subprocesses and its listener. */
+  private disposeSessionMcpHost(host: NonNullable<SessionManager['sessionMcpHost']>): void {
+    for (const entry of host.children.values()) {
+      void entry.close().catch(() => {})
+    }
+    host.children.clear()
+    host.server.stop(true)
+  }
+
   /**
-   * NODE-runtime listener (review fix round 13, issue A): node:http server
-   * adapting IncomingMessage/ServerResponse to the web-standard Request the
-   * callback router expects. Same 127.0.0.1-only binding as the Bun path.
+   * NODE-runtime listener: node:http server adapting IncomingMessage /
+   * ServerResponse to the web-standard Request the callback router expects.
+   * 127.0.0.1-only binding, 1 MiB body limit (413 at the boundary), and
+   * listen errors (port conflicts / permission failures) surface as a
+   * REJECTED promise — never an uncaught 'error' event.
    */
   private async startNodeHttpHost(
     handler: (request: Request) => Promise<Response>,
@@ -7571,13 +7569,10 @@ export class SessionManager implements ISessionManager {
   stopSessionMcpHost(): void {
     const host = this.sessionMcpHost
     if (!host) return
-    for (const entry of host.children.values()) {
-      void entry.close().catch(() => {})
-    }
-    host.children.clear()
-    host.server.stop(true)
+    this.disposeSessionMcpHost(host)
     this.sessionMcpHost = null
     this.sessionMcpHostReady = null
+    this.sessionMcpHostStart = null
     sessionLog.info('Session MCP host stopped')
   }
 
@@ -7648,7 +7643,14 @@ export class SessionManager implements ISessionManager {
       stderr: 'pipe',
     })
     const client = new Client({ name: 'polo-session-mcp-host', version: '0.3.1' })
-    const entry = { client, close: () => client.close(), toolCalls: 0 }
+    // CLIENT READINESS: the connect promise is part of the entry. The first
+    // turn's tool call awaits it (see awaitSessionMcpClient) — a call must
+    // never race an unconnected client.
+    const entry = { client, ready: client.connect(transport), close: () => client.close(), toolCalls: 0 }
+    entry.ready.catch(connectError => {
+      sessionLog.error(`Session MCP server connect failed for session ${sessionId}:`, connectError)
+      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
+    })
     transport.onclose = () => {
       if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
     }
@@ -7661,10 +7663,6 @@ export class SessionManager implements ISessionManager {
     host.children.set(sessionId, entry)
     host.lastSpawnSpec = built.spec
     sessionLog.info(`Spawned session MCP server for session ${sessionId} (capability=${built.allowRequestUserInput}, generation=${processingGeneration})`)
-    void client.connect(transport).catch((connectError: Error) => {
-      sessionLog.error(`Session MCP server connect failed for session ${sessionId}:`, connectError)
-      if (host.children.get(sessionId) === entry) host.children.delete(sessionId)
-    })
   }
 
   /**
@@ -7704,16 +7702,21 @@ export class SessionManager implements ISessionManager {
   ): Promise<NonNullable<SessionManager['sessionMcpHost']>['children'] extends Map<string, infer E> ? E : never> {
     const host = await this.awaitSessionMcpHost()
     if (!host) return undefined as never
-    const ready = host.children.get(sessionId)
-    if (!ready) return undefined as never
-    return ready
+    const entry = host.children.get(sessionId)
+    if (!entry) return undefined as never
+    try {
+      await entry.ready
+    } catch {
+      return undefined as never
+    }
+    return entry
   }
 
   /**
    * Resolve the session MCP host AFTER its startup promise settles. Returns
    * null when the host was never started or its startup failed — the spawn
-   * path then skips the session MCP tool deterministically (review fix
-   * round 14, issue B).
+   * path then skips the session MCP tool deterministically. A failed
+   * CANDIDATE startup falls back to the still-healthy incumbent host.
    */
   private async awaitSessionMcpHost(): Promise<SessionManager['sessionMcpHost']> {
     const ready = this.sessionMcpHostReady
@@ -7721,7 +7724,7 @@ export class SessionManager implements ISessionManager {
     try {
       await ready
     } catch {
-      return null
+      return this.sessionMcpHost
     }
     return this.sessionMcpHost
   }
@@ -7740,22 +7743,20 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * PRODUCTION agent tool-set routing (review fix round 14, issue A): the
-   * model's request_user_input tool call reaches the durable handoff through
-   * the session MCP HOST CLIENT when one is running for this session — the
-   * full stdio loop (client → session-mcp-server → callback POST →
-   * SessionManager durable handoff, awaitable ack preserved) — and through
-   * the in-process durable path otherwise.
+   * PRODUCTION agent tool-set routing: the embedded engines (Claude SDK
+   * in-process toolset, Pi host-side proxy execution) reach the durable
+   * handoff DIRECTLY — one owner/channel per engine. The per-turn session
+   * MCP server is the EXTERNAL engine's (Codex harness) consumption channel:
+   * its tool call travels stdio → HTTP POST → callback router → this same
+   * durable handoff (see callSessionMcpRequestUserInput consumers). An
+   * embedded call therefore never loops through the child, and a single tool
+   * call can never produce two durable handoffs.
    */
   private routeAgentQuestionRequested(
     managed: ManagedSession,
     questions: import('@polo-ai/session-tools-core').RequestUserInputQuestionArgs[],
     generationAtRequest: number,
   ): Promise<void> {
-    console.log('DBGR route: children keys', JSON.stringify([...(this.sessionMcpHost?.children.keys() ?? [])]), 'host:', !!this.sessionMcpHost)
-    if (this.sessionMcpHost?.children.get(managed.id)) {
-      return this.callSessionMcpRequestUserInput(managed.id, questions).then(() => undefined)
-    }
     return this.handleQuestionRequested(managed, questions, generationAtRequest)
   }
 
@@ -8155,29 +8156,15 @@ export class SessionManager implements ISessionManager {
       return { status: 'session_missing' }
     }
 
+    // NO single-flight map: the durable commit below runs ENTIRELY under the
+    // session's question-state lock, so concurrent submissions of the SAME
+    // requestId serialize. The loser always reads fully-committed or
+    // fully-rolled-back state: first success → already_answered (idempotent),
+    // first failure → the pending question is intact and the loser becomes a
+    // genuine retry owner. Followers can never derive an outcome from
+    // rollback-able in-memory state.
     const requestId = resolution.action === 'answer' ? resolution.response.requestId : resolution.requestId
-
-    // Resolution single-flight (review round 8, issue 3): concurrent
-    // submissions of the SAME sessionId+requestId must wait for the FIRST
-    // durable commit's outcome. The commit path mutates memory (push answer,
-    // clear pending) BEFORE the flush; a second window reading that
-    // not-yet-durable state would derive a fake already_answered — if the
-    // first flush then rolls back, the server restores the pending question
-    // while the second window already cleared its card. Followers therefore
-    // share the owner's promise: first success → both accepted; first
-    // failure → both transient_failure (pending intact, retry possible).
-    const flightKey = `${sessionId}::${requestId}`
-    const inFlight = this.resolutionInFlight.get(flightKey)
-    if (inFlight) {
-      sessionLog.info(`Question resolution ${requestId} for session ${sessionId} is in flight — follower awaits the first durable commit`)
-      return inFlight
-    }
-    const flight = this.respondToQuestionInner(managed, sessionId, resolution, requestId)
-      .finally(() => {
-        this.resolutionInFlight.delete(flightKey)
-      })
-    this.resolutionInFlight.set(flightKey, flight)
-    return flight
+    return this.respondToQuestionInner(managed, sessionId, resolution, requestId)
   }
 
   private async respondToQuestionInner(

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import type { BackendHostRuntimeContext } from '../types.ts';
 import { setPathToClaudeCodeExecutable } from '../../options.ts';
-import { buildSessionMcpServerArgs } from '../../core/session-lifecycle.ts';
+import { buildSessionMcpServerArgs, type SessionMcpSpawnOptions } from '@polo-ai/session-tools-core';
 
 /**
  * When set, the resolver walks further up from the .app bundle to find SDK,
@@ -37,7 +37,7 @@ export interface ResolvedBackendRuntimePaths {
    * available in this runtime.
    */
   buildSessionMcpServerInvocation?:
-    | ((options: import('../../core/session-lifecycle.ts').SessionMcpSpawnOptions) => {
+    | ((options: SessionMcpSpawnOptions) => {
         command: string;
         args: string[];
       } | null);
@@ -303,7 +303,7 @@ export function applyAnthropicRuntimeBootstrap(
  */
 export function buildSessionMcpServerInvocation(
   hostRuntime: BackendHostRuntimeContext,
-  options: import('../../core/session-lifecycle.ts').SessionMcpSpawnOptions,
+  options: SessionMcpSpawnOptions,
 ): { command: string; args: string[] } | null {
   const paths = resolveBackendRuntimePaths(hostRuntime);
   if (!paths.sessionServerPath) return null;

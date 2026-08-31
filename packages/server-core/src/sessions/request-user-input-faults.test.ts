@@ -1047,17 +1047,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     }
   })
 
-  // ---- Review fix round 14, issue A: the per-turn MCP client is wired into
-  // the AGENT tool set -- the model's request_user_input tool call routes
-  // through the client -> stdio -> session-mcp-server -> callback POST ->
-  // SessionManager durable handoff (full closed loop), via the PRODUCTION
-  // routing method.
+  // ---- Ownership: the per-turn MCP client is the EXTERNAL engine's channel;
+  // the EMBEDDED agent wiring goes DIRECT to the durable handoff — one
+  // owner/channel per engine, no stdio/HTTP callback loop, no double delivery.
 
-  it('agent tool call routes through the spawned stdio client into the durable handoff (closed loop)', async () => {
+  it('embedded agent wiring goes DIRECT to the durable handoff even with a live per-turn child (no loop, one handoff)', async () => {
     seedSession('f-wire-1', {})
     const managed = getManaged('f-wire-1') as unknown as { processingGeneration: number }
     // Wire the agent field EXACTLY like the production onQuestionRequested
-    // wiring does (client-preferred routing via routeAgentQuestionRequested).
+    // wiring does (direct durable routing via routeAgentQuestionRequested).
     ;(getManaged('f-wire-1') as unknown as { agent: { onQuestionRequested?: (q: unknown[], g: number) => Promise<void> } }).agent = {
       onQuestionRequested: (questions: unknown[], generation: number) =>
         (sm as unknown as {
@@ -1073,23 +1071,17 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       return !!host?.children.get('f-wire-1')
     }, 15000)
 
-    ;(sm as unknown as { __tag: string }).__tag = 'TEST-SM'
-    console.log('DBGY test-side map size:', (sm as unknown as { sessions: Map<string, unknown> }).sessions.size, 'hostPort:', (sm as unknown as { sessionMcpHost: { callbackPort: number } }).sessionMcpHost?.callbackPort)
-    // The model calls the tool -- the production routing sends it through the
-    // spawned stdio CLIENT into the durable handoff.
+    // The model calls the tool — the embedded wiring lands DIRECTLY in the
+    // durable handoff; the stdio child is NOT traversed (toolCalls stays 0).
     const request = makeQuestionRequest('f-wire-1')
-    // AWAIT the agent-field call: the stdio loop (client → server → callback
-    // POST → durable handoff) must complete before the assertions.
     await (getManaged('f-wire-1') as unknown as { agent: { onQuestionRequested: (q: unknown[], g: number) => Promise<void> } }).agent
       .onQuestionRequested!(request.questions as never, managed.processingGeneration)
 
-    // The tool call traversed the CLIENT (counted) and landed in the durable
-    // handoff (pending + event).
     const host = (sm as unknown as { sessionMcpHost: { children: Map<string, { toolCalls: number }>; callbackPort: number } }).sessionMcpHost
-    console.log('DBGE children keys:', JSON.stringify([...host!.children.keys()]), 'toolCalls:', host!.children.get('f-wire-1')?.toolCalls, 'port:', host!.callbackPort, 'mapSize:', (sm as unknown as { sessions: Map<string, unknown> }).sessions.size, 'pending:', !!sm.getPendingQuestion('f-wire-1'), 'events:', JSON.stringify(events.map(e => e.type)))
-    expect(host!.children.get('f-wire-1')!.toolCalls).toBe(1)
+    expect(host!.children.get('f-wire-1')!.toolCalls).toBe(0)
     const pending = sm.getPendingQuestion('f-wire-1')
     expect(pending).not.toBeNull()
+    // ONE tool call → exactly ONE durable handoff.
     expect(events.filter(e => e.type === 'question_request')).toHaveLength(1)
 
     // Terminal: answering settles the question.
@@ -1097,14 +1089,14 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     expect(sm.getPendingQuestion('f-wire-1')).toBeNull()
 
     sm.stopSessionMcpHost()
-  })
+  }, 30000)
 
   // ---- Review fix round 14, issue C: node host adversarial — body size
   // limit (413) and deterministic listen-failure rejection.
 
   it('node http host: a 2MiB body is rejected with 413 at the boundary', async () => {
     seedSession('f-node-413', {})
-    const port = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), forceNodeHttp: true })
+    const port = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js') })
 
     const bigBody = JSON.stringify({
       sessionId: 'f-node-413',
@@ -1126,10 +1118,10 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
   it('node http host: a port conflict rejects startup deterministically (no uncaught error, no half-open host)', async () => {
     seedSession('f-node-port', {})
-    const firstPort = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), forceNodeHttp: true })
+    const firstPort = await sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js') })
 
     // A second host on the SAME port must fail deterministically.
-    await expect(sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), callbackPort: firstPort, forceNodeHttp: true }))
+    await expect(sm.startSessionMcpHost({ serverEntryPath: join(tmpRoot, 'e.js'), callbackPort: firstPort }))
       .rejects.toThrow()
 
     // The first host keeps serving; the failed start left no stray state.
@@ -1211,17 +1203,15 @@ describe('request_user_input fault injection + stop lifecycle', () => {
     sm.stopSessionMcpHost()
   })
 
-  // ---- Review fix round 13, issue A: the host must start on a NODE runtime
-  // (Electron main) — the forceNodeHttp path exercises the node:http
-  // listener with a real POST round-trip.
+  // ---- The host listener is a node:http server (the Electron main process
+  // is a NODE runtime) — a real POST round-trip through the ONLY host path.
 
-  it('host startup works on the NODE http path (forceNodeHttp) with a real POST round-trip', async () => {
+  it('host startup listens on node:http with a real POST round-trip', async () => {
     seedSession('f-node-host', {})
     const request = makeQuestionRequest('f-node-host')
 
     const port = await sm.startSessionMcpHost({
       serverEntryPath: join(tmpRoot, 'whatever-entry.js'),
-      forceNodeHttp: true,
     })
     expect(port).toBeGreaterThan(0)
 
@@ -2592,96 +2582,72 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       })
     })
 
-    // Round 8, issue 3: concurrent resolutions of the SAME sessionId+requestId
-    // single-flight on the first durable commit — followers never derive
-    // idempotency from rollback-able in-memory state.
-    describe('resolution single-flight', () => {
-      it('concurrent duplicate answers await the first durable commit: both accepted, ONE answer message', async () => {
+    // Concurrent resolutions of the SAME sessionId+requestId serialize on the
+    // question-state lock — the ENTIRE durable commit (mutation + flush +
+    // rollback) is in-lock, so the loser always reads fully-committed or
+    // fully-rolled-back state and never derives a fake outcome. Which caller
+    // reaches the lock first is microtask-order (not call-order); the
+    // INVARIANT is the outcome SET: exactly one durable commit, the other
+    // idempotent.
+    describe('resolution serialization (question-state lock)', () => {
+      it('concurrent duplicate answers serialize: one accepted commit + one already_answered, ONE answer message', async () => {
         patchPrivateFlush()
         const request = makeQuestionRequest('f-flight-1')
         seedSession('f-flight-1', { pendingQuestion: request })
-
-        // Gate the FIRST flush (the owner's commit) so the follower must
-        // single-flight on the in-flight promise.
-        let releaseFlush: (() => void) | null = null
-        const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
-        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
-        let flushCalls = 0
-        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
-          flushCalls++
-          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
-          return realFlush.call(sm, id)
-        }
         ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
 
         const p1 = sm.respondToQuestion('f-flight-1', makeAnswerResolution(request))
         const p2 = sm.respondToQuestion('f-flight-1', makeAnswerResolution(request))
-
-        releaseFlush!()
         const [r1, r2] = await Promise.all([p1, p2])
-        expect(r1).toEqual({ status: 'accepted' })
-        expect(r2).toEqual({ status: 'accepted' })
+        // Exactly ONE submission performs the durable commit; the other reads
+        // the durable settled world and succeeds idempotently.
+        expect([r1, r2].map(r => r.status).sort()).toEqual(['accepted', 'already_answered'])
         expect(answerMessageCountByFixture('f-flight-1')).toBe(1)
         expect(sm.getPendingQuestion('f-flight-1')).toBeNull()
       })
 
-      it('first submission fails → the follower receives the SAME transient_failure; the pending stays intact and a later retry succeeds', async () => {
+      it('a broken disk makes EVERY early commit truthfully transient; the pending stays intact and a later retry succeeds', async () => {
         patchPrivateFlush()
         const request = makeQuestionRequest('f-flight-2')
         seedSession('f-flight-2', { pendingQuestion: request })
         ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
 
-        let releaseFlush: (() => void) | null = null
-        let rejectFlush: ((e: Error) => void) | null = null
-        const flushGate = new Promise<void>((resolve, reject) => { releaseFlush = resolve; rejectFlush = reject })
+        let diskBroken = true
         const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
-        let flushCalls = 0
         ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
-          flushCalls++
-          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
+          if (diskBroken) return Promise.reject(new Error('disk full (injected)'))
           return realFlush.call(sm, id)
         }
 
         const p1 = sm.respondToQuestion('f-flight-2', makeAnswerResolution(request))
         const p2 = sm.respondToQuestion('f-flight-2', makeAnswerResolution(request))
-
-        rejectFlush!(new Error('disk full (injected)'))
         const [r1, r2] = await Promise.all([p1, p2])
-        // The follower shares the owner's transient failure — the pending
-        // question stays intact for a retry.
+        // Both early commits fail while the disk is broken — each outcome is
+        // truthful, the pending question stays intact (rolled back in-lock).
         expect(r1).toEqual({ status: 'transient_failure', message: 'disk full (injected)' })
         expect(r2).toEqual({ status: 'transient_failure', message: 'disk full (injected)' })
         expect(sm.getPendingQuestion('f-flight-2')?.requestId).toBe(request.requestId)
+        expect(answerMessageCountByFixture('f-flight-2')).toBe(0)
 
-        // A LATER submission (flight released) is a NEW owner and succeeds.
+        // Once the disk recovers, the SAME resolution succeeds — exactly one
+        // durable answer message exists.
+        diskBroken = false
         const retry = await sm.respondToQuestion('f-flight-2', makeAnswerResolution(request))
         expect(retry).toEqual({ status: 'accepted' })
         expect(sm.getPendingQuestion('f-flight-2')).toBeNull()
+        expect(answerMessageCountByFixture('f-flight-2')).toBe(1)
       })
 
-      it('concurrent duplicate cancels single-flight too: both cancelled, one cancel record, agent not resumed', async () => {
+      it('concurrent duplicate cancels serialize too: one cancelled + one already_answered, one cancel record, agent not resumed', async () => {
         patchPrivateFlush()
         const request = makeQuestionRequest('f-flight-3')
         seedSession('f-flight-3', { pendingQuestion: request })
         ;(sm as unknown as { sendMessage: (...args: unknown[]) => Promise<void> }).sendMessage = async () => {}
 
-        let releaseFlush: (() => void) | null = null
-        const flushGate = new Promise<void>(resolve => { releaseFlush = resolve })
-        const realFlush = (Object.getPrototypeOf(sm) as { flushSession: (id: string) => Promise<void> }).flushSession
-        let flushCalls = 0
-        ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = (id: string) => {
-          flushCalls++
-          if (flushCalls === 1) return flushGate.then(() => realFlush.call(sm, id))
-          return realFlush.call(sm, id)
-        }
-
         const p1 = sm.respondToQuestion('f-flight-3', { action: 'cancel', requestId: request.requestId })
         const p2 = sm.respondToQuestion('f-flight-3', { action: 'cancel', requestId: request.requestId })
-
-        releaseFlush!()
         const [r1, r2] = await Promise.all([p1, p2])
-        expect(r1).toEqual({ status: 'cancelled' })
-        expect(r2).toEqual({ status: 'cancelled' })
+        expect([r1, r2].map(r => r.status).sort()).toEqual(['already_answered', 'cancelled'])
         const cancelRecords = (getManaged('f-flight-3').messages as Array<Record<string, unknown>>)
           .filter(m => (m as { questionResolution?: unknown }).questionResolution)
         expect(cancelRecords).toHaveLength(1)
