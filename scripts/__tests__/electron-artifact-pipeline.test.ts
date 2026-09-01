@@ -514,12 +514,12 @@ describe('Electron final artifact validation pipeline', () => {
     expect(afterPack).toContain('linux-terminal-integration.sh')
   })
 
-  // STAGING-LEVEL REGRESSION (POO-53 round 3): the resource copies are
-  // overwrite-only, so a pre-removal leftover of the removed session MCP
-  // sidecar must be PRUNED by the staging entry itself — both in the source
-  // resources/ tree and in dist/resources/ — while the Pi subprocess bundle
-  // survives. Static script-text scans cannot catch a stale artifact; this
-  // exercises the real staging function against a planted sentinel.
+  // STAGING-LEVEL REGRESSION: the resource copies are overwrite-only, so a
+  // leftover of the removed session MCP sidecar must be PRUNED by the
+  // staging entry itself — in both the source resources/ tree and
+  // dist/resources/ — while the Pi subprocess bundle survives. Static
+  // script-text scans cannot catch a stale artifact; this exercises the
+  // real staging function against a planted sentinel.
   it('resource staging prunes a stale session-mcp-server sidecar from source and dist and keeps the pi bundle', async () => {
     const { stageResources } = await import(join(root, 'apps', 'electron', 'scripts', 'copy-assets.ts'))
     const electronDir = mkdtempSync(join(tmpdir(), 'polo-resource-staging-'))

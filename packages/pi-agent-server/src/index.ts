@@ -14,7 +14,6 @@
  * separate process, avoiding bundling issues in the Electron main process.
  */
 
-import http from 'node:http';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -173,7 +172,7 @@ type EnrichedToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_
 type OutboundAgentEvent = AgentSessionEvent | EnrichedToolExecutionStartEvent;
 
 /** Messages to main process (stdout) */
-interface OutboundReady { type: 'ready'; sessionId: string | null; callbackPort: number }
+interface OutboundReady { type: 'ready'; sessionId: string | null }
 interface OutboundEvent { type: 'event'; event: OutboundAgentEvent }
 interface OutboundPreToolUseReq {
   type: 'pre_tool_use_request';
@@ -253,8 +252,6 @@ let currentUserMessage = '';
 const pendingPreToolUse = new Map<string, { resolve: (response: { action: string; input?: Record<string, unknown>; reason?: string }) => void }>();
 const pendingToolExecutions = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void }>();
 
-// Pending session MCP tool calls for completion detection
-
 // Proxy tool definitions from main process — session tools are REPLACED
 // wholesale per registration (per-turn capability bits like request_user_input
 // must fail closed); pool (MCP/API source) tools merge by name. See
@@ -277,8 +274,6 @@ function isPrefetchableTool(toolName: string): boolean {
 // Single source of truth: ProxyToolRegistry.toolsChanged.
 
 // Callback server for call_llm
-let callbackServer: http.Server | null = null;
-let callbackPort = 0;
 
 // ============================================================
 // JSONL I/O
@@ -307,57 +302,6 @@ function findMostRecentSessionFile(sessionDir: string): string | null {
     }
   }
   return best?.path ?? null;
-}
-
-// ============================================================
-// Callback Server (for call_llm from session MCP server)
-// ============================================================
-
-async function startCallbackServer(): Promise<void> {
-  if (callbackServer) return;
-
-  const server = http.createServer(async (req, res) => {
-    if (req.method !== 'POST' || req.url !== '/call-llm') {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-    try {
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(chunk as Buffer);
-      const body = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
-
-      debugLog('Received call_llm request via callback server');
-      const result = await preExecuteCallLlm(body);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      debugLog(`call_llm via callback failed: ${msg}`);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: msg }));
-    }
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      callbackPort = typeof addr === 'object' && addr ? addr.port : 0;
-      debugLog(`Callback server listening on 127.0.0.1:${callbackPort}`);
-      resolve();
-    });
-    server.on('error', reject);
-  });
-
-  callbackServer = server;
-}
-
-function stopCallbackServer(): void {
-  if (callbackServer) {
-    callbackServer.close();
-    callbackServer = null;
-    callbackPort = 0;
-  }
 }
 
 // ============================================================
@@ -1101,11 +1045,6 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
   }
 }
 
-async function preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQueryResult> {
-  const sessionPath = initConfig?.sessionPath || undefined;
-  const request = await buildCallLlmRequest(input, { backendName: 'Pi', sessionPath });
-  return queryLlm(request);
-}
 
 async function runMiniCompletion(prompt: string): Promise<string | null> {
   try {
@@ -1264,13 +1203,9 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
     debugLog('Set AZURE_OPENAI_BASE_URL for active runtime endpoint');
   }
 
-  // Start callback server for call_llm (idempotent — skips if already running)
-  await startCallbackServer();
-
   send({
     type: 'ready',
     sessionId: null,
-    callbackPort,
   });
 }
 
@@ -1653,9 +1588,6 @@ function handleShutdown(): void {
     piSession.dispose();
     piSession = null;
   }
-
-  // Stop callback server
-  stopCallbackServer();
 
   // Reject pending promises
   for (const [, pending] of pendingPreToolUse) {

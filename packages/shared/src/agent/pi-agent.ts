@@ -234,9 +234,6 @@ export class PiAgent extends BaseAgent {
   // Pi session ID (managed by subprocess, reported back)
   private piSessionId: string | null = null;
 
-  // Callback server port (managed by subprocess)
-  private callbackPort: number = 0;
-
   // State
   private _isProcessing: boolean = false;
   private abortReason?: AbortReason;
@@ -1125,8 +1122,6 @@ export class PiAgent extends BaseAgent {
 
     switch (type) {
       case 'ready':
-        // Subprocess initialized, callback server listening
-        this.callbackPort = (msg.callbackPort as number) || 0;
         if (msg.sessionId) {
           this.piSessionId = msg.sessionId as string;
           this.config.onSdkSessionIdUpdate?.(this.piSessionId!);
@@ -1314,7 +1309,6 @@ export class PiAgent extends BaseAgent {
     // The subprocess sends Pi SDK AgentSessionEvent objects serialized as JSON.
     // Feed them through PiEventAdapter to convert to Polo AIEvents.
 
-    // Detect session MCP tool completions (same pattern as in-process version)
     const eventType = event.type as string;
     let adaptedEvent = event;
 
@@ -2690,7 +2684,6 @@ export class PiAgent extends BaseAgent {
     }
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
-    this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
     this.adapter.resetOverflowState();
 
@@ -2723,7 +2716,6 @@ export class PiAgent extends BaseAgent {
 
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
-    this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
 
     // Clear any in-flight overflow-recovery state so a stale fallback timer
