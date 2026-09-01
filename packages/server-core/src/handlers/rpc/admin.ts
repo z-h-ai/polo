@@ -603,10 +603,33 @@ export function registerAdminHandlers(
   const captureInitialSyncTrustedProductSpaceAccount = (): Promise<void> => {
     initialSyncAccountRestore ??= (async () => {
       try {
-        const adminUrl = requireAdminUrl()
         const manager = getCredentialManager()
+        // Discriminative read: `signed_out` is committed ONLY when the
+        // credential store confirms the admin token does not exist. A
+        // store that exists but cannot be read, decrypted or validated
+        // stays `unknown` (the sync gate refuses everything) so a corrupt
+        // credentials.enc is never mistaken for a signed-out device.
+        const presence = await manager.inspectAdminCredentialPresence()
+        if (presence.status === 'unreadable_or_invalid') {
+          deps.platform.logger.warn(
+            '[Admin] persisted Admin credentials are unreadable or invalid; the sync gate stays fail-closed:',
+            presence.reason,
+          )
+          return
+        }
+        if (presence.status === 'absent') {
+          setSyncTrustedProductSpaceAccountId(null)
+          return
+        }
+        // Credential found: resolve the live session snapshot for its user.
         const snapshot = await sessions.capture(manager)
-        setSyncTrustedProductSpaceAccountId(snapshot?.tokens.userId ?? null)
+        if (!snapshot) {
+          deps.platform.logger.warn(
+            '[Admin] persisted Admin credentials exist but no session snapshot could be captured; the sync gate stays fail-closed',
+          )
+          return
+        }
+        setSyncTrustedProductSpaceAccountId(snapshot.tokens.userId)
       } catch (error) {
         deps.platform.logger.warn(
           '[Admin] initial ProductSpace account restore failed; the sync gate stays fail-closed:',

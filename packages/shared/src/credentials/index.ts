@@ -38,3 +38,4 @@ export {
   type InvocationCredentialProxyTarget,
 } from './invocation-credential-proxy.ts';
 export type { CredentialBackend } from './backends/types.ts';
+export type { CredentialPresenceStatus } from './backends/types.ts';

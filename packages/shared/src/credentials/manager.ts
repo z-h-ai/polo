@@ -6,7 +6,7 @@
  */
 
 import type { CredentialBackend } from './backends/types.ts';
-import type { CredentialCompareAndSwapResult } from './backends/types.ts';
+import type { CredentialCompareAndSwapResult, CredentialPresenceStatus } from './backends/types.ts';
 import type { CredentialId, CredentialType, StoredCredential, CredentialHealthStatus, CredentialHealthIssue } from './types.ts';
 import type { LlmAuthType, LlmProviderType } from '../config/llm-connections.ts';
 import { SecureStorageBackend } from './backends/secure-storage.ts';
@@ -355,6 +355,31 @@ export class CredentialManager {
   }
 
   /** Get admin access/refresh tokens. */
+  /**
+   * Discriminative admin-credential presence inspection for startup
+   * restore. `absent` requires every backend to confirm the credential does
+   * not exist; any backend that reports the credential exists but cannot be
+   * read, decrypted or validated yields `unreadable_or_invalid` so callers
+   * fail closed instead of degrading to signed-out.
+   */
+  async inspectAdminCredentialPresence(): Promise<CredentialPresenceStatus> {
+    await this.ensureInitialized();
+    let sawUnreadable = false;
+    let sawUnreadableReason = 'one or more credential backends could not be read';
+    for (const backend of this.backends) {
+      if (!backend.inspectCredentialPresence) continue;
+      const result = await backend.inspectCredentialPresence({ type: 'admin_token' });
+      if (result.status === 'found') return result;
+      if (result.status === 'unreadable_or_invalid') {
+        sawUnreadable = true;
+        sawUnreadableReason = result.reason;
+      }
+    }
+    return sawUnreadable
+      ? { status: 'unreadable_or_invalid', reason: sawUnreadableReason }
+      : { status: 'absent' };
+  }
+
   async getAdminTokens(): Promise<{
     accessToken: string;
     refreshToken: string;

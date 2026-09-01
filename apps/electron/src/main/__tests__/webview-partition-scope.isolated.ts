@@ -1,4 +1,12 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// The real credential manager reads this env at backend construction; set it
+// before any test drives a restore so the store lives in a temp directory.
+const credentialStoreRoot = mkdtempSync(join(tmpdir(), 'webview-partition-credentials-'))
+process.env.POLO_AI_SHARED_CREDENTIALS_DIR = credentialStoreRoot
 
 type PartitionSession = {
   partition: string
@@ -454,5 +462,109 @@ describe('ProductSpace webview partition policy wiring', () => {
     const legacySession = sessions.get(legacyPartition)
     expect(legacySession).toBeDefined()
     expect(legacySession!.clearStorageDataCalls).toBe(1)
+  })
+})
+
+
+describe('startup credential restore → webview attach gate (integration)', () => {
+  const storeFile = join(credentialStoreRoot, 'credentials.enc')
+  const adminHandlersDeps = {
+    sessionManager: {},
+    oauthFlowStore: {},
+    platform: {
+      appRootPath: credentialStoreRoot,
+      resourcesPath: credentialStoreRoot,
+      isPackaged: false,
+      appVersion: '0.0.0-test',
+      isDebugMode: true,
+      logger: {
+        info() {}, warn() {}, error() {}, debug() {},
+      },
+      imageProcessor: {
+        async getMetadata() { return null },
+        async process() { return Buffer.from('') },
+      },
+    },
+  } as never
+
+  beforeEach(() => {
+    sessions.clear()
+    webviewCreatedListener = null
+    __resetWebviewSecurityForTests()
+    setSyncTrustedProductSpaceAccountState({ status: 'unknown' })
+    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpaceAccount(null)
+    if (existsSync(storeFile)) rmSync(storeFile)
+  })
+
+  it('a corrupted credentials.enc keeps the gate unknown and refuses every partition', async () => {
+    // A real store file that cannot be decrypted (wrong magic bytes).
+    writeFileSync(storeFile, Buffer.from('corrupted-not-a-credential-store-'.repeat(8)))
+
+    const { registerAdminHandlers } = await import('@polo-ai/server-core/handlers/rpc/admin')
+    const { whenInitialSyncTrustedProductSpaceAccountRestored } = await import(
+      '@polo-ai/server-core/handlers/rpc/admin'
+    )
+    const server = {
+      handle() {},
+      push() {},
+      async invokeClient() { return null },
+    }
+    registerAdminHandlers(server as never, adminHandlersDeps)
+    await whenInitialSyncTrustedProductSpaceAccountRestored()
+
+    // The unreadable store must NOT have been committed as signed_out.
+    expect(getSyncTrustedProductSpaceAccountState()).toEqual({ status: 'unknown' })
+
+    installWebviewSecurityHandlers()
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).toHaveBeenCalledTimes(1)
+
+    const preventScoped = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventScoped },
+      { partition: tabAppPartitionForScope({ accountId: 'account-a', productSpaceId: 'space-a', workspaceId: 'ws-7' }) },
+      { src: 'https://app.example' },
+    )
+    expect(preventScoped).toHaveBeenCalledTimes(1)
+  })
+
+  it('a confirmed-empty store commits signed_out and keeps the browser-pane partition', async () => {
+    // No credentials.enc at all: the restore explicitly confirms signed-out.
+    const { registerAdminHandlers } = await import('@polo-ai/server-core/handlers/rpc/admin')
+    const { whenInitialSyncTrustedProductSpaceAccountRestored } = await import(
+      '@polo-ai/server-core/handlers/rpc/admin'
+    )
+    const server = {
+      handle() {},
+      push() {},
+      async invokeClient() { return null },
+    }
+    registerAdminHandlers(server as never, adminHandlersDeps)
+    await whenInitialSyncTrustedProductSpaceAccountRestored()
+
+    expect(getSyncTrustedProductSpaceAccountState()).toEqual({ status: 'signed_out' })
+
+    installWebviewSecurityHandlers()
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).not.toHaveBeenCalled()
   })
 })

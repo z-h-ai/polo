@@ -51,7 +51,7 @@ import { link, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises'
 import { hostname, userInfo, homedir } from 'os';
 import { join } from 'path';
 
-import type { CredentialBackend, CredentialCompareAndSwapResult } from './types.ts';
+import type { CredentialBackend, CredentialCompareAndSwapResult, CredentialPresenceStatus } from './types.ts';
 import type { CredentialId, StoredCredential } from '../types.ts';
 import { credentialIdToAccount, accountToCredentialId } from '../types.ts';
 import { CONFIG_DIR } from '../../config/paths.ts';
@@ -555,6 +555,65 @@ export class SecureStorageBackend implements CredentialBackend {
   async getFresh(id: CredentialId): Promise<StoredCredential | null> {
     this.cachedStore = null;
     return this.get(id);
+  }
+
+  /**
+   * Discriminative presence inspection for startup restore: distinguishes a
+   * confirmed-absent credential from one that exists but could not be read,
+   * decrypted or validated. Unlike `get`, failures are surfaced instead of
+   * collapsed into `null`.
+   */
+  async inspectCredentialPresence(
+    id: CredentialId,
+  ): Promise<CredentialPresenceStatus> {
+    if (!existsSync(this.credentialsFile)) {
+      if (
+        this.allowLegacyPathMigration
+        && this.credentialsFile !== this.legacyCredentialsFile
+        && existsSync(this.legacyCredentialsFile)
+      ) {
+        return this.inspectStoredCredential(
+          this.loadStoreFromFile(this.legacyCredentialsFile),
+          id,
+          'legacy credential store could not be decrypted or parsed',
+        );
+      }
+      return { status: 'absent' };
+    }
+    return this.inspectStoredCredential(
+      this.loadStoreFromFile(this.credentialsFile),
+      id,
+      'credential store could not be decrypted or parsed',
+    );
+  }
+
+  private inspectStoredCredential(
+    store: CredentialStore | null,
+    id: CredentialId,
+    unreadableReason: string,
+  ): CredentialPresenceStatus {
+    if (!store) {
+      return { status: 'unreadable_or_invalid', reason: unreadableReason };
+    }
+    const key = credentialIdToAccount(id);
+    const credential = store.credentials[key];
+    if (!credential) return { status: 'absent' };
+    // Mirror the structural validation getAdminTokens performs: an entry
+    // that exists but cannot yield a usable admin session is invalid, not
+    // absent.
+    if (
+      !credential.value
+      || !credential.refreshToken
+      || !credential.expiresAt
+      || !credential.userId
+      || !credential.username
+    ) {
+      return {
+        status: 'unreadable_or_invalid',
+        reason: 'admin token entry is structurally incomplete',
+      };
+    }
+    return { status: 'found' };
   }
 
   async set(id: CredentialId, credential: StoredCredential): Promise<void> {
