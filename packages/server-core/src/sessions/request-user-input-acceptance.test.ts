@@ -427,8 +427,8 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
   }
 
   // -------------------------------------------------------------------------
-  // Engine 1: Claude — REAL ClaudeAgent (production factory) + real SDK query
-  // loop; only the outermost CLI subprocess is a scripted model.
+  // Backend 1 — Claude: REAL ClaudeAgent (production factory) + real SDK
+  // query loop; only the outermost CLI subprocess is a scripted model.
   // -------------------------------------------------------------------------
 
   it('claude: a real desktop turn discovers and calls the tool from the production toolset; the renderer question state appears; the answer resumes with ONE readable message', async () => {
@@ -525,7 +525,7 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
   }, 60000)
 
   // -------------------------------------------------------------------------
-  // Engine 2: Pi — REAL PiAgent (production factory) + REAL pi-agent-server
+  // Backend 2 — Pi: REAL PiAgent (production factory) + REAL pi-agent-server
   // subprocess; prompt → register_tools → tool_execute protocol with the
   // model scripted at the local OpenAI-compatible endpoint.
   // -------------------------------------------------------------------------
@@ -572,8 +572,10 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
   }, 240000)
 
   // -------------------------------------------------------------------------
-  // Engine 3: Pi × Codex OAuth — the ChatGPT Plus / Codex connection shape
-  // rides the SAME Pi backend (no independent Codex CLI session anywhere).
+  // Backend 2 — Pi with a Codex OAuth / Codex model config: Polo has exactly
+  // TWO agent backends (Claude and Pi); the ChatGPT Plus / Codex OAuth
+  // connection shape rides the SAME Pi backend (no independent Codex CLI
+  // session anywhere).
   // -------------------------------------------------------------------------
 
   it('pi (Codex OAuth connection): the SAME Pi backend assembles the toolset and drives the durable handoff; no independent Codex CLI session is created', async () => {

@@ -212,7 +212,7 @@ async function buildWaWorker(): Promise<void> {
   }
 }
 
-// Build MCP servers for Codex sessions and Pi agent server (one-time, no watch needed)
+// Build the Pi agent server subprocess bundle (one-time, no watch needed)
 async function buildMcpServers(): Promise<void> {
   console.log("🌉 Building Pi agent server...");
 
@@ -257,10 +257,6 @@ function getOAuthDefines(): Record<string, string> {
 // Get environment variables for electron process
 function getElectronEnv(): Record<string, string> {
   const vitePort = process.env.POLO_AI_VITE_PORT || "5173";
-
-  // Codex binary path is resolved at runtime by the binary-resolver module.
-  // It checks: CODEX_PATH env var > bundled binary > local dev fork > system PATH.
-  // You can override with CODEX_PATH env var if needed for debugging.
 
   return {
     ...process.env as Record<string, string>,

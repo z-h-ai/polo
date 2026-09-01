@@ -68,7 +68,7 @@ import {
 
 // Direct source imports from shared (bundled by bun build)
 import { handleLargeResponse, estimateTokens, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
-import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
+import { withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
@@ -272,8 +272,6 @@ function isPrefetchableTool(toolName: string): boolean {
 
 // Proxy tools changed since last session creation — session needs recreation.
 // Single source of truth: ProxyToolRegistry.toolsChanged.
-
-// Callback server for call_llm
 
 // ============================================================
 // JSONL I/O
