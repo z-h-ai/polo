@@ -260,6 +260,58 @@ describe('ProductSpace webview partition policy wiring', () => {
     expect(preventPane).not.toHaveBeenCalled()
   })
 
+  it('prevents every partition when a committed fence has no trusted Workspace mapping', () => {
+    // Active fence, but the window→Workspace mapping cannot be resolved:
+    // the scope is incomplete, so even the shared browser-pane partition is
+    // refused (a signed-in renderer must never land in a cross-workspace
+    // shared session).
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: () => null,
+    })
+    installWebviewSecurityHandlers()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).toHaveBeenCalledTimes(1)
+
+    const preventScoped = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventScoped },
+      { partition: tabAppPartitionForScope({ accountId: trustedAccount, productSpaceId: fenceSpace, workspaceId: 'ws-guess' }) },
+      { src: 'https://app.example' },
+    )
+    expect(preventScoped).toHaveBeenCalledTimes(1)
+  })
+
+  it('prevents every partition when signed in but the fence is missing', () => {
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
+    })
+    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpaceAccount(trustedAccount)
+    installWebviewSecurityHandlers()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).toHaveBeenCalledTimes(1)
+  })
+
   it('clears the superseded legacy partition once the scoped gate first engages', () => {
     setWebviewScopeResolver({
       getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
@@ -278,6 +330,7 @@ describe('ProductSpace webview partition policy wiring', () => {
     const legacyPartition = legacyTabAppPartitionForScope({
       accountId: trustedAccount,
       productSpaceId: fenceSpace,
+      workspaceId: 'ws-7',
     })
     const legacySession = sessions.get(legacyPartition)
     expect(legacySession).toBeDefined()

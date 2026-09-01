@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { createHash } from 'node:crypto'
 import {
-  LEGACY_TAB_APP_PARTITION_PREFIX,
   legacyTabAppPartitionForScope,
   tabAppPartitionForScope,
 } from '../tab-browser-partition'
@@ -87,11 +86,35 @@ describe('tab-app partition identity', () => {
     expect(leftPartition).not.toBe(rightPartition)
   })
 
-  it('derives the superseded legacy partition name for cleanup', () => {
-    const legacy = legacyTabAppPartitionForScope({ accountId: 'account-a', productSpaceId: 'space-a' })
-    expect(legacy).toMatch(new RegExp(`^${LEGACY_TAB_APP_PARTITION_PREFIX.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}[a-z0-9]+$`))
-    // The legacy name ignores the workspace dimension (the flaw that was
-    // fixed) and differs from every current partition.
-    expect(legacy).not.toBe(tabAppPartitionForScope({ accountId: 'account-a', productSpaceId: 'space-a', workspaceId: 'ws-1' }))
+  it('reproduces the superseded 425e90a1 partition name exactly', () => {
+    // The cleanup must target the REAL orphaned partitions, so the legacy
+    // helper is pinned to the historical algorithm byte-for-byte:
+    // `persist:tab-app-${fnv1a32(JSON.stringify([account, space, workspace]))
+    //   .toString(36).padStart(7, '0')}`.
+    const legacyHash = (input: string): string => {
+      let hash = 0x811c9dc5
+      for (let index = 0; index < input.length; index += 1) {
+        hash ^= input.charCodeAt(index)
+        hash = Math.imul(hash, 0x01000193) >>> 0
+      }
+      return hash.toString(36).padStart(7, '0')
+    }
+    for (const [accountId, productSpaceId, workspaceId] of [
+      ['account-a', 'space-a', 'ws-1'],
+      ['账号', '空间：研发', '工作区-42'],
+      ['account-victim', 'space-victim', 'ws-victim'],
+    ]) {
+      const expected = `persist:tab-app-${legacyHash(JSON.stringify([accountId, productSpaceId, workspaceId]))}`
+      expect(legacyTabAppPartitionForScope({ accountId, productSpaceId, workspaceId })).toBe(expected)
+    }
+    // The review's concrete example shape.
+    expect(legacyTabAppPartitionForScope({
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      workspaceId: 'ws-1',
+    })).toMatch(/^persist:tab-app-[a-z0-9]{7}$/)
+    // And it differs from every current SHA-based partition.
+    expect(legacyTabAppPartitionForScope({ accountId: 'account-a', productSpaceId: 'space-a', workspaceId: 'ws-1' }))
+      .not.toBe(tabAppPartitionForScope({ accountId: 'account-a', productSpaceId: 'space-a', workspaceId: 'ws-1' }))
   })
 })

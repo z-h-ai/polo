@@ -1,6 +1,10 @@
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
-import { createProductSpaceContextKey } from '@polo-ai/shared/product-spaces'
+import {
+  AccountIdSchema,
+  createProductSpaceContextKey,
+  ProductSpaceIdSchema,
+} from '@polo-ai/shared/product-spaces'
 import type { AppDefinition } from '../../shared/tab-browser-types'
 import type { HandlerDeps } from './handler-deps'
 import { resolveTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
@@ -75,7 +79,9 @@ async function deriveTrustedTabBrowserScope(
   if (!workspaceId) {
     throw new Error('TAB_BROWSER_SCOPE_REQUIRED')
   }
-  return `${createProductSpaceContextKey(accountId as never, activeProductSpaceId as never)}::${workspaceId}`
+  const trustedAccountId = AccountIdSchema.parse(accountId)
+  const trustedSpaceId = ProductSpaceIdSchema.parse(activeProductSpaceId)
+  return `${createProductSpaceContextKey(trustedAccountId, trustedSpaceId)}::${workspaceId}`
 }
 
 /**

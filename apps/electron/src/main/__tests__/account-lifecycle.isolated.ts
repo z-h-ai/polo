@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, afterEach } from 'bun:test'
 import { endAccountProductSpaceRuntimes } from '../account-lifecycle'
 import {
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
 } from '@polo-ai/server-core/runtime/product-space-executions'
+
+afterEach(() => {
+  // Never leak a registered execution into sibling test files that share
+  // this process when run together.
+  resetProductSpaceExecutionRegistryForTests()
+})
 
 describe('production account-session-ending wiring', () => {
   it('awaits Local App cleanup before resolving and registers nothing as done early', async () => {
