@@ -178,6 +178,41 @@ describe('execution enumeration fence', () => {
     ).toEqual([true])
   })
 
+  it('stops executions on the forward wire order and rejects the legacy order for the ACTIVE space', async () => {
+    // The STOP anti-regression must use the CURRENT active space: a
+    // cross-space call would fail for the wrong reason (space mismatch) and
+    // miss a parameter-order revert entirely.
+    const { invoke } = createHarness()
+
+    // Legacy (reversed) order against the active space: must fail and leave
+    // the execution untouched.
+    registerProductSpaceExecution(fakeExecution({ executionId: 'exec-reverse' }))
+    const reversedStop = await invoke(
+      RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+      spaceA,
+      trustedAccountId,
+    )
+    expect(reversedStop.success).toBe(false)
+    expect(['FORBIDDEN', 'VALIDATION_ERROR']).toContain(reversedStop.errorCode)
+    expect(await Promise.all(
+      listRegisteredProductSpaceExecutions().map(execution => execution.isActive()),
+    )).toEqual([true])
+
+    // Forward wire order (accountId, productSpaceId): succeeds and the
+    // execution is really stopped and unregistered.
+    registerProductSpaceExecution(fakeExecution({ executionId: 'exec-forward' }))
+    const forwardStop = await invoke(
+      RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+      trustedAccountId,
+      spaceA,
+    )
+    expect(forwardStop.success).toBe(true)
+    expect(forwardStop.result.allStopped).toBe(true)
+    expect(listRegisteredProductSpaceExecutions().some(
+      execution => execution.scope.executionId === 'exec-forward',
+    )).toBe(false)
+  })
+
   it('fails closed when no ProductSpace is committed', async () => {
     setRuntimeActiveProductSpace(null)
     registerProductSpaceExecution(fakeExecution({ executionId: 'exec-a1' }))

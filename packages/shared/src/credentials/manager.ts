@@ -363,6 +363,13 @@ export class CredentialManager {
    * backend that cannot confirm presence at all — yields
    * `unreadable_or_invalid` so callers fail closed instead of degrading to
    * signed-out.
+   *
+   * Mixed-backend aggregation is deliberately conservative: `found` from
+   * any backend wins immediately; `unreadable_or_invalid` from any backend
+   * dominates a bare `absent` from another; a backend without inspection
+   * support demotes a cross-backend `absent` to
+   * `unreadable_or_invalid` because absence could never be confirmed for
+   * it.
    */
   async inspectAdminCredentialPresence(): Promise<CredentialPresenceStatus> {
     await this.ensureInitialized();
