@@ -6,6 +6,45 @@ const root = join(import.meta.dir, '..', '..')
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8')
 
 describe('Electron final artifact validation pipeline', () => {
+  // The session MCP sidecar was removed from the product (POO-53): every
+  // packaging/validator entry point must agree on its deletion, and the Pi
+  // agent server must remain the staged subprocess bundle. A regression here
+  // must fail on ALL THREE platform entry points (Docker, macOS/Linux shell,
+  // Windows PowerShell) — not just the one a local build happens to exercise.
+  it('keeps the removed session-mcp-server sidecar out of every packaging entry point', () => {
+    const dockerfile = read('Dockerfile.server')
+    expect(dockerfile).not.toContain('session-mcp-server')
+    expect(dockerfile).toContain('packages/pi-agent-server/package.json')
+    expect(dockerfile).toContain('packages/pi-agent-server/src/index.ts')
+
+    const unixValidator = read('apps/electron/scripts/validate-final-artifacts.sh')
+    expect(unixValidator).not.toContain('session-mcp-server')
+    expect(unixValidator).toContain('resources/pi-agent-server/index.js')
+
+    const windowsValidator = read('apps/electron/scripts/validate-final-artifacts.ps1')
+    expect(windowsValidator).not.toContain('session-mcp-server')
+    expect(windowsValidator).not.toContain('sessionServerPath')
+    expect(windowsValidator).toContain('pi-agent-server')
+
+    const builderManifest = read('apps/electron/electron-builder.yml')
+    expect(builderManifest).not.toContain('resources/session-mcp-server')
+    expect(builderManifest).toContain('resources/pi-agent-server/**/*')
+
+    // The repo-wide source tree must not resurrect the sidecar: only the
+    // mandated spawn-spec leaf contract may name it (as a contract comment).
+    for (const file of [
+      'scripts/build-server.ts',
+      'scripts/build/common.ts',
+      'scripts/electron-build-main.ts',
+      'scripts/electron-dev.ts',
+      'scripts/prepare-platform-runtime.ts',
+      'packages/server-core/src/sessions/SessionManager.ts',
+      'packages/shared/src/agent/backend/internal/runtime-resolver.ts',
+    ]) {
+      expect(read(file)).not.toContain('session-mcp-server')
+    }
+  })
+
   it('makes final container smoke a builder gate', () => {
     const builder = read('apps/electron/electron-builder.yml')
     const hook = read('apps/electron/scripts/afterAllArtifactBuild.cjs')

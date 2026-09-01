@@ -535,7 +535,7 @@ export interface RegistrySessionToolDef extends SessionToolDefBase {
   handler: SessionToolHandler;
 }
 
-/** Tool executed by backend-specific adapters (Pi/Claude/session-mcp-server adapters). */
+/** Tool executed by backend-specific adapters (Pi/Claude). */
 export interface BackendSessionToolDef extends SessionToolDefBase {
   executionMode: 'backend';
   handler: null;
@@ -601,7 +601,7 @@ export interface SessionToolFilterOptions {
  * Return session tools with optional feature filtering.
  *
  * Callers should use this helper instead of filtering ad hoc so tool visibility
- * stays consistent across Claude, Pi, and session-mcp-server tool surfaces.
+ * stays consistent across the Claude and Pi backend tool surfaces.
  */
 export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionToolDef[] {
   const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
@@ -682,7 +682,7 @@ export function getSessionSafeBlockedToolNames(options?: SessionToolNameOptions)
 /** Set of session tool names for quick membership checks. */
 export const SESSION_TOOL_NAMES = new Set(SESSION_TOOL_DEFS.map(d => d.name));
 
-/** Session tool names that must be handled by backend-specific adapters (Pi/Claude/session-mcp-server surfaces). */
+/** Session tool names that must be handled by backend-specific adapters (Pi/Claude). */
 export const SESSION_BACKEND_TOOL_NAMES = new Set(
   SESSION_TOOL_DEFS.filter(d => d.executionMode === 'backend').map(d => d.name)
 );

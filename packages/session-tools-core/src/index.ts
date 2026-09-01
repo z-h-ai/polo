@@ -2,7 +2,7 @@
  * Session Tools Core
  *
  * Shared utilities for session-scoped tools used by both
- * Claude (in-process) and Codex (subprocess) implementations.
+ * Claude (in-process) and Pi (host-side proxy execution) implementations.
  *
  * @packageDocumentation
  */
@@ -29,7 +29,6 @@ export type {
   AuthResult,
 
   // IPC types
-  CallbackMessage,
 
   // Tool result types
   TextContent,

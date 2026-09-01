@@ -229,7 +229,6 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
     $uvManifestPath = Join-Path $appRoot "resources\bin\win32-$Arch\runtime-manifest.json"
     $installedExe = Join-Path $installDir "Polo AI.exe"
     $piServerPath = Join-Path $appRoot "resources\pi-agent-server\index.js"
-    $sessionServerPath = Join-Path $appRoot "resources\session-mcp-server\index.js"
     $wrapperMessages = Join-Path $appRoot "resources\bin\polo-messages.cmd"
 
     foreach ($required in @(
@@ -287,7 +286,7 @@ function Test-InstalledContainer([bool]$RequireRunHelpers = $true) {
         throw "Installed NSIS uv runtime smoke failed: $uvOutput"
     }
     if ($RequireRunHelpers) {
-        foreach ($required in @($piServerPath, $sessionServerPath)) {
+        foreach ($required in @($piServerPath)) {
             if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
                 throw "Installed NSIS container is missing run helper $required"
             }

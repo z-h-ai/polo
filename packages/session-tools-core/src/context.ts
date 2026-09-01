@@ -1,8 +1,8 @@
 /**
  * Session Tools Core - Context Interface
  *
- * Defines the abstract context interface that both Claude (in-process)
- * and Codex (subprocess) implementations must provide.
+ * Defines the abstract context interface that the Claude (in-process SDK
+ * MCP server) and Pi (host-side proxy execution) backends must provide.
  *
  * This enables writing tool handlers once and running them in both environments.
  */
@@ -38,23 +38,20 @@ export interface LoadedSource {
 // ============================================================
 
 /**
- * Callbacks for session tool operations.
- * Both Claude and Codex implement this interface differently:
- * - Claude: Direct function calls via registry
- * - Codex: JSON messages over stderr
+ * Callbacks for session tool operations. Claude resolves them through the
+ * in-process callback registry; Pi resolves them through its host-side
+ * SessionToolContext.
  */
 export interface SessionToolCallbacks {
   /**
    * Called when a plan is submitted.
    * Claude: calls onPlanSubmitted callback
-   * Codex: sends __CALLBACK__ message to stderr
    */
   onPlanSubmitted(planPath: string): void;
 
   /**
    * Called when authentication is requested.
    * Claude: calls onAuthRequest callback + forceAbort
-   * Codex: sends __CALLBACK__ message to stderr
    */
   onAuthRequest(request: AuthRequest): void;
 
@@ -116,7 +113,7 @@ export interface FileSystemInterface {
 /**
  * Credential manager abstraction.
  * Claude has full access to credential stores.
- * Codex may have limited or no access (relies on main process).
+ * Other consumers (subprocesses) may have limited or no access (rely on the main process).
  */
 export interface CredentialManagerInterface {
   /**
@@ -142,7 +139,7 @@ export interface CredentialManagerInterface {
 /**
  * Config validation interface.
  * Claude uses full Zod validators from packages/shared.
- * Codex uses simplified validators from session-tools-core.
+ * Subprocess consumers use simplified validators from session-tools-core.
  */
 export interface ValidatorInterface {
   validateConfig(): import('./types.js').ValidationResult;
@@ -164,9 +161,9 @@ export interface ValidatorInterface {
 /**
  * Main context interface for session tools.
  *
- * Both Claude and Codex create their own implementation of this interface:
+ * Backends create their own implementation of this interface:
  * - Claude: createClaudeContext() with direct access to Electron internals
- * - Codex: createCodexContext() with callback IPC and limited capabilities
+ * - Pi: createClaudeContext() reused for host-side proxy execution
  */
 export interface SessionToolContext {
   // ============================================================
@@ -322,14 +319,13 @@ export interface SessionToolContext {
   /**
    * Submit developer feedback. Injected by each backend:
    * - Claude: writes JSON files to ~/.polo-ai/feedback/
-   * - Codex/Pi: could send over IPC or write directly
+   * - Pi: could send over IPC or write directly
    */
   submitFeedback?(feedback: import('./types.ts').DeveloperFeedback): void;
 
   /**
    * Update user preferences. Injected by each backend:
    * - Claude: calls updatePreferences() from config/preferences.ts
-   * - session-mcp-server: writes directly to preferences.json
    * - Pi: calls updatePreferences() from config/preferences.ts
    */
   updatePreferences?(updates: Record<string, unknown>): void;
@@ -368,7 +364,7 @@ export interface SessionToolContext {
    * build its MCP/API servers, apply to the agent.
    *
    * Only available in backends that run alongside SessionManager (Claude in-process, Pi subprocess).
-   * Codex and other backends leave this undefined — callers should degrade gracefully (restart required).
+   * Other consumers leave this undefined — callers should degrade gracefully (restart required).
    *
    * `availability` is always `'next-turn'` when activation succeeds: both Claude SDK
    * (frozen `mcpServers` at `query()` start) and Pi (subprocess reloads proxy tools

@@ -92,6 +92,7 @@ const rendererModules: { events: any; pending: any } = await (async () => {
 describe('request_user_input outside-in acceptance (production agents)', () => {
   let tmpRoot: string
   let claudeRoot: string
+  let piStagingLayout: string | null = null
   let sm: InstanceType<typeof import('./SessionManager').SessionManager>
   let events: Array<Record<string, unknown>>
   const seededSessionIds = new Set<string>()
@@ -123,6 +124,10 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
   })
 
   afterAll(() => {
+    if (piStagingLayout) {
+      rmSync(piStagingLayout, { recursive: true, force: true })
+      piStagingLayout = null
+    }
     rmSync(configRoot, { recursive: true, force: true })
   })
 
@@ -157,9 +162,43 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
     setSessionPlatform(buildPlatform(claudeRoot))
   }
 
-  /** Host runtime for PI scenarios (resolves the real packaged pi server). */
+  /**
+   * Build the REAL pi-agent-server from the CURRENT HEAD source into a
+   * temporary production layout (production build flags, scripts/build/
+   * common.ts `buildMcpServers`). The resolver consumes THIS bundle — never
+   * the gitignored workspace `dist/` and never a stale artifact from a
+   * previous build: the staged bundle is fresh by construction, and the
+   * scenario fails loudly if the build fails (the layout shadows the walk-up
+   * path at resolution level 0).
+   */
+  function ensurePiServerStaging(): string {
+    if (piStagingLayout) return piStagingLayout
+    const layout = mkdtempSync(join(REPO_ROOT, 'node_modules', 'acceptance-pi-runtime-'))
+    const outdir = join(layout, 'packages', 'pi-agent-server', 'dist')
+    mkdirSync(outdir, { recursive: true })
+    const src = join(REPO_ROOT, 'packages', 'pi-agent-server', 'src', 'index.ts')
+    if (!existsSync(src)) {
+      throw new Error(`acceptance setup: pi-agent-server source not found at ${src}`)
+    }
+    const build = Bun.spawnSync({
+      cmd: [process.execPath, 'build', src, '--outdir', outdir, '--target', 'bun', '--format', 'esm', '--external', 'koffi'],
+      cwd: REPO_ROOT,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const staged = join(outdir, 'index.js')
+    if (build.exitCode !== 0 || !existsSync(staged)) {
+      throw new Error(
+        `acceptance setup: building pi-agent-server from source failed (exit ${build.exitCode})\n${build.stderr?.toString() ?? ''}`,
+      )
+    }
+    piStagingLayout = layout
+    return layout
+  }
+
+  /** Host runtime for PI scenarios (resolves the freshly staged pi server). */
   function usePiHostRuntime(): void {
-    setSessionPlatform(buildPlatform(REPO_ROOT))
+    setSessionPlatform(buildPlatform(ensurePiServerStaging()))
   }
 
   function buildPlatform(appRootPath: string): import('@polo-ai/server-core/runtime').PlatformServices {
