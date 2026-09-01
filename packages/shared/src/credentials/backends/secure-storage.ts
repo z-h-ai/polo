@@ -633,17 +633,33 @@ export class SecureStorageBackend implements CredentialBackend {
       return { status: 'unreadable_or_invalid', reason: unreadableReason };
     }
     const key = credentialIdToAccount(id);
-    const credential = store.credentials[key];
-    if (!credential) return { status: 'absent' };
-    // Mirror and tighten the structural validation getAdminTokens performs:
-    // field presence AND types — an entry that exists but cannot yield a
-    // usable admin session is invalid, not absent.
+    // Absence means the key is genuinely not present. A key that EXISTS with
+    // a falsy or non-object value (null, false, 0, "", …) is a malformed
+    // entry — never "absent".
+    if (!Object.prototype.hasOwnProperty.call(store.credentials, key)) {
+      return { status: 'absent' };
+    }
+    const credential: unknown = (store.credentials as Record<string, unknown>)[key];
     if (
-      typeof credential.value !== 'string' || !credential.value
-      || typeof credential.refreshToken !== 'string' || !credential.refreshToken
-      || typeof credential.expiresAt !== 'number' || !Number.isFinite(credential.expiresAt)
-      || typeof credential.userId !== 'string' || !credential.userId
-      || typeof credential.username !== 'string' || !credential.username
+      !credential
+      || typeof credential !== 'object'
+      || Array.isArray(credential)
+    ) {
+      return {
+        status: 'unreadable_or_invalid',
+        reason: 'admin token entry is not a credential object',
+      };
+    }
+    const entry = credential as Record<string, unknown>;
+    // Mirror and tighten the structural validation getAdminTokens performs:
+    // field presence, types and non-emptiness — an entry that exists but
+    // cannot yield a usable admin session is invalid, not absent.
+    if (
+      typeof entry.value !== 'string' || !entry.value
+      || typeof entry.refreshToken !== 'string' || !entry.refreshToken
+      || typeof entry.expiresAt !== 'number' || !Number.isFinite(entry.expiresAt)
+      || typeof entry.userId !== 'string' || !entry.userId
+      || typeof entry.username !== 'string' || !entry.username
     ) {
       return {
         status: 'unreadable_or_invalid',

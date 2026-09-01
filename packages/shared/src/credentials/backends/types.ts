@@ -41,9 +41,9 @@ export interface CredentialBackend {
   getFresh?(id: CredentialId): Promise<StoredCredential | null>;
 
   /**
-   * Discriminative presence inspection. Optional: managers fall back to
-   * treating backends without it as absent when no other backend reports
-   * otherwise.
+   * Discriminative presence inspection. Optional: a manager whose backends
+   * all lack this method cannot confirm absence and fails closed with
+   * `unreadable_or_invalid` (never `absent`).
    */
   inspectCredentialPresence?(
     id: CredentialId,

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 // The real credential manager reads this env at backend construction; set it
 // before any test drives a restore so the store lives in a temp directory.
+const originalSharedCredentialsDir = process.env.POLO_AI_SHARED_CREDENTIALS_DIR
 const credentialStoreRoot = mkdtempSync(join(tmpdir(), 'webview-partition-credentials-'))
 process.env.POLO_AI_SHARED_CREDENTIALS_DIR = credentialStoreRoot
 
@@ -473,7 +474,13 @@ describe('startup credential restore → webview attach gate (integration)', () 
     } catch {
       // Best-effort cleanup of the temp credential store.
     }
-    delete process.env.POLO_AI_SHARED_CREDENTIALS_DIR
+    // Restore the process-start value instead of leaving the variable
+    // deleted.
+    if (originalSharedCredentialsDir === undefined) {
+      delete process.env.POLO_AI_SHARED_CREDENTIALS_DIR
+    } else {
+      process.env.POLO_AI_SHARED_CREDENTIALS_DIR = originalSharedCredentialsDir
+    }
   })
 
   const storeFile = join(credentialStoreRoot, 'credentials.enc')
@@ -599,6 +606,51 @@ describe('startup credential restore → webview attach gate (integration)', () 
     } finally {
       chmodSync(credentialStoreRoot, 0o755)
     }
+  })
+
+  it.each([
+    ['a null admin_token entry', { type: 'admin_token' }, null],
+    ['a false admin_token entry', { type: 'admin_token' }, false],
+    ['an admin_token entry with an empty-string value', { type: 'admin_token' }, {
+      type: 'admin_token',
+      value: '',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  ])('keeps the gate unknown for $0', async (_label, id, entry) => {
+    // The store decrypts and passes the top-level schema, but the
+    // admin_token entry itself exists with a malformed value — malformed,
+    // never absent.
+    const { getCredentialManager } = await import('@polo-ai/shared/credentials')
+    await getCredentialManager().set({ type: 'admin_token' }, entry as never)
+
+    const { registerAdminHandlers } = await import('@polo-ai/server-core/handlers/rpc/admin')
+    const { whenInitialSyncTrustedProductSpaceAccountRestored } = await import(
+      '@polo-ai/server-core/handlers/rpc/admin'
+    )
+    registerAdminHandlers(
+      { handle() {}, push() {}, async invokeClient() { return null } } as never,
+      adminHandlersDeps,
+    )
+    await whenInitialSyncTrustedProductSpaceAccountRestored()
+
+    expect(getSyncTrustedProductSpaceAccountState()).toEqual({ status: 'unknown' })
+
+    installWebviewSecurityHandlers()
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the gate unknown when the stored admin token entry has malformed field types', async () => {
