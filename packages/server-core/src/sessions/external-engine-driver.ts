@@ -27,6 +27,9 @@ export interface ExternalEngineToolsetConfig {
 export interface ExternalEngineTool {
   name: string
   description?: string
+  /** The sidecar's NATIVE JSON schema for the tool's arguments. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inputSchema?: any
 }
 
 export class ExternalEngineSessionDriver {
@@ -70,7 +73,14 @@ export class ExternalEngineSessionDriver {
   async listTools(): Promise<ExternalEngineTool[]> {
     const tools = await this.client.listTools()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (tools.tools ?? []).map((t: any) => ({ name: t.name as string, description: t.description as string | undefined }))
+    return (tools.tools ?? []).map((t: any) => ({
+      name: t.name as string,
+      description: t.description as string | undefined,
+      // NATIVE schema passthrough: the model must see the tool's real
+      // arguments shape (e.g. request_user_input's questions[] structure) —
+      // an empty object schema here would make valid calls ungeneratable.
+      inputSchema: t.inputSchema,
+    }))
   }
 
   /**

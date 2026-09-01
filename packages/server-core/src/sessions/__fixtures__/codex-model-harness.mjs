@@ -13,21 +13,23 @@
  * - The prompt is appended LAST by the launch closure. Model decision: if
  *   the prompt contains the original ask marker, call request_user_input;
  *   otherwise the turn completes without tools (the answer is in history).
- * - POLO_HARNESS_HOLD_FILE: AFTER the tool result settles, hold (poll) until
- *   the file disappears, then exit — the deferred gate for stale-completion
- *   tests.
  * - POLO_HARNESS_EXIT_MARKER: records how this model session ended
  *   ('sigterm' when the turn was settled by the host, 'exit' on natural
- *   completion) — the observable pause-boundary evidence.
+ *   completion, 'force-call-rejected' after a rejected call for a missing
+ *   tool) — the observable pause-boundary / fail-closed evidence.
+ * - POLO_HARNESS_FORCE_TOOL=<name>: fail-closed probe — the tool must NOT be
+ *   model-visible; the harness attempts the call anyway and expects the
+ *   sidecar to reject it (exit 6). Exit 7 = tool was visible (fail closed
+ *   broken); exit 8 = the call for a missing tool did not error.
  * Exits 0 after the tool result is received (the durable boundary settled).
  */
 import process from 'node:process'
 import { appendFileSync, writeFileSync } from 'node:fs'
 
 const toolArgsJson = process.argv[2] ?? '{}'
-const holdFilePath = process.env.POLO_HARNESS_HOLD_FILE ?? null
 const exitMarkerPath = process.env.POLO_HARNESS_EXIT_MARKER ?? null
 const promptLogPath = process.env.POLO_HARNESS_PROMPT_LOG ?? null
+const forceTool = process.env.POLO_HARNESS_FORCE_TOOL ?? null
 const prompt = process.argv.slice(3).join(' ')
 
 // Observability: record this model session's prompt so a test can await the
@@ -103,6 +105,24 @@ async function main() {
   }
   const names = (tools.result.tools ?? []).map(t => t.name)
 
+  // FAIL-CLOSED PROBE: a turn whose capability is off must not serve the
+  // tool at all, and a call for the missing tool must be rejected by the
+  // sidecar — never silently succeed.
+  if (forceTool) {
+    if (names.includes(forceTool)) {
+      console.error(`harness: FAIL-CLOSED VIOLATION — ${forceTool} is model-visible`)
+      process.exit(7)
+    }
+    const rejected = await rpc('tools/call', { name: forceTool, arguments: {} })
+    const toolError = Boolean(rejected.error) || rejected.result?.isError === true
+    if (!toolError) {
+      console.error(`harness: calling missing tool ${forceTool} did not error:`, JSON.stringify(rejected.result ?? rejected.error))
+      process.exit(8)
+    }
+    recordExit('force-call-rejected')
+    process.exit(6)
+  }
+
   // MODEL DECISION (credentials/decision layer): if the model asks the
   // question, call request_user_input — discovered NATIVELY from the
   // tools/list schemas above.
@@ -127,14 +147,6 @@ async function main() {
     await new Promise(() => { /* parked until the host settles the turn */ })
   }
 
-  // Deferred gate: hold the model process alive until the marker file is
-  // removed (the test releases the stale-completion ordering this way).
-  if (holdFilePath) {
-    const { existsSync } = await import('node:fs')
-    while (existsSync(holdFilePath)) {
-      await new Promise(resolve => setTimeout(resolve, 25))
-    }
-  }
   recordExit('exit')
   process.exit(0)
 }

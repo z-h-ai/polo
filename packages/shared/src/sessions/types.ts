@@ -33,6 +33,13 @@ export interface PendingAgentResume {
    * visibility instead of re-inferring it as an ordinary desktop turn.
    */
   invocationSource?: import('../protocol/dto').InvocationSource;
+  /**
+   * The questions the interrupted external turn asked (request_user_input
+   * payload). The resumed model session has no memory of the paused turn —
+   * this context is what lets the continuation prompt carry "you asked X,
+   * the user answered Y" instead of a bare answer.
+   */
+  questionContext?: unknown;
 }
 
 /**

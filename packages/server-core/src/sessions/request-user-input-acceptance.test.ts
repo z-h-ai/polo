@@ -495,7 +495,6 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
   })
 
 
-  const HARNESS_ENTRY = join(REPO_ROOT, 'packages', 'session-mcp-server', 'src', 'index.ts')
   const harnessModelScript = join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs')
 
   /**
@@ -506,7 +505,7 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
    */
   function registerProductionCodexModelAdapter(
     toolArgsJson: string,
-    options?: { holdFilePath?: string; exitMarkerPath?: string; onLaunch?: () => void },
+    options?: { exitMarkerPath?: string; promptLogPath?: string; forceTool?: string; onLaunch?: () => void },
   ): void {
     sm.setExternalEngineModelAdapter(
       createCodexSessionModelTurn({
@@ -518,8 +517,9 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
             command: process.execPath,
             args: [harnessModelScript, toolArgsJson],
             env: {
-              ...(options?.holdFilePath ? { POLO_HARNESS_HOLD_FILE: options.holdFilePath } : {}),
               ...(options?.exitMarkerPath ? { POLO_HARNESS_EXIT_MARKER: options.exitMarkerPath } : {}),
+              ...(options?.promptLogPath ? { POLO_HARNESS_PROMPT_LOG: options.promptLogPath } : {}),
+              ...(options?.forceTool ? { POLO_HARNESS_FORCE_TOOL: options.forceTool } : {}),
             },
           }
         },
@@ -648,19 +648,27 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     // THE STALE COMPLETION: gen1's model session settles NOW, while gen2 is
     // the live turn. The identity/generation guard must treat it as an
     // idempotent no-op — the newer turn's driver and processing state stay.
+    const completionsBefore = events.filter(e => (e as { type?: string }).type === 'complete').length
     turnGates[0].resolve()
     // Macrotask yields let the stale completion settle; the assertion is
     // "state unchanged", so settling only strengthens the proof.
     await new Promise(r => setImmediate(r))
     await new Promise(r => setImmediate(r))
     expect(sm.getExternalEngineDriverPid(sessionId)).toBe(pid2)
+    // The live sidecar process must still be the SAME ALIVE process — a stale
+    // completion that disposed and re-slotted a fresh driver could keep the
+    // pid non-null while the live sidecar died.
+    expect(sidecarAlive(sm.getExternalEngineDriverPid(sessionId))).toBe(true)
     expect(getManaged(sessionId).isProcessing).toBe(true)
+    expect(events.filter(e => (e as { type?: string }).type === 'complete').length).toBe(completionsBefore)
     expect(events.filter(e => e.type === 'error')).toHaveLength(0)
 
-    // gen2 then completes normally through the same boundary.
+    // gen2 then completes normally through the same boundary — exactly ONE
+    // processing stop for this generation.
     turnGates[1].resolve()
     await waitForCondition(() => getManaged(sessionId).isProcessing === false, 30000)
     expect(sm.getExternalEngineDriverPid(sessionId)).toBeNull()
+    expect(events.filter(e => (e as { type?: string }).type === 'complete').length).toBe(completionsBefore + 1)
   }, 120000)
 
   it('external codex: cancel through the model tool call records ONE skip message and the session does not continue', async () => {
@@ -698,13 +706,15 @@ describe('request_user_input outside-in acceptance (production harness)', () => 
     const created = await sm.createExternalEngineSession('ws_test', { name: 'acc-codex-3' })
     const sessionId = created.id
 
-    // The messaging model's tool call fails closed (the sidecar serves no
-    // request_user_input) — the harness exits non-zero, the turn ends via
-    // the error boundary, and NOTHING reaches the durable handoff.
-    registerProductionCodexModelAdapter('request_user_input')
+    // FAIL-CLOSED PROBE: the messaging model process must not see the tool
+    // in its model-visible toolset, and a forced call for it must be rejected
+    // by the sidecar. The harness records both facts in its exit marker.
+    const failClosedMarker = join(tmpRoot, 'messaging-fail-closed.marker')
+    registerProductionCodexModelAdapter('{}', { exitMarkerPath: failClosedMarker, forceTool: 'request_user_input' })
 
     await sm.sendMessage(sessionId, 'messaging turn', [], [], { invocationSource: 'messaging' })
-    await waitForCondition(() => !getManaged(sessionId).isProcessing, 30000)
+    await waitForCondition(() => existsSync(failClosedMarker), 30000)
+    expect(readFileSync(failClosedMarker, 'utf-8')).toBe('force-call-rejected')
     expect(sm.getPendingQuestion(sessionId)).toBeNull()
     expect(questionEvents()).toHaveLength(0)
     expect(renderer.pendingOf(sessionId)).toBeNull()

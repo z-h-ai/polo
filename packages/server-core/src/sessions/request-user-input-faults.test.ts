@@ -1419,17 +1419,21 @@ describe('request_user_input fault injection + stop lifecycle', () => {
       serverEntryPath: serverEntry,
       nodeRuntimePath: process.execPath,
     })
-    // The production adapter starts the harness; its native tools/list
-    // discovery sees NO request_user_input and its tool call fails closed.
+    // FAIL-CLOSED PROBE: the messaging model process must not see the tool,
+    // and a forced call for it must be rejected by the sidecar (exit marker).
+    const failClosedMarker = join(tmpRoot, 'messaging-fail-closed.marker')
     ;(sm as unknown as { setExternalEngineModelAdapter: (m: unknown) => void }).setExternalEngineModelAdapter(
       createCodexSessionModelTurn({
         resolveCodexCommand: () => ({
           command: process.execPath,
-          args: [join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs'), JSON.stringify({ questions: makeQuestionRequest('f-mcp-nd').questions }), 'messaging turn'],
+          args: [join(import.meta.dir, '__fixtures__', 'codex-model-harness.mjs'), '{}'],
+          env: { POLO_HARNESS_FORCE_TOOL: 'request_user_input', POLO_HARNESS_EXIT_MARKER: failClosedMarker },
         }),
       }),
     )
     await sm.sendMessage('f-mcp-nd', 'messaging turn', [], [], { invocationSource: 'messaging' })
+    await waitForCondition(() => existsSync(failClosedMarker), 30000)
+    expect(readFileSync(failClosedMarker, 'utf-8')).toBe('force-call-rejected')
     await waitForCondition(() => !getManaged('f-mcp-nd').isProcessing, 30000)
 
     expect(sm.getPendingQuestion('f-mcp-nd')).toBeNull()
@@ -2436,21 +2440,17 @@ describe('request_user_input fault injection + stop lifecycle', () => {
 
         const ownerSend = sm.sendMessage('f-clean-3', 'owner message', [], [], { invocationSource: 'desktop' })
         await waitForCondition(() => flushCalls === 1)
-        console.log('DBG T1 flush1', JSON.stringify({ isProc: getManaged('f-clean-3').isProcessing, res: getManaged('f-clean-3').turnStartReserved }))
         expect(getManaged('f-clean-3').turnStartReserved).toBe(true)
 
         // …a follower arriving NOW is serialized behind that section: it can
         // neither queue nor start while the boundary is held.
         const followerSend = sm.sendMessage('f-clean-3', 'follower message', [], [], { invocationSource: 'messaging' })
-        console.log('DBG T1 follower-fired', JSON.stringify({ isProc: getManaged('f-clean-3').isProcessing, res: getManaged('f-clean-3').turnStartReserved }))
-        void followerSend.then(() => console.log('DBG T1 follower-settled'), e => console.log('DBG T1 follower-rejected', String(e)))
 
         // The owner's flush fails — the reserved turn never starts. The
         // boundary releases the reservation, and the serialized follower then
         // claims a fresh turn of its own (no stranded queue, no lost message).
         rejectFlush!(new Error('pre-start flush failed (injected)'))
         await expect(ownerSend).rejects.toThrow('pre-start flush failed (injected)')
-        console.log('DBG T1 owner-rejected', JSON.stringify({ isProc: getManaged('f-clean-3').isProcessing, res: getManaged('f-clean-3').turnStartReserved, q: getManaged('f-clean-3').messageQueue.length }))
         await followerSend
 
         await waitForCondition(() => chatInvocations >= 1, 8000)

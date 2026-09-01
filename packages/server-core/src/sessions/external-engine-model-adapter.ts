@@ -25,6 +25,9 @@ import {
 export interface ExternalEngineTool {
   name: string
   description?: string
+  /** The sidecar's NATIVE JSON schema for the tool's arguments. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inputSchema?: any
 }
 
 export interface ExternalEngineMcpConfig {
@@ -59,6 +62,9 @@ export interface ExternalEngineModelTurn {
  */
 const QUESTION_HANDOFF_TOOL = 'request_user_input'
 
+/** Grace period between the pause SIGTERM and the enforcement SIGKILL. */
+const SETTLE_GRACE_MS = 2_000
+
 /** The real model session turn: start the Codex process against the owned toolset. */
 export interface CodexSessionModelTurnOptions {
   /**
@@ -84,7 +90,7 @@ export function createCodexSessionModelTurn(options: CodexSessionModelTurnOption
 } {
   const maxTurnMs = options.maxTurnMs ?? 30 * 60_000
   return {
-    async start({ sessionId, prompt, sessionMcpConfig, listTools, callTool }) {
+    async start({ sessionId, prompt, listTools, callTool }) {
       const codex = options.resolveCodexCommand(sessionId)
       if (!codex) {
         // No Codex CLI configured in this runtime — deterministic degrade.
@@ -99,11 +105,13 @@ export function createCodexSessionModelTurn(options: CodexSessionModelTurnOption
         { capabilities: { tools: {} } },
       )
       proxy.setRequestHandler(ListToolsRequestSchema, async () => ({
+        // NATIVE schema passthrough: the model sees the sidecar's real
+        // arguments shape (request_user_input's questions[] structure among
+        // them) — this proxy must not reshape what the sidecar serves.
         tools: (await listTools()).map(t => ({
           name: t.name,
           description: t.description,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          inputSchema: { type: 'object' } as any,
+          inputSchema: t.inputSchema,
         })),
       }))
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,10 +123,17 @@ export function createCodexSessionModelTurn(options: CodexSessionModelTurnOption
       // has answered — the answer path owns the continuation (a new
       // generation and a new model session).
       let turnSettled = false
+      let terminateTimer: NodeJS.Timeout | null = null
       const settleModelTurn = () => {
-        if (turnSettled) return
+        if (turnSettled || !codexProcess) return
         turnSettled = true
-        codexProcess?.kill('SIGTERM')
+        codexProcess.kill('SIGTERM')
+        // A model session that ignores SIGTERM must not outlive the pause:
+        // it could keep querying into a generation the answer already owns.
+        terminateTimer = setTimeout(() => {
+          codexProcess?.kill('SIGKILL')
+        }, SETTLE_GRACE_MS)
+        terminateTimer.unref?.()
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       proxy.setRequestHandler(CallToolRequestSchema, async (req: any) => {
@@ -138,12 +153,6 @@ export function createCodexSessionModelTurn(options: CodexSessionModelTurnOption
           // The bootstrap's per-runtime Codex environment travels with the
           // resolved command (credentials, CLI paths).
           ...(codex.env ?? {}),
-          // The session MCP sidecar is registered natively as the Codex
-          // session's MCP server (command + args of the driver-owned
-          // sidecar), so tools/list serves the real schemas.
-          POLO_SESSION_MCP_COMMAND: sessionMcpConfig.command,
-          POLO_SESSION_MCP_ARGS: sessionMcpConfig.args.join(' '),
-          POLO_SESSION_MCP_CALLBACK_PORT: String(sessionMcpConfig.callbackPort),
           POLO_SESSION_ID: sessionId,
         },
       })
@@ -160,28 +169,38 @@ export function createCodexSessionModelTurn(options: CodexSessionModelTurnOption
       )
       await proxy.connect(transport)
 
-      // The Codex process exiting is the model turn's completion — either the
-      // model finished its turn naturally, or the turn was settled at the
-      // question-handoff pause boundary above.
-      await new Promise<void>(resolve => {
+      // The model session process exiting is the turn's completion — either
+      // the model finished naturally (exit 0), the turn was settled at the
+      // question-handoff pause boundary, or the session FAILED (a non-zero
+      // exit with no settled handoff is a failed turn, never a silent no-op).
+      const exitCode = await new Promise<number | null>((resolve, reject) => {
         const timer = setTimeout(() => {
           proc.kill('SIGKILL')
-          resolve()
+          resolve(null)
         }, maxTurnMs)
         timer.unref?.()
-        proc.once('exit', () => {
+        proc.once('exit', (code: number | null) => {
           clearTimeout(timer)
+          if (terminateTimer) clearTimeout(terminateTimer)
           // Release the proxy's stdio handles so the turn leaves no dangling
           // transport behind.
           void proxy.close().catch(() => {})
-          resolve()
+          resolve(code)
         })
-        proc.once('error', () => {
+        proc.once('error', (error: Error) => {
           clearTimeout(timer)
+          if (terminateTimer) clearTimeout(terminateTimer)
           void proxy.close().catch(() => {})
-          resolve()
+          reject(error)
         })
       })
+      if (!turnSettled && exitCode !== null && exitCode !== 0) {
+        // The model session failed mid-turn (bad CLI arguments, crash,
+        // rejected tool call). The message is durably persisted; surfacing
+        // the failure through the completion boundary must not be swallowed
+        // as a successful no-op turn.
+        throw new Error(`external model session exited with code ${exitCode}`)
+      }
     },
   }
 }

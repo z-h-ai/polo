@@ -2743,11 +2743,26 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Whether externally driven sessions may be created in this runtime.
+   * Enabled by default (production-reachable); a deployment opts out
+   * explicitly with POLO_EXTERNAL_ENGINES=0|false|off.
+   */
+  static isExternalEngineEnabled(): boolean {
+    const flag = process.env.POLO_EXTERNAL_ENGINES?.trim().toLowerCase()
+    return flag !== '0' && flag !== 'false' && flag !== 'off'
+  }
+
+  /**
    * PRODUCTION entry for creating an externally driven session (the external
    * Codex harness owns the model): creation registers the session for the
-   * external single-owner/channel turn path.
+   * external single-owner/channel turn path. SERVER-SIDE GATE: creation is
+   * authoritative here, so a disabled runtime refuses deterministically
+   * instead of registering a session whose every turn would degrade.
    */
   async createExternalEngineSession(workspaceId: string, options?: { name?: string }): Promise<Session> {
+    if (!SessionManager.isExternalEngineEnabled()) {
+      throw new Error('External engines are disabled in this runtime (POLO_EXTERNAL_ENGINES)')
+    }
     return this.createSession(workspaceId, { ...options, externalEngine: true })
   }
 
@@ -6487,6 +6502,22 @@ export class SessionManager implements ISessionManager {
     if (managed.externalToolset) {
       try {
         const config = await this.getSessionExternalModelToolset(sessionId, invocationSource, myGeneration)
+        // CONTINUATION CONTEXT (captured before the durable resume clears):
+        // a resumed external model session is a NEW process with no memory of
+        // the paused turn — an answer-only prompt would leave it guessing what
+        // "yes, delete them" refers to.
+        const resumeQuestionContext = managed.pendingAgentResume?.questionContext
+        const modelPrompt = resumeQuestionContext
+          ? [
+              'You asked the user via request_user_input:',
+              JSON.stringify(resumeQuestionContext),
+              '',
+              'The user answered:',
+              message,
+              '',
+              'Continue the original task using that answer.',
+            ].join('\n')
+          : message
         if (managed.pendingAgentResume) {
           await this.clearPendingAgentResume(managed, 'external engine turn launched — continuation owned by the driver')
         }
@@ -6529,7 +6560,7 @@ export class SessionManager implements ISessionManager {
             void model
               .start({
                 sessionId,
-                prompt: message,
+                prompt: modelPrompt,
                 sessionMcpConfig: config,
                 listTools: () => driver.listTools(),
                 callTool: (name, args) => driver.callTool(name, args),
@@ -7578,26 +7609,6 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Handle an agent-initiated question request (request_user_input).
-   *
-   * Mandatory order (P0 contract):
-   * 1. Polo generates the requestId and re-validates the full schema
-   * 2. The new request becomes the authoritative pendingQuestion
-   *    (a previously active requestId becomes stale by identity)
-   * 3. Persist + flush — disk is authoritative BEFORE the agent is
-   *    interrupted or renderers are notified; on failure the in-memory
-   *    replacement is rolled back and this method REJECTS so the tool
-   *    returns an error (never a fake "paused" success)
-   * 4. The tool activity is marked completed ("Waiting for user input")
-   * 5. question_request event informs every renderer (input-area takeover)
-   * 6. Handoff with AbortReason.QuestionRequested stops the turn and
-   *    releases browser/session runtime ownership, then sends `complete`
-   *
-   * @throws when validation or the durable persist fails — the request_user_input
-   * tool converts this into an isError result so the model can retry.
-   */
-
-  /**
    * PRODUCTION HTTP surface for the session MCP callback protocol: wraps
    * `createSessionMcpCallbackHandler` so a host callback server mounts the
    * route with one call. Enforces the POST-only method gate (405 otherwise)
@@ -7977,25 +7988,6 @@ export class SessionManager implements ISessionManager {
     return managed.externalEngineDriver?.driver.pid ?? null
   }
 
-  /**
-   * The session's LLM query client (its configured backend), used by the
-   * external-engine model adapter as the model channel. The agent here is
-   * strictly the query client — the turn itself stays driver-owned.
-   */
-  async getSessionQueryFn(sessionId: string): Promise<((request: { prompt: string; systemPrompt?: string }) => Promise<{ text: string }>) | null> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return null
-    try {
-      const agent = (await this.getOrCreateAgent(managed)) as unknown as {
-        queryLlm?: (request: { prompt: string; systemPrompt?: string }) => Promise<{ text: string }>
-      }
-      if (!managed.agent || typeof agent.queryLlm !== 'function') return null
-      return request => agent.queryLlm!(request)
-    } catch (error) {
-      sessionLog.warn(`No LLM query client available for session ${sessionId}:`, error)
-      return null
-    }
-  }
 
   /**
    * Register the MODEL layer for externally driven sessions (the
@@ -8624,6 +8616,10 @@ export class SessionManager implements ISessionManager {
         // DEFAULT IS INTERNAL — fail closed for
         // legacy/malformed persisted states without a persisted source.
         invocationSource: pending.invocationSource ?? 'internal',
+        // The asked questions travel with the durable resume: an external
+        // model session restarted for the answer has no memory of the paused
+        // turn, so the continuation prompt must carry what was asked.
+        questionContext: (pending as { questions?: unknown }).questions,
       }
 
       this.persistSession(managed)

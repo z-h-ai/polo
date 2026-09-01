@@ -596,12 +596,19 @@ export async function main() {
     }
   );
 
-  // Connect to upstream docs server (non-blocking, best-effort)
-  // Non-blocking, best-effort: the session tools must be served IMMEDIATELY —
-  // the docs upstream attempt can stall on slow networks and would otherwise
-  // delay every tools/list (and thus the model's request_user_input
-  // discovery).
-  void connectDocsUpstream();
+  // Connect to upstream docs server — BOUNDED wait: a fully fire-and-forget
+  // connect races the model's first tools/list, and with no tool-list-changed
+  // notification a slow upstream would hide the docs tools from this whole
+  // turn (a silent capability loss). Waiting is capped so the session tools
+  // (and the model's request_user_input discovery) can never be delayed
+  // indefinitely by a stalled network.
+  await Promise.race([
+    connectDocsUpstream(),
+    new Promise(resolve => {
+      const timer = setTimeout(resolve, 3000);
+      timer.unref?.();
+    }),
+  ]);
 
   // Handle tool listing — session tools + docs upstream tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

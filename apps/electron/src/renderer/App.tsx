@@ -690,59 +690,64 @@ export default function App() {
     const beforeIds = new Set(beforeMetaMap.keys())
     const transportState = await window.electronAPI.getTransportConnectionState().catch(() => null)
 
-    // SNAPSHOT LIFECYCLE: the pending-question guard scope opens BEFORE the
-    // list RPC and closes in the finally below — terminal markers are pinned
-    // for the whole in-flight window.
-    pendingQuestionGuardRef.current.beginSnapshot()
+    // SNAPSHOT LIFECYCLE: the guard scope opens BEFORE the list RPC and
+    // closes after the snapshot has been applied synchronously (same helper
+    // as every other list path).
+    let sessions: Session[] = []
+    let nextMetaMap: Map<string, SessionMeta> | null = null
     try {
-      const sessions = await window.electronAPI.getSessions()
-      const returnedIds = new Set(sessions.map(s => s.id))
-      const missingIds = Array.from(beforeIds).filter(id => !returnedIds.has(id))
-      const addedIds = sessions.map(s => s.id).filter(id => !beforeIds.has(id))
-      const logPayload = {
-        reason,
-        removeMissing,
-        windowWorkspaceId,
-        windowRemoteWorkspaceId,
-        selectedSessionId,
-        beforeCount: beforeIds.size,
-        returnedCount: sessions.length,
-        beforeIds: summarizeIds(beforeIds),
-        returnedIds: summarizeIds(returnedIds),
-        missingIds: summarizeIds(missingIds),
-        addedIds: summarizeIds(addedIds),
-        beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
-        returnedWorkspaceIds: workspaceDistribution(sessions),
-        transportState,
-      }
+      await applySnapshotUnderGuard(
+        pendingQuestionGuardRef.current,
+        () => window.electronAPI.getSessions(),
+        fetchedSessions => {
+          sessions = fetchedSessions
+          const returnedIds = new Set(sessions.map(s => s.id))
+          const missingIds = Array.from(beforeIds).filter(id => !returnedIds.has(id))
+          const addedIds = sessions.map(s => s.id).filter(id => !beforeIds.has(id))
+          const logPayload = {
+            reason,
+            removeMissing,
+            windowWorkspaceId,
+            windowRemoteWorkspaceId,
+            selectedSessionId,
+            beforeCount: beforeIds.size,
+            returnedCount: sessions.length,
+            beforeIds: summarizeIds(beforeIds),
+            returnedIds: summarizeIds(returnedIds),
+            missingIds: summarizeIds(missingIds),
+            addedIds: summarizeIds(addedIds),
+            beforeWorkspaceIds: workspaceDistribution(beforeMetaMap.values()),
+            returnedWorkspaceIds: workspaceDistribution(sessions),
+            transportState,
+          }
 
-      rendererLog.info('[App] Session list metadata refresh result', logPayload)
-      if (!removeMissing && missingIds.length > 0) {
-        rendererLog.warn('[App] Non-destructive refresh preserved sessions omitted by getSessions(); this indicates a partial backend response or workspace-context mismatch', logPayload)
-      }
+          rendererLog.info('[App] Session list metadata refresh result', logPayload)
+          if (!removeMissing && missingIds.length > 0) {
+            rendererLog.warn('[App] Non-destructive refresh preserved sessions omitted by getSessions(); this indicates a partial backend response or workspace-context mismatch', logPayload)
+          }
 
-      const loadedSessionIds = store.get(loadedSessionsAtom)
+          const loadedSessionIds = store.get(loadedSessionsAtom)
 
-      // Single transactional atom write — all cross-atom mutations happen
-      // inside one Jotai write function so React subscribers see one
-      // consistent update instead of intermediate states.
-      const nextMetaMap = store.set(refreshSessionsMetadataAtom, { sessions, loadedSessionIds, removeMissing })
+          // Single transactional atom write — all cross-atom mutations happen
+          // inside one Jotai write function so React subscribers see one
+          // consistent update instead of intermediate states.
+          nextMetaMap = store.set(refreshSessionsMetadataAtom, { sessions, loadedSessionIds, removeMissing })
 
-      // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
-      for (const session of sessions) {
-        syncSessionOptionsFromSession(session)
-      }
-      // Reconnect metadata refresh carries the pending state — fill missing
-      // entries; existing event-driven entries are never touched. The guard
-      // scope (opened before the RPC) closes in the finally below, after
-      // this synchronous application.
-      applyPendingQuestions(prev => {
-        let next = prev
-        for (const session of sessions) {
-          next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
-        }
-        return next
-      })
+          // Sync app-level state (React hooks / non-atom concerns) after the atom transaction
+          for (const session of sessions) {
+            syncSessionOptionsFromSession(session)
+          }
+          // Reconnect metadata refresh carries the pending state — fill missing
+          // entries; existing event-driven entries are never touched.
+          applyPendingQuestions(prev => {
+            let next = prev
+            for (const session of sessions) {
+              next = syncPendingQuestionFromSession(next, session, pendingQuestionGuardRef.current)
+            }
+            return next
+          })
+        },
+      )
       await Promise.allSettled(sessions.map(s => reconcilePermissionModeState(s.id)))
 
       return nextMetaMap
@@ -760,8 +765,6 @@ export default function App() {
         error: err,
       })
       return null
-    } finally {
-      pendingQuestionGuardRef.current.endSnapshot()
     }
   }, [store, syncSessionOptionsFromSession, reconcilePermissionModeState, pendingQuestionGuardRef, windowWorkspaceId, windowRemoteWorkspaceId])
 

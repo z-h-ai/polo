@@ -947,16 +947,21 @@ app.whenReady().then(async () => {
           // crashes the bootstrap.
           sm.setExternalEngineModelAdapter(
             createCodexSessionModelTurn({
-              resolveCodexCommand: sessionId => {
+              resolveCodexCommand: () => {
+                // `codex exec <prompt>` is the supported non-interactive form;
+                // the turn prompt is appended as the last argv by the model
+                // adapter. (Codex has no `--session` flag on `exec` — session
+                // continuity is `codex exec resume <id>`, which the external
+                // turn wiring does not use yet.)
                 const configured = process.env.POLO_CODEX_CLI?.trim()
-                if (configured) return { command: configured, args: ['exec', '--session', sessionId] }
+                if (configured) return { command: configured, args: ['exec'] }
                 const onPath = (process.env.PATH ?? '')
                   .split(delimiter)
                   .filter(Boolean)
                   .map(dir => join(dir, 'codex'))
                   .find(candidate => existsSync(candidate))
                 if (!onPath) return null
-                return { command: onPath, args: ['exec', '--session', sessionId] }
+                return { command: onPath, args: ['exec'] }
               },
             }),
           )
