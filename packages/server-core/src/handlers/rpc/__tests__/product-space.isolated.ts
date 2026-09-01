@@ -140,8 +140,10 @@ describe('execution enumeration fence', () => {
     }))
 
     const { invoke } = createHarness()
+    // Frontend wire contract: (accountId, productSpaceId).
     const result = await invoke(
       RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      trustedAccountId,
       spaceA,
     )
     expect(result.success).toBe(true)
@@ -149,11 +151,42 @@ describe('execution enumeration fence', () => {
       .toEqual(['exec-a1'])
   })
 
+  it('rejects the reversed (server-legacy) argument order', async () => {
+    // Anti-regression: the handler once read (productSpaceId, accountId).
+    // A call in that order must fail instead of silently succeeding.
+    registerProductSpaceExecution(fakeExecution({ executionId: 'exec-a1' }))
+    const { invoke } = createHarness()
+    const reversed = await invoke(
+      RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      spaceA,
+      trustedAccountId,
+    )
+    expect(reversed.success).toBe(false)
+    expect(['FORBIDDEN', 'VALIDATION_ERROR']).toContain(reversed.errorCode)
+
+    const reversedStop = await invoke(
+      RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+      spaceB,
+      trustedAccountId,
+    )
+    expect(reversedStop.success).toBe(false)
+    expect(['FORBIDDEN', 'VALIDATION_ERROR']).toContain(reversedStop.errorCode)
+    expect(
+      await Promise.all(
+        listRegisteredProductSpaceExecutions().map(execution => execution.isActive()),
+      ),
+    ).toEqual([true])
+  })
+
   it('fails closed when no ProductSpace is committed', async () => {
     setRuntimeActiveProductSpace(null)
     registerProductSpaceExecution(fakeExecution({ executionId: 'exec-a1' }))
     const { invoke } = createHarness()
-    const listed = await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, spaceA)
+    const listed = await invoke(
+      RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      trustedAccountId,
+      spaceA,
+    )
     expect(listed.success).toBe(false)
     expect(listed.errorCode).toBe('PRODUCT_SPACE_CONTEXT_REQUIRED')
   })
@@ -163,10 +196,18 @@ describe('execution enumeration fence', () => {
       executionId: 'exec-b1', productSpaceId: spaceB,
     }))
     const { invoke } = createHarness()
-    const listed = await invoke(RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS, spaceB)
+    const listed = await invoke(
+      RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      trustedAccountId,
+      spaceB,
+    )
     expect(listed.success).toBe(false)
     expect(listed.errorCode).toBe('FORBIDDEN')
-    const stopped = await invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS, spaceB)
+    const stopped = await invoke(
+      RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
+      trustedAccountId,
+      spaceB,
+    )
     expect(stopped.success).toBe(false)
     expect(stopped.errorCode).toBe('FORBIDDEN')
     expect(
@@ -181,8 +222,8 @@ describe('execution enumeration fence', () => {
     for (const malformed of [{ accountId: 'x' }, ['account-x'], 42]) {
       const result = await invoke(
         RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
-        spaceA,
         malformed,
+        spaceA,
       )
       expect(result.success).toBe(false)
       expect(result.errorCode).toBe('VALIDATION_ERROR')
@@ -190,6 +231,7 @@ describe('execution enumeration fence', () => {
     for (const malformedSpace of [42, { space: spaceA }, ['space-a'], '']) {
       const result = await invoke(
         RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+        trustedAccountId,
         malformedSpace,
       )
       expect(result.success).toBe(false)
@@ -215,6 +257,7 @@ describe('execution enumeration fence', () => {
     const { invoke } = createHarness()
     const result = await invoke(
       RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
+      trustedAccountId,
       spaceA,
     )
     expect(result.success).toBe(true)

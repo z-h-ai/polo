@@ -332,7 +332,10 @@ export async function registerAssistantSessionExecution(input: {
 export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDeps): void {
   server.handle(
     RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
-    async (_ctx, productSpaceId: unknown, requestedAccountId?: unknown) => {
+    // Frontend wire contract: (accountId, productSpaceId) — see
+    // ElectronAPI.productSpaceListActiveExecutions. The account always
+    // comes first.
+    async (_ctx, requestedAccountId: unknown, productSpaceId: unknown) => {
       const trusted = await resolveTrustedExecutionRequest(
         requestedAccountId,
         productSpaceId,
@@ -363,7 +366,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
   server.handle(
     RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
-    async (_ctx, productSpaceId: unknown, requestedAccountId?: unknown) => {
+    // Frontend wire contract: (accountId, productSpaceId) — see
+    // ElectronAPI.productSpaceStopAllExecutions. The account always
+    // comes first.
+    async (_ctx, requestedAccountId: unknown, productSpaceId: unknown) => {
       const trusted = await resolveTrustedExecutionRequest(
         requestedAccountId,
         productSpaceId,
