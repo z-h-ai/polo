@@ -14,7 +14,7 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import {
-  buildMcpServers,
+  buildPiAgentServer,
   copyInterceptor,
   copyPiAgentServer,
   copyRipgrep,
@@ -190,7 +190,7 @@ export function stagePlatformRuntimeHelpers(
   }
   const piOutput = join(config.rootDir, 'packages', 'pi-agent-server', 'dist', 'index.js')
   if (!existsSync(piOutput)) {
-    buildMcpServers(config)
+    buildPiAgentServer(config)
   }
   copyPiAgentServer(config)
   const stagedPiServer = join(config.electronDir, 'resources', 'pi-agent-server', 'index.js')

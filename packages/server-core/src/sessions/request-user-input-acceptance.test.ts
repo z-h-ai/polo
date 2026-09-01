@@ -172,7 +172,7 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
   /**
    * Build the REAL pi-agent-server from the CURRENT HEAD source into a
    * temporary production layout (production build flags, scripts/build/
-   * common.ts `buildMcpServers`). The resolver consumes THIS bundle — never
+   * common.ts `buildPiAgentServer`). The resolver consumes THIS bundle — never
    * the gitignored workspace `dist/` and never a stale artifact from a
    * previous build: the staged bundle is fresh by construction, and the
    * scenario fails loudly if the build fails (the layout shadows the walk-up
@@ -566,7 +566,7 @@ describe('request_user_input outside-in acceptance (production agents)', () => {
     await waitForCondition(() => fake.captured.length >= 2, 30000)
     const continuationText = fake.captured[1]!.messageTexts.join('\n')
     expect(continuationText).toContain(ASK_MARKER)
-    expect(continuationText).toContain(ASK_MARKER.length ? ANSWER_MARKER : ANSWER_MARKER)
+    expect(continuationText).toContain(ANSWER_MARKER)
 
     fake.server.stop(true)
   }, 240000)

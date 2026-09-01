@@ -54,7 +54,7 @@ import {
   UV_VERSION,
   downloadBun,
   downloadUv,
-  buildMcpServers,
+  buildPiAgentServer,
   getPlatformKey,
 } from './build/common';
 
@@ -833,8 +833,8 @@ async function main(): Promise<void> {
   console.log(`\n[3/8] Downloading uv ${UV_VERSION}...`);
   await downloadUvForServer(config);
 
-  // Step 4: Build MCP servers
-  console.log('\n[4/8] Building MCP servers...');
+  // Step 4: Build the Pi agent server subprocess bundle
+  console.log('\n[4/8] Building the Pi agent server subprocess bundle...');
   const buildConfig: BuildConfig = {
     platform,
     arch,
@@ -844,7 +844,7 @@ async function main(): Promise<void> {
     rootDir,
     electronDir,
   };
-  buildMcpServers(buildConfig);
+  buildPiAgentServer(buildConfig);
 
   // Build the WhatsApp worker bundle. Must happen before copyWorkspacePackages
   // so dist/worker.cjs exists when we copy the messaging-whatsapp-worker package.

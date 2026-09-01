@@ -213,7 +213,7 @@ async function buildWaWorker(): Promise<void> {
 }
 
 // Build the Pi agent server subprocess bundle (one-time, no watch needed)
-async function buildMcpServers(): Promise<void> {
+async function buildPiAgentServer(): Promise<void> {
   console.log("🌉 Building Pi agent server...");
 
   // Ensure dist directory exists
@@ -397,7 +397,7 @@ async function main(): Promise<void> {
   copyResources();
 
   // Build the Pi agent server subprocess bundle
-  await buildMcpServers();
+  await buildPiAgentServer();
 
   // Build WhatsApp worker bundle so the adapter can spawn it on demand
   await buildWaWorker();

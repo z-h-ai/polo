@@ -340,7 +340,7 @@ describe('Electron final artifact validation pipeline', () => {
     expect(workflow).toContain('release-signing-audit-*.jsonl')
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('bun run validate:ci')
-    expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildMcpServers(config)')
+    expect(read('scripts/prepare-platform-runtime.ts')).toContain('buildPiAgentServer(config)')
     const macValidator = read('apps/electron/scripts/validate-final-artifacts.sh')
     expect(macValidator).toContain('"$MODE" != "signing"')
     expect(macValidator).toContain('platform=macos mode=$MODE')

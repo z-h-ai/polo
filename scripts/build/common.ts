@@ -805,10 +805,11 @@ export function copyPiAgentServer(config: BuildConfig): void {
 }
 
 /**
- * Build the Pi agent server subprocess bundle.
+ * Build the Pi agent server subprocess bundle (the only staged MCP helper
+ * server left in the product).
  * Shared across all platforms to avoid drift.
  */
-export function buildMcpServers(config: BuildConfig): void {
+export function buildPiAgentServer(config: BuildConfig): void {
   const { rootDir } = config;
 
   const piDir = join(rootDir, 'packages', 'pi-agent-server');
@@ -855,9 +856,9 @@ export function buildWhatsAppWorker(config: BuildConfig): void {
 }
 
 /**
- * Verify the Pi agent server is present in packaged resources.
+ * Verify the Pi agent server bundle is present in packaged resources.
  */
-export function verifyMcpServersExist(config: BuildConfig): void {
+export function verifyPiAgentServerBundleExists(config: BuildConfig): void {
   const { electronDir } = config;
 
   const piPath = join(electronDir, 'resources', 'pi-agent-server', 'index.js');
