@@ -233,6 +233,12 @@ describe('Main-side switch transaction', () => {
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(prepared.success).toBe(true)
+    // The plan is returned before anything is stopped.
+    expect(prepared.executions.map((execution: { executionId: string }) => execution.executionId).sort())
+      .toEqual(['exec-a1', 'exec-a2'])
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
+
     const committed = await invoke(
       RPC_CHANNELS.productSpace.COMMIT_SWITCH,
       prepared.token,
@@ -268,22 +274,31 @@ describe('Main-side switch transaction', () => {
 
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
-    expect(prepared.success).toBe(false)
-    expect(prepared.errorCode).toBe('runtime_stop_failed')
+    expect(prepared.success).toBe(true)
     expect(getRuntimeActive()).toBe(spaceA)
     expect(await stuck.isActive()).toBe(true)
-    // Failed entries stay registered for retry.
-    expect(listRegisteredProductSpaceExecutions().some(
-      execution => execution.scope.executionId === 'exec-stuck',
-    )).toBe(true)
 
-    // Retry after the runtime becomes stoppable.
+    const stopResult = await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)
+    expect(stopResult.success).toBe(false)
+    expect(stopResult.errorCode).toBe('runtime_stop_failed')
+    expect(stopResult.executions).toEqual([
+      expect.objectContaining({ executionId: 'exec-stuck', status: 'failed' }),
+    ])
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(await stuck.isActive()).toBe(true)
+    // The transaction is consumed on failure — no stale token lingers.
+    const lateStop = await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)
+    expect(lateStop.success).toBe(false)
+    expect(lateStop.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+
+    // Retry after the runtime becomes stoppable: fresh prepare + stop + commit.
     refuseStop = false
-    const retry = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
-    expect(retry.success).toBe(true)
+    const retryPrepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(retryPrepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, retryPrepared.token)).toMatchObject({ success: true })
     const committed = await invoke(
       RPC_CHANNELS.productSpace.COMMIT_SWITCH,
-      retry.token,
+      retryPrepared.token,
       spaceB,
     )
     expect(committed.success).toBe(true)
@@ -316,6 +331,7 @@ describe('Main-side switch transaction', () => {
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
 
     // The token is bound to the preparing account.
     setTrustedProductSpaceAccountProvider(async () => 'account-other')
@@ -381,12 +397,17 @@ describe('Main-side switch transaction', () => {
     const result = await pending
     expect(sawSwitchInProgress).toBe(true)
     expect(result.success).toBe(true)
+    // The pending transaction window (prepare → stop → commit) keeps new
+    // starts blocked even between RPCs…
+    expect(isSwitchInProgress()).toBe(true)
+    // …and cancellation releases it.
+    await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, result.token)
     expect(isSwitchInProgress()).toBe(false)
   })
 })
 
 describe('two-phase switch transaction', () => {
-  it('prepares with a one-time token and commits only with it', async () => {
+  it('prepares with a one-time token, finalizes stops, and commits only with it', async () => {
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(prepared.success).toBe(true)
@@ -402,6 +423,16 @@ describe('two-phase switch transaction', () => {
     expect(badToken.success).toBe(false)
     expect(badToken.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
 
+    // A commit before the stop phase finalized is equally invalid.
+    const premature = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(premature.success).toBe(false)
+    expect(premature.errorCode).toBe('SWITCH_TRANSACTION_INVALID')
+
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
     const committed = await invoke(
       RPC_CHANNELS.productSpace.COMMIT_SWITCH,
       prepared.token,
@@ -419,10 +450,11 @@ describe('two-phase switch transaction', () => {
     expect(replay.success).toBe(false)
   })
 
-  it('fails the commit when an origin execution appears after prepare', async () => {
+  it('fails the commit when an origin execution appears after the stop phase', async () => {
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
 
     registerProductSpaceExecution(fakeExecution({ executionId: 'exec-late' }))
 
@@ -453,6 +485,80 @@ describe('two-phase switch transaction', () => {
     expect(committed.errorCode).toBe('SWITCH_SUPERSEDED')
     expect(getRuntimeActive()).toBeNull()
   })
+
+  it('cancelling during stopping leaves undispatched executions running', async () => {
+    const first = fakeExecution({ executionId: 'exec-c1' })
+    const second = fakeExecution({ executionId: 'exec-c2' })
+    registerProductSpaceExecution(first)
+    registerProductSpaceExecution(second)
+
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(prepared.executions).toHaveLength(2)
+
+    // Block inside the first stop dispatch so the loop is still busy on the
+    // first execution when the cancel arrives.
+    const firstStopStarted = new Promise<void>(resolve => { resolve = resolve })
+    let releaseFirstStop!: () => void
+    const firstStopReleased = new Promise<void>(resolve => { releaseFirstStop = resolve })
+    void firstStopStarted
+    const originalFirstStop = first.stop
+    let firstStopCalls = 0
+    first.stop = async () => {
+      firstStopCalls += 1
+      await firstStopReleased
+      return originalFirstStop()
+    }
+    const originalSecondStop = second.stop
+    let secondStopCalls = 0
+    second.stop = async () => {
+      secondStopCalls += 1
+      return originalSecondStop()
+    }
+    const stopping = invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)
+    // Wait until the stop phase is inside the first (blocked) dispatch.
+    for (let i = 0; i < 300 && firstStopCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(firstStopCalls).toBe(1)
+    // Cancel while the first stop is still in flight, then let it finish.
+    await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    releaseFirstStop()
+    const stopped = await stopping
+
+    expect(stopped.success).toBe(false)
+    expect(stopped.errorCode).toBe('SWITCH_CANCELLED')
+    // The first stop was already dispatched and completed; the second
+    // execution was never touched.
+    expect(secondStopCalls).toBe(0)
+    expect(await second.isActive()).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('cancelling before the stop phase stops nothing at all', async () => {
+    const execution = fakeExecution({ executionId: 'exec-c3' })
+    registerProductSpaceExecution(execution)
+    let stopCalls = 0
+    const originalStop = execution.stop
+    execution.stop = async () => {
+      stopCalls += 1
+      return originalStop()
+    }
+
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    const cancelled = await invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH, prepared.token)
+    expect(cancelled.success).toBe(true)
+
+    const stopped = await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)
+    expect(stopped.success).toBe(false)
+    expect(stopped.errorCode).toBe('SWITCH_CANCELLED')
+    expect(stopCalls).toBe(0)
+    expect(await execution.isActive()).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceA)
+  })
 })
 
 describe('offline read-only restore', () => {
@@ -470,6 +576,7 @@ describe('offline read-only restore', () => {
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(prepared.success).toBe(true)
     expect(isRuntimeOfflineReadOnly()).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
     const committed = await invoke(
       RPC_CHANNELS.productSpace.COMMIT_SWITCH,
       prepared.token,
@@ -542,6 +649,7 @@ describe('offline read-only restore', () => {
     const { invoke } = createHarness()
     const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(prepared.success).toBe(true)
+    expect(await invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS, prepared.token)).toMatchObject({ success: true })
     // Target list becomes unavailable between prepare and commit.
     listResult = null
     const committed = await invoke(

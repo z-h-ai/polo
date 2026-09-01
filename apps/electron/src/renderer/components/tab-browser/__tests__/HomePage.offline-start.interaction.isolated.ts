@@ -162,6 +162,10 @@ beforeEach(async () => {
         to: targetProductSpaceId,
         executions: [],
       }),
+      productSpaceStopSwitchExecutions: async () => ({
+        success: true as const,
+        executions: [],
+      }),
       productSpaceCommitSwitch: async (_token: string, targetProductSpaceId: string) => ({
         success: true as const,
         from: null,

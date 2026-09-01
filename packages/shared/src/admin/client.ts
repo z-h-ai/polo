@@ -219,6 +219,7 @@ const SAFE_ADMIN_ERROR_MESSAGES: Record<AdminErrorCode, string> = {
   upload_expired: 'The upload address has expired',
   checksum_mismatch: 'The downloaded ZIP failed its checksum check',
   content_digest_mismatch: 'The extracted Skill content failed its integrity check',
+  account_transition_pending: 'The previous account is still shutting down. Retry the sign-in.',
 };
 
 const MAX_RETRY_AFTER_SECONDS = 86_400;

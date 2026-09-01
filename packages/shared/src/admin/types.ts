@@ -470,6 +470,7 @@ export type AdminErrorCode =
   | 'upload_expired'
   | 'checksum_mismatch'
   | 'content_digest_mismatch'
+  | 'account_transition_pending'
   | PhoneAuthErrorCode;
 
 export interface AdminErrorDetails {

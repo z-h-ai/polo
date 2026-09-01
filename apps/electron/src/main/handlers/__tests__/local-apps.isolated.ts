@@ -426,6 +426,42 @@ describe('local app main-process authorization boundary', () => {
     expect(registered.every(execution => execution.scope.productSpaceId === 'organization-a')).toBe(true)
   })
 
+  it('a workspace stop only unregisters the calling workspace execution', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    const stop = handlers.get(RPC_CHANNELS.localApps.STOP)!
+    await start(context, scope())
+    windowWorkspaceId = 'ws-window-b'
+    await start(context, scope())
+
+    const byWorkspace = () => Object.fromEntries(
+      listRegisteredProductSpaceExecutions()
+        .filter(execution => execution.kind === 'local_app')
+        .map(execution => [execution.scope.workspaceId as string, execution]),
+    )
+
+    // ws-a stops the app: only ws-a's execution record is unregistered, and
+    // ws-b's execution stays registered for its own lifecycle. (The
+    // underlying POO-12 runtime process is still one per installation —
+    // documented residual — so ws-b's liveness probe reads the shared
+    // runtime, but its registration and lifecycle ownership are isolated.)
+    windowWorkspaceId = 'ws-window-a'
+    context.webContentsId = 1
+    await stop(context, scope())
+    let registered = byWorkspace()
+    expect(registered['ws-window-a']).toBeUndefined()
+    expect(registered['ws-window-b']).toBeDefined()
+
+    // ws-b's own stop cleans up its record too.
+    windowWorkspaceId = 'ws-window-b'
+    context.webContentsId = 2
+    await stop(context, scope())
+    registered = byWorkspace()
+    expect(registered['ws-window-b']).toBeUndefined()
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(0)
+  })
+
   it('requests a short-lived download grant for the currently authorized release', async () => {
     const install = handlers.get(RPC_CHANNELS.localApps.INSTALL)!
     catalog.apps[0] = {

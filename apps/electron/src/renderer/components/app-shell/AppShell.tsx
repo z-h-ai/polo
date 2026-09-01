@@ -88,6 +88,7 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
+import { reportTargetProjectionFailure } from '@/lib/target-projection'
 import {
   creatorSkillSafetyCheckStatesAtom,
   creatorSkillSafetyIdentityKey,
@@ -919,6 +920,7 @@ function AppShellContent({
       setSources(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load sources:', err)
+      reportTargetProjectionFailure({ source: 'sources', message: String(err) })
     })
   }, [activeWorkspaceId])
 
@@ -1320,6 +1322,7 @@ function AppShellContent({
       setSkills(loaded || [])
     }).catch(err => {
       console.error('[Chat] Failed to load skills:', err)
+      reportTargetProjectionFailure({ source: 'skills', message: String(err) })
     })
   }, [activeWorkspaceId, activeSessionWorkingDirectory])
 

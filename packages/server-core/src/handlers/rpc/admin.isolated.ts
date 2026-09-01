@@ -1809,7 +1809,7 @@ describe('registerAdminHandlers', () => {
     expect(appCatalogAccess.get('account-b:organization-b')).toBe('online')
   })
 
-  it('commits the replacement session even when old-account cleanup fails', async () => {
+  it('refuses the replacement session when old-account cleanup fails, retryably', async () => {
     managerState.tokens = {
       accessToken: 'account-a-token',
       refreshToken: 'account-a-refresh',
@@ -1822,25 +1822,173 @@ describe('registerAdminHandlers', () => {
     })
     const { login } = createHarness()
 
-    expect(await login(
+    const result = await login(
       { clientId: 'client-1', workspaceId: null, webContentsId: null },
       'admin',
       'secret',
-    )).toMatchObject({
-      success: true,
-      user: { id: 'user-1' },
+    )
+    // The replacement is refused fail-closed: account B's tokens never land
+    // while account A's executions/fence are not confirmed clean.
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'account_transition_pending',
     })
-    expect(adminSessionEnding).toHaveBeenCalledWith('account-a')
-    expect(managerState.tokens).toMatchObject({
-      userId: 'user-1',
-      accessToken: 'access-token',
-    })
-    expect(adminClientCalls.map(call => call.method)).toEqual([
-      'login',
-      'getLlmConnections',
-    ])
+    expect(managerState.tokens).toMatchObject({ userId: 'account-a' })
     expect(loggerWarn).toHaveBeenCalled()
+
+    // The failed cleanup is retried on a fresh login and then succeeds.
+    const retry = await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )
+    expect(retry).toMatchObject({ success: true, user: { id: 'user-1' } })
+    expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
   })
+
+  it('refuses the replacement when a prior-account execution cannot be stopped', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    setRuntimeActiveProductSpaceAccount('account-a')
+    setRuntimeActiveProductSpace('space-a')
+    // A stuck prior-account assistant: even after a stop request it stays
+    // active, so the bounded drain reports it as failed.
+    let stopAttempts = 0
+    registerProductSpaceExecution({
+      scope: {
+        contractVersion: 1,
+        executionId: 'exec-stuck-a',
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        workspaceId: 'ws-a',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      } as never,
+      kind: 'assistant_session',
+      name: 'assistant',
+      ref: 'session-a',
+      isActive: () => true,
+      stop: async () => {
+        stopAttempts += 1
+        return 'failed' as const
+      },
+    })
+    adminSessionEnding.mockImplementation(async (accountId: string) => {
+      const stopped = await stopRegisteredProductSpaceExecutionsForAccount(accountId)
+      if (!stopped.ok) {
+        throw new Error(`product_space_execution_stop_failed: ${stopped.failedExecutionIds.join(', ')}`)
+      }
+    })
+
+    const { login } = createHarness()
+    const result = await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )
+    expect(stopAttempts).toBeGreaterThan(0)
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'account_transition_pending',
+    })
+    expect(managerState.tokens).toMatchObject({ userId: 'account-a' })
+    // The fence stays exactly where it was: no replacement landed on top of
+    // the still-running prior-account execution.
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+  }, 20_000)
+
+  it('refuses the replacement when the prior-account liveness probe keeps failing', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    // Probe failures fail closed: the execution counts as still running and
+    // the bounded drain reports it as failed.
+    registerProductSpaceExecution({
+      scope: {
+        contractVersion: 1,
+        executionId: 'exec-probe-broken-a',
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        workspaceId: 'ws-a',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      } as never,
+      kind: 'assistant_session',
+      name: 'assistant',
+      ref: 'session-a',
+      isActive: () => Promise.reject(new Error('probe broken')),
+      stop: async () => 'stopped' as const,
+    })
+    adminSessionEnding.mockImplementation(async (accountId: string) => {
+      const stopped = await stopRegisteredProductSpaceExecutionsForAccount(accountId)
+      if (!stopped.ok) {
+        throw new Error(`product_space_execution_stop_failed: ${stopped.failedExecutionIds.join(', ')}`)
+      }
+    })
+
+    const { login } = createHarness()
+    const result = await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'account_transition_pending',
+    })
+    expect(managerState.tokens).toMatchObject({ userId: 'account-a' })
+  }, 20_000)
+
+  it('refuses the replacement when the prior-account fence revoke fails, then lands after the revoke recovers', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    setRuntimeActiveProductSpaceAccount('account-a')
+    setRuntimeActiveProductSpace('space-a')
+    adminSessionEnding.mockImplementation(async () => {})
+    // Wedge the switch lock so the fence revoke cannot complete; the
+    // replacement must fail instead of landing on top of a live fence.
+    const { withSwitchLock } = await import('../../runtime/product-space-executions')
+    const releaseLock = createDeferred<void>()
+    const wedge = withSwitchLock(() => new Promise<void>(resolve => {
+      void releaseLock.promise.then(resolve)
+    }))
+    const { login } = createHarness()
+    const pendingLogin = login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )
+    const refusal = await Promise.race([
+      pendingLogin.then(() => 'committed' as const),
+      new Promise<'stalled'>(resolve => {
+        setTimeout(() => resolve('stalled'), 2_000)
+      }),
+    ])
+    // While the revoke is stuck, the login must not have landed account B.
+    expect(refusal).toBe('stalled')
+    expect(managerState.tokens).toMatchObject({ userId: 'account-a' })
+    expect(getRuntimeActiveProductSpace()).toBe('space-a')
+
+    // Once the revoke can complete, the same login finishes: the replacement
+    // lands only after the fence is confirmed revoked.
+    releaseLock.resolve()
+    await wedge
+    const settled = await pendingLogin
+    expect(settled).toMatchObject({ success: true, user: { id: 'user-1' } })
+    expect(getRuntimeActiveProductSpace()).toBeNull()
+  }, 20_000)
 
   it('syncs transit-encrypted admin api keys into credential storage as plaintext', async () => {
     adminClientBehavior.getLlmConnections = async () => ({

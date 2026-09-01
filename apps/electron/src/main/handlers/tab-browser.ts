@@ -1,6 +1,13 @@
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
+import { createProductSpaceContextKey } from '@polo-ai/shared/product-spaces'
 import type { AppDefinition } from '../../shared/tab-browser-types'
+import type { HandlerDeps } from './handler-deps'
+import { resolveTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+import {
+  getRuntimeActiveProductSpace,
+  isRuntimeFenceBoundToAccount,
+} from '@polo-ai/server-core/runtime/product-space-executions'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tabBrowser.GET_APPS,
@@ -31,41 +38,75 @@ function normalizeApps(apps: unknown): AppDefinition[] {
     }))
 }
 
-function isValidScope(scope: unknown): scope is string {
-  return typeof scope === 'string' && scope.length > 0 && scope.length <= 256
+export interface TabBrowserDeps {
+  windowManager?: HandlerDeps['windowManager']
 }
 
 /**
- * Installed tab-browser apps are account+ProductSpace scoped: the renderer
- * passes its verified ProductSpace context key, and every scope reads and
- * writes only its own partition. A scopeless call keeps the pre-ProductSpace
- * legacy global store for local-account windows only — a ProductSpace-scoped
- * window never falls back to (or writes) the legacy global list, so a
- * personal-space app can never reappear after switching to an enterprise.
+ * Derives the installed-apps partition key from Main-trusted state only:
+ * the Admin session account, the committed ProductSpace fence bound to it,
+ * and the calling window's Workspace. The renderer never names the scope —
+ * a forged contextKey for another account/space cannot read or overwrite
+ * that partition. Returns null for the pre-ProductSpace local-account
+ * window (no committed fence), which keeps the legacy global store.
  */
-export function registerTabBrowserHandlers(server: RpcServer): void {
-  server.handle(RPC_CHANNELS.tabBrowser.GET_APPS, async (_ctx, rawScope?: unknown) => {
+async function deriveTrustedTabBrowserScope(
+  webContentsId: number | null | undefined,
+  deps: TabBrowserDeps,
+): Promise<string | null> {
+  const accountId = await resolveTrustedProductSpaceAccountId()
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  if (!accountId || !activeProductSpaceId) {
+    // Pre-ProductSpace local-account window (signed out or no fence yet).
+    return null
+  }
+  // A committed fence that is not bound to the trusted account is a broken
+  // replacement state: fail closed instead of degrading to the legacy store.
+  if (!isRuntimeFenceBoundToAccount(accountId)) {
+    throw new Error('TAB_BROWSER_SCOPE_REQUIRED')
+  }
+  if (webContentsId == null) {
+    throw new Error('TAB_BROWSER_SCOPE_REQUIRED')
+  }
+  const workspaceId = deps.windowManager?.getWorkspaceForWindow(webContentsId)
+  if (!workspaceId) {
+    throw new Error('TAB_BROWSER_SCOPE_REQUIRED')
+  }
+  return `${createProductSpaceContextKey(accountId as never, activeProductSpaceId as never)}::${workspaceId}`
+}
+
+/**
+ * Installed tab-browser apps are account+ProductSpace+Workspace scoped. The
+ * scope is always derived Main-side from trusted state; a ProductSpace
+ * window can never fall back to (or write) the legacy global store, so a
+ * personal-space app can never reappear after switching to an enterprise or
+ * be planted into another account's partition.
+ */
+export function registerTabBrowserHandlers(server: RpcServer, deps: TabBrowserDeps = {}): void {
+  server.handle(RPC_CHANNELS.tabBrowser.GET_APPS, async (ctx) => {
     const { loadStoredConfig } = await import('@polo-ai/shared/config/storage')
     const config = loadStoredConfig()
-    if (isValidScope(rawScope)) {
-      const scoped = config?.tabBrowser?.installedAppsByScope?.[rawScope]
-      return normalizeApps(scoped ?? [])
+    const scope = await deriveTrustedTabBrowserScope(ctx.webContentsId, deps)
+    if (scope === null) {
+      return normalizeApps(config?.tabBrowser?.installedApps)
     }
-    return normalizeApps(config?.tabBrowser?.installedApps)
+    const scoped = config?.tabBrowser?.installedAppsByScope?.[scope]
+    return normalizeApps(scoped ?? [])
   })
 
-  server.handle(RPC_CHANNELS.tabBrowser.SAVE_APPS, async (_ctx, apps: AppDefinition[], rawScope?: unknown) => {
+  server.handle(RPC_CHANNELS.tabBrowser.SAVE_APPS, async (ctx, apps: AppDefinition[]) => {
     const { updateStoredConfig } = await import('@polo-ai/shared/config/storage')
     const normalized = normalizeApps(apps)
+    const scope = await deriveTrustedTabBrowserScope(ctx.webContentsId, deps)
     updateStoredConfig(config => {
       config.tabBrowser ??= { installedApps: [] }
-      if (isValidScope(rawScope)) {
-        const byScope = { ...(config.tabBrowser.installedAppsByScope ?? {}) }
-        byScope[rawScope] = normalized
-        config.tabBrowser.installedAppsByScope = byScope
+      if (scope === null) {
+        config.tabBrowser.installedApps = normalized
         return
       }
-      config.tabBrowser.installedApps = normalized
+      const byScope = { ...(config.tabBrowser.installedAppsByScope ?? {}) }
+      byScope[scope] = normalized
+      config.tabBrowser.installedAppsByScope = byScope
     })
   })
 }

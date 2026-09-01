@@ -270,6 +270,7 @@ const EXPECTED_CHANNELS: string[] = [
   'product-space:restoreOfflineView',
   'product-space:revokeActiveContext',
   'product-space:stopAllExecutions',
+  'product-space:stopSwitchExecutions',
   'releaseNotes:get',
   'releaseNotes:getLatestVersion',
   'remote:testConnection',

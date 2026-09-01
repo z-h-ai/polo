@@ -2358,31 +2358,31 @@ async function completeAdminLogin(args: {
       args.sessions.closeAuthorizationForEnding(previousTokens.userId)
       // Account replacement must be total before account B becomes usable:
       // every registered execution of account A (assistant sessions and
-      // Local Apps alike) is stopped, and account A's ProductSpace fence is
-      // revoked so no business surface can act under the old scope. The
-      // coordinator deduplicates this against an already-running logout
-      // cleanup; awaiting it is deliberate — the fence must be gone before
-      // account B's tokens land.
-      await args.sessions.getOrStartAccountCleanup(
-        previousTokens.userId,
-        transitionGeneration,
-        async () => {
-          await args.deps.onAdminSessionEnding?.(previousTokens.userId)
-          try {
+      // Local Apps alike) must reach a terminal state, and account A's
+      // ProductSpace fence must be revoked — BEFORE account B's tokens land
+      // or its session starts. A failed stop or revoke propagates: the
+      // replacement is refused with a retryable local error and the login
+      // can be retried once the runtime is clean. The coordinator
+      // deduplicates this against an already-running logout cleanup.
+      try {
+        await args.sessions.getOrStartAccountCleanup(
+          previousTokens.userId,
+          transitionGeneration,
+          async () => {
+            await args.deps.onAdminSessionEnding?.(previousTokens.userId)
             await revokeRuntimeProductSpaceFence()
-          } catch (error) {
-            args.deps.platform.logger.warn(
-              '[Admin] previous account ProductSpace fence revoke failed during login replacement:',
-              error instanceof Error ? error.message : String(error),
-            )
-          }
-        },
-      ).catch(error => {
+          },
+        )
+      } catch (error) {
         args.deps.platform.logger.warn(
-          '[Admin] previous account cleanup failed during login replacement:',
+          '[Admin] previous account cleanup failed during login replacement; refusing the replacement:',
           error instanceof Error ? error.message : String(error),
         )
-      })
+        throw new AdminError(
+          'The previous account is still shutting down. Retry the sign-in.',
+          'account_transition_pending',
+        )
+      }
       await deleteAdminManagedConnections(
         args.manager,
         previousAdminConnectionSlugs,

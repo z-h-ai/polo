@@ -109,8 +109,21 @@ function configureIpc(): void {
           token: `token-${targetProductSpaceId}`,
           from: 'space-personal',
           to: targetProductSpaceId,
-          executions: switchResult.executions ?? [],
+          executions: [],
         }
+      },
+      productSpaceStopSwitchExecutions: async (token: string) => {
+        if (!token.startsWith('token-')) {
+          return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID' }
+        }
+        if (!switchResult.success) {
+          return {
+            success: false as const,
+            errorCode: switchResult.errorCode ?? 'runtime_stop_failed',
+            executions: switchResult.executions ?? [],
+          }
+        }
+        return { success: true as const, executions: [] }
       },
       productSpaceCommitSwitch: async (token: string, targetProductSpaceId: string) => {
         if (!token.startsWith('token-')) {
@@ -708,30 +721,26 @@ describe('useProductSpaceContextState cancel race', () => {
     const { result } = renderHook(useHarness)
     await boot(result)
 
-    // Executions present → confirm phase; the prepare (which stops them)
-    // hangs until we release it.
-    let releasePrepare!: (value: {
-      success: true
-      token: string
-      from: string
-      to: string
-      executions: never[]
-    }) => void
-    const preparePromise = new Promise<typeof releasePrepare extends (value: infer V) => void ? V : never>(() => {})
-    Object.defineProperty(window.electronAPI, 'productSpacePrepareSwitch', {
-      configurable: true,
-      value: (targetProductSpaceId: string) => new Promise(resolve => {
-        releasePrepare = resolve
-        void targetProductSpaceId
-        void preparePromise
-      }),
-    })
+    // Executions present → confirm phase; the prepare resolves fast (token
+    // held) and the stop phase hangs until we release it — the renderer
+    // cancel must reach Main while stopping is still in flight.
     executionsResult = {
       success: true as const,
       executions: [
         { executionId: 'exec-1', name: 'Running item', status: 'running' },
       ],
     }
+    let releaseStop!: (value: { success: true; executions: never[] }) => void
+    const stopGate = new Promise<{ success: true; executions: never[] }>(resolve => {
+      releaseStop = resolve
+    })
+    Object.defineProperty(window.electronAPI, 'productSpaceStopSwitchExecutions', {
+      configurable: true,
+      value: (token: string) => {
+        cancelledTokens.push(`stop:${token}`)
+        return stopGate
+      },
+    })
 
     await act(async () => {
       await result.current.requestSwitch('space-ent')
@@ -742,27 +751,26 @@ describe('useProductSpaceContextState cancel race', () => {
     await act(async () => {
       stopping = result.current.confirmStopAndSwitch()
     })
-    expect(result.current.pendingSwitch?.phase).toBe('stopping')
+    await waitFor(() => {
+      expect(result.current.pendingSwitch?.phase).toBe('stopping')
+    })
+    expect(cancelledTokens).toContain('stop:token-space-ent')
 
-    // The user cancels while Main is still preparing/stopping.
+    // The user cancels while Main is still stopping — the cancel RPC must
+    // carry the already-held token.
     await act(async () => {
       result.current.cancelSwitch()
     })
     expect(result.current.pendingSwitch).toBeNull()
+    expect(cancelledTokens).toContain('token-space-ent')
 
-    // Main finishes stopping and returns the token — the stale switch must
-    // deterministically cancel/consume it.
+    // Main finishes the in-flight stop dispatch; the stop result reports the
+    // switch as cancelled and the renderer stays in the origin space.
     await act(async () => {
-      releasePrepare({
-        success: true as const,
-        token: 'token-late',
-        from: personalId,
-        to: 'space-ent',
-        executions: [],
-      })
+      releaseStop({ success: true as const, executions: [] })
       await stopping
     })
-    expect(cancelledTokens).toContain('token-late')
     expect(result.current.activeProductSpaceId).toBe(personalId)
+    expect(declaredActiveSpace).toBe(personalId)
   })
 })

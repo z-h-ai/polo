@@ -957,14 +957,15 @@ app.whenReady().then(async () => {
             messagingRegistry: messagingHandle.registry,
             onAdminSessionEnding: async (accountId: string) => {
               // Account session-ending is total: every registered execution
-              // of the account — assistant sessions AND Local Apps — stops
-              // before the account is considered gone. The ProductSpace
-              // fence itself is revoked by the admin session coordinator.
+              // of the account — assistant sessions AND Local Apps — must
+              // reach a terminal state before the account is considered
+              // gone. A non-empty failure list fails the whole ending so an
+              // account replacement can never land on top of a still-running
+              // prior-account execution.
               const stopped = await stopRegisteredProductSpaceExecutionsForAccount(accountId)
               if (!stopped.ok) {
-                mainLog.warn(
-                  '[ProductSpace] Some executions of the ending account could not be stopped:',
-                  stopped.failedExecutionIds.join(', '),
+                throw new Error(
+                  `product_space_execution_stop_failed: ${stopped.failedExecutionIds.join(', ')}`,
                 )
               }
               getScopedLocalAppRuntimeRegistry().stopAccount(accountId)

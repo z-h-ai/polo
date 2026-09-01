@@ -172,6 +172,7 @@ export const CHANNEL_MAP = {
   productSpaceStopAllExecutions: invoke(RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS),
   productSpaceGetCatalog: invoke(RPC_CHANNELS.productSpace.CATALOG),
   productSpacePrepareSwitch: invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH),
+  productSpaceStopSwitchExecutions: invoke(RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS),
   productSpaceCommitSwitch: invoke(RPC_CHANNELS.productSpace.COMMIT_SWITCH),
   productSpaceCancelSwitch: invoke(RPC_CHANNELS.productSpace.CANCEL_SWITCH),
   productSpaceRestoreOfflineView: invoke(RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW),

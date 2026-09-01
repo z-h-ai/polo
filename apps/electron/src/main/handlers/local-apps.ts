@@ -585,10 +585,20 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
     }
   }
 
-  const unregisterLocalAppExecutions = (scope: CatalogLocalAppScope): void => {
+  const unregisterLocalAppExecutions = (
+    scope: CatalogLocalAppScope,
+    options?: { workspaceId?: string | null },
+  ): void => {
     for (const execution of listRegisteredProductSpaceExecutions()) {
       if (execution.kind !== 'local_app') continue
       if (execution.scope.productSpaceId !== scope.organizationId) continue
+      // A workspace-scoped management operation may only unregister the
+      // calling workspace's execution; UNINSTALL removes the whole
+      // installation and therefore every workspace's execution record.
+      if (
+        options?.workspaceId
+        && execution.scope.workspaceId !== options.workspaceId
+      ) continue
       if (
         execution.scope.subject.kind === 'artifact_instance'
         && execution.scope.subject.artifactInstanceId === scope.catalogAppId
@@ -739,12 +749,13 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
       scope => startCatalogApp(ctx, scope),
     ))
 
-  server.handle(RPC_CHANNELS.localApps.STOP, (_ctx, reference: unknown) =>
+  server.handle(RPC_CHANNELS.localApps.STOP, (ctx, reference: unknown) =>
     withCatalogManagementScope(
       reference,
       async (scope, catalogReference) => {
         const status = await getScopedLocalAppRuntimeRegistry().stop(scope)
-        unregisterLocalAppExecutions(scope)
+        // Only the calling workspace's execution record dies with this stop.
+        unregisterLocalAppExecutions(scope, { workspaceId: callerWorkspaceId(ctx) })
         return projectLocalAppStatusForCatalogAccess(
           status,
           catalogReference.canAccessDeliveryMetadata
@@ -765,7 +776,7 @@ export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManag
             'Only installed and prepared organization apps can restart while offline',
           )
         }
-        unregisterLocalAppExecutions(scope)
+        unregisterLocalAppExecutions(scope, { workspaceId: callerWorkspaceId(ctx) })
         return startAndRegisterLocalApp(scope, () => registry.restart(scope), callerWorkspaceId(ctx))
       },
     ))

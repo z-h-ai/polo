@@ -22,6 +22,7 @@ import {
   type AppDefinition,
   type TabInstance,
 } from '../../shared/tab-browser-types'
+import { tabAppPartitionForScope } from '../../shared/tab-browser-partition'
 
 export interface WebAppNavigationControls {
   canGoBack: boolean
@@ -61,13 +62,13 @@ const TabShellContext = createContext<TabShellContextValue | null>(null)
 interface TabShellProviderProps {
   workspaceId?: string | null
   /**
-   * Verified ProductSpace scope (account+space context key). Tab and
-   * installed-app persistence is partitioned by this scope: the same local
-   * Workspace entered from a different ProductSpace never restores the other
-   * space's tabs, URLs or app launchers. Null only for the legacy
-   * local-account window, which keeps the global store.
+   * Verified ProductSpace scope (account + space ids). Tab and installed-app
+   * persistence is partitioned by this scope: the same local Workspace
+   * entered from a different ProductSpace never restores the other space's
+   * tabs, URLs or app launchers. Null only for the legacy local-account
+   * window, which keeps the global store.
    */
-  productSpaceScopeKey?: string | null
+  productSpaceScope?: { accountId: string; productSpaceId: string } | null
   children: React.ReactNode
 }
 
@@ -83,7 +84,7 @@ function restoreTabs(rawTabs: TabInstance[], apps: AppDefinition[]): TabInstance
   return hasPolo ? restored : [POLO_TAB, ...restored]
 }
 
-export function TabShellProvider({ workspaceId, productSpaceScopeKey, children }: TabShellProviderProps) {
+export function TabShellProvider({ workspaceId, productSpaceScope, children }: TabShellProviderProps) {
   const [installedApps, setInstalledAppsState] = useAtom(installedAppsAtom)
   const [openTabs, setOpenTabs] = useAtom(openTabsAtom)
   const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
@@ -98,27 +99,35 @@ export function TabShellProvider({ workspaceId, productSpaceScopeKey, children }
   const [webAppNavigation, setWebAppNavigation] = useState<Record<string, WebAppNavigationControls>>({})
   const hydratedRef = useRef(false)
   // The persistence scope: account+ProductSpace first, workspace second.
-  // Storage keys (tabs) and the Main-side installed-app partition are both
-  // derived from this suffix, so a space switch can never rehydrate the
-  // other space's tab strip or webapp URLs.
-  const storageScope = productSpaceScopeKey
-    ? `${productSpaceScopeKey}::${workspaceId || 'default'}`
+  // Storage keys (tabs) and the webview partition are both derived from this
+  // scope, so a space switch can never rehydrate the other space's tab
+  // strip, webapp URLs or WebView state.
+  const storageScope = productSpaceScope
+    ? `${tabAppPartitionForScope({
+        accountId: productSpaceScope.accountId,
+        productSpaceId: productSpaceScope.productSpaceId,
+        workspaceId: workspaceId || 'default',
+      })}::${workspaceId || 'default'}`
     : (workspaceId || 'default')
-  // Deterministic, Electron-safe partition suffix for the ProductSpace scope.
-  const webAppPartition = productSpaceScopeKey
-    ? `persist:tab-app-${Array.from(productSpaceScopeKey).reduce(
-        (hash, character) => ((hash * 31) + character.charCodeAt(0)) >>> 0,
-        5381,
-      ).toString(36)}`
+  // Deterministic, Electron-safe session partition for the ProductSpace
+  // scope — identical to what Main re-derives to install the webview
+  // permission policy.
+  const webAppPartition = productSpaceScope
+    ? tabAppPartitionForScope({
+        accountId: productSpaceScope.accountId,
+        productSpaceId: productSpaceScope.productSpaceId,
+        workspaceId: workspaceId || 'default',
+      })
     : null
 
   useEffect(() => {
     let cancelled = false
 
     async function hydrate() {
-      const persistedApps = await window.electronAPI
-        .getTabBrowserApps(productSpaceScopeKey ?? undefined)
-        .catch(() => [])
+      // The Main side derives the installed-apps partition from trusted
+      // state (account + fence + window workspace) — the renderer never
+      // names the scope.
+      const persistedApps = await window.electronAPI.getTabBrowserApps().catch(() => [])
       if (cancelled) return
 
       const apps = normalizeInstalledApps(persistedApps)
@@ -135,7 +144,7 @@ export function TabShellProvider({ workspaceId, productSpaceScopeKey, children }
     return () => {
       cancelled = true
     }
-  }, [productSpaceScopeKey, setActiveTabId, setInstalledApps, setOpenTabs, storageScope])
+  }, [setActiveTabId, setInstalledApps, setOpenTabs, storageScope])
 
   useEffect(() => {
     if (!hydratedRef.current) return
@@ -150,9 +159,8 @@ export function TabShellProvider({ workspaceId, productSpaceScopeKey, children }
     setInstalledAppsState(normalized)
     await window.electronAPI.saveTabBrowserApps(
       normalized.filter((app) => !BUILTIN_APP_IDS.has(app.id)),
-      productSpaceScopeKey ?? undefined,
     )
-  }, [productSpaceScopeKey, setInstalledAppsState])
+  }, [setInstalledAppsState])
 
   const addApp = useCallback(async (app: AppDefinition) => {
     await persistApps([...installedApps.filter((item) => item.id !== app.id), app])

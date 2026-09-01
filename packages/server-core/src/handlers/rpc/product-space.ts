@@ -56,6 +56,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
   RPC_CHANNELS.productSpace.PREPARE_SWITCH,
+  RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS,
   RPC_CHANNELS.productSpace.COMMIT_SWITCH,
   RPC_CHANNELS.productSpace.CANCEL_SWITCH,
   RPC_CHANNELS.productSpace.REVOKE_ACTIVE_CONTEXT,
@@ -168,6 +169,22 @@ async function isActiveExecution(
   } catch {
     return true
   }
+}
+
+/** Projects dispatched executions and their stop outcomes for the renderer. */
+function statusesToExecutionSummaries(
+  dispatched: RegisteredProductSpaceExecution[],
+  statuses: Record<string, 'stopped' | 'failed'>,
+): ExecutionSummary[] {
+  return dispatched.map(execution => ({
+    executionId: EXECUTION_ID_SCHEMA.parse(execution.scope.executionId),
+    scope: execution.scope,
+    name: execution.name,
+    status: statuses[execution.scope.executionId] ?? 'failed',
+    ...(statuses[execution.scope.executionId] === 'failed'
+      ? { errorCode: 'runtime_stop_failed' }
+      : {}),
+  }))
 }
 
 async function executionSummariesForSpace(
@@ -370,11 +387,11 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
   // The trusted client declares the committed device space. While declared,
   // the runtime fences sessions and executions to that space only.
-  // Phase 1 of the two-phase switch: verify the target, terminate origin
-  // executions, re-enumerate to zero, and hold the switch lock behind a
-  // one-time transaction token. The fence is NOT moved yet — the renderer
-  // stages the target projections against this prepared state and then
-  // commits. Any failure keeps the origin fence untouched.
+  // Phase 1 of the cancellable switch: verify the target and create the
+  // one-time transaction token BEFORE any execution is stopped — the token
+  // is returned to the renderer immediately, so cancelling during the
+  // stopping phase is real (the stop phase checks cancellation before every
+  // dispatch). The fence is NOT moved and nothing is stopped yet.
   server.handle(
     RPC_CHANNELS.productSpace.PREPARE_SWITCH,
     async (_ctx, targetProductSpaceId: unknown) => {
@@ -424,9 +441,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             return { success: false as const, errorCode: 'FORBIDDEN', message: 'The restored ProductSpace is no longer active' }
           }
 
-          let stopped: Awaited<ReturnType<typeof stopRegisteredExecutionsOnce>> = []
+          // Snapshot the origin executions the stop phase will terminate —
+          // nothing is stopped in this phase.
+          const planned: ExecutionSummary[] = []
           if (originProductSpaceId && !offlineRevalidation) {
-            const originEntries: RegisteredProductSpaceExecution[] = []
             for (const execution of listRegisteredProductSpaceExecutions()) {
               if (execution.scope.accountId !== trustedAccountId) continue
               if (execution.scope.productSpaceId !== originProductSpaceId) continue
@@ -436,29 +454,14 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
               } catch {
                 active = true
               }
-              if (active) originEntries.push(execution)
-            }
-            stopped = await stopRegisteredExecutionsOnce(originEntries)
-          }
-
-          const remaining = []
-          for (const execution of listRegisteredProductSpaceExecutions()) {
-            if (execution.scope.accountId !== trustedAccountId) continue
-            if (execution.scope.productSpaceId !== originProductSpaceId) continue
-            let active: boolean
-            try {
-              active = Boolean(await execution.isActive())
-            } catch {
-              active = true
-            }
-            if (active) remaining.push(execution)
-          }
-          if (remaining.length > 0) {
-            return {
-              success: false as const,
-              errorCode: 'runtime_stop_failed',
-              message: 'Origin ProductSpace still has running executions',
-              executions: stopped,
+              if (active) {
+                planned.push({
+                  executionId: EXECUTION_ID_SCHEMA.parse(execution.scope.executionId),
+                  scope: execution.scope,
+                  name: execution.name,
+                  status: 'running',
+                })
+              }
             }
           }
 
@@ -470,13 +473,15 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             originProductSpaceId: originProductSpaceId ?? '',
             fenceGeneration,
             createdAt: Date.now(),
+            status: offlineRevalidation ? 'ready' : 'prepared',
+            cancelled: false,
           })
           return {
             success: true as const,
             token,
             from: originProductSpaceId,
             to: targetProductSpaceId,
-            executions: stopped,
+            executions: planned,
           }
         } finally {
           setSwitchInProgress(false)
@@ -485,10 +490,116 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
     },
   )
 
-  // Phase 2: one-time token commit. Verifies the token, the fence generation
-  // (any revoke permanently invalidates prepared transactions) and — inside
-  // the lock — that the origin space still has zero running executions
-  // (nothing may have been registered between prepare and commit).
+  // Phase 1b: the cancellable stop dispatch. Runs OUTSIDE the switch lock so
+  // CANCEL_SWITCH can interleave; the pending transaction itself gates new
+  // starts for the whole window. Every dispatch is preceded by a
+  // cancellation check — after a cancel, executions that were not yet
+  // dispatched keep running.
+  server.handle(
+    RPC_CHANNELS.productSpace.STOP_SWITCH_EXECUTIONS,
+    async (_ctx, stopToken: unknown) => {
+      if (typeof stopToken !== 'string' || !stopToken) {
+        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch stop request is invalid' }
+      }
+      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+      if (!trustedAccountId) {
+        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
+      }
+      const pending = getPendingSwitchTransaction()
+      if (!pending || pending.token !== stopToken) {
+        return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'No matching prepared switch transaction' }
+      }
+      if (pending.accountId !== trustedAccountId) {
+        return { success: false as const, errorCode: 'FORBIDDEN', message: 'The prepared switch belongs to another account' }
+      }
+      if (pending.cancelled) {
+        setPendingSwitchTransaction(null)
+        setSwitchInProgress(false)
+        return { success: false as const, errorCode: 'SWITCH_CANCELLED', message: 'The switch was cancelled', executions: [] }
+      }
+      if (pending.status === 'ready') {
+        // Already finalized (idempotent retry of the stop phase).
+        return { success: true as const, executions: [] }
+      }
+      pending.status = 'stopping'
+
+      const originProductSpaceId = pending.originProductSpaceId || null
+      const dispatched: Array<RegisteredProductSpaceExecution> = []
+      const statuses: Record<string, 'stopped' | 'failed'> = {}
+
+      setSwitchInProgress(true)
+      try {
+        for (const execution of listRegisteredProductSpaceExecutions()) {
+          if (execution.scope.accountId !== trustedAccountId) continue
+          if (execution.scope.productSpaceId !== originProductSpaceId) continue
+          let active: boolean
+          try {
+            active = Boolean(await execution.isActive())
+          } catch {
+            active = true
+          }
+          if (!active) continue
+          // Cancellation gate before EVERY dispatch.
+          const current = getPendingSwitchTransaction()
+          if (!current || current.token !== stopToken || current.cancelled) {
+            setPendingSwitchTransaction(null)
+            return {
+              success: false as const,
+              errorCode: 'SWITCH_CANCELLED',
+              message: 'The switch was cancelled during stopping',
+              executions: statusesToExecutionSummaries(dispatched, statuses),
+            }
+          }
+          dispatched.push(execution)
+          const [result] = await stopRegisteredExecutionsOnce([execution])
+          statuses[execution.scope.executionId] = result?.status ?? 'failed'
+        }
+
+        // Re-enumerate under the lock: zero origin executions is a hard
+        // precondition for finalizing the transaction as committable.
+        const finalized = await withSwitchLock(async () => {
+          const current = getPendingSwitchTransaction()
+          if (!current || current.token !== stopToken || current.cancelled) {
+            setPendingSwitchTransaction(null)
+            return false
+          }
+          for (const execution of listRegisteredProductSpaceExecutions()) {
+            if (execution.scope.accountId !== trustedAccountId) continue
+            if (execution.scope.productSpaceId !== originProductSpaceId) continue
+            let active: boolean
+            try {
+              active = Boolean(await execution.isActive())
+            } catch {
+              active = true
+            }
+            if (active) return false
+          }
+          current.status = 'ready'
+          return true
+        })
+        if (!finalized) {
+          // A failed stop phase consumes the transaction: the renderer's
+          // retry always re-prepares, so no dead token lingers.
+          setPendingSwitchTransaction(null)
+          return {
+            success: false as const,
+            errorCode: 'runtime_stop_failed',
+            message: 'Origin ProductSpace still has running executions',
+            executions: statusesToExecutionSummaries(dispatched, statuses),
+          }
+        }
+        return { success: true as const, executions: [] }
+      } finally {
+        setSwitchInProgress(false)
+      }
+    },
+  )
+
+  // Phase 2: one-time token commit. Requires the stop phase to have
+  // finalized the transaction ('ready'), then verifies the token, the fence
+  // generation (any revoke permanently invalidates prepared transactions)
+  // and — inside the lock — that the origin space still has zero running
+  // executions (nothing may have been registered between stop and commit).
   server.handle(
     RPC_CHANNELS.productSpace.COMMIT_SWITCH,
     async (_ctx, commitToken: unknown, targetProductSpaceId: unknown) => {
@@ -513,11 +624,20 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         if (pending.accountId !== trustedAccountId) {
           return { success: false as const, errorCode: 'FORBIDDEN', message: 'The prepared switch belongs to another account' }
         }
-        // Consume the token immediately: one-time use.
-        setPendingSwitchTransaction(null)
+        // A revoke (or any fence change) permanently invalidates the
+        // prepared transaction.
         if (pending.fenceGeneration !== getRuntimeFenceGeneration()) {
+          setPendingSwitchTransaction(null)
+          setSwitchInProgress(false)
           return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The prepared switch was superseded by a fence change' }
         }
+        if (pending.cancelled || pending.status !== 'ready') {
+          // The stop phase has not confirmed every origin execution terminal.
+          return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'The prepared switch has not finished stopping' }
+        }
+        // All checks green: consume the token (one-time use).
+        setPendingSwitchTransaction(null)
+        setSwitchInProgress(false)
         // Re-verify at commit time that the target is still visible to this
         // account under the current contract.
         const list = await fetchTrustedProductSpaceList()
@@ -552,22 +672,29 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
     },
   )
 
-  // Cancel is only valid before a commit: it releases the prepared
-  // transaction and leaves the origin fence untouched. After a commit the
-  // only recovery is the atomic reverse transaction.
+  // Cancel is valid at any point before a commit. It runs OUTSIDE the
+  // switch lock on purpose: during the stopping phase the renderer's cancel
+  // must reach Main immediately, before the next stop dispatch. Clearing
+  // the pending transaction both marks the cancellation (the stop phase
+  // checks before every dispatch — already-dispatched stops finish, but no
+  // further execution is touched) and invalidates the token.
   server.handle(
     RPC_CHANNELS.productSpace.CANCEL_SWITCH,
     async (_ctx, cancelToken: unknown) => {
       if (typeof cancelToken !== 'string' || !cancelToken) {
         return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch cancel request is invalid' }
       }
-      return withSwitchLock(async () => {
-        const pending = getPendingSwitchTransaction()
-        if (pending?.token === cancelToken) {
-          setPendingSwitchTransaction(null)
-        }
-        return { success: true as const }
-      })
+      const pending = getPendingSwitchTransaction()
+      if (pending?.token === cancelToken && !pending.cancelled) {
+        // Keep the transaction as a cancelled tombstone: the stop phase
+        // observes the flag before every dispatch and reports
+        // SWITCH_CANCELLED; a cancelled transaction no longer blocks new
+        // starts and is cleaned up by the stop phase, the TTL, or a
+        // superseding prepare.
+        pending.cancelled = true
+        setSwitchInProgress(false)
+      }
+      return { success: true as const }
     },
   )
 

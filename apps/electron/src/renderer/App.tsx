@@ -96,6 +96,7 @@ import {
   reportProductSpaceContractFailure,
   subscribeToProductSpaceContractFailures,
 } from '@/lib/product-space-contract-failure'
+import { onTargetProjectionFailure } from '@/lib/target-projection'
 
 /** App-level states for the ProductSpace-first client shell. */
 type AppState =
@@ -679,6 +680,31 @@ export default function App() {
       setSessionsLoaded(true)
     }
   }, [initializeSessions, initialSessionId, reconcilePermissionModeState, windowWorkspaceId])
+
+  // Any OTHER failing target projection (skills, sources, …) triggers the
+  // same automatic reverse transaction — never a half-loaded ready shell.
+  useEffect(() => {
+    return onTargetProjectionFailure(() => {
+      const committedSwitch = lastCommittedSwitchRef.current
+      if (!committedSwitch) return
+      if (Date.now() - committedSwitch.at >= ROLLBACK_WINDOW_MS) return
+      const entry = committedSwitch
+      lastCommittedSwitchRef.current = null
+      void productSpaceRef.current.rollbackToOrigin(entry.from)
+        .then(rolledBack => {
+          if (!rolledBack) throw new Error('rollback failed')
+          setSessionLoadError(null)
+          setSessionsLoaded(false)
+          void loadSessionsFromServer()
+        })
+        .catch(() => {
+          // The automatic rollback failed: restore the window so the safe
+          // error screen with the manual rollback action takes over.
+          lastCommittedSwitchRef.current = entry
+          toast.error(t('productSpace.rollback.failed'))
+        })
+    })
+  }, [loadSessionsFromServer])
 
   const refreshSessionListMetadataFromServer = useCallback(async (options: SessionListRefreshOptions = {}): Promise<Map<string, SessionMeta> | null> => {
     const {
@@ -2822,7 +2848,14 @@ export default function App() {
             <TabShellProvider
               key={productSpaceContextValue?.productSpaceContextKey ?? 'local-account'}
               workspaceId={windowWorkspaceId}
-              productSpaceScopeKey={productSpaceContextValue?.productSpaceContextKey ?? null}
+              productSpaceScope={
+                productSpaceContextValue?.accountId && productSpaceContextValue?.activeProductSpaceId
+                  ? {
+                      accountId: productSpaceContextValue.accountId,
+                      productSpaceId: productSpaceContextValue.activeProductSpaceId,
+                    }
+                  : null
+              }
             >
               <TabShell
               renderPolo={() => (

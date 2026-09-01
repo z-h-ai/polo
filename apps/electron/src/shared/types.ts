@@ -582,8 +582,8 @@ export interface ElectronAPI {
   sendDeepLinkActionResult(result: DeepLinkActionResult): void
 
   // Tab browser app launcher configuration
-  getTabBrowserApps(scope?: string): Promise<AppDefinition[]>
-  saveTabBrowserApps(apps: AppDefinition[], scope?: string): Promise<void>
+  getTabBrowserApps(): Promise<AppDefinition[]>
+  saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
 
   // Local App Bundle installation and runtime
   localApps: {
@@ -956,8 +956,19 @@ export interface ElectronAPI {
       token: string
       from: string | null
       to: string
-      executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
+      executions: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
     }
+    | {
+      success: false
+      errorCode: string
+      message?: string
+      executions?: Array<{ executionId: string; name: string; status: 'running' | 'stopped' | 'failed'; errorCode?: string }>
+    }
+  >
+  productSpaceStopSwitchExecutions(
+    token: string,
+  ): Promise<
+    | { success: true; executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }> }
     | {
       success: false
       errorCode: string

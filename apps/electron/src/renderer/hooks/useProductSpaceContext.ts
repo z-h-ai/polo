@@ -161,13 +161,12 @@ export function useProductSpaceContextState() {
   }, [persistVerifiedContext])
 
   /**
-   * Two-phase trusted switch. PREPARE (Main): verify the target against the
-   * account's contract-validated list, terminate origin executions,
-   * re-enumerate to zero and hold a one-time transaction token — the fence
-   * is NOT moved. The renderer then stages the target projections; only a
-   * fully staged target reaches COMMIT, which atomically moves the fence
-   * under the token. Cancel is only meaningful pre-commit; after a commit
-   * any failure recovers through the atomic reverse transaction.
+   * Phase 1 of the cancellable trusted switch. PREPARE (Main): verify the
+   * target against the account's contract-validated list and create the
+   * one-time transaction token BEFORE stopping anything — the token is held
+   * by the renderer from here on, so cancelling during the stopping phase
+   * is real. Nothing has been stopped when this resolves; the planned
+   * executions are returned for the stop dialog.
    */
   const prepareTrustedSwitch = useCallback(async (
     targetId: string,
@@ -178,17 +177,38 @@ export function useProductSpaceContextState() {
     statuses: Record<string, ExecutionSummary['status']>
   }> => {
     const result = await window.electronAPI.productSpacePrepareSwitch(targetId)
+    const statuses: Record<string, ExecutionSummary['status']> = {}
     if (result.success) {
-      const statuses: Record<string, ExecutionSummary['status']> = {}
+      preparedSwitchTokenRef.current = result.token
       for (const execution of result.executions) {
         statuses[execution.executionId] = execution.status
       }
-      preparedSwitchTokenRef.current = result.token
       return { ok: true, token: result.token, statuses }
     }
+    for (const execution of result.executions ?? []) {
+      statuses[execution.executionId] = execution.status
+    }
+    return { ok: false, errorCode: result.errorCode, statuses }
+  }, [])
+
+  /**
+   * Phase 1b: dispatch the terminations covered by the prepared token. Main
+   * checks cancellation before every dispatch; SWITCH_CANCELLED means the
+   * renderer cancelled while stopping (already-dispatched stops finished,
+   * untouched executions keep running).
+   */
+  const stopPreparedSwitchExecutions = useCallback(async (token: string): Promise<{
+    ok: boolean
+    errorCode?: string
+    statuses: Record<string, ExecutionSummary['status']>
+  }> => {
+    const result = await window.electronAPI.productSpaceStopSwitchExecutions(token)
     const statuses: Record<string, ExecutionSummary['status']> = {}
     for (const execution of result.executions ?? []) {
       statuses[execution.executionId] = execution.status
+    }
+    if (result.success) {
+      return { ok: true, statuses }
     }
     return { ok: false, errorCode: result.errorCode, statuses }
   }, [])
@@ -243,6 +263,11 @@ export function useProductSpaceContextState() {
     if (!accountId || !originId) return false
     const prepared = await prepareTrustedSwitch(originId)
     if (!prepared.ok) return false
+    const stopped = await stopPreparedSwitchExecutions(prepared.token!)
+    if (!stopped.ok) {
+      await cancelPreparedSwitch()
+      return false
+    }
     try {
       await commitPreparedSwitch(originId)
     } catch {
@@ -256,13 +281,14 @@ export function useProductSpaceContextState() {
       originId,
     )
     return true
-  }, [cancelPreparedSwitch, commitPreparedSwitch, prepareTrustedSwitch, publishCommittedSelection])
+  }, [cancelPreparedSwitch, commitPreparedSwitch, prepareTrustedSwitch, publishCommittedSelection, stopPreparedSwitchExecutions])
 
   /**
    * Bootstrap initial declaration and membership-loss fallbacks run through
-   * the same two-phase trusted transaction: Main verifies the target and
-   * terminates origin executions in prepare, the renderer confirms readiness,
-   * and the one-time token commit moves the fence.
+   * the same cancellable trusted transaction: Main verifies the target and
+   * creates the token, the stop phase terminates origin executions (cancel
+   * still possible until each dispatch), and the one-time token commit
+   * moves the fence.
    */
   const executeAtomicSwitch = useCallback(async (
     targetId: string,
@@ -275,18 +301,25 @@ export function useProductSpaceContextState() {
     if (!prepared.ok) {
       return { ok: false, errorCode: prepared.errorCode, statuses: prepared.statuses }
     }
+    const stopped = await stopPreparedSwitchExecutions(prepared.token!)
+    if (!stopped.ok) {
+      if (stopped.errorCode === 'SWITCH_CANCELLED') {
+        return { ok: false, errorCode: 'SWITCH_CANCELLED', statuses: stopped.statuses }
+      }
+      return { ok: false, errorCode: stopped.errorCode ?? 'runtime_stop_failed', statuses: stopped.statuses }
+    }
     try {
       await commitPreparedSwitch(targetId)
-      return { ok: true, statuses: prepared.statuses }
+      return { ok: true, statuses: stopped.statuses }
     } catch (caught) {
       const record = (caught ?? {}) as Record<string, unknown>
       return {
         ok: false,
         errorCode: typeof record.code === 'string' ? record.code : 'runtime_commit_failed',
-        statuses: prepared.statuses,
+        statuses: stopped.statuses,
       }
     }
-  }, [commitPreparedSwitch, prepareTrustedSwitch])
+  }, [commitPreparedSwitch, prepareTrustedSwitch, stopPreparedSwitchExecutions])
 
   const applySpaceSelection = useCallback(async (
     accountId: string,
@@ -677,7 +710,8 @@ export function useProductSpaceContextState() {
       errorCode: null,
     })
 
-    // No running items: verify the target and commit without a stop dialog.
+    // No running items: verify the target, finalize the (empty) stop phase,
+    // and commit without a stop dialog.
     if (executions.length === 0) {
       const generation = switchGenerationRef.current
       const prepared = await prepareTrustedSwitch(targetId)
@@ -690,13 +724,23 @@ export function useProductSpaceContextState() {
         ))
         return
       }
+      const stopped = await stopPreparedSwitchExecutions(prepared.token!)
+      if (await abandonSwitchIfStale(generation)) return
+      if (!stopped.ok) {
+        setPendingSwitch(previous => (
+          previous && previous.targetId === targetId
+            ? { ...previous, phase: 'target-failed', errorCode: stopped.errorCode ?? 'runtime_stop_failed' }
+            : previous
+        ))
+        return
+      }
       const scope = {
         accountId,
         generation: accountScopeGenerationRef.current,
       }
       await finishSwitchAfterStop(scope, generation, targetId)
     }
-  }, [abandonSwitchIfStale, finishSwitchAfterStop, listActiveExecutions, prepareTrustedSwitch])
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, listActiveExecutions, prepareTrustedSwitch, stopPreparedSwitchExecutions])
 
   const confirmStopAndSwitch = useCallback(async (): Promise<void> => {
     const accountId = accountIdRef.current
@@ -745,9 +789,32 @@ export function useProductSpaceContextState() {
         ))
         return
       }
+      // The token is already held: Main dispatches the terminations now and
+      // checks cancellation before every dispatch, so the frozen cancel
+      // button is real during this phase.
+      const stopped = await stopPreparedSwitchExecutions(committed.token!)
+      if (stopped.errorCode === 'SWITCH_CANCELLED') {
+        // The user cancelled during stopping: Main left every not-yet-
+        // dispatched execution running and released the transaction.
+        return
+      }
+      if (await abandonSwitchIfStale(generation)) return
+      if (!stopped.ok) {
+        setPendingSwitch(previous => (
+          previous && previous.targetId === targetId
+            ? {
+                ...previous,
+                phase: 'stop-failed',
+                statuses: stopped.statuses,
+                errorCode: stopped.errorCode ?? 'runtime_stop_failed',
+              }
+            : previous
+        ))
+        return
+      }
       setPendingSwitch(previous => (
         previous && previous.targetId === targetId
-          ? { ...previous, phase: 'target-loading', statuses: committed.statuses, errorCode: null }
+          ? { ...previous, phase: 'target-loading', statuses: stopped.statuses, errorCode: null }
           : previous
       ))
       await finishSwitchAfterStop(scope, generation, targetId)
@@ -766,7 +833,7 @@ export function useProductSpaceContextState() {
         return { ...previous, phase: 'stop-failed', statuses, errorCode }
       })
     }
-  }, [abandonSwitchIfStale, finishSwitchAfterStop, pendingSwitch, prepareTrustedSwitch])
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, pendingSwitch, prepareTrustedSwitch, stopPreparedSwitchExecutions])
 
   const retryFailedStops = useCallback(async (): Promise<void> => {
     await confirmStopAndSwitch()
@@ -785,8 +852,10 @@ export function useProductSpaceContextState() {
       previous ? { ...previous, phase: 'target-loading', errorCode: null } : previous
     ))
     // A commit-level failure consumes the one-time token at Main. Retry must
-    // re-prepare the trusted transaction before re-staging and committing;
-    // a still-held token (pre-commit staging failure) is reused as-is.
+    // re-prepare the trusted transaction (and re-run the stop phase, since
+    // commit requires the finalized 'ready' state) before re-staging and
+    // committing; a still-held token (pre-commit staging failure) is reused
+    // as-is with its already-finalized stop phase.
     if (!preparedSwitchTokenRef.current) {
       const prepared = await prepareTrustedSwitch(targetId)
       if (await abandonSwitchIfStale(generation)) return
@@ -798,9 +867,19 @@ export function useProductSpaceContextState() {
         ))
         return
       }
+      const stopped = await stopPreparedSwitchExecutions(prepared.token!)
+      if (await abandonSwitchIfStale(generation)) return
+      if (!stopped.ok) {
+        setPendingSwitch(previous => (
+          previous && previous.targetId === targetId
+            ? { ...previous, phase: 'target-failed', errorCode: stopped.errorCode ?? 'runtime_stop_failed' }
+            : previous
+        ))
+        return
+      }
     }
     await finishSwitchAfterStop(scope, generation, targetId)
-  }, [abandonSwitchIfStale, finishSwitchAfterStop, prepareTrustedSwitch])
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, prepareTrustedSwitch, stopPreparedSwitchExecutions])
 
   const cancelSwitch = useCallback((): void => {
     switchGenerationRef.current += 1

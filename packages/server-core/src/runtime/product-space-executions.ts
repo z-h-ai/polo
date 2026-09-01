@@ -232,10 +232,19 @@ export async function stopRegisteredProductSpaceExecutionsForAccount(accountId: 
 }
 
 /**
- * A prepared (not yet committed) switch transaction. The token is one-time:
- * only the renderer that prepared the switch may commit it, and any revoke
- * invalidates the whole transaction via the fence generation.
+ * A prepared (not yet committed) switch transaction. The token is one-time
+ * and is created BEFORE any execution is stopped, so the renderer can cancel
+ * while stopping is still in progress:
+ *
+ * - `prepared`: target verified, token held by the renderer, nothing stopped
+ *   yet. Cancellation is fully clean — no stop has been dispatched.
+ * - `stopping`: the stop phase is dispatching; cancellation prevents any
+ *   further dispatch but cannot recall stops already sent.
+ * - `ready`: every origin execution confirmed terminal; only now can the
+ *   token commit the fence.
  */
+export type PendingSwitchStatus = 'prepared' | 'stopping' | 'ready'
+
 export interface PendingSwitchTransaction {
   token: string
   /** Bound at prepare time; only this account may commit the token. */
@@ -244,6 +253,9 @@ export interface PendingSwitchTransaction {
   originProductSpaceId: string
   fenceGeneration: number
   createdAt: number
+  status: PendingSwitchStatus
+  /** Set by CANCEL_SWITCH; every stop dispatch checks it first. */
+  cancelled: boolean
 }
 
 const SWITCH_TRANSACTION_TTL_MS = 120_000
@@ -302,8 +314,10 @@ export async function withSwitchLock<T>(operation: () => Promise<T>): Promise<T>
 }
 
 /**
- * While a switch transaction is in flight, every path that could move an
- * execution into running/preparing must refuse to start.
+ * While a switch transaction is in flight — including the async window
+ * between prepare and the stop phase — every path that could move an
+ * execution into running/preparing must refuse to start. A live (non-
+ * expired) pending transaction keeps this true even between RPCs.
  */
 let switchInProgress = false
 
@@ -312,5 +326,8 @@ export function setSwitchInProgress(inProgress: boolean): void {
 }
 
 export function isSwitchInProgress(): boolean {
-  return switchInProgress
+  const pending = getPendingSwitchTransaction()
+  // A cancelled transaction is a tombstone kept only so the stop phase can
+  // report SWITCH_CANCELLED — it must not keep blocking new starts.
+  return switchInProgress || (pending !== null && !pending.cancelled)
 }
