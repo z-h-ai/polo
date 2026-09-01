@@ -520,6 +520,39 @@ describe('Electron final artifact validation pipeline', () => {
   // dist/resources/ — while the Pi subprocess bundle survives. Static
   // script-text scans cannot catch a stale artifact; this exercises the
   // real staging function against a planted sentinel.
+  // CALL-GRAPH REGRESSION: the electron dev entry must keep the wrapper/leaf
+  // split for the Pi agent server bundle — exactly ONE orchestration wrapper
+  // (which owns the failure policy: a failed build stops the dev entry via
+  // process.exit) and exactly ONE leaf builder returning {success, error}.
+  // If the two collapse into one name, the later leaf declaration wins and
+  // the failure result is silently swallowed.
+  it('electron dev keeps the pi bundle wrapper/leaf split with failure propagation', () => {
+    const dev = read('scripts/electron-dev.ts')
+
+    const wrapperName = 'ensurePiAgentServerBuiltForDev'
+    const leafName = 'buildPiAgentServer'
+
+    // Exactly one declaration of each — no shadowing/recursive collapse.
+    expect((dev.match(new RegExp(`async function ${leafName}\\(`, 'g')) ?? []).length).toBe(1)
+    expect((dev.match(new RegExp(`async function ${wrapperName}\\(`, 'g')) ?? []).length).toBe(1)
+
+    // The leaf returns the failure-bearing result contract.
+    expect(dev).toContain(`async function ${leafName}(): Promise<{ success: boolean; error?: string }>`)
+
+    // The wrapper calls the LEAF once, inspects its result, and exits on
+    // failure — the failure must never be swallowed.
+    const wrapperStart = dev.indexOf(`async function ${wrapperName}(`)
+    const wrapperBody = dev.slice(wrapperStart, dev.indexOf('\n}', wrapperStart))
+    expect(wrapperBody).toContain('await buildPiAgentServer()')
+    expect(wrapperBody).toContain('!piResult.success')
+    expect(wrapperBody).toContain('process.exit(1)')
+    // No self-recursion: the wrapper never awaits itself.
+    expect(wrapperBody).not.toContain(`await ${wrapperName}()`)
+
+    // The dev entry routes through the wrapper (failure policy applied).
+    expect(dev).toContain(`await ${wrapperName}()`)
+  })
+
   it('resource staging prunes a stale session-mcp-server sidecar from source and dist and keeps the pi bundle', async () => {
     const { stageResources } = await import(join(root, 'apps', 'electron', 'scripts', 'copy-assets.ts'))
     const electronDir = mkdtempSync(join(tmpdir(), 'polo-resource-staging-'))

@@ -212,8 +212,11 @@ async function buildWaWorker(): Promise<void> {
   }
 }
 
-// Build the Pi agent server subprocess bundle (one-time, no watch needed)
-async function buildPiAgentServer(): Promise<void> {
+// Dev orchestration for the Pi agent server subprocess bundle (one-time, no
+// watch needed). Wraps the leaf builder below and owns the failure policy: a
+// failed bundle build must STOP the dev entry instead of booting Electron
+// against a missing or stale artifact.
+async function ensurePiAgentServerBuiltForDev(): Promise<void> {
   console.log("🌉 Building Pi agent server...");
 
   // Ensure dist directory exists
@@ -397,7 +400,7 @@ async function main(): Promise<void> {
   copyResources();
 
   // Build the Pi agent server subprocess bundle
-  await buildPiAgentServer();
+  await ensurePiAgentServerBuiltForDev();
 
   // Build WhatsApp worker bundle so the adapter can spawn it on demand
   await buildWaWorker();
