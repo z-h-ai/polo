@@ -28,12 +28,16 @@ import {
   EXECUTION_STOP_POLL_INTERVAL_MS,
   getPendingSwitchTransaction,
   getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceAccount,
   getRuntimeFenceGeneration,
-  isSwitchInProgress,
+  isRuntimeFenceBoundToAccount,
+  isRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
+  revokeRuntimeProductSpaceFence,
   setPendingSwitchTransaction,
   setRuntimeActiveProductSpace,
+  setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
   setSwitchInProgress,
   stopAllRegisteredProductSpaceExecutions,
@@ -130,6 +134,15 @@ async function resolveTrustedExecutionRequest(
       success: false,
       errorCode: PRODUCT_SPACE_CONTEXT_REQUIRED,
       message: 'No committed ProductSpace is active on this device',
+    }
+  }
+  // The fence is account-scoped: a replaced account's stale fence is never
+  // operable — the renderer must re-bootstrap and commit a fresh fence.
+  if (!isRuntimeFenceBoundToAccount(trustedAccountId)) {
+    return {
+      success: false,
+      errorCode: PRODUCT_SPACE_CONTEXT_REQUIRED,
+      message: 'The committed ProductSpace belongs to a different account',
     }
   }
   if (requestedProductSpaceId !== activeProductSpaceId) {
@@ -375,7 +388,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
       return withSwitchLock(async () => {
         const originProductSpaceId = getRuntimeActiveProductSpace()
-        if (targetProductSpaceId === originProductSpaceId) {
+        // A fence committed for another (replaced) account is never
+        // switchable — it must be revoked and re-committed by a bootstrap.
+        if (originProductSpaceId && !isRuntimeFenceBoundToAccount(trustedAccountId)) {
+          return { success: false as const, errorCode: 'FORBIDDEN', message: 'The committed ProductSpace belongs to a different account' }
+        }
+        if (targetProductSpaceId === originProductSpaceId && !isRuntimeOfflineReadOnly()) {
           return {
             success: false as const,
             errorCode: 'VALIDATION_ERROR',
@@ -388,6 +406,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
 
         setSwitchInProgress(true)
         try {
+          // Online revalidation of the offline read-only view: the restored
+          // view shows the same space, so a plain switch would be rejected as
+          // a no-op. Instead this trusted transaction re-validates the
+          // contract and membership online and its commit atomically clears
+          // the offline read-only view (the fence itself is unchanged).
+          const offlineRevalidation = targetProductSpaceId === originProductSpaceId
           const list = await fetchTrustedProductSpaceList()
           if (!list) {
             return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
@@ -396,9 +420,12 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           if (!target) {
             return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
           }
+          if (offlineRevalidation && target.accessMode !== 'active') {
+            return { success: false as const, errorCode: 'FORBIDDEN', message: 'The restored ProductSpace is no longer active' }
+          }
 
           let stopped: Awaited<ReturnType<typeof stopRegisteredExecutionsOnce>> = []
-          if (originProductSpaceId) {
+          if (originProductSpaceId && !offlineRevalidation) {
             const originEntries: RegisteredProductSpaceExecution[] = []
             for (const execution of listRegisteredProductSpaceExecutions()) {
               if (execution.scope.accountId !== trustedAccountId) continue
@@ -515,8 +542,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             return { success: false as const, errorCode: 'runtime_stop_failed', message: 'Origin executions appeared after prepare' }
           }
         }
-        // A successful online commit ends the offline read-only view.
+        // A successful online commit ends the offline read-only view and
+        // (re)binds the fence to the committing trusted account.
         setRuntimeOfflineReadOnly(false)
+        setRuntimeActiveProductSpaceAccount(trustedAccountId)
         setRuntimeActiveProductSpace(targetProductSpaceId)
         return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
       })
@@ -559,13 +588,10 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       if (!trustedAccountId) {
         return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session' }
       }
-      await withSwitchLock(async () => {
-        // The pending transaction record is deliberately kept: its commit
-        // consumes the token, then fails on the advanced fence generation —
-        // a prepared switch can never land after a revoke.
-        setRuntimeOfflineReadOnly(false)
-        setRuntimeActiveProductSpace(null)
-      })
+      // The pending transaction record is deliberately kept: its commit
+      // consumes the token, then fails on the advanced fence generation —
+      // a prepared switch can never land after a revoke.
+      await revokeRuntimeProductSpaceFence()
       return { success: true as const }
     },
   )
@@ -607,6 +633,9 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
       const activeId = listed?.id ?? list.data.personalProductSpaceId
       setPendingSwitchTransaction(null)
       setRuntimeOfflineReadOnly(true)
+      // The restored read-only view belongs to the trusted account that owns
+      // the verified snapshot — never to a replaced account.
+      setRuntimeActiveProductSpaceAccount(trustedAccountId)
       setRuntimeActiveProductSpace(activeId)
       return {
         success: true as const,

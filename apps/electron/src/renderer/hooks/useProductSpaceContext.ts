@@ -211,6 +211,21 @@ export function useProductSpaceContextState() {
   }, [])
 
   /**
+   * A switch that lost its generation while Main was preparing (the user
+   * cancelled during stopping/target-loading) must still deterministically
+   * consume whatever one-time token the prepare produced — otherwise the
+   * pending Main transaction lingers until its TTL and a later prepare has
+   * to supersede it. Stopping cannot be undone, so cancelling here never
+   * revives stopped executions; it only releases the prepared transaction.
+   */
+  const abandonSwitchIfStale = useCallback(async (generation: number): Promise<boolean> => {
+    if (generation === switchGenerationRef.current) return false
+    pendingTargetRef.current = null
+    await cancelPreparedSwitch()
+    return true
+  }, [cancelPreparedSwitch])
+
+  /**
    * Trusted reverse transaction used when anything fails after a commit:
    * Main re-runs the same verification/termination for the origin space and
    * atomically restores its fence, after which the renderer republishes the
@@ -294,7 +309,10 @@ export function useProductSpaceContextState() {
     setPersonalProductSpaceId(parsed.personalProductSpaceId)
   }, [])
 
-  const fetchProductSpaces = useCallback(async (scope: AccountScope): Promise<{
+  const fetchProductSpaces = useCallback(async (scope: AccountScope, options?: {
+    /** Publish the fetched list into renderer state (default true). */
+    publishList?: boolean
+  }): Promise<{
     list: ProductSpaceSummary[]
     personalId: string
   } | null> => {
@@ -313,7 +331,11 @@ export function useProductSpaceContextState() {
     if (!parsed.personalProductSpaceId || parsed.productSpaces.length === 0) {
       throw { code: 'product_space_list_invalid' }
     }
-    applyListResponse(parsed)
+    // A membership-loss refresh must not publish the new list before the
+    // fallback transaction committed — callers stage it instead.
+    if (options?.publishList !== false) {
+      applyListResponse(parsed)
+    }
     return {
       list: parsed.productSpaces,
       personalId: parsed.personalProductSpaceId,
@@ -433,14 +455,11 @@ export function useProductSpaceContextState() {
       generation: accountScopeGenerationRef.current,
     }
     try {
-      const fetched = await fetchProductSpaces(scope)
+      // The fetched list is staged locally: it is only published together
+      // with a consistent active selection, never before the membership
+      // evaluation completes.
+      const fetched = await fetchProductSpaces(scope, { publishList: false })
       if (!fetched) return null
-      persistVerifiedContext(
-        accountId,
-        fetched.list,
-        fetched.personalId,
-        activeProductSpaceIdRef.current,
-      )
 
       const listedIds = new Set<string>(fetched.list.map(space => space.id as string))
       setUnavailableSpaceIds(previous => new Set(
@@ -448,27 +467,44 @@ export function useProductSpaceContextState() {
       ))
 
       const activeId = activeProductSpaceIdRef.current
-      if (!activeId) return fetched.list
+      if (!activeId) {
+        applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
+        persistVerifiedContext(accountId, fetched.list, fetched.personalId, null)
+        return fetched.list
+      }
       const active = fetched.list.find(space => space.id === activeId)
-      if (active && isActiveSpace(active)) return fetched.list
+      if (active && isActiveSpace(active)) {
+        applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
+        persistVerifiedContext(accountId, fetched.list, fetched.personalId, activeId)
+        return fetched.list
+      }
 
       // A removed membership makes the space disappear from the server list;
       // membership loss returns the account to personal space without
-      // confirmation, per the shared operation contract. The same atomic
-      // stop-all fence guards this path: if any execution cannot be
-      // terminated, the account stays on the old space (safe degraded state)
-      // instead of half-switching. A read-only space stays entered so its
-      // restriction reason remains visible.
+      // confirmation, per the shared operation contract. The stop-all fence
+      // guards this path: the personal fallback transaction must fully
+      // commit BEFORE the new list and selection are published together —
+      // a half-published refresh can never render. A read-only space stays
+      // entered so its restriction reason remains visible.
       if (!active && activeId !== fetched.personalId) {
-        // Same trusted transaction, no confirmation needed for membership
-        // loss. Any rejection keeps the old space and degrades safely.
         try {
           await applySpaceSelection(accountId, fetched.list, fetched.personalId, fetched.personalId)
         } catch {
+          // Fail-closed: keep the last complete verified projection (the old
+          // list is still published state) and surface the safe error page —
+          // Apps, assistant, files and writes stay blocked there. Publishing
+          // a list that lacks the active space would render a providerless
+          // shell.
           setFlowState('error')
-          return fetched.list
+          return null
         }
+        applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
+        persistVerifiedContext(accountId, fetched.list, fetched.personalId, fetched.personalId)
+        return fetched.list
       }
+
+      applyListResponse({ productSpaces: fetched.list, personalProductSpaceId: fetched.personalId })
+      persistVerifiedContext(accountId, fetched.list, fetched.personalId, activeId)
       return fetched.list
     } catch (caught) {
       const record = (caught ?? {}) as Record<string, unknown>
@@ -479,7 +515,7 @@ export function useProductSpaceContextState() {
       // Refresh failures keep the current space and its member relationships.
       return null
     }
-  }, [applySpaceSelection, enterContractBlocked, fetchProductSpaces, persistVerifiedContext])
+  }, [applyListResponse, applySpaceSelection, enterContractBlocked, fetchProductSpaces, persistVerifiedContext])
 
   const listActiveExecutions = useCallback(async (): Promise<ExecutionSummary[] | null> => {
     const accountId = accountIdRef.current
@@ -536,7 +572,7 @@ export function useProductSpaceContextState() {
     targetId: string,
   ): Promise<void> => {
     const verification = await verifyTargetStillAccessible(scope, targetId)
-    if (generation !== switchGenerationRef.current) return
+    if (await abandonSwitchIfStale(generation)) return
     if (verification === 'access-lost') {
       setPendingSwitch(previous => (
         previous && previous.targetId === targetId
@@ -604,7 +640,7 @@ export function useProductSpaceContextState() {
       personalProductSpaceIdRef.current ?? targetId,
       targetId,
     )
-  }, [commitPreparedSwitch, enterContractBlocked, publishCommittedSelection, verifyTargetStillAccessible])
+  }, [abandonSwitchIfStale, commitPreparedSwitch, enterContractBlocked, publishCommittedSelection, verifyTargetStillAccessible])
 
   const requestSwitch = useCallback(async (targetId: string): Promise<void> => {
     const accountId = accountIdRef.current
@@ -645,7 +681,7 @@ export function useProductSpaceContextState() {
     if (executions.length === 0) {
       const generation = switchGenerationRef.current
       const prepared = await prepareTrustedSwitch(targetId)
-      if (generation !== switchGenerationRef.current) return
+      if (await abandonSwitchIfStale(generation)) return
       if (!prepared.ok) {
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
@@ -660,7 +696,7 @@ export function useProductSpaceContextState() {
       }
       await finishSwitchAfterStop(scope, generation, targetId)
     }
-  }, [finishSwitchAfterStop, listActiveExecutions, prepareTrustedSwitch])
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, listActiveExecutions, prepareTrustedSwitch])
 
   const confirmStopAndSwitch = useCallback(async (): Promise<void> => {
     const accountId = accountIdRef.current
@@ -687,7 +723,7 @@ export function useProductSpaceContextState() {
     ))
     try {
       const committed = await prepareTrustedSwitch(targetId)
-      if (generation !== switchGenerationRef.current) return
+      if (await abandonSwitchIfStale(generation)) return
       if (!committed.ok) {
         if (committed.errorCode === 'runtime_stop_failed') {
           setPendingSwitch(previous => (
@@ -730,7 +766,7 @@ export function useProductSpaceContextState() {
         return { ...previous, phase: 'stop-failed', statuses, errorCode }
       })
     }
-  }, [finishSwitchAfterStop, pendingSwitch, prepareTrustedSwitch])
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, pendingSwitch, prepareTrustedSwitch])
 
   const retryFailedStops = useCallback(async (): Promise<void> => {
     await confirmStopAndSwitch()
@@ -753,7 +789,7 @@ export function useProductSpaceContextState() {
     // a still-held token (pre-commit staging failure) is reused as-is.
     if (!preparedSwitchTokenRef.current) {
       const prepared = await prepareTrustedSwitch(targetId)
-      if (generation !== switchGenerationRef.current) return
+      if (await abandonSwitchIfStale(generation)) return
       if (!prepared.ok) {
         setPendingSwitch(previous => (
           previous && previous.targetId === targetId
@@ -764,7 +800,7 @@ export function useProductSpaceContextState() {
       }
     }
     await finishSwitchAfterStop(scope, generation, targetId)
-  }, [finishSwitchAfterStop, prepareTrustedSwitch])
+  }, [abandonSwitchIfStale, finishSwitchAfterStop, prepareTrustedSwitch])
 
   const cancelSwitch = useCallback((): void => {
     switchGenerationRef.current += 1

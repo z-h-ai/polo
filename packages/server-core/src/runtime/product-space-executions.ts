@@ -137,8 +137,11 @@ export function resetProductSpaceExecutionRegistryForTests(): void {
  * the Main-side switch transaction (never by renderer RPC). While set, the
  * runtime hides sessions and rejects session operations bound to another
  * space; nothing can be re-classified from the renderer side after creation.
+ * The fence is account-scoped: a fence committed for account A is never
+ * usable by account B — it must be revoked and re-committed.
  */
 let runtimeActiveProductSpaceId: string | null = null
+let runtimeActiveAccountId: string | null = null
 
 /**
  * Monotonic fence generation. Every committed switch and every revoke
@@ -153,11 +156,79 @@ export function getRuntimeFenceGeneration(): number {
 
 export function setRuntimeActiveProductSpace(productSpaceId: string | null): void {
   runtimeActiveProductSpaceId = productSpaceId
+  if (productSpaceId === null) {
+    // Clearing the fence is a revoke: the account binding dies with it.
+    runtimeActiveAccountId = null
+  }
   runtimeFenceGeneration += 1
+}
+
+/** Binds (or re-binds) the trusted account of the committed fence. */
+export function setRuntimeActiveProductSpaceAccount(accountId: string | null): void {
+  runtimeActiveAccountId = accountId
+}
+
+export function getRuntimeActiveProductSpaceAccount(): string | null {
+  return runtimeActiveAccountId
+}
+
+/** The full committed fence scope, or null when no fence is committed. */
+export function getRuntimeActiveProductSpaceScope(): {
+  accountId: string
+  productSpaceId: string
+} | null {
+  return runtimeActiveProductSpaceId && runtimeActiveAccountId
+    ? { accountId: runtimeActiveAccountId, productSpaceId: runtimeActiveProductSpaceId }
+    : null
+}
+
+/**
+ * True only when a fence is committed AND bound to exactly this account.
+ * Every trusted runtime entry derives the account from the Admin session and
+ * must refuse a fence that belongs to a replaced account.
+ */
+export function isRuntimeFenceBoundToAccount(accountId: string | null): boolean {
+  return Boolean(
+    accountId
+    && runtimeActiveProductSpaceId
+    && runtimeActiveAccountId === accountId,
+  )
 }
 
 export function getRuntimeActiveProductSpace(): string | null {
   return runtimeActiveProductSpaceId
+}
+
+/**
+ * Main-side revoke: clears the fence (and its account binding) and the
+ * offline read-only flag inside the switch lock, advancing the fence
+ * generation so any prepared switch is permanently invalidated.
+ */
+export async function revokeRuntimeProductSpaceFence(): Promise<void> {
+  await withSwitchLock(async () => {
+    setRuntimeOfflineReadOnly(false)
+    setRuntimeActiveProductSpace(null)
+  })
+}
+
+/**
+ * Stops and unregisters every registered execution of one account —
+ * assistant sessions and Local Apps alike. Used by Admin session-ending and
+ * account replacement so a prior account can never keep executions running
+ * in the background after its trusted session is gone.
+ */
+export async function stopRegisteredProductSpaceExecutionsForAccount(accountId: string): Promise<{
+  ok: boolean
+  failedExecutionIds: string[]
+}> {
+  const entries = listRegisteredProductSpaceExecutions().filter(
+    execution => execution.scope.accountId === accountId,
+  )
+  const results = await stopRegisteredExecutionsOnce(entries)
+  const failedExecutionIds = results
+    .filter(result => result.status === 'failed')
+    .map(result => result.executionId)
+  return { ok: failedExecutionIds.length === 0, failedExecutionIds }
 }
 
 /**

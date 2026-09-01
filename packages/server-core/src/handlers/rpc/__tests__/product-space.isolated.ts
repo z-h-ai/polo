@@ -8,6 +8,7 @@ import {
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
   setRuntimeActiveProductSpace,
+  setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
   isRuntimeOfflineReadOnly,
   type RegisteredProductSpaceExecution,
@@ -121,6 +122,8 @@ function createHarness() {
 beforeEach(() => {
   resetProductSpaceExecutionRegistryForTests()
   setRuntimeActiveProductSpace(spaceA)
+  setRuntimeActiveProductSpaceAccount(trustedAccountId)
+  setRuntimeOfflineReadOnly(false)
   setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
   listResult = visibleList()
   setTrustedProductSpaceListFetcher(async () => listResult)
@@ -476,6 +479,61 @@ describe('offline read-only restore', () => {
     expect(getRuntimeActive()).toBe(spaceB)
     // Assistant/App starts consult the same flag — it must be cleared in
     // the same transaction that moved the fence.
+    expect(isRuntimeOfflineReadOnly()).toBe(false)
+  })
+
+  it('recovers online in-process when the offline view revalidates the same space', async () => {
+    // Offline view on spaceA; network returns and bootstrap selects the same
+    // space — a plain switch would be a no-op, so the trusted revalidation
+    // transaction clears the offline read-only view instead.
+    setRuntimeOfflineReadOnly(true)
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceA)
+    expect(prepared.success).toBe(true)
+    expect(isRuntimeOfflineReadOnly()).toBe(true)
+
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceA,
+    )
+    expect(committed.success).toBe(true)
+    expect(committed.from).toBe(spaceA)
+    expect(committed.to).toBe(spaceA)
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isRuntimeOfflineReadOnly()).toBe(false)
+
+    // The token is one-time here too.
+    const replay = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceA,
+    )
+    expect(replay.success).toBe(false)
+  })
+
+  it('keeps the offline view when the restored space lost membership', async () => {
+    setRuntimeOfflineReadOnly(true)
+    const { invoke } = createHarness()
+    listResult = {
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        { id: spaceB, kind: 'enterprise', name: 'B', accessMode: 'active' },
+        { id: personalId, kind: 'personal', name: '我的空间', accessMode: 'active' },
+      ],
+    }
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceA)
+    expect(prepared.success).toBe(false)
+    expect(prepared.errorCode).toBe('FORBIDDEN')
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isRuntimeOfflineReadOnly()).toBe(true)
+  })
+
+  it('still rejects a same-space switch outside the offline view', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceA)
+    expect(prepared.success).toBe(false)
+    expect(prepared.errorCode).toBe('VALIDATION_ERROR')
     expect(isRuntimeOfflineReadOnly()).toBe(false)
   })
 

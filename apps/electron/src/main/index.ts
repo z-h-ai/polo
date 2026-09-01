@@ -87,6 +87,7 @@ import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
+import { stopRegisteredProductSpaceExecutionsForAccount } from '@polo-ai/server-core/runtime/product-space-executions'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
@@ -954,8 +955,20 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
-            onAdminSessionEnding: (accountId: string) =>
-              getScopedLocalAppRuntimeRegistry().stopAccount(accountId),
+            onAdminSessionEnding: async (accountId: string) => {
+              // Account session-ending is total: every registered execution
+              // of the account — assistant sessions AND Local Apps — stops
+              // before the account is considered gone. The ProductSpace
+              // fence itself is revoked by the admin session coordinator.
+              const stopped = await stopRegisteredProductSpaceExecutionsForAccount(accountId)
+              if (!stopped.ok) {
+                mainLog.warn(
+                  '[ProductSpace] Some executions of the ending account could not be stopped:',
+                  stopped.failedExecutionIds.join(', '),
+                )
+              }
+              getScopedLocalAppRuntimeRegistry().stopAccount(accountId)
+            },
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },

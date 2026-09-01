@@ -582,8 +582,8 @@ export interface ElectronAPI {
   sendDeepLinkActionResult(result: DeepLinkActionResult): void
 
   // Tab browser app launcher configuration
-  getTabBrowserApps(): Promise<AppDefinition[]>
-  saveTabBrowserApps(apps: AppDefinition[]): Promise<void>
+  getTabBrowserApps(scope?: string): Promise<AppDefinition[]>
+  saveTabBrowserApps(apps: AppDefinition[], scope?: string): Promise<void>
 
   // Local App Bundle installation and runtime
   localApps: {

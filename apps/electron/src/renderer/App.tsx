@@ -413,6 +413,10 @@ export default function App() {
     productSpaceRefreshGenerationRef.current += 1
   }, [])
   const productSpace = useProductSpaceContextState()
+  // Stable access for callbacks defined before the hook value settles; the
+  // object identity changes every render but the ref always tracks the latest.
+  const productSpaceRef = useRef(productSpace)
+  productSpaceRef.current = productSpace
   const {
     bootstrap: bootstrapProductSpace,
     clearAccount: clearProductSpaceAccount,
@@ -605,8 +609,7 @@ export default function App() {
   const loadSessionsFromServer = useCallback(async () => {
     setSessionLoadError(null)
 
-    try {
-      // The runtime enforces the committed ProductSpace: sessions bound to
+    try {      // The runtime enforces the committed ProductSpace: sessions bound to
       // other spaces never cross the sessions:list boundary.
       const loadedSessions = await window.electronAPI.getSessions()
 
@@ -649,6 +652,27 @@ export default function App() {
         setSessionsLoaded(true)
         setSessionLoadError(null)
         return
+      }
+
+      // A target projection that fails right after a committed switch is a
+      // half-switched surface: the trusted reverse transaction back to the
+      // frozen origin space runs automatically — the user never has to
+      // discover a manual rollback. If the reverse transaction itself fails,
+      // the safe error screen with the manual rollback action remains.
+      const committedSwitch = lastCommittedSwitchRef.current
+      if (
+        committedSwitch
+        && Date.now() - committedSwitch.at < ROLLBACK_WINDOW_MS
+      ) {
+        const rolledBack = await productSpaceRef.current.rollbackToOrigin(committedSwitch.from)
+          .catch(() => false)
+        if (rolledBack) {
+          lastCommittedSwitchRef.current = null
+          setSessionLoadError(null)
+          setSessionsLoaded(false)
+          void loadSessionsFromServer()
+          return
+        }
       }
 
       setSessionLoadError(formatSessionLoadFailure(err))
@@ -2720,6 +2744,60 @@ export default function App() {
     )
   }
 
+  // Membership loss whose personal-space fallback failed: the last complete
+  // verified projection is kept, but the safe error page replaces the shell
+  // so Apps, assistant, files and writes stay blocked (never a providerless
+  // ready shell).
+  if (appState === 'ready' && productSpace.flowState === 'error') {
+    return (
+      <DismissibleLayerProvider>
+        <ModalProvider>
+          <WindowCloseHandler />
+          <div
+            className="flex h-full items-center justify-center p-6"
+            data-testid="product-space-error-screen"
+          >
+            <div className="max-w-lg rounded-xl border border-border/50 bg-background shadow-minimal p-6 text-center">
+              <h2 className="text-lg font-semibold text-foreground">
+                {t('productSpace.error.loadTitle')}
+              </h2>
+              <p className="mt-2 text-sm text-foreground/60">
+                {t('productSpace.error.loadDesc')}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  data-testid="product-space-error-logout"
+                  onClick={() => {
+                    void handleAdminLogout()
+                  }}
+                >
+                  {t('productSpace.error.logout')}
+                </Button>
+                <Button
+                  type="button"
+                  data-testid="product-space-error-retry"
+                  onClick={() => {
+                    void retryProductSpaceBootstrap().then(next => {
+                      if (next === 'ready') {
+                        continueAfterProductSpace(windowWorkspaceId)
+                      } else if (next === 'contract-blocked') {
+                        setAppState('contract-blocked')
+                      }
+                    }).catch(() => {})
+                  }}
+                >
+                  {t('productSpace.error.retry')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </ModalProvider>
+      </DismissibleLayerProvider>
+    )
+  }
+
   // Ready state - main app with splash overlay during data loading
   return (
     <PlatformProvider actions={platformActions}>
@@ -2744,6 +2822,7 @@ export default function App() {
             <TabShellProvider
               key={productSpaceContextValue?.productSpaceContextKey ?? 'local-account'}
               workspaceId={windowWorkspaceId}
+              productSpaceScopeKey={productSpaceContextValue?.productSpaceContextKey ?? null}
             >
               <TabShell
               renderPolo={() => (

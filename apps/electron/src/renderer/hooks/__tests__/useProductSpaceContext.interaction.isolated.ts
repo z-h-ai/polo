@@ -73,6 +73,7 @@ let switchResult: {
   executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
 }
 let commitResult: { success: boolean; errorCode?: string }
+const cancelledTokens: string[] = []
 let restoreViewResult: {
   success: boolean
   errorCode?: string
@@ -121,7 +122,10 @@ function configureIpc(): void {
         declaredActiveSpace = targetProductSpaceId
         return { success: true as const, from: 'space-personal', to: targetProductSpaceId }
       },
-      productSpaceCancelSwitch: async () => ({ success: true }),
+      productSpaceCancelSwitch: async (token: string) => {
+        cancelledTokens.push(token)
+        return { success: true as const }
+      },
       productSpaceRestoreOfflineView: async () => {
         if (restoreViewResult?.success && restoreViewResult.snapshot) {
           return { success: true as const, snapshot: restoreViewResult.snapshot }
@@ -186,6 +190,7 @@ beforeEach(() => {
   switchResult = { success: true, executions: [] }
   commitResult = { success: true }
   restoreViewResult = { success: false, errorCode: 'PRODUCT_SPACE_CONTEXT_REQUIRED' }
+  cancelledTokens.length = 0
   configureIpc()
 })
 
@@ -669,5 +674,95 @@ describe('useProductSpaceContextState enterprise refresh signals', () => {
     })
     expect(result.current.activeProductSpaceId).toBe('space-ent')
     expect(result.current.flowState).toBe('ready')
+  })
+
+  it('never publishes a list that lacks the active space when the fallback fails', async () => {
+    setStoredActiveProductSpaceId(accountId, 'space-ent')
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+
+    // The membership list loses space-ent AND the personal fallback
+    // transaction fails: the old complete projection stays published and the
+    // hook enters the fail-closed error state — never a half-published list.
+    listResult = {
+      success: true,
+      personalProductSpaceId: personalId,
+      productSpaces: [personalSpace],
+    }
+    activeContextAckSuccess = false
+    await act(async () => {
+      await result.current.refreshProductSpaces()
+    })
+    activeContextAckSuccess = true
+    expect(result.current.flowState).toBe('error')
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+    // The stale enterprise space is still present in the published (old,
+    // verified) list — no list without the active space was ever published.
+    expect(result.current.allProductSpaces.some(space => space.id === 'space-ent')).toBe(true)
+  })
+})
+
+describe('useProductSpaceContextState cancel race', () => {
+  it('consumes the prepared token when the user cancels during stopping', async () => {
+    const { result } = renderHook(useHarness)
+    await boot(result)
+
+    // Executions present → confirm phase; the prepare (which stops them)
+    // hangs until we release it.
+    let releasePrepare!: (value: {
+      success: true
+      token: string
+      from: string
+      to: string
+      executions: never[]
+    }) => void
+    const preparePromise = new Promise<typeof releasePrepare extends (value: infer V) => void ? V : never>(() => {})
+    Object.defineProperty(window.electronAPI, 'productSpacePrepareSwitch', {
+      configurable: true,
+      value: (targetProductSpaceId: string) => new Promise(resolve => {
+        releasePrepare = resolve
+        void targetProductSpaceId
+        void preparePromise
+      }),
+    })
+    executionsResult = {
+      success: true as const,
+      executions: [
+        { executionId: 'exec-1', name: 'Running item', status: 'running' },
+      ],
+    }
+
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    expect(result.current.pendingSwitch?.phase).toBe('confirm')
+
+    let stopping: Promise<void> = Promise.resolve()
+    await act(async () => {
+      stopping = result.current.confirmStopAndSwitch()
+    })
+    expect(result.current.pendingSwitch?.phase).toBe('stopping')
+
+    // The user cancels while Main is still preparing/stopping.
+    await act(async () => {
+      result.current.cancelSwitch()
+    })
+    expect(result.current.pendingSwitch).toBeNull()
+
+    // Main finishes stopping and returns the token — the stale switch must
+    // deterministically cancel/consume it.
+    await act(async () => {
+      releasePrepare({
+        success: true as const,
+        token: 'token-late',
+        from: personalId,
+        to: 'space-ent',
+        executions: [],
+      })
+      await stopping
+    })
+    expect(cancelledTokens).toContain('token-late')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
   })
 })

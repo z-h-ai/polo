@@ -37,6 +37,7 @@ import {
 import {
   getRuntimeActiveProductSpace,
   isSwitchInProgress,
+  isRuntimeFenceBoundToAccount,
   isRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
   registerProductSpaceExecution,
@@ -46,6 +47,7 @@ import {
 } from '@polo-ai/server-core/runtime/product-space-executions'
 import { setLegacyLocalAppCleaner } from '@polo-ai/server-core/runtime/legacy-state-cleaners'
 import { resolveTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
+import type { HandlerDeps } from './handler-deps'
 
 /**
  * Trusted active ProductSpace gate for every renderer-reachable Local App
@@ -466,8 +468,14 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.localApps.GET_LOGS,
 ] as const
 
-export function registerLocalAppHandlers(server: RpcServer): void {
+export function registerLocalAppHandlers(server: RpcServer, deps?: { windowManager?: HandlerDeps['windowManager'] }): void {
   void server
+  // The calling window's Workspace is resolved from the trusted Main-side
+  // window registry — never from renderer arguments.
+  const callerWorkspaceId = (ctx: { webContentsId?: number | null }): string | null => {
+    if (ctx.webContentsId == null) return null
+    return deps?.windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? null
+  }
   setLegacyLocalAppCleaner(async () => {
     const registry = getScopedLocalAppRuntimeRegistry()
     const failedRefs: string[] = []
@@ -593,12 +601,22 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   const registerLocalAppExecution = async (
     scope: CatalogLocalAppScope,
     name: string,
+    workspaceId: string | null,
   ): Promise<string> => {
     const accountId = await resolveTrustedProductSpaceAccountId()
     if (!accountId) {
       throw new LocalAppRuntimeError(
         'NOT_AUTHORIZED',
         'A trusted Admin session is required to start a ProductSpace app',
+      )
+    }
+    if (!workspaceId) {
+      // The shared contract requires an immutable accountId+ProductSpace+
+      // Workspace scope: an app start without a resolvable caller Workspace
+      // can never be attributed, so it is refused instead of placeholder-bound.
+      throw new LocalAppRuntimeError(
+        'INVALID_REQUEST',
+        'The calling window has no Workspace context for this app start',
       )
     }
     const registry = getScopedLocalAppRuntimeRegistry()
@@ -610,7 +628,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
         executionId,
         accountId,
         productSpaceId: scope.organizationId,
-        workspaceId: 'local-app-runtime',
+        workspaceId,
         subject: {
           kind: 'artifact_instance',
           artifactType: 'app',
@@ -654,6 +672,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   const startAndRegisterLocalApp = async (
     scope: CatalogLocalAppScope,
     startRuntime: () => Promise<{ version: string }>,
+    workspaceId: string | null,
   ) => {
     // Runs under the same mutex as PREPARE_SWITCH/COMMIT_SWITCH: a switch
     // transaction cannot interleave with a starting app, and the app cannot
@@ -664,6 +683,13 @@ export function registerLocalAppHandlers(server: RpcServer): void {
         throw new LocalAppRuntimeError(
           'PRODUCT_SPACE_CONTEXT_REQUIRED',
           'No committed ProductSpace is active on this device',
+        )
+      }
+      // A fence committed for another (replaced) account is never startable.
+      if (!isRuntimeFenceBoundToAccount(await resolveTrustedProductSpaceAccountId())) {
+        throw new LocalAppRuntimeError(
+          'PRODUCT_SPACE_CONTEXT_REQUIRED',
+          'The committed ProductSpace belongs to a different account',
         )
       }
       if (isSwitchInProgress()) {
@@ -688,27 +714,29 @@ export function registerLocalAppHandlers(server: RpcServer): void {
           'A ProductSpace switch superseded this start',
         )
       }
-      await registerLocalAppExecution(scope, result.version)
+      await registerLocalAppExecution(scope, result.version, workspaceId)
       return result
     })
   }
 
-  const startCatalogApp = async (scope: CatalogLocalAppScope) => {
-    const { accessMode } = await requireAuthorizedCatalogApp(scope)
-    const registry = getScopedLocalAppRuntimeRegistry()
-    if (accessMode === 'offline' && !await registry.isInstalledAndReady(scope)) {
-      throw new LocalAppRuntimeError(
-        'NOT_AUTHORIZED',
-        'Only installed and prepared organization apps can start while offline',
-      )
-    }
-    return startAndRegisterLocalApp(scope, () => registry.start(scope))
+  const startCatalogApp = (ctx: { webContentsId?: number | null }, scope: CatalogLocalAppScope) => {
+    return (async () => {
+      const { accessMode } = await requireAuthorizedCatalogApp(scope)
+      const registry = getScopedLocalAppRuntimeRegistry()
+      if (accessMode === 'offline' && !await registry.isInstalledAndReady(scope)) {
+        throw new LocalAppRuntimeError(
+          'NOT_AUTHORIZED',
+          'Only installed and prepared organization apps can start while offline',
+        )
+      }
+      return startAndRegisterLocalApp(scope, () => registry.start(scope), callerWorkspaceId(ctx))
+    })()
   }
 
-  server.handle(RPC_CHANNELS.localApps.START, (_ctx, reference: unknown) =>
+  server.handle(RPC_CHANNELS.localApps.START, (ctx, reference: unknown) =>
     withCatalogScope(
       reference,
-      startCatalogApp,
+      scope => startCatalogApp(ctx, scope),
     ))
 
   server.handle(RPC_CHANNELS.localApps.STOP, (_ctx, reference: unknown) =>
@@ -725,7 +753,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
       },
     ))
 
-  server.handle(RPC_CHANNELS.localApps.RESTART, (_ctx, reference: unknown) =>
+  server.handle(RPC_CHANNELS.localApps.RESTART, (ctx, reference: unknown) =>
     withCatalogScope(
       reference,
       async scope => {
@@ -738,7 +766,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
           )
         }
         unregisterLocalAppExecutions(scope)
-        return startAndRegisterLocalApp(scope, () => registry.restart(scope))
+        return startAndRegisterLocalApp(scope, () => registry.restart(scope), callerWorkspaceId(ctx))
       },
     ))
 

@@ -220,6 +220,7 @@ const { setTrustedProductSpaceAccountProvider } = await import(
 const {
   resetProductSpaceExecutionRegistryForTests: resetExecutionRegistry,
   setRuntimeActiveProductSpace,
+  setRuntimeActiveProductSpaceAccount,
   setRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
@@ -276,8 +277,10 @@ describe('local app main-process authorization boundary', () => {
   const handlers = new Map<string, Handler>()
   const context = {
     clientId: 'renderer',
+    webContentsId: 1 as number | null,
     signal: new AbortController().signal,
   }
+  let windowWorkspaceId: string | null = 'ws-window-a'
 
   beforeEach(() => {
     signedInAccountId = 'account-a'
@@ -285,6 +288,8 @@ describe('local app main-process authorization boundary', () => {
     accountAccessDenied = false
     appAccessDenied = false
     catalog = createCatalog(1)
+    windowWorkspaceId = 'ws-window-a'
+    context.webContentsId = 1
     getAppReleaseDownload.mockClear()
     handlers.clear()
     for (const handlerMock of [
@@ -332,8 +337,17 @@ describe('local app main-process authorization boundary', () => {
         return []
       },
     } satisfies RpcServer
-    registerLocalAppHandlers(server)
+    registerLocalAppHandlers(server, {
+      windowManager: {
+        getWorkspaceForWindow: (webContentsId: number) => (
+          context.webContentsId === webContentsId ? windowWorkspaceId : null
+        ),
+      },
+    } as never)
     setTrustedProductSpaceAccountProvider(async () => signedInAccountId)
+    if (signedInAccountId) {
+      setRuntimeActiveProductSpaceAccount(signedInAccountId)
+    }
     setRuntimeActiveProductSpace(signedInAccountId ? 'organization-a' : null)
     resetExecutionRegistry()
   })
@@ -356,6 +370,60 @@ describe('local app main-process authorization boundary', () => {
     expect(registered[0]!.scope.productSpaceId as string).toBe('organization-a')
     expect(registered[0]!.scope.executionId as string).toContain('organization-a')
     expect(await registered[0]!.isActive()).toBe(true)
+  })
+
+  it('binds each start to the calling window workspace and refuses workspace-less starts', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    await start(context, scope())
+    windowWorkspaceId = 'ws-window-b'
+    await start(context, scope())
+
+    const registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(2)
+    expect(registered.map(execution => execution.scope.workspaceId as string).sort())
+      .toEqual(['ws-window-a', 'ws-window-b'])
+    expect(new Set(registered.map(execution => execution.scope.executionId as string)).size).toBe(2)
+
+    // A caller without a Workspace context can never be attributed to an
+    // immutable scope, so the start is refused instead of placeholder-bound.
+    context.webContentsId = null
+    await expect(start(context, scope()))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )).toHaveLength(2)
+    context.webContentsId = 1
+  })
+
+  it('isolates the same app across workspaces and ProductSpaces', async () => {
+    const start = handlers.get(RPC_CHANNELS.localApps.START)!
+    // Workspace A inside the active space.
+    await start(context, scope())
+    // Workspace B inside the same active space.
+    windowWorkspaceId = 'ws-window-b'
+    await start(context, scope())
+
+    let registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(2)
+    for (const execution of registered) {
+      expect(execution.scope.accountId as string).toBe('account-a')
+      expect(execution.scope.productSpaceId as string).toBe('organization-a')
+    }
+
+    // A second ProductSpace fence: the same catalog scope from the first
+    // space is refused — cross-space starts are impossible.
+    setRuntimeActiveProductSpace('organization-b')
+    await expect(start(context, scope()))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+    registered = listRegisteredProductSpaceExecutions().filter(
+      execution => execution.kind === 'local_app',
+    )
+    expect(registered).toHaveLength(2)
+    expect(registered.every(execution => execution.scope.productSpaceId === 'organization-a')).toBe(true)
   })
 
   it('requests a short-lived download grant for the currently authorized release', async () => {

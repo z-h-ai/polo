@@ -4,6 +4,15 @@ import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { AdminLlmConnection } from '@polo-ai/shared/admin'
 import type { HandlerFn, RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import {
+  getRuntimeActiveProductSpace,
+  listRegisteredProductSpaceExecutions,
+  registerProductSpaceExecution,
+  resetProductSpaceExecutionRegistryForTests,
+  setRuntimeActiveProductSpace,
+  setRuntimeActiveProductSpaceAccount,
+  stopRegisteredProductSpaceExecutionsForAccount,
+} from '../../runtime/product-space-executions'
 
 type StoredTokens = {
   accessToken: string
@@ -576,6 +585,9 @@ beforeEach(() => {
   retainedCatalogAppIds.mockImplementation(async () => new Set())
   listStoredCredentials.mockClear()
   deleteStoredCredential.mockClear()
+  resetProductSpaceExecutionRegistryForTests()
+  setRuntimeActiveProductSpace(null)
+  setRuntimeActiveProductSpaceAccount(null)
   adminClientCalls.length = 0
   configState.adminUrl = 'https://admin.example.com'
   configState.adminConfigVersion = undefined
@@ -1186,6 +1198,68 @@ describe('registerAdminHandlers', () => {
       .toMatchObject({ authorizationStatus: 'denied' })
   })
 
+  it('stops the prior account executions and revokes its fence before the replacement starts', async () => {
+    managerState.tokens = {
+      accessToken: 'account-a-token',
+      refreshToken: 'account-a-refresh',
+      expiresAt: Date.now() + 3600_000,
+      userId: 'account-a',
+      username: 'account-a',
+    }
+    // Account A holds the committed fence and a still-running execution.
+    setRuntimeActiveProductSpaceAccount('account-a')
+    setRuntimeActiveProductSpace('space-a')
+    let assistantActive = true
+    let stopCalls = 0
+    registerProductSpaceExecution({
+      scope: {
+        contractVersion: 1,
+        executionId: 'exec-account-a-assistant',
+        accountId: 'account-a',
+        productSpaceId: 'space-a',
+        workspaceId: 'ws-a',
+        subject: { kind: 'built_in_app', builtInAppId: 'polo_assistant' },
+      } as never,
+      kind: 'assistant_session',
+      name: 'assistant',
+      ref: 'session-a',
+      isActive: () => assistantActive,
+      stop: async () => {
+        stopCalls += 1
+        assistantActive = false
+        return 'stopped'
+      },
+    })
+
+    const observed: Array<{ fence: string | null; executions: number }> = []
+    adminSessionEnding.mockImplementation(async (accountId: string) => {
+      // Mirrors the Main implementation: stop every registered execution of
+      // the ending account.
+      await stopRegisteredProductSpaceExecutionsForAccount(accountId)
+    })
+    adminSessionStarted.mockImplementation(async () => {
+      observed.push({
+        fence: getRuntimeActiveProductSpace(),
+        executions: listRegisteredProductSpaceExecutions().length,
+      })
+    })
+
+    const { login } = createHarness()
+    await login(
+      { clientId: 'client-1', workspaceId: null, webContentsId: null },
+      'admin',
+      'secret',
+    )
+
+    // The prior account's assistant execution was actually stopped.
+    expect(stopCalls).toBe(1)
+    expect(assistantActive).toBe(false)
+    // By the time account B's session starts, A's fence is revoked and none
+    // of A's executions remain registered.
+    expect(observed).toEqual([{ fence: null, executions: 0 }])
+    expect(managerState.tokens).toMatchObject({ userId: 'user-1' })
+  })
+
   it('discards account A organization success after login switches to B', async () => {
     managerState.tokens = {
       accessToken: 'account-a-token',
@@ -1555,12 +1629,17 @@ describe('registerAdminHandlers', () => {
 
     const staleLogout = authLogout(context)
     await cleanupStarted.promise
+    // Account replacement waits for the prior account's local cleanup
+    // (bounded in production by the execution-stop drain deadline) before
+    // account B's tokens land.
+    finishCleanup.resolve()
     expect(await login(context, 'account-b', 'secret')).toMatchObject({
       success: true,
       user: { id: 'account-b' },
     })
-    expect(adminSessionEnding).toHaveBeenCalledTimes(1)
-    finishCleanup.resolve()
+    // Call 1 is the logout cleanup; because it already completed, the
+    // replacement re-ran the (idempotent) cleanup callback before B landed.
+    expect(adminSessionEnding).toHaveBeenCalledTimes(2)
 
     expect(await staleLogout).toEqual({
       success: false,

@@ -4,19 +4,30 @@ import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
 import { describeUrlForLog } from './deep-link-log'
 import { windowLog } from './logger'
 
-export function installWebviewSecurityHandlers(): void {
-  const ses = session.fromPartition(BROWSER_PANE_SESSION_PARTITION)
-  const allow = new Set([
-    'fullscreen',
-    'pointerLock',
-    'window-management',
-    'notifications',
-    'geolocation',
-    'media',
-    'clipboard-read',
-    'clipboard-sanitized-write',
-    'idle-detection',
-  ])
+const allow = new Set([
+  'fullscreen',
+  'pointerLock',
+  'window-management',
+  'notifications',
+  'geolocation',
+  'media',
+  'clipboard-read',
+  'clipboard-sanitized-write',
+  'idle-detection',
+])
+
+const handledPartitions = new Set<string>()
+
+/**
+ * Installs the webview permission policy on a session partition. The base
+ * browser-pane partition is handled eagerly; ProductSpace-scoped tab-app
+ * partitions are created lazily per scope, so they are attached on first
+ * webview use through `web-contents-created`.
+ */
+function attachWebviewPermissionHandlers(partitionName: string): void {
+  if (handledPartitions.has(partitionName)) return
+  handledPartitions.add(partitionName)
+  const ses = session.fromPartition(partitionName)
 
   if (typeof ses.setPermissionCheckHandler === 'function') {
     ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
@@ -46,9 +57,20 @@ export function installWebviewSecurityHandlers(): void {
       callback(allowed)
     })
   }
+}
+
+export function installWebviewSecurityHandlers(): void {
+  attachWebviewPermissionHandlers(BROWSER_PANE_SESSION_PARTITION)
 
   app.on('web-contents-created', (_event, contents) => {
     if (contents.getType() !== 'webview') return
+
+    // Tab webapps run in per-ProductSpace partitions; make sure the same
+    // permission policy covers every scoped partition.
+    const partition = (contents.session as unknown as { partition?: string } | null)?.partition
+    if (partition?.startsWith('persist:tab-app-')) {
+      attachWebviewPermissionHandlers(partition)
+    }
 
     contents.setWindowOpenHandler((details) => {
       const classification = classifyExternalUrl(details.url)

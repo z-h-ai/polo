@@ -11,6 +11,12 @@ import {
 } from '@polo-ai/server-core/transport'
 import { CredentialManager } from '@polo-ai/shared/credentials'
 import type { HandlerDeps } from '../handler-deps'
+import { resolveTrustedProductSpaceAccountId } from './trusted-product-space-account'
+import {
+  getRuntimeActiveProductSpace,
+  isRuntimeFenceBoundToAccount,
+  isRuntimeOfflineReadOnly,
+} from '../../runtime/product-space-executions'
 import {
   CreatorSkillBackupDeleteRpcInputSchema,
   CreatorSkillBackupRpcInputSchema,
@@ -224,6 +230,49 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.creatorSkills.IGNORE_VERSION,
 ] as const
 
+/** Stable business-RPC error for an uncommitted (null) runtime fence. */
+export const SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED = 'PRODUCT_SPACE_CONTEXT_REQUIRED'
+
+/**
+ * Every Skills entry derives its scope from the trusted Admin session and
+ * the committed ProductSpace fence — never from renderer arguments. Without
+ * a trusted account or a committed fence bound to it, the Skills surface is
+ * closed: the same local Workspace can be entered from different
+ * ProductSpaces, so enumerating its files without the fence would leak one
+ * space's skill capabilities into another.
+ */
+async function requireTrustedSkillsScope(): Promise<{
+  accountId: string
+  productSpaceId: string
+}> {
+  const trustedAccountId = await resolveTrustedProductSpaceAccountId()
+  if (!trustedAccountId) {
+    throw Object.assign(new Error('No trusted Admin session is available'), {
+      code: SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED,
+    })
+  }
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  if (!activeProductSpaceId || !isRuntimeFenceBoundToAccount(trustedAccountId)) {
+    throw Object.assign(new Error('No committed ProductSpace is active for this account'), {
+      code: SKILLS_PRODUCT_SPACE_CONTEXT_REQUIRED,
+    })
+  }
+  return { accountId: trustedAccountId, productSpaceId: activeProductSpaceId }
+}
+
+/**
+ * The offline read-only view may read installed skills (they are part of the
+ * restored history surface) but every mutation is refused: installs and
+ * deletes must be re-validated against a fresh online membership first.
+ */
+function assertSkillsWritable(): void {
+  if (isRuntimeOfflineReadOnly()) {
+    throw Object.assign(new Error('The offline read-only view cannot modify skills'), {
+      code: 'OFFLINE_READ_ONLY',
+    })
+  }
+}
+
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
   const recoveryByWorkspaceRoot = new Map<string, Promise<void>>()
   const ensureRecovered = (workspaceRoot: string): Promise<void> => {
@@ -283,6 +332,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Get all skills for a workspace (and optionally project-level skills from workingDirectory)
   server.handle(RPC_CHANNELS.skills.GET, async (_ctx, workspaceId: string, workingDirectory?: string) => {
+    await requireTrustedSkillsScope()
     deps.platform.logger?.info(`SKILLS_GET: Loading skills for workspace: ${workspaceId}${workingDirectory ? `, workingDirectory: ${workingDirectory}` : ''}`)
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
@@ -302,6 +352,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Get files in a skill directory
   server.handle(RPC_CHANNELS.skills.GET_FILES, async (_ctx, workspaceId: string, skillSlug: string) => {
+    await requireTrustedSkillsScope()
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       deps.platform.logger?.error(`SKILLS_GET_FILES: Workspace not found: ${workspaceId}`)
@@ -357,6 +408,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         code: 'VALIDATION_ERROR',
       })
     }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const { workspaceId, skillSlug } = input.data
     const workspace = getBoundWorkspace(ctx, workspaceId, deps)
     if (!workspace) throw Object.assign(new Error('Workspace context mismatch'), {
@@ -410,6 +463,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!input.success) {
       return { success: false, errorCode: 'VALIDATION_ERROR' }
     }
+    await requireTrustedSkillsScope()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     return {
@@ -434,6 +488,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         retryable: false,
       }
     }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) {
       return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
@@ -498,6 +554,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     if (!CreatorSkillOperationIdSchema.safeParse(operationId).success) {
       return { success: false }
     }
+    await requireTrustedSkillsScope()
     const workspaceId = currentWorkspaceId(ctx, deps)
     const workspace = workspaceId
       ? getBoundWorkspace(ctx, workspaceId, deps)
@@ -526,6 +583,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
         retryable: false,
       }
     }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) {
       return workspaceMutationError(input.data.operationId, 'workspace_context_mismatch')
@@ -552,6 +611,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.LIST_BACKUPS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillBackupRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     try {
@@ -572,6 +632,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.DELETE_BACKUPS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillBackupDeleteRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
@@ -595,6 +657,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.UPDATE_SAFETY_STATUS, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillStatusUpdateRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     await ensureRecovered(workspace.rootPath)
@@ -616,6 +680,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(RPC_CHANNELS.creatorSkills.IGNORE_VERSION, async (ctx, rawInput: unknown) => {
     const input = CreatorSkillIgnoreVersionRpcInputSchema.safeParse(rawInput)
     if (!input.success) return { success: false, errorCode: 'VALIDATION_ERROR' }
+    await requireTrustedSkillsScope()
+    assertSkillsWritable()
     const workspace = getBoundWorkspace(ctx, input.data.workspaceId, deps)
     if (!workspace) return { success: false, errorCode: 'workspace_context_mismatch' }
     if (!await hasWorkspaceSkillWriteAccess(workspace.rootPath)) {
@@ -638,6 +704,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Open skill SKILL.md in editor
   server.handle(RPC_CHANNELS.skills.OPEN_EDITOR, async (_ctx, workspaceId: string, skillSlug: string) => {
+    await requireTrustedSkillsScope()
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
     if (workspace.remoteServer) throw new Error('Open in editor is not available for remote workspaces')
@@ -651,6 +718,7 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Open skill folder in Finder/Explorer
   server.handle(RPC_CHANNELS.skills.OPEN_FINDER, async (_ctx, workspaceId: string, skillSlug: string) => {
+    await requireTrustedSkillsScope()
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
     if (workspace.remoteServer) throw new Error('Show in Finder is not available for remote workspaces')

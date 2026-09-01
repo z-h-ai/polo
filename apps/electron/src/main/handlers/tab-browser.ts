@@ -31,17 +31,41 @@ function normalizeApps(apps: unknown): AppDefinition[] {
     }))
 }
 
+function isValidScope(scope: unknown): scope is string {
+  return typeof scope === 'string' && scope.length > 0 && scope.length <= 256
+}
+
+/**
+ * Installed tab-browser apps are account+ProductSpace scoped: the renderer
+ * passes its verified ProductSpace context key, and every scope reads and
+ * writes only its own partition. A scopeless call keeps the pre-ProductSpace
+ * legacy global store for local-account windows only — a ProductSpace-scoped
+ * window never falls back to (or writes) the legacy global list, so a
+ * personal-space app can never reappear after switching to an enterprise.
+ */
 export function registerTabBrowserHandlers(server: RpcServer): void {
-  server.handle(RPC_CHANNELS.tabBrowser.GET_APPS, async () => {
+  server.handle(RPC_CHANNELS.tabBrowser.GET_APPS, async (_ctx, rawScope?: unknown) => {
     const { loadStoredConfig } = await import('@polo-ai/shared/config/storage')
     const config = loadStoredConfig()
+    if (isValidScope(rawScope)) {
+      const scoped = config?.tabBrowser?.installedAppsByScope?.[rawScope]
+      return normalizeApps(scoped ?? [])
+    }
     return normalizeApps(config?.tabBrowser?.installedApps)
   })
 
-  server.handle(RPC_CHANNELS.tabBrowser.SAVE_APPS, async (_ctx, apps: AppDefinition[]) => {
+  server.handle(RPC_CHANNELS.tabBrowser.SAVE_APPS, async (_ctx, apps: AppDefinition[], rawScope?: unknown) => {
     const { updateStoredConfig } = await import('@polo-ai/shared/config/storage')
+    const normalized = normalizeApps(apps)
     updateStoredConfig(config => {
-      config.tabBrowser = { installedApps: normalizeApps(apps) }
+      config.tabBrowser ??= { installedApps: [] }
+      if (isValidScope(rawScope)) {
+        const byScope = { ...(config.tabBrowser.installedAppsByScope ?? {}) }
+        byScope[rawScope] = normalized
+        config.tabBrowser.installedAppsByScope = byScope
+        return
+      }
+      config.tabBrowser.installedApps = normalized
     })
   })
 }

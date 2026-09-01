@@ -76,6 +76,7 @@ import {
   setTrustedProductSpaceListFetcher,
   type TrustedProductSpaceListSnapshot,
 } from './trusted-product-space-account'
+import { revokeRuntimeProductSpaceFence } from '../../runtime/product-space-executions'
 import { RPC_CHANNELS } from '@polo-ai/shared/protocol'
 import type { RpcServer } from '@polo-ai/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -2296,6 +2297,18 @@ async function endAdminSession(
     )
   }
 
+  // The ProductSpace fence is Main state that outlives the renderer's own
+  // revoke attempt: end the session's runtime scope too, so a logout can
+  // never return while a committed fence (or offline view) survives.
+  try {
+    await revokeRuntimeProductSpaceFence()
+  } catch (error) {
+    deps?.platform.logger.warn(
+      '[Admin] ProductSpace fence revoke failed while ending the session:',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+
   const ended = await sessions.finishEndingIfCurrent(
     manager,
     ending,
@@ -2343,13 +2356,27 @@ async function completeAdminLogin(args: {
     const transitionGeneration = args.sessions.advanceGeneration()
     if (previousTokens && switchingAccounts) {
       args.sessions.closeAuthorizationForEnding(previousTokens.userId)
-      // The coordinator deduplicates this against an already-running logout
-      // cleanup. Starting it under the transition lock gates account A
-      // immediately, but deliberately not awaiting it lets account B commit.
-      void args.sessions.getOrStartAccountCleanup(
+      // Account replacement must be total before account B becomes usable:
+      // every registered execution of account A (assistant sessions and
+      // Local Apps alike) is stopped, and account A's ProductSpace fence is
+      // revoked so no business surface can act under the old scope. The
+      // coordinator deduplicates this against an already-running logout
+      // cleanup; awaiting it is deliberate — the fence must be gone before
+      // account B's tokens land.
+      await args.sessions.getOrStartAccountCleanup(
         previousTokens.userId,
         transitionGeneration,
-        () => args.deps.onAdminSessionEnding?.(previousTokens.userId),
+        async () => {
+          await args.deps.onAdminSessionEnding?.(previousTokens.userId)
+          try {
+            await revokeRuntimeProductSpaceFence()
+          } catch (error) {
+            args.deps.platform.logger.warn(
+              '[Admin] previous account ProductSpace fence revoke failed during login replacement:',
+              error instanceof Error ? error.message : String(error),
+            )
+          }
+        },
       ).catch(error => {
         args.deps.platform.logger.warn(
           '[Admin] previous account cleanup failed during login replacement:',
