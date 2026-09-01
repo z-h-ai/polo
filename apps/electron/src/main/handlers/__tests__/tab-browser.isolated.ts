@@ -140,8 +140,28 @@ describe('tab-browser installed-apps scope derivation (Main-trusted)', () => {
     context.webContentsId = 1
   })
 
-  it('keeps the legacy store only for the local-account mode without a fence', async () => {
+  it('fails closed when a signed-in window has no committed fence (no legacy fallback)', async () => {
+    // Contract-blocked, mid-revoke, or pre-bootstrap: a signed-in renderer
+    // with a trusted account but no committed fence must never read the
+    // legacy Organization-era global store.
     setRuntimeActiveProductSpace(null)
+    const getApps = handlers.get(RPC_CHANNELS.tabBrowser.GET_APPS)!
+    const saveApps = handlers.get(RPC_CHANNELS.tabBrowser.SAVE_APPS)!
+    await expect(getApps(context)).rejects.toThrow('TAB_BROWSER_SCOPE_REQUIRED')
+    await expect(saveApps(context, [
+      { id: 'planted', name: 'P', url: 'https://evil.example', type: 'webapp', createdAt: 1, order: 0 },
+    ] as never)).rejects.toThrow('TAB_BROWSER_SCOPE_REQUIRED')
+    const { loadStoredConfig } = require('@polo-ai/shared/config/storage') as {
+      loadStoredConfig: () => {
+        tabBrowser?: { installedApps?: Array<{ id: string }> }
+      } | null
+    }
+    expect(loadStoredConfig()?.tabBrowser?.installedApps?.some(app => app.id === 'planted')).toBe(false)
+  })
+
+  it('keeps the legacy store for a genuinely signed-out local-account window', async () => {
+    setRuntimeActiveProductSpace(null)
+    setTrustedProductSpaceAccountProvider(async () => null)
     const getApps = handlers.get(RPC_CHANNELS.tabBrowser.GET_APPS)!
     expect(await getApps(context)).toEqual([
       expect.objectContaining({ id: 'legacy-app' }),

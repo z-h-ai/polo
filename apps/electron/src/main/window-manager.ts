@@ -10,8 +10,6 @@ import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
 import { describeDeepLinkForLog, describeUrlForLog } from './deep-link-log'
 import { installWebviewSecurityHandlers, setWebviewScopeResolver } from './webview-security'
-import { resolveTrustedProductSpaceAccountId } from '@polo-ai/server-core/handlers/rpc/trusted-product-space-account'
-import { getRuntimeActiveProductSpace } from '@polo-ai/server-core/runtime/product-space-executions'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -189,8 +187,6 @@ export class WindowManager {
     this.webviewSecurityInitialized = true
     setWebviewScopeResolver({
       getWorkspaceForWebContentsId: webContentsId => this.getWorkspaceForWindow(webContentsId) ?? null,
-      getAccountId: () => resolveTrustedProductSpaceAccountId(),
-      getProductSpaceId: () => getRuntimeActiveProductSpace(),
     })
     installWebviewSecurityHandlers()
   }

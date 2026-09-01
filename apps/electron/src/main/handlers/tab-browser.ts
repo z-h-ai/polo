@@ -55,14 +55,17 @@ async function deriveTrustedTabBrowserScope(
   deps: TabBrowserDeps,
 ): Promise<string | null> {
   const accountId = await resolveTrustedProductSpaceAccountId()
-  const activeProductSpaceId = getRuntimeActiveProductSpace()
-  if (!accountId || !activeProductSpaceId) {
-    // Pre-ProductSpace local-account window (signed out or no fence yet).
+  if (!accountId) {
+    // A genuinely signed-out local-account window: the legacy global store
+    // is the only state this renderer ever owned.
     return null
   }
-  // A committed fence that is not bound to the trusted account is a broken
-  // replacement state: fail closed instead of degrading to the legacy store.
-  if (!isRuntimeFenceBoundToAccount(accountId)) {
+  // A signed-in window without a committed fence — contract-blocked, an
+  // in-flight logout revoke, or startup before bootstrap — must never reach
+  // the legacy fallback: the old Organization-era global list is not a
+  // valid source for a ProductSpace renderer.
+  const activeProductSpaceId = getRuntimeActiveProductSpace()
+  if (!activeProductSpaceId || !isRuntimeFenceBoundToAccount(accountId)) {
     throw new Error('TAB_BROWSER_SCOPE_REQUIRED')
   }
   if (webContentsId == null) {

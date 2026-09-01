@@ -87,7 +87,7 @@ import type { PlatformServices } from '../runtime/platform'
 import { createElectronPlatform } from './platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import { bootstrapServer, releaseServerLock } from '@polo-ai/server-core/bootstrap'
-import { stopRegisteredProductSpaceExecutionsForAccount } from '@polo-ai/server-core/runtime/product-space-executions'
+import { endAccountProductSpaceRuntimes } from './account-lifecycle'
 import { createMessagingBootstrap, type MessagingBootstrapHandle } from '@polo-ai/messaging-gateway'
 import { getCredentialManager } from '@polo-ai/shared/credentials'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@polo-ai/server-core/model-fetchers'
@@ -955,21 +955,11 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
-            onAdminSessionEnding: async (accountId: string) => {
-              // Account session-ending is total: every registered execution
-              // of the account — assistant sessions AND Local Apps — must
-              // reach a terminal state before the account is considered
-              // gone. A non-empty failure list fails the whole ending so an
-              // account replacement can never land on top of a still-running
-              // prior-account execution.
-              const stopped = await stopRegisteredProductSpaceExecutionsForAccount(accountId)
-              if (!stopped.ok) {
-                throw new Error(
-                  `product_space_execution_stop_failed: ${stopped.failedExecutionIds.join(', ')}`,
-                )
-              }
-              getScopedLocalAppRuntimeRegistry().stopAccount(accountId)
-            },
+            onAdminSessionEnding: (accountId: string) =>
+              endAccountProductSpaceRuntimes(
+                accountId,
+                getScopedLocalAppRuntimeRegistry(),
+              ),
             onAdminSessionStarted: (accountId: string) => {
               getScopedLocalAppRuntimeRegistry().resumeAccount(accountId)
             },

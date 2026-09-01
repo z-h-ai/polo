@@ -4,9 +4,14 @@ import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager'
 import { describeUrlForLog } from './deep-link-log'
 import { windowLog } from './logger'
 import {
-  isTabAppPartition,
+  LEGACY_TAB_APP_PARTITION_PREFIX,
+  legacyTabAppPartitionForScope,
   tabAppPartitionForScope,
 } from '../shared/tab-browser-partition'
+import {
+  getRuntimeActiveProductSpace,
+  getRuntimeActiveProductSpaceAccount,
+} from '@polo-ai/server-core/runtime/product-space-executions'
 
 const allow = new Set([
   'fullscreen',
@@ -21,12 +26,52 @@ const allow = new Set([
 ])
 
 const handledPartitions = new Set<string>()
+const cleanedLegacyPartitions = new Set<string>()
+
+interface WebviewScopeResolver {
+  getWorkspaceForWebContentsId?: (webContentsId: number) => string | null
+}
+
+const trustedWebviewScopeResolver: WebviewScopeResolver = {}
+
+/**
+ * Wires the Main-trusted window→Workspace mapping. The account and
+ * ProductSpace are always read synchronously from the runtime fence so an
+ * account change is reflected at every attach, never cached.
+ */
+export function setWebviewScopeResolver(resolver: WebviewScopeResolver): void {
+  trustedWebviewScopeResolver.getWorkspaceForWebContentsId = resolver.getWorkspaceForWebContentsId
+}
+
+/** Test seam: resets the caches and the scope resolver. */
+export function __resetWebviewSecurityForTests(): void {
+  handledPartitions.clear()
+  cleanedLegacyPartitions.clear()
+  delete trustedWebviewScopeResolver.getWorkspaceForWebContentsId
+}
+
+/**
+ * Synchronously derives the ONLY tab-app partition a window may embed, from
+ * the trusted runtime fence and the window→Workspace mapping. Returns null
+ * when no committed fence exists (local-account mode): such windows may use
+ * only the shared legacy browser-pane partition.
+ */
+function deriveTrustedTabAppPartition(
+  hostWebContentsId: number,
+): string | null {
+  const accountId = getRuntimeActiveProductSpaceAccount()
+  const productSpaceId = getRuntimeActiveProductSpace()
+  if (!accountId || !productSpaceId) return null
+  const workspaceId = trustedWebviewScopeResolver.getWorkspaceForWebContentsId?.(hostWebContentsId)
+  if (!workspaceId) return null
+  return tabAppPartitionForScope({ accountId, productSpaceId, workspaceId })
+}
 
 /**
  * Installs the webview permission policy on a session partition. The base
- * browser-pane partition is handled eagerly; ProductSpace-scoped tab-app
- * partitions are attached when their guest webview is created — before the
- * guest's first navigation.
+ * browser-pane partition is handled eagerly; scoped tab-app partitions are
+ * attached at `will-attach-webview` (before the guest navigates) and — as
+ * defense in depth — on guest web-contents creation.
  */
 function attachWebviewPermissionHandlers(partitionName: string): void {
   if (handledPartitions.has(partitionName)) return
@@ -63,62 +108,67 @@ function attachWebviewPermissionHandlers(partitionName: string): void {
   }
 }
 
-interface WebviewScopeResolver {
-  getWorkspaceForWebContentsId?: (webContentsId: number) => string | null
-  getAccountId?: () => Promise<string | null> | string | null
-  getProductSpaceId?: () => string | null
-}
-
-const trustedWebviewScopeResolver: WebviewScopeResolver = {}
-
 /**
- * Wires the Main-trusted scope resolver (window manager + Admin account +
- * ProductSpace fence). Called from the app bootstrap; without it scoped
- * tab-app partitions cannot be identified and simply receive no policy —
- * which is fail-closed for webviews, since the browser-pane base partition
- * policy is installed regardless.
+ * One-shot cleanup of the superseded 32-bit tab-app partitions: after the
+ * digest change the old `persist:tab-app-<fnv>` cookies/storage are orphaned
+ * (never loaded again), so they are cleared instead of lingering.
  */
-export function setWebviewScopeResolver(resolver: WebviewScopeResolver): void {
-  trustedWebviewScopeResolver.getWorkspaceForWebContentsId = resolver.getWorkspaceForWebContentsId
-  trustedWebviewScopeResolver.getAccountId = resolver.getAccountId
-  trustedWebviewScopeResolver.getProductSpaceId = resolver.getProductSpaceId
+function cleanupLegacyTabAppPartition(legacyPartition: string): void {
+  if (cleanedLegacyPartitions.has(legacyPartition)) return
+  cleanedLegacyPartitions.add(legacyPartition)
+  try {
+    void session.fromPartition(legacyPartition).clearStorageData().catch(error => {
+      windowLog.warn(
+        '[webview-security] legacy tab-app partition cleanup failed:',
+        error instanceof Error ? error.message : String(error),
+      )
+    })
+  } catch (error) {
+    windowLog.warn(
+      '[webview-security] legacy tab-app partition cleanup failed:',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
 }
 
-/** Test seam: resets the handled-partition cache and the scope resolver. */
-export function __resetWebviewSecurityForTests(): void {
-  handledPartitions.clear()
-  delete trustedWebviewScopeResolver.getWorkspaceForWebContentsId
-  delete trustedWebviewScopeResolver.getAccountId
-  delete trustedWebviewScopeResolver.getProductSpaceId
+function clearLegacyPartitionsForScope(
+  accountId: string,
+  productSpaceId: string,
+): void {
+  // The superseded digest covered account+ProductSpace without the
+  // Workspace dimension; every workspace of the tuple shared one partition.
+  const legacyPartition = legacyTabAppPartitionForScope({ accountId, productSpaceId })
+  cleanupLegacyTabAppPartition(legacyPartition)
+  // Belt and braces: clean every legacy-named partition this process has
+  // already seen (e.g. from a previously committed fence).
+  for (const partition of handledPartitions) {
+    if (partition.startsWith(LEGACY_TAB_APP_PARTITION_PREFIX)) {
+      cleanupLegacyTabAppPartition(partition)
+    }
+  }
 }
 
 export function installWebviewSecurityHandlers(): void {
   attachWebviewPermissionHandlers(BROWSER_PANE_SESSION_PARTITION)
 
   app.on('web-contents-created', (_event, contents) => {
-    if (contents.getType() !== 'webview') return
+    if (contents.getType() === 'webview') {
+      // Defense in depth: the authoritative gate is the host's
+      // will-attach-webview below; this guest-side hook covers guests whose
+      // window predates the resolver wiring.
+      const host = contents.hostWebContents
+      const expectedPartition = host
+        ? deriveTrustedTabAppPartition(host.id)
+        : null
+      if (expectedPartition) {
+        attachWebviewPermissionHandlers(expectedPartition)
+      }
+    } else if (contents.getType() !== 'window') {
+      return
+    }
 
-    // Tab webapps run in per-account+ProductSpace+Workspace partitions. The
-    // Electron Session type does not expose its partition name, so the
-    // partition is re-derived here from Main-trusted state and the policy
-    // is installed before the guest navigates.
-    void Promise.resolve(trustedWebviewScopeResolver.getAccountId?.() ?? null)
-      .then(accountId => {
-        const host = contents.hostWebContents
-        if (!host || !accountId) return
-        const workspaceId = trustedWebviewScopeResolver.getWorkspaceForWebContentsId?.(host.id)
-        const productSpaceId = trustedWebviewScopeResolver.getProductSpaceId?.()
-        if (!workspaceId || !productSpaceId) return
-        const partition = tabAppPartitionForScope({ accountId, productSpaceId, workspaceId })
-        if (isTabAppPartition(partition)) {
-          attachWebviewPermissionHandlers(partition)
-        }
-      })
-      .catch(() => {
-        // Resolver failures are fail-closed: no policy attach happens for an
-        // unresolvable scope.
-      })
-
+    // Common webview/window policy: popups open externally (never inside the
+    // guest), and only HTTP(S) navigations are allowed.
     contents.setWindowOpenHandler((details) => {
       const classification = classifyExternalUrl(details.url)
       if (classification.kind === 'dangerous' || classification.kind === 'internal-deeplink') {
@@ -154,6 +204,47 @@ export function installWebviewSecurityHandlers(): void {
         '[webview-security] blocked navigation',
         describeUrlForLog(url),
       )
+    })
+
+    if (contents.getType() !== 'window') return
+
+    // The host window gate: when the renderer attaches a <webview>, verify
+    // the guest's actual partition against the one Main derives from the
+    // trusted account+ProductSpace+Workspace tuple. A mismatching or
+    // missing partition (compromised or buggy renderer) never loads.
+    contents.on('will-attach-webview', (event, webPreferences, params) => {
+      const requestedPartition = webPreferences.partition
+      const expectedPartition = deriveTrustedTabAppPartition(contents.id)
+
+      if (expectedPartition) {
+        // Before any navigation the scoped policy is guaranteed on the
+        // exact session the guest will use. The superseded 32-bit legacy
+        // partitions are cleared once per process.
+        clearLegacyPartitionsForScope(
+          getRuntimeActiveProductSpaceAccount()!,
+          getRuntimeActiveProductSpace()!,
+        )
+        if (requestedPartition !== expectedPartition) {
+          event.preventDefault()
+          windowLog.warn(
+            '[webview-security] blocked webview with unexpected partition',
+            `${describeUrlForLog(params.src ?? '')} requested=${requestedPartition ?? '(none)'} expected=${expectedPartition}`,
+          )
+          return
+        }
+        attachWebviewPermissionHandlers(expectedPartition)
+        return
+      }
+
+      // Local-account mode (no committed fence): only the shared legacy
+      // browser-pane partition is acceptable.
+      if (requestedPartition !== BROWSER_PANE_SESSION_PARTITION) {
+        event.preventDefault()
+        windowLog.warn(
+          '[webview-security] blocked webview partition without a committed ProductSpace',
+          `${describeUrlForLog(params.src ?? '')} requested=${requestedPartition ?? '(none)'}`,
+        )
+      }
     })
   })
 }

@@ -4,19 +4,19 @@ type PartitionSession = {
   partition: string
   permissionChecks: number
   permissionRequests: number
+  clearStorageDataCalls: number
   setPermissionCheckHandler(): void
   setPermissionRequestHandler(): void
+  clearStorageData(): Promise<void>
 }
 
 const sessions = new Map<string, PartitionSession>()
 
-const electronStub = () => () => {}
 const electronMock = {
-  app: { on: (_event: string, _listener: unknown) => {} },
+  app: {
+    on: (_event: string, _listener: (...args: unknown[]) => void) => {},
+  },
   shell: { openExternal: async () => {} },
-  webContents: electronStub,
-  ipcMain: electronStub,
-  BrowserWindow: electronStub,
   session: {
     fromPartition: (partition: string) => {
       let ses = sessions.get(partition)
@@ -25,11 +25,15 @@ const electronMock = {
           partition,
           permissionChecks: 0,
           permissionRequests: 0,
+          clearStorageDataCalls: 0,
           setPermissionCheckHandler() {
             ses!.permissionChecks += 1
           },
           setPermissionRequestHandler() {
             ses!.permissionRequests += 1
+          },
+          clearStorageData: async () => {
+            ses!.clearStorageDataCalls += 1
           },
         }
         sessions.set(partition, ses)
@@ -48,29 +52,27 @@ mock.module('../logger', () => ({ windowLog: {
 } }))
 mock.module('../deep-link-log', () => ({ describeUrlForLog: (url: string) => url }))
 
-const { tabAppPartitionForScope } = await import('../../shared/tab-browser-partition')
+const { tabAppPartitionForScope, legacyTabAppPartitionForScope } = await import('../../shared/tab-browser-partition')
 const {
   __resetWebviewSecurityForTests,
   installWebviewSecurityHandlers,
   setWebviewScopeResolver,
 } = await import('../webview-security')
+const {
+  setRuntimeActiveProductSpace,
+  setRuntimeActiveProductSpaceAccount,
+} = await import('@polo-ai/server-core/runtime/product-space-executions')
 
 const trustedAccount = 'account-a'
 const fenceSpace = 'space-a'
 
-function makeGuestWebview(webContentsId: number) {
-  return {
-    getType: () => 'webview',
-    hostWebContents: { id: webContentsId },
-    setWindowOpenHandler() {},
-    on() {},
-  }
+type GuestContents = { getType: () => string; hostWebContents: { id: number } }
+type HostContents = {
+  getType: () => string
+  id: number
+  on: (event: string, handler: (...args: unknown[]) => void) => void
 }
-
-const { app } = electronMock as unknown as {
-  app: { on: (event: string, listener: (_event: unknown, contents: ReturnType<typeof makeGuestWebview>) => void) => void }
-}
-let webviewCreatedListener: ((_event: unknown, contents: ReturnType<typeof makeGuestWebview>) => void) | null = null
+let webviewCreatedListener: ((_event: unknown, contents: GuestContents | HostContents) => void) | null = null
 ;(electronMock.app as unknown as { on: (event: string, listener: unknown) => void }).on = (
   event: string,
   listener: unknown,
@@ -80,69 +82,205 @@ let webviewCreatedListener: ((_event: unknown, contents: ReturnType<typeof makeG
   }
 }
 
+function makeHostWindow(webContentsId: number): HostContents {
+  const handlers = new Map<string, (...args: unknown[]) => void>()
+  const window = {
+    getType: () => 'window',
+    id: webContentsId,
+    on: (event: string, handler: (...args: unknown[]) => void) => {
+      handlers.set(event, handler)
+    },
+    setWindowOpenHandler: () => {},
+  }
+  return Object.assign(window, {
+    emit: (event: string, ...args: unknown[]) => handlers.get(event)?.(...args),
+  }) as HostContents & { emit: (event: string, ...args: unknown[]) => void }
+}
+
+function hostPartition(window: HostContents): string {
+  return tabAppPartitionForScope({
+    accountId: trustedAccount,
+    productSpaceId: fenceSpace,
+    workspaceId: `ws-${window.id}`,
+  })
+}
+
 describe('ProductSpace webview partition policy wiring', () => {
   beforeEach(() => {
     sessions.clear()
     webviewCreatedListener = null
     __resetWebviewSecurityForTests()
+    setRuntimeActiveProductSpaceAccount(trustedAccount)
+    setRuntimeActiveProductSpace(fenceSpace)
   })
 
-  it('installs permission check and request handlers on the trusted scoped partition', async () => {
+  it('enforces the exact derived partition and installs its policy at attach', () => {
     setWebviewScopeResolver({
-      getWorkspaceForWebContentsId: webContentsId => (webContentsId === 7 ? 'ws-a' : null),
-      getAccountId: () => trustedAccount,
-      getProductSpaceId: () => fenceSpace,
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
     })
     installWebviewSecurityHandlers()
     expect(webviewCreatedListener).toBeTruthy()
 
-    webviewCreatedListener!({}, makeGuestWebview(7))
-    // The async resolver attaches the policy before the guest navigates.
-    await new Promise(resolve => setTimeout(resolve, 0))
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const expectedPartition = hostPartition(window)
+    const preventDefault = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault },
+      { partition: expectedPartition },
+      { src: 'https://app.example' },
+    )
 
-    const expectedPartition = tabAppPartitionForScope({
-      accountId: trustedAccount,
-      productSpaceId: fenceSpace,
-      workspaceId: 'ws-a',
-    })
+    expect(preventDefault).not.toHaveBeenCalled()
     const ses = sessions.get(expectedPartition)
     expect(ses).toBeDefined()
     expect(ses!.permissionChecks).toBe(1)
     expect(ses!.permissionRequests).toBe(1)
   })
 
-  it('separates partitions per account, ProductSpace, and Workspace', async () => {
+  it('blocks a guest pointing at another (victim) partition', () => {
     setWebviewScopeResolver({
-      getWorkspaceForWebContentsId: webContentsId => (webContentsId === 7 ? 'ws-a' : webContentsId === 8 ? 'ws-b' : null),
-      getAccountId: () => 'account-b',
-      getProductSpaceId: () => 'space-b',
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
     })
     installWebviewSecurityHandlers()
 
-    webviewCreatedListener!({}, makeGuestWebview(7))
-    await new Promise(resolve => setTimeout(resolve, 0))
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const victimPartition = tabAppPartitionForScope({
+      accountId: 'account-victim',
+      productSpaceId: 'space-victim',
+      workspaceId: 'ws-victim',
+    })
+    const preventDefault = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault },
+      { partition: victimPartition },
+      { src: 'https://evil.example' },
+    )
 
-    const partitionA = tabAppPartitionForScope({ accountId: 'account-b', productSpaceId: 'space-b', workspaceId: 'ws-a' })
-    const partitionB = tabAppPartitionForScope({ accountId: 'account-b', productSpaceId: 'space-b', workspaceId: 'ws-b' })
-    expect(partitionA).not.toBe(partitionB)
-    expect(sessions.get(partitionA)?.permissionRequests).toBe(1)
-    // The other workspace's partition is never touched by this webview.
-    expect(sessions.get(partitionB)).toBeUndefined()
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    // The victim partition receives no policy and is never created.
+    expect(sessions.get(victimPartition)).toBeUndefined()
   })
 
-  it('installs no scoped policy when the scope cannot be resolved (fail-closed)', async () => {
+  it('blocks a guest without any partition', () => {
     setWebviewScopeResolver({
-      getWorkspaceForWebContentsId: () => null,
-      getAccountId: () => null,
-      getProductSpaceId: () => null,
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
     })
     installWebviewSecurityHandlers()
 
-    const before = new Set(sessions.keys())
-    webviewCreatedListener!({}, makeGuestWebview(42))
-    await new Promise(resolve => setTimeout(resolve, 0))
-    // An unresolvable scope creates no scoped partition at all (fail-closed);
-    // only the base browser-pane partition may exist.
-    expect([...sessions.keys()].filter(key => !before.has(key))).toEqual([])
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const preventDefault = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault },
+      {},
+      { src: 'https://app.example' },
+    )
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it('recomputes the expected partition when the fence account changes', () => {
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
+    })
+    installWebviewSecurityHandlers()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const oldPartition = hostPartition(window)
+
+    // Account replacement: the fence is now bound to account B on space B.
+    setRuntimeActiveProductSpaceAccount('account-b')
+    setRuntimeActiveProductSpace('space-b')
+    const newPartition = tabAppPartitionForScope({
+      accountId: 'account-b',
+      productSpaceId: 'space-b',
+      workspaceId: 'ws-7',
+    })
+
+    const preventDefault = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault },
+      { partition: oldPartition },
+      { src: 'https://app.example' },
+    )
+    // The stale partition from the previous account is refused.
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+
+    const attachB = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: attachB },
+      { partition: newPartition },
+      { src: 'https://app.example' },
+    )
+    expect(attachB).not.toHaveBeenCalled()
+    expect(sessions.get(newPartition)?.permissionRequests).toBe(1)
+  })
+
+  it('allows only the browser-pane partition for local-account windows', () => {
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
+    })
+    setRuntimeActiveProductSpace(null)
+    setRuntimeActiveProductSpaceAccount(null)
+    installWebviewSecurityHandlers()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    const tabAppPartition = tabAppPartitionForScope({
+      accountId: 'account-a',
+      productSpaceId: 'space-a',
+      workspaceId: 'ws-7',
+    })
+
+    // A scoped partition without a committed fence is refused.
+    const preventScoped = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventScoped },
+      { partition: tabAppPartition },
+      { src: 'https://app.example' },
+    )
+    expect(preventScoped).toHaveBeenCalledTimes(1)
+
+    // The local-account window may keep the shared browser-pane partition.
+    const preventPane = mock(() => {})
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: preventPane },
+      { partition: 'persist:browser-pane' },
+      { src: 'https://app.example' },
+    )
+    expect(preventPane).not.toHaveBeenCalled()
+  })
+
+  it('clears the superseded legacy partition once the scoped gate first engages', () => {
+    setWebviewScopeResolver({
+      getWorkspaceForWebContentsId: webContentsId => `ws-${webContentsId}`,
+    })
+    installWebviewSecurityHandlers()
+
+    const window = makeHostWindow(7)
+    webviewCreatedListener!({}, window)
+    ;(window as unknown as { emit: (event: string, ...args: unknown[]) => void }).emit(
+      'will-attach-webview',
+      { preventDefault: mock(() => {}) },
+      { partition: hostPartition(window) },
+      { src: 'https://app.example' },
+    )
+
+    const legacyPartition = legacyTabAppPartitionForScope({
+      accountId: trustedAccount,
+      productSpaceId: fenceSpace,
+    })
+    const legacySession = sessions.get(legacyPartition)
+    expect(legacySession).toBeDefined()
+    expect(legacySession!.clearStorageDataCalls).toBe(1)
   })
 })

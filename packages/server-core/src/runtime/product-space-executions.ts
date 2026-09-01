@@ -73,10 +73,32 @@ export interface ExecutionStopResult {
 }
 
 /**
- * Stops the given registered executions. Each execution receives exactly ONE
- * stop request (dispatched concurrently); the bounded workers only poll
- * liveness until a terminal outcome under one shared deadline. Confirmed
- * terminal executions are unregistered; failures stay registered for retry.
+ * Awaits a promise under the shared stop deadline. A stop implementation
+ * that never resolves must not extend the window beyond the deadline: on
+ * timeout the execution keeps its registry entry (retryable) and the caller
+ * reports runtime_stop_failed.
+ */
+function withStopDeadline<T>(promise: Promise<T>, deadline: number): Promise<T | null> {
+  let deadlineTimer: ReturnType<typeof setTimeout> | null = null
+  const deadlinePromise = new Promise<null>(resolve => {
+    const remaining = deadline - Date.now()
+    deadlineTimer = setTimeout(() => resolve(null), Math.max(remaining, 0))
+  })
+  return Promise.race([
+    promise,
+    deadlinePromise,
+  ]).finally(() => {
+    if (deadlineTimer) clearTimeout(deadlineTimer)
+  })
+}
+
+/**
+ * Stops the given registered executions. Each execution receives exactly
+ * ONE stop request (dispatched concurrently) and both the stop call itself
+ * and the liveness drain are bounded by ONE shared deadline. Confirmed
+ * terminal executions are unregistered; a stop that never resolves or a
+ * liveness probe that never settles keeps its registry entry (retryable)
+ * and is reported as failed.
  */
 export async function stopRegisteredExecutionsOnce(
   entries: RegisteredProductSpaceExecution[],
@@ -84,9 +106,13 @@ export async function stopRegisteredExecutionsOnce(
   if (entries.length === 0) return []
   const deadline = Date.now() + EXECUTION_STOP_DRAIN_TIMEOUT_MS
 
-  // One stop request per execution, dispatched concurrently.
+  // One stop request per execution, dispatched concurrently — each bounded
+  // by the shared deadline.
   await Promise.allSettled(
-    entries.map(entry => entry.stop().catch(() => undefined)),
+    entries.map(entry => withStopDeadline(
+      entry.stop().catch(() => undefined),
+      deadline,
+    )),
   )
 
   const results: ExecutionStopResult[] = []
@@ -95,8 +121,11 @@ export async function stopRegisteredExecutionsOnce(
   const workers = Array.from({ length: workerCount }, async () => {
     while (index < entries.length) {
       const entry = entries[index++]!
-      const terminal = await drainExecutionUntilTerminal(entry, deadline)
-      if (terminal) {
+      const terminal = await withStopDeadline(
+        drainExecutionUntilTerminal(entry, deadline),
+        deadline,
+      )
+      if (terminal === true) {
         registry.delete(entry.scope.executionId)
         results.push({ executionId: entry.scope.executionId, status: 'stopped' })
       } else {
