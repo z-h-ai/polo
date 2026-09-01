@@ -1137,6 +1137,7 @@
   "productSpace.exec.status.stopped": "Leállítva",
   "productSpace.exec.status.stopping": "Leállítás",
   "productSpace.exec.status.waiting_for_network": "Hálózatra vár",
+  "productSpace.logout.revokeFailed": "A kijelentkezés nem sikerült biztonságosan. A térhatár továbbra is aktív, próbálja újra.",
   "productSpace.restricted": "Korlátozott",
   "productSpace.role.manager": "Manager",
   "productSpace.role.member": "Tag",

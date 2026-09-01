@@ -21,6 +21,10 @@ const ASSISTANT_STOP_POLL_INTERVAL_MS = 50
  * into preparing/processing — including restored (cold) sessions on their
  * first send — so a switch can never leave an old assistant running in the
  * background unregistered.
+ *
+ * Returns `false` only when no trusted Admin account is available: the
+ * caller decides whether that is survivable (best-effort creation) or must
+ * fail closed (execution start).
  */
 interface AssistantExecutionSessionManager {
   getSessions(): Array<{ id: string; isProcessing: boolean }>
@@ -33,16 +37,16 @@ export async function ensureAssistantSessionExecution(input: {
   workspaceId: string
   productSpaceId: string
   name: string
-}): Promise<void> {
+}): Promise<boolean> {
   const accountId = await resolveTrustedProductSpaceAccountId()
-  if (!accountId) return
+  if (!accountId) return false
   const existing = getRegisteredProductSpaceExecution(input.sessionId)
   if (
     existing
     && existing.scope.productSpaceId === input.productSpaceId
     && existing.scope.accountId === accountId
   ) {
-    return
+    return true
   }
   const execution: RegisteredProductSpaceExecution = {
     scope: {
@@ -76,4 +80,5 @@ export async function ensureAssistantSessionExecution(input: {
     },
   }
   registerProductSpaceExecution(execution)
+  return true
 }

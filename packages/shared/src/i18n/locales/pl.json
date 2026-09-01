@@ -1137,6 +1137,7 @@
   "productSpace.exec.status.stopped": "Zatrzymane",
   "productSpace.exec.status.stopping": "Zatrzymywanie",
   "productSpace.exec.status.waiting_for_network": "Oczekiwanie na sieć",
+  "productSpace.logout.revokeFailed": "Nie udało się bezpiecznie wylogować. Granica przestrzeni pozostaje aktywna, spróbuj ponownie.",
   "productSpace.restricted": "Ograniczona",
   "productSpace.role.manager": "Menedżer",
   "productSpace.role.member": "Członek",

@@ -295,7 +295,6 @@ export const RPC_CHANNELS = {
     CATALOG: 'product-space:catalog',
     LIST_ACTIVE_EXECUTIONS: 'product-space:listActiveExecutions',
     STOP_ALL_EXECUTIONS: 'product-space:stopAllExecutions',
-    EXECUTE_SWITCH: 'product-space:executeSwitch',
     PREPARE_SWITCH: 'product-space:prepareSwitch',
     COMMIT_SWITCH: 'product-space:commitSwitch',
     CANCEL_SWITCH: 'product-space:cancelSwitch',

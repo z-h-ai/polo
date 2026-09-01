@@ -14,9 +14,22 @@ import { bindClientActiveSession } from './client-active-session'
 import {
   getRuntimeActiveProductSpace,
   isRuntimeOfflineReadOnly,
+  unregisterProductSpaceExecution,
 } from '../../runtime/product-space-executions'
-import { unregisterProductSpaceExecution } from '../../runtime/product-space-executions'
 import { ensureAssistantSessionExecution } from '../../runtime/assistant-executions'
+
+/**
+ * The offline read-only view keeps only the RPCs needed to read saved
+ * history. Every Session write entry — create, import (direct or committed
+ * through chunked transfer), permission/credential responses and mutating
+ * commands — must refuse while the offline view is active so no data enters
+ * the runtime without a fresh online membership validation.
+ */
+function assertOnlineBusinessSurface(): void {
+  if (isRuntimeOfflineReadOnly()) {
+    throw new Error('OFFLINE_READ_ONLY')
+  }
+}
 
 interface ClientSessionWatchState {
   watcher: SessionFileWatcher
@@ -235,10 +248,12 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Create a new session
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@polo-ai/shared/protocol').CreateSessionOptions) => {
     // A session may only be created inside the committed active ProductSpace;
-    // a null fence means the business surface is not ready.
+    // a null fence means the business surface is not ready, and the offline
+    // read-only view starts no new sessions.
     if (!getRuntimeActiveProductSpace()) {
       throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
     }
+    assertOnlineBusinessSurface()
     const end = perf.start('rpc.createSession', { workspaceId })
     const session = await sessionManager.createSession(workspaceId, options)
     end()
@@ -367,6 +382,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Returns true if the response was delivered, false if agent/session is gone
   server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (_ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
     assertSessionSpaceAllowed(sessionManager, sessionId)
+    // Responding can resume agent processing: never allowed in the offline
+    // read-only view.
+    assertOnlineBusinessSurface()
     return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
   })
 
@@ -374,12 +392,41 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Returns true if the response was delivered, false if agent/session is gone
   server.handle(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (_ctx, sessionId: string, requestId: string, response: import('@polo-ai/shared/protocol').CredentialResponse) => {
     assertSessionSpaceAllowed(sessionManager, sessionId)
+    assertOnlineBusinessSurface()
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
 
   // ==========================================================================
   // Consolidated Command Handlers
   // ==========================================================================
+
+  // Commands that mutate session data or can trigger agent work are refused
+  // in the offline read-only view; only the local history-reading and
+  // navigation commands below stay available.
+  const OFFLINE_MUTATING_COMMANDS = new Set<import('@polo-ai/shared/protocol').SessionCommand['type']>([
+    'flag',
+    'unflag',
+    'archive',
+    'unarchive',
+    'rename',
+    'setSessionStatus',
+    'setPermissionMode',
+    'setThinkingLevel',
+    'updateWorkingDirectory',
+    'setSources',
+    'setLabels',
+    'setConnection',
+    'shareToViewer',
+    'updateShare',
+    'revokeShare',
+    'refreshTitle',
+    'setPendingPlanExecution',
+    'markCompactionComplete',
+    'markPendingPlanExecutionDispatched',
+    'clearPendingPlanExecution',
+    'addAnnotation',
+    'removeAnnotation',
+  ])
 
   // Session commands - consolidated handler for session operations
   server.handle(RPC_CHANNELS.sessions.COMMAND, async (
@@ -388,6 +435,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     command: import('@polo-ai/shared/protocol').SessionCommand
   ) => {
     assertSessionSpaceAllowed(sessionManager, sessionId)
+    if (OFFLINE_MUTATING_COMMANDS.has(command.type)) {
+      assertOnlineBusinessSurface()
+    }
     switch (command.type) {
       case 'flag':
         return sessionManager.flagSession(sessionId)
@@ -650,6 +700,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Set session notes (writes to notes.md in session directory)
   server.handle(RPC_CHANNELS.sessions.SET_NOTES, async (_ctx, sessionId: string, content: string) => {
     assertSessionSpaceAllowed(sessionManager, sessionId)
+    assertOnlineBusinessSurface()
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) {
       throw new Error(`Session not found: ${sessionId}`)
@@ -684,6 +735,13 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // targetWorkspaceId is passed explicitly (not from context) so the renderer
   // can import into any workspace the server manages, not just the active one.
   const importHandler = async (_ctx: any, targetWorkspaceId: string, bundle: unknown, mode: string) => {
+    // The same handler serves the direct RPC and the chunked-transfer commit
+    // (transfer:COMMIT invokes it without re-entering the RPC handler), so
+    // both the active fence and the offline read-only refusal live here.
+    if (!getRuntimeActiveProductSpace()) {
+      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
+    }
+    assertOnlineBusinessSurface()
     await sessionManager.waitForInit()
     if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
     if (mode !== 'move' && mode !== 'fork') throw new Error(`Invalid dispatch mode: ${mode}`)
@@ -691,9 +749,6 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessionManager.importSession(targetWorkspaceId, bundle as import('@polo-ai/shared/sessions').SessionBundle, mode)
   }
   server.handle(RPC_CHANNELS.sessions.IMPORT, async (ctx, ...rest: unknown[]) => {
-    if (!getRuntimeActiveProductSpace()) {
-      throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
-    }
     return (importHandler as (c: typeof ctx, ...args: unknown[]) => unknown)(ctx, ...rest)
   })
   // Also register as transferable so chunked transfer can invoke it on commit
@@ -716,6 +771,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     if (!getRuntimeActiveProductSpace()) {
       throw new Error(PRODUCT_SPACE_CONTEXT_REQUIRED)
     }
+    assertOnlineBusinessSurface()
     await sessionManager.waitForInit()
     if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
     return sessionManager.importRemoteSessionTransfer(targetWorkspaceId, payload)

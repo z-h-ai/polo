@@ -167,6 +167,8 @@ export function getRuntimeActiveProductSpace(): string | null {
  */
 export interface PendingSwitchTransaction {
   token: string
+  /** Bound at prepare time; only this account may commit the token. */
+  accountId: string
   targetProductSpaceId: string
   originProductSpaceId: string
   fenceGeneration: number

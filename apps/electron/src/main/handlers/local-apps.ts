@@ -655,7 +655,7 @@ export function registerLocalAppHandlers(server: RpcServer): void {
     scope: CatalogLocalAppScope,
     startRuntime: () => Promise<{ version: string }>,
   ) => {
-    // Runs under the same mutex as EXECUTE_SWITCH/PREPARE_SWITCH: a switch
+    // Runs under the same mutex as PREPARE_SWITCH/COMMIT_SWITCH: a switch
     // transaction cannot interleave with a starting app, and the app cannot
     // slip past a switch that begins while its runtime boots.
     return withSwitchLock(async () => {
@@ -900,7 +900,10 @@ export function registerLocalAppHandlers(server: RpcServer): void {
   server.handle(
     RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
     async (_ctx, rawScope: unknown) => {
-      const scope = validateCatalogLocalAppScope(rawScope)
+      // Same trusted active-ProductSpace gate as every other renderer
+      // business scope: null fence, offline read-only, and cross-space
+      // scopes are all rejected before any authorization entry is read.
+      const scope = requireRendererCatalogScope(rawScope)
       const { app } = await requireAuthorizedCatalogEntry(scope)
       if (app.deliveryMode !== 'remote_url' || !app.remoteUrl) {
         throw new LocalAppRuntimeError(

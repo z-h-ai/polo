@@ -8,6 +8,8 @@ import {
   registerProductSpaceExecution,
   resetProductSpaceExecutionRegistryForTests,
   setRuntimeActiveProductSpace,
+  setRuntimeOfflineReadOnly,
+  isRuntimeOfflineReadOnly,
   type RegisteredProductSpaceExecution,
 } from '../../../runtime/product-space-executions'
 import {
@@ -226,10 +228,16 @@ describe('Main-side switch transaction', () => {
     registerProductSpaceExecution(fakeExecution({ executionId: 'exec-a2' }))
 
     const { invoke } = createHarness()
-    const result = await invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, spaceB)
-    expect(result.success).toBe(true)
-    expect(result.from).toBe(spaceA)
-    expect(result.to).toBe(spaceB)
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(committed.success).toBe(true)
+    expect(committed.from).toBe(spaceA)
+    expect(committed.to).toBe(spaceB)
     expect(getRuntimeActive()).toBe(spaceB)
     expect(listRegisteredProductSpaceExecutions()).toEqual([])
   })
@@ -256,9 +264,9 @@ describe('Main-side switch transaction', () => {
     registerProductSpaceExecution(stuck)
 
     const { invoke } = createHarness()
-    const result = await invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, spaceB)
-    expect(result.success).toBe(false)
-    expect(result.errorCode).toBe('runtime_stop_failed')
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(false)
+    expect(prepared.errorCode).toBe('runtime_stop_failed')
     expect(getRuntimeActive()).toBe(spaceA)
     expect(await stuck.isActive()).toBe(true)
     // Failed entries stay registered for retry.
@@ -268,8 +276,14 @@ describe('Main-side switch transaction', () => {
 
     // Retry after the runtime becomes stoppable.
     refuseStop = false
-    const retry = await invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, spaceB)
+    const retry = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(retry.success).toBe(true)
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      retry.token,
+      spaceB,
+    )
+    expect(committed.success).toBe(true)
     expect(getRuntimeActive()).toBe(spaceB)
   }, 20_000)
 
@@ -282,28 +296,63 @@ describe('Main-side switch transaction', () => {
       ],
     }
     const { invoke } = createHarness()
-    const result = await invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, spaceB)
+    const result = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(result.success).toBe(false)
     expect(result.errorCode).toBe('FORBIDDEN')
     expect(getRuntimeActive()).toBe(spaceA)
 
     // List fetch failure also fails closed.
     listResult = null
-    const unavailable = await invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, personalId)
+    const unavailable = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, personalId)
     expect(unavailable.success).toBe(false)
     expect(unavailable.errorCode).toBe('service_unavailable')
+    expect(getRuntimeActive()).toBe(spaceA)
+  })
+
+  it('rejects a commit from another account and re-verifies target visibility', async () => {
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+
+    // The token is bound to the preparing account.
+    setTrustedProductSpaceAccountProvider(async () => 'account-other')
+    const other = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(other.success).toBe(false)
+    expect(other.errorCode).toBe('FORBIDDEN')
+    expect(getRuntimeActive()).toBe(spaceA)
+
+    // Commit re-verifies target visibility under the current contract.
+    setTrustedProductSpaceAccountProvider(async () => trustedAccountId)
+    listResult = {
+      personalProductSpaceId: personalId,
+      productSpaces: [
+        { id: spaceA, kind: 'enterprise', name: 'A', accessMode: 'active' },
+        { id: personalId, kind: 'personal', name: '我的空间', accessMode: 'active' },
+      ],
+    }
+    const stale = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(stale.success).toBe(false)
+    expect(stale.errorCode).toBe('FORBIDDEN')
     expect(getRuntimeActive()).toBe(spaceA)
   })
 
   it('rejects malformed switch targets and requires a trusted session', async () => {
     const { invoke } = createHarness()
     for (const malformed of [42, { space: spaceA }, ['space-a'], '']) {
-      const result = await invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, malformed)
+      const result = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, malformed)
       expect(result.success).toBe(false)
       expect(result.errorCode).toBe('VALIDATION_ERROR')
     }
     setTrustedProductSpaceAccountProvider(async () => null)
-    const unauthorized = await invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, spaceB)
+    const unauthorized = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     expect(unauthorized.success).toBe(false)
     expect(unauthorized.errorCode).toBe('UNAUTHORIZED')
     expect(getRuntimeActive()).toBe(spaceA)
@@ -320,7 +369,7 @@ describe('Main-side switch transaction', () => {
       })
     })
     let sawSwitchInProgress = false
-    const pending = invoke(RPC_CHANNELS.productSpace.EXECUTE_SWITCH, spaceB)
+    const pending = invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
     for (let i = 0; i < 300 && !releaseSwitch; i += 1) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
@@ -408,6 +457,44 @@ describe('offline read-only restore', () => {
     const { invoke } = createHarness()
     const result = await invoke(RPC_CHANNELS.productSpace.RESTORE_OFFLINE_VIEW)
     expect(result.success).toBe(false)
+  })
+
+  it('a successful online commit ends the offline read-only view', async () => {
+    // Simulate the restored offline view: the fence sits on the origin space
+    // with the read-only flag set.
+    setRuntimeOfflineReadOnly(true)
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    expect(isRuntimeOfflineReadOnly()).toBe(true)
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(committed.success).toBe(true)
+    expect(getRuntimeActive()).toBe(spaceB)
+    // Assistant/App starts consult the same flag — it must be cleared in
+    // the same transaction that moved the fence.
+    expect(isRuntimeOfflineReadOnly()).toBe(false)
+  })
+
+  it('a failed commit keeps the fence and the offline read-only view', async () => {
+    setRuntimeOfflineReadOnly(true)
+    const { invoke } = createHarness()
+    const prepared = await invoke(RPC_CHANNELS.productSpace.PREPARE_SWITCH, spaceB)
+    expect(prepared.success).toBe(true)
+    // Target list becomes unavailable between prepare and commit.
+    listResult = null
+    const committed = await invoke(
+      RPC_CHANNELS.productSpace.COMMIT_SWITCH,
+      prepared.token,
+      spaceB,
+    )
+    expect(committed.success).toBe(false)
+    expect(committed.errorCode).toBe('service_unavailable')
+    expect(getRuntimeActive()).toBe(spaceA)
+    expect(isRuntimeOfflineReadOnly()).toBe(true)
   })
 })
 

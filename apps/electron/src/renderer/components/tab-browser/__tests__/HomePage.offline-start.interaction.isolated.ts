@@ -155,12 +155,6 @@ beforeEach(async () => {
         productSpaceContextStorage = next
         return next
       },
-      productSpaceExecuteSwitch: async (targetProductSpaceId: string) => ({
-        success: true as const,
-        from: null,
-        to: targetProductSpaceId,
-        executions: [],
-      }),
       productSpacePrepareSwitch: async (targetProductSpaceId: string) => ({
         success: true as const,
         token: `token-${targetProductSpaceId}`,

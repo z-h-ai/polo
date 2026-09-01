@@ -1137,6 +1137,7 @@
   "productSpace.exec.status.stopped": "Gestoppt",
   "productSpace.exec.status.stopping": "Wird gestoppt",
   "productSpace.exec.status.waiting_for_network": "Wartet auf Netzwerk",
+  "productSpace.logout.revokeFailed": "Abmelden fehlgeschlagen: Die Bereichs-Umschung wurde nicht sicher zurückgesetzt. Bitte erneut versuchen.",
   "productSpace.restricted": "Eingeschränkt",
   "productSpace.role.manager": "Manager",
   "productSpace.role.member": "Mitglied",

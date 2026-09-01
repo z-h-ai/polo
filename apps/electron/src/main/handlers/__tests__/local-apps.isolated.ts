@@ -220,6 +220,7 @@ const { setTrustedProductSpaceAccountProvider } = await import(
 const {
   resetProductSpaceExecutionRegistryForTests: resetExecutionRegistry,
   setRuntimeActiveProductSpace,
+  setRuntimeOfflineReadOnly,
   listRegisteredProductSpaceExecutions,
 } = await import('@polo-ai/server-core/runtime/product-space-executions')
 
@@ -699,6 +700,31 @@ describe('local app main-process authorization boundary', () => {
     catalog.authorizationStatus = 'denied'
     await expect(resolveRemoteUrl(context, scope()))
       .rejects.toThrow('no longer authorized')
+  })
+
+  it('resolves no remote URL for a scope outside the committed active space', async () => {
+    // The renderer presents a stale scope from a space it switched away
+    // from: the Main active-space gate must reject it before any
+    // authorization entry is read.
+    setRuntimeActiveProductSpace('organization-b')
+    const resolveRemoteUrl = handlers.get(
+      RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+    )!
+    await expect(resolveRemoteUrl(context, scope()))
+      .rejects.toMatchObject({ code: 'NOT_AUTHORIZED' })
+  })
+
+  it('resolves no remote URL while the offline read-only view is active', async () => {
+    setRuntimeOfflineReadOnly(true)
+    try {
+      const resolveRemoteUrl = handlers.get(
+        RPC_CHANNELS.localApps.RESOLVE_REMOTE_URL,
+      )!
+      await expect(resolveRemoteUrl(context, scope()))
+        .rejects.toMatchObject({ code: 'PRODUCT_SPACE_CONTEXT_REQUIRED' })
+    } finally {
+      setRuntimeOfflineReadOnly(false)
+    }
   })
 
   it('fails every public Catalog app RPC while session-ending access is denied', async () => {

@@ -92,6 +92,8 @@ import {
 } from '@/lib/admin-auth-failure'
 import { Button } from '@/components/ui/button'
 import {
+  isProductSpaceContractUnsupported,
+  reportProductSpaceContractFailure,
   subscribeToProductSpaceContractFailures,
 } from '@/lib/product-space-contract-failure'
 
@@ -2175,6 +2177,20 @@ export default function App() {
       && currentAdminUserGenerationRef.current === logoutSnapshot.generation
     )
     invalidateProductSpaceDeepLinkRefresh()
+    // The Main fence and any prepared switch transaction must be revoked
+    // BEFORE credentials are invalidated — otherwise a stale fence survives
+    // the logout. A failed revoke aborts the logout (fail-closed): credential
+    // cleanup never completes against a live runtime scope.
+    try {
+      const revoke = await window.electronAPI.productSpaceRevokeActiveContext()
+      if (!revoke?.success) {
+        toast.error(t('productSpace.logout.revokeFailed'))
+        return
+      }
+    } catch {
+      toast.error(t('productSpace.logout.revokeFailed'))
+      return
+    }
     try {
       const result = await window.electronAPI.adminLogout()
       if (!result.success || !isCurrentLogout()) return
@@ -2491,7 +2507,19 @@ export default function App() {
     void window.electronAPI.productSpaceGetCatalog(
       startupCatalogSpaceId,
     ).then((result) => {
-      if (!cancelled && !result.success) {
+      if (cancelled) return
+      if (!result.success) {
+        // PC-F11 is a single global gate: a contract-incompatible Catalog
+        // reported by this warmup — even when no useAppCatalog consumer is
+        // mounted (e.g. a restored assistant tab) — must revoke the fence
+        // and enter the upgrade screen. Network failures stay local.
+        if (isProductSpaceContractUnsupported(result)) {
+          reportProductSpaceContractFailure({
+            errorCode: 'product_space_contract_unsupported',
+            source: 'catalog-warmup',
+          })
+          return
+        }
         emitAdminCatalogSessionAuthFailure(result)
       }
     }).catch(() => {
@@ -2752,9 +2780,12 @@ export default function App() {
                                 // origin fence, then the full origin
                                 // projection (selection, context key, shell)
                                 // is republished before sessions reload.
+                                // The rollback target is the real frozen
+                                // origin of the failing transaction — never
+                                // a personal-space default.
                                 const entry = lastCommittedSwitchRef.current
                                 if (!entry) return
-                                void productSpace.rollbackToOrigin()
+                                void productSpace.rollbackToOrigin(entry.from)
                                   .then(rolledBack => {
                                     if (!rolledBack) throw new Error('rollback failed')
                                     lastCommittedSwitchRef.current = null

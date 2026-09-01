@@ -23,7 +23,12 @@ import {
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@polo-ai/shared/config'
 import { PrivilegedExecutionBroker } from '@polo-ai/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
-import { getRuntimeActiveProductSpace } from '../runtime/product-space-executions'
+import {
+  getRuntimeActiveProductSpace,
+  isRuntimeOfflineReadOnly,
+  isSwitchInProgress,
+  withSwitchLock,
+} from '../runtime/product-space-executions'
 import { ensureAssistantSessionExecution } from '../runtime/assistant-executions'
 import { InitGate } from '@polo-ai/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@polo-ai/shared/i18n'
@@ -5615,13 +5620,36 @@ export class SessionManager implements ISessionManager {
 
     // Every entry that can push a session into processing must have the
     // session's immutable execution scope registered — including restored
-    // (cold) sessions on their first send.
-    void ensureAssistantSessionExecution({
-      sessionManager: this,
-      sessionId,
-      workspaceId: managed.workspace.id,
-      productSpaceId: managed.productSpaceId ?? '',
-      name: managed.name || sessionId,
+    // (cold) sessions on their first send. Registration runs inside the
+    // switch lock and re-verifies the trusted fence: an offline read-only
+    // view, an in-flight switch, or a registration failure refuses the send
+    // instead of leaving an unregistered execution. Sessions created before
+    // the ProductSpace contract (never bound, e.g. CLI runtimes) carry no
+    // space semantics and keep their legacy behavior.
+    await withSwitchLock(async () => {
+      if (!managed.productSpaceId) return
+      const fence = getRuntimeActiveProductSpace()
+      if (
+        !fence
+        || isRuntimeOfflineReadOnly()
+        || isSwitchInProgress()
+        || managed.productSpaceId !== fence
+      ) {
+        throw new Error('EXECUTION_REGISTRATION_REFUSED')
+      }
+      // A missing trusted account means the scope could not be bound to an
+      // immutable identity — the send fails closed rather than running
+      // unregistered.
+      const registered = await ensureAssistantSessionExecution({
+        sessionManager: this,
+        sessionId,
+        workspaceId: managed.workspace.id,
+        productSpaceId: managed.productSpaceId,
+        name: managed.name || sessionId,
+      })
+      if (!registered) {
+        throw new Error('EXECUTION_REGISTRATION_REFUSED')
+      }
     })
 
     // Source-activation auto-retry dedup (polo-ai-oss#804). When the server

@@ -985,24 +985,6 @@ export interface ElectronAPI {
     }
     | { success: false; errorCode: string; message?: string }
   >
-  productSpaceExecuteSwitch(
-    targetProductSpaceId: string,
-  ): Promise<
-    | {
-      success: true
-      from: string | null
-      to: string
-      executions: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
-    }
-    | {
-      success: false
-      errorCode: string
-      message?: string
-      from?: string | null
-      to?: string
-      executions?: Array<{ executionId: string; status: 'stopped' | 'failed'; errorCode?: string }>
-    }
-  >
   productSpaceRevokeActiveContext(): Promise<{ success: boolean }>
   productSpaceCleanupLegacyState(): Promise<{
     success: boolean

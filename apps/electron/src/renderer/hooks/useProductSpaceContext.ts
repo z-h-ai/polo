@@ -216,9 +216,14 @@ export function useProductSpaceContextState() {
    * atomically restores its fence, after which the renderer republishes the
    * full origin projection.
    */
-  const rollbackToOrigin = useCallback(async (): Promise<boolean> => {
+  const rollbackToOrigin = useCallback(async (
+    explicitOriginId?: string,
+  ): Promise<boolean> => {
     const accountId = accountIdRef.current
-    const originId = personalProductSpaceIdRef.current
+    // The rollback target is the recorded origin of the failing transaction;
+    // personal space is only the fallback when no transaction was recorded.
+    const originId = explicitOriginId
+      ?? personalProductSpaceIdRef.current
       ?? activeProductSpaceIdRef.current
     if (!accountId || !originId) return false
     const prepared = await prepareTrustedSwitch(originId)
@@ -239,9 +244,10 @@ export function useProductSpaceContextState() {
   }, [cancelPreparedSwitch, commitPreparedSwitch, prepareTrustedSwitch, publishCommittedSelection])
 
   /**
-   * Atomic single-transaction variant used for the bootstrap initial
-   * declaration and for membership-loss fallbacks — Main verifies the target
-   * and moves the fence in one lock.
+   * Bootstrap initial declaration and membership-loss fallbacks run through
+   * the same two-phase trusted transaction: Main verifies the target and
+   * terminates origin executions in prepare, the renderer confirms readiness,
+   * and the one-time token commit moves the fence.
    */
   const executeAtomicSwitch = useCallback(async (
     targetId: string,
@@ -250,14 +256,22 @@ export function useProductSpaceContextState() {
     errorCode?: string
     statuses: Record<string, ExecutionSummary['status']>
   }> => {
-    const result = await window.electronAPI.productSpaceExecuteSwitch(targetId)
-    const statuses: Record<string, ExecutionSummary['status']> = {}
-    for (const execution of result.executions ?? []) {
-      statuses[execution.executionId] = execution.status
+    const prepared = await prepareTrustedSwitch(targetId)
+    if (!prepared.ok) {
+      return { ok: false, errorCode: prepared.errorCode, statuses: prepared.statuses }
     }
-    if (result.success) return { ok: true, statuses }
-    return { ok: false, errorCode: result.errorCode, statuses }
-  }, [])
+    try {
+      await commitPreparedSwitch(targetId)
+      return { ok: true, statuses: prepared.statuses }
+    } catch (caught) {
+      const record = (caught ?? {}) as Record<string, unknown>
+      return {
+        ok: false,
+        errorCode: typeof record.code === 'string' ? record.code : 'runtime_commit_failed',
+        statuses: prepared.statuses,
+      }
+    }
+  }, [commitPreparedSwitch, prepareTrustedSwitch])
 
   const applySpaceSelection = useCallback(async (
     accountId: string,
@@ -270,7 +284,7 @@ export function useProductSpaceContextState() {
       throw { code: committed.errorCode ?? 'runtime_commit_failed' }
     }
     publishCommittedSelection(accountId, list, personalId, productSpaceId)
-  }, [executeAtomicSwitch])
+  }, [executeAtomicSwitch, publishCommittedSelection])
 
   const applyListResponse = useCallback((parsed: {
     productSpaces: ProductSpaceSummary[]
@@ -516,24 +530,6 @@ export function useProductSpaceContextState() {
     }
   }, [applyListResponse, isCurrentAccountScope, persistVerifiedContext])
 
-  const commitSwitch = useCallback(async (
-    scope: AccountScope,
-    targetId: string,
-  ): Promise<boolean> => {
-    const accountId = accountIdRef.current
-    if (!accountId || !isCurrentAccountScope(scope)) return false
-    const personalId = personalProductSpaceIdRef.current
-    if (!personalId) return false
-    try {
-      await applySpaceSelection(accountId, productSpacesRef.current, personalId, targetId)
-      return true
-    } catch {
-      // The runtime commit failed: nothing was published, so the client is
-      // still fully inside the origin space.
-      return false
-    }
-  }, [applySpaceSelection, isCurrentAccountScope])
-
   const finishSwitchAfterStop = useCallback(async (
     scope: AccountScope,
     generation: number,
@@ -752,8 +748,23 @@ export function useProductSpaceContextState() {
     setPendingSwitch(previous => (
       previous ? { ...previous, phase: 'target-loading', errorCode: null } : previous
     ))
+    // A commit-level failure consumes the one-time token at Main. Retry must
+    // re-prepare the trusted transaction before re-staging and committing;
+    // a still-held token (pre-commit staging failure) is reused as-is.
+    if (!preparedSwitchTokenRef.current) {
+      const prepared = await prepareTrustedSwitch(targetId)
+      if (generation !== switchGenerationRef.current) return
+      if (!prepared.ok) {
+        setPendingSwitch(previous => (
+          previous && previous.targetId === targetId
+            ? { ...previous, phase: 'target-failed', errorCode: prepared.errorCode ?? 'runtime_stop_failed' }
+            : previous
+        ))
+        return
+      }
+    }
     await finishSwitchAfterStop(scope, generation, targetId)
-  }, [finishSwitchAfterStop])
+  }, [finishSwitchAfterStop, prepareTrustedSwitch])
 
   const cancelSwitch = useCallback((): void => {
     switchGenerationRef.current += 1

@@ -92,27 +92,6 @@ function configureIpc(): void {
       productSpaceListActiveExecutions: async () => executionsResult,
       productSpaceStopAllExecutions: async () => stopAllResult,
       productSpaceGetCatalog: async () => catalogResult,
-      productSpaceExecuteSwitch: async (targetProductSpaceId: string) => {
-        if (!activeContextAckSuccess) {
-          return { success: false as const, errorCode: 'runtime_commit_failed' }
-        }
-        if (!switchResult.success) {
-          return {
-            success: false as const,
-            errorCode: switchResult.errorCode ?? 'runtime_stop_failed',
-            from: 'space-personal',
-            to: targetProductSpaceId,
-            executions: switchResult.executions ?? [],
-          }
-        }
-        declaredActiveSpace = targetProductSpaceId
-        return {
-          success: true as const,
-          from: 'space-personal',
-          to: targetProductSpaceId,
-          executions: switchResult.executions ?? [],
-        }
-      },
       productSpacePrepareSwitch: async (targetProductSpaceId: string) => {
         if (!activeContextAckSuccess) {
           return { success: false as const, errorCode: 'runtime_commit_failed' }
@@ -540,6 +519,46 @@ describe('useProductSpaceContextState switch staging (round 1)', () => {
     })
     expect(result.current.activeProductSpaceId).toBe('space-ent')
     expect(declaredActiveSpace).toBe('space-ent')
+  })
+
+  it('re-prepares the trusted transaction after a commit-level failure, then commits on retry', async () => {
+    // First commit consumes the one-time token at Main and fails; the retry
+    // must prepare a fresh transaction instead of replaying a dead token.
+    let commitCalls = 0
+    Object.defineProperty(window.electronAPI, 'productSpaceCommitSwitch', {
+      configurable: true,
+      value: async (_token: string, targetProductSpaceId: string) => {
+        commitCalls += 1
+        // Call 1 is the bootstrap declaration; only the first switch commit
+        // fails after consuming its token.
+        if (commitCalls === 2) {
+          return { success: false as const, errorCode: 'service_unavailable' }
+        }
+        declaredActiveSpace = targetProductSpaceId
+        return { success: true as const, from: personalId, to: targetProductSpaceId }
+      },
+    })
+
+    const { result } = renderHook(useHarness)
+    await boot(result)
+    await act(async () => {
+      await result.current.requestSwitch('space-ent')
+    })
+    await waitFor(() => {
+      expect(result.current.pendingSwitch?.phase).toBe('target-failed')
+    })
+    expect(result.current.pendingSwitch?.errorCode).toBe('service_unavailable')
+    expect(result.current.activeProductSpaceId).toBe(personalId)
+
+    await act(async () => {
+      await result.current.retryTargetLoad()
+    })
+    await waitFor(() => {
+      expect(result.current.pendingSwitch).toBeNull()
+    })
+    expect(result.current.activeProductSpaceId).toBe('space-ent')
+    expect(declaredActiveSpace).toBe('space-ent')
+    expect(commitCalls).toBe(3)
   })
 
   it('fails closed when the one-shot legacy cleanup fails', async () => {

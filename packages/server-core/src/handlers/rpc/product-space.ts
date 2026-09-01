@@ -51,7 +51,6 @@ import {
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.productSpace.LIST_ACTIVE_EXECUTIONS,
   RPC_CHANNELS.productSpace.STOP_ALL_EXECUTIONS,
-  RPC_CHANNELS.productSpace.EXECUTE_SWITCH,
   RPC_CHANNELS.productSpace.PREPARE_SWITCH,
   RPC_CHANNELS.productSpace.COMMIT_SWITCH,
   RPC_CHANNELS.productSpace.CANCEL_SWITCH,
@@ -439,6 +438,7 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
           const token = randomBytes(24).toString('hex')
           setPendingSwitchTransaction({
             token,
+            accountId: trustedAccountId,
             targetProductSpaceId,
             originProductSpaceId: originProductSpaceId ?? '',
             fenceGeneration,
@@ -483,10 +483,23 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
         ) {
           return { success: false as const, errorCode: 'SWITCH_TRANSACTION_INVALID', message: 'No matching prepared switch transaction' }
         }
+        if (pending.accountId !== trustedAccountId) {
+          return { success: false as const, errorCode: 'FORBIDDEN', message: 'The prepared switch belongs to another account' }
+        }
         // Consume the token immediately: one-time use.
         setPendingSwitchTransaction(null)
         if (pending.fenceGeneration !== getRuntimeFenceGeneration()) {
           return { success: false as const, errorCode: 'SWITCH_SUPERSEDED', message: 'The prepared switch was superseded by a fence change' }
+        }
+        // Re-verify at commit time that the target is still visible to this
+        // account under the current contract.
+        const list = await fetchTrustedProductSpaceList()
+        if (!list) {
+          return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
+        }
+        const target = list.productSpaces.find(space => space.id === targetProductSpaceId)
+        if (!target) {
+          return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
         }
         const originProductSpaceId = pending.originProductSpaceId || null
         for (const execution of listRegisteredProductSpaceExecutions()) {
@@ -502,6 +515,8 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
             return { success: false as const, errorCode: 'runtime_stop_failed', message: 'Origin executions appeared after prepare' }
           }
         }
+        // A successful online commit ends the offline read-only view.
+        setRuntimeOfflineReadOnly(false)
         setRuntimeActiveProductSpace(targetProductSpaceId)
         return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
       })
@@ -532,98 +547,6 @@ export function registerProductSpaceHandlers(server: RpcServer, deps: HandlerDep
   // termination and re-enumeration, then an atomic fence commit — all inside
   // the switch lock, with new starts blocked for the duration. The renderer
   // can request a verified target but can never write the fence directly.
-  server.handle(
-    RPC_CHANNELS.productSpace.EXECUTE_SWITCH,
-    async (_ctx, targetProductSpaceId: unknown) => {
-      if (typeof targetProductSpaceId !== 'string' || !targetProductSpaceId) {
-        return { success: false as const, errorCode: 'VALIDATION_ERROR', message: 'Switch request is invalid' }
-      }
-      const trustedAccountId = await resolveTrustedProductSpaceAccountId()
-      if (!trustedAccountId) {
-        return { success: false as const, errorCode: 'UNAUTHORIZED', message: 'No trusted Admin session is available' }
-      }
-
-      return withSwitchLock(async () => {
-        const originProductSpaceId = getRuntimeActiveProductSpace()
-        if (targetProductSpaceId === originProductSpaceId) {
-          return { success: true as const, from: originProductSpaceId, to: targetProductSpaceId, executions: [] }
-        }
-
-        // From this point until the transaction settles, nothing new may
-        // start running — including while the target is being verified.
-        setSwitchInProgress(true)
-        try {
-          // Target verification against the account's contract-validated list.
-          const list = await fetchTrustedProductSpaceList()
-          if (!list) {
-            return { success: false as const, errorCode: 'service_unavailable', message: 'ProductSpace list is unavailable' }
-          }
-          const target = list.productSpaces.find(space => space.id === targetProductSpaceId)
-          if (!target) {
-            return { success: false as const, errorCode: 'FORBIDDEN', message: 'The target ProductSpace is not available for this account' }
-          }
-
-          // Terminate every running item of the origin space inside the lock.
-          let stopped: Awaited<ReturnType<typeof stopRegisteredExecutionsOnce>> = []
-          if (originProductSpaceId) {
-            const originEntries = []
-            for (const execution of listRegisteredProductSpaceExecutions()) {
-              if (execution.scope.accountId !== trustedAccountId) continue
-              if (execution.scope.productSpaceId !== originProductSpaceId) continue
-              let active: boolean
-              try {
-                active = Boolean(await execution.isActive())
-              } catch {
-                active = true
-              }
-              if (active) originEntries.push(execution)
-            }
-            stopped = await stopRegisteredExecutionsOnce(originEntries)
-          }
-
-          // Re-enumerate inside the lock: zero origin executions is a hard
-          // precondition for the fence commit.
-          const remaining = []
-          for (const execution of listRegisteredProductSpaceExecutions()) {
-            if (execution.scope.accountId !== trustedAccountId) continue
-            if (execution.scope.productSpaceId !== originProductSpaceId) continue
-            let active: boolean
-            try {
-              active = Boolean(await execution.isActive())
-            } catch {
-              active = true
-            }
-            if (active) remaining.push(execution)
-          }
-          if (remaining.length > 0) {
-            return {
-              success: false as const,
-              errorCode: 'runtime_stop_failed',
-              message: 'Origin ProductSpace still has running executions',
-              from: originProductSpaceId,
-              to: targetProductSpaceId,
-              executions: stopped,
-            }
-          }
-
-          // Atomic commit: supersedes any pending two-phase transaction and
-          // ends the offline read-only view (the online list re-validated).
-          setPendingSwitchTransaction(null)
-          setRuntimeOfflineReadOnly(false)
-          setRuntimeActiveProductSpace(targetProductSpaceId)
-          return {
-            success: true as const,
-            from: originProductSpaceId,
-            to: targetProductSpaceId,
-            executions: stopped,
-          }
-        } finally {
-          setSwitchInProgress(false)
-        }
-      })
-    },
-  )
-
   // Fail-closed direction only: the renderer may clear the fence (contract
   // loss, logout) but can never set it. Serialized with the switch lock and
   // it invalidates any prepared switch by consuming the pending transaction
